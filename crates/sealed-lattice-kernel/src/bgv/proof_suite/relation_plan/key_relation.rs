@@ -33,9 +33,9 @@ pub(crate) const MODULAR_QUOTIENT_VALUE_COUNT: u64 = 1_u64 << MODULAR_QUOTIENT_B
 // but cannot attain -65,536. Keep all 17-bit values and shift the interval to
 // the exact complete range [-65,535, 65,536].
 pub(crate) const MODULAR_QUOTIENT_ENCODING_OFFSET: u64 = MODULAR_QUOTIENT_VALUE_COUNT / 2 - 1;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) const MODULAR_QUOTIENT_MINIMUM: i64 = -(MODULAR_QUOTIENT_ENCODING_OFFSET as i64);
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) const MODULAR_QUOTIENT_MAXIMUM: i64 =
     (MODULAR_QUOTIENT_VALUE_COUNT - MODULAR_QUOTIENT_ENCODING_OFFSET - 1) as i64;
 pub(super) const TRUSTEE_QUOTIENT_LOW_TRIT_COUNT: usize = 10;

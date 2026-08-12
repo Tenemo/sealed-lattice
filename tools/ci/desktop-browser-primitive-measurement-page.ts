@@ -1,12 +1,12 @@
 import {
     openIndexedDbUntrustedStorageAdapter,
     type IndexedDbUntrustedStorageAdapter,
-} from "../../packages/protocol/src/runtime/indexed-db-untrusted-storage-adapter.js";
+} from '../../packages/protocol/src/runtime/indexed-db-untrusted-storage-adapter.js';
 import {
     openUntrustedStorageTransactionStore,
     type UntrustedStorageAuthenticatedRepairProtection,
     type UntrustedStorageExclusiveCapacityReservation,
-} from "../../packages/protocol/src/runtime/untrusted-storage-transaction-store.js";
+} from '../../packages/protocol/src/runtime/untrusted-storage-transaction-store.js';
 
 import {
     desktopBrowserBoundaryCopyIterationCount,
@@ -19,7 +19,7 @@ import {
     type DesktopBrowserPrimitiveCaseMeasurement,
     type DesktopBrowserPrimitiveMeasurementEvidence,
     type PrimitiveMeasurementRecord,
-} from "./primitive-measurement-evidence.js";
+} from './primitive-measurement-evidence.js';
 
 type PrimitiveMeasurementWasmExports = Readonly<{
     memory: WebAssembly.Memory;
@@ -37,15 +37,15 @@ const browserStorageIterationCount = 4;
 const browserStorageReadPassCount = 2;
 const browserStorageMaximumDeletionBatchRecordCount = 64;
 const browserBoundaryCopyWarmupIterationCount = 8;
-const logicalRecordPrefix = "primitive-measurement/";
-const textDecoder = new TextDecoder("utf-8", { fatal: true });
+const logicalRecordPrefix = 'primitive-measurement/';
+const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
 const requireNumberExport = (
     exports: WebAssembly.Exports,
     exportName: keyof PrimitiveMeasurementWasmExports,
 ): ((...arguments_: number[]) => number | void) => {
     const candidate = exports[exportName];
-    if (typeof candidate !== "function") {
+    if (typeof candidate !== 'function') {
         throw new Error(
             `Primitive-measurement WASM export ${exportName} is absent.`,
         );
@@ -64,21 +64,21 @@ const instantiateMeasurementKernel = async (
     });
     const exports = instantiated.instance.exports;
     if (!(exports.memory instanceof WebAssembly.Memory)) {
-        throw new Error("Primitive-measurement WASM memory export is absent.");
+        throw new Error('Primitive-measurement WASM memory export is absent.');
     }
     return Object.freeze({
         memory: exports.memory,
         sealed_lattice_allocate: requireNumberExport(
             exports,
-            "sealed_lattice_allocate",
+            'sealed_lattice_allocate',
         ) as (length: number) => number,
         sealed_lattice_deallocate: requireNumberExport(
             exports,
-            "sealed_lattice_deallocate",
+            'sealed_lattice_deallocate',
         ),
         sealed_lattice_primitive_measurement_with_length: requireNumberExport(
             exports,
-            "sealed_lattice_primitive_measurement_with_length",
+            'sealed_lattice_primitive_measurement_with_length',
         ) as (caseIdentifier: number, outputLengthPointer: number) => number,
     });
 };
@@ -94,7 +94,7 @@ const runPrimitiveCase = async (
     );
     if (outputLengthPointer === 0) {
         throw new Error(
-            "Primitive-measurement WASM refused its output-length allocation.",
+            'Primitive-measurement WASM refused its output-length allocation.',
         );
     }
     const outputStatusPointer = kernel.sealed_lattice_allocate(
@@ -106,7 +106,7 @@ const runPrimitiveCase = async (
             wasm32UsizeByteLength,
         );
         throw new Error(
-            "Primitive-measurement WASM refused its output-status allocation.",
+            'Primitive-measurement WASM refused its output-status allocation.',
         );
     }
     let outputPointer = 0;
@@ -150,7 +150,7 @@ const runPrimitiveCase = async (
         }
         const record = validatePrimitiveMeasurementRecord(
             JSON.parse(textDecoder.decode(resultBytes)) as unknown,
-            "wasm32-unknown-unknown",
+            'wasm32-unknown-unknown',
         );
         resultBytes.fill(0);
         return Object.freeze({
@@ -217,23 +217,23 @@ const copyToArrayBufferView = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
 const createRepairProtection =
     async (): Promise<UntrustedStorageAuthenticatedRepairProtection> => {
         const authenticationKey = await crypto.subtle.generateKey(
-            { length: 256, name: "AES-GCM" },
+            { length: 256, name: 'AES-GCM' },
             false,
-            ["decrypt", "encrypt"],
+            ['decrypt', 'encrypt'],
         );
         const repairIdentity = crypto.getRandomValues(new Uint8Array(64));
         return Object.freeze({
             deriveDigest: async (bytes: Uint8Array) =>
                 new Uint8Array(
                     await crypto.subtle.digest(
-                        "SHA-512",
+                        'SHA-512',
                         copyToArrayBufferView(bytes),
                     ),
                 ),
             open: async (sealedBytes: Uint8Array) => {
                 if (sealedBytes.byteLength < 28) {
                     throw new Error(
-                        "Primitive-measurement repair head is truncated.",
+                        'Primitive-measurement repair head is truncated.',
                     );
                 }
                 return new Uint8Array(
@@ -242,7 +242,7 @@ const createRepairProtection =
                             iv: copyToArrayBufferView(
                                 sealedBytes.subarray(0, 12),
                             ),
-                            name: "AES-GCM",
+                            name: 'AES-GCM',
                         },
                         authenticationKey,
                         copyToArrayBufferView(sealedBytes.subarray(12)),
@@ -254,7 +254,7 @@ const createRepairProtection =
                 const nonce = crypto.getRandomValues(new Uint8Array(12));
                 const ciphertext = new Uint8Array(
                     await crypto.subtle.encrypt(
-                        { iv: nonce, name: "AES-GCM" },
+                        { iv: nonce, name: 'AES-GCM' },
                         authenticationKey,
                         copyToArrayBufferView(plaintext),
                     ),
@@ -272,24 +272,24 @@ const createRepairProtection =
 const deleteDatabase = (databaseName: string): Promise<void> =>
     new Promise<void>((resolve, reject) => {
         const request = indexedDB.deleteDatabase(databaseName);
-        request.addEventListener("success", () => resolve(), { once: true });
+        request.addEventListener('success', () => resolve(), { once: true });
         request.addEventListener(
-            "error",
+            'error',
             () =>
                 reject(
                     request.error ??
                         new Error(
-                            "Primitive-measurement IndexedDB deletion failed.",
+                            'Primitive-measurement IndexedDB deletion failed.',
                         ),
                 ),
             { once: true },
         );
         request.addEventListener(
-            "blocked",
+            'blocked',
             () =>
                 reject(
                     new Error(
-                        "Primitive-measurement IndexedDB deletion was blocked by a leaked connection.",
+                        'Primitive-measurement IndexedDB deletion was blocked by a leaked connection.',
                     ),
                 ),
             { once: true },
@@ -342,8 +342,8 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
     const randomBytes = crypto.getRandomValues(new Uint8Array(16));
     const databaseName = `sealed-lattice-primitive-measurement-${Array.from(
         randomBytes,
-        (byte) => byte.toString(16).padStart(2, "0"),
-    ).join("")}`;
+        (byte) => byte.toString(16).padStart(2, '0'),
+    ).join('')}`;
     randomBytes.fill(0);
     const storageEstimateBefore = await copyStorageEstimate();
     let adapter: IndexedDbUntrustedStorageAdapter | undefined;
@@ -360,7 +360,7 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
             adapter,
             authenticatedRepairProtection: await createRepairProtection(),
             limits: configuration.storeLimits,
-            namespace: "primitive-measurement",
+            namespace: 'primitive-measurement',
         });
         reservation = await opened.store.reserveExclusiveCapacity(
             configuration.reservation,
@@ -374,7 +374,7 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
         ) {
             const logicalRecordKey = `${logicalRecordPrefix}${String(
                 recordOrdinal,
-            ).padStart(4, "0")}`;
+            ).padStart(4, '0')}`;
             const recordBytes = makePatternedRecord(
                 recordByteLength,
                 recordOrdinal,
@@ -392,7 +392,7 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
                 await lease.seal(({ bytes, logicalRecordKey: observedKey }) => {
                     if (observedKey !== logicalRecordKey) {
                         throw new Error(
-                            "Authenticated browser storage changed a logical record key.",
+                            'Authenticated browser storage changed a logical record key.',
                         );
                     }
                     assertPatternedRecord(bytes, recordOrdinal);
@@ -420,7 +420,7 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
             ) {
                 const logicalRecordKey = `${logicalRecordPrefix}${String(
                     recordOrdinal,
-                ).padStart(4, "0")}`;
+                ).padStart(4, '0')}`;
                 const startedAt = performance.now();
                 const storedBytes = await opened.store.readAuthenticated({
                     authenticate: ({
@@ -429,7 +429,7 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
                     }) => {
                         if (observedKey !== logicalRecordKey) {
                             throw new Error(
-                                "Authenticated browser storage read the wrong logical key.",
+                                'Authenticated browser storage read the wrong logical key.',
                             );
                         }
                         assertPatternedRecord(bytes, recordOrdinal);
@@ -439,7 +439,7 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
                 readElapsedMilliseconds += performance.now() - startedAt;
                 if (storedBytes === undefined) {
                     throw new Error(
-                        "Authenticated browser storage lost a measured record.",
+                        'Authenticated browser storage lost a measured record.',
                     );
                 }
                 assertPatternedRecord(storedBytes, recordOrdinal);
@@ -455,7 +455,7 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
         const cleanupElapsedMilliseconds = performance.now() - cleanupStartedAt;
         if (deletedRecordCount !== browserStorageIterationCount) {
             throw new Error(
-                "Authenticated browser storage deleted the wrong measured record count.",
+                'Authenticated browser storage deleted the wrong measured record count.',
             );
         }
         const physicalAccounting = reservation.copyPhysicalStorageAccounting();
@@ -505,12 +505,12 @@ export const runDesktopBrowserAuthenticatedStorageMeasurement = async (
             ),
         ];
         throw new Error(
-            `Primitive-measurement browser storage or its cleanup failed: ${failureDescriptions.join("; ")}.`,
+            `Primitive-measurement browser storage or its cleanup failed: ${failureDescriptions.join('; ')}.`,
         );
     }
     if (measurement === undefined) {
         throw new Error(
-            "Primitive-measurement browser storage completed without evidence.",
+            'Primitive-measurement browser storage completed without evidence.',
         );
     }
     return measurement;
@@ -525,7 +525,7 @@ export const runDesktopBrowserBoundaryCopyMeasurement = async (
     const pointer = kernel.sealed_lattice_allocate(byteLength);
     if (pointer === 0) {
         throw new Error(
-            "Primitive-measurement WASM refused the boundary-copy allocation.",
+            'Primitive-measurement WASM refused the boundary-copy allocation.',
         );
     }
     const source = makePatternedRecord(byteLength, 91);
@@ -589,7 +589,7 @@ export const runDesktopBrowserBoundaryCopyMeasurement = async (
             performance.now() - copyFromStartedAt;
         return Object.freeze({
             byteLengthPerCopy: byteLength,
-            checksumHex: checksum.toString(16).padStart(8, "0"),
+            checksumHex: checksum.toString(16).padStart(8, '0'),
             copyFromWasmElapsedMilliseconds,
             copyIntoWasmElapsedMilliseconds,
             iterationCount: desktopBrowserBoundaryCopyIterationCount,
@@ -618,10 +618,10 @@ const dimensionValue = (
 };
 
 export const runDesktopBrowserPrimitiveMeasurements = async (input: {
-    browserEngine: "chromium" | "firefox";
+    browserEngine: 'chromium';
     wasmUrl: string;
 }): Promise<DesktopBrowserPrimitiveMeasurementEvidence> => {
-    const response = await fetch(input.wasmUrl, { cache: "no-store" });
+    const response = await fetch(input.wasmUrl, { cache: 'no-store' });
     if (!response.ok) {
         throw new Error(
             `Primitive-measurement WASM fetch failed with ${String(response.status)}.`,
@@ -629,7 +629,7 @@ export const runDesktopBrowserPrimitiveMeasurements = async (input: {
     }
     const wasmBytes = await response.arrayBuffer();
     if (wasmBytes.byteLength === 0) {
-        throw new Error("Primitive-measurement WASM artifact is empty.");
+        throw new Error('Primitive-measurement WASM artifact is empty.');
     }
     const primitiveCases: DesktopBrowserPrimitiveCaseMeasurement[] = [];
     for (const catalogEntry of primitiveMeasurementCaseCatalog) {
@@ -645,12 +645,12 @@ export const runDesktopBrowserPrimitiveMeasurements = async (input: {
     );
     if (authenticatedScratchRecord === undefined) {
         throw new Error(
-            "Primitive-measurement authenticated scratch-record case is absent.",
+            'Primitive-measurement authenticated scratch-record case is absent.',
         );
     }
     const recordByteLength = dimensionValue(
         authenticatedScratchRecord.record,
-        "canonicalEnvelopeByteLength",
+        'canonicalEnvelopeByteLength',
     );
     const boundaryCopies = await runDesktopBrowserBoundaryCopyMeasurement(
         wasmBytes,
@@ -671,7 +671,7 @@ export const runDesktopBrowserPrimitiveMeasurements = async (input: {
 };
 
 export const runDesktopBrowserFocusedPrimitiveMeasurements = async (input: {
-    browserEngine: "chromium" | "firefox";
+    browserEngine: 'chromium';
     caseIdentifiers: readonly number[];
     wasmUrl: string;
 }): Promise<readonly DesktopBrowserFocusedPrimitiveMeasurementEvidence[]> => {
@@ -694,10 +694,10 @@ export const runDesktopBrowserFocusedPrimitiveMeasurements = async (input: {
         )
     ) {
         throw new Error(
-            "Focused primitive-measurement case set is empty, duplicated, unsupported, or noncanonical.",
+            'Focused primitive-measurement case set is empty, duplicated, unsupported, or noncanonical.',
         );
     }
-    const response = await fetch(input.wasmUrl, { cache: "no-store" });
+    const response = await fetch(input.wasmUrl, { cache: 'no-store' });
     if (!response.ok) {
         throw new Error(
             `Primitive-measurement WASM fetch failed with ${String(response.status)}.`,
@@ -705,7 +705,7 @@ export const runDesktopBrowserFocusedPrimitiveMeasurements = async (input: {
     }
     const wasmBytes = await response.arrayBuffer();
     if (wasmBytes.byteLength === 0) {
-        throw new Error("Primitive-measurement WASM artifact is empty.");
+        throw new Error('Primitive-measurement WASM artifact is empty.');
     }
     const evidence: DesktopBrowserFocusedPrimitiveMeasurementEvidence[] = [];
     for (const caseIdentifier of input.caseIdentifiers) {

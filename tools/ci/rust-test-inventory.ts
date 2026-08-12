@@ -13,7 +13,7 @@ export type RustTestInventoryEntry = {
     readonly testName: string;
 };
 
-export const parseLibtestListOutput = (output: string): readonly string[] =>
+const parseLibtestListOutput = (output: string): readonly string[] =>
     [
         ...new Set(
             output
@@ -27,7 +27,7 @@ export const parseLibtestListOutput = (output: string): readonly string[] =>
         ),
     ].sort((left, right) => left.localeCompare(right));
 
-export const classifyRustTestInventory = (input: {
+const classifyRustTestInventory = (input: {
     readonly allTests: readonly string[];
     readonly ignoredTests: readonly string[];
 }): readonly RustTestInventoryEntry[] => {

@@ -324,7 +324,7 @@ mod tests {
         let expected_source_roles = (0_u8..4)
             .map(|batch_ordinal| QuerySamplingGroupRole::SourceOracle { batch_ordinal })
             .collect::<Vec<_>>();
-        let expected_whir_mask_roles = vec![
+        let expected_whir_mask_roles = [
             MaskGroupRole::WhirSumcheck { batch_ordinal: 0 },
             MaskGroupRole::WhirCodeSwitch { round_ordinal: 0 },
             MaskGroupRole::WhirSumcheck { batch_ordinal: 1 },

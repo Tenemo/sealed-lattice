@@ -5025,7 +5025,13 @@ mod tests {
         assert_eq!(cached.column_ordinal, column_ordinal);
         assert_eq!(cached.coefficients.len(), TEST_RING_DEGREE as usize);
 
-        let selected_profile_coordinates = [(0, 0, 0), (0, 1, 19), (1, 0, 0), (1, 1, 19)];
+        let last_option_ordinal = u16::try_from(OPTION_COUNT - 1).expect("last option ordinal");
+        let selected_profile_coordinates = [
+            (0, 0, 0),
+            (0, 1, last_option_ordinal),
+            (1, 0, 0),
+            (1, 1, last_option_ordinal),
+        ];
         let profile_columns_and_coefficients = selected_profile_coordinates.map(
             |(expected_ciphertext_ordinal, expected_auxiliary_ordinal, expected_option_ordinal)| {
                 let column_ordinal = evaluator

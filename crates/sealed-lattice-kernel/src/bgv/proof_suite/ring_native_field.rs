@@ -242,14 +242,14 @@ fn montgomery_multiply(
     right: [u64; RING_NATIVE_PROOF_FIELD_LIMB_COUNT],
 ) -> [u64; RING_NATIVE_PROOF_FIELD_LIMB_COUNT] {
     let mut product = [0_u64; 16];
-    for left_limb_ordinal in 0..RING_NATIVE_PROOF_FIELD_LIMB_COUNT {
+    for (left_limb_ordinal, left_limb) in left.iter().copied().enumerate() {
         let mut carry = 0_u64;
-        for right_limb_ordinal in 0..RING_NATIVE_PROOF_FIELD_LIMB_COUNT {
+        for (right_limb_ordinal, right_limb) in right.iter().copied().enumerate() {
             let product_limb_ordinal = left_limb_ordinal + right_limb_ordinal;
             product[product_limb_ordinal] = multiply_accumulate_with_carry(
                 product[product_limb_ordinal],
-                left[left_limb_ordinal],
-                right[right_limb_ordinal],
+                left_limb,
+                right_limb,
                 &mut carry,
             );
         }
@@ -270,12 +270,14 @@ fn montgomery_multiply(
             &mut carry,
         );
         debug_assert_eq!(discarded, 0);
-        for modulus_limb_ordinal in 1..RING_NATIVE_PROOF_FIELD_LIMB_COUNT {
+        for (modulus_limb_ordinal, modulus_limb) in
+            PROOF_FIELD_MODULUS.iter().copied().enumerate().skip(1)
+        {
             let product_limb_ordinal = reduction_limb_ordinal + modulus_limb_ordinal;
             product[product_limb_ordinal] = multiply_accumulate_with_carry(
                 product[product_limb_ordinal],
                 reduction_factor,
-                PROOF_FIELD_MODULUS[modulus_limb_ordinal],
+                modulus_limb,
                 &mut carry,
             );
         }

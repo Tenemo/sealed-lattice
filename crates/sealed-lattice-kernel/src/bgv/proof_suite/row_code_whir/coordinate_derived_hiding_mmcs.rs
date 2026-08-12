@@ -733,8 +733,8 @@ mod tests {
         );
         assert_eq!(aggregate_private_leaf_salt_row_workspace_byte_length(), 584);
         assert_eq!(
-            transported_private_leaf_salt_uniqueness_set_byte_length(2_782),
-            Ok(489_656),
+            transported_private_leaf_salt_uniqueness_set_byte_length(2_783),
+            Ok(489_832),
         );
         assert_eq!(
             materialized_single_column_commitment_payload_byte_length(8_192),

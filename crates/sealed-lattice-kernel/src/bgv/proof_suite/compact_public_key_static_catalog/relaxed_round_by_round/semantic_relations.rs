@@ -561,18 +561,18 @@ pub(super) enum SemanticCfwVerifierTransition {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SemanticCfwBadTransition {
-    InitialConsistencyRoot {
+    InitialConsistency {
         auxiliary_difference: CompactChallengeField,
         masked_constraint_hypercube_residuals: Vec<CompactChallengeField>,
         constraint_combining_challenge: CompactChallengeField,
         equality_point: Vec<CompactChallengeField>,
     },
-    NonzeroPolynomialRoot {
+    NonzeroPolynomial {
         transition: SemanticCfwVerifierTransition,
         coefficients: Vec<CompactChallengeField>,
         challenge: CompactChallengeField,
     },
-    ZeroEvaderRoot {
+    ZeroEvader {
         residuals: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
         weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
         challenge: CompactChallengeField,
@@ -587,14 +587,14 @@ impl SemanticCfwBadTransition {
     /// would admit the tighter one-root bound.
     pub(super) fn polynomial_identity_numerator(&self) -> Option<u64> {
         match self {
-            Self::InitialConsistencyRoot { equality_point, .. } => {
+            Self::InitialConsistency { equality_point, .. } => {
                 u64::try_from(equality_point.len()).ok()?.checked_add(1)
             }
-            Self::NonzeroPolynomialRoot { coefficients, .. } => coefficients
+            Self::NonzeroPolynomial { coefficients, .. } => coefficients
                 .iter()
                 .rposition(|coefficient| *coefficient != CompactChallengeField::ZERO)
                 .and_then(|degree| u64::try_from(degree).ok()),
-            Self::ZeroEvaderRoot { residuals, .. } => residuals
+            Self::ZeroEvader { residuals, .. } => residuals
                 .iter()
                 .rposition(|residual| *residual != CompactChallengeField::ZERO)
                 .and_then(|degree| u64::try_from(degree).ok()),
@@ -848,7 +848,7 @@ pub(super) fn semantic_cfw_bad_transition<Matrices: CompactCfwR1csMatrices>(
             {
                 return Err(SemanticCfwError::InconsistentBadTransition);
             }
-            Ok(Some(SemanticCfwBadTransition::NonzeroPolynomialRoot {
+            Ok(Some(SemanticCfwBadTransition::NonzeroPolynomial {
                 transition,
                 coefficients,
                 challenge,
@@ -885,7 +885,7 @@ pub(super) fn semantic_cfw_bad_transition<Matrices: CompactCfwR1csMatrices>(
             {
                 return Err(SemanticCfwError::InconsistentBadTransition);
             }
-            Ok(Some(SemanticCfwBadTransition::ZeroEvaderRoot {
+            Ok(Some(SemanticCfwBadTransition::ZeroEvader {
                 residuals,
                 weights,
                 challenge,
@@ -922,7 +922,7 @@ fn semantic_cfw_initial_bad_transition<Matrices: CompactCfwR1csMatrices>(
     {
         return Err(SemanticCfwError::InconsistentBadTransition);
     }
-    Ok(SemanticCfwBadTransition::InitialConsistencyRoot {
+    Ok(SemanticCfwBadTransition::InitialConsistency {
         auxiliary_difference,
         masked_constraint_hypercube_residuals: residuals,
         constraint_combining_challenge,
@@ -1821,10 +1821,10 @@ fn validate_semantic_cfw_prefix_shape(
     {
         return Err(SemanticCfwError::MalformedPrefix);
     }
-    if let Some(final_message) = &prefix.final_message {
-        if final_message.outer_evaluations.len() != geometry.outer_mask_count() {
-            return Err(SemanticCfwError::MalformedPrefix);
-        }
+    if let Some(final_message) = &prefix.final_message
+        && final_message.outer_evaluations.len() != geometry.outer_mask_count()
+    {
+        return Err(SemanticCfwError::MalformedPrefix);
     }
     Ok(())
 }
@@ -2846,7 +2846,7 @@ mod tests {
             Some(3)
         );
         match invalid_initial_event {
-            SemanticCfwBadTransition::InitialConsistencyRoot {
+            SemanticCfwBadTransition::InitialConsistency {
                 auxiliary_difference,
                 masked_constraint_hypercube_residuals,
                 constraint_combining_challenge: classified_challenge,
@@ -2912,7 +2912,7 @@ mod tests {
                 .expect("the adjusted polynomial creates a bad transition");
         assert_eq!(root_adjusted_event.polynomial_identity_numerator(), Some(1));
         match root_adjusted_event {
-            SemanticCfwBadTransition::NonzeroPolynomialRoot {
+            SemanticCfwBadTransition::NonzeroPolynomial {
                 transition,
                 coefficients,
                 challenge,
@@ -2995,7 +2995,7 @@ mod tests {
                 .expect("the adjusted final values create a joint bad transition");
         assert_eq!(zero_evader_event.polynomial_identity_numerator(), Some(2));
         match zero_evader_event {
-            SemanticCfwBadTransition::ZeroEvaderRoot {
+            SemanticCfwBadTransition::ZeroEvader {
                 residuals,
                 weights,
                 challenge,

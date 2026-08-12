@@ -37,7 +37,7 @@ use crate::{
     transcript_core::encode_hex,
 };
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 use super::generation_authority::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
     SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
@@ -256,7 +256,7 @@ pub(crate) fn populate_compact_public_key_development_evidence_authority(
 /// standalone compact public-key development slice. The returned authority is
 /// nonserializable and intentionally cannot drive VSS, relinearization,
 /// Galois, or ceremony setup output.
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(in crate::bgv) fn populate_compact_public_key_development_authority(
     selected_suite: &SelectedSuiteCapability,
     verified_public_randomness: &VerifiedPublicRandomness,

@@ -450,9 +450,11 @@ pub(crate) fn compact_cfw_semantic_round_polynomial(
         round_ordinal,
         constraint_combining_challenge,
         equality_point,
-        equality_prefix_evaluation,
-        past_inner_mask_evaluations,
-        past_outer_mask_evaluation,
+        CompactCfwRoundHistory {
+            equality_prefix_evaluation,
+            past_inner_mask_evaluations,
+            past_outer_mask_evaluation,
+        },
     )?;
     let suffix_count = accumulator.expected_suffix_count;
     if matrix_rows
@@ -583,6 +585,13 @@ pub(crate) struct CompactCfwRoundAccumulator {
     round_polynomial: [CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH],
 }
 
+#[derive(Clone, Copy)]
+struct CompactCfwRoundHistory {
+    equality_prefix_evaluation: CompactChallengeField,
+    past_inner_mask_evaluations: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+    past_outer_mask_evaluation: CompactChallengeField,
+}
+
 impl CompactCfwRoundAccumulator {
     fn new(
         geometry: CompactCfwGeometry,
@@ -590,9 +599,7 @@ impl CompactCfwRoundAccumulator {
         round_ordinal: usize,
         constraint_combining_challenge: CompactChallengeField,
         equality_point: &[CompactChallengeField],
-        equality_prefix_evaluation: CompactChallengeField,
-        past_inner_mask_evaluations: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
-        past_outer_mask_evaluation: CompactChallengeField,
+        history: CompactCfwRoundHistory,
     ) -> Result<Self, CompactCfwError> {
         if equality_point.len() != geometry.sumcheck_round_count()
             || round_ordinal >= geometry.sumcheck_round_count()
@@ -636,6 +643,11 @@ impl CompactCfwRoundAccumulator {
         if equality_suffix_point.capacity() != equality_suffix.len() {
             return Err(CompactCfwError::AllocationLimitExceeded);
         }
+        let CompactCfwRoundHistory {
+            equality_prefix_evaluation,
+            past_inner_mask_evaluations,
+            past_outer_mask_evaluation,
+        } = history;
         Ok(Self {
             expected_suffix_count,
             absorbed_suffix_count: 0,
@@ -800,9 +812,11 @@ impl CompactCfwScalarProverState {
             self.round_ordinal,
             self.constraint_combining_challenge,
             &self.equality_point,
-            self.equality_prefix_evaluation,
-            self.past_inner_mask_evaluations,
-            self.past_outer_mask_evaluation,
+            CompactCfwRoundHistory {
+                equality_prefix_evaluation: self.equality_prefix_evaluation,
+                past_inner_mask_evaluations: self.past_inner_mask_evaluations,
+                past_outer_mask_evaluation: self.past_outer_mask_evaluation,
+            },
         )
     }
 
@@ -1534,6 +1548,15 @@ pub(crate) struct CompactCfwCombinedRelation {
     claim_count: usize,
 }
 
+type CompactCfwCombinedRelationParts = (
+    Vec<CompactChallengeField>,
+    CompactChallengeField,
+    Vec<Vec<CompactChallengeField>>,
+    Vec<Vec<CompactChallengeField>>,
+    Vec<Vec<CompactChallengeField>>,
+    usize,
+);
+
 impl CompactCfwCombinedRelation {
     fn extension_element_count(&self) -> Result<usize, CompactCfwError> {
         self.source_covector
@@ -1557,16 +1580,7 @@ impl CompactCfwCombinedRelation {
             .ok_or(CompactCfwError::CountOverflow)
     }
 
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Vec<CompactChallengeField>,
-        CompactChallengeField,
-        Vec<Vec<CompactChallengeField>>,
-        Vec<Vec<CompactChallengeField>>,
-        Vec<Vec<CompactChallengeField>>,
-        usize,
-    ) {
+    pub(crate) fn into_parts(self) -> CompactCfwCombinedRelationParts {
         (
             self.source_covector,
             self.target,
@@ -2174,9 +2188,12 @@ mod tests {
                 &factors[CompactCfwMatrixRole::LeftMultiplicand.ordinal()],
                 &factors[CompactCfwMatrixRole::RightMultiplicand.ordinal()],
             );
-            for coefficient_ordinal in 0..COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH {
-                constraint_polynomial[coefficient_ordinal] -=
-                    factors[CompactCfwMatrixRole::Product.ordinal()][coefficient_ordinal];
+            for (constraint_coefficient, product_coefficient) in constraint_polynomial
+                .iter_mut()
+                .zip(&factors[CompactCfwMatrixRole::Product.ordinal()])
+                .take(COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH)
+            {
+                *constraint_coefficient -= *product_coefficient;
             }
             let equality_polynomial = [
                 CompactChallengeField::ONE - equality_point[0],
@@ -2303,9 +2320,12 @@ mod tests {
                 0,
                 constraint_combining_challenge,
                 &equality_point,
-                CompactChallengeField::ONE,
-                [CompactChallengeField::ZERO; COMPACT_CFW_MATRIX_COUNT],
-                CompactChallengeField::ZERO,
+                CompactCfwRoundHistory {
+                    equality_prefix_evaluation: CompactChallengeField::ONE,
+                    past_inner_mask_evaluations: [CompactChallengeField::ZERO;
+                        COMPACT_CFW_MATRIX_COUNT],
+                    past_outer_mask_evaluation: CompactChallengeField::ZERO,
+                },
             )
             .expect("first-round accumulator")
         };

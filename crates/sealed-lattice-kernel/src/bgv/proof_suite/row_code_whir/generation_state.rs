@@ -8583,8 +8583,8 @@ mod tests {
             phase_commitment.wasm_runtime_baseline_byte_length(),
             33_554_432
         );
-        assert_eq!(phase_commitment.engine_control_byte_length(), 19_216_973);
-        assert_eq!(phase_commitment.source_provider_byte_length(), 30_479_232);
+        assert_eq!(phase_commitment.engine_control_byte_length(), 19_216_957);
+        assert_eq!(phase_commitment.source_provider_byte_length(), 30_431_184);
         assert_eq!(phase_commitment.replay_reader_byte_length(), 11_534_336);
         assert_eq!(phase_commitment.dft_buffer_byte_length(), 4_194_304);
         assert_eq!(
@@ -8593,14 +8593,14 @@ mod tests {
         );
         assert_eq!(
             phase_commitment.proof_encoder_non_salt_byte_length(),
-            39_871_506,
+            39_873_954,
         );
         assert_eq!(
             phase_commitment.transported_private_leaf_salt_byte_length(),
-            4_268_544,
+            4_268_672,
         );
         assert_eq!(phase_commitment.transcript_byte_length(), 223_432);
-        assert_eq!(phase_commitment.private_material_byte_length(), 721_272);
+        assert_eq!(phase_commitment.private_material_byte_length(), 721_672);
         assert_eq!(phase_commitment.private_leaf_salt_state_byte_length(), 0);
         assert_eq!(
             phase_commitment.private_leaf_salt_workspace_byte_length(),
@@ -8631,14 +8631,14 @@ mod tests {
         .into_iter()
         .try_fold(0_u64, |total, byte_length| total.checked_add(byte_length))
         .expect("the selected VSS owned live set adds");
-        assert_eq!(allocator_owned_byte_length, 389_581_155);
+        assert_eq!(allocator_owned_byte_length, 389_536_067);
         assert_eq!(
             phase_commitment.allocator_overhead_byte_length(),
             allocator_owned_byte_length.div_ceil(8),
         );
         assert_eq!(
             phase_commitment.allocator_overhead_byte_length(),
-            48_697_645
+            48_692_009
         );
         assert_eq!(
             phase_commitment.total_byte_length(),
@@ -8646,10 +8646,10 @@ mod tests {
                 + allocator_owned_byte_length
                 + allocator_owned_byte_length.div_ceil(8),
         );
-        assert_eq!(phase_commitment.total_byte_length(), 471_833_232);
+        assert_eq!(phase_commitment.total_byte_length(), 471_782_508);
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            557_779_965
+            557_729_241
         );
 
         let base_phase = construction_plan
@@ -8680,18 +8680,18 @@ mod tests {
                 .expect("the selected VSS grouped-lane total adds")
         };
         let two_lane_total_byte_length = grouped_phase_total(2);
-        assert_eq!(two_lane_total_byte_length, 594_516_624);
+        assert_eq!(two_lane_total_byte_length, 594_465_900);
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(two_lane_total_byte_length),
-            Some(9_463_152),
+            Some(9_513_876),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH.checked_sub(two_lane_total_byte_length),
-            Some(76_572_016),
+            Some(76_622_740),
         );
         let three_lane_total_byte_length = grouped_phase_total(3);
-        assert_eq!(three_lane_total_byte_length, 712_481_424);
+        assert_eq!(three_lane_total_byte_length, 712_430_700);
         assert!(three_lane_total_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH);
     }
 
@@ -9000,7 +9000,7 @@ mod tests {
             4_268_544
         );
         assert_eq!(phase_commitment.transcript_byte_length(), 217_888);
-        assert_eq!(phase_commitment.private_material_byte_length(), 721_272);
+        assert_eq!(phase_commitment.private_material_byte_length(), 721_672);
         assert_eq!(phase_commitment.bridge_copy_byte_length(), 2_097_508);
         assert_eq!(
             phase_commitment.allocator_overhead_byte_length(),
@@ -9421,7 +9421,7 @@ mod tests {
             4_268_544
         );
         assert_eq!(aggregate_source.transcript_byte_length(), 215_488);
-        assert_eq!(aggregate_source.private_material_byte_length(), 721_272);
+        assert_eq!(aggregate_source.private_material_byte_length(), 721_672);
         assert_eq!(aggregate_source.bridge_copy_byte_length(), 2_097_508);
         assert_eq!(
             aggregate_source.allocator_overhead_byte_length(),
@@ -10044,15 +10044,15 @@ mod tests {
         assert_eq!(relation_variant_payload_byte_length, 4_986_144);
         assert_eq!(relation_context_payload_byte_length, 736);
         assert_eq!(construction_identity_byte_length, 994_031);
-        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 20_304);
+        assert_eq!(size_of::<RowCodeWhirGenerationStateMachine>(), 20_288);
         assert_eq!(size_of::<super::super::RowCodeWhirChallenger>(), 552);
         assert_eq!(
             accounting.loading_persistent_resident_byte_length(),
-            5_529_036
+            5_529_060
         );
         assert_eq!(
             accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
-            5_004_748,
+            5_004_772,
         );
         assert_eq!(
             accounting.additional_loading_transient_byte_length(),
@@ -10069,7 +10069,7 @@ mod tests {
                 .and_then(|bytes| {
                     bytes.checked_add(accounting.maximum_returned_source_polynomial_byte_length())
                 }),
-            Some(14_885_134),
+            Some(14_885_158),
         );
 
         let validated_variant = validated
@@ -10234,7 +10234,7 @@ mod tests {
                 0,
                 0,
                 0,
-                65_180_391,
+                65_180_850,
             ),
             (
                 GenerationPhaseLivenessKind::SourceReplay,
@@ -10245,7 +10245,7 @@ mod tests {
                 0,
                 0,
                 0,
-                158_740_890,
+                158_744_247,
             ),
             (
                 GenerationPhaseLivenessKind::RelationMaterialization,
@@ -10256,7 +10256,7 @@ mod tests {
                 0,
                 0,
                 1_185_104,
-                160_074_132,
+                160_077_489,
             ),
             (
                 GenerationPhaseLivenessKind::PhaseCommitment,
@@ -10267,7 +10267,7 @@ mod tests {
                 392,
                 0,
                 0,
-                504_268_062,
+                504_271_419,
             ),
             (
                 GenerationPhaseLivenessKind::QuotientPreparation,
@@ -10278,7 +10278,7 @@ mod tests {
                 0,
                 0,
                 7_280_808,
-                166_931_799,
+                166_935_156,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateSource,
@@ -10289,7 +10289,7 @@ mod tests {
                 0,
                 0,
                 386_426_745,
-                593_470_978,
+                593_474_335,
             ),
             (
                 GenerationPhaseLivenessKind::PrivateMaterialSampling,
@@ -10299,8 +10299,8 @@ mod tests {
                 0,
                 0,
                 0,
-                721_320,
-                64_000_887,
+                721_720,
+                64_004_694,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateOpeningPreparation,
@@ -10311,7 +10311,7 @@ mod tests {
                 0,
                 0,
                 167_772_160,
-                251_933_082,
+                251_936_439,
             ),
             (
                 GenerationPhaseLivenessKind::AggregateCommitment,
@@ -10322,7 +10322,7 @@ mod tests {
                 976,
                 0,
                 0,
-                478_426_659,
+                478_430_016,
             ),
             (
                 GenerationPhaseLivenessKind::BoundTreeAuthentication,
@@ -10333,7 +10333,7 @@ mod tests {
                 0,
                 0,
                 0,
-                289_682_430,
+                289_685_787,
             ),
             (
                 GenerationPhaseLivenessKind::WhirOpening,
@@ -10344,7 +10344,7 @@ mod tests {
                 976,
                 0,
                 1_376_720,
-                474_345_127,
+                474_348_457,
             ),
             (
                 GenerationPhaseLivenessKind::BaseCaseOpening,
@@ -10355,7 +10355,7 @@ mod tests {
                 976,
                 0,
                 46_794_256,
-                140_874_607,
+                140_877_937,
             ),
             (
                 GenerationPhaseLivenessKind::CanonicalEncoding,
@@ -10364,9 +10364,9 @@ mod tests {
                 0,
                 0,
                 0,
-                750_312,
+                750_488,
                 0,
-                58_403_161,
+                58_406_689,
             ),
         ];
         assert_eq!(complete_liveness.rows().len(), expected_rows.len());
@@ -10387,11 +10387,11 @@ mod tests {
         {
             assert_eq!(row.phase(), phase);
             assert_eq!(row.wasm_runtime_baseline_byte_length(), 33_554_432);
-            assert_eq!(row.engine_control_byte_length(), 10_200_625);
+            assert_eq!(row.engine_control_byte_length(), 10_200_609);
             assert_eq!(
                 row.source_provider_byte_length(),
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
-                    14_754_062
+                    14_754_086
                 } else if matches!(
                     phase,
                     GenerationPhaseLivenessKind::WhirOpening
@@ -10400,7 +10400,7 @@ mod tests {
                 ) {
                     0
                 } else {
-                    5_004_748
+                    5_004_772
                 },
             );
             assert_eq!(row.replay_reader_byte_length(), replay);
@@ -10411,7 +10411,7 @@ mod tests {
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
                     0
                 } else {
-                    7_564_954
+                    7_567_402
                 },
             );
             assert_eq!(
@@ -10419,11 +10419,11 @@ mod tests {
                 if phase == GenerationPhaseLivenessKind::LoadingAuthenticatedSources {
                     0
                 } else {
-                    545_664
+                    545_792
                 },
             );
             assert_eq!(row.transcript_byte_length(), 207_424);
-            assert_eq!(row.private_material_byte_length(), 721_272);
+            assert_eq!(row.private_material_byte_length(), 721_672);
             assert_eq!(
                 row.private_leaf_salt_state_byte_length(),
                 private_salt_state
@@ -10472,7 +10472,7 @@ mod tests {
         }
         assert_eq!(
             complete_liveness.maximum_live_set_byte_length(),
-            593_470_978,
+            593_474_335,
         );
         assert_eq!(
             complete_liveness
@@ -10480,17 +10480,17 @@ mod tests {
                 .saturating_sub(
                     crate::bgv::proof_suite::prover::NOMINAL_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
                 ),
-            190_817_794,
+            190_821_151,
         );
         assert_eq!(
             crate::bgv::proof_suite::prover::AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length(),),
-            Some(10_508_798),
+            Some(10_505_441),
         );
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 .checked_sub(complete_liveness.maximum_live_set_byte_length()),
-            Some(77_617_662),
+            Some(77_614_305),
         );
     }
 

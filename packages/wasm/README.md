@@ -12,13 +12,18 @@ Long-running workers cannot assume background execution or a final lifecycle
 callback. Their owning protocol runtime must provide proactive authenticated
 checkpoint custody and bounded deterministic resume.
 
-No compact CFW/WHIR packing factor is selected or exported for proof
-generation. Current factor byte and lifecycle values are static host-side
-development estimates, not release-WASM or browser evidence. Factor eight is
-ineligible under the retained-tree scratch bound, while factors one, two, and
-four still require the remaining masking and emitted-byte theorem closure, live
-transcript driving, authenticated restart, selected-size execution, and one
-reproducible scalar browser artifact.
+The compact semantic, prover, transport, and hostile-verifier modules are test-
+only. The measurement feature contains only bounded measurement owners and
+their ring-native arithmetic. No compact CFW/WHIR packing factor is selected or
+exported for proof generation. Current factor byte and lifecycle values are
+static host-side development estimates, not release-WASM or browser evidence.
+The ordinary scalar kernel and SDK package bytes reproduce at
+`91e5a2c5d26f9f98a7e0afa797948769c1a648f84622a78b115e7b86edc47524`, but those
+bytes omit the compact proof path. Factor eight is ineligible under the retained-
+tree scratch bound, while factors one, two, and four still require the remaining
+masking and emitted-byte theorem closure, a live release compact path,
+authenticated restart, selected-size execution, and browser proof evidence for
+the same frozen bytes.
 
 The reduced compact kernel chain now publishes all 24 response boundaries
 through the common authenticated checkpoint event chain, binding the exact

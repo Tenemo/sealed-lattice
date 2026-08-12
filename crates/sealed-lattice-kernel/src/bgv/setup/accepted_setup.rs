@@ -96,7 +96,7 @@ pub(in crate::bgv) use self::generation_authority::{
     with_setup_generation_relinearization_round_two_component_chunk,
     with_setup_generation_relinearization_round_two_witness, with_setup_generation_vss_material,
 };
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(in crate::bgv) use self::generation_authority::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
     selected_setup_generation_compact_public_key_development_retained_payload_byte_length,

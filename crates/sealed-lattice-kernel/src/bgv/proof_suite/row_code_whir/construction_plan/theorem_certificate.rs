@@ -87,8 +87,8 @@ use crate::bgv::proof_suite::{
     compile_same_secret_relation_plan, selected_ballot_validity_relation_compilation,
     selected_committed_material_profile,
     selected_persistent_committed_material_mask_image_inventory,
-    selected_public_key_share_relation_plan_input, selected_relation_plan_for_schema,
-    selected_relation_plans, selected_same_secret_relation_plan_input,
+    selected_public_key_share_relation_plan_input, selected_relation_plans,
+    selected_same_secret_relation_plan_input,
 };
 use crate::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalItemType,
@@ -101,7 +101,7 @@ use crate::hashing::HASH512_PREIMAGE_PREFIX;
 
 mod fixed_output_oracle_graph;
 mod production_extractor;
-mod soundness_composition;
+mod statement_challenge_chronology;
 
 use fixed_output_oracle_graph::{
     Cms19AuxiliaryTableUniversalGoodnessCertificate, Cms19FixedOutputOracleGraphCertificate,
@@ -131,15 +131,15 @@ const SAME_SECRET_SCALAR_OPENING_COUNT: u64 = 1_782;
 /// supplied-response absorptions        2,071      =     2,071
 /// deterministic empty absorptions      4,235      =     4,235
 /// fixed 512-bit challenge seeds         4,272      =     4,272
-/// fixed 512-bit challenge blocks      590,128      =   590,128
-/// total                                               604,801
+/// fixed 512-bit challenge blocks      590,144      =   590,144
+/// total                                               604,817
 /// ~~~
 ///
 /// The `4,272` seeded streams partition as `4,260` extension challenges, `9`
 /// distinct-index samplers, and `3` product-space samplers. The independently
-/// derived fixed-call subtotals are `549,540`, `44,473`, and `387`; they include
+/// derived fixed-call subtotals are `549,540`, `44,489`, and `387`; they include
 /// one seed per logical message and every discarded rejection slot.
-const SELECTED_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 604_801;
+const SELECTED_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 604_817;
 const SELECTED_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 4_272;
 const CMS19_ADVERSARIAL_QUERY_EXPONENT: usize = 80;
 const CMS19_REQUIRED_ORACLE_OUTPUT_BIT_LENGTH: usize = 512;
@@ -3663,8 +3663,6 @@ struct NonlinearCommitmentPrivacyCertificate {
     persistent_material_masking_is_bound_root_globally: bool,
     persistent_material_bad_event_is_charged_once_outside_family: bool,
     affine_component_catalog_is_bound: bool,
-    affine_image_inclusion_is_proved: bool,
-    opened_leaf_sequential_simulator_is_proved: bool,
     commitment_before_dependent_query_chronology_is_complete: bool,
     compact_frontier_is_canonical_truncated_tree_postprocessing: bool,
     adaptive_post_commitment_query_sets_are_supported: bool,
@@ -3853,8 +3851,6 @@ impl NonlinearCommitmentPrivacyCertificate {
             && self.persistent_material_masking_is_bound_root_globally
             && self.persistent_material_bad_event_is_charged_once_outside_family
             && self.affine_component_catalog_is_bound
-            && !self.affine_image_inclusion_is_proved
-            && !self.opened_leaf_sequential_simulator_is_proved
             && self.commitment_before_dependent_query_chronology_is_complete
             && self.compact_frontier_is_canonical_truncated_tree_postprocessing
             && self.adaptive_post_commitment_query_sets_are_supported
@@ -4403,8 +4399,6 @@ fn derive_nonlinear_commitment_privacy_certificate(
         persistent_material_masking_is_bound_root_globally: true,
         persistent_material_bad_event_is_charged_once_outside_family: true,
         affine_component_catalog_is_bound: true,
-        affine_image_inclusion_is_proved: false,
-        opened_leaf_sequential_simulator_is_proved: false,
         commitment_before_dependent_query_chronology_is_complete: true,
         compact_frontier_is_canonical_truncated_tree_postprocessing: true,
         adaptive_post_commitment_query_sets_are_supported: true,
@@ -5271,15 +5265,6 @@ impl Cms19FixedOutputSeededSamplerReduction {
     const fn evidence_identifier(self) -> &'static str {
         match self {
             Self::DomainSeparatedPredecessorLinkedFixedHashSamplerV1 => Self::EVIDENCE_IDENTIFIER,
-        }
-    }
-
-    fn from_evidence_identifier(identifier: &str) -> Option<Self> {
-        match identifier {
-            Self::EVIDENCE_IDENTIFIER => {
-                Some(Self::DomainSeparatedPredecessorLinkedFixedHashSamplerV1)
-            }
-            _ => None,
         }
     }
 
@@ -6797,15 +6782,15 @@ impl ProductionOpeningCoordinate {
     }
 }
 
-/// Independent production-side correspondence for every secret-bearing view
-/// before the aggregate-wide opening argument.
+/// Independent production-side accounting for every secret-bearing view before
+/// the aggregate-wide opening argument.
 ///
 /// The relation checker supplies the abstract source/view graph. This
-/// certificate separately walks the physical construction rows, opened
+/// This record separately walks the physical construction rows, opened
 /// polynomial chunks, bound columns, aggregate roles, and transcript query
-/// schedules. It then requires the two derivations to agree after canonical
-/// ordering. Public-only relations retain the complete physical census but
-/// intentionally have no private source/view graph.
+/// schedules. It requires the two catalogs to agree after canonical ordering.
+/// It is accounting, not an affine-image proof or simulator. Public-only
+/// relations retain the physical census but have no private source/view graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ProductionConstructionMaskingCorrespondenceCertificate {
     proof_privacy_mode: ProofPrivacyMode,
@@ -10190,7 +10175,6 @@ struct ConstructionMaskingAffineCompositionCertificate {
     production_preaggregate_correspondence_is_complete: bool,
     production_aggregate_correspondence_is_complete: bool,
     finite_population_agreement_term_is_soundness_only: bool,
-    claims_affine_image_inclusion: bool,
     claims_family_simulation: bool,
     claims_malicious_verifier_zero_knowledge: bool,
     claims_quantum_random_oracle_zero_knowledge: bool,
@@ -10264,7 +10248,6 @@ impl ConstructionMaskingAffineCompositionCertificate {
             && self.production_preaggregate_correspondence_is_complete
             && self.production_aggregate_correspondence_is_complete
             && self.finite_population_agreement_term_is_soundness_only
-            && !self.claims_affine_image_inclusion
             && !self.claims_family_simulation
             && !self.claims_malicious_verifier_zero_knowledge
             && !self.claims_quantum_random_oracle_zero_knowledge
@@ -10597,7 +10580,6 @@ fn derive_construction_masking_affine_composition(
         production_preaggregate_correspondence_is_complete: true,
         production_aggregate_correspondence_is_complete: true,
         finite_population_agreement_term_is_soundness_only: true,
-        claims_affine_image_inclusion: false,
         claims_family_simulation: false,
         claims_malicious_verifier_zero_knowledge: false,
         claims_quantum_random_oracle_zero_knowledge: false,
@@ -10609,8 +10591,8 @@ fn derive_construction_masking_affine_composition(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConstructionAffineImageFactorization {
-    /// For every trace-mask source, the real map is evaluation of
+enum ConstructionAffineImagePlan {
+    /// Planned trace-mask argument: the intended map is evaluation of
     /// `(X^H - 1) r(X)` on the complete Frobenius-closed opening catalog.
     /// Every catalog point is outside `H`; multiplication by `X^H - 1` is
     /// therefore an invertible diagonal map and interpolation by `r` is
@@ -10622,7 +10604,7 @@ enum ConstructionAffineImageFactorization {
         total_observation_coordinate_count: u64,
         minimum_source_coordinate_surplus: u64,
     },
-    /// After the already simulated trace openings fix the sum of the quotient
+    /// Planned quotient argument: after prior trace openings fix the sum of the quotient
     /// components, witness differences lie in the sum-zero kernel. The
     /// deployed telescoping map `[I; -1 ... -1]`, independently at each point,
     /// spans exactly that kernel.
@@ -10634,7 +10616,7 @@ enum ConstructionAffineImageFactorization {
         dependency_matrix_rank: u64,
         conditioned_identity_coordinate_count: u64,
     },
-    /// The opening-batch mask is an independently sampled extension-field
+    /// Planned opening-batch argument: the mask is an independently sampled extension-field
     /// polynomial. Its own revealed evaluations contain no witness summand;
     /// the associated PCS batch is conditioned on the already simulated
     /// relation openings.
@@ -10643,7 +10625,7 @@ enum ConstructionAffineImageFactorization {
         challenge_extension_degree: u16,
         mask_coefficient_count: u64,
     },
-    /// Each physical phase row adds an independent high-half polynomial. The
+    /// Planned phase-row argument: each physical row adds an independent high-half polynomial. The
     /// production rank requirement is the distinct-point generalized
     /// Vandermonde map used by the actual row encoder and shared query vector.
     PhaseRowPadVandermonde {
@@ -10652,7 +10634,7 @@ enum ConstructionAffineImageFactorization {
         conditioned_view_rank_per_row: u64,
         verification: ConstructionMaskingRankVerification,
     },
-    /// The aggregate-wide production walk binds a block-diagonal conditioned
+    /// Planned aggregate argument: the production walk records a block-diagonal conditioned
     /// map. Sumcheck blocks have the constant nonzero `7 x 7` minor; query
     /// blocks have square generalized Vandermonde factors; fresh reveals have
     /// coordinate-identity factors. All remaining affine coordinates are
@@ -10668,31 +10650,25 @@ enum ConstructionAffineImageFactorization {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ConstructionAffineImageInclusionRow {
+struct ConstructionAffineImagePlanRow {
     source_class: ConstructionAffineMaskSourceClass,
     private_base_coordinate_count: u64,
     conditioned_view_base_coordinate_count: u64,
-    mask_image_rank_or_generic_rank: u64,
-    joined_mask_and_witness_image_rank_or_generic_rank: u64,
     derived_alias_base_coordinate_count: u64,
-    factorization: ConstructionAffineImageFactorization,
+    plan: ConstructionAffineImagePlan,
 }
 
-impl ConstructionAffineImageInclusionRow {
-    fn is_complete(self) -> bool {
+impl ConstructionAffineImagePlanRow {
+    fn is_consistent(self) -> bool {
         if self.private_base_coordinate_count == 0
             || self.conditioned_view_base_coordinate_count == 0
-            || self.mask_image_rank_or_generic_rank == 0
-            || self.mask_image_rank_or_generic_rank
-                != self.joined_mask_and_witness_image_rank_or_generic_rank
-            || self.conditioned_view_base_coordinate_count != self.mask_image_rank_or_generic_rank
         {
             return false;
         }
-        match (self.source_class, self.factorization) {
+        match (self.source_class, self.plan) {
             (
                 ConstructionAffineMaskSourceClass::RelationTraceMasks,
-                ConstructionAffineImageFactorization::VanishingScaledTraceEvaluation {
+                ConstructionAffineImagePlan::VanishingScaledTraceEvaluation {
                     trace_domain_size,
                     challenge_extension_degree,
                     source_count,
@@ -10711,7 +10687,7 @@ impl ConstructionAffineImageInclusionRow {
             }
             (
                 ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
-                ConstructionAffineImageFactorization::ConditionedTelescopingKernel {
+                ConstructionAffineImagePlan::ConditionedTelescopingKernel {
                     quotient_component_count,
                     telescoping_source_count,
                     opening_point_count,
@@ -10739,7 +10715,7 @@ impl ConstructionAffineImageInclusionRow {
             }
             (
                 ConstructionAffineMaskSourceClass::OpeningBatchMask,
-                ConstructionAffineImageFactorization::IndependentOpeningBatchMask {
+                ConstructionAffineImagePlan::IndependentOpeningBatchMask {
                     opening_point_count,
                     challenge_extension_degree,
                     mask_coefficient_count,
@@ -10755,7 +10731,7 @@ impl ConstructionAffineImageInclusionRow {
             }
             (
                 ConstructionAffineMaskSourceClass::PhaseRowPads,
-                ConstructionAffineImageFactorization::PhaseRowPadVandermonde {
+                ConstructionAffineImagePlan::PhaseRowPadVandermonde {
                     physical_row_count,
                     source_dimension_per_row,
                     conditioned_view_rank_per_row,
@@ -10777,7 +10753,7 @@ impl ConstructionAffineImageInclusionRow {
             }
             (
                 ConstructionAffineMaskSourceClass::AggregateWidePad,
-                ConstructionAffineImageFactorization::AggregateBlockDiagonal {
+                ConstructionAffineImagePlan::AggregateBlockDiagonal {
                     challenge_extension_degree,
                     affine_block_count,
                     block_kind_counts,
@@ -10818,25 +10794,22 @@ enum ConstructionAffineConditioningStage {
     AggregateGivenMaskedOpenings,
 }
 
+/// Necessary affine-image accounting for the rejected row-code comparison
+/// backend. The rows record dimensions and intended factorizations only. They
+/// do not materialize either linear map or prove conditioned image inclusion.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ConstructionAffineImageInclusionCertificate {
+struct ConstructionAffineImagePlanAccounting {
     construction_plan_identity_hash: [u8; 64],
     relation_plan_variant_hash: [u8; 64],
-    rows: Vec<ConstructionAffineImageInclusionRow>,
+    rows: Vec<ConstructionAffineImagePlanRow>,
     total_private_base_coordinate_count: u64,
     total_conditioned_view_base_coordinate_count: u64,
-    total_mask_image_rank_or_generic_rank: u64,
-    total_joined_image_rank_or_generic_rank: u64,
     total_derived_alias_base_coordinate_count: u64,
     conditioning_order: Vec<ConstructionAffineConditioningStage>,
-    claims_unconditioned_independence: bool,
-    claims_nonlinear_simulation: bool,
-    claims_family_simulation: bool,
-    claims_quantum_random_oracle_zero_knowledge: bool,
 }
 
-impl ConstructionAffineImageInclusionCertificate {
-    fn is_complete(&self) -> bool {
+impl ConstructionAffineImagePlanAccounting {
+    fn is_consistent(&self) -> bool {
         let expected_classes = [
             ConstructionAffineMaskSourceClass::RelationTraceMasks,
             ConstructionAffineMaskSourceClass::QuotientTelescopingMasks,
@@ -10844,7 +10817,7 @@ impl ConstructionAffineImageInclusionCertificate {
             ConstructionAffineMaskSourceClass::PhaseRowPads,
             ConstructionAffineMaskSourceClass::AggregateWidePad,
         ];
-        let sum = |select: fn(&ConstructionAffineImageInclusionRow) -> u64| {
+        let sum = |select: fn(&ConstructionAffineImagePlanRow) -> u64| {
             self.rows
                 .iter()
                 .try_fold(0_u64, |total, row| total.checked_add(select(row)))
@@ -10861,19 +10834,13 @@ impl ConstructionAffineImageInclusionCertificate {
                 .rows
                 .iter()
                 .copied()
-                .all(ConstructionAffineImageInclusionRow::is_complete)
+                .all(ConstructionAffineImagePlanRow::is_consistent)
             && sum(|row| row.private_base_coordinate_count)
                 == Some(self.total_private_base_coordinate_count)
             && sum(|row| row.conditioned_view_base_coordinate_count)
                 == Some(self.total_conditioned_view_base_coordinate_count)
-            && sum(|row| row.mask_image_rank_or_generic_rank)
-                == Some(self.total_mask_image_rank_or_generic_rank)
-            && sum(|row| row.joined_mask_and_witness_image_rank_or_generic_rank)
-                == Some(self.total_joined_image_rank_or_generic_rank)
             && sum(|row| row.derived_alias_base_coordinate_count)
                 == Some(self.total_derived_alias_base_coordinate_count)
-            && self.total_mask_image_rank_or_generic_rank
-                == self.total_joined_image_rank_or_generic_rank
             && self.conditioning_order
                 == [
                     ConstructionAffineConditioningStage::AuthenticatedPersistentObjectsFixed,
@@ -10882,22 +10849,18 @@ impl ConstructionAffineImageInclusionCertificate {
                     ConstructionAffineConditioningStage::OpeningBatchGivenRelationOpenings,
                     ConstructionAffineConditioningStage::AggregateGivenMaskedOpenings,
                 ]
-            && !self.claims_unconditioned_independence
-            && !self.claims_nonlinear_simulation
-            && !self.claims_family_simulation
-            && !self.claims_quantum_random_oracle_zero_knowledge
     }
 
-    fn is_complete_for(&self, input: ConstructionMaskingAffineCompositionInput<'_>) -> bool {
-        self.is_complete()
-            && derive_construction_affine_image_inclusion(input)
+    fn is_consistent_for(&self, input: ConstructionMaskingAffineCompositionInput<'_>) -> bool {
+        self.is_consistent()
+            && derive_construction_affine_image_plan_accounting(input)
                 .is_ok_and(|expected| expected == *self)
     }
 }
 
-fn derive_construction_affine_image_inclusion(
+fn derive_construction_affine_image_plan_accounting(
     input: ConstructionMaskingAffineCompositionInput<'_>,
-) -> Result<ConstructionAffineImageInclusionCertificate, WhirTheoremCertificateError> {
+) -> Result<ConstructionAffineImagePlanAccounting, WhirTheoremCertificateError> {
     let accounting = derive_construction_masking_affine_composition(input)?;
     let ConstructionMaskingAffineCompositionInput {
         plan,
@@ -10909,7 +10872,6 @@ fn derive_construction_affine_image_inclusion(
         row_pad_generator: _,
     } = input;
     if !accounting.is_complete()
-        || accounting.claims_affine_image_inclusion
         || !production_preaggregate.is_complete_for(plan, relation_variant, relation_context)
         || !production_aggregate.is_complete(aggregate_wide_masking)
     {
@@ -11035,14 +10997,14 @@ fn derive_construction_affine_image_inclusion(
         aggregate_wide_masking.joint_affine_view_summary();
 
     let factorization_rows = [
-        ConstructionAffineImageFactorization::VanishingScaledTraceEvaluation {
+        ConstructionAffineImagePlan::VanishingScaledTraceEvaluation {
             trace_domain_size: relation_variant.trace_domain_size(),
             challenge_extension_degree: extension_degree,
             source_count: trace_masks.len(),
             total_observation_coordinate_count: trace_coordinate_count,
             minimum_source_coordinate_surplus: minimum_trace_surplus,
         },
-        ConstructionAffineImageFactorization::ConditionedTelescopingKernel {
+        ConstructionAffineImagePlan::ConditionedTelescopingKernel {
             quotient_component_count,
             telescoping_source_count,
             opening_point_count,
@@ -11054,18 +11016,18 @@ fn derive_construction_affine_image_inclusion(
                 .checked_mul(u64::from(extension_degree))
                 .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?,
         },
-        ConstructionAffineImageFactorization::IndependentOpeningBatchMask {
+        ConstructionAffineImagePlan::IndependentOpeningBatchMask {
             opening_point_count: opening_batch_point_count,
             challenge_extension_degree: extension_degree,
             mask_coefficient_count: opening_batch_mask.mask_degree_bound_exclusive(),
         },
-        ConstructionAffineImageFactorization::PhaseRowPadVandermonde {
+        ConstructionAffineImagePlan::PhaseRowPadVandermonde {
             physical_row_count,
             source_dimension_per_row: row_pad_requirement.source_dimension,
             conditioned_view_rank_per_row: row_pad_requirement.required_rank,
             verification: row_pad_requirement.verification,
         },
-        ConstructionAffineImageFactorization::AggregateBlockDiagonal {
+        ConstructionAffineImagePlan::AggregateBlockDiagonal {
             challenge_extension_degree: extension_degree,
             affine_block_count: production_aggregate.affine_rows.len(),
             block_kind_counts: aggregate_block_kind_counts,
@@ -11080,39 +11042,31 @@ fn derive_construction_affine_image_inclusion(
         .iter()
         .copied()
         .zip(factorization_rows)
-        .map(
-            |(accounting_row, factorization)| ConstructionAffineImageInclusionRow {
-                source_class: accounting_row.source_class,
-                private_base_coordinate_count: accounting_row.private_base_coordinate_count,
-                conditioned_view_base_coordinate_count: accounting_row.joint_view_rank,
-                mask_image_rank_or_generic_rank: accounting_row.joint_view_rank,
-                joined_mask_and_witness_image_rank_or_generic_rank: accounting_row.joint_view_rank,
-                derived_alias_base_coordinate_count: accounting_row
-                    .derived_linear_identity_base_coordinate_count,
-                factorization,
-            },
-        )
+        .map(|(accounting_row, plan)| ConstructionAffineImagePlanRow {
+            source_class: accounting_row.source_class,
+            private_base_coordinate_count: accounting_row.private_base_coordinate_count,
+            conditioned_view_base_coordinate_count: accounting_row.joint_view_rank,
+            derived_alias_base_coordinate_count: accounting_row
+                .derived_linear_identity_base_coordinate_count,
+            plan,
+        })
         .collect::<Vec<_>>();
-    if rows.iter().copied().any(|row| !row.is_complete()) {
+    if rows.iter().copied().any(|row| !row.is_consistent()) {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
-    let sum = |select: fn(&ConstructionAffineImageInclusionRow) -> u64| {
+    let sum = |select: fn(&ConstructionAffineImagePlanRow) -> u64| {
         rows.iter().try_fold(0_u64, |total, row| {
             total
                 .checked_add(select(row))
                 .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)
         })
     };
-    let certificate = ConstructionAffineImageInclusionCertificate {
+    let accounting = ConstructionAffineImagePlanAccounting {
         construction_plan_identity_hash: accounting.construction_plan_identity_hash,
         relation_plan_variant_hash: accounting.relation_plan_variant_hash,
         total_private_base_coordinate_count: sum(|row| row.private_base_coordinate_count)?,
         total_conditioned_view_base_coordinate_count: sum(|row| {
             row.conditioned_view_base_coordinate_count
-        })?,
-        total_mask_image_rank_or_generic_rank: sum(|row| row.mask_image_rank_or_generic_rank)?,
-        total_joined_image_rank_or_generic_rank: sum(|row| {
-            row.joined_mask_and_witness_image_rank_or_generic_rank
         })?,
         total_derived_alias_base_coordinate_count: sum(|row| {
             row.derived_alias_base_coordinate_count
@@ -11125,15 +11079,11 @@ fn derive_construction_affine_image_inclusion(
             ConstructionAffineConditioningStage::OpeningBatchGivenRelationOpenings,
             ConstructionAffineConditioningStage::AggregateGivenMaskedOpenings,
         ],
-        claims_unconditioned_independence: false,
-        claims_nonlinear_simulation: false,
-        claims_family_simulation: false,
-        claims_quantum_random_oracle_zero_knowledge: false,
     };
-    if !certificate.is_complete() {
+    if !accounting.is_consistent() {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
-    Ok(certificate)
+    Ok(accounting)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11437,9 +11387,9 @@ impl ConstructionSequentialAggregateSectionSimulationRow {
 }
 
 #[derive(Clone, Copy)]
-struct ConstructionSequentialSimulatorInput<'a> {
+struct ConstructionSequentialSimulationPlanInput<'a> {
     plan: &'a RowCodeWhirConstructionPlan,
-    affine_image_inclusion: &'a ConstructionAffineImageInclusionCertificate,
+    affine_image_plan_accounting: &'a ConstructionAffineImagePlanAccounting,
     nonlinear_commitment_privacy: &'a NonlinearCommitmentPrivacyCertificate,
     nonlinear_commitment_binding: &'a NonlinearCommitmentBindingCertificate,
     whole_database_support: &'a Cms19WholeDatabaseSupportCertificate,
@@ -11449,20 +11399,14 @@ struct ConstructionSequentialSimulatorInput<'a> {
     transported_proof_correspondence: &'a ExactSameSecretTransportCorrespondenceCertificate,
 }
 
-/// One construction-level classical ideal-XOF simulator for a secret-bearing
-/// production verifier view.
+/// Strategy accounting for a possible construction-level ideal-XOF simulator.
 ///
-/// The simulator first replaces every attempt-private root, imports each
-/// already simulated persistent producer root, and leaves public setup roots
-/// unchanged. Each shared query vector is then sampled once. The conditioned
-/// affine image certificate supplies the complete joint opened-value coset;
-/// code switches and folds are deterministic functions of values already in
-/// that prefix. Finally, the simulator programs only coordinate-derived leaf
-/// and frontier nodes under the pre-opening fresh-input bad event. This does
-/// not claim a concrete SHAKE256 reduction, malicious-verifier security,
-/// resettable security, cross-family simulation, or QROM zero knowledge.
+/// This record enumerates the intended root, query, opened-value, transport,
+/// and frontier strategies. It does not sample coins, consume only a public
+/// statement and verifier messages, or emit a witness-free verifier view. It is
+/// therefore a simulation plan, not an executable simulator or privacy proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ConstructionSequentialSimulatorCertificate {
+struct ConstructionSequentialSimulationPlan {
     construction_plan_identity_hash: [u8; 64],
     affine_image_relation_plan_variant_hash: [u8; 64],
     conditioned_affine_source_classes: Vec<ConstructionAffineMaskSourceClass>,
@@ -11485,15 +11429,10 @@ struct ConstructionSequentialSimulatorCertificate {
     aggregate_code_switch_count: usize,
     aggregate_fold_count: usize,
     ideal_xof_programming_bad_event: ExactBigFraction,
-    claims_concrete_shake256_reduction: bool,
-    claims_malicious_verifier_zero_knowledge: bool,
-    claims_resettable_zero_knowledge: bool,
-    claims_family_simulation: bool,
-    claims_quantum_random_oracle_zero_knowledge: bool,
 }
 
-impl ConstructionSequentialSimulatorCertificate {
-    fn is_complete(&self) -> bool {
+impl ConstructionSequentialSimulationPlan {
+    fn is_consistent(&self) -> bool {
         let attempt_private_root_count = self
             .commitment_rows
             .iter()
@@ -11796,16 +11735,11 @@ impl ConstructionSequentialSimulatorCertificate {
             && self
                 .ideal_xof_programming_bad_event
                 .is_at_most_inverse_power_of_two(128)
-            && !self.claims_concrete_shake256_reduction
-            && !self.claims_malicious_verifier_zero_knowledge
-            && !self.claims_resettable_zero_knowledge
-            && !self.claims_family_simulation
-            && !self.claims_quantum_random_oracle_zero_knowledge
     }
 
-    fn is_complete_for(&self, input: ConstructionSequentialSimulatorInput<'_>) -> bool {
-        self.is_complete()
-            && derive_construction_sequential_simulator(input)
+    fn is_consistent_for(&self, input: ConstructionSequentialSimulationPlanInput<'_>) -> bool {
+        self.is_consistent()
+            && derive_construction_sequential_simulation_plan(input)
                 .is_ok_and(|expected| expected == *self)
     }
 }
@@ -11939,12 +11873,12 @@ fn simulator_aggregate_section_strategy(
     }
 }
 
-fn derive_construction_sequential_simulator(
-    input: ConstructionSequentialSimulatorInput<'_>,
-) -> Result<ConstructionSequentialSimulatorCertificate, WhirTheoremCertificateError> {
-    let ConstructionSequentialSimulatorInput {
+fn derive_construction_sequential_simulation_plan(
+    input: ConstructionSequentialSimulationPlanInput<'_>,
+) -> Result<ConstructionSequentialSimulationPlan, WhirTheoremCertificateError> {
+    let ConstructionSequentialSimulationPlanInput {
         plan,
-        affine_image_inclusion,
+        affine_image_plan_accounting,
         nonlinear_commitment_privacy,
         nonlinear_commitment_binding,
         whole_database_support,
@@ -11956,14 +11890,15 @@ fn derive_construction_sequential_simulator(
     let construction_plan_identity_hash = plan
         .canonical_identity_hash()
         .map_err(|_| WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy)?;
-    if construction_plan_identity_hash != affine_image_inclusion.construction_plan_identity_hash
+    if construction_plan_identity_hash
+        != affine_image_plan_accounting.construction_plan_identity_hash
         || construction_plan_identity_hash
             != nonlinear_commitment_privacy.construction_plan_identity_hash
         || construction_plan_identity_hash
             != nonlinear_commitment_binding.construction_plan_identity_hash
         || construction_plan_identity_hash
             != transported_proof_correspondence.construction_plan_identity_hash
-        || !affine_image_inclusion.is_complete()
+        || !affine_image_plan_accounting.is_consistent()
         || !nonlinear_commitment_privacy.has_complete_standalone_theorem()
         || !nonlinear_commitment_binding
             .is_complete_for(whole_database_support, commitment_subtree_extraction)
@@ -12096,10 +12031,11 @@ fn derive_construction_sequential_simulator(
         .ok_or(WhirTheoremCertificateError::ArithmeticOverflow)?;
     let (aggregate_commitment_root_count, aggregate_compact_frontier_count, _, _) =
         aggregate_wide_masking.nonlinear_view_summary();
-    let certificate = ConstructionSequentialSimulatorCertificate {
+    let plan = ConstructionSequentialSimulationPlan {
         construction_plan_identity_hash,
-        affine_image_relation_plan_variant_hash: affine_image_inclusion.relation_plan_variant_hash,
-        conditioned_affine_source_classes: affine_image_inclusion
+        affine_image_relation_plan_variant_hash: affine_image_plan_accounting
+            .relation_plan_variant_hash,
+        conditioned_affine_source_classes: affine_image_plan_accounting
             .rows
             .iter()
             .map(|row| row.source_class)
@@ -12129,16 +12065,11 @@ fn derive_construction_sequential_simulator(
         ideal_xof_programming_bad_event: nonlinear_commitment_privacy
             .selected_numeric_bad_event
             .clone(),
-        claims_concrete_shake256_reduction: false,
-        claims_malicious_verifier_zero_knowledge: false,
-        claims_resettable_zero_knowledge: false,
-        claims_family_simulation: false,
-        claims_quantum_random_oracle_zero_knowledge: false,
     };
-    if !certificate.is_complete() {
+    if !plan.is_consistent() {
         return Err(WhirTheoremCertificateError::IncompleteNonlinearCommitmentPrivacy);
     }
-    Ok(certificate)
+    Ok(plan)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12179,8 +12110,8 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirFailurePartitionCertificate {
     production_aggregate_wide_views: ProductionAggregateWideViewCorrespondenceCertificate,
     private_row_pad_generator_hybrid: PrivateRowPadGeneratorHybridCertificate,
     affine_masking_composition: ConstructionMaskingAffineCompositionCertificate,
-    affine_image_inclusion: ConstructionAffineImageInclusionCertificate,
-    sequential_simulator: ConstructionSequentialSimulatorCertificate,
+    affine_image_plan_accounting: ConstructionAffineImagePlanAccounting,
+    sequential_simulation_plan: ConstructionSequentialSimulationPlan,
     private_leaf_salt_prf: PrivateLeafSaltPrfCertificate,
     relation_compiler_interpreter_semantics: RelationCompilerInterpreterSemanticCertificate,
     polynomial_protocol_extractor: ProductionPolynomialProtocolExtractorCertificate,
@@ -12272,20 +12203,26 @@ impl RowCodeWhirFailurePartitionCertificate {
                 == self
                     .production_construction_masking
                     .relation_plan_variant_hash
-            && self.affine_image_inclusion.is_complete()
-            && self.affine_image_inclusion.construction_plan_identity_hash
+            && self.affine_image_plan_accounting.is_consistent()
+            && self
+                .affine_image_plan_accounting
+                .construction_plan_identity_hash
                 == self
                     .affine_masking_composition
                     .construction_plan_identity_hash
-            && self.affine_image_inclusion.relation_plan_variant_hash
+            && self.affine_image_plan_accounting.relation_plan_variant_hash
                 == self.affine_masking_composition.relation_plan_variant_hash
-            && self.sequential_simulator.is_complete()
-            && self.sequential_simulator.construction_plan_identity_hash
-                == self.affine_image_inclusion.construction_plan_identity_hash
+            && self.sequential_simulation_plan.is_consistent()
             && self
-                .sequential_simulator
+                .sequential_simulation_plan
+                .construction_plan_identity_hash
+                == self
+                    .affine_image_plan_accounting
+                    .construction_plan_identity_hash
+            && self
+                .sequential_simulation_plan
                 .affine_image_relation_plan_variant_hash
-                == self.affine_image_inclusion.relation_plan_variant_hash
+                == self.affine_image_plan_accounting.relation_plan_variant_hash
             && self.private_leaf_salt_prf.has_complete_for_bound_geometry(
                 self.production_aggregate_wide_views
                     .construction_plan_identity_hash,
@@ -12421,7 +12358,7 @@ impl RowCodeWhirFailurePartitionCertificate {
                 .has_internal_consistency()
     }
 
-    pub(in crate::bgv::proof_suite) fn has_complete_construction_theorem_for(
+    pub(in crate::bgv::proof_suite) fn has_complete_rejected_backend_accounting_for(
         &self,
         plan: &RowCodeWhirConstructionPlan,
     ) -> bool {
@@ -12450,7 +12387,10 @@ impl RowCodeWhirFailurePartitionCertificate {
             })
             && self.nonlinear_commitment_binding.is_bound_to_plan(plan)
             && plan.canonical_identity_hash().is_ok_and(|identity| {
-                identity == self.affine_image_inclusion.construction_plan_identity_hash
+                identity
+                    == self
+                        .affine_image_plan_accounting
+                        .construction_plan_identity_hash
             })
             && self.private_leaf_salt_prf.is_complete_for(
                 plan,
@@ -12470,11 +12410,10 @@ impl RowCodeWhirFailurePartitionCertificate {
                     affine_masking_composition: &self.affine_masking_composition,
                     persistent_material_masking: &persistent_material_masking,
                 })
-            && self
-                .sequential_simulator
-                .is_complete_for(ConstructionSequentialSimulatorInput {
+            && self.sequential_simulation_plan.is_consistent_for(
+                ConstructionSequentialSimulationPlanInput {
                     plan,
-                    affine_image_inclusion: &self.affine_image_inclusion,
+                    affine_image_plan_accounting: &self.affine_image_plan_accounting,
                     nonlinear_commitment_privacy: &self.nonlinear_commitment_privacy,
                     nonlinear_commitment_binding: &self.nonlinear_commitment_binding,
                     whole_database_support: &self.cms19_whole_database_support,
@@ -12482,7 +12421,8 @@ impl RowCodeWhirFailurePartitionCertificate {
                     aggregate_wide_masking: &self.aggregate_wide_masking,
                     production_aggregate: &self.production_aggregate_wide_views,
                     transported_proof_correspondence: &self.transported_proof_correspondence,
-                })
+                },
+            )
             && self.cms19_strong_round_by_round_semantics.is_complete_for(
                 plan,
                 &self.cms19_whole_state_transitions,
@@ -12950,44 +12890,43 @@ impl RowCodeWhirProductionGeometryCertificate {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SecretBearingConstructionViewSimulationCertificate {
+/// Joined accounting for the rejected row-code backend's masking and planned
+/// simulation inputs. This record is not a zero-knowledge certificate.
+struct SecretBearingConstructionViewAccounting {
     construction_plan_identity_hash: [u8; 64],
     relation_plan_variant_hash: [u8; 64],
     affine_masking_composition: ConstructionMaskingAffineCompositionCertificate,
-    affine_image_inclusion: ConstructionAffineImageInclusionCertificate,
+    affine_image_plan_accounting: ConstructionAffineImagePlanAccounting,
     nonlinear_commitment_privacy: NonlinearCommitmentPrivacyCertificate,
-    sequential_simulator: ConstructionSequentialSimulatorCertificate,
+    sequential_simulation_plan: ConstructionSequentialSimulationPlan,
     transported_proof_correspondence: ExactSameSecretTransportCorrespondenceCertificate,
-    persistent_material_masking_is_root_global: bool,
-    persistent_material_bad_event_is_owned_outside_family: bool,
-    claims_concrete_shake256_reduction: bool,
-    claims_malicious_verifier_zero_knowledge: bool,
-    claims_resettable_zero_knowledge: bool,
-    claims_family_simulation: bool,
-    claims_quantum_random_oracle_zero_knowledge: bool,
 }
 
-impl SecretBearingConstructionViewSimulationCertificate {
-    fn is_complete(&self) -> bool {
+impl SecretBearingConstructionViewAccounting {
+    fn is_consistent(&self) -> bool {
         self.construction_plan_identity_hash != [0_u8; 64]
             && self.relation_plan_variant_hash != [0_u8; 64]
             && self.affine_masking_composition.is_complete()
-            && self.affine_image_inclusion.is_complete()
+            && self.affine_image_plan_accounting.is_consistent()
             && self
                 .nonlinear_commitment_privacy
                 .has_complete_standalone_theorem()
-            && self.sequential_simulator.is_complete()
+            && self.sequential_simulation_plan.is_consistent()
             && self
                 .affine_masking_composition
                 .construction_plan_identity_hash
                 == self.construction_plan_identity_hash
-            && self.affine_image_inclusion.construction_plan_identity_hash
+            && self
+                .affine_image_plan_accounting
+                .construction_plan_identity_hash
                 == self.construction_plan_identity_hash
             && self
                 .nonlinear_commitment_privacy
                 .construction_plan_identity_hash
                 == self.construction_plan_identity_hash
-            && self.sequential_simulator.construction_plan_identity_hash
+            && self
+                .sequential_simulation_plan
+                .construction_plan_identity_hash
                 == self.construction_plan_identity_hash
             && self
                 .transported_proof_correspondence
@@ -12995,30 +12934,23 @@ impl SecretBearingConstructionViewSimulationCertificate {
                 == self.construction_plan_identity_hash
             && self.affine_masking_composition.relation_plan_variant_hash
                 == self.relation_plan_variant_hash
-            && self.affine_image_inclusion.relation_plan_variant_hash
+            && self.affine_image_plan_accounting.relation_plan_variant_hash
                 == self.relation_plan_variant_hash
             && self
                 .transported_proof_correspondence
                 .relation_plan_variant_hash
                 == self.relation_plan_variant_hash
-            && self.persistent_material_masking_is_root_global
-            && self.persistent_material_bad_event_is_owned_outside_family
-            && !self.claims_concrete_shake256_reduction
-            && !self.claims_malicious_verifier_zero_knowledge
-            && !self.claims_resettable_zero_knowledge
-            && !self.claims_family_simulation
-            && !self.claims_quantum_random_oracle_zero_knowledge
     }
 }
 
-fn derive_secret_bearing_construction_view_simulation_certificate(
+fn derive_secret_bearing_construction_view_accounting(
     plan: &RowCodeWhirConstructionPlan,
     artifact: &ValidatedRelationPlanArtifact,
     relation_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
     geometry: &RowCodeWhirProductionGeometryCertificate,
     persistent_material_masking: &ProductionPersistentCommittedMaterialMaskingCertificate,
-) -> Result<SecretBearingConstructionViewSimulationCertificate, WhirTheoremCertificateError> {
+) -> Result<SecretBearingConstructionViewAccounting, WhirTheoremCertificateError> {
     let construction_plan_identity_hash = plan
         .canonical_identity_hash()
         .map_err(|_| WhirTheoremCertificateError::IncompleteMaskingCorrespondence)?;
@@ -13044,7 +12976,8 @@ fn derive_secret_bearing_construction_view_simulation_certificate(
         row_pad_generator: &geometry.private_row_pad_generator_hybrid,
     };
     let affine_masking_composition = derive_construction_masking_affine_composition(affine_input)?;
-    let affine_image_inclusion = derive_construction_affine_image_inclusion(affine_input)?;
+    let affine_image_plan_accounting =
+        derive_construction_affine_image_plan_accounting(affine_input)?;
     let nonlinear_commitment_privacy =
         derive_nonlinear_commitment_privacy_certificate(NonlinearCommitmentPrivacyInput {
             plan,
@@ -13064,10 +12997,10 @@ fn derive_secret_bearing_construction_view_simulation_certificate(
         relation_context,
     )
     .map_err(|_| WhirTheoremCertificateError::IncompleteTransportedProofCorrespondence)?;
-    let sequential_simulator =
-        derive_construction_sequential_simulator(ConstructionSequentialSimulatorInput {
+    let sequential_simulation_plan = derive_construction_sequential_simulation_plan(
+        ConstructionSequentialSimulationPlanInput {
             plan,
-            affine_image_inclusion: &affine_image_inclusion,
+            affine_image_plan_accounting: &affine_image_plan_accounting,
             nonlinear_commitment_privacy: &nonlinear_commitment_privacy,
             nonlinear_commitment_binding: &geometry.nonlinear_commitment_binding,
             whole_database_support: &geometry.cms19_whole_database_support,
@@ -13075,27 +13008,21 @@ fn derive_secret_bearing_construction_view_simulation_certificate(
             aggregate_wide_masking: &geometry.aggregate_wide_masking,
             production_aggregate: &geometry.production_aggregate_wide_views,
             transported_proof_correspondence: &transported_proof_correspondence,
-        })?;
-    let certificate = SecretBearingConstructionViewSimulationCertificate {
+        },
+    )?;
+    let accounting = SecretBearingConstructionViewAccounting {
         construction_plan_identity_hash,
         relation_plan_variant_hash: geometry.relation_plan_variant_hash,
         affine_masking_composition,
-        affine_image_inclusion,
+        affine_image_plan_accounting,
         nonlinear_commitment_privacy,
-        sequential_simulator,
+        sequential_simulation_plan,
         transported_proof_correspondence,
-        persistent_material_masking_is_root_global: true,
-        persistent_material_bad_event_is_owned_outside_family: true,
-        claims_concrete_shake256_reduction: false,
-        claims_malicious_verifier_zero_knowledge: false,
-        claims_resettable_zero_knowledge: false,
-        claims_family_simulation: false,
-        claims_quantum_random_oracle_zero_knowledge: false,
     };
-    if !certificate.is_complete() {
+    if !accounting.is_consistent() {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
-    Ok(certificate)
+    Ok(accounting)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13257,19 +13184,19 @@ struct CheckedProductionGeometryCertificateInventory {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProductionConstructionSimulationStrategy {
-    SecretBearingClassicalIdealXof,
+enum ProductionConstructionViewAccountingStrategy {
+    SecretBearingClassicalIdealXofPlan,
     PublicTerminalTranscriptReplay,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ProductionConstructionSimulationRecord {
+struct ProductionConstructionViewAccountingRecord {
     application_statement_schema_identifier: u16,
     schedule_position: Option<u32>,
     top_count: Option<u16>,
     construction_plan_identity_hash: [u8; 64],
     complete_action_application_multiplicity: u32,
-    strategy: ProductionConstructionSimulationStrategy,
+    strategy: ProductionConstructionViewAccountingStrategy,
     attempt_local_affine_source_count: usize,
     attempt_private_root_count: usize,
     imported_persistent_root_count: usize,
@@ -13293,18 +13220,12 @@ struct ProductionConstructionSimulationRecord {
     private_leaf_salt_distinct_framed_input_count_per_proof: u64,
     private_leaf_salt_clean_derivation_call_count_per_proof: u64,
     maximum_candidate_draws_per_output: u32,
-    conditioned_affine_image_inclusion_is_complete: bool,
-    opened_leaf_sequential_simulator_is_complete: bool,
-    persistent_bad_event_is_owned_root_globally: bool,
-    canonical_transport_is_plan_bound: bool,
-    claims_family_simulation: bool,
-    claims_quantum_random_oracle_zero_knowledge: bool,
 }
 
-impl ProductionConstructionSimulationRecord {
-    fn is_complete(&self) -> bool {
-        let strategy_is_complete = match self.strategy {
-            ProductionConstructionSimulationStrategy::SecretBearingClassicalIdealXof => {
+impl ProductionConstructionViewAccountingRecord {
+    fn is_consistent(&self) -> bool {
+        let strategy_is_consistent = match self.strategy {
+            ProductionConstructionViewAccountingStrategy::SecretBearingClassicalIdealXofPlan => {
                 self.attempt_local_affine_source_count == 5
                     && self.attempt_private_root_count > 0
                     && self.complete_action_application_multiplicity > 0
@@ -13325,7 +13246,7 @@ impl ProductionConstructionSimulationRecord {
                     && self.private_leaf_salt_clean_derivation_call_count_per_proof
                         >= self.private_leaf_salt_distinct_framed_input_count_per_proof
             }
-            ProductionConstructionSimulationStrategy::PublicTerminalTranscriptReplay => {
+            ProductionConstructionViewAccountingStrategy::PublicTerminalTranscriptReplay => {
                 self.attempt_local_affine_source_count == 0
                     && self.attempt_private_root_count == 0
                     && self.imported_persistent_root_count == 0
@@ -13355,24 +13276,18 @@ impl ProductionConstructionSimulationRecord {
             && self.every_challenge_has_immediate_predecessor
             && self.maximum_candidate_draws_per_output
                 == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
-            && self.conditioned_affine_image_inclusion_is_complete
-            && self.opened_leaf_sequential_simulator_is_complete
-            && strategy_is_complete
-            && self.persistent_bad_event_is_owned_root_globally
-            && self.canonical_transport_is_plan_bound
-            && !self.claims_family_simulation
-            && !self.claims_quantum_random_oracle_zero_knowledge
+            && strategy_is_consistent
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct CheckedProductionConstructionSimulationInventory {
-    records: Vec<ProductionConstructionSimulationRecord>,
+struct CheckedProductionConstructionViewAccountingInventory {
+    records: Vec<ProductionConstructionViewAccountingRecord>,
     persistent_material_masking: ProductionPersistentCommittedMaterialMaskingCertificate,
 }
 
-impl CheckedProductionConstructionSimulationInventory {
-    fn is_complete(&self) -> bool {
+impl CheckedProductionConstructionViewAccountingInventory {
+    fn is_consistent(&self) -> bool {
         let mut coordinates = BTreeSet::new();
         let mut identities = BTreeSet::new();
         let Ok(expected_rows) = crate::bgv::proof_suite::selected_accounting::resource_accounting::
@@ -13386,7 +13301,7 @@ impl CheckedProductionConstructionSimulationInventory {
                 .persistent_material_masking
                 .is_complete_for_selected_profile()
             && self.records.iter().all(|record| {
-                record.is_complete()
+                record.is_consistent()
                     && expected_rows.iter().any(|expected| {
                         expected.application_statement_schema_identifier()
                             == record.application_statement_schema_identifier
@@ -13405,15 +13320,15 @@ impl CheckedProductionConstructionSimulationInventory {
     }
 }
 
-fn checked_selected_production_construction_simulation_inventory(
+fn checked_selected_production_construction_view_accounting_inventory(
     artifacts: &[ValidatedRelationPlanArtifact],
-) -> Result<CheckedProductionConstructionSimulationInventory, WhirTheoremCertificateError> {
-    checked_production_construction_simulation_inventory(artifacts)
+) -> Result<CheckedProductionConstructionViewAccountingInventory, WhirTheoremCertificateError> {
+    checked_production_construction_view_accounting_inventory(artifacts)
 }
 
-fn checked_production_construction_simulation_inventory(
+fn checked_production_construction_view_accounting_inventory(
     artifacts: &[ValidatedRelationPlanArtifact],
-) -> Result<CheckedProductionConstructionSimulationInventory, WhirTheoremCertificateError> {
+) -> Result<CheckedProductionConstructionViewAccountingInventory, WhirTheoremCertificateError> {
     let persistent_material_masking =
         derive_production_persistent_committed_material_masking_certificate()?;
     let mut masking_certificates = Vec::<(
@@ -13462,7 +13377,7 @@ fn checked_production_construction_simulation_inventory(
                 &masking_certificates[masking_certificate_index].1,
             )?;
             let chronology =
-                soundness_composition::checked_production_statement_challenge_chronology_summary(
+                statement_challenge_chronology::checked_production_statement_challenge_chronology_summary(
                     &plan, &geometry,
                 )?;
             if chronology.construction_plan_identity_hash
@@ -13473,57 +13388,55 @@ fn checked_production_construction_simulation_inventory(
             }
             let record = match plan.proof_privacy_mode {
                 ProofPrivacyMode::SecretBearing => {
-                    let certificate =
-                        derive_secret_bearing_construction_view_simulation_certificate(
-                            &plan,
-                            artifact,
-                            relation_variant,
-                            &relation_context,
-                            &geometry,
-                            &persistent_material_masking,
-                        )?;
-                    ProductionConstructionSimulationRecord {
+                    let accounting = derive_secret_bearing_construction_view_accounting(
+                        &plan,
+                        artifact,
+                        relation_variant,
+                        &relation_context,
+                        &geometry,
+                        &persistent_material_masking,
+                    )?;
+                    ProductionConstructionViewAccountingRecord {
                         application_statement_schema_identifier: plan
                             .application_statement_schema_identifier,
                         schedule_position: plan.schedule_position,
                         top_count: plan.top_count,
-                        construction_plan_identity_hash: certificate
+                        construction_plan_identity_hash: accounting
                             .construction_plan_identity_hash,
                         complete_action_application_multiplicity,
-                        strategy:
-                            ProductionConstructionSimulationStrategy::SecretBearingClassicalIdealXof,
-                        attempt_local_affine_source_count: certificate
+                        strategy: ProductionConstructionViewAccountingStrategy::SecretBearingClassicalIdealXofPlan,
+                        attempt_local_affine_source_count: accounting
                             .affine_masking_composition
                             .rows
                             .len(),
-                        attempt_private_root_count: certificate
+                        attempt_private_root_count: accounting
                             .nonlinear_commitment_privacy
                             .attempt_private_tree_count,
-                        imported_persistent_root_count: certificate
+                        imported_persistent_root_count: accounting
                             .nonlinear_commitment_privacy
                             .persistent_private_tree_count,
-                        public_root_count: certificate
+                        public_root_count: accounting
                             .nonlinear_commitment_privacy
                             .public_tree_count,
-                        persistent_material_endpoint_count_for_complete_action: certificate
+                        persistent_material_endpoint_count_for_complete_action: accounting
                             .nonlinear_commitment_privacy
                             .persistent_material_endpoint_count_for_family,
-                        transported_family_body_byte_length_ceiling: certificate
+                        transported_family_body_byte_length_ceiling: accounting
                             .transported_proof_correspondence
                             .family_body_byte_length_ceiling,
-                        local_commitment_fresh_input_bad_event: certificate
+                        local_commitment_fresh_input_bad_event: accounting
                             .nonlinear_commitment_privacy
                             .streaming_state_fresh_input_bad_event
                             .add(
-                                &certificate
+                                &accounting
                                     .nonlinear_commitment_privacy
                                     .salted_or_marked_fresh_input_bad_event,
                             )?,
-                        local_leaf_salt_collision_bad_event: certificate
+                        local_leaf_salt_collision_bad_event: accounting
                             .nonlinear_commitment_privacy
                             .leaf_salt_collision_bad_event
                             .clone(),
-                        local_classical_ideal_xof_bad_event: certificate
+                        local_classical_ideal_xof_bad_event: accounting
                             .nonlinear_commitment_privacy
                             .selected_numeric_bad_event,
                         logical_challenge_count: chronology.logical_challenge_count,
@@ -13535,7 +13448,7 @@ fn checked_production_construction_simulation_inventory(
                             .canonical_statement_and_header_are_absorbed_first,
                         every_challenge_has_immediate_predecessor: chronology
                             .every_challenge_has_immediate_predecessor,
-                        common_private_coin_modulo_output_count_per_proof: certificate
+                        common_private_coin_modulo_output_count_per_proof: accounting
                             .affine_masking_composition
                             .private_coin_generator_hybrid
                             .total_modulo_output_count,
@@ -13564,20 +13477,6 @@ fn checked_production_construction_simulation_inventory(
                         maximum_candidate_draws_per_output: plan
                             .parameters
                             .maximum_fiat_shamir_candidate_draws_per_output,
-                        conditioned_affine_image_inclusion_is_complete: certificate
-                            .affine_image_inclusion
-                            .is_complete(),
-                        opened_leaf_sequential_simulator_is_complete: certificate
-                            .sequential_simulator
-                            .is_complete(),
-                        persistent_bad_event_is_owned_root_globally: certificate
-                            .persistent_material_bad_event_is_owned_outside_family,
-                        canonical_transport_is_plan_bound: certificate
-                            .transported_proof_correspondence
-                            .is_bound_to_construction_plan(&plan),
-                        claims_family_simulation: certificate.claims_family_simulation,
-                        claims_quantum_random_oracle_zero_knowledge: certificate
-                            .claims_quantum_random_oracle_zero_knowledge,
                     }
                 }
                 ProofPrivacyMode::PublicOnly => {
@@ -13589,7 +13488,7 @@ fn checked_production_construction_simulation_inventory(
                             &relation_context,
                             &geometry,
                         )?;
-                    ProductionConstructionSimulationRecord {
+                    ProductionConstructionViewAccountingRecord {
                         application_statement_schema_identifier: plan
                             .application_statement_schema_identifier,
                         schedule_position: plan.schedule_position,
@@ -13597,8 +13496,7 @@ fn checked_production_construction_simulation_inventory(
                         construction_plan_identity_hash: certificate
                             .construction_plan_identity_hash,
                         complete_action_application_multiplicity,
-                        strategy:
-                            ProductionConstructionSimulationStrategy::PublicTerminalTranscriptReplay,
+                        strategy: ProductionConstructionViewAccountingStrategy::PublicTerminalTranscriptReplay,
                         attempt_local_affine_source_count: 0,
                         attempt_private_root_count: 0,
                         imported_persistent_root_count: 0,
@@ -13633,28 +13531,20 @@ fn checked_production_construction_simulation_inventory(
                         maximum_candidate_draws_per_output: plan
                             .parameters
                             .maximum_fiat_shamir_candidate_draws_per_output,
-                        conditioned_affine_image_inclusion_is_complete: true,
-                        opened_leaf_sequential_simulator_is_complete: true,
-                        persistent_bad_event_is_owned_root_globally: true,
-                        canonical_transport_is_plan_bound: certificate
-                            .transported_proof_correspondence
-                            .is_bound_to_construction_plan(&plan),
-                        claims_family_simulation: false,
-                        claims_quantum_random_oracle_zero_knowledge: false,
                     }
                 }
             };
-            if !record.is_complete() {
+            if !record.is_consistent() {
                 return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
             }
             records.push(record);
         }
     }
-    let inventory = CheckedProductionConstructionSimulationInventory {
+    let inventory = CheckedProductionConstructionViewAccountingInventory {
         records,
         persistent_material_masking,
     };
-    if !inventory.is_complete() {
+    if !inventory.is_consistent() {
         return Err(WhirTheoremCertificateError::IncompleteMaskingCorrespondence);
     }
     Ok(inventory)
@@ -14862,7 +14752,8 @@ fn checked_row_code_whir_failure_partition_for_validated_relation(
     };
     let affine_masking_composition =
         derive_construction_masking_affine_composition(affine_masking_input)?;
-    let affine_image_inclusion = derive_construction_affine_image_inclusion(affine_masking_input)?;
+    let affine_image_plan_accounting =
+        derive_construction_affine_image_plan_accounting(affine_masking_input)?;
     let private_leaf_salt_prf = PrivateLeafSaltPrfCertificate::derive(
         plan,
         &aggregate_wide_masking,
@@ -15202,10 +15093,10 @@ fn checked_row_code_whir_failure_partition_for_validated_relation(
             affine_masking_composition: &affine_masking_composition,
             persistent_material_masking: &persistent_material_masking,
         })?;
-    let sequential_simulator =
-        derive_construction_sequential_simulator(ConstructionSequentialSimulatorInput {
+    let sequential_simulation_plan = derive_construction_sequential_simulation_plan(
+        ConstructionSequentialSimulationPlanInput {
             plan,
-            affine_image_inclusion: &affine_image_inclusion,
+            affine_image_plan_accounting: &affine_image_plan_accounting,
             nonlinear_commitment_privacy: &nonlinear_commitment_privacy,
             nonlinear_commitment_binding: &nonlinear_commitment_binding,
             whole_database_support: &cms19_whole_database_support,
@@ -15213,7 +15104,8 @@ fn checked_row_code_whir_failure_partition_for_validated_relation(
             aggregate_wide_masking: &aggregate_wide_masking,
             production_aggregate: &production_aggregate_wide_views,
             transported_proof_correspondence: &transported_proof_correspondence,
-        })?;
+        },
+    )?;
     let cms19_strong_state_hash_chain = derive_cms19_strong_state_hash_chain_certificate(
         plan,
         &catalog,
@@ -15353,8 +15245,8 @@ fn checked_row_code_whir_failure_partition_for_validated_relation(
         production_aggregate_wide_views,
         private_row_pad_generator_hybrid,
         affine_masking_composition,
-        affine_image_inclusion,
-        sequential_simulator,
+        affine_image_plan_accounting,
+        sequential_simulation_plan,
         private_leaf_salt_prf,
         relation_compiler_interpreter_semantics,
         polynomial_protocol_extractor,
@@ -22966,17 +22858,17 @@ fn production_aggregate_wide_views_bind_every_affine_and_nonlinear_catalog() {
             (9, 7, 2),
             (3_483, 3_483, 0),
             (2_592, 2_592, 0),
-            (2_412, 2_412, 0),
+            (2_421, 2_421, 0),
             (2_376, 2_376, 0),
             (2_367, 2_367, 0),
             (2_104, 2_104, 0),
             (393, 393, 0),
             (327, 327, 0),
-            (1_917, 1_917, 0),
+            (1_918, 1_918, 0),
         ]
     );
-    assert_eq!(certificate.transcript_affine_coordinate_count, 3_756);
-    assert_eq!(certificate.primary_opened_affine_coordinate_count, 14_257);
+    assert_eq!(certificate.transcript_affine_coordinate_count, 3_758);
+    assert_eq!(certificate.primary_opened_affine_coordinate_count, 14_265);
     assert_eq!(certificate.derived_opened_affine_coordinate_count, 656);
     assert_eq!(
         certificate.delegated_opening_evaluation_coordinate_count,
@@ -23005,13 +22897,13 @@ fn production_aggregate_wide_views_bind_every_affine_and_nonlinear_catalog() {
         [
             (2_097_152, 387, 8_388_608, 8, 387, 2_097_152, 6_291_069, 23),
             (262_144, 288, 4_194_304, 8, 288, 262_144, 3_931_872, 22),
-            (32_768, 268, 2_097_152, 8, 268, 32_768, 2_064_116, 21),
+            (32_768, 269, 2_097_152, 8, 269, 32_768, 2_064_115, 21),
             (4_096, 264, 1_048_576, 8, 264, 4_096, 1_044_216, 20),
             (512, 263, 524_288, 8, 263, 512, 523_513, 19),
             (64, 263, 262_144, 8, 263, 64, 261_817, 18),
-            (1_524, 393, 8_192, 1, 393, 1_524, 6_275, 13),
+            (1_525, 393, 8_192, 1, 393, 1_525, 6_274, 13),
             (64, 263, 262_144, 1, 263, 64, 261_817, 18),
-            (1_524, 393, 8_192, 1, 393, 1_524, 6_275, 13),
+            (1_525, 393, 8_192, 1, 393, 1_525, 6_274, 13),
         ],
     );
     assert_eq!(
@@ -23029,7 +22921,7 @@ fn production_aggregate_wide_views_bind_every_affine_and_nonlinear_catalog() {
         [
             (0, 8, 387, 387, 3),
             (1, 8, 288, 288, 3),
-            (2, 8, 268, 268, 3),
+            (2, 8, 269, 269, 3),
             (3, 8, 264, 264, 3),
             (4, 8, 263, 263, 3),
             (5, 8, 263, 263, 3),
@@ -23337,7 +23229,7 @@ fn production_private_leaf_salt_prf_binds_every_clean_and_replayed_derivation() 
     assert_eq!(certificate.clean_prover_derivation_call_count, 133_974_178);
     assert_eq!(certificate.repeated_or_cached_call_count, 66_848_930);
     assert_eq!(certificate.verifier_derivation_call_count, 0);
-    assert_eq!(certificate.transported_salt_count, 3_943);
+    assert_eq!(certificate.transported_salt_count, 3_944);
     assert_eq!(certificate.family_application_multiplicity, 10);
     assert_eq!(
         certificate
@@ -23392,7 +23284,7 @@ fn production_private_leaf_salt_prf_binds_every_clean_and_replayed_derivation() 
                 2_097_152,
                 8,
                 4,
-                268,
+                269,
             ),
             (
                 PrivateLeafSaltCommitmentRole::FoldedSource { epoch_ordinal: 3 },
@@ -24127,7 +24019,7 @@ fn public_key_share_schema_0x1212_derives_from_its_production_geometry() {
     let persistent_material_masking =
         derive_production_persistent_committed_material_masking_certificate()
             .expect("the root-global persistent masking certificate derives");
-    let construction_simulation = derive_secret_bearing_construction_view_simulation_certificate(
+    let construction_view_accounting = derive_secret_bearing_construction_view_accounting(
         &plan,
         &artifact,
         relation_variant,
@@ -24135,10 +24027,10 @@ fn public_key_share_schema_0x1212_derives_from_its_production_geometry() {
         &certificate,
         &persistent_material_masking,
     )
-    .expect("schema 0x1212 complete construction simulation derives");
-    assert!(construction_simulation.is_complete());
+    .expect("schema 0x1212 construction-view accounting derives");
+    assert!(construction_view_accounting.is_consistent());
     assert_eq!(
-        construction_simulation
+        construction_view_accounting
             .affine_masking_composition
             .rows
             .iter()
@@ -24153,25 +24045,25 @@ fn public_key_share_schema_0x1212_derives_from_its_production_geometry() {
         ],
     );
     assert_eq!(
-        construction_simulation
+        construction_view_accounting
             .nonlinear_commitment_privacy
             .persistent_material_endpoint_count_for_family,
-        construction_simulation
+        construction_view_accounting
             .nonlinear_commitment_privacy
             .persistent_private_tree_count
             * usize::try_from(
-                construction_simulation
+                construction_view_accounting
                     .nonlinear_commitment_privacy
                     .family_application_multiplicity,
             )
             .expect("the family multiplicity fits usize"),
     );
     assert!(
-        construction_simulation
-            .sequential_simulator
+        construction_view_accounting
+            .sequential_simulation_plan
             .conditioned_affine_source_classes
-            == construction_simulation
-                .affine_image_inclusion
+            == construction_view_accounting
+                .affine_image_plan_accounting
                 .rows
                 .iter()
                 .map(|row| row.source_class)
@@ -24181,14 +24073,14 @@ fn public_key_share_schema_0x1212_derives_from_its_production_geometry() {
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
-fn all_exact_ten_production_identities_have_construction_view_simulation_certificates() {
+fn all_exact_ten_production_identities_have_construction_view_accounting() {
     let _certificate_test_guard = PRODUCTION_GEOMETRY_CERTIFICATE_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let artifacts = selected_relation_plans().expect("selected relation plans derive");
-    let inventory = checked_selected_production_construction_simulation_inventory(&artifacts)
-        .expect("all exact-ten construction simulation certificates derive");
-    assert!(inventory.is_complete());
+    let inventory = checked_selected_production_construction_view_accounting_inventory(&artifacts)
+        .expect("all exact-ten construction-view accounting derives");
+    assert!(inventory.is_consistent());
     assert_eq!(inventory.records.len(), 21);
     assert_eq!(
         inventory
@@ -24212,7 +24104,7 @@ fn all_exact_ten_production_identities_have_construction_view_simulation_certifi
             .iter()
             .filter(|record| {
                 record.strategy
-                    == ProductionConstructionSimulationStrategy::SecretBearingClassicalIdealXof
+                    == ProductionConstructionViewAccountingStrategy::SecretBearingClassicalIdealXofPlan
             })
             .count(),
         9,
@@ -24223,7 +24115,7 @@ fn all_exact_ten_production_identities_have_construction_view_simulation_certifi
             .iter()
             .filter(|record| {
                 record.strategy
-                    == ProductionConstructionSimulationStrategy::PublicTerminalTranscriptReplay
+                    == ProductionConstructionViewAccountingStrategy::PublicTerminalTranscriptReplay
             })
             .count(),
         12,
@@ -24239,16 +24131,12 @@ fn all_exact_ten_production_identities_have_construction_view_simulation_certifi
 
     let mut omitted_identity = inventory.clone();
     omitted_identity.records.pop();
-    assert!(!omitted_identity.is_complete());
+    assert!(!omitted_identity.is_consistent());
 
     let mut duplicated_identity = inventory.clone();
     duplicated_identity.records[1].construction_plan_identity_hash =
         duplicated_identity.records[0].construction_plan_identity_hash;
-    assert!(!duplicated_identity.is_complete());
-
-    let mut family_simulation_overclaim = inventory;
-    family_simulation_overclaim.records[0].claims_family_simulation = true;
-    assert!(!family_simulation_overclaim.is_complete());
+    assert!(!duplicated_identity.is_consistent());
 }
 
 #[test]
@@ -24298,12 +24186,12 @@ fn width_64_same_secret_through_rkg_round_one_aggregate_have_complete_geometry_c
                 == ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
         })
         .expect("the same-secret geometry certificate exists");
-    assert_eq!(same_secret.maximum_transcript_hash_query_count, 604_801);
+    assert_eq!(same_secret.maximum_transcript_hash_query_count, 604_817);
     assert_eq!(same_secret.logical_verifier_message_count, 4_272);
-    assert_eq!(same_secret.deployed_verifier_hash_query_count, 695_547,);
+    assert_eq!(same_secret.deployed_verifier_hash_query_count, 695_585,);
     assert_eq!(
         same_secret.deployed_accepting_database_equation_count,
-        695_547,
+        695_585,
     );
 }
 
@@ -25060,8 +24948,8 @@ fn deployed_streaming_leaf_chain_uses_uniform_512_bit_oracle_outputs() {
         [226, 194, 154],
     );
     assert_eq!(semantic.rows.len(), 69);
-    assert_eq!(semantic.hash_query_count, 20_477);
-    assert_eq!(semantic.accepting_database_equation_count_ceiling, 20_477);
+    assert_eq!(semantic.hash_query_count, 20_487);
+    assert_eq!(semantic.accepting_database_equation_count_ceiling, 20_487);
     assert_eq!(semantic.maximum_predecessor_support_count, 1);
 
     let mut missing_transition = deployed.clone();
@@ -25259,7 +25147,7 @@ fn transcript_sampler_catalogs_every_fixed_512_bit_oracle_answer() {
     .expect("the primary and sampler-table oracle projection derives");
     assert_eq!(
         separated_oracle_projection.concrete_transcript_hash_query_count,
-        604_801,
+        604_817,
     );
     assert_eq!(
         separated_oracle_projection.primary_transcript_hash_query_count,
@@ -25275,27 +25163,27 @@ fn transcript_sampler_catalogs_every_fixed_512_bit_oracle_answer() {
     );
     assert_eq!(
         separated_oracle_projection.auxiliary_sampler_table_hash_query_count,
-        590_128,
+        590_144,
     );
     assert_eq!(
         separated_oracle_projection.concrete_verifier_hash_query_count,
-        695_547,
+        695_585,
     );
     assert_eq!(
         separated_oracle_projection.primary_verifier_hash_query_count,
-        105_419,
+        105_441,
     );
     assert_eq!(
         separated_oracle_projection.concrete_accepting_database_equation_count,
-        695_547,
+        695_585,
     );
     assert_eq!(
         separated_oracle_projection.primary_accepting_database_equation_count,
-        105_419,
+        105_441,
     );
     assert_eq!(
         separated_oracle_projection.auxiliary_accepting_database_equation_count,
-        590_128,
+        590_144,
     );
     assert_eq!(separated_oracle_projection.auxiliary_database_role_count, 1);
     assert!(
@@ -25307,15 +25195,15 @@ fn transcript_sampler_catalogs_every_fixed_512_bit_oracle_answer() {
     assert!(!separated_oracle_projection.claims_relativized_cms19_reduction);
     let concrete_partition = &separated_oracle_projection.concrete_shake256_partition;
     assert!(concrete_partition.is_complete_for(&whole_database_support, &nonlinear_binding));
-    assert_eq!(concrete_partition.primary_hash_query_count, 105_419);
-    assert_eq!(concrete_partition.auxiliary_hash_query_count, 590_128);
+    assert_eq!(concrete_partition.primary_hash_query_count, 105_441);
+    assert_eq!(concrete_partition.auxiliary_hash_query_count, 590_144);
     assert_eq!(
         concrete_partition.primary_accepting_database_equation_count,
-        105_419,
+        105_441,
     );
     assert_eq!(
         concrete_partition.auxiliary_accepting_database_equation_count,
-        590_128,
+        590_144,
     );
     assert_eq!(
         concrete_partition.auxiliary_argument_item_types,
@@ -25443,11 +25331,11 @@ fn transcript_sampler_catalogs_every_fixed_512_bit_oracle_answer() {
     .expect("the conditional primary-oracle CMS19 arithmetic derives");
     assert_eq!(
         conditional_cms19_arithmetic.verifier_hash_query_count,
-        105_419
+        105_441
     );
     assert_eq!(
         conditional_cms19_arithmetic.accepting_database_equation_count,
-        105_419,
+        105_441,
     );
     assert_eq!(
         conditional_cms19_arithmetic.separated_oracle_projection,
@@ -26086,14 +25974,14 @@ fn exact_transported_proof_catalog_binds_every_production_section() {
     ));
     assert_eq!(certificate.section_rows.len(), 22);
     assert_eq!(certificate.section_rows.len(), plan.proof_sections().len());
-    assert_eq!(certificate.family_body_byte_length_ceiling, 5_813_652);
+    assert_eq!(certificate.family_body_byte_length_ceiling, 5_814_884);
     assert_eq!(
         certificate
             .aggregate_opening_section_ledger
             .iter()
             .map(|(_, byte_length)| *byte_length)
             .sum::<usize>(),
-        2_942_104,
+        2_943_336,
     );
 
     let mut omitted_section = certificate.clone();
@@ -26446,7 +26334,7 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
     assert!(strong_semantics.state_evaluator.is_complete());
     assert!(strong_semantics.accepting_database_extractor.is_complete());
     assert!(strong_semantics.is_complete());
-    assert!(certificate.has_complete_construction_theorem_for(&plan));
+    assert!(certificate.has_complete_rejected_backend_accounting_for(&plan));
 
     let atomic_operation_ordinals = strong_semantics
         .state_evaluator
@@ -26572,7 +26460,7 @@ fn cms19_whole_state_and_database_support_are_exact_and_mutation_sensitive() {
         .cms19_strong_round_by_round_semantics
         .accepting_database_extractor
         .construction_plan_identity_hash[0] ^= 1;
-    assert!(!altered_construction_identity.has_complete_construction_theorem_for(&plan));
+    assert!(!altered_construction_identity.has_complete_rejected_backend_accounting_for(&plan));
 
     let unknown_assignment = BTreeMap::from([(
         u32::try_from(
@@ -27707,17 +27595,17 @@ fn selected_nonlinear_commitment_binding_covers_every_root_and_shared_query() {
 
     assert!(is_complete(binding));
     assert!(binding.is_bound_to_plan(&plan));
-    assert!(certificate.has_complete_construction_theorem_for(&plan));
+    assert!(certificate.has_complete_rejected_backend_accounting_for(&plan));
     assert_eq!(binding.rows.len(), 23);
     assert_eq!(binding.transcript_supplied_root_count, 12);
     assert_eq!(binding.verifier_owned_root_count, 11);
     assert_eq!(binding.distinct_shared_query_vector_count, 9);
-    assert_eq!(binding.semantic_opened_leaf_count, 5_061);
-    assert_eq!(binding.underlying_leaf_hash_query_count, 22_756);
-    assert_eq!(binding.parent_hash_query_count, 67_986);
-    assert_eq!(binding.complete_merkle_hash_query_count, 90_742);
-    assert_eq!(binding.whole_database_hash_query_count, 695_547);
-    assert_eq!(binding.whole_database_accepting_equation_count, 695_547);
+    assert_eq!(binding.semantic_opened_leaf_count, 5_062);
+    assert_eq!(binding.underlying_leaf_hash_query_count, 22_766);
+    assert_eq!(binding.parent_hash_query_count, 67_998);
+    assert_eq!(binding.complete_merkle_hash_query_count, 90_764);
+    assert_eq!(binding.whole_database_hash_query_count, 695_585);
+    assert_eq!(binding.whole_database_accepting_equation_count, 695_585);
     assert_eq!(
         binding
             .rows
@@ -27918,7 +27806,7 @@ fn selected_nonlinear_commitment_binding_covers_every_root_and_shared_query() {
             .nonlinear_commitment_binding
             .is_bound_to_plan(&plan)
     );
-    assert!(!changed_statement_root.has_complete_construction_theorem_for(&plan));
+    assert!(!changed_statement_root.has_complete_rejected_backend_accounting_for(&plan));
 
     let mut mismatched_bound_construction = binding.clone();
     let bound_row = mismatched_bound_construction
@@ -27980,14 +27868,14 @@ fn selected_nonlinear_commitment_privacy_counts_every_deployed_hash_call() {
     };
 
     assert!(is_complete(privacy));
-    assert!(theorem.has_complete_construction_theorem_for(&plan));
+    assert!(theorem.has_complete_rejected_backend_accounting_for(&plan));
     assert_eq!(privacy.rows.len(), 23);
     assert_eq!(privacy.attempt_private_tree_count, 12);
     assert_eq!(privacy.persistent_private_tree_count, 8);
     assert_eq!(privacy.public_tree_count, 3);
     assert_eq!(privacy.private_leaf_count_per_proof, 134_234_112);
     assert_eq!(privacy.attempt_private_leaf_count_per_proof, 67_125_248);
-    assert_eq!(privacy.opened_private_leaf_count_per_proof, 4_263);
+    assert_eq!(privacy.opened_private_leaf_count_per_proof, 4_264);
     assert_eq!(
         privacy.salted_start_or_single_call_count_per_proof,
         67_125_248
@@ -28070,8 +27958,6 @@ fn selected_nonlinear_commitment_privacy_counts_every_deployed_hash_call() {
     assert!(privacy.persistent_material_masking_is_bound_root_globally);
     assert!(privacy.persistent_material_bad_event_is_charged_once_outside_family);
     assert!(privacy.affine_component_catalog_is_bound);
-    assert!(!privacy.affine_image_inclusion_is_proved);
-    assert!(!privacy.opened_leaf_sequential_simulator_is_proved);
     assert!(!privacy.concrete_shake256_reduction_is_available);
     assert!(!privacy.claims_fiat_shamir_zero_knowledge);
     assert!(!privacy.claims_malicious_verifier_zero_knowledge);
@@ -28126,14 +28012,6 @@ fn selected_nonlinear_commitment_privacy_counts_every_deployed_hash_call() {
     let mut substituted_bcs16_route = privacy.clone();
     substituted_bcs16_route.bcs16_direct_leaf_hypothesis_matches_deployed_chain = true;
     assert!(!substituted_bcs16_route.has_complete_standalone_theorem());
-
-    let mut affine_image_overclaim = privacy.clone();
-    affine_image_overclaim.affine_image_inclusion_is_proved = true;
-    assert!(!affine_image_overclaim.has_complete_standalone_theorem());
-
-    let mut sequential_simulator_overclaim = privacy.clone();
-    sequential_simulator_overclaim.opened_leaf_sequential_simulator_is_proved = true;
-    assert!(!sequential_simulator_overclaim.has_complete_standalone_theorem());
 
     let mut concrete_reduction_overclaim = privacy.clone();
     concrete_reduction_overclaim.concrete_shake256_reduction_is_available = true;
@@ -28229,7 +28107,7 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
         certificate.rows[3].private_base_coordinate_count,
         130_023_424
     );
-    assert_eq!(certificate.rows[4].joint_view_rank, 90_065);
+    assert_eq!(certificate.rows[4].joint_view_rank, 90_115);
     assert!(
         !certificate
             .private_coin_generator_hybrid
@@ -28259,10 +28137,6 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
         .masks_are_publicly_recomputable = true;
     assert!(!public_attempt_masks.is_complete());
 
-    let mut affine_image_overclaim = certificate.clone();
-    affine_image_overclaim.claims_affine_image_inclusion = true;
-    assert!(!affine_image_overclaim.is_complete());
-
     let mut challenge_dependent_aggregate = production_aggregate.clone();
     challenge_dependent_aggregate.chronology.swap(2, 3);
     assert!(
@@ -28290,7 +28164,7 @@ fn selected_same_secret_affine_masking_composition_is_exact_and_hostile_mutation
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
-fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_factorizations() {
+fn selected_same_secret_affine_image_plan_accounts_for_conditioned_production_shapes() {
     let relation_context = selected_relation_plan_check_context(
         ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
     )
@@ -28337,17 +28211,13 @@ fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_facto
     };
     let accounting = derive_construction_masking_affine_composition(derivation_input)
         .expect("the selected affine accounting derives");
-    let certificate = derive_construction_affine_image_inclusion(derivation_input)
-        .expect("the selected conditioned affine image theorem derives");
+    let image_plan = derive_construction_affine_image_plan_accounting(derivation_input)
+        .expect("the selected conditioned affine image plan derives");
 
-    assert!(certificate.is_complete_for(derivation_input));
-    assert_eq!(certificate.rows.len(), 6);
+    assert!(image_plan.is_consistent_for(derivation_input));
+    assert_eq!(image_plan.rows.len(), 5);
     assert_eq!(
-        certificate.total_mask_image_rank_or_generic_rank,
-        certificate.total_joined_image_rank_or_generic_rank
-    );
-    assert_eq!(
-        certificate.total_private_base_coordinate_count,
+        image_plan.total_private_base_coordinate_count,
         accounting
             .rows
             .iter()
@@ -28355,7 +28225,7 @@ fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_facto
             .sum::<u64>()
     );
     assert_eq!(
-        certificate.total_conditioned_view_base_coordinate_count,
+        image_plan.total_conditioned_view_base_coordinate_count,
         accounting
             .rows
             .iter()
@@ -28363,7 +28233,7 @@ fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_facto
             .sum::<u64>()
     );
     assert_eq!(
-        certificate.total_derived_alias_base_coordinate_count,
+        image_plan.total_derived_alias_base_coordinate_count,
         accounting
             .rows
             .iter()
@@ -28371,8 +28241,8 @@ fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_facto
             .sum::<u64>()
     );
     assert!(matches!(
-        certificate.rows[1].factorization,
-        ConstructionAffineImageFactorization::ConditionedTelescopingKernel {
+        image_plan.rows[1].plan,
+        ConstructionAffineImagePlan::ConditionedTelescopingKernel {
             quotient_component_count: 8,
             telescoping_source_count: 7,
             opening_point_count: 1,
@@ -28382,8 +28252,8 @@ fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_facto
         }
     ));
     assert!(matches!(
-        certificate.rows[3].factorization,
-        ConstructionAffineImageFactorization::PhaseRowPadVandermonde {
+        image_plan.rows[3].plan,
+        ConstructionAffineImagePlan::PhaseRowPadVandermonde {
             physical_row_count: 62,
             source_dimension_per_row: 2_097_152,
             conditioned_view_rank_per_row: 3_483,
@@ -28391,55 +28261,43 @@ fn selected_same_secret_affine_image_inclusion_uses_conditioned_production_facto
         }
     ));
     assert!(matches!(
-        certificate.rows[4].factorization,
-        ConstructionAffineImageFactorization::AggregateBlockDiagonal {
+        image_plan.rows[4].plan,
+        ConstructionAffineImagePlan::AggregateBlockDiagonal {
             challenge_extension_degree: 5,
             affine_block_count: 15,
             block_kind_counts: [6, 5, 1, 1, 1, 1],
-            private_extension_coordinate_count: 18_025,
-            conditioned_image_rank_extension: 18_013,
+            private_extension_coordinate_count: 18_035,
+            conditioned_image_rank_extension: 18_023,
             derived_alias_extension_coordinate_count: 2_444,
         }
     ));
 
-    let mut changed_joined_rank = certificate.clone();
-    changed_joined_rank.rows[0].joined_mask_and_witness_image_rank_or_generic_rank -= 1;
-    assert!(!changed_joined_rank.is_complete());
-
-    let mut changed_trace_factorization = certificate.clone();
-    let ConstructionAffineImageFactorization::VanishingScaledTraceEvaluation {
+    let mut changed_trace_plan = image_plan.clone();
+    let ConstructionAffineImagePlan::VanishingScaledTraceEvaluation {
         minimum_source_coordinate_surplus,
         ..
-    } = &mut changed_trace_factorization.rows[0].factorization
+    } = &mut changed_trace_plan.rows[0].plan
     else {
-        panic!("the trace factorization row is present");
+        panic!("the trace plan row is present");
     };
     *minimum_source_coordinate_surplus += 1;
-    assert!(!changed_trace_factorization.is_complete_for(derivation_input));
+    assert!(!changed_trace_plan.is_consistent_for(derivation_input));
 
-    let mut changed_conditioning_order = certificate.clone();
+    let mut changed_conditioning_order = image_plan;
     changed_conditioning_order.conditioning_order.swap(1, 2);
-    assert!(!changed_conditioning_order.is_complete());
-
-    let mut unconditioned_overclaim = certificate.clone();
-    unconditioned_overclaim.claims_unconditioned_independence = true;
-    assert!(!unconditioned_overclaim.is_complete());
-
-    let mut nonlinear_overclaim = certificate;
-    nonlinear_overclaim.claims_nonlinear_simulation = true;
-    assert!(!nonlinear_overclaim.is_complete());
+    assert!(!changed_conditioning_order.is_consistent());
 }
 
 #[test]
 #[ignore = "owned by test:rust:kernel:theorem-evidence"]
-fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear_views() {
+fn selected_same_secret_simulation_plan_accounts_for_shared_queries_and_nonlinear_views() {
     let plan = selected_same_secret_construction_plan();
     let theorem = checked_row_code_whir_failure_partition(&plan)
         .expect("the selected theorem certificate derives");
-    let simulator = &theorem.sequential_simulator;
-    let simulator_input = ConstructionSequentialSimulatorInput {
+    let simulation_plan = &theorem.sequential_simulation_plan;
+    let simulation_plan_input = ConstructionSequentialSimulationPlanInput {
         plan: &plan,
-        affine_image_inclusion: &theorem.affine_image_inclusion,
+        affine_image_plan_accounting: &theorem.affine_image_plan_accounting,
         nonlinear_commitment_privacy: &theorem.nonlinear_commitment_privacy,
         nonlinear_commitment_binding: &theorem.nonlinear_commitment_binding,
         whole_database_support: &theorem.cms19_whole_database_support,
@@ -28448,21 +28306,21 @@ fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear
         production_aggregate: &theorem.production_aggregate_wide_views,
         transported_proof_correspondence: &theorem.transported_proof_correspondence,
     };
-    let is_complete = |candidate: &ConstructionSequentialSimulatorCertificate| {
-        candidate.is_complete_for(simulator_input)
+    let is_consistent = |candidate: &ConstructionSequentialSimulationPlan| {
+        candidate.is_consistent_for(simulation_plan_input)
     };
 
-    assert!(is_complete(simulator));
-    assert!(theorem.has_complete_construction_theorem_for(&plan));
-    assert_eq!(simulator.commitment_rows.len(), 23);
-    assert_eq!(simulator.query_groups.len(), 9);
-    assert_eq!(simulator.derived_views.len(), 11);
-    assert_eq!(simulator.conditioned_affine_source_classes.len(), 6);
-    assert_eq!(simulator.transported_section_rows.len(), 22);
-    assert_eq!(simulator.aggregate_terminal_section_rows.len(), 15);
-    assert_eq!(simulator.aggregate_terminal_byte_length, 2_942_104);
+    assert!(is_consistent(simulation_plan));
+    assert!(theorem.has_complete_rejected_backend_accounting_for(&plan));
+    assert_eq!(simulation_plan.commitment_rows.len(), 23);
+    assert_eq!(simulation_plan.query_groups.len(), 9);
+    assert_eq!(simulation_plan.derived_views.len(), 11);
+    assert_eq!(simulation_plan.conditioned_affine_source_classes.len(), 5);
+    assert_eq!(simulation_plan.transported_section_rows.len(), 22);
+    assert_eq!(simulation_plan.aggregate_terminal_section_rows.len(), 15);
+    assert_eq!(simulation_plan.aggregate_terminal_byte_length, 2_943_336);
     assert_eq!(
-        simulator
+        simulation_plan
             .aggregate_terminal_section_rows
             .iter()
             .filter(|row| {
@@ -28473,34 +28331,34 @@ fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear
         2
     );
     assert_eq!(
-        simulator.transported_family_body_byte_length_ceiling,
-        5_813_652
+        simulation_plan.transported_family_body_byte_length_ceiling,
+        5_814_884
     );
-    assert_eq!(simulator.attempt_private_root_count, 12);
-    assert_eq!(simulator.imported_persistent_root_count, 8);
-    assert_eq!(simulator.public_root_count, 3);
-    assert_eq!(simulator.programmed_private_frontier_count, 20);
-    assert_eq!(simulator.verified_public_frontier_count, 3);
-    assert_eq!(simulator.opened_private_leaf_count, 4_263);
-    assert_eq!(simulator.opened_public_leaf_count, 798);
-    assert_eq!(simulator.aggregate_commitment_root_count, 9);
-    assert_eq!(simulator.aggregate_compact_frontier_count, 9);
-    assert_eq!(simulator.aggregate_code_switch_count, 5);
-    assert_eq!(simulator.aggregate_fold_count, 6);
+    assert_eq!(simulation_plan.attempt_private_root_count, 12);
+    assert_eq!(simulation_plan.imported_persistent_root_count, 8);
+    assert_eq!(simulation_plan.public_root_count, 3);
+    assert_eq!(simulation_plan.programmed_private_frontier_count, 20);
+    assert_eq!(simulation_plan.verified_public_frontier_count, 3);
+    assert_eq!(simulation_plan.opened_private_leaf_count, 4_264);
+    assert_eq!(simulation_plan.opened_public_leaf_count, 798);
+    assert_eq!(simulation_plan.aggregate_commitment_root_count, 9);
+    assert_eq!(simulation_plan.aggregate_compact_frontier_count, 9);
+    assert_eq!(simulation_plan.aggregate_code_switch_count, 5);
+    assert_eq!(simulation_plan.aggregate_fold_count, 6);
     assert!(
-        simulator
+        simulation_plan
             .ideal_xof_programming_bad_event
             .is_at_most_inverse_power_of_two(401)
     );
     assert!(
-        simulator
+        simulation_plan
             .ideal_xof_programming_bad_event
             .is_greater_than_inverse_power_of_two(402)
     );
-    assert!(simulator.query_groups.iter().any(|group| {
+    assert!(simulation_plan.query_groups.iter().any(|group| {
         group.owner == NonlinearCommitmentQueryOwner::Outer && group.ordered_roles.len() == 3
     }));
-    assert!(simulator.query_groups.iter().any(|group| {
+    assert!(simulation_plan.query_groups.iter().any(|group| {
         group.owner == NonlinearCommitmentQueryOwner::Bound
             && group.sampled_query_vector_length == 266
             && group.ordered_roles.len() == 11
@@ -28517,21 +28375,15 @@ fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear
                 .count()
                 == 3
     }));
-    assert!(!simulator.claims_concrete_shake256_reduction);
-    assert!(!simulator.claims_malicious_verifier_zero_knowledge);
-    assert!(!simulator.claims_resettable_zero_knowledge);
-    assert!(!simulator.claims_family_simulation);
-    assert!(!simulator.claims_quantum_random_oracle_zero_knowledge);
-
-    let mut omitted_commitment = simulator.clone();
+    let mut omitted_commitment = simulation_plan.clone();
     omitted_commitment.commitment_rows.pop();
-    assert!(!omitted_commitment.is_complete());
+    assert!(!omitted_commitment.is_consistent());
 
-    let mut split_shared_query = simulator.clone();
+    let mut split_shared_query = simulation_plan.clone();
     split_shared_query.query_groups[0].query_operation_ordinal += 1;
-    assert!(!is_complete(&split_shared_query));
+    assert!(!is_consistent(&split_shared_query));
 
-    let mut persistent_root_redrawn = simulator.clone();
+    let mut persistent_root_redrawn = simulation_plan.clone();
     let persistent_row = persistent_root_redrawn
         .commitment_rows
         .iter_mut()
@@ -28542,33 +28394,33 @@ fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear
         .expect("a persistent root exists");
     persistent_row.root_strategy =
         ConstructionSimulatorRootStrategy::RandomAttemptRootUnderPrivateSaltHybrid;
-    assert!(!persistent_root_redrawn.is_complete());
+    assert!(!persistent_root_redrawn.is_consistent());
 
-    let mut omitted_fold = simulator.clone();
+    let mut omitted_fold = simulation_plan.clone();
     omitted_fold.derived_views.pop();
-    assert!(!omitted_fold.is_complete());
+    assert!(!omitted_fold.is_consistent());
 
-    let mut reordered_derived_view = simulator.clone();
+    let mut reordered_derived_view = simulation_plan.clone();
     reordered_derived_view.derived_views.swap(4, 5);
-    assert!(!reordered_derived_view.is_complete());
+    assert!(!reordered_derived_view.is_consistent());
 
-    let mut omitted_affine_source = simulator.clone();
+    let mut omitted_affine_source = simulation_plan.clone();
     omitted_affine_source
         .conditioned_affine_source_classes
         .pop();
-    assert!(!omitted_affine_source.is_complete());
+    assert!(!omitted_affine_source.is_consistent());
 
-    let mut omitted_transport_section = simulator.clone();
+    let mut omitted_transport_section = simulation_plan.clone();
     omitted_transport_section.transported_section_rows.remove(7);
-    assert!(!omitted_transport_section.is_complete());
+    assert!(!omitted_transport_section.is_consistent());
 
-    let mut reordered_transport_sections = simulator.clone();
+    let mut reordered_transport_sections = simulation_plan.clone();
     reordered_transport_sections
         .transported_section_rows
         .swap(7, 8);
-    assert!(!reordered_transport_sections.is_complete());
+    assert!(!reordered_transport_sections.is_consistent());
 
-    let mut changed_transport_owner = simulator.clone();
+    let mut changed_transport_owner = simulation_plan.clone();
     let out_of_domain_row = changed_transport_owner
         .transported_section_rows
         .iter_mut()
@@ -28576,25 +28428,25 @@ fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear
         .expect("the out-of-domain section exists");
     out_of_domain_row.strategy =
         ConstructionSequentialTransportSectionStrategy::IndependentOpeningBatchMaskEvaluations;
-    assert!(!changed_transport_owner.is_complete());
+    assert!(!changed_transport_owner.is_consistent());
 
-    let mut omitted_aggregate_section = simulator.clone();
+    let mut omitted_aggregate_section = simulation_plan.clone();
     omitted_aggregate_section
         .aggregate_terminal_section_rows
         .remove(6);
-    assert!(!omitted_aggregate_section.is_complete());
+    assert!(!omitted_aggregate_section.is_consistent());
 
-    let mut reordered_aggregate_sections = simulator.clone();
+    let mut reordered_aggregate_sections = simulation_plan.clone();
     reordered_aggregate_sections
         .aggregate_terminal_section_rows
         .swap(6, 7);
-    assert!(!reordered_aggregate_sections.is_complete());
+    assert!(!reordered_aggregate_sections.is_consistent());
 
-    let mut changed_aggregate_section_length = simulator.clone();
+    let mut changed_aggregate_section_length = simulation_plan.clone();
     changed_aggregate_section_length.aggregate_terminal_section_rows[6].byte_length += 1;
-    assert!(!changed_aggregate_section_length.is_complete());
+    assert!(!changed_aggregate_section_length.is_consistent());
 
-    let mut nonempty_canonical_empty_vector = simulator.clone();
+    let mut nonempty_canonical_empty_vector = simulation_plan.clone();
     let canonical_empty_vector = nonempty_canonical_empty_vector
         .aggregate_terminal_section_rows
         .iter_mut()
@@ -28603,24 +28455,12 @@ fn selected_same_secret_sequential_simulator_covers_shared_queries_and_nonlinear
         })
         .expect("a canonical empty aggregate vector exists");
     canonical_empty_vector.byte_length = 1;
-    assert!(!nonempty_canonical_empty_vector.is_complete());
+    assert!(!nonempty_canonical_empty_vector.is_consistent());
 
-    let mut programming_budget_overclaim = simulator.clone();
+    let mut programming_budget_overclaim = simulation_plan.clone();
     programming_budget_overclaim.ideal_xof_programming_bad_event =
         ExactBigFraction::new(BigUint::one(), BigUint::one()).expect("the unit fraction derives");
-    assert!(!programming_budget_overclaim.is_complete());
-
-    let mut malicious_verifier_overclaim = simulator.clone();
-    malicious_verifier_overclaim.claims_malicious_verifier_zero_knowledge = true;
-    assert!(!malicious_verifier_overclaim.is_complete());
-
-    let mut qrom_overclaim = simulator.clone();
-    qrom_overclaim.claims_quantum_random_oracle_zero_knowledge = true;
-    assert!(!qrom_overclaim.is_complete());
-
-    let mut family_overclaim = simulator.clone();
-    family_overclaim.claims_family_simulation = true;
-    assert!(!family_overclaim.is_complete());
+    assert!(!programming_budget_overclaim.is_consistent());
 }
 
 #[test]
@@ -28760,9 +28600,9 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .iter()
             .map(|row| row.algebraic_numerator)
             .collect::<Vec<_>>(),
-        [388, 289, 269, 265, 264],
+        [388, 289, 270, 265, 264],
     );
-    assert_eq!(certificate.shift_numerator(), Ok(1_475));
+    assert_eq!(certificate.shift_numerator(), Ok(1_476));
     assert_eq!(certificate.initial_constraint_batch_numerator(), 1_781);
     assert_eq!(certificate.final_sumcheck_numerator(), 0);
     assert_eq!(certificate.final_query_row.epoch_ordinal, 5);
@@ -28896,7 +28736,8 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             + independently_derived_response_binding_count
             + semantic_response_operation_count
             + consecutive_challenge_count
-            + semantic_challenge_operation_count,
+            + semantic_challenge_operation_count
+            + transcript_role_equation_count(OracleEquationRole::AtomicChallengeOutputBlock),
         SELECTED_TRANSCRIPT_HASH_QUERY_COUNT,
     );
     assert_eq!(
@@ -28926,8 +28767,8 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             > semantic_challenge_operation_count,
     );
     let verifier_ledger = &certificate.complete_verifier_oracle_ledger;
-    assert_eq!(verifier_ledger.transcript_equation_count, 604_801);
-    assert_eq!(verifier_ledger.transcript_hash_query_count, 604_801);
+    assert_eq!(verifier_ledger.transcript_equation_count, 604_817);
+    assert_eq!(verifier_ledger.transcript_hash_query_count, 604_817);
     assert_eq!(verifier_ledger.merkle_rows.len(), 23);
     assert_eq!(
         verifier_ledger.merkle_rows[..3]
@@ -28977,7 +28818,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             (
                 MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 2 },
                 2_097_152,
-                268,
+                269,
             ),
             (
                 MerkleOracleEquationRole::WhirEpoch { epoch_ordinal: 3 },
@@ -29034,7 +28875,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .iter()
             .all(|row| row.predecessor_support_ceiling <= 2)
     );
-    assert_eq!(verifier_ledger.merkle_hash_query_count(), Ok(73_047));
+    assert_eq!(verifier_ledger.merkle_hash_query_count(), Ok(73_060));
     assert_eq!(
         verifier_ledger.merkle_rows[..3]
             .iter()
@@ -29057,7 +28898,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .try_fold(0_u64, |total, row| {
                 total.checked_add(row.hash_query_count().expect("WHIR row count"))
             }),
-        Some(25_078),
+        Some(25_091),
     );
     assert_eq!(
         verifier_ledger.merkle_rows[20..]
@@ -29077,12 +28918,11 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .iter()
             .all(|row| row.transcript_catalog_equation_overlap_count == 0),
     );
-    // The complete ceilings are the `604,801` transcript calls plus `73,056`
-    // Merkle equations or `73,065` Merkle hash calls and four fixed verifier
-    // calls. The transcript and fixed rows each charge one equation per call;
-    // the nine-call difference comes from repeated Merkle initial inputs.
-    assert_eq!(verifier_ledger.complete_equation_count_ceiling, 677_861);
-    assert_eq!(verifier_ledger.complete_hash_query_count, 677_870);
+    // The complete ceilings are the `604,817` transcript calls plus `73,060`
+    // Merkle equations or hash calls and four fixed verifier calls. The
+    // additional query closes the former repeated-initial-input gap.
+    assert_eq!(verifier_ledger.complete_equation_count_ceiling, 677_881);
+    assert_eq!(verifier_ledger.complete_hash_query_count, 677_881);
     assert!(certificate.commitment_subtree_extraction.is_complete());
     assert_eq!(certificate.commitment_subtree_extraction.rows.len(), 23);
     assert_eq!(
@@ -29124,18 +28964,18 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         certificate.cms19_arithmetic.verifier_hash_query_count,
-        105_419,
+        105_441,
     );
     assert_eq!(
         certificate
             .cms19_arithmetic
             .accepting_database_equation_count,
-        105_419,
+        105_441,
     );
     let oracle_projection = &certificate.cms19_arithmetic.separated_oracle_projection;
     assert_eq!(
         oracle_projection.concrete_transcript_hash_query_count,
-        604_801
+        604_817
     );
     assert_eq!(
         oracle_projection.primary_transcript_hash_query_count,
@@ -29148,20 +28988,20 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         oracle_projection.auxiliary_sampler_table_hash_query_count,
-        590_128,
+        590_144,
     );
     assert_eq!(
         oracle_projection.concrete_verifier_hash_query_count,
-        695_547
+        695_585
     );
-    assert_eq!(oracle_projection.primary_verifier_hash_query_count, 105_419);
+    assert_eq!(oracle_projection.primary_verifier_hash_query_count, 105_441);
     assert_eq!(
         oracle_projection.concrete_accepting_database_equation_count,
-        695_547,
+        695_585,
     );
     assert_eq!(
         oracle_projection.primary_accepting_database_equation_count,
-        105_419,
+        105_441,
     );
     assert!(
         oracle_projection
@@ -29182,7 +29022,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
             * &certificate.cms19_arithmetic.compiler_query_bound
-            + BigUint::from(2_u8) * BigUint::from(105_419_u64),
+            + BigUint::from(2_u8) * BigUint::from(105_441_u64),
     );
     assert_eq!(
         certificate
@@ -29212,13 +29052,13 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .cms19_applicability
             .claimed_complete_equation_count,
-        695_547,
+        695_585,
     );
     assert_eq!(
         certificate
             .cms19_applicability
             .claimed_complete_hash_query_count,
-        695_547,
+        695_585,
     );
     assert_eq!(
         certificate
@@ -29320,17 +29160,17 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             .iter()
             .map(|row| row.opened_leaf_count)
             .sum::<u64>(),
-        2_782,
+        2_783,
     );
-    assert_eq!(deployed_leaf_oracle.distinct_initial_equation_count, 2_782);
+    assert_eq!(deployed_leaf_oracle.distinct_initial_equation_count, 2_783);
     assert_eq!(deployed_leaf_oracle.repeated_initial_hash_query_count, 0);
     assert_eq!(
         deployed_leaf_oracle.deployed_verifier_hash_query_count,
-        695_547
+        695_585
     );
     assert_eq!(
         deployed_leaf_oracle.deployed_accepting_database_equation_count,
-        695_547
+        695_585
     );
     assert_eq!(
         deployed_leaf_oracle.intermediate_oracle_output_bit_length,
@@ -29421,7 +29261,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .aggregate_wide_masking
             .joint_affine_view_summary(),
-        (18_025, 18_013, 12),
+        (18_035, 18_023, 12),
     );
     assert_eq!(
         certificate.aggregate_wide_masking.nonlinear_view_summary(),
@@ -29431,7 +29271,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         certificate
             .aggregate_wide_masking
             .generator_sample_summary(),
-        (18_027, 90_135, 64, 10),
+        (18_037, 90_185, 64, 10),
     );
     assert!(
         certificate
@@ -29516,7 +29356,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
         .cms19_fixed_output_seeded_sampler_model
         .canonical_oracle_plan_hash[0] ^= 1;
     assert!(!changed_typed_oracle_plan.has_complete_structural_certificate());
-    assert!(!changed_typed_oracle_plan.has_complete_construction_theorem_for(&plan));
+    assert!(!changed_typed_oracle_plan.has_complete_rejected_backend_accounting_for(&plan));
     assert!(
         certificate
             .cms19_state_predicate
@@ -29599,8 +29439,8 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
                 ExactQueryFailureEvent::WhirSource { epoch_ordinal: 2 },
                 1,
                 2_097_152,
-                1_065_094,
-                268,
+                1_065_095,
+                269,
                 1,
             ),
             (
@@ -29665,11 +29505,11 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     let theta_numerator = BigUint::from(3_u8) * single_theta_numerator;
     assert_eq!(
         &complete_algebraic_numerator - &theta_numerator,
-        BigUint::from(216_542_517_u64),
+        BigUint::from(216_542_518_u64),
     );
     assert_eq!(
         complete_algebraic_numerator,
-        BigUint::parse_bytes(b"113302212165600456748245", 10)
+        BigUint::parse_bytes(b"113302212165600456748246", 10)
             .expect("the exact algebraic numerator parses"),
     );
     assert!(
@@ -29849,9 +29689,9 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
             (
                 ConstructionAffineMaskSourceClass::AggregateWidePad,
                 15,
-                90_125,
-                102_285,
-                90_065,
+                90_175,
+                102_335,
+                90_115,
                 ConstructionAffineRankKind::Exact,
                 12_220,
                 60,
@@ -29874,7 +29714,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         private_coin_hybrid.aggregate_affine_base_field_output_count,
-        90_125,
+        90_175,
     );
     assert_eq!(
         private_coin_hybrid.aggregate_leaf_salt_key_base_field_output_count,
@@ -29882,7 +29722,7 @@ fn generated_selected_whir_failure_partition_is_exact_and_mutation_sensitive() {
     );
     assert_eq!(
         private_coin_hybrid.total_modulo_output_count,
-        independently_censused_trace_private_coordinates + 11_167_320,
+        independently_censused_trace_private_coordinates + 11_167_370,
     );
     assert_eq!(private_coin_hybrid.row_pad_seed_material_byte_count, 192);
     assert_eq!(private_coin_hybrid.ceremony_application_multiplicity, 10);

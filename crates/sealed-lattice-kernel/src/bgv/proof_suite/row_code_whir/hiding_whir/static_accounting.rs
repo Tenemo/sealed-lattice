@@ -778,8 +778,8 @@ mod tests {
 
         // The exact ledgers. Secret-bearing query leaves transport their
         // construction-bound private salts; the public comparator does not.
-        assert_eq!(plain.byte_length(), 2_014_236);
-        assert_eq!(hiding.byte_length(), 6_237_640);
+        assert_eq!(plain.byte_length(), 2_015_260);
+        assert_eq!(hiding.byte_length(), 6_238_832);
         let migration_byte_cost = hiding.byte_length() - plain.byte_length();
         assert_eq!(migration_byte_cost, HIDING_MIGRATION_BYTE_COST);
 
@@ -790,8 +790,8 @@ mod tests {
             PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH + plain.byte_length();
         let complete_hiding_proof_byte_length =
             PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH + hiding.byte_length();
-        assert_eq!(complete_plain_proof_byte_length, 4_886_686);
-        assert_eq!(complete_hiding_proof_byte_length, 9_110_090);
+        assert_eq!(complete_plain_proof_byte_length, 4_887_710);
+        assert_eq!(complete_hiding_proof_byte_length, 9_111_282);
         assert!(
             complete_hiding_proof_byte_length > NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
             "complete hiding proof is {complete_hiding_proof_byte_length} bytes",
@@ -823,8 +823,8 @@ mod tests {
         // Eighteen three-coordinate sumcheck masks and the five switch masks
         // occupy disjoint slices. Only switch slices need public deltas because
         // their logical values depend on challenges sampled after the pad root.
-        assert_eq!(pad_census.message_length, 1_524);
-        assert_eq!(pad_census.code_switch_delta_count, 1_470);
+        assert_eq!(pad_census.message_length, 1_525);
+        assert_eq!(pad_census.code_switch_delta_count, 1_471);
         assert_eq!(pad_census.randomness_length, 393);
         assert_eq!(pad_census.codeword_domain_size, 8_192);
 
@@ -867,34 +867,34 @@ mod tests {
 
         assert_eq!(
             aggregate_wide.section_byte_length(AggregateOpeningSection::CodeSwitchMaskDeltas),
-            58_800,
+            58_840,
         );
         assert_eq!(
             aggregate_wide.section_byte_length(
                 AggregateOpeningSection::BaseCaseBlindedAggregateWidePadReveal,
             ),
-            76_680,
+            76_720,
         );
         assert_eq!(
             aggregate_wide
                 .section_byte_length(AggregateOpeningSection::BaseCaseAggregateWidePadOpenings,),
             348_504,
         );
-        assert_eq!(aggregate_wide.byte_length(), 2_942_104);
+        assert_eq!(aggregate_wide.byte_length(), 2_943_336);
 
         let complete_proof_byte_length =
             PRODUCTION_SHARED_PROOF_PREFIX_BYTE_LENGTH + aggregate_wide.byte_length();
-        assert_eq!(complete_proof_byte_length, 5_814_554);
+        assert_eq!(complete_proof_byte_length, 5_815_786);
         assert_eq!(
             complete_proof_byte_length - NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
-            571_674,
+            572_906,
         );
         assert!(complete_proof_byte_length > NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         assert!(complete_proof_byte_length <= AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH);
     }
 
     /// Bytes the hiding mask layer adds to the plain aggregate opening.
-    const HIDING_MIGRATION_BYTE_COST: usize = 4_223_404;
+    const HIDING_MIGRATION_BYTE_COST: usize = 4_223_572;
 
     /// Production same-secret proof bytes outside the aggregate opening.
     ///
@@ -906,10 +906,10 @@ mod tests {
 
     /// Margin the recorded plain same-secret proof leaves under the gate.
     ///
-    /// The salted-phase plain baseline is `4,886,686` bytes against the `5,242,880`-byte
+    /// The salted-phase plain baseline is `4,887,710` bytes against the `5,242,880`-byte
     /// selection gate. Any masking layer has to fit inside that margin, because
     /// every other section of the stream is unchanged by the masking choice.
-    const PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE: usize = 356_194;
+    const PLAIN_PROOF_MARGIN_BELOW_SELECTION_GATE: usize = 355_170;
 
     /// One searched hiding-parameter candidate.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -982,7 +982,6 @@ mod tests {
         assert!(candidates.len() >= 200, "searched {}", candidates.len());
         candidates.sort_unstable();
         let cheapest = candidates[0];
-
         // Even the cheapest complete proof remains over the nominal target.
         assert!(
             cheapest.complete_proof_byte_length > NOMINAL_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
@@ -996,9 +995,9 @@ mod tests {
             ),
             (6, 3, 3),
         );
-        assert_eq!(cheapest.hiding_opening_byte_length, 5_416_316);
-        assert_eq!(cheapest.migration_byte_cost, 2_364_716);
-        assert_eq!(cheapest.complete_proof_byte_length, 8_288_766);
+        assert_eq!(cheapest.hiding_opening_byte_length, 5_419_620);
+        assert_eq!(cheapest.migration_byte_cost, 2_364_884);
+        assert_eq!(cheapest.complete_proof_byte_length, 8_292_070);
 
         // The selected geometry is not an outlier inside the searched family:
         // its cost is within a small factor of the cheapest one, so the refusal
@@ -1022,7 +1021,7 @@ mod tests {
             selected_candidate.migration_byte_cost,
             HIDING_MIGRATION_BYTE_COST
         );
-        assert_eq!(selected_candidate.complete_proof_byte_length, 9_110_090);
+        assert_eq!(selected_candidate.complete_proof_byte_length, 9_111_282);
         assert!(
             selected_candidate.complete_proof_byte_length > cheapest.complete_proof_byte_length
         );

@@ -165,7 +165,6 @@ const generationCaseByVerificationCase: ReadonlyMap<string, string> = new Map(
 
 const generationProofStream = (
     generationCaseIdentifier: string,
-    browserEngine: 'chromium' | 'firefox',
     runOrdinal = 1,
 ) => {
     const caseIndex = transportedProofCasePairs.findIndex(
@@ -177,8 +176,7 @@ const generationProofStream = (
             `No transported proof stream owns ${generationCaseIdentifier}.`,
         );
     }
-    const browserOffset = browserEngine === 'chromium' ? 1 : 129;
-    const digestByte = (browserOffset + caseIndex + runOrdinal - 1)
+    const digestByte = (1 + caseIndex + runOrdinal - 1)
         .toString(16)
         .padStart(2, '0');
     return {
@@ -193,7 +191,7 @@ const cancellationDeclaration = Object.freeze({
     declaredStorageYieldBoundaryCount: 2,
 });
 
-const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
+const createGenerationEvents = () =>
     desktopBrowserProofEvidenceCaseIdentifiersByOwnershipRole.generation.flatMap(
         (caseIdentifier) => {
             if (caseIdentifier === 'same-secret-generation') {
@@ -201,7 +199,6 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
                     const runOrdinal = runIndex + 1;
                     const transportedProof = generationProofStream(
                         caseIdentifier,
-                        browserEngine,
                         runOrdinal,
                     );
                     return createMeasurementEvent(caseIdentifier, {
@@ -212,7 +209,7 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
                         outputSha512Hex: transportedProof.sha512Hex,
                         runOrdinal,
                         startedAtUnixMilliseconds: 1_000 + runIndex * 20,
-                        workerInstanceIdentifier: `${browserEngine}-same-secret-run-${String(runOrdinal)}`,
+                        workerInstanceIdentifier: `chromium-same-secret-run-${String(runOrdinal)}`,
                     });
                 });
             }
@@ -225,7 +222,7 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
                         cancellationBoundaryKind: boundary.boundaryKind,
                         cancellationBoundaryOrdinal: boundary.boundaryOrdinal,
                         runOrdinal: boundaryIndex + 1,
-                        workerInstanceIdentifier: `${browserEngine}-cancel-worker-${String(boundaryIndex + 1)}`,
+                        workerInstanceIdentifier: `chromium-cancel-worker-${String(boundaryIndex + 1)}`,
                     }),
                 );
             }
@@ -234,7 +231,7 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
             ) {
                 return [
                     createMeasurementEvent(caseIdentifier, {
-                        workerInstanceIdentifier: `${browserEngine}-cancel-worker-1`,
+                        workerInstanceIdentifier: 'chromium-cancel-worker-1',
                         workerOperationOrdinal: 2,
                     }),
                 ];
@@ -243,7 +240,7 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
                 return [
                     createMeasurementEvent(caseIdentifier, {
                         refusalReasonIdentifier: 'malformed-proof-source',
-                        workerInstanceIdentifier: `${browserEngine}-refusal-worker`,
+                        workerInstanceIdentifier: 'chromium-refusal-worker',
                         workerOperationOrdinal: 3,
                     }),
                 ];
@@ -251,7 +248,7 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
             if (caseIdentifier === 'same-secret-generation-after-refusal') {
                 return [
                     createMeasurementEvent(caseIdentifier, {
-                        workerInstanceIdentifier: `${browserEngine}-refusal-worker`,
+                        workerInstanceIdentifier: 'chromium-refusal-worker',
                         workerOperationOrdinal: 4,
                     }),
                 ];
@@ -274,7 +271,7 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
                 ([generationCaseIdentifier]) =>
                     generationCaseIdentifier === caseIdentifier,
             )
-                ? generationProofStream(caseIdentifier, browserEngine)
+                ? generationProofStream(caseIdentifier)
                 : undefined;
             return [
                 createMeasurementEvent(
@@ -291,9 +288,7 @@ const createGenerationEvents = (browserEngine: 'chromium' | 'firefox') =>
         },
     );
 
-const createVerificationEvents = (
-    verificationBrowserEngine: 'chromium' | 'firefox' | 'webkit',
-) =>
+const createVerificationEvents = () =>
     desktopBrowserProofEvidenceCaseIdentifiersByOwnershipRole.verification.flatMap(
         (verificationCaseIdentifier) => {
             const generationCaseIdentifier =
@@ -305,35 +300,21 @@ const createVerificationEvents = (
                     `No generation case owns ${verificationCaseIdentifier}.`,
                 );
             }
-            let verificationRunOrdinal = 0;
-            return (['chromium', 'firefox'] as const).flatMap(
-                (generationBrowserEngine) => {
-                    const runCount =
-                        generationCaseIdentifier === 'same-secret-generation'
-                            ? 4
-                            : 1;
-                    return Array.from({ length: runCount }, (_, runIndex) => {
-                        const generationRunOrdinal = runIndex + 1;
-                        verificationRunOrdinal += 1;
-                        const transportedProof = generationProofStream(
-                            generationCaseIdentifier,
-                            generationBrowserEngine,
-                            generationRunOrdinal,
-                        );
-                        return createMeasurementEvent(
-                            verificationCaseIdentifier,
-                            {
-                                canonicalInputByteLength:
-                                    transportedProof.byteLength,
-                                canonicalInputSha512Hex:
-                                    transportedProof.sha512Hex,
-                                runOrdinal: verificationRunOrdinal,
-                                workerInstanceIdentifier: `${verificationBrowserEngine}-${verificationCaseIdentifier}-${generationBrowserEngine}-run-${String(generationRunOrdinal)}`,
-                            },
-                        );
-                    });
-                },
-            );
+            const runCount =
+                generationCaseIdentifier === 'same-secret-generation' ? 4 : 1;
+            return Array.from({ length: runCount }, (_, runIndex) => {
+                const generationRunOrdinal = runIndex + 1;
+                const transportedProof = generationProofStream(
+                    generationCaseIdentifier,
+                    generationRunOrdinal,
+                );
+                return createMeasurementEvent(verificationCaseIdentifier, {
+                    canonicalInputByteLength: transportedProof.byteLength,
+                    canonicalInputSha512Hex: transportedProof.sha512Hex,
+                    runOrdinal: generationRunOrdinal,
+                    workerInstanceIdentifier: `chromium-${verificationCaseIdentifier}-run-${String(generationRunOrdinal)}`,
+                });
+            });
         },
     );
 
@@ -342,8 +323,8 @@ const createOwnershipSessionEventSets = () =>
         sessionIdentifier: session.sessionIdentifier,
         testEvents:
             session.ownershipRole === 'generation'
-                ? createGenerationEvents(session.browserEngine)
-                : createVerificationEvents(session.browserEngine),
+                ? createGenerationEvents()
+                : createVerificationEvents(),
     }));
 
 const networkEvidenceIdentity = Object.freeze({
@@ -486,9 +467,7 @@ const createNetworkLedgerEvents = (uploadByteLength = 17) => [
     },
 ];
 
-const createOwnershipSessionEventSetsWithNetworkLedgers = (
-    firefoxUploadByteLength = 17,
-) =>
+const createOwnershipSessionEventSetsWithNetworkLedgers = () =>
     createOwnershipSessionEventSets().map((sessionEventSet) => {
         const session = desktopBrowserProofEvidenceSessionDefinitions.find(
             ({ sessionIdentifier }) =>
@@ -502,19 +481,15 @@ const createOwnershipSessionEventSetsWithNetworkLedgers = (
                   ...sessionEventSet,
                   testEvents: [
                       ...sessionEventSet.testEvents,
-                      ...createNetworkLedgerEvents(
-                          session.browserEngine === 'firefox'
-                              ? firefoxUploadByteLength
-                              : 17,
-                      ),
+                      ...createNetworkLedgerEvents(17),
                   ],
               }
             : sessionEventSet;
     });
 
 const createExactMeasurementEvents = () => [
-    ...createGenerationEvents('chromium'),
-    ...createVerificationEvents('chromium'),
+    ...createGenerationEvents(),
+    ...createVerificationEvents(),
 ];
 
 describe('Desktop-browser proof-evidence runner', () => {
@@ -528,10 +503,7 @@ describe('Desktop-browser proof-evidence runner', () => {
             ),
         ).toEqual([
             { browserEngine: 'chromium', ownershipRole: 'generation' },
-            { browserEngine: 'firefox', ownershipRole: 'generation' },
             { browserEngine: 'chromium', ownershipRole: 'verification' },
-            { browserEngine: 'firefox', ownershipRole: 'verification' },
-            { browserEngine: 'webkit', ownershipRole: 'verification' },
         ]);
     });
 
@@ -556,13 +528,12 @@ describe('Desktop-browser proof-evidence runner', () => {
         );
         expect(projections.map(({ browserEngine }) => browserEngine)).toEqual([
             'chromium',
-            'firefox',
         ]);
         expect(
             projections.map(
                 ({ projection }) => projection.durableCheckpointCount,
             ),
-        ).toEqual([1, 1]);
+        ).toEqual([1]);
         expect(
             projections.map(({ projection }) =>
                 projection.projections.map(
@@ -570,18 +541,7 @@ describe('Desktop-browser proof-evidence runner', () => {
                         computeSlowdownMultiplier,
                 ),
             ),
-        ).toEqual([
-            [2, 4, 8],
-            [2, 4, 8],
-        ]);
-    });
-
-    it('rejects cross-engine network carrier drift', () => {
-        expect(() =>
-            projectDesktopBrowserProofEvidenceNetworkSessions(
-                createOwnershipSessionEventSetsWithNetworkLedgers(18),
-            ),
-        ).toThrow(/did not use one source, build, suite/u);
+        ).toEqual([[2, 4, 8]]);
     });
 
     it('rejects incomplete, role-mixed, or untransported ownership evidence', () => {
@@ -617,7 +577,8 @@ describe('Desktop-browser proof-evidence runner', () => {
         expect(() =>
             validateDesktopBrowserProofEvidenceOwnershipMatrix(
                 exactSessionEventSets.map((sessionEventSet) =>
-                    sessionEventSet.sessionIdentifier === 'webkit-verification'
+                    sessionEventSet.sessionIdentifier ===
+                    'chromium-verification'
                         ? {
                               ...sessionEventSet,
                               testEvents: sessionEventSet.testEvents.map(
@@ -733,15 +694,15 @@ describe('Desktop-browser proof-evidence runner', () => {
 
     it('rejects verifier worker reuse and cross-session suite drift', () => {
         const exactSessionEventSets = createOwnershipSessionEventSets();
-        const webkitVerification = exactSessionEventSets.find(
+        const chromiumVerification = exactSessionEventSets.find(
             ({ sessionIdentifier }) =>
-                sessionIdentifier === 'webkit-verification',
+                sessionIdentifier === 'chromium-verification',
         );
-        expect(webkitVerification).toBeDefined();
+        expect(chromiumVerification).toBeDefined();
         expect(() =>
             validateDesktopBrowserProofEvidenceOwnershipMatrix(
                 exactSessionEventSets.map((sessionEventSet) =>
-                    sessionEventSet === webkitVerification
+                    sessionEventSet === chromiumVerification
                         ? {
                               ...sessionEventSet,
                               testEvents: sessionEventSet.testEvents.map(
@@ -764,7 +725,7 @@ describe('Desktop-browser proof-evidence runner', () => {
         expect(() =>
             validateDesktopBrowserProofEvidenceOwnershipMatrix(
                 exactSessionEventSets.map((sessionEventSet) =>
-                    sessionEventSet === webkitVerification
+                    sessionEventSet === chromiumVerification
                         ? {
                               ...sessionEventSet,
                               testEvents: sessionEventSet.testEvents.map(

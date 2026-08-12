@@ -17,13 +17,10 @@ const safeFileNamePattern = /^[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/u;
 
 export const desktopBrowserProofGenerationSessionIdentifiers = Object.freeze([
     'chromium-generation',
-    'firefox-generation',
 ] as const);
 
 export const desktopBrowserProofVerificationSessionIdentifiers = Object.freeze([
     'chromium-verification',
-    'firefox-verification',
-    'webkit-verification',
 ] as const);
 
 export type DesktopBrowserProofGenerationSessionIdentifier =
@@ -32,7 +29,7 @@ export type DesktopBrowserProofGenerationSessionIdentifier =
 export type DesktopBrowserProofVerificationSessionIdentifier =
     (typeof desktopBrowserProofVerificationSessionIdentifiers)[number];
 
-type DesktopBrowserProofGenerationBrowserEngine = 'chromium' | 'firefox';
+type DesktopBrowserProofGenerationBrowserEngine = 'chromium';
 
 type DesktopBrowserProofDeterministicParityBinding = Readonly<{
     deterministicCoinBindingSha512Hex: string;
@@ -222,13 +219,6 @@ export const requireDesktopBrowserProofVerificationSessionIdentifier = (
     }
     return value;
 };
-
-const resolveDesktopBrowserProofGenerationBrowserEngine = (
-    generationSessionIdentifier: DesktopBrowserProofGenerationSessionIdentifier,
-): DesktopBrowserProofGenerationBrowserEngine =>
-    generationSessionIdentifier === 'chromium-generation'
-        ? 'chromium'
-        : 'firefox';
 
 const requireTransportGenerationCaseIdentifier = (
     value: unknown,
@@ -435,10 +425,8 @@ const parseTransportManifestValue = (
         requireDesktopBrowserProofGenerationSessionIdentifier(
             value.generationSessionIdentifier,
         );
-    const generationBrowserEngine =
-        resolveDesktopBrowserProofGenerationBrowserEngine(
-            generationSessionIdentifier,
-        );
+    const generationBrowserEngine: DesktopBrowserProofGenerationBrowserEngine =
+        'chromium';
     if (value.generationBrowserEngine !== generationBrowserEngine) {
         throw new TypeError(
             'The desktop proof transport manifest browser does not own its generation session.',
@@ -503,10 +491,7 @@ export const createDesktopBrowserProofTransportManifest = (input: {
 }): DesktopBrowserProofTransportManifest =>
     parseTransportManifestValue({
         artifacts: sortTransportArtifacts(input.artifacts),
-        generationBrowserEngine:
-            resolveDesktopBrowserProofGenerationBrowserEngine(
-                input.generationSessionIdentifier,
-            ),
+        generationBrowserEngine: 'chromium',
         generationSessionIdentifier: input.generationSessionIdentifier,
         schemaIdentifier: transportManifestSchemaIdentifier,
         suiteId: input.suiteId,
@@ -806,10 +791,6 @@ export const serializeDesktopBrowserProofTransportManifestAuthenticationBindings
                 bindings['chromium-generation'],
                 'chromium-generation manifest digest',
             ),
-            'firefox-generation': requireSha512Hex(
-                bindings['firefox-generation'],
-                'firefox-generation manifest digest',
-            ),
         });
 
 export const parseDesktopBrowserProofTransportManifestAuthenticationBindings = (
@@ -828,10 +809,7 @@ export const parseDesktopBrowserProofTransportManifestAuthenticationBindings = (
     }
     if (
         !isRecord(parsedValue) ||
-        !hasExactKeys(parsedValue, [
-            'chromium-generation',
-            'firefox-generation',
-        ])
+        !hasExactKeys(parsedValue, ['chromium-generation'])
     ) {
         throw new TypeError(
             'The desktop proof transport manifest authentication binding is malformed.',
@@ -841,10 +819,6 @@ export const parseDesktopBrowserProofTransportManifestAuthenticationBindings = (
         'chromium-generation': requireSha512Hex(
             parsedValue['chromium-generation'],
             'chromium-generation manifest digest',
-        ),
-        'firefox-generation': requireSha512Hex(
-            parsedValue['firefox-generation'],
-            'firefox-generation manifest digest',
         ),
     });
     if (

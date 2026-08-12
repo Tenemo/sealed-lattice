@@ -15,10 +15,6 @@ export const selectedCollectiveSetupSecurityEvidencePath = path.join(
     repositoryRoot,
     'test-vectors/selected-collective-setup-security-evidence.json',
 );
-export const selectedCommonProofMappedSoundnessEvidencePath = path.join(
-    repositoryRoot,
-    'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
-);
 
 const sourcePaths = [
     'Cargo.toml',
@@ -51,23 +47,6 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/interpreter.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_profile.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/zero_knowledge.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_hiding.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_pcs.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_prover.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_verifier.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_wire.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/column_commitment.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/fixed_output_oracle_graph.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/soundness_composition.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/generation_state.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/mod.rs',
-    'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/commitment/mod.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/sampling.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/authority.rs',
@@ -81,7 +60,6 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/verified_public_randomness.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/vss_qualification.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/collective_setup_security_evidence.rs',
-    'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
     'tools/ci/selected-collective-setup-security-evidence.ts',
 ] as const;
 
@@ -110,28 +88,6 @@ const setupProofInventoryTotals = setupProofInventory.reduce(
         logicalRelationInstanceCount: 0,
     },
 );
-
-const commonProofMappedSoundnessInventory = [
-    ...setupProofInventory,
-    ['ballotValidity', 0x1302, 20, 20],
-    ['targetShare', 0x1621, 10, 10],
-] as const;
-
-const commonProofMappedSoundnessTotals =
-    commonProofMappedSoundnessInventory.reduce(
-        (totals, [, , physicalCount, logicalCount]) => ({
-            physicalProofApplicationCount:
-                totals.physicalProofApplicationCount + physicalCount,
-            logicalRelationInstanceCount:
-                totals.logicalRelationInstanceCount + logicalCount,
-        }),
-        {
-            physicalProofApplicationCount: 0,
-            logicalRelationInstanceCount: 0,
-        },
-    );
-
-const completeAdversarialQueryBudgetDecimal = ((1n << 80n) - 1n).toString();
 
 const exactWitnessJoinIdentifiers = [
     'secretContributionAcrossVssAnchorAndKeyShares',
@@ -212,6 +168,7 @@ const assumptionNodeIdentifiers = [
 ] as const;
 
 const unresolvedNodeIdentifiers = [
+    'commonConstructionKnowledgeSoundness',
     'commonConstructionQromTransform',
     'commonProofQromComposition',
     'commonConstructionMaskingCorrespondence',
@@ -249,31 +206,6 @@ const exactResidualLedgerIdentifiers = [
     'qromInvalidAcceptance',
     'honestFailureAndCorrectness',
     'statisticalPrivacyAndLeakage',
-] as const;
-
-const exactCoverageIdentifiers = [
-    'externalInputsAndStaticCorruption',
-    'relaySchedulingRushingAndMalformedObjects',
-    'terminalOutputBoundary',
-    'commitBeforeRevealAndPublicSeedOrder',
-    'fiatShamirAfterExactStatementAndCommitments',
-    'noHiddenCrsOrCallerSelectedChallenge',
-    'completeWitnessTupleAndWitnessJoins',
-    'simulatorInputBoundary',
-    'exactSampleCensusBasesAndCorrelations',
-    'allStaticCorruptionSubsets',
-    'abortRetryCheckpointAndResume',
-    'fourSeparatedResidualLedgers',
-    'estimatorCostsExcludedFromAdvantages',
-    'noCapabilityMintingByEvidence',
-    'jointSetupSampleHybrid',
-    'commonConstructionKnowledgeSoundness',
-    'commonConstructionQromTransform',
-    'commonProofQromComposition',
-    'commonConstructionMaskingCorrespondence',
-    'setupFamilySimulationComposition',
-    'selectedSetupCorrectnessImport',
-    'collectiveSetupHybridComposition',
 ] as const;
 
 const sha256 = (payload: Uint8Array): string =>
@@ -349,297 +281,6 @@ const requireInteger = (
     }
     return value;
 };
-
-export type CommonProofMappedSoundnessImportSummary = {
-    readonly actionTopCount: number;
-    readonly adversarialQueryBudgetDecimal: string;
-    readonly conditionalOracleModel: string;
-    readonly constructionPlanIdentityCount: number;
-    readonly fixedOutputOracleGraphIdentityCount: number;
-    readonly formatVersion: number;
-    readonly logicalRelationInstanceCount: number;
-    readonly oracleOutputBitLength: number;
-    readonly physicalProofApplicationCount: number;
-    readonly rowCount: number;
-};
-
-const requireCommonProofMappedSoundnessImportSummary = (
-    value: JsonValue | undefined,
-): CommonProofMappedSoundnessImportSummary => {
-    const summary = requireRecord(
-        value,
-        'Common-proof mapped-soundness import',
-    );
-    const checkedSummary = {
-        actionTopCount: requireInteger(
-            summary.actionTopCount,
-            'Mapped-soundness import action top count',
-        ),
-        adversarialQueryBudgetDecimal: requireString(
-            summary.adversarialQueryBudgetDecimal,
-            'Mapped-soundness import adversarial query budget',
-        ),
-        conditionalOracleModel: requireString(
-            summary.conditionalOracleModel,
-            'Mapped-soundness import oracle model',
-        ),
-        constructionPlanIdentityCount: requireInteger(
-            summary.constructionPlanIdentityCount,
-            'Mapped-soundness construction identity count',
-        ),
-        fixedOutputOracleGraphIdentityCount: requireInteger(
-            summary.fixedOutputOracleGraphIdentityCount,
-            'Mapped-soundness graph identity count',
-        ),
-        formatVersion: requireInteger(
-            summary.formatVersion,
-            'Mapped-soundness import format version',
-        ),
-        logicalRelationInstanceCount: requireInteger(
-            summary.logicalRelationInstanceCount,
-            'Mapped-soundness logical instance count',
-        ),
-        oracleOutputBitLength: requireInteger(
-            summary.oracleOutputBitLength,
-            'Mapped-soundness oracle output bit length',
-        ),
-        physicalProofApplicationCount: requireInteger(
-            summary.physicalProofApplicationCount,
-            'Mapped-soundness physical proof count',
-        ),
-        rowCount: requireInteger(
-            summary.rowCount,
-            'Mapped-soundness row count',
-        ),
-    };
-    if (
-        checkedSummary.actionTopCount !== 10 ||
-        checkedSummary.adversarialQueryBudgetDecimal !==
-            completeAdversarialQueryBudgetDecimal ||
-        checkedSummary.conditionalOracleModel !==
-            'single-fixed-512-bit-qro-with-precommitted-auxiliary-restriction-v1' ||
-        checkedSummary.constructionPlanIdentityCount !==
-            commonProofMappedSoundnessInventory.length ||
-        checkedSummary.fixedOutputOracleGraphIdentityCount !==
-            commonProofMappedSoundnessInventory.length ||
-        checkedSummary.formatVersion !== 5 ||
-        checkedSummary.logicalRelationInstanceCount !==
-            commonProofMappedSoundnessTotals.logicalRelationInstanceCount ||
-        checkedSummary.oracleOutputBitLength !== 512 ||
-        checkedSummary.physicalProofApplicationCount !==
-            commonProofMappedSoundnessTotals.physicalProofApplicationCount ||
-        checkedSummary.rowCount !== commonProofMappedSoundnessInventory.length
-    ) {
-        throw new Error(
-            'The common-proof mapped-soundness import is stale or incomplete.',
-        );
-    }
-    return checkedSummary;
-};
-
-const lowercaseHash512Pattern = /^[0-9a-f]{128}$/u;
-const canonicalPositiveDecimalPattern = /^[1-9][0-9]*$/u;
-
-const requireCanonicalPositiveFraction = (
-    value: JsonValue | undefined,
-    description: string,
-): void => {
-    const fraction = requireRecord(value, description);
-    const numerator = requireString(
-        fraction.numeratorDecimal,
-        `${description} numerator`,
-    );
-    const denominator = requireString(
-        fraction.denominatorDecimal,
-        `${description} denominator`,
-    );
-    if (
-        !canonicalPositiveDecimalPattern.test(numerator) ||
-        !canonicalPositiveDecimalPattern.test(denominator)
-    ) {
-        throw new Error(
-            `${description} must be a positive canonical fraction.`,
-        );
-    }
-};
-
-export const validateCommonProofMappedSoundnessEvidence = (
-    evidence: JsonValue,
-): CommonProofMappedSoundnessImportSummary => {
-    const document = requireRecord(
-        evidence,
-        'Common-proof mapped-soundness evidence',
-    );
-    const formatVersion = requireInteger(
-        document.formatVersion,
-        'Mapped-soundness format version',
-    );
-    const actionTopCount = requireInteger(
-        document.actionTopCount,
-        'Mapped-soundness action top count',
-    );
-    const conditionalOracleModel = requireString(
-        document.conditionalOracleModel,
-        'Mapped-soundness conditional oracle model',
-    );
-    const rows = requireArray(document.rows, 'Mapped-soundness rows');
-    if (
-        formatVersion !== 5 ||
-        actionTopCount !== 10 ||
-        conditionalOracleModel !==
-            'single-fixed-512-bit-qro-with-precommitted-auxiliary-restriction-v1' ||
-        rows.length !== commonProofMappedSoundnessInventory.length
-    ) {
-        throw new Error(
-            'The common-proof mapped-soundness document geometry is stale.',
-        );
-    }
-
-    const constructionPlanIdentities = new Set<string>();
-    const fixedOutputOracleGraphIdentities = new Set<string>();
-    for (const [rowOrdinal, rowValue] of rows.entries()) {
-        const row = requireRecord(rowValue, 'Mapped-soundness row');
-        const [, expectedSchemaIdentifier, expectedPhysicalCount] =
-            commonProofMappedSoundnessInventory[rowOrdinal];
-        const schemaIdentifier = requireInteger(
-            row.applicationStatementSchemaIdentifier,
-            'Mapped-soundness schema identifier',
-        );
-        const expectedSchedulePosition =
-            schemaIdentifier >= 0x1214 && schemaIdentifier <= 0x1217 ? 0 : null;
-        const expectedTopCount = schemaIdentifier === 0x1218 ? 10 : null;
-        const constructionPlanIdentity = requireString(
-            row.constructionPlanIdentityHashHex,
-            'Construction-plan identity',
-        );
-        const fixedOutputOracleGraphIdentity = requireString(
-            row.fixedOutputOracleGraphIdentityHashHex,
-            'Fixed-output oracle-graph identity',
-        );
-        const chronologyIdentity = requireString(
-            row.chronologyHashHex,
-            'Mapped-soundness chronology identity',
-        );
-        const logicalVerifierMessageCount = requireInteger(
-            row.logicalVerifierMessageCount,
-            'Logical verifier-message count',
-        );
-        const verifierHashQueryCount = requireInteger(
-            row.verifierHashQueryCount,
-            'Verifier hash-query count',
-        );
-        const acceptingDatabaseEquationCount = requireInteger(
-            row.acceptingDatabaseEquationCount,
-            'Accepting-database equation count',
-        );
-        const oracleOutputBitLength = requireInteger(
-            row.oracleOutputBitLength,
-            'Oracle output bit length',
-        );
-        const firstChallengeOperationOrdinal = requireInteger(
-            row.firstChallengeOperationOrdinal,
-            'First challenge operation ordinal',
-        );
-        const challengeOperationCount = requireInteger(
-            row.challengeOperationCount,
-            'Challenge operation count',
-        );
-        const requiresVerifiedVssBoundPrerequisite =
-            row.requiresVerifiedVssBoundPrerequisite;
-        const requiresVerifiedSetupPolynomialBoundPrerequisite =
-            row.requiresVerifiedSetupPolynomialBoundPrerequisite;
-        if (
-            schemaIdentifier !== expectedSchemaIdentifier ||
-            row.schedulePosition !== expectedSchedulePosition ||
-            row.topCount !== expectedTopCount ||
-            row.familyApplicationMultiplicity !== expectedPhysicalCount ||
-            row.adversarialQueryBoundDecimal !==
-                completeAdversarialQueryBudgetDecimal ||
-            logicalVerifierMessageCount <= 0 ||
-            verifierHashQueryCount <= 0 ||
-            acceptingDatabaseEquationCount <= 0 ||
-            oracleOutputBitLength !== 512 ||
-            row.fixedOutputSamplerReduction !==
-                'domain-separated-predecessor-linked-fixed-hash-sampler-v1' ||
-            !lowercaseHash512Pattern.test(constructionPlanIdentity) ||
-            /^0+$/u.test(constructionPlanIdentity) ||
-            !lowercaseHash512Pattern.test(fixedOutputOracleGraphIdentity) ||
-            /^0+$/u.test(fixedOutputOracleGraphIdentity) ||
-            !lowercaseHash512Pattern.test(chronologyIdentity) ||
-            /^0+$/u.test(chronologyIdentity) ||
-            row.initialOperationOrdinal !== 0 ||
-            row.canonicalHeaderRootEquationSlotOrdinal !== 0 ||
-            row.initialAbsorptionEquationSlotOrdinal !== 1 ||
-            firstChallengeOperationOrdinal <= 0 ||
-            challengeOperationCount !== logicalVerifierMessageCount ||
-            typeof requiresVerifiedVssBoundPrerequisite !== 'boolean' ||
-            typeof requiresVerifiedSetupPolynomialBoundPrerequisite !==
-                'boolean' ||
-            (requiresVerifiedVssBoundPrerequisite &&
-                requiresVerifiedSetupPolynomialBoundPrerequisite)
-        ) {
-            throw new Error(
-                `Mapped-soundness row ${rowOrdinal} is stale or incomplete.`,
-            );
-        }
-        requireCanonicalPositiveFraction(
-            row.classicalFailureProbabilityCeiling,
-            'Classical failure probability',
-        );
-        requireCanonicalPositiveFraction(
-            row.primaryOracleQromFailureProbabilityAtDeclaredBudget,
-            'Primary-oracle QROM failure probability',
-        );
-        requireCanonicalPositiveFraction(
-            row.auxiliaryTableBadEventProbabilityCeiling,
-            'Auxiliary-table bad-event probability',
-        );
-        requireCanonicalPositiveFraction(
-            row.qromFailureProbabilityAtDeclaredBudget,
-            'Complete QROM failure probability',
-        );
-        constructionPlanIdentities.add(constructionPlanIdentity);
-        fixedOutputOracleGraphIdentities.add(fixedOutputOracleGraphIdentity);
-    }
-    if (
-        constructionPlanIdentities.size !== rows.length ||
-        fixedOutputOracleGraphIdentities.size !== rows.length
-    ) {
-        throw new Error(
-            'The mapped-soundness construction or graph identities are duplicated.',
-        );
-    }
-    return {
-        actionTopCount,
-        adversarialQueryBudgetDecimal: completeAdversarialQueryBudgetDecimal,
-        conditionalOracleModel,
-        constructionPlanIdentityCount: constructionPlanIdentities.size,
-        fixedOutputOracleGraphIdentityCount:
-            fixedOutputOracleGraphIdentities.size,
-        formatVersion,
-        logicalRelationInstanceCount:
-            commonProofMappedSoundnessTotals.logicalRelationInstanceCount,
-        oracleOutputBitLength: 512,
-        physicalProofApplicationCount:
-            commonProofMappedSoundnessTotals.physicalProofApplicationCount,
-        rowCount: rows.length,
-    };
-};
-
-const deriveCommonProofMappedSoundnessImport = async (
-    rootPath: string,
-): Promise<CommonProofMappedSoundnessImportSummary> =>
-    validateCommonProofMappedSoundnessEvidence(
-        parseJsonValue(
-            await readFile(
-                path.join(
-                    rootPath,
-                    'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
-                ),
-                'utf8',
-            ),
-        ),
-    );
 
 const deriveSourceAuthority = async (
     rootPath: string,
@@ -1027,136 +668,42 @@ const buildSelectedSetupCorrectnessImport = (): JsonValue => ({
     ],
 });
 
-const checkedSourceBundleDigest = (
-    sourceAuthority: readonly JsonValue[],
-    ownerSourcePaths: readonly string[],
-): string => {
-    const sourceRows = new Map(
-        sourceAuthority.map((value) => {
-            const row = requireRecord(value, 'Source-authority row');
-            return [
-                requireString(row.relativePath, 'Source-authority path'),
-                row,
-            ] as const;
-        }),
-    );
-    return canonicalJsonSha256(
-        ownerSourcePaths.map((relativePath) => {
-            const row = sourceRows.get(relativePath);
-            if (row === undefined) {
-                throw new Error(
-                    `Construction evidence owner ${relativePath} is absent from source authority.`,
-                );
-            }
-            return row;
-        }),
-    );
-};
-
-const buildConstructionEvidenceImports = (
-    sourceAuthority: readonly JsonValue[],
-    mappedSoundnessImport: CommonProofMappedSoundnessImportSummary,
-): JsonValue => {
-    const knowledgeOwnerSourcePaths = [
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/interpreter.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
-    ] as const;
-    const qromOwnerSourcePaths = [
-        'crates/sealed-lattice-kernel/src/foundation/hash.rs',
-        'crates/sealed-lattice-kernel/src/hashing/mod.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/compact_merkle_frontier.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/column_commitment.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/linear_bcs_transcript.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/fixed_output_oracle_graph.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/mod.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/verification.rs',
-    ] as const;
-    const qromCompositionOwnerSourcePaths = [
-        'crates/sealed-lattice-kernel/src/foundation/private_randomness/generator_hybrid.rs',
-        'crates/sealed-lattice-kernel/src/foundation/proof_application.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_profile.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/soundness_composition.rs',
-        'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
-    ] as const;
-    const maskingOwnerSourcePaths = [
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/zero_knowledge.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_hiding.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_pcs.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_prover.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_verifier.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/aggregate_wide_wire.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-        'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/exact_same_secret/exact_proof.rs',
-    ] as const;
-    return [
-        {
-            identifier: exactConstructionEvidenceImportIdentifiers[0],
-            ownerSourcePaths: knowledgeOwnerSourcePaths,
-            requiredClosurePredicate:
-                'completeConstructionExtractorCorrespondence',
-            observedStatus: 'resolved',
-            checkedArtifactDigest: checkedSourceBundleDigest(
-                sourceAuthority,
-                knowledgeOwnerSourcePaths,
-            ),
-            missingEvidence: null,
-        },
-        {
-            identifier: exactConstructionEvidenceImportIdentifiers[1],
-            ownerSourcePaths: qromOwnerSourcePaths,
-            requiredClosurePredicate:
-                'singleFixed512BitQroRestrictionCorrespondenceAndProductionRows',
-            observedStatus: 'unresolved',
-            checkedArtifactDigest: checkedSourceBundleDigest(
-                sourceAuthority,
-                qromOwnerSourcePaths,
-            ),
-            checkedMappedSoundnessImportDigest: canonicalJsonSha256(
-                mappedSoundnessImport,
-            ),
-            missingEvidence:
-                'The independently derived fixed-output oracle graph now covers coherent fragment, suffix, repeated, and overlapping access, exact half-preimage support, purification, recording, lifting, extraction, and all twelve production rows. This import remains unresolved until one canonical transported proof instantiates the certified graph identity for the emitted verifier bytes.',
-        },
-        {
-            identifier: exactConstructionEvidenceImportIdentifiers[2],
-            ownerSourcePaths: qromCompositionOwnerSourcePaths,
-            requiredClosurePredicate:
-                'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
-            observedStatus: 'unresolved',
-            checkedArtifactDigest: checkedSourceBundleDigest(
-                sourceAuthority,
-                qromCompositionOwnerSourcePaths,
-            ),
-            checkedMappedSoundnessImportDigest: canonicalJsonSha256(
-                mappedSoundnessImport,
-            ),
-            missingEvidence:
-                'The conservative 103-physical-proof and 159-logical-instance union now derives with one transform per physical proof and the complete adversarial query budget. This import remains unresolved until the emitted transported proof instantiates the certified construction and graph identities.',
-        },
-        {
-            identifier: exactConstructionEvidenceImportIdentifiers[3],
-            ownerSourcePaths: maskingOwnerSourcePaths,
-            requiredClosurePredicate:
-                'completeConstructionMaskingCorrespondence',
-            observedStatus: 'unresolved',
-            checkedArtifactDigest: checkedSourceBundleDigest(
-                sourceAuthority,
-                maskingOwnerSourcePaths,
-            ),
-            missingEvidence:
-                'The static conditioned affine image inclusion and classical ideal-XOF sequential simulator derive. Emitted transported-proof instantiation, the concrete SHAKE256 reduction, adaptive setup-family composition, and stronger zero-knowledge notions remain unproved.',
-        },
-    ];
-};
+const buildConstructionEvidenceImports = (): JsonValue => [
+    {
+        identifier: exactConstructionEvidenceImportIdentifiers[0],
+        ownerSourcePaths: [],
+        requiredClosurePredicate: 'completeConstructionExtractorCorrespondence',
+        observedStatus: 'unresolved',
+        missingEvidence:
+            'The compact semantic owner is test-only and proves the interactive semantic input only. No production compact proof, transported-byte extractor, or noninteractive knowledge-soundness owner exists.',
+    },
+    {
+        identifier: exactConstructionEvidenceImportIdentifiers[1],
+        ownerSourcePaths: [],
+        requiredClosurePredicate:
+            'singleFixed512BitQroRestrictionCorrespondenceAndProductionRows',
+        observedStatus: 'unresolved',
+        missingEvidence:
+            'No complete transported compact proof instantiates the actual verifier oracle graph. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
+    },
+    {
+        identifier: exactConstructionEvidenceImportIdentifiers[2],
+        ownerSourcePaths: [],
+        requiredClosurePredicate:
+            'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
+        observedStatus: 'unresolved',
+        missingEvidence:
+            'No compact emitted-byte census instantiates qPi, qy, qV, tuple, Merkle multi-extraction, or ceremony-composition arithmetic.',
+    },
+    {
+        identifier: exactConstructionEvidenceImportIdentifiers[3],
+        ownerSourcePaths: [],
+        requiredClosurePredicate: 'completeConstructionMaskingCorrespondence',
+        observedStatus: 'unresolved',
+        missingEvidence:
+            'The rejected row-code affine-image and sequential-simulation objects are accounting and proof plans. Compact production matrices, conditioned inclusion factorization, a witness-free adaptive simulator, and the KMAC256 and SHAKE256 hybrid remain absent.',
+    },
+];
 
 const buildProtocolSchedule = (): JsonValue => ({
     orderedPhases: [
@@ -1222,10 +769,10 @@ const buildHybridGames = (): JsonValue => [
     },
     {
         identifier: exactHybridGameIdentifiers[3],
-        status: 'resolved',
+        status: 'unresolved',
         transitionReduction: 'commonConstructionKnowledgeSoundness',
-        transitionAdvantage: 'epsilon_common_construction_knowledge',
-        change: 'Extract one complete consistent witness tuple for every accepted corrupt setup proof and enforce every cross-family join.',
+        transitionAdvantage: 'unresolved_common_construction_knowledge_error',
+        change: 'Extract one complete consistent witness tuple for every accepted corrupt setup proof and enforce every cross-family join. The compact construction does not yet supply this extractor.',
     },
     {
         identifier: exactHybridGameIdentifiers[4],
@@ -1389,11 +936,11 @@ const buildReductionDag = (): JsonValue => [
     {
         identifier: 'commonConstructionKnowledgeSoundness',
         kind: 'reduction',
-        status: 'resolved',
+        status: 'unresolved',
         dependencies: ['canonicalHashBinding'],
-        advantageExpression: 'epsilon_common_construction_knowledge',
+        advantageExpression: 'unresolved_common_construction_knowledge_error',
         statement:
-            'The live plan, compiler-interpreter semantics, round-by-round polynomial extractor, explicit-point constraint extractor, and coordinate-derived commitment subtree establish the interactive construction extractor correspondence. This does not instantiate the Fiat-Shamir quantum transform.',
+            'The compact semantic owner proves the test-only interactive semantic input, direct initial-transition bound, and production schedule. A production compact proof, transported-byte extractor, and noninteractive knowledge-soundness composition remain absent.',
     },
     {
         identifier: 'commonConstructionQromTransform',
@@ -1403,7 +950,7 @@ const buildReductionDag = (): JsonValue => [
         advantageExpression:
             'unresolved_common_construction_qrom_transform_error',
         statement:
-            'The independently derived fixed-output graph covers coherent fragment, suffix, repeated, overlapping, and out-of-order access; exact half-preimage support; purification, recording, lifting, extraction; accepted-path predecessor closure; and all twelve production rows under one conditional 512-bit ideal QRO. The imported status remains unresolved until emitted transported proof bytes instantiate the certified graph identity. Concrete SHAKE256 remains only an explicit ideal-QRO assumption.',
+            'No complete transported compact proof instantiates the actual verifier oracle graph or its extraction terms. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
     },
     {
         identifier: 'commonProofQromComposition',
@@ -1412,7 +959,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['commonConstructionQromTransform'],
         advantageExpression: 'unresolved_common_proof_qrom_composition_error',
         statement:
-            'The conservative action theorem maps one fixed-output transform to each of 103 physical proofs, internally unions 159 logical instances, charges the complete adversarial query budget to every proof, and assumes no cross-proof independence. The imported status remains unresolved until emitted transported proof bytes instantiate the certified construction and graph identities.',
+            'No compact emitted-byte owner instantiates qPi, qy, qV, tuple size, proof length, Merkle multi-extraction, or ceremony-composition arithmetic.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
@@ -1421,7 +968,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['shakeQuantumOracle'],
         advantageExpression: 'unresolved_common_construction_privacy_error',
         statement:
-            'The selected same-secret construction derives production-bound affine source accounting, exact conditioned witness-to-mask image inclusion, pre-opening commitment-root hiding, and one classical ideal-XOF sequential simulator over all shared queries, nonlinear views, and canonical transport sections. Emitted transported-proof instantiation, a concrete SHAKE256 reduction, adaptive setup-family composition, malicious-verifier or resettable security, and QROM zero knowledge remain open.',
+            'The rejected row-code affine-image and sequential-simulation objects are accounting and proof plans. Compact production coefficient-to-view matrices, conditioned image inclusion, a witness-free adaptive simulator, and the KMAC256 and SHAKE256 hybrid remain absent.',
     },
     {
         identifier: 'setupFamilySimulationComposition',
@@ -1475,7 +1022,6 @@ const buildReductionDag = (): JsonValue => [
 const buildResidualLedgers = (): JsonValue => [
     {
         identifier: exactResidualLedgerIdentifiers[0],
-        status: 'unresolved',
         rows: [
             {
                 source: 'authenticated public transcript',
@@ -1495,8 +1041,8 @@ const buildResidualLedgers = (): JsonValue => [
             },
             {
                 source: 'common-proof knowledge soundness',
-                symbolicTerm: 'epsilon_common_construction_knowledge',
-                status: 'resolved',
+                symbolicTerm: 'unresolved_common_construction_knowledge_error',
+                status: 'unresolved',
             },
             {
                 source: 'collective setup composition',
@@ -1507,7 +1053,6 @@ const buildResidualLedgers = (): JsonValue => [
     },
     {
         identifier: exactResidualLedgerIdentifiers[1],
-        status: 'unresolved',
         rows: [
             {
                 source: 'single domain-separated quantum oracle',
@@ -1536,7 +1081,6 @@ const buildResidualLedgers = (): JsonValue => [
     },
     {
         identifier: exactResidualLedgerIdentifiers[2],
-        status: 'resolved',
         rows: [
             {
                 source: 'missing or inconsistent commitment and reveal',
@@ -1562,7 +1106,6 @@ const buildResidualLedgers = (): JsonValue => [
     },
     {
         identifier: exactResidualLedgerIdentifiers[3],
-        status: 'unresolved',
         rows: [
             {
                 source: 'joint structured setup samples',
@@ -1594,20 +1137,9 @@ const buildResidualLedgers = (): JsonValue => [
     },
 ];
 
-const buildNormativeCoverage = (): JsonValue =>
-    exactCoverageIdentifiers.map((identifier) => ({
-        identifier,
-        status: unresolvedNodeIdentifiers.includes(
-            identifier as (typeof unresolvedNodeIdentifiers)[number],
-        )
-            ? 'unresolved'
-            : 'covered',
-    }));
-
 const buildCertificateBody = (
     productionAuthority: JsonValue,
     sourceAuthority: readonly JsonValue[],
-    commonProofMappedSoundnessImport: CommonProofMappedSoundnessImportSummary,
 ): Record<string, JsonValue> => ({
     schemaIdentifier:
         'sealed-lattice/selected-collective-setup-security-evidence/v1',
@@ -1632,23 +1164,11 @@ const buildCertificateBody = (
     sampleRelations: buildSampleRelations(),
     jointSetupSampleHybridReduction: buildJointSetupSampleHybridReduction(),
     selectedSetupCorrectnessImport: buildSelectedSetupCorrectnessImport(),
-    commonProofMappedSoundnessImport,
-    constructionEvidenceImports: buildConstructionEvidenceImports(
-        sourceAuthority,
-        commonProofMappedSoundnessImport,
-    ),
+    constructionEvidenceImports: buildConstructionEvidenceImports(),
     protocolSchedule: buildProtocolSchedule(),
     hybridGames: buildHybridGames(),
     reductionDag: buildReductionDag(),
     residualLedgers: buildResidualLedgers(),
-    normativeCoverage: buildNormativeCoverage(),
-    closure: {
-        status: 'blocked',
-        assumptionLeaves: assumptionNodeIdentifiers,
-        unresolvedNonAssumptionLeaves: unresolvedNodeIdentifiers,
-        authorizationEffect: 'none',
-        capabilityMintingEffect: 'none',
-    },
 });
 
 export const buildSelectedCollectiveSetupSecurityEvidence = async (
@@ -1656,15 +1176,10 @@ export const buildSelectedCollectiveSetupSecurityEvidence = async (
     rootPath = repositoryRoot,
 ): Promise<JsonValue> => {
     validateProductionAuthority(productionAuthority);
-    const [sourceAuthority, commonProofMappedSoundnessImport] =
-        await Promise.all([
-            deriveSourceAuthority(rootPath),
-            deriveCommonProofMappedSoundnessImport(rootPath),
-        ]);
+    const sourceAuthority = await deriveSourceAuthority(rootPath);
     const certificateBody = buildCertificateBody(
         productionAuthority,
         sourceAuthority,
-        commonProofMappedSoundnessImport,
     );
     return {
         ...certificateBody,
@@ -2335,22 +1850,6 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
             'The selected setup correctness import is stale or incomplete.',
         );
     }
-    const commonProofMappedSoundnessImport =
-        requireCommonProofMappedSoundnessImportSummary(
-            record.commonProofMappedSoundnessImport,
-        );
-    const expectedCommonProofMappedSoundnessImport =
-        requireCommonProofMappedSoundnessImportSummary(
-            expectedRecord.commonProofMappedSoundnessImport,
-        );
-    if (
-        canonicalJsonText(commonProofMappedSoundnessImport) !==
-        canonicalJsonText(expectedCommonProofMappedSoundnessImport)
-    ) {
-        throw new Error(
-            'The common-proof mapped-soundness import is stale or altered.',
-        );
-    }
     const constructionEvidenceImports = requireArray(
         record.constructionEvidenceImports,
         'Construction evidence imports',
@@ -2362,12 +1861,7 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
     );
     if (
         canonicalJsonText(constructionEvidenceImports) !==
-        canonicalJsonText(
-            buildConstructionEvidenceImports(
-                expectedSourceAuthority,
-                expectedCommonProofMappedSoundnessImport,
-            ),
-        )
+        canonicalJsonText(buildConstructionEvidenceImports())
     ) {
         throw new Error(
             'A common-construction evidence import is stale or overstated.',
@@ -2401,7 +1895,7 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
         'defined',
         'resolved',
         'resolved',
-        'resolved',
+        'unresolved',
         'resolved',
         'unresolved',
         'resolved',
@@ -2449,19 +1943,8 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
         exactResidualLedgerIdentifiers,
         'Residual-ledger catalog',
     );
-    const expectedLedgerStatuses = [
-        'unresolved',
-        'unresolved',
-        'resolved',
-        'unresolved',
-    ] as const;
-    for (const [ledgerOrdinal, ledgerValue] of ledgers.entries()) {
+    for (const ledgerValue of ledgers) {
         const ledger = requireRecord(ledgerValue, 'Residual ledger');
-        if (ledger.status !== expectedLedgerStatuses[ledgerOrdinal]) {
-            throw new Error(
-                'A residual-ledger status is stale or inconsistent with its rows.',
-            );
-        }
         const rows = requireArray(ledger.rows, 'Residual ledger rows');
         if (rows.length === 0) {
             throw new Error('A residual ledger may not be empty.');
@@ -2477,64 +1960,14 @@ export const validateSelectedCollectiveSetupSecurityEvidence = (
                     'Numeric estimator bit costs may not appear in a residual ledger.',
                 );
             }
+            if (
+                row.status !== 'assumed' &&
+                row.status !== 'resolved' &&
+                row.status !== 'unresolved'
+            ) {
+                throw new Error('A residual-ledger row has an invalid status.');
+            }
         }
-        if (
-            ledger.status === 'resolved' &&
-            rows.some(
-                (rowValue) =>
-                    requireRecord(rowValue, 'Residual ledger row').status ===
-                    'unresolved',
-            )
-        ) {
-            throw new Error(
-                'A resolved residual ledger contains an unresolved row.',
-            );
-        }
-    }
-
-    const normativeCoverage = requireArray(
-        record.normativeCoverage,
-        'Normative coverage',
-    );
-    validateIdentifierCatalog(
-        normativeCoverage,
-        exactCoverageIdentifiers,
-        'Normative coverage catalog',
-    );
-    for (const coverageValue of normativeCoverage) {
-        const coverage = requireRecord(
-            coverageValue,
-            'Normative coverage item',
-        );
-        const identifier = requireString(
-            coverage.identifier,
-            'Normative coverage identifier',
-        );
-        const expectedStatus = unresolvedNodeIdentifiers.includes(
-            identifier as (typeof unresolvedNodeIdentifiers)[number],
-        )
-            ? 'unresolved'
-            : 'covered';
-        if (coverage.status !== expectedStatus) {
-            throw new Error(
-                'A normative coverage status is overstated or stale.',
-            );
-        }
-    }
-
-    const closure = requireRecord(record.closure, 'Security closure result');
-    if (
-        closure.status !== 'blocked' ||
-        closure.authorizationEffect !== 'none' ||
-        closure.capabilityMintingEffect !== 'none' ||
-        canonicalJsonText(closure.assumptionLeaves ?? null) !==
-            canonicalJsonText(assumptionNodeIdentifiers) ||
-        canonicalJsonText(closure.unresolvedNonAssumptionLeaves ?? null) !==
-            canonicalJsonText(unresolved)
-    ) {
-        throw new Error(
-            'The security closure result is inconsistent or overstated.',
-        );
     }
 
     const expectedBody = { ...expectedRecord };

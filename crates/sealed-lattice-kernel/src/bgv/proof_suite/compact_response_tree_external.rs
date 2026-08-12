@@ -1387,7 +1387,7 @@ mod tests {
             CompactResponseTreeRetentionDriver::new(&merkle_geometries, proof_geometry.responses())
                 .expect("retained-tree coordinator starts");
         let mut storage = TestStorage::default();
-        let response_values = vec![
+        let response_values = [
             vec![
                 OwnedLeafValue::BaseField(vec![base(11)]),
                 OwnedLeafValue::BaseField(vec![base(13)]),

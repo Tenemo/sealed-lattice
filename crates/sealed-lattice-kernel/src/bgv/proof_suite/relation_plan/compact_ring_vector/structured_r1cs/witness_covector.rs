@@ -121,7 +121,7 @@ impl CompactStructuredWitnessCovectorGeometry {
             || !ring_degree.is_power_of_two()
             || padded_row_count < ring_degree
             || !padded_row_count.is_power_of_two()
-            || padded_row_count % ring_degree != 0
+            || !padded_row_count.is_multiple_of(ring_degree)
             || matrices.row_count != padded_row_count
             || matrices.witness_length != relation.padded_witness_element_count
         {
@@ -1113,7 +1113,7 @@ mod tests {
                 host_memory.handoff_initialization_resident_owned_byte_length(),
                 host_memory.handoff_maximum_resident_owned_byte_length(),
             ),
-            (1_840, 1_040, 14_160, 169_110_040, 174_352_000,)
+            (1_840, 1_072, 14_192, 169_110_072, 174_352_032,)
         );
     }
 }

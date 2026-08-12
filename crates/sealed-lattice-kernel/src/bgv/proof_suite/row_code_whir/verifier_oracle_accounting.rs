@@ -833,13 +833,13 @@ mod tests {
             relation_variant.proof_privacy_mode(),
             ProofPrivacyMode::SecretBearing
         );
-        assert_eq!(accounting.maximum_transcript_hash_query_count(), 604_801);
+        assert_eq!(accounting.maximum_transcript_hash_query_count(), 604_817);
         assert_eq!(accounting.logical_verifier_message_count(), 4_272);
         assert_eq!(accounting.transcript_output_bit_length(), 512);
-        assert_eq!(accounting.maximum_verifier_hash_query_count(), 695_547);
+        assert_eq!(accounting.maximum_verifier_hash_query_count(), 695_585);
         assert_eq!(
             accounting.maximum_accepting_database_equation_count(),
-            695_547
+            695_585
         );
         let merkle_hash_query_count = accounting
             .merkle_rows()
@@ -891,18 +891,18 @@ mod tests {
                 .iter()
                 .map(|row| row.initial_hash_query_count())
                 .sum::<u64>(),
-            2_782
+            2_783
         );
         assert_eq!(
             streaming_rows
                 .iter()
                 .map(|row| row.leaf_hash_query_count().expect("the leaf count adds"))
                 .sum::<u64>(),
-            20_477
+            20_487
         );
         assert_eq!(
             accounting.distinct_streaming_initial_equation_count(),
-            2_782
+            2_783
         );
         assert_eq!(accounting.repeated_streaming_initial_hash_query_count(), 0);
         assert_eq!(
@@ -911,7 +911,7 @@ mod tests {
                 .map(|row| { row.transition_hash_query_count() + row.final_hash_query_count() })
                 .sum::<u64>()
                 + accounting.distinct_streaming_initial_equation_count(),
-            20_477
+            20_487
         );
         assert!(accounting.merkle_rows().iter().all(|row| {
             row.parent_output_bit_length() == 512

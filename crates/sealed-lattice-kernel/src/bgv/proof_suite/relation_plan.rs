@@ -68,7 +68,7 @@ pub(crate) use model::{
     RelationRadixProductTermDescriptor, negacyclic_automorphism_semantics_match,
 };
 mod checking;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_ring_vector;
 mod expressions;
 
@@ -166,7 +166,7 @@ pub(crate) use committed_material_adapter::CommittedMaterialSourcePolynomialAdap
 pub(crate) use committed_material_adapter::fused_vss_radix_51_source_provider_memory_accounting;
 #[cfg(test)]
 pub(crate) use committed_material_adapter::selected_vss_source_provider_memory_accounting;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use compact_ring_vector::{
     COMPACT_STRUCTURED_WITNESS_COVECTOR_ELEMENT_CHUNK_COUNT,
     CompactAuthenticatedAssignmentMemoryGeometry, CompactLookupRelationGeometry,
@@ -195,10 +195,11 @@ pub(crate) use interpreter::{
 };
 #[cfg(test)]
 pub(crate) use key_relation::MODULAR_QUOTIENT_BIT_COUNT;
+#[cfg(test)]
+pub(crate) use key_relation::{MODULAR_QUOTIENT_MAXIMUM, MODULAR_QUOTIENT_MINIMUM};
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 pub(crate) use key_relation::{
-    MODULAR_QUOTIENT_MAXIMUM, MODULAR_QUOTIENT_MINIMUM, MODULAR_QUOTIENT_VALUE_COUNT,
-    TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE,
+    MODULAR_QUOTIENT_VALUE_COUNT, TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE,
 };
 pub(crate) use key_relation::{PublicKeyShareRelationPlanInput, SameSecretRelationPlanInput};
 pub(crate) use public_aggregate::{
@@ -224,7 +225,7 @@ pub(crate) use same_secret_anchor::{
     SameSecretSourceLayout, compile_same_secret_relation_plan,
     compile_same_secret_relation_with_source_layout,
 };
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use setup_key_relation_adapter::compact_public_key_assignment_source_provider_memory_accounting;
 #[cfg(test)]
 pub(crate) use setup_key_relation_adapter::same_secret_source_provider_memory_accounting;

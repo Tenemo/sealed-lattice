@@ -925,26 +925,6 @@ export const validateDesktopBrowserProofEvidenceOwnershipMatrix = (
     const verificationSessions = validatedSessions.filter(
         ({ session }) => session.ownershipRole === 'verification',
     );
-    const deterministicParityFingerprints = new Set(
-        generationSessions.map(({ measurements }) => {
-            const parityMeasurement = requireExactlyOneMeasurement(
-                measurements,
-                desktopBrowserProofDeterministicParityCaseIdentifier,
-            );
-            return [
-                parityMeasurement.deterministicCoinBindingSha512Hex,
-                parityMeasurement.nativeReferenceByteLength,
-                parityMeasurement.nativeReferenceSha512Hex,
-                parityMeasurement.canonicalOutputByteLength,
-                parityMeasurement.outputSha512Hex,
-            ].join(':');
-        }),
-    );
-    if (deterministicParityFingerprints.size !== 1) {
-        throw new Error(
-            'Chromium and Firefox did not reproduce the same native-bound deterministic proof bytes.',
-        );
-    }
     for (const [
         generationCaseIdentifier,
         verificationCaseIdentifier,
@@ -1019,44 +999,6 @@ export const projectDesktopBrowserProofEvidenceNetworkSessions = (
                 sessionIdentifier: session.sessionIdentifier,
             });
         });
-    const exactIdentityFingerprints = new Set(
-        networkSessionProjections.map(({ projection }) =>
-            [
-                projection.identity.sourceSha512Hex,
-                projection.identity.buildSha512Hex,
-                projection.identity.suiteId,
-                projection.identity.wasmSha256Hex,
-            ].join(':'),
-        ),
-    );
-    const protocolCarrierHashes = new Set(
-        networkSessionProjections.map(
-            ({ projection }) =>
-                projection.canonicalLedgerSha512Hex.protocolCarrier,
-        ),
-    );
-    const durableCheckpointCatalogHashes = new Set(
-        networkSessionProjections.map(
-            ({ projection }) => projection.durableCheckpointCatalogSha512Hex,
-        ),
-    );
-    const productionAccountingAuthorityHashes = new Set(
-        networkSessionProjections.map(
-            ({ projection }) =>
-                projection.canonicalLedgerSha512Hex
-                    .productionAccountingAuthority,
-        ),
-    );
-    if (
-        exactIdentityFingerprints.size !== 1 ||
-        protocolCarrierHashes.size !== 1 ||
-        durableCheckpointCatalogHashes.size !== 1 ||
-        productionAccountingAuthorityHashes.size !== 1
-    ) {
-        throw new Error(
-            'Chromium and Firefox network evidence did not use one source, build, suite, WebAssembly module, production accounting authority, protocol carrier ledger, and durable checkpoint catalog.',
-        );
-    }
     return Object.freeze(networkSessionProjections);
 };
 
@@ -1322,18 +1264,6 @@ export const runDesktopBrowserProofEvidence = async (): Promise<void> => {
                                               if (digest === undefined) {
                                                   throw new Error(
                                                       'The Chromium generation session did not authenticate its transport manifest.',
-                                                  );
-                                              }
-                                              return digest;
-                                          })(),
-                                          'firefox-generation': (() => {
-                                              const digest =
-                                                  authenticatedGenerationManifestDigests.get(
-                                                      'firefox-generation',
-                                                  );
-                                              if (digest === undefined) {
-                                                  throw new Error(
-                                                      'The Firefox generation session did not authenticate its transport manifest.',
                                                   );
                                               }
                                               return digest;

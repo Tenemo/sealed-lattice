@@ -2,13 +2,25 @@
 
 This package contains deterministic protocol-development helpers for transcript rules, canonical selection, poll validation, structural threshold-count calculation, roster and manifest checks, setup artifact construction, and browser-local durable-state coordination. Roster-count helpers derive the documented formulas for `3 <= n <= 20`, and the intended manifest boundary admits `2 <= optionCount <= 20`; those structural ranges do not make a non-selected profile supported.
 
-These helpers validate their documented inputs and recompute local bindings, but they do not establish a complete ceremony or certify parameter security, supported-phone runtime behavior, or participant acceptance. The exact `n = 10`, `optionCount = 10` suite and build is the sole prototype completion and evidence target. Other roster sizes in `3..20` are structurally admitted but remain unqualified and unsupported for cryptographic or runtime use. Other option counts in `2..20` are admitted and deterministically compiled but need no generated cryptographic evidence or runtime qualification for current completion. The selected source profile binds ten options. Its current mapped-soundness vector contains exact-ten structural arithmetic and keeps its QROM transform and composition imports unresolved, while other construction, resource, checkpoint, and runtime records still describe the superseded twenty-option candidate. None can freeze the suite. The participant-facing verification components that exist cross the Rust/WASM kernel and the public SDK boundaries described in the root documentation.
+These helpers validate their documented inputs and recompute local bindings, but they do not establish a complete ceremony or certify parameter security, supported-phone runtime behavior, or participant acceptance. The exact `n = 10`, `optionCount = 10` suite and build is the sole prototype completion and evidence target. Other roster sizes in `3..20` are structurally admitted but remain unqualified and unsupported for cryptographic or runtime use. Other option counts in `2..20` are admitted and deterministically compiled but need no generated cryptographic evidence or runtime qualification for current completion. The selected source profile binds ten options. The rejected row-code mapped-soundness vector and action-composition catalog were removed instead of being regenerated after its WHIR schedule changed. The exact-ten proof multiplicities remain derived inventory only. Other construction, resource, checkpoint, and runtime records still describe superseded candidates, and none can freeze the suite. The participant-facing verification components that exist cross the Rust/WASM kernel and the public SDK boundaries described in the root documentation.
+
+The tracked exact-ten collective-setup evidence record was regenerated through
+a guarded Rust production-authority export and binds 44 source paths. Its
+ordinary Node consumer later reads the expected `productionAuthority` from that
+same record, so it checks canonical internal consistency and bound source hashes
+rather than independently rederiving production authority. Handwritten status
+catalogs drive its closure summary, and its joint setup-sample transition merely
+names the broad structured-RLWE/circular-KDM assumption. Its recorded schedule
+also places Galois publication after the frozen round-one aggregate instead of
+inside the combined post-VSS packet. Treat it as nonqualifying development
+bookkeeping. The four compact common-construction imports, two setup and
+collective composition leaves, and exact joint reduction remain open; the
+record has no production capability consumer and cannot select a suite.
 
 The implemented row-code/WHIR proof body is operationally rejected as the
 mobile proving direction. The lattice-PCS replacement is also rejected because
 its available extractor and opening lifecycle do not close this protocol's
-post-quantum browser path. A test- or measurement-feature-gated compact
-Goldilocks ring-vector candidate
+post-quantum browser path. A test-only compact Goldilocks ring-vector candidate
 preserves the complete production family inventory and keeps accepted BGV
 objects in their existing RNS representation. The standalone public-key slice
 now has a production-derived structured relation and independent interpreter,
@@ -16,7 +28,7 @@ two commitment epochs, all CFW inner and outer masks, code-switch and WHIR
 static catalogs, canonical proof and public-input codecs, one salted Merkle
 commitment per logical response, and complete live-prefix query schedules for
 every production packing geometry. The factor-one executable semantic owner is
-complete only as a source-level, feature/test-gated standalone development
+complete only as a source-level, test-only standalone development
 owner over reduced fixtures and the checked 82-move schedule; it is not
 production-size execution or noninteractive proof closure. Interactive
 masking, emitted-byte correspondence, and conditional CDHZ/QROM composition
@@ -74,6 +86,12 @@ oracle is
 owned once by the canonical response catalog; its two later verifier-message
 groups open their sorted unique union through bounded canonical response counts.
 These are static development owners, not an accepted proof path.
+
+The measurement feature contains only bounded measurement owners and their
+ring-native arithmetic. The rejected row-code affine-image and sequential-
+simulation structures are accounting and proof plans: their rank equality is
+not independently derived from matrices, and they do not sample or emit a
+witness-free verifier view.
 
 The current packing-factor proof, provisional WASM-peak, and scratch triples
 are `(26,927,670, 385,505,540, 640,811,508)`,

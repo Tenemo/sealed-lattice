@@ -138,6 +138,11 @@ struct CompactNegacyclicProductAddress {
     centered_offset: u64,
 }
 
+type PreparedCompactNegacyclicProduct = (
+    CompactNegacyclicProductAddress,
+    Zeroizing<Vec<ProofBaseFieldElement>>,
+);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct CompactCenteredPrivateVectorAddress {
     private_vector_first_column_ordinal: u64,
@@ -237,11 +242,8 @@ impl CompactStructuredR1csRowSourceGeometry {
             .ok_or(CommonProofProverError::CountOverflow)?;
         let product_cache_catalog_byte_length = negacyclic_product_count
             .checked_mul(
-                u64::try_from(core::mem::size_of::<(
-                    CompactNegacyclicProductAddress,
-                    Zeroizing<Vec<ProofBaseFieldElement>>,
-                )>())
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
+                u64::try_from(core::mem::size_of::<PreparedCompactNegacyclicProduct>())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
             )
             .ok_or(CommonProofProverError::CountOverflow)?;
         let product_cache_resident_owned_byte_length = product_cache_payload_byte_length
@@ -1378,7 +1380,7 @@ pub(super) enum CompactStructuredR1csRowSourcePreparationPoll<
         step: CompactStructuredR1csRowSourcePreparationStep,
         completed_work_unit_count: u64,
     },
-    Complete(CompactStructuredR1csRowSource<'source, Assignment>),
+    Complete(Box<CompactStructuredR1csRowSource<'source, Assignment>>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1693,10 +1695,7 @@ struct CompactNegacyclicProductPreparation {
     private_transform: Option<Zeroizing<Vec<ProofBaseFieldElement>>>,
     product_transform: Option<Zeroizing<Vec<ProofBaseFieldElement>>>,
     folded_product: Option<Zeroizing<Vec<ProofBaseFieldElement>>>,
-    prepared_products: Vec<(
-        CompactNegacyclicProductAddress,
-        Zeroizing<Vec<ProofBaseFieldElement>>,
-    )>,
+    prepared_products: Vec<PreparedCompactNegacyclicProduct>,
     phase: CompactNegacyclicProductPreparationPhase,
 }
 
@@ -2110,13 +2109,7 @@ impl CompactNegacyclicProductPreparation {
     fn finish(
         mut self,
         expected_product_count: usize,
-    ) -> Result<
-        Vec<(
-            CompactNegacyclicProductAddress,
-            Zeroizing<Vec<ProofBaseFieldElement>>,
-        )>,
-        CommonProofProverError,
-    > {
+    ) -> Result<Vec<PreparedCompactNegacyclicProduct>, CommonProofProverError> {
         if self.phase != CompactNegacyclicProductPreparationPhase::Complete
             || self.prepared_products.len() != expected_product_count
         {
@@ -2154,12 +2147,7 @@ pub(super) struct CompactStructuredR1csRowSourcePreparation<
     lookup_preparation: Option<CompactLookupLogDerivativeEvaluationCachePreparation>,
     lookup_log_derivative_cache: Option<CompactLookupLogDerivativeEvaluationCache>,
     product_preparation: Option<CompactNegacyclicProductPreparation>,
-    negacyclic_products: Option<
-        Vec<(
-            CompactNegacyclicProductAddress,
-            Zeroizing<Vec<ProofBaseFieldElement>>,
-        )>,
-    >,
+    negacyclic_products: Option<Vec<PreparedCompactNegacyclicProduct>>,
     phase: CompactStructuredR1csRowSourcePreparationPhase,
 }
 
@@ -2285,7 +2273,7 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
                         return Err(CommonProofProverError::InvalidInput);
                     }
                     return Ok(CompactStructuredR1csRowSourcePreparationPoll::Complete(
-                        CompactStructuredR1csRowSource {
+                        Box::new(CompactStructuredR1csRowSource {
                             relation: self.relation,
                             matrices: self.matrices.clone(),
                             assignment: self.assignment,
@@ -2294,7 +2282,7 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
                                 .lookup_log_derivative_cache
                                 .ok_or(CommonProofProverError::InvalidInput)?,
                             geometry: self.geometry,
-                        },
+                        }),
                     ));
                 }
             }
@@ -2309,10 +2297,7 @@ pub(super) struct CompactStructuredR1csRowSource<
     relation: &'source CompactPublicKeyRelationCatalog,
     matrices: CompactStructuredR1csCatalog,
     assignment: &'source Assignment,
-    negacyclic_products: Vec<(
-        CompactNegacyclicProductAddress,
-        Zeroizing<Vec<ProofBaseFieldElement>>,
-    )>,
+    negacyclic_products: Vec<PreparedCompactNegacyclicProduct>,
     lookup_log_derivative_cache: CompactLookupLogDerivativeEvaluationCache,
     geometry: CompactStructuredR1csRowSourceGeometry,
 }
@@ -4349,19 +4334,14 @@ mod tests {
             .begin_lookup_inverse_materialization(lookup_challenge)
             .expect("bounded lookup materialization starts");
         let mut lookup_materialization_poll_count = 0_u64;
-        loop {
-            match lookup_materializer
-                .advance(8_192)
-                .expect("bounded lookup materialization poll")
-            {
-                CompactLookupInverseMaterializationPoll::ArithmeticStepCompleted {
-                    processed_element_count,
-                } => {
-                    assert!((1..=8_192).contains(&processed_element_count));
-                    lookup_materialization_poll_count += 1;
-                }
-                CompactLookupInverseMaterializationPoll::Complete => break,
-            }
+        while let CompactLookupInverseMaterializationPoll::ArithmeticStepCompleted {
+            processed_element_count,
+        } = lookup_materializer
+            .advance(8_192)
+            .expect("bounded lookup materialization poll")
+        {
+            assert!((1..=8_192).contains(&processed_element_count));
+            lookup_materialization_poll_count += 1;
         }
         assert_eq!(lookup_materialization_poll_count, 233);
         let assignment = lookup_materializer
@@ -4403,7 +4383,7 @@ mod tests {
                     row_source_preparation_poll_count += 1;
                 }
                 CompactStructuredR1csRowSourcePreparationPoll::Complete(row_source) => {
-                    break row_source;
+                    break *row_source;
                 }
             }
         };
@@ -4554,7 +4534,7 @@ mod tests {
                         completed_work_unit_count;
                 }
                 CompactStructuredR1csRowSourcePreparationPoll::Complete(row_source) => {
-                    break row_source;
+                    break *row_source;
                 }
             }
         };
@@ -4797,34 +4777,34 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let counting_row_source = CountingCompactCfwExternalRowSource {
-            source: &row_source,
-            evaluated_row_count: Cell::new(0),
-        };
-        let mut external_prover = CompactCfwExternalProverState::prepare(
-            &counting_row_source,
-            compact_mask_material,
-            compact_challenge_from_production(
-                ProofChallengeExtensionElement::from_canonical_coordinates([7, 11, 13, 17, 19])
-                    .expect("the compact constraint challenge is canonical"),
-            ),
-            equality_point,
-        )
-        .expect("the production row source connects to the external CFW prover");
-        let mut storage = TestStorage::default();
-        assert_eq!(
-            external_prover
-                .advance_round_polynomial(&counting_row_source, &mut storage)
-                .expect("one bounded production row-source poll advances"),
-            None
-        );
-        assert_eq!(counting_row_source.evaluated_row_count.get(), 16_384);
-        assert_eq!(
-            counting_row_source.evaluated_row_count.get() * COMPACT_CFW_MATRIX_COUNT,
-            49_152
-        );
-        drop(external_prover);
-        drop(counting_row_source);
+        {
+            let counting_row_source = CountingCompactCfwExternalRowSource {
+                source: &row_source,
+                evaluated_row_count: Cell::new(0),
+            };
+            let mut external_prover = CompactCfwExternalProverState::prepare(
+                &counting_row_source,
+                compact_mask_material,
+                compact_challenge_from_production(
+                    ProofChallengeExtensionElement::from_canonical_coordinates([7, 11, 13, 17, 19])
+                        .expect("the compact constraint challenge is canonical"),
+                ),
+                equality_point,
+            )
+            .expect("the production row source connects to the external CFW prover");
+            let mut storage = TestStorage::default();
+            assert_eq!(
+                external_prover
+                    .advance_round_polynomial(&counting_row_source, &mut storage)
+                    .expect("one bounded production row-source poll advances"),
+                None
+            );
+            assert_eq!(counting_row_source.evaluated_row_count.get(), 16_384);
+            assert_eq!(
+                counting_row_source.evaluated_row_count.get() * COMPACT_CFW_MATRIX_COUNT,
+                49_152
+            );
+        }
 
         let first_product_address = matrices
             .ordered_negacyclic_product_addresses(&relation)

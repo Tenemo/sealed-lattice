@@ -4,6 +4,7 @@
         ".": {
             "entry": [
                 "tests/**/*.test.ts",
+                "tools/ci/desktop-browser-primitive-measurement-page.ts",
                 "tools/ci/packed-package-smoke.mjs",
                 "tools/ci/sdk-package-tsdown.config.ts",
             ],

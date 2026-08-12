@@ -8,9 +8,7 @@ import {
     canonicalJsonText,
     parseJsonValue,
     requireSelectedCollectiveSetupSecurityClosure,
-    selectedCommonProofMappedSoundnessEvidencePath,
     selectedCollectiveSetupSecurityEvidencePath,
-    validateCommonProofMappedSoundnessEvidence,
     validateSelectedCollectiveSetupSecurityEvidence,
     type JsonValue,
 } from '#tools/ci/selected-collective-setup-security-evidence';
@@ -54,20 +52,14 @@ const supersededTwentyOptionProductionAuthority = (
 describe('Selected collective-setup security evidence', () => {
     let checkedEvidence: JsonValue;
     let expectedEvidence: JsonValue;
-    let mappedSoundnessEvidence: JsonValue;
     let trackedEvidence: JsonValue;
 
     beforeAll(async () => {
-        const [trackedEvidenceText, mappedSoundnessEvidenceText] =
-            await Promise.all([
-                readFile(selectedCollectiveSetupSecurityEvidencePath, 'utf8'),
-                readFile(
-                    selectedCommonProofMappedSoundnessEvidencePath,
-                    'utf8',
-                ),
-            ]);
+        const trackedEvidenceText = await readFile(
+            selectedCollectiveSetupSecurityEvidencePath,
+            'utf8',
+        );
         trackedEvidence = parseJsonValue(trackedEvidenceText);
-        mappedSoundnessEvidence = parseJsonValue(mappedSoundnessEvidenceText);
         const productionAuthority = requireRecord(trackedEvidence)
             .productionAuthority as JsonValue;
         expectedEvidence =
@@ -89,6 +81,7 @@ describe('Selected collective-setup security evidence', () => {
             physicalProofApplicationCount: 73,
             readyForClosure: false,
             unresolvedNonAssumptionLeaves: [
+                'commonConstructionKnowledgeSoundness',
                 'commonConstructionQromTransform',
                 'commonProofQromComposition',
                 'commonConstructionMaskingCorrespondence',
@@ -163,16 +156,9 @@ describe('Selected collective-setup security evidence', () => {
             throw new Error('Expected QROM graph missing evidence.');
         }
         expect(qromMissingEvidence).toContain(
-            'independently derived fixed-output oracle graph now covers',
+            'No complete transported compact proof',
         );
-        expect(qromImport?.ownerSourcePaths).toEqual(
-            expect.arrayContaining([
-                'crates/sealed-lattice-kernel/src/foundation/hash.rs',
-                'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
-                'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate.rs',
-                'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/fixed_output_oracle_graph.rs',
-            ]),
-        );
+        expect(qromImport?.ownerSourcePaths).toEqual([]);
         const qromCompositionImport = constructionEvidenceImports
             .map((value) => requireRecord(value))
             .find((value) => value.identifier === 'commonProofQromComposition');
@@ -188,15 +174,9 @@ describe('Selected collective-setup security evidence', () => {
             throw new Error('Expected QROM composition missing evidence.');
         }
         expect(qromCompositionMissingEvidence).toContain(
-            'conservative 103-physical-proof and 159-logical-instance union now derives',
+            'No compact emitted-byte census',
         );
-        expect(qromCompositionImport?.ownerSourcePaths).toEqual(
-            expect.arrayContaining([
-                'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
-                'crates/sealed-lattice-kernel/src/bgv/proof_suite/row_code_whir/construction_plan/theorem_certificate/soundness_composition.rs',
-                'test-vectors/selected-common-proof-mapped-soundness-evidence.json',
-            ]),
-        );
+        expect(qromCompositionImport?.ownerSourcePaths).toEqual([]);
         const quantumRandomOracleLedger = requireArray(record.residualLedgers)
             .map((value) => requireRecord(value))
             .find((value) => value.identifier === 'qromInvalidAcceptance');
@@ -215,22 +195,9 @@ describe('Selected collective-setup security evidence', () => {
                 }),
             ]),
         );
-        expect(record.commonProofMappedSoundnessImport).toEqual({
-            actionTopCount: 10,
-            adversarialQueryBudgetDecimal: ((1n << 80n) - 1n).toString(),
-            conditionalOracleModel:
-                'single-fixed-512-bit-qro-with-precommitted-auxiliary-restriction-v1',
-            constructionPlanIdentityCount: 12,
-            fixedOutputOracleGraphIdentityCount: 12,
-            formatVersion: 5,
-            logicalRelationInstanceCount: 159,
-            oracleOutputBitLength: 512,
-            physicalProofApplicationCount: 103,
-            rowCount: 12,
-        });
     });
 
-    it('accepts the tracked evidence only when production and source authority are current', () => {
+    it('accepts tracked evidence only when production and source authority are current', () => {
         expect(() =>
             validateSelectedCollectiveSetupSecurityEvidence(
                 trackedEvidence,
@@ -252,7 +219,7 @@ describe('Selected collective-setup security evidence', () => {
         );
     });
 
-    it('round-trips the exact source authority into every construction evidence import', () => {
+    it('keeps missing compact-construction evidence separate from source authority', () => {
         const checkedRecord = requireRecord(checkedEvidence);
         const expectedRecord = requireRecord(expectedEvidence);
         const sourceAuthority = requireArray(checkedRecord.sourceAuthority);
@@ -263,37 +230,18 @@ describe('Selected collective-setup security evidence', () => {
             canonicalJsonText(expectedSourceAuthority as JsonValue),
         );
 
-        const sourceRowsByPath = new Map(
-            sourceAuthority.map((sourceValue) => {
-                const source = requireRecord(sourceValue);
-                if (typeof source.relativePath !== 'string') {
-                    throw new Error('Expected a source-authority path.');
-                }
-                return [source.relativePath, source] as const;
-            }),
-        );
         const constructionEvidenceImports = requireArray(
             checkedRecord.constructionEvidenceImports,
         );
         for (const importValue of constructionEvidenceImports) {
             const constructionEvidenceImport = requireRecord(importValue);
-            const ownerSourceRows = requireArray(
-                constructionEvidenceImport.ownerSourcePaths,
-            ).map((ownerSourcePathValue) => {
-                if (typeof ownerSourcePathValue !== 'string') {
-                    throw new Error('Expected a construction owner path.');
-                }
-                const sourceRow = sourceRowsByPath.get(ownerSourcePathValue);
-                if (sourceRow === undefined) {
-                    throw new Error(
-                        `Missing source-authority row for ${ownerSourcePathValue}.`,
-                    );
-                }
-                return sourceRow;
-            });
-            expect(constructionEvidenceImport.checkedArtifactDigest).toBe(
-                canonicalJsonSha256(ownerSourceRows as JsonValue),
+            expect(constructionEvidenceImport.observedStatus).toBe(
+                'unresolved',
             );
+            expect(constructionEvidenceImport.ownerSourcePaths).toEqual([]);
+            expect(
+                constructionEvidenceImport.checkedArtifactDigest,
+            ).toBeUndefined();
         }
         expect(() =>
             validateSelectedCollectiveSetupSecurityEvidence(
@@ -343,44 +291,6 @@ describe('Selected collective-setup security evidence', () => {
             ).toThrow(
                 'A common-construction evidence import is stale or overstated.',
             );
-        }
-    });
-
-    it('refuses mapped soundness without every independently derived graph certificate', () => {
-        const hostileMappedEvidenceRecords = [
-            structuredClone(mappedSoundnessEvidence),
-            structuredClone(mappedSoundnessEvidence),
-            structuredClone(mappedSoundnessEvidence),
-            structuredClone(mappedSoundnessEvidence),
-            structuredClone(mappedSoundnessEvidence),
-            structuredClone(mappedSoundnessEvidence),
-        ] as Record<string, unknown>[];
-        requireRecord(
-            requireArray(hostileMappedEvidenceRecords[0].rows)[0],
-        ).fixedOutputOracleGraphIdentityHashHex = '0'.repeat(128);
-        delete requireRecord(
-            requireArray(hostileMappedEvidenceRecords[1].rows)[0],
-        ).fixedOutputOracleGraphIdentityHashHex;
-        const duplicatedIdentityRows = requireArray(
-            hostileMappedEvidenceRecords[2].rows,
-        );
-        requireRecord(
-            duplicatedIdentityRows[1],
-        ).fixedOutputOracleGraphIdentityHashHex = requireRecord(
-            duplicatedIdentityRows[0],
-        ).fixedOutputOracleGraphIdentityHashHex;
-        hostileMappedEvidenceRecords[3].formatVersion = 4;
-        requireRecord(
-            requireArray(hostileMappedEvidenceRecords[4].rows)[0],
-        ).adversarialQueryBoundDecimal = ((1n << 80n) - 2n).toString();
-        requireArray(hostileMappedEvidenceRecords[5].rows).reverse();
-
-        for (const hostileMappedEvidence of hostileMappedEvidenceRecords) {
-            expect(() =>
-                validateCommonProofMappedSoundnessEvidence(
-                    hostileMappedEvidence as JsonValue,
-                ),
-            ).toThrow();
         }
     });
 
@@ -501,15 +411,8 @@ describe('Selected collective-setup security evidence', () => {
                 expectedEvidence,
             ),
         ).toThrow(
-            'Collective-setup security closure is blocked by: commonConstructionQromTransform, commonProofQromComposition, commonConstructionMaskingCorrespondence, setupFamilySimulationComposition, collectiveSetupHybridComposition.',
+            'Collective-setup security closure is blocked by: commonConstructionKnowledgeSoundness, commonConstructionQromTransform, commonProofQromComposition, commonConstructionMaskingCorrespondence, setupFamilySimulationComposition, collectiveSetupHybridComposition.',
         );
-        const closure = requireRecord(requireRecord(checkedEvidence).closure);
-        expect(closure).toMatchObject({
-            status: 'blocked',
-            authorizationEffect: 'none',
-            capabilityMintingEffect: 'none',
-        });
-        expect(JSON.stringify(checkedEvidence)).not.toContain('VerifiedSetup');
     });
 
     it('refuses stale production relation-plan hashes', () => {

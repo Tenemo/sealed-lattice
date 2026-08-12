@@ -4,7 +4,7 @@
 ///
 /// Every proof-family ledger uses the same `2^80 - 1` budget rather than
 /// selecting a family-local value.
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) const DECLARED_ADVERSARIAL_QUERY_BUDGET: u128 = (1_u128 << 80) - 1;
 
 mod authenticated_mailbox;
@@ -163,13 +163,13 @@ pub(crate) use prepared_signed_carrier::{
     retain_prepared_signed_carrier,
 };
 pub(crate) use private_randomness::PersistentProofWitnessCoinBinding;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use private_randomness::generator_hybrid::{
     MaskGeneratorHonestAbortEvent, MaskGeneratorHybridAssumption, MaskGeneratorHybridHop,
     MaskGeneratorHybridLoss, action_root_expansion_summary, deployed_mask_generator_hybrid,
     quantum_mask_generator_hybrid,
 };
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use private_randomness::generator_hybrid::{
     deployed_private_stream_hybrid, quantum_private_stream_hybrid,
 };

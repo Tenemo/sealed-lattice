@@ -1308,11 +1308,11 @@ mod tests {
             .checked_sub(aggregate_opening_byte_length)
             .expect("the same-secret proof contains its aggregate opening");
         assert_eq!(same_secret.canonical_header_byte_length, 902);
-        assert_eq!(same_secret.canonical_family_body_byte_length, 5_813_652);
-        assert_eq!(aggregate_opening_byte_length, 2_942_104);
+        assert_eq!(same_secret.canonical_family_body_byte_length, 5_814_884);
+        assert_eq!(aggregate_opening_byte_length, 2_943_336);
         assert_eq!(non_aggregate_prefix_byte_length, 2_872_450);
-        assert_eq!(same_secret.canonical_proof_byte_length, 5_814_554);
-        assert_eq!(same_secret.nominal_proof_overage_byte_length, 571_674);
+        assert_eq!(same_secret.canonical_proof_byte_length, 5_815_786);
+        assert_eq!(same_secret.nominal_proof_overage_byte_length, 572_906);
         assert_eq!(same_secret.automatic_acceptance_overage_byte_length, 0);
         assert_eq!(
             same_secret.external_memory.peak_stored_byte_length,

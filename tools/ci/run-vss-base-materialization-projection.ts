@@ -29,20 +29,15 @@ export const runVssBaseMaterializationProjection = async (): Promise<void> => {
         },
         async (runLog) => {
             if (commandArguments[0] === 'fused-radix-51-owners') {
-                const [
-                    ,
-                    nativeEvidenceArgument,
-                    chromiumEvidenceArgument,
-                    firefoxEvidenceArgument,
-                ] = commandArguments;
+                const [, nativeEvidenceArgument, chromiumEvidenceArgument] =
+                    commandArguments;
                 if (
                     nativeEvidenceArgument === undefined ||
                     chromiumEvidenceArgument === undefined ||
-                    firefoxEvidenceArgument === undefined ||
-                    commandArguments.length !== 4
+                    commandArguments.length !== 3
                 ) {
                     throw new Error(
-                        'The focused fused radix-51 projection requires one native owner set and one same-build owner bundle for Chromium and Firefox.',
+                        'The focused fused radix-51 projection requires one native owner set and one Chromium owner bundle.',
                     );
                 }
                 const nativeEvidence =
@@ -53,36 +48,26 @@ export const runVssBaseMaterializationProjection = async (): Promise<void> => {
                         false,
                         vssFusedRadix51ProjectionOwnerCaseIdentifiers,
                     );
-                const browserBundles = await Promise.all(
-                    [chromiumEvidenceArgument, firefoxEvidenceArgument].map(
-                        async (evidenceArgument) =>
-                            validateDesktopBrowserFocusedPrimitiveMeasurementBundle(
-                                await parseJsonFile(
-                                    path.resolve(
-                                        process.cwd(),
-                                        evidenceArgument,
-                                    ),
-                                ),
-                                vssFusedRadix51ProjectionOwnerCaseIdentifiers,
+                const browserBundle =
+                    validateDesktopBrowserFocusedPrimitiveMeasurementBundle(
+                        await parseJsonFile(
+                            path.resolve(
+                                process.cwd(),
+                                chromiumEvidenceArgument,
                             ),
-                    ),
-                );
+                        ),
+                        vssFusedRadix51ProjectionOwnerCaseIdentifiers,
+                    );
                 if (
-                    browserBundles[0]?.focusedPrimitiveEvidence[0]
-                        ?.browserEngine !== 'chromium' ||
-                    browserBundles[1]?.focusedPrimitiveEvidence[0]
-                        ?.browserEngine !== 'firefox' ||
-                    JSON.stringify(browserBundles[0]?.measurementWasm) !==
-                        JSON.stringify(browserBundles[1]?.measurementWasm)
+                    browserBundle.focusedPrimitiveEvidence[0]?.browserEngine !==
+                    'chromium'
                 ) {
                     throw new Error(
-                        'The focused fused radix-51 browser owner sets do not bind one canonical Chromium-then-Firefox WASM artifact.',
+                        'The focused fused radix-51 browser owner set is not Chromium evidence.',
                     );
                 }
                 const projection = deriveVssFusedRadix51OwnerProjection({
-                    browserEvidence: browserBundles.flatMap(
-                        (bundle) => bundle.focusedPrimitiveEvidence,
-                    ),
+                    browserEvidence: browserBundle.focusedPrimitiveEvidence,
                     nativeEvidence,
                 });
                 const attachmentDirectoryPath = path.join(
@@ -99,7 +84,7 @@ export const runVssBaseMaterializationProjection = async (): Promise<void> => {
                     attachmentFilePath,
                     `${JSON.stringify(
                         {
-                            measurementWasm: browserBundles[0].measurementWasm,
+                            measurementWasm: browserBundle.measurementWasm,
                             projection,
                             schemaVersion: 1,
                         },
@@ -125,7 +110,7 @@ export const runVssBaseMaterializationProjection = async (): Promise<void> => {
                 commandArguments.length !== 2
             ) {
                 throw new Error(
-                    'The VSS base-materialization projection requires one complete native catalog and one complete Chromium-and-Firefox bundle from a single WASM build.',
+                    'The VSS base-materialization projection requires one complete native catalog and one complete Chromium catalog from a single WASM build.',
                 );
             }
             const nativeEvidencePath = path.resolve(
@@ -144,13 +129,11 @@ export const runVssBaseMaterializationProjection = async (): Promise<void> => {
                     ),
                 );
             if (
-                browserBundle.browserEvidence.length !== 2 ||
-                browserBundle.browserEvidence[0]?.browserEngine !==
-                    'chromium' ||
-                browserBundle.browserEvidence[1]?.browserEngine !== 'firefox'
+                browserBundle.browserEvidence.length !== 1 ||
+                browserBundle.browserEvidence[0]?.browserEngine !== 'chromium'
             ) {
                 throw new Error(
-                    'The browser primitive bundle must contain complete Chromium and Firefox catalogs in canonical order.',
+                    'The browser primitive bundle must contain exactly one complete Chromium catalog.',
                 );
             }
             const projection = deriveVssBaseMaterializationProjection({

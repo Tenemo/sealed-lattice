@@ -12,23 +12,23 @@ mod ballot_validity_runtime;
 mod body;
 mod collective_public_key_runtime;
 mod committed_material;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_cfw;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_cfw_external;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_cfw_external_prover;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_generation_checkpoint;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_proof_wire;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_public_key_static_catalog;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_response_merkle;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_response_tree_external;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod compact_transcript;
 mod component_material_stream;
 mod component_public_polynomial_runtime;
@@ -41,7 +41,7 @@ mod evaluator_source_material;
 mod external_memory;
 mod external_polynomial;
 mod field;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 mod fixed_uniform_verifier_message;
 mod galois_key_share_runtime;
 mod galois_source_material;
@@ -323,8 +323,6 @@ pub(crate) use selected_accounting::selected_complete_proof_resource_accounting;
 pub(crate) use selected_accounting::{SelectedProofAccountingError, selected_proof_runtime_limits};
 #[cfg(test)]
 pub(crate) use selected_profile::selected_proof_profile_set;
-#[cfg(all(test, feature = "theorem-evidence"))]
-pub(crate) use selected_profile::selected_relation_plan_for_schema;
 #[cfg(test)]
 pub(crate) use selected_profile::selected_target_decryption_flooding_bound;
 pub(crate) use selected_profile::{

@@ -6,6 +6,7 @@
 //! QROM capacity, and bounded hash-PCS stripe geometry derived from the same
 //! production constants as the incumbent proof inventory.
 
+#[cfg(test)]
 use num_bigint::BigUint;
 #[cfg(test)]
 use num_traits::Signed;
@@ -13,11 +14,10 @@ use num_traits::Signed;
 use crate::{
     bgv::{
         evaluator::candidate_evidence::EvaluatorCandidateInput,
-        key_switch_topology::KeySwitchDecompositionTopology,
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES},
     },
-    foundation::{ProofApplicationSlotCeilings, selected_sharing_data_prime_coordinates},
+    foundation::selected_sharing_data_prime_coordinates,
 };
 #[cfg(test)]
 use crate::{
@@ -27,6 +27,7 @@ use crate::{
             direct_ballot_target_noise_bounds_for_key_switch_topology,
             direct_ballot_target_release_noise_trace_for_key_switch_topology,
         },
+        key_switch_topology::KeySwitchDecompositionTopology,
         key_switch_topology::canonical_residue_byte_length,
         parameters::{RootParameters, SPECIAL_PRIMES},
         target_decryption::kllps_release::{
@@ -34,26 +35,33 @@ use crate::{
             MAXIMUM_AUTHORIZED_COEFFICIENT_NORM, factor_four_required_flooding_bound,
         },
     },
-    foundation::{FOUNDATION_PROFILE, SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION},
+    foundation::{
+        FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    },
 };
 
 #[cfg(test)]
 use super::relation_plan::MODULAR_QUOTIENT_BIT_COUNT;
-use super::relation_plan::{
-    MODULAR_QUOTIENT_MAXIMUM, MODULAR_QUOTIENT_MINIMUM, MODULAR_QUOTIENT_VALUE_COUNT,
-    TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE,
-};
+#[cfg(test)]
+use super::relation_plan::{MODULAR_QUOTIENT_MAXIMUM, MODULAR_QUOTIENT_MINIMUM};
+use super::relation_plan::{MODULAR_QUOTIENT_VALUE_COUNT, TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE};
 #[cfg(test)]
 use super::selected_target_decryption_flooding_bound;
 
+#[cfg(test)]
 const GOLDILOCKS_BASE_FIELD_MODULUS: u64 = 0xffff_ffff_0000_0001;
 const CANDIDATE_LOOKUP_EXTENSION_DEGREE: u32 = 5;
+#[cfg(test)]
 const CANDIDATE_BASE_FIELD_RBR_REPETITION_COUNT: u32 = 8;
+#[cfg(test)]
 const CANDIDATE_RADIX_DIGIT_BIT_LENGTH: u32 = 16;
 const CANDIDATE_RANDOMIZED_CODE_MESSAGE_LENGTH: u64 = 65_536;
 const CANDIDATE_INVERSE_RATE: u64 = 4;
 const CANDIDATE_THEOREM_MAIN_CODE_INVERSE_RATE: u64 = 2;
+#[cfg(test)]
 const CANDIDATE_LOW_MEMORY_LOGICAL_COLUMN_STRIPE_WIDTH: u64 = 64;
+#[cfg(test)]
 const CANDIDATE_LOGICAL_COLUMN_STRIPE_WIDTH: u64 = 128;
 const CANDIDATE_TRANSFORM_BATCH_WIDTH: u64 = 32;
 const CANDIDATE_QUINTIC_EXTENSION_TRANSFORM_BATCH_WIDTH: u64 = 8;
@@ -61,16 +69,27 @@ const PREFERRED_POST_VSS_RING_VECTOR_PACKING_FACTOR: u64 = 8;
 const CANDIDATE_MERKLE_DIGEST_BYTE_LENGTH: u64 = 64;
 const CANDIDATE_SHAKE256_STATE_BYTE_LENGTH: u64 = 25 * 8;
 const CANDIDATE_NON_MATRIX_WORKSPACE_BYTE_LENGTH: u64 = 192 * 1024 * 1024;
+#[cfg(test)]
 const NOMINAL_WASM_LINEAR_MEMORY_BYTE_LENGTH: u64 = 402_653_184;
+#[cfg(test)]
 const AUTOMATIC_WASM_LINEAR_MEMORY_BYTE_LENGTH: u64 = 603_979_776;
+#[cfg(test)]
 const HARD_WASM_LINEAR_MEMORY_BYTE_LENGTH: u64 = 671_088_640;
+#[cfg(test)]
 const AUTOMATIC_PROOF_BYTE_LENGTH: u64 = 7_864_320;
+#[cfg(test)]
 const ABSOLUTE_PROOF_PARSER_BYTE_LENGTH: u64 = 268_435_456;
+#[cfg(test)]
 const CANDIDATE_ADVERSARIAL_QUERY_BUDGET_BIT_LENGTH: u32 = 80;
+#[cfg(test)]
 const CANDIDATE_INTERACTIVE_ROUND_COUNT_CEILING: u64 = 64;
+#[cfg(test)]
 const CDHZ_STATE_RESTORATION_CONSTANT: u64 = 80;
+#[cfg(test)]
 const CDHZ_BCS_STATE_RESTORATION_MULTIPLIER: u64 = 4;
+#[cfg(test)]
 const MOBILE_PROTOTYPE_INVALID_ACCEPTANCE_BIT_LENGTH: u32 = 80;
+#[cfg(test)]
 const CANDIDATE_OUTER_PACKET_SCHEDULE_COUNT: u32 = 60;
 const CANDIDATE_LOOKUP_QUERY_COUNT: u64 = 393;
 const CFW_R1CS_INNER_MASK_MESSAGE_LENGTH: u64 = 4;
@@ -87,7 +106,9 @@ pub(super) const PREFERRED_CANDIDATE_SPECIAL_MODULI: [u64; 6] = [
     2_251_797_842_558_977,
     2_251_797_286_748_161,
 ];
+#[cfg(test)]
 const SELECTED_VSS_COMPLETE_BUTTERFLY_COUNT: u64 = 365_944_635_392;
+#[cfg(test)]
 const SELECTED_VSS_COMPLETE_SALTED_LEAF_HASH_COUNT: u64 = 2_382_364_672;
 
 #[cfg(test)]
@@ -158,7 +179,51 @@ const PREFERRED_CANDIDATE_SPECIAL_GROUP_PRIME_FACTORS: [&[u64]; 6] = [
     &[2, 3, 5, 257, 4_456_511],
 ];
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompactPublicKeyWorkInventory {
+    ternary_vector_count: u64,
+    eta_two_vector_count: u64,
+    signed_modular_quotient_count: u64,
+    quotient_lookup_table_value_count: u64,
+    small_set_multiplication_helper_logical_column_count: u64,
+    inverse_helper_logical_column_count: u64,
+}
+
+fn compact_public_key_work_inventory() -> CompactPublicKeyWorkInventory {
+    let relation_input = super::selected_public_key_share_relation_plan_input()
+        .expect("selected public-key-share relation input derives");
+    let data_limb_count =
+        u64::try_from(relation_input.data_modulus_indices.len()).expect("data-limb count fits u64");
+    let anchor_count = u64::try_from(relation_input.commitment_data_modulus_indices.len())
+        .expect("anchor count fits u64");
+    let commitment_rank = u64::from(relation_input.commitment_module_rank);
+    let anchor_row_count = anchor_count
+        .checked_mul(commitment_rank + 1)
+        .expect("anchor-row count fits u64");
+    let ternary_vector_count = 1_u64
+        .checked_add(
+            anchor_count
+                .checked_mul(2 * commitment_rank + 1)
+                .expect("anchor small-vector count fits u64"),
+        )
+        .expect("ternary-vector count fits u64");
+    let eta_two_vector_count = 1_u64;
+    let signed_modular_quotient_count = data_limb_count
+        .checked_add(anchor_row_count)
+        .expect("public-key quotient count fits u64");
+    CompactPublicKeyWorkInventory {
+        ternary_vector_count,
+        eta_two_vector_count,
+        signed_modular_quotient_count,
+        quotient_lookup_table_value_count: MODULAR_QUOTIENT_VALUE_COUNT,
+        small_set_multiplication_helper_logical_column_count: ternary_vector_count
+            .checked_add(3 * eta_two_vector_count)
+            .expect("public-key small-set helper width fits u64"),
+        inverse_helper_logical_column_count: signed_modular_quotient_count,
+    }
+}
+
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CompactPublicKeyPacketInventory {
     relation_plan_hash: [u8; 64],
@@ -191,7 +256,7 @@ struct CompactPublicKeyPacketInventory {
     r1cs_witness_logical_column_count: u64,
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 fn compact_public_key_packet_inventory() -> CompactPublicKeyPacketInventory {
     let compact_relation_catalog: super::relation_plan::CompactPublicKeyRelationCatalog =
         super::relation_plan::selected_compact_public_key_relation_catalog()
@@ -445,6 +510,7 @@ struct CompactPostVssPacketInventory {
     quotient_vector_count: u64,
 }
 
+#[cfg(test)]
 fn compact_post_vss_packet_inventory() -> CompactPostVssPacketInventory {
     let sharing_limb_count = u64::try_from(
         selected_sharing_data_prime_coordinates()
@@ -574,6 +640,7 @@ fn preferred_compact_post_vss_packet_inventory() -> CompactPostVssPacketInventor
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactLookupTranscriptOperation {
     CommitQuotientsAndMultiplicities,
@@ -586,6 +653,7 @@ enum CompactLookupTranscriptOperation {
     DeriveSharedPcsQueriesAfterEveryPredecessor,
 }
 
+#[cfg(test)]
 const COMPACT_LOOKUP_TRANSCRIPT_CHRONOLOGY: [CompactLookupTranscriptOperation; 8] = [
     CompactLookupTranscriptOperation::CommitQuotientsAndMultiplicities,
     CompactLookupTranscriptOperation::SampleExtensionChallenge,
@@ -652,6 +720,7 @@ struct CfwR1csMaskLowerBoundLedger {
     sumcheck_non_oracle_message_byte_length: u64,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CfwFieldStrategyStaticLedger {
     field_extension_degree: u32,
@@ -716,6 +785,7 @@ fn power_of_two_stripe_widths(logical_column_count: u64) -> Vec<u64> {
     widths
 }
 
+#[cfg(test)]
 pub(super) fn compact_lookup_work_ledger() -> CompactLookupWorkLedger {
     let quotient_vector_count = compact_post_vss_packet_inventory().quotient_vector_count;
     compact_lookup_work_ledger_for_quotient_inventory(
@@ -748,7 +818,7 @@ pub(super) fn preferred_compact_lookup_work_ledger() -> CompactLookupWorkLedger 
 
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 fn compact_public_key_work_ledger() -> CompactLookupWorkLedger {
-    let inventory = compact_public_key_packet_inventory();
+    let inventory = compact_public_key_work_inventory();
     compact_lookup_work_ledger_for_quotient_inventory(
         inventory.signed_modular_quotient_count,
         inventory.quotient_lookup_table_value_count,
@@ -925,6 +995,7 @@ fn compact_lookup_work_ledger_for_quotient_inventory(
     }
 }
 
+#[cfg(test)]
 fn cfw_r1cs_mask_lower_bound_ledger(
     lookup_ledger: &CompactLookupWorkLedger,
 ) -> CfwR1csMaskLowerBoundLedger {
@@ -969,8 +1040,6 @@ fn cfw_r1cs_mask_lower_bound_ledger_for_repetition_count(
         .and_then(|count| count.checked_add(1))
         .expect("CFW randomized-encoding count fits");
 
-    assert!(CFW_R1CS_INNER_MASK_MESSAGE_LENGTH >= 4);
-    assert!(CFW_R1CS_OUTER_MASK_MESSAGE_LENGTH >= 2 * CFW_R1CS_INNER_MASK_MESSAGE_LENGTH);
     let mask_code_populated_message_length = CFW_R1CS_OUTER_MASK_MESSAGE_LENGTH
         .max(CFW_R1CS_INNER_MASK_MESSAGE_LENGTH)
         .checked_add(CANDIDATE_LOOKUP_QUERY_COUNT)
@@ -1027,6 +1096,7 @@ fn cfw_r1cs_mask_lower_bound_ledger_for_repetition_count(
     }
 }
 
+#[cfg(test)]
 fn cfw_field_strategy_static_ledger(
     lookup_ledger: &CompactLookupWorkLedger,
     mask_ledger: &CfwR1csMaskLowerBoundLedger,
@@ -1328,6 +1398,7 @@ pub(super) fn factor_eight_post_vss_cfw_two_epoch_packet_static_ledger()
     )
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RingNativeConstraintCapability {
     ArbitraryLinearMap,
@@ -1339,6 +1410,7 @@ enum RingNativeConstraintCapability {
     ExactRnsLimbIntegerLift,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RingNativeCandidateDisposition {
     /// The family remains a logical relation inside a secret-bearing proof.
@@ -1349,6 +1421,7 @@ enum RingNativeCandidateDisposition {
     PublicLinearAggregate,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RingNativeCandidateEpoch {
     DealerVss,
@@ -1359,6 +1432,7 @@ enum RingNativeCandidateEpoch {
     PublicRecomputation,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RingNativeCandidateFamily {
     application_statement_schema_identifier: u16,
@@ -1367,6 +1441,7 @@ struct RingNativeCandidateFamily {
     required_capabilities: &'static [RingNativeConstraintCapability],
 }
 
+#[cfg(test)]
 const COMMITTED_MATERIAL: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ArbitraryLinearMap,
     RingNativeConstraintCapability::CanonicalCoefficientEncoding,
@@ -1374,6 +1449,7 @@ const COMMITTED_MATERIAL: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ExactRnsLimbIntegerLift,
 ];
 
+#[cfg(test)]
 const SAME_SECRET: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ArbitraryLinearMap,
     RingNativeConstraintCapability::CanonicalCoefficientEncoding,
@@ -1382,6 +1458,7 @@ const SAME_SECRET: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ExactRnsLimbIntegerLift,
 ];
 
+#[cfg(test)]
 const RING_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ArbitraryLinearMap,
     RingNativeConstraintCapability::CanonicalCoefficientEncoding,
@@ -1391,6 +1468,7 @@ const RING_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ExactRnsLimbIntegerLift,
 ];
 
+#[cfg(test)]
 const GALOIS_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ArbitraryLinearMap,
     RingNativeConstraintCapability::CanonicalCoefficientEncoding,
@@ -1401,6 +1479,7 @@ const GALOIS_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ExactRnsLimbIntegerLift,
 ];
 
+#[cfg(test)]
 const BALLOT_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ArbitraryLinearMap,
     RingNativeConstraintCapability::CanonicalCoefficientEncoding,
@@ -1410,6 +1489,7 @@ const BALLOT_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ExactRnsLimbIntegerLift,
 ];
 
+#[cfg(test)]
 const TARGET_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ArbitraryLinearMap,
     RingNativeConstraintCapability::CanonicalCoefficientEncoding,
@@ -1419,11 +1499,13 @@ const TARGET_SAMPLE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ExactRnsLimbIntegerLift,
 ];
 
+#[cfg(test)]
 const PUBLIC_AGGREGATE: &[RingNativeConstraintCapability] = &[
     RingNativeConstraintCapability::ArbitraryLinearMap,
     RingNativeConstraintCapability::CanonicalCoefficientEncoding,
 ];
 
+#[cfg(test)]
 const RING_NATIVE_CANDIDATE_FAMILIES: [RingNativeCandidateFamily; 12] = [
     RingNativeCandidateFamily {
         application_statement_schema_identifier:
@@ -1508,6 +1590,7 @@ const RING_NATIVE_CANDIDATE_FAMILIES: [RingNativeCandidateFamily; 12] = [
     },
 ];
 
+#[cfg(test)]
 fn modulus_product_bit_length(moduli: &[u64]) -> u64 {
     moduli
         .iter()
@@ -1649,16 +1732,18 @@ fn preferred_candidate_component_byte_lengths(catalog_level: usize) -> (u64, u64
     )
 }
 
+#[cfg(test)]
 fn candidate_lookup_challenge_field_order() -> BigUint {
     BigUint::from(GOLDILOCKS_BASE_FIELD_MODULUS).pow(CANDIDATE_LOOKUP_EXTENSION_DEGREE)
 }
 
+#[cfg(test)]
 fn radix_digit_count(maximum_magnitude: &BigUint) -> u64 {
     let bit_length = maximum_magnitude.bits().max(1);
-    (bit_length + u64::from(CANDIDATE_RADIX_DIGIT_BIT_LENGTH) - 1)
-        / u64::from(CANDIDATE_RADIX_DIGIT_BIT_LENGTH)
+    bit_length.div_ceil(u64::from(CANDIDATE_RADIX_DIGIT_BIT_LENGTH))
 }
 
+#[cfg(test)]
 fn candidate_stripe_matrix_byte_length(logical_column_count: u64) -> u64 {
     let encoded_row_count = CANDIDATE_RANDOMIZED_CODE_MESSAGE_LENGTH
         .checked_mul(CANDIDATE_INVERSE_RATE)
@@ -1693,10 +1778,10 @@ fn compact_public_key_packet_inventory_follows_the_production_relation_geometry(
     assert_eq!(inventory.coefficient_local_exact_equation_count, 950_272);
     assert_eq!(
         inventory.lookup_inverse_multiplication_constraint_count,
-        4_751_360
+        950_272
     );
     assert_eq!(inventory.small_set_multiplication_constraint_count, 786_432);
-    assert_eq!(inventory.known_multiplication_constraint_count, 5_537_792);
+    assert_eq!(inventory.known_multiplication_constraint_count, 1_736_704);
     assert_eq!(inventory.public_key_quotient_interval_minimum, -32_767);
     assert_eq!(inventory.public_key_quotient_interval_maximum, 32_768);
     assert_eq!(inventory.first_anchor_quotient_interval_minimum, -65_535);
@@ -1720,8 +1805,8 @@ fn compact_public_key_packet_inventory_follows_the_production_relation_geometry(
         inventory.small_set_multiplication_helper_logical_column_count,
         13
     );
-    assert_eq!(inventory.inverse_helper_logical_column_count, 145);
-    assert_eq!(inventory.r1cs_witness_logical_column_count, 202);
+    assert_eq!(inventory.inverse_helper_logical_column_count, 29);
+    assert_eq!(inventory.r1cs_witness_logical_column_count, 86);
 
     // Schema 0x1212 contains only public-by-private ring maps: the public-key
     // common reference and every anchor matrix are verifier-owned. The compact
@@ -2087,12 +2172,11 @@ fn one_quintic_cfw_run_is_the_theorem_minimizing_field_strategy() {
         CANDIDATE_LOOKUP_EXTENSION_DEGREE,
         CANDIDATE_QUINTIC_EXTENSION_TRANSFORM_BATCH_WIDTH,
     );
-
-    assert_eq!(public_key_masks.inner_mask_oracle_count, 72);
-    assert_eq!(public_key_masks.outer_mask_oracle_count, 24);
+    assert_eq!(public_key_masks.inner_mask_oracle_count, 69);
+    assert_eq!(public_key_masks.outer_mask_oracle_count, 23);
     assert_eq!(
         public_key_masks.randomized_encoding_count_including_main,
-        97
+        93
     );
     assert_eq!(public_key_masks.mask_physical_column_count, 160);
     assert_eq!(public_key_masks.mask_commitment_root_count, 2);
@@ -2113,7 +2197,7 @@ fn one_quintic_cfw_run_is_the_theorem_minimizing_field_strategy() {
     );
     assert_eq!(
         public_key_strategy.main_complete_two_pass_base_coordinate_butterfly_count,
-        5_284_823_040
+        2_264_924_160
     );
     assert_eq!(
         public_key_strategy.mask_one_pass_base_coordinate_element_count,
@@ -2121,12 +2205,12 @@ fn one_quintic_cfw_run_is_the_theorem_minimizing_field_strategy() {
     );
     assert_eq!(
         public_key_strategy.known_component_naive_path_subtotal_byte_length,
-        7_957_152
+        5_491_832
     );
     assert_eq!(
-        public_key_strategy.known_component_naive_path_subtotal_byte_length
-            - AUTOMATIC_PROOF_BYTE_LENGTH,
-        92_832
+        AUTOMATIC_PROOF_BYTE_LENGTH
+            - public_key_strategy.known_component_naive_path_subtotal_byte_length,
+        2_372_488
     );
     assert!(
         public_key_strategy.known_component_naive_path_subtotal_byte_length
@@ -2175,10 +2259,10 @@ fn theorem_aligned_two_epoch_packets_have_a_bounded_single_quintic_path() {
 
     assert_eq!(
         public_key_packet.padded_r1cs_witness_element_count,
-        8_388_608
+        4_194_304
     );
     assert_eq!(public_key_packet.ring_vector_packing_factor, 1);
-    assert_eq!(public_key_packet.main_interleaved_component_count, 256);
+    assert_eq!(public_key_packet.main_interleaved_component_count, 128);
     assert_eq!(
         public_key_packet.relation_message_element_count_per_component,
         32_768
@@ -2222,7 +2306,7 @@ fn theorem_aligned_two_epoch_packets_have_a_bounded_single_quintic_path() {
     );
     assert_eq!(
         public_key_packet.main_complete_two_pass_base_coordinate_butterfly_count,
-        2_852_126_720
+        1_426_063_360
     );
     assert_eq!(
         public_key_packet.pre_challenge_complete_two_pass_base_field_butterfly_count,
@@ -2230,20 +2314,20 @@ fn theorem_aligned_two_epoch_packets_have_a_bounded_single_quintic_path() {
     );
     assert_eq!(
         public_key_packet.complete_two_pass_base_coordinate_butterfly_count,
-        2_994_733_056
+        1_568_669_696
     );
     assert_eq!(
         public_key_packet.known_component_naive_path_subtotal_byte_length,
-        8_158_304
+        6_145_784
     );
     assert_eq!(
         public_key_packet.main_oracle_query_answer_byte_length,
-        4_024_320
+        2_012_160
     );
     assert_eq!(
-        public_key_packet.known_component_naive_path_subtotal_byte_length
-            - AUTOMATIC_PROOF_BYTE_LENGTH,
-        293_984
+        AUTOMATIC_PROOF_BYTE_LENGTH
+            - public_key_packet.known_component_naive_path_subtotal_byte_length,
+        1_718_536
     );
     assert!(
         public_key_packet.known_component_naive_path_subtotal_byte_length
@@ -3183,20 +3267,20 @@ fn compact_candidate_single_stripe_sensitivity_fits_the_wasm_memory_policy() {
         candidate_stripe_matrix_byte_length(public_key_ledger.physical_column_count)
             + complete_binary_tree_byte_length
             + CANDIDATE_NON_MATRIX_WORKSPACE_BYTE_LENGTH;
-    assert_eq!(monolithic_sensitivity_peak_live_byte_length, 704_643_008);
-    assert!(monolithic_sensitivity_peak_live_byte_length > HARD_WASM_LINEAR_MEMORY_BYTE_LENGTH);
+    assert_eq!(monolithic_sensitivity_peak_live_byte_length, 436_207_552);
+    assert!(monolithic_sensitivity_peak_live_byte_length < HARD_WASM_LINEAR_MEMORY_BYTE_LENGTH);
 
     let required_stripe_count = public_key_ledger.ordered_physical_stripe_widths.len();
-    assert_eq!(required_stripe_count, 3);
+    assert_eq!(required_stripe_count, 2);
     assert_eq!(
         public_key_ledger.ordered_physical_stripe_widths,
-        vec![64, 128, 32]
+        vec![64, 32]
     );
 
     let encoded_base_field_byte_length = encoded_row_count * 8;
     let total_physical_matrix_byte_length =
         encoded_base_field_byte_length * public_key_ledger.physical_column_count;
-    assert_eq!(total_physical_matrix_byte_length, 469_762_048);
+    assert_eq!(total_physical_matrix_byte_length, 201_326_592);
 
     // This is a liveness envelope, not a PCS proof or a selected width. The
     // packet compiler must derive its real columns, all stripe roots must be

@@ -104,17 +104,32 @@ pub(super) struct DecodedSmallChainCanonicalProof {
     pub(super) main_whir_proof: SmallChainWhirProof,
 }
 
+pub(super) struct SmallChainCanonicalProofEncoding<'input> {
+    pub(super) pre_challenge_configuration: &'input SmallChainWhirConfiguration,
+    pub(super) main_configuration: &'input SmallChainWhirConfiguration,
+    pub(super) inner_mask_shape: MaskGroupShape,
+    pub(super) outer_mask_shape: MaskGroupShape,
+    pub(super) shared_mask_shape: MaskGroupShape,
+    pub(super) canonical_cfw_proof_bytes: &'input [u8],
+    pub(super) commitments: &'input SmallChainExternalCommitments,
+    pub(super) pre_challenge_whir_proof: &'input SmallChainWhirProof,
+    pub(super) main_whir_proof: &'input SmallChainWhirProof,
+}
+
 pub(super) fn encode_small_chain_canonical_proof(
-    pre_challenge_configuration: &SmallChainWhirConfiguration,
-    main_configuration: &SmallChainWhirConfiguration,
-    inner_mask_shape: MaskGroupShape,
-    outer_mask_shape: MaskGroupShape,
-    shared_mask_shape: MaskGroupShape,
-    canonical_cfw_proof_bytes: &[u8],
-    commitments: &SmallChainExternalCommitments,
-    pre_challenge_whir_proof: &SmallChainWhirProof,
-    main_whir_proof: &SmallChainWhirProof,
+    encoding: SmallChainCanonicalProofEncoding<'_>,
 ) -> Result<Vec<u8>, SmallChainCanonicalTransportError> {
+    let SmallChainCanonicalProofEncoding {
+        pre_challenge_configuration,
+        main_configuration,
+        inner_mask_shape,
+        outer_mask_shape,
+        shared_mask_shape,
+        canonical_cfw_proof_bytes,
+        commitments,
+        pre_challenge_whir_proof,
+        main_whir_proof,
+    } = encoding;
     if canonical_cfw_proof_bytes.is_empty() {
         return Err(SmallChainCanonicalTransportError::EmptySection);
     }

@@ -1951,10 +1951,10 @@ mod tests {
         assert_eq!(distribution.local_storage_traffic_byte_length, 0);
         let result_transition = accounting.result_transition;
         assert_eq!(result_transition.transition_count, 1);
-        assert_eq!(result_transition.result_word_count, 20);
-        assert_eq!(result_transition.rust_result_byte_length, 80);
-        assert_eq!(result_transition.wasm_to_javascript_copy_byte_length, 80);
-        assert_eq!(result_transition.maximum_boundary_live_byte_length, 160);
+        assert_eq!(result_transition.result_word_count, 10);
+        assert_eq!(result_transition.rust_result_byte_length, 40);
+        assert_eq!(result_transition.wasm_to_javascript_copy_byte_length, 40);
+        assert_eq!(result_transition.maximum_boundary_live_byte_length, 80);
         assert_eq!(result_transition.terminal_rust_handle_consumption_count, 1);
         assert_eq!(result_transition.protocol_transport_byte_length, 0);
         let subset_accounting = accounting.reconstruction_subset_operations;
@@ -2029,12 +2029,12 @@ mod tests {
             .reconstruction_buffer_accounting(4, 1)
             .expect("threshold reconstruction accounts");
         let complete = accounting
-            .reconstruction_buffer_accounting(10, 20)
+            .reconstruction_buffer_accounting(10, 10)
             .expect("complete-action reconstruction accounts");
         assert_eq!(threshold.verified_share_handle_byte_length, 16);
         assert_eq!(threshold.reconstructed_result_byte_length, 4);
         assert_eq!(complete.verified_share_handle_byte_length, 40);
-        assert_eq!(complete.reconstructed_result_byte_length, 80);
+        assert_eq!(complete.reconstructed_result_byte_length, 40);
         assert_eq!(complete.selected_verified_share_count, 4);
         assert_eq!(
             complete.retained_verified_share_coefficient_payload_byte_length,

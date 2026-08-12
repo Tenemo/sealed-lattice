@@ -38,20 +38,50 @@ independent statuses for the same exact bytes:
   otherwise valid cryptography, although an orders-of-magnitude variance is a
   mandatory redesign signal.
 
+The only current browser qualification profile is Chrome on the selected
+physical phone for the exact `n = 10`, `optionCount = 10` build. Desktop
+Chromium is development evidence. Other browser engines are not current support,
+test, evidence, or release gates and may be evaluated only after Chrome completes
+the full physical-phone procedure.
+
 ### Current proof boundary
 
 The default kernel build and selected proof profile remain wired to the
 row-code/WHIR backend. That backend is operationally rejected as the mobile
 proving direction and cannot activate a suite. Its retained code and evidence
 are comparison and transition material, not an eligible production proof path.
+Its affine-image and sequential-simulation structures are accounting and proof
+plans only: they neither prove the conditioned image relation from independent
+matrices nor emit a witness-free simulated verifier view.
+The rejected backend's mapped-soundness vector, per-family checkpoint owners,
+and conservative action-composition catalog were removed after its corrected
+schedule changed derived oracle counts. They are not security inputs for the
+compact successor.
 
-The compact CFW/WHIR proof modules are compiled only for tests or the
-`primitive-measurement-evidence` feature. They currently cover a standalone
-public-key-share development slice; no default participant build selects them,
-no compact packing factor is selected, and no participant-facing API exposes a
+The latest retained complete dirty-worktree graph passed the workspace build, package,
+Node, 1,218-entry ordinary Rust, and Chromium lane. The
+scalar WASM and SDK bytes reproduced at
+`91e5a2c5d26f9f98a7e0afa797948769c1a648f84622a78b115e7b86edc47524`, and all
+35 retained theorem-registry members passed under the serialized guard. Those
+results validate only that recorded dirty state. They predate the later
+collective-setup record and current documentation changes and are neither
+current-workspace nor clean commit-bound evidence. The desktop graph used
+Node.js `22.22.2`, below the declared
+`24.14.1` minimum, and therefore is not declared-toolchain closure. The theorem
+registry still includes rejected row-code accounting and
+proof-plan owners; it does not supply compact masking or a compact proof. No
+manual browser proof-evidence result exists because there is no production
+compact proof to run.
+
+The compact CFW/WHIR semantic, prover, transport, and hostile-verifier
+workbench is compiled only for tests. The `primitive-measurement-evidence`
+feature contains only bounded measurement owners and the operative ring-native
+arithmetic they measure. Neither scope enters the default participant build.
+They currently cover a standalone public-key-share development slice; no
+compact packing factor is selected, and no participant-facing API exposes a
 complete compact prover or verifier.
 
-Within that feature gate, the factor-one source-level semantic owner is
+Within that test-only workbench, the factor-one source-level semantic owner is
 substantive and complete for its narrow scope. It executes the selected decoder,
 construction-wide knowledge-state predicate, deterministic extractor, all 82
 message transitions, adjacent extracted-witness transitions, bad-transition
@@ -155,9 +185,12 @@ the snapshot is the newest state.
   flow, or local newest-snapshot proof. Lost or unauthenticated state retires
   that participant from the action.
 - `SEC-004`: The default selected proof backend is the operationally rejected
-  row-code/WHIR path. The compact successor is test or measurement-feature
-  gated, unselected, and lacks a production-size proof and complete participant
-  runtime. No proof backend is currently mobile-feasible or suite-selectable.
+  row-code/WHIR path. The compact semantic, prover, transport, and hostile-
+  verifier workbench is test-only; the measurement feature contains only
+  bounded measurement owners and their ring-native arithmetic. The compact
+  successor is unselected and lacks a production-size proof and complete
+  participant runtime. No proof backend is currently mobile-feasible or suite-
+  selectable.
 - `SEC-005`: The compact standalone semantic owner is source-level evidence
   only. Complete production masking, ideal simulation, the KMAC quantum-PRF
   reduction, emitted-byte correspondence, salted-Merkle privacy, root and
@@ -186,13 +219,24 @@ the snapshot is the newest state.
 - `SEC-017`: Internal caller-key storage adapters do not safely support
   equivalent-key reimport or reuse across runtime lifecycles.
 - `SEC-018`: Schemas and deterministic compilers admit the structural option
-  range and bind ten options in the selected source profile, but proof,
+  range and bind ten options in the selected source profile. The tracked exact-
+  ten collective-setup record was produced through a guarded Rust refresh, but
+  its routine Node consumer obtains the expected production authority from that
+  same record. Its handwritten status catalogs are not independent theorem
+  premises, its joint setup-sample transition is only a restatement of a broad
+  structured-RLWE/circular-KDM assumption rather than a complete reduction, and
+  its Galois/round-one schedule conflicts with the canonical packet dependency.
+  The record is nonqualifying bookkeeping: its four compact construction
+  imports, two setup and collective composition leaves, and exact joint
+  reduction remain open, and it cannot authorize or mint a capability. Proof,
   checkpoint, runtime, and package evidence is not one reconciled exact-ten
-  authority. Some retained evidence still belongs to rejected geometry.
-- `SEC-019`: The canonical WASM source is scalar-capable, but no reproducible
-  current-source scalar artifact or browser qualification follows. Compact
-  checkpoint publication is reduced kernel groundwork, not browser-custody or
-  selected-size durable resume.
+  authority.
+- `SEC-019`: The canonical scalar WASM and SDK package bytes reproduce at
+  `91e5a2c5d26f9f98a7e0afa797948769c1a648f84622a78b115e7b86edc47524`, and the
+  ordinary desktop-browser graph passes. The release build still omits compact
+  proof generation and verification, so this is not selected-size compact-proof
+  browser qualification. Compact checkpoint publication remains reduced kernel
+  groundwork, not browser-custody or selected-size durable resume.
 - `SEC-020`: Pollable source preparation, transpose, Merkle, codec, and reduced
   CFW/WHIR lifecycle owners provide development evidence only. Selected-size
   production authority, response values, unified transcript, authenticated

@@ -11,7 +11,7 @@ export const ordinaryDesktopBrowserExcludedTestGlobs = [
 ] as const;
 
 export type DesktopBrowserProofEvidenceSessionDefinition = Readonly<{
-    browserEngine: 'chromium' | 'firefox' | 'webkit';
+    browserEngine: 'chromium';
     ownershipRole: DesktopBrowserProofEvidenceOwnershipRole;
     sessionIdentifier: string;
     testProjectLabel: string;
@@ -27,32 +27,11 @@ export const desktopBrowserProofEvidenceSessionDefinitions = Object.freeze([
         vitestProjectName: 'chromium-desktop-proof-evidence-generation',
     },
     {
-        browserEngine: 'firefox',
-        ownershipRole: 'generation',
-        sessionIdentifier: 'firefox-generation',
-        testProjectLabel: 'desktop-browser-proof-evidence-firefox-generation',
-        vitestProjectName: 'firefox-desktop-proof-evidence-generation',
-    },
-    {
         browserEngine: 'chromium',
         ownershipRole: 'verification',
         sessionIdentifier: 'chromium-verification',
         testProjectLabel:
             'desktop-browser-proof-evidence-chromium-verification',
         vitestProjectName: 'chromium-desktop-proof-evidence-verification',
-    },
-    {
-        browserEngine: 'firefox',
-        ownershipRole: 'verification',
-        sessionIdentifier: 'firefox-verification',
-        testProjectLabel: 'desktop-browser-proof-evidence-firefox-verification',
-        vitestProjectName: 'firefox-desktop-proof-evidence-verification',
-    },
-    {
-        browserEngine: 'webkit',
-        ownershipRole: 'verification',
-        sessionIdentifier: 'webkit-verification',
-        testProjectLabel: 'desktop-browser-proof-evidence-webkit-verification',
-        vitestProjectName: 'webkit-desktop-proof-evidence-verification',
     },
 ] satisfies readonly DesktopBrowserProofEvidenceSessionDefinition[]);

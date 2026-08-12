@@ -624,8 +624,11 @@ fn aggregate_score_difference_range_fits_the_recomputed_plaintext_order() {
 }
 
 #[test]
-fn pair_character_codec_rejects_malformed_scores_and_wrong_suite_geometry() {
-    for scores in [vec![1; OPTION_COUNT - 1], vec![1; OPTION_COUNT + 1]] {
+fn pair_character_codec_rejects_out_of_range_scores_and_wrong_ring_geometry() {
+    for scores in [
+        vec![1; usize::from(crate::foundation::MINIMUM_CONFIGURABLE_OPTION_COUNT) - 1],
+        vec![1; usize::from(crate::foundation::MAXIMUM_CONFIGURABLE_OPTION_COUNT) + 1],
+    ] {
         assert_eq!(
             pair_character_plaintexts(
                 &scores,

@@ -1,17 +1,17 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { chromium, firefox, type BrowserType } from "playwright";
-import { createServer, type Plugin, type ViteDevServer } from "vite";
+import { chromium } from 'playwright';
+import { createServer, type Plugin, type ViteDevServer } from 'vite';
 
 import {
     buildPrimitiveMeasurementWasm,
     primitiveMeasurementWasmOutputFilePath,
-} from "./build-primitive-measurement-wasm.js";
-import { assertDeterministicWasmStackLayout } from "./build-wasm-kernel.js";
-import { runWithLocalRunLog } from "./local-run-log.js";
+} from './build-primitive-measurement-wasm.js';
+import { assertDeterministicWasmStackLayout } from './build-wasm-kernel.js';
+import { runWithLocalRunLog } from './local-run-log.js';
 import {
     compactLookupProjectionOwnerCaseIdentifiers,
     selectedAuthenticatedScratchRecordByteLength,
@@ -24,24 +24,24 @@ import {
     type DesktopBrowserBoundaryCopyMeasurement,
     type DesktopBrowserFocusedPrimitiveMeasurementEvidence,
     type DesktopBrowserPrimitiveMeasurementEvidence,
-} from "./primitive-measurement-evidence.js";
+} from './primitive-measurement-evidence.js';
 
-import { normalizeTranscriptCoreKernelBytesForHash } from "#packages/wasm/src/transcript-core-bridge.js";
+import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
 
 const repositoryRootPath = path.resolve(
-    fileURLToPath(new URL("../../", import.meta.url)),
+    fileURLToPath(new URL('../../', import.meta.url)),
 );
-const browserMeasurementPagePath = "/primitive-measurements/";
+const browserMeasurementPagePath = '/primitive-measurements/';
 const browserMeasurementModulePath =
-    "/tools/ci/desktop-browser-primitive-measurement-page.ts";
+    '/tools/ci/desktop-browser-primitive-measurement-page.ts';
 const browserMeasurementWasmPath =
-    "/temp/primitive-measurements/sealed-lattice-kernel-primitive-measurement.wasm";
+    '/temp/primitive-measurements/sealed-lattice-kernel-primitive-measurement.wasm';
 const browserServerBasePort = 41_130;
 
-type SupportedBrowserEngine = "chromium" | "firefox";
+type SupportedBrowserEngine = 'chromium';
 type SupportedMeasurementComponent =
-    | "authenticated-storage"
-    | "boundary-copies";
+    | 'authenticated-storage'
+    | 'boundary-copies';
 
 export type DesktopBrowserPrimitiveMeasurementArguments = Readonly<{
     browserEngines: readonly SupportedBrowserEngine[];
@@ -54,35 +54,31 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
     rawArguments: readonly string[],
 ): DesktopBrowserPrimitiveMeasurementArguments => {
     const argumentsWithoutSeparator = rawArguments.filter(
-        (argument) => argument !== "--",
+        (argument) => argument !== '--',
     );
     if (argumentsWithoutSeparator.length === 0) {
         return Object.freeze({
-            browserEngines: Object.freeze(["chromium", "firefox"] as const),
+            browserEngines: Object.freeze(['chromium'] as const),
         });
     }
     const browserEngineArgument = argumentsWithoutSeparator[0];
-    if (
-        browserEngineArgument !== "chromium" &&
-        browserEngineArgument !== "firefox"
-    ) {
+    if (browserEngineArgument !== 'chromium') {
         throw new Error(
-            "The desktop-browser primitive-measurement runner accepts chromium or firefox.",
+            'The desktop-browser primitive-measurement runner accepts only chromium.',
         );
     }
-    const browserEngine: SupportedBrowserEngine =
-        browserEngineArgument === "chromium" ? "chromium" : "firefox";
+    const browserEngine: SupportedBrowserEngine = 'chromium';
     const focusedCaseMatch =
         /^case-(1|2|3|4|5|6|8|9|10|11|12|13|14|15|16|17|18|19|20)$/u.exec(
-            argumentsWithoutSeparator[1] ?? "",
+            argumentsWithoutSeparator[1] ?? '',
         );
     const focusedCaseIdentifiers =
         focusedCaseMatch === null
             ? argumentsWithoutSeparator[1] ===
-              "fused-radix-51-projection-owners"
+              'fused-radix-51-projection-owners'
                 ? vssFusedRadix51ProjectionOwnerCaseIdentifiers
                 : argumentsWithoutSeparator[1] ===
-                    "compact-lookup-projection-owners"
+                    'compact-lookup-projection-owners'
                   ? compactLookupProjectionOwnerCaseIdentifiers
                   : undefined
             : Object.freeze([Number(focusedCaseMatch[1])]);
@@ -90,16 +86,16 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
         if (
             argumentsWithoutSeparator.length > 3 ||
             (argumentsWithoutSeparator.length === 3 &&
-                argumentsWithoutSeparator[2] !== "reuse-wasm")
+                argumentsWithoutSeparator[2] !== 'reuse-wasm')
         ) {
             throw new Error(
-                "A focused primitive case accepts only an optional reuse-wasm argument.",
+                'A focused primitive case accepts only an optional reuse-wasm argument.',
             );
         }
         return Object.freeze({
             browserEngines: Object.freeze([browserEngine]),
             focusedCaseIdentifiers,
-            ...(argumentsWithoutSeparator[2] === "reuse-wasm"
+            ...(argumentsWithoutSeparator[2] === 'reuse-wasm'
                 ? { reuseMeasurementWasm: true }
                 : {}),
         });
@@ -107,19 +103,19 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
     if (
         argumentsWithoutSeparator.length > 2 ||
         (argumentsWithoutSeparator.length === 2 &&
-            argumentsWithoutSeparator[1] !== "authenticated-storage" &&
-            argumentsWithoutSeparator[1] !== "boundary-copies" &&
-            argumentsWithoutSeparator[1] !== "reuse-wasm")
+            argumentsWithoutSeparator[1] !== 'authenticated-storage' &&
+            argumentsWithoutSeparator[1] !== 'boundary-copies' &&
+            argumentsWithoutSeparator[1] !== 'reuse-wasm')
     ) {
         throw new Error(
-            "The desktop-browser primitive-measurement runner accepts chromium or firefox with an optional authenticated-storage, boundary-copies, case-1 through case-6, case-8 through case-20, fused-radix-51-projection-owners, compact-lookup-projection-owners, or reuse-wasm selector.",
+            'The desktop-browser primitive-measurement runner accepts chromium with an optional authenticated-storage, boundary-copies, case-1 through case-6, case-8 through case-20, fused-radix-51-projection-owners, compact-lookup-projection-owners, or reuse-wasm selector.',
         );
     }
     return Object.freeze({
         browserEngines: Object.freeze([browserEngine]),
         ...(argumentsWithoutSeparator[1] === undefined
             ? {}
-            : argumentsWithoutSeparator[1] === "reuse-wasm"
+            : argumentsWithoutSeparator[1] === 'reuse-wasm'
               ? { reuseMeasurementWasm: true }
               : {
                     measurementComponent:
@@ -129,21 +125,21 @@ export const parseDesktopBrowserPrimitiveMeasurementArguments = (
 };
 
 const measurementPagePlugin = (): Plugin => ({
-    name: "sealed-lattice-primitive-measurement-page",
+    name: 'sealed-lattice-primitive-measurement-page',
     configureServer(server): void {
         server.middlewares.use((request, response, next) => {
             const requestUrl = request.url;
             if (
                 requestUrl === undefined ||
-                new URL(requestUrl, "http://127.0.0.1").pathname !==
+                new URL(requestUrl, 'http://127.0.0.1').pathname !==
                     browserMeasurementPagePath
             ) {
                 next();
                 return;
             }
             response.statusCode = 200;
-            response.setHeader("Content-Type", "text/html; charset=utf-8");
-            response.setHeader("Cache-Control", "no-store");
+            response.setHeader('Content-Type', 'text/html; charset=utf-8');
+            response.setHeader('Cache-Control', 'no-store');
             response.end(
                 '<!doctype html><html><head><meta charset="utf-8"><title>Primitive measurements</title></head><body></body></html>',
             );
@@ -156,31 +152,31 @@ const startBrowserServer = async (): Promise<{
     readonly server: ViteDevServer;
 }> => {
     const server = await createServer({
-        appType: "custom",
+        appType: 'custom',
         clearScreen: false,
-        logLevel: "error",
+        logLevel: 'error',
         optimizeDeps: { noDiscovery: true },
         plugins: [measurementPagePlugin()],
         resolve: {
             alias: [
                 {
-                    find: "#packages",
-                    replacement: path.resolve(repositoryRootPath, "packages"),
+                    find: '#packages',
+                    replacement: path.resolve(repositoryRootPath, 'packages'),
                 },
                 {
-                    find: "#tests",
-                    replacement: path.resolve(repositoryRootPath, "tests"),
+                    find: '#tests',
+                    replacement: path.resolve(repositoryRootPath, 'tests'),
                 },
                 {
-                    find: "#tools",
-                    replacement: path.resolve(repositoryRootPath, "tools"),
+                    find: '#tools',
+                    replacement: path.resolve(repositoryRootPath, 'tools'),
                 },
             ],
         },
         root: repositoryRootPath,
         server: {
             fs: { allow: [repositoryRootPath] },
-            host: "127.0.0.1",
+            host: '127.0.0.1',
             port: browserServerBasePort,
             strictPort: false,
         },
@@ -191,10 +187,10 @@ const startBrowserServer = async (): Promise<{
         if (
             address === null ||
             address === undefined ||
-            typeof address === "string"
+            typeof address === 'string'
         ) {
             throw new Error(
-                "Primitive-measurement browser server has no TCP address.",
+                'Primitive-measurement browser server has no TCP address.',
             );
         }
         return Object.freeze({
@@ -207,14 +203,11 @@ const startBrowserServer = async (): Promise<{
     }
 };
 
-const browserTypeFor = (browserEngine: SupportedBrowserEngine): BrowserType =>
-    browserEngine === "chromium" ? chromium : firefox;
-
 const runBrowserMeasurement = async (input: {
     readonly baseUrl: string;
     readonly browserEngine: SupportedBrowserEngine;
 }): Promise<DesktopBrowserPrimitiveMeasurementEvidence> => {
-    const browser = await browserTypeFor(input.browserEngine).launch({
+    const browser = await chromium.launch({
         headless: true,
     });
     try {
@@ -223,7 +216,7 @@ const runBrowserMeasurement = async (input: {
             const page = await context.newPage();
             await page.goto(
                 new URL(browserMeasurementPagePath, input.baseUrl).href,
-                { waitUntil: "domcontentloaded" },
+                { waitUntil: 'domcontentloaded' },
             );
             const rawEvidence = await page.evaluate(
                 async (evaluationInput) => {
@@ -231,7 +224,7 @@ const runBrowserMeasurement = async (input: {
                         /* @vite-ignore */ evaluationInput.moduleUrl
                     )) as unknown as {
                         runDesktopBrowserPrimitiveMeasurements(input: {
-                            browserEngine: "chromium" | "firefox";
+                            browserEngine: 'chromium';
                             wasmUrl: string;
                         }): Promise<unknown>;
                     };
@@ -267,7 +260,7 @@ const runBrowserFocusedPrimitiveMeasurements = async (input: {
     readonly browserEngine: SupportedBrowserEngine;
     readonly caseIdentifiers: readonly number[];
 }): Promise<readonly DesktopBrowserFocusedPrimitiveMeasurementEvidence[]> => {
-    const browser = await browserTypeFor(input.browserEngine).launch({
+    const browser = await chromium.launch({
         headless: true,
     });
     try {
@@ -276,7 +269,7 @@ const runBrowserFocusedPrimitiveMeasurements = async (input: {
             const page = await context.newPage();
             await page.goto(
                 new URL(browserMeasurementPagePath, input.baseUrl).href,
-                { waitUntil: "domcontentloaded" },
+                { waitUntil: 'domcontentloaded' },
             );
             const rawEvidence = await page.evaluate(
                 async (evaluationInput) => {
@@ -284,7 +277,7 @@ const runBrowserFocusedPrimitiveMeasurements = async (input: {
                         /* @vite-ignore */ evaluationInput.moduleUrl
                     )) as unknown as {
                         runDesktopBrowserFocusedPrimitiveMeasurements(input: {
-                            browserEngine: "chromium" | "firefox";
+                            browserEngine: 'chromium';
                             caseIdentifiers: readonly number[];
                             wasmUrl: string;
                         }): Promise<readonly unknown[]>;
@@ -313,7 +306,7 @@ const runBrowserFocusedPrimitiveMeasurements = async (input: {
                 rawEvidence.length !== input.caseIdentifiers.length
             ) {
                 throw new Error(
-                    "Focused desktop-browser primitive measurement returned the wrong case count.",
+                    'Focused desktop-browser primitive measurement returned the wrong case count.',
                 );
             }
             return Object.freeze(
@@ -351,7 +344,7 @@ const runBrowserAuthenticatedStorageMeasurement = async (input: {
     readonly baseUrl: string;
     readonly browserEngine: SupportedBrowserEngine;
 }): Promise<DesktopBrowserAuthenticatedStorageEvidence> => {
-    const browser = await browserTypeFor(input.browserEngine).launch({
+    const browser = await chromium.launch({
         headless: true,
     });
     try {
@@ -360,7 +353,7 @@ const runBrowserAuthenticatedStorageMeasurement = async (input: {
             const page = await context.newPage();
             await page.goto(
                 new URL(browserMeasurementPagePath, input.baseUrl).href,
-                { waitUntil: "domcontentloaded" },
+                { waitUntil: 'domcontentloaded' },
             );
             const rawEvidence = await page.evaluate(
                 async (evaluationInput) => {
@@ -389,12 +382,12 @@ const runBrowserAuthenticatedStorageMeasurement = async (input: {
                 },
             );
             if (
-                typeof rawEvidence.browserUserAgent !== "string" ||
+                typeof rawEvidence.browserUserAgent !== 'string' ||
                 rawEvidence.browserUserAgent.length === 0 ||
                 rawEvidence.browserUserAgent.length > 1_024
             ) {
                 throw new Error(
-                    "Authenticated-storage browser user agent is invalid.",
+                    'Authenticated-storage browser user agent is invalid.',
                 );
             }
             return Object.freeze({
@@ -418,7 +411,7 @@ const runBrowserBoundaryCopyMeasurement = async (input: {
     readonly baseUrl: string;
     readonly browserEngine: SupportedBrowserEngine;
 }): Promise<DesktopBrowserBoundaryCopyEvidence> => {
-    const browser = await browserTypeFor(input.browserEngine).launch({
+    const browser = await chromium.launch({
         headless: true,
     });
     try {
@@ -427,12 +420,12 @@ const runBrowserBoundaryCopyMeasurement = async (input: {
             const page = await context.newPage();
             await page.goto(
                 new URL(browserMeasurementPagePath, input.baseUrl).href,
-                { waitUntil: "domcontentloaded" },
+                { waitUntil: 'domcontentloaded' },
             );
             const rawEvidence = await page.evaluate(
                 async (evaluationInput) => {
                     const response = await fetch(evaluationInput.wasmUrl, {
-                        cache: "no-store",
+                        cache: 'no-store',
                     });
                     if (!response.ok) {
                         throw new Error(
@@ -469,11 +462,11 @@ const runBrowserBoundaryCopyMeasurement = async (input: {
                 },
             );
             if (
-                typeof rawEvidence.browserUserAgent !== "string" ||
+                typeof rawEvidence.browserUserAgent !== 'string' ||
                 rawEvidence.browserUserAgent.length === 0 ||
                 rawEvidence.browserUserAgent.length > 1_024
             ) {
-                throw new Error("Boundary-copy browser user agent is invalid.");
+                throw new Error('Boundary-copy browser user agent is invalid.');
             }
             return Object.freeze({
                 boundaryCopies: validateDesktopBrowserBoundaryCopyMeasurement(
@@ -498,8 +491,8 @@ export const runDesktopBrowserPrimitiveMeasurements =
         await runWithLocalRunLog(
             {
                 commandLineArguments,
-                lanes: ["Desktop-browser primitive measurements"],
-                scriptName: "test:browser:primitive-measurements",
+                lanes: ['Desktop-browser primitive measurements'],
+                scriptName: 'test:browser:primitive-measurements',
             },
             async (runLog) => {
                 const parsedArguments =
@@ -508,11 +501,11 @@ export const runDesktopBrowserPrimitiveMeasurements =
                     );
                 const measurementWasm =
                     parsedArguments.measurementComponent !==
-                    "authenticated-storage"
+                    'authenticated-storage'
                         ? await (async () => {
                               const artifact =
                                   parsedArguments.measurementComponent ===
-                                      "boundary-copies" ||
+                                      'boundary-copies' ||
                                   parsedArguments.reuseMeasurementWasm === true
                                       ? undefined
                                       : await buildPrimitiveMeasurementWasm();
@@ -520,18 +513,18 @@ export const runDesktopBrowserPrimitiveMeasurements =
                                   primitiveMeasurementWasmOutputFilePath,
                               );
                               assertDeterministicWasmStackLayout(artifactBytes);
-                              const rawSha256Hex = createHash("sha256")
+                              const rawSha256Hex = createHash('sha256')
                                   .update(artifactBytes)
-                                  .digest("hex");
+                                  .digest('hex');
                               const normalizedSha256Hex =
                                   artifact?.normalizedSha256Hex ??
-                                  createHash("sha256")
+                                  createHash('sha256')
                                       .update(
                                           normalizeTranscriptCoreKernelBytesForHash(
                                               artifactBytes,
                                           ),
                                       )
-                                      .digest("hex");
+                                      .digest('hex');
                               runLog.writeEvent({
                                   details: {
                                       byteLength: artifactBytes.byteLength,
@@ -540,8 +533,8 @@ export const runDesktopBrowserPrimitiveMeasurements =
                                   },
                                   eventType:
                                       artifact === undefined
-                                          ? "primitive-measurement-wasm-reused"
-                                          : "primitive-measurement-wasm-built",
+                                          ? 'primitive-measurement-wasm-reused'
+                                          : 'primitive-measurement-wasm-built',
                               });
                               return Object.freeze({
                                   byteLength: artifactBytes.byteLength,
@@ -564,7 +557,7 @@ export const runDesktopBrowserPrimitiveMeasurements =
                     for (const browserEngine of parsedArguments.browserEngines) {
                         if (
                             parsedArguments.measurementComponent ===
-                            "authenticated-storage"
+                            'authenticated-storage'
                         ) {
                             const evidence =
                                 await runBrowserAuthenticatedStorageMeasurement(
@@ -582,13 +575,13 @@ export const runDesktopBrowserPrimitiveMeasurements =
                                             .physicalWriteByteLength,
                                 },
                                 eventType:
-                                    "authenticated-storage-browser-measurement-completed",
+                                    'authenticated-storage-browser-measurement-completed',
                             });
                             continue;
                         }
                         if (
                             parsedArguments.measurementComponent ===
-                            "boundary-copies"
+                            'boundary-copies'
                         ) {
                             const evidence =
                                 await runBrowserBoundaryCopyMeasurement({
@@ -607,7 +600,7 @@ export const runDesktopBrowserPrimitiveMeasurements =
                                             .copyIntoWasmElapsedMilliseconds,
                                 },
                                 eventType:
-                                    "boundary-copy-browser-measurement-completed",
+                                    'boundary-copy-browser-measurement-completed',
                             });
                             continue;
                         }
@@ -637,7 +630,7 @@ export const runDesktopBrowserPrimitiveMeasurements =
                                                 .wasmMemoryByteLengthAfter,
                                     },
                                     eventType:
-                                        "focused-primitive-measurement-browser-completed",
+                                        'focused-primitive-measurement-browser-completed',
                                 });
                             }
                             continue;
@@ -663,7 +656,7 @@ export const runDesktopBrowserPrimitiveMeasurements =
                                         .physicalStoredPeakByteLength,
                             },
                             eventType:
-                                "primitive-measurement-browser-completed",
+                                'primitive-measurement-browser-completed',
                         });
                     }
                 } finally {
@@ -672,8 +665,8 @@ export const runDesktopBrowserPrimitiveMeasurements =
 
                 const attachmentDirectoryPath = path.join(
                     runLog.runDirectoryPath,
-                    "attachments",
-                    "primitive-measurements",
+                    'attachments',
+                    'primitive-measurements',
                 );
                 await mkdir(attachmentDirectoryPath, { recursive: true });
                 const evidenceRecord = Object.freeze({
@@ -690,7 +683,7 @@ export const runDesktopBrowserPrimitiveMeasurements =
                                 measurementWasm,
                             }
                           : parsedArguments.measurementComponent ===
-                              "authenticated-storage"
+                              'authenticated-storage'
                             ? {
                                   authenticatedStorageEvidence: Object.freeze(
                                       authenticatedStorageEvidence,
@@ -711,22 +704,22 @@ export const runDesktopBrowserPrimitiveMeasurements =
                     attachmentDirectoryPath,
                     parsedArguments.focusedCaseIdentifiers !== undefined
                         ? parsedArguments.focusedCaseIdentifiers.length === 1
-                            ? "desktop-browser-focused-primitive-measurement.json"
-                            : "desktop-browser-focused-primitive-measurements.json"
+                            ? 'desktop-browser-focused-primitive-measurement.json'
+                            : 'desktop-browser-focused-primitive-measurements.json'
                         : parsedArguments.measurementComponent === undefined
-                          ? "desktop-browser-primitive-measurements.json"
+                          ? 'desktop-browser-primitive-measurements.json'
                           : parsedArguments.measurementComponent ===
-                              "authenticated-storage"
-                            ? "desktop-browser-authenticated-storage-measurement.json"
-                            : "desktop-browser-boundary-copy-measurement.json",
+                              'authenticated-storage'
+                            ? 'desktop-browser-authenticated-storage-measurement.json'
+                            : 'desktop-browser-boundary-copy-measurement.json',
                 );
                 await writeFile(
                     attachmentFilePath,
                     `${JSON.stringify(evidenceRecord, null, 2)}\n`,
-                    "utf8",
+                    'utf8',
                 );
                 runLog.writeCombinedOutput(
-                    `Desktop-browser ${parsedArguments.focusedCaseIdentifiers === undefined ? (parsedArguments.measurementComponent ?? "primitive measurements") : `primitive cases ${parsedArguments.focusedCaseIdentifiers.join(", ")}`} completed for ${parsedArguments.browserEngines.join(", ")}; evidence: ${attachmentFilePath}\n`,
+                    `Desktop-browser ${parsedArguments.focusedCaseIdentifiers === undefined ? (parsedArguments.measurementComponent ?? 'primitive measurements') : `primitive cases ${parsedArguments.focusedCaseIdentifiers.join(', ')}`} completed for ${parsedArguments.browserEngines.join(', ')}; evidence: ${attachmentFilePath}\n`,
                 );
             },
         );

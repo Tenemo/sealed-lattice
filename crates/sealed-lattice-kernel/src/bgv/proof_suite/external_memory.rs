@@ -64,7 +64,7 @@ pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYT
     }
 };
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProofExternalMemoryBoundaryGeometry {
     append_request_byte_length: u64,
@@ -73,7 +73,7 @@ pub(crate) struct ProofExternalMemoryBoundaryGeometry {
     read_response_byte_length: u64,
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 impl ProofExternalMemoryBoundaryGeometry {
     pub(crate) fn derive(
         maximum_payload_byte_length: u64,
@@ -141,7 +141,7 @@ pub(crate) use executor::{
     ProofExternalMemoryError, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryUsage,
 };
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use plan::ProofExternalMemoryTransactionOperation;
 pub(crate) use plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
@@ -153,7 +153,7 @@ pub(crate) use transaction::{
     ProofExternalMemoryTransactionAdapterError, ProofExternalMemoryTransactionRecorder,
     ProofExternalMemoryTransactionReplay, ProofExternalMemoryTransactionRequest,
 };
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use transaction::{
     EXTERNAL_MEMORY_SINGLE_APPEND_REPLAY_LENGTH_CAPACITY_CEILING,
     EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING,

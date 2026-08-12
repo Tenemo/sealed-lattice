@@ -3,13 +3,13 @@ use std::{
     mem::size_of,
 };
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 use zeroize::Zeroizing;
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 use crate::bgv::setup::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
     setup_generation_compact_public_key_development_retained_payload_byte_length,
@@ -72,7 +72,7 @@ enum SetupKeyRelationSourceLayout {
 
 enum SetupKeyRelationAuthorityAccess {
     RetainedRegistry(u32),
-    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[cfg(test)]
     CompactPublicKeyDevelopment(Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>),
 }
 
@@ -162,6 +162,7 @@ trait PublicKeyShareCoefficientSource: SetupKeyRelationAnchorCoefficientSource {
         &self,
         limb_ordinal: usize,
     ) -> Result<&[u64], RefusalReason>;
+    #[cfg(test)]
     fn public_key_limb_count(&self) -> Result<usize, RefusalReason>;
 }
 
@@ -262,6 +263,7 @@ impl PublicKeyShareCoefficientSource for SetupGenerationKeyRelationSource<'_, '_
             .ok_or(RefusalReason::WrongTypeOrLength)
     }
 
+    #[cfg(test)]
     fn public_key_limb_count(&self) -> Result<usize, RefusalReason> {
         Ok(self.public_key_share()?.ordered_limb_coefficients().len())
     }
@@ -1180,7 +1182,7 @@ pub(crate) fn public_key_share_source_provider_memory_accounting(
     )
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn compact_public_key_assignment_source_provider_memory_accounting(
     relation_plan_variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
@@ -1376,7 +1378,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         )
     }
 
-    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_compact_public_key_assignment(
         source: &SetupGenerationKeyRelationSource<'_, '_>,
@@ -1501,14 +1503,14 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                 .into_boxed_slice(),
             SetupKeyRelationSourceLayout::PublicKeyShare(_) => Box::new([]),
         };
-        #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+        #[cfg(test)]
         let authority_access = source
             .compact_public_key_development_authority()
             .map(SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment)
             .unwrap_or_else(|| {
                 SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier())
             });
-        #[cfg(not(any(test, feature = "primitive-measurement-evidence")))]
+        #[cfg(not(test))]
         let authority_access =
             SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier());
         Ok(Self {
@@ -1554,7 +1556,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         )
     }
 
-    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[cfg(test)]
     pub(crate) fn compact_public_key_assignment_request_context(
         &self,
     ) -> Result<CommonProofSourcePolynomialRequestContext, CommonProofProverError> {
@@ -1567,7 +1569,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         Ok(self.request_context)
     }
 
-    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[cfg(test)]
     pub(crate) fn finish_compact_public_key_assignment_sources(
         self,
     ) -> Result<(), CommonProofProverError> {
@@ -1742,7 +1744,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                     derive_polynomial,
                 )
             }
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
                 with_setup_generation_compact_public_key_development_relation_reentry::<
                     _,
@@ -1824,7 +1826,7 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
             SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
                 add_setup_authority_memory_accounting(base, *authority_identifier)
             }
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
                 add_setup_authority_payload_memory_accounting(
                     base,
@@ -1926,7 +1928,7 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
             SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
                 *authority_identifier
             }
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(_) => {
                 return Err(CommonProofProverError::InvalidTree);
             }

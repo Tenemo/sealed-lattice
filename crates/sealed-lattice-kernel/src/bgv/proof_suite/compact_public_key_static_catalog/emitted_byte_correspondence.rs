@@ -1564,9 +1564,9 @@ mod tests {
                     && !response.components.is_empty()
                     && response.components.iter().all(|component| {
                         component.value_region.is_some()
-                            == !component.value_region_consumers.is_empty()
+                            != component.value_region_consumers.is_empty()
                             && component.leaf_salt_region.is_some()
-                                == !component.leaf_salt_region_consumers.is_empty()
+                                != component.leaf_salt_region_consumers.is_empty()
                     })
             }));
             let variable_responses = correspondence

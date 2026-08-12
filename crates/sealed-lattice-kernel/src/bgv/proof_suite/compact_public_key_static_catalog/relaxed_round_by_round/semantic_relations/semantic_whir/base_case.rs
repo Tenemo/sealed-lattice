@@ -27,7 +27,7 @@ impl SemanticWhirBaseStatement {
             || input_relation.opening_evaluation_claim_count != 0
             || input_relation.carried_reduction_claim_count != 1
             || input_relation.claim_count != 1
-            || input_instance.opening_claims.len() != 0
+            || !input_instance.opening_claims.is_empty()
             || input_instance.carried_reduction_claims.len() != 1
             || input_instance.masks.len() != input_relation.mask_codes.len()
             || source_query_count == 0

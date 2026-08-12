@@ -1,5 +1,5 @@
 use super::super::external_memory::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 use super::super::external_memory::{
     EXTERNAL_MEMORY_SINGLE_APPEND_REPLAY_LENGTH_CAPACITY_CEILING,
     EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING,
@@ -38,7 +38,7 @@ enum CommonProofStorageTransactionPass {
     Cancelled,
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofStorageTransactionMemoryGeometry {
     runtime_inline_byte_length: u64,
@@ -57,7 +57,7 @@ pub(crate) struct CommonProofStorageTransactionMemoryGeometry {
     maximum_live_byte_length: u64,
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 impl CommonProofStorageTransactionMemoryGeometry {
     pub(crate) fn derive(
         maximum_payload_byte_length: u64,
@@ -190,19 +190,19 @@ impl CommonProofStorageTransactionMemoryGeometry {
     }
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 fn type_byte_length<Value>() -> Result<u64, CommonProofRuntimeError> {
     u64::try_from(core::mem::size_of::<Value>())
         .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 fn checked_storage_memory_add(left: u64, right: u64) -> Result<u64, CommonProofRuntimeError> {
     left.checked_add(right)
         .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 fn checked_storage_memory_product(factors: &[u64]) -> Result<u64, CommonProofRuntimeError> {
     factors.iter().copied().try_fold(1_u64, |product, factor| {
         product

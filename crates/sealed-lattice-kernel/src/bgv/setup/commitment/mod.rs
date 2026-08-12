@@ -60,6 +60,7 @@ pub(super) use computation::{
     compute_setup_commitment_for_degree, compute_setup_commitment_from_typed_opening_for_degree,
 };
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use lattice_anchor::selected_lattice_anchor_commitment_canonical_byte_length;
 #[cfg(test)]
 pub(crate) use lattice_anchor::{

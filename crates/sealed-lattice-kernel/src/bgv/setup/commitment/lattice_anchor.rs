@@ -127,6 +127,7 @@ pub(crate) fn lattice_anchor_commitment_canonical_bytes(
 /// commitment rows. This follows the same tuple and homogeneous-list layout
 /// used by `lattice_anchor_commitment_canonical_bytes`.
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn selected_lattice_anchor_commitment_canonical_byte_length(
     commitment_data_prime_index: usize,
 ) -> CanonicalResult<usize> {

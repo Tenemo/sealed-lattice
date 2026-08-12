@@ -2,7 +2,6 @@ import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
-    configurableOptionCountRange,
     foundationProfile,
     isProtocolHash,
     refusalReasonCodes,
@@ -197,7 +196,7 @@ describe('foundation ceremony Rust/WASM boundary', () => {
         ).toThrow();
 
         const boundaryOptionDefinitions = Array.from(
-            { length: configurableOptionCountRange.maximum },
+            { length: foundationProfile.optionCount },
             (_value, optionIndex) => ({
                 displayLabel: `O${String(optionIndex)}`,
                 optionIdentifier: `option-${String(optionIndex)}`,

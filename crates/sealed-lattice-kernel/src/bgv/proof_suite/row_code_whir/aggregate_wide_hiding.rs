@@ -1646,9 +1646,9 @@ impl AggregateWideMaskingCertificate {
 
     pub(super) fn is_complete(&self) -> bool {
         self.base_case_mask_group_count == 1
-            && self.private_extension_element_count == 18_027
-            && self.affine_private_extension_element_count == 18_025
-            && self.total_joint_affine_view_rank == 18_013
+            && self.private_extension_element_count == 18_037
+            && self.affine_private_extension_element_count == 18_035
+            && self.total_joint_affine_view_rank == 18_023
             && self.total_conditional_entropy_dimension == 12
             && self.joint_affine_view_rows.len() == 15
             && self.derived_affine_identities.len() == 22
@@ -2668,8 +2668,8 @@ mod tests {
     #[test]
     fn selected_pad_layout_is_disjoint_and_complete() {
         let layout = selected_layout();
-        assert_eq!(layout.message_length(), 1_524);
-        assert_eq!(layout.switch_delta_count(), 1_470);
+        assert_eq!(layout.message_length(), 1_525);
+        assert_eq!(layout.switch_delta_count(), 1_471);
 
         let mut coverage = vec![0_u8; layout.message_length()];
         for batch in &layout.sumcheck_batches {
@@ -2694,16 +2694,16 @@ mod tests {
         let shape = AggregateWideHidingMaterialShape::derive(&configuration)
             .expect("aggregate-wide private-material shape");
 
-        assert_eq!(shape.pad_message_length, 1_524);
+        assert_eq!(shape.pad_message_length, 1_525);
         assert_eq!(shape.pad_randomness_length, 393);
         assert_eq!(
             shape.oracle_randomness_lengths,
-            [3_096, 2_304, 2_144, 2_112, 2_104, 2_104]
+            [3_096, 2_304, 2_152, 2_112, 2_104, 2_104]
         );
         assert_eq!(shape.fresh_source_message_length, 64);
         assert_eq!(shape.fresh_source_randomness_length, 263);
-        assert_eq!(shape.total_extension_element_count(), 18_027);
-        assert_eq!(shape.pad_shape().message_len, 1_524);
+        assert_eq!(shape.total_extension_element_count(), 18_037);
+        assert_eq!(shape.pad_shape().message_len, 1_525);
         assert_eq!(shape.pad_shape().randomness_len, 393);
         assert_eq!(shape.pad_shape().domain_size, 8_192);
     }
@@ -2722,13 +2722,13 @@ mod tests {
         assert_eq!(certificate.logical_sumcheck_mask_coefficient_count, 54);
         assert_eq!(certificate.full_sumcheck_coordinate_count, 54);
         assert_eq!(certificate.switch_mask_count, 5);
-        assert_eq!(certificate.switch_mask_coefficient_count, 1_470);
-        assert_eq!(certificate.pad_message_length(), 1_524);
+        assert_eq!(certificate.switch_mask_coefficient_count, 1_471);
+        assert_eq!(certificate.pad_message_length(), 1_525);
         assert_eq!(certificate.pad_randomness_length(), 393);
         assert_eq!(certificate.pad_domain_size(), 8_192);
-        assert_eq!(certificate.private_extension_element_count(), 18_027);
-        assert_eq!(certificate.affine_private_extension_element_count, 18_025);
-        assert_eq!(certificate.total_joint_affine_view_rank, 18_013);
+        assert_eq!(certificate.private_extension_element_count(), 18_037);
+        assert_eq!(certificate.affine_private_extension_element_count, 18_035);
+        assert_eq!(certificate.total_joint_affine_view_rank, 18_023);
         assert_eq!(certificate.total_conditional_entropy_dimension, 12);
         assert_eq!(certificate.joint_affine_view_rows.len(), 15);
         assert_eq!(
@@ -2750,13 +2750,13 @@ mod tests {
                 (9, 7, 2),
                 (3_483, 3_483, 0),
                 (2_592, 2_592, 0),
-                (2_412, 2_412, 0),
+                (2_421, 2_421, 0),
                 (2_376, 2_376, 0),
                 (2_367, 2_367, 0),
                 (2_104, 2_104, 0),
                 (393, 393, 0),
                 (327, 327, 0),
-                (1_917, 1_917, 0),
+                (1_918, 1_918, 0),
             ]
         );
         assert_eq!(
@@ -2789,7 +2789,7 @@ mod tests {
                 .private_leaf_salt_byte_length,
             128
         );
-        assert_eq!(certificate.generator_hybrid.base_field_sample_count, 90_135);
+        assert_eq!(certificate.generator_hybrid.base_field_sample_count, 90_185);
         assert_eq!(
             certificate
                 .generator_hybrid
@@ -2815,7 +2815,7 @@ mod tests {
             [
                 (2_097_152, 387, 8_388_608, 387, 8),
                 (262_144, 288, 4_194_304, 288, 8),
-                (32_768, 268, 2_097_152, 268, 8),
+                (32_768, 269, 2_097_152, 269, 8),
                 (4_096, 264, 1_048_576, 264, 8),
                 (512, 263, 524_288, 263, 8),
                 (64, 263, 262_144, 263, 8),
@@ -2999,8 +2999,8 @@ mod tests {
             }
         };
 
-        assert_eq!(coins.sample_count, 90_135);
-        assert_eq!(material.pad_message.len(), 1_524);
+        assert_eq!(coins.sample_count, 90_185);
+        assert_eq!(material.pad_message.len(), 1_525);
         assert_eq!(material.pad_randomness.len(), 393);
         assert_eq!(
             material
@@ -3008,7 +3008,7 @@ mod tests {
                 .iter()
                 .map(Vec::len)
                 .collect::<Vec<_>>(),
-            [3_096, 2_304, 2_144, 2_112, 2_104, 2_104],
+            [3_096, 2_304, 2_152, 2_112, 2_104, 2_104],
         );
         assert_eq!(material.base_case_fresh_material.source_message.len(), 64);
         assert_eq!(
@@ -3024,7 +3024,7 @@ mod tests {
         );
         assert_eq!(
             material.base_case_fresh_material.mask_groups[0].messages[0].len(),
-            1_524
+            1_525
         );
         assert_eq!(
             material.base_case_fresh_material.mask_groups[0].randomness[0].len(),
@@ -3073,7 +3073,7 @@ mod tests {
         );
         assert_eq!(
             (shape.message_len, shape.randomness_len, shape.domain_size,),
-            (1_524, 393, 8_192),
+            (1_525, 393, 8_192),
         );
 
         let mut message = ChallengeField::zero_vec(shape.message_len);

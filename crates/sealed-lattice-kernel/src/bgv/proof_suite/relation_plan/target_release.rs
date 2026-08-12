@@ -5332,13 +5332,13 @@ mod tests {
             .first()
             .expect("selected target role");
         assert_eq!(compilation.ring_degree, 32_768);
-        assert_eq!(compilation.flooding_by_role[0].grouped_limbs.len(), 13,);
+        assert_eq!(compilation.flooding_by_role[0].grouped_limbs.len(), 9);
         assert_eq!(modulus_layout.share_limbs.len(), 4);
         assert_eq!(role_layout.scaled_a_digits.len(), 2);
         assert_eq!(role_layout.partial_decryption_digits.len(), 2);
-        assert_eq!(role_layout.quotient_digits.len(), 13);
-        assert_eq!(role_layout.carry_values.len(), 13);
-        assert_eq!(role_layout.exact_integer_lift_carry_columns.len(), 28);
+        assert_eq!(role_layout.quotient_digits.len(), 9);
+        assert_eq!(role_layout.carry_values.len(), 9);
+        assert_eq!(role_layout.exact_integer_lift_carry_columns.len(), 20);
         assert_eq!(
             role_layout.scaled_a_digits.len() + modulus_layout.share_limbs.len() - 1,
             5,
@@ -5363,36 +5363,36 @@ mod tests {
         assert_eq!(wasm_accounting.callback_construction_byte_length, 1_572_896);
         assert_eq!(
             wasm_accounting.flooding_layer_construction_byte_length,
-            4_980_892,
+            3_932_268,
         );
         assert_eq!(
             wasm_accounting.share_radix_construction_byte_length,
-            6_029_516,
+            4_980_892,
         );
         assert_eq!(
             wasm_accounting.share_transform_construction_byte_length,
-            8_388_860,
+            7_340_236,
         );
-        assert_eq!(wasm_accounting.product_evaluation_byte_length, 11_534_648);
-        assert_eq!(wasm_accounting.product_folding_byte_length, 11_272_564);
+        assert_eq!(wasm_accounting.product_evaluation_byte_length, 10_486_024);
+        assert_eq!(wasm_accounting.product_folding_byte_length, 10_223_940);
         assert_eq!(
             wasm_accounting.quotient_construction_byte_length,
-            14_942_604,
+            11_796_780,
         );
-        assert_eq!(wasm_accounting.carry_construction_byte_length, 22_807_208);
-        assert_eq!(wasm_accounting.role_cache_byte_length, 17_039_828);
-        assert_eq!(wasm_accounting.steady_role_envelope_byte_length, 17_301_972,);
+        assert_eq!(wasm_accounting.carry_construction_byte_length, 17_564_152);
+        assert_eq!(wasm_accounting.role_cache_byte_length, 11_796_804);
+        assert_eq!(wasm_accounting.steady_role_envelope_byte_length, 12_058_948,);
         assert_eq!(
             wasm_accounting.exact_carry_derivation_byte_length,
-            28_049_992,
+            20_709_784,
         );
         assert_eq!(
             wasm_accounting.exact_carry_materialization_byte_length,
-            17_564_116,
+            12_321_092,
         );
         assert_eq!(
             wasm_accounting.ordinary_materialization_byte_length,
-            17_564_116,
+            12_321_092,
         );
         assert_eq!(
             wasm_accounting.maximum_dynamic_byte_length(),
@@ -5403,7 +5403,7 @@ mod tests {
             wasm_accounting
                 .maximum_dynamic_byte_length()
                 .checked_sub(wasm_accounting.steady_role_envelope_byte_length),
-            Some(10_748_020),
+            Some(8_650_836),
         );
 
         let construction_dominant = target_release_role_layer_construction_memory_accounting(
@@ -5500,31 +5500,31 @@ mod tests {
             );
             assert_eq!(
                 native_accounting.share_transform_construction_byte_length,
-                8_913_400,
+                7_864_728,
             );
-            assert_eq!(native_accounting.product_evaluation_byte_length, 12_059_248,);
-            assert_eq!(native_accounting.product_folding_byte_length, 11_797_224,);
+            assert_eq!(native_accounting.product_evaluation_byte_length, 11_010_576,);
+            assert_eq!(native_accounting.product_folding_byte_length, 10_748_552,);
             assert_eq!(
                 native_accounting.quotient_construction_byte_length,
-                15_467_288,
+                12_321_368,
             );
-            assert_eq!(native_accounting.carry_construction_byte_length, 23_332_048,);
-            assert_eq!(native_accounting.role_cache_byte_length, 17_040_296);
+            assert_eq!(native_accounting.carry_construction_byte_length, 18_088_848,);
+            assert_eq!(native_accounting.role_cache_byte_length, 11_797_128);
             assert_eq!(
                 native_accounting.steady_role_envelope_byte_length,
-                17_302_440,
+                12_059_272,
             );
             assert_eq!(
                 native_accounting.exact_carry_derivation_byte_length,
-                28_050_460,
+                20_710_108,
             );
             assert_eq!(
                 native_accounting.exact_carry_materialization_byte_length,
-                17_564_584,
+                12_321_416,
             );
             assert_eq!(
                 native_accounting.ordinary_materialization_byte_length,
-                17_564_584,
+                12_321_416,
             );
             assert_eq!(
                 native_accounting.maximum_dynamic_byte_length(),
@@ -5534,7 +5534,7 @@ mod tests {
                 native_accounting
                     .maximum_dynamic_byte_length()
                     .checked_sub(native_accounting.steady_role_envelope_byte_length),
-                Some(10_748_020),
+                Some(8_650_836),
             );
 
             let provider_accounting =
@@ -5562,7 +5562,7 @@ mod tests {
             );
             assert_eq!(
                 provider_accounting.additional_loading_transient_byte_length(),
-                10_748_020,
+                8_650_836,
             );
             assert_eq!(
                 provider_accounting.maximum_returned_source_polynomial_byte_length(),

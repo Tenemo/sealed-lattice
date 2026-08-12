@@ -9,9 +9,7 @@ use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger, Grind
 use p3_commit::MultilinearPcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_sumcheck::layout::PrefixProver;
-use p3_whir::{
-    DomainSeparator, FoldingFactor, ProtocolParameters, SecurityAssumption, WhirConfig, WhirProver,
-};
+use p3_whir::{DomainSeparator, FoldingFactor, WhirProver};
 
 use super::construction_plan::{
     RowCodeWhirConstructionPlan, RowCodeWhirEncodedOraclePlan, RowCodeWhirFinalRoundPlan,
@@ -90,33 +88,15 @@ fn aggregate_wide_pcs_from_selected_parameters(
     parameters: RowCodeWhirSelectedParameters,
     privacy_mode: crate::bgv::proof_suite::relation_plan::ProofPrivacyMode,
 ) -> Result<AggregateWidePcs, String> {
-    let configuration =
-        WhirConfig::<ChallengeField, ChallengeField, ExtensionFieldChallenger>::new(
-            parameters.polynomial_commitment_variable_count,
-            ProtocolParameters {
-                starting_log_inv_rate: parameters.starting_log_inverse_rate,
-                round_log_inv_rates: Vec::new(),
-                folding_factor: FoldingFactor::Constant(parameters.folding_factor),
-                soundness_type: aggregate_wide_security_assumption(parameters.soundness_assumption),
-                security_level: parameters.security_level,
-                pow_bits: parameters.proof_of_work_bits,
-            },
-        )
-        .map_err(|error| format!("construct aggregate-wide WHIR configuration: {error}"))?;
+    let configuration = super::hiding_whir::selected_hiding_whir_config(parameters)
+        .map_err(|error| format!("construct aggregate-wide WHIR configuration: {error}"))?
+        .inner;
     let commitment_scheme = CommitmentScheme::verifier(privacy_mode);
     Ok(WhirProver::new(
         configuration,
         DiscreteFourierTransform::default(),
         commitment_scheme,
     ))
-}
-
-const fn aggregate_wide_security_assumption(
-    soundness_assumption: RowCodeWhirSoundnessAssumption,
-) -> SecurityAssumption {
-    match soundness_assumption {
-        RowCodeWhirSoundnessAssumption::UniqueDecoding => SecurityAssumption::UniqueDecoding,
-    }
 }
 
 fn ensure_aggregate_wide_pcs_matches_construction_plan(
@@ -132,8 +112,13 @@ fn ensure_aggregate_wide_pcs_matches_construction_plan(
         || pcs.params.starting_log_inv_rate != parameters.starting_log_inverse_rate
         || !pcs.params.round_log_inv_rates.is_empty()
         || !folding_factor_matches
-        || pcs.params.soundness_type
-            != aggregate_wide_security_assumption(parameters.soundness_assumption)
+        || !matches!(
+            (pcs.params.soundness_type, parameters.soundness_assumption),
+            (
+                p3_whir::SecurityAssumption::UniqueDecoding,
+                RowCodeWhirSoundnessAssumption::UniqueDecoding
+            )
+        )
         || pcs.params.security_level != parameters.security_level
         || pcs.params.pow_bits != parameters.proof_of_work_bits
     {

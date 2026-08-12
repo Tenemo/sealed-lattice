@@ -1674,7 +1674,7 @@ mod tests {
                 .iter()
                 .map(|epoch| epoch.query_count())
                 .collect::<Vec<_>>(),
-            [387, 288, 268, 264, 263, 263],
+            [387, 288, 269, 264, 263, 263],
         );
         assert_eq!(
             accounting
@@ -1682,24 +1682,24 @@ mod tests {
                 .iter()
                 .map(|epoch| epoch.stripe_count())
                 .collect::<Vec<_>>(),
-            [8, 4, 2, 1, 1, 1],
+            [16, 8, 4, 2, 1, 1],
         );
         assert_eq!(size_of::<ChallengeField>(), 40);
         assert_eq!(size_of::<ColumnStreamableLeafState>(), 64);
         assert_eq!(accounting.maximum_dft_buffer_byte_length(), 335_544_320);
         assert_eq!(
             accounting.maximum_leaf_state_stripe_byte_length(),
-            67_108_864
+            33_554_432
         );
         assert_eq!(
             accounting.maximum_algorithm_live_set_byte_length(),
-            402_654_216,
+            369_099_784,
         );
         assert!(
             accounting.maximum_algorithm_live_set_byte_length()
                 <= AUTOMATIC_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
         );
-        assert_eq!(accounting.full_column_dft_count(), 272);
+        assert_eq!(accounting.full_column_dft_count(), 512);
         assert_eq!(accounting.initial_hash_query_count(), 33_030_144);
         assert_eq!(accounting.private_leaf_salt_derivation_count(), 33_030_144);
         assert_eq!(accounting.transition_hash_query_count(), 264_241_152);
@@ -1720,7 +1720,7 @@ mod tests {
         );
         assert_eq!(
             selected_same_secret_proof_byte_length(&plan, &validated),
-            5_814_554
+            5_815_786
         );
     }
 
@@ -1731,12 +1731,12 @@ mod tests {
             derive_private_leaf_salt_liveness(&plan).expect("private salt liveness derives");
         assert_eq!(accounting.phase_opening_salt_count, 1_161);
         assert_eq!(accounting.bound_opening_salt_count, 320);
-        assert_eq!(accounting.aggregate_opening_salt_count, 2_782);
-        assert_eq!(accounting.transported_salt_byte_length, 545_664);
+        assert_eq!(accounting.aggregate_opening_salt_count, 2_783);
+        assert_eq!(accounting.transported_salt_byte_length, 545_792);
         assert_eq!(accounting.aggregate_resident_state_byte_length, 56);
         assert_eq!(accounting.derivation_workspace_byte_length, 392);
         assert_eq!(accounting.aggregate_row_workspace_byte_length, 584);
-        assert_eq!(accounting.canonical_uniqueness_set_byte_length, 750_312);
+        assert_eq!(accounting.canonical_uniqueness_set_byte_length, 750_488);
         assert_eq!(
             accounting.retained_pad_commitment_payload_byte_length,
             1_376_720,
@@ -1762,7 +1762,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             frontier_node_count,
-            [5_543, 3_968, 3_460, 3_152, 2_879, 2_616]
+            [5_543, 3_968, 3_471, 3_152, 2_879, 2_616]
         );
         let extra_frontier_node_count = frontier_node_count
             .iter()
@@ -1780,8 +1780,8 @@ mod tests {
                 + extra_frontier_node_count * MERKLE_DIGEST_BYTE_LENGTH
                 + epoch_count * 7 * MERKLE_DIGEST_BYTE_LENGTH
                 + epoch_count * 7 * CANONICAL_COUNT_BYTE_LENGTH;
-        assert_eq!(extra_frontier_node_count, 151_326);
-        assert_eq!(column_separated_proof_byte_length, 15_502_274);
+        assert_eq!(extra_frontier_node_count, 151_403);
+        assert_eq!(column_separated_proof_byte_length, 15_508_434);
 
         let leaf_count_sum = accounting
             .epochs()

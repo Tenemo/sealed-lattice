@@ -1603,10 +1603,13 @@ fn derive_vss_relation_replay_candidate_construction_plan(
 }
 
 #[cfg(test)]
+type VssTraceColumnsByOpeningPattern = BTreeMap<(Vec<u32>, u64), BTreeSet<u32>>;
+
+#[cfg(test)]
 fn trace_phase_columns_by_opening_pattern_and_chunk_count(
     phase: &RowCodeWhirTracePhasePlan,
     logical_polynomials_per_physical_row: u64,
-) -> Result<BTreeMap<(Vec<u32>, u64), BTreeSet<u32>>, String> {
+) -> Result<VssTraceColumnsByOpeningPattern, String> {
     let mut rows_by_column_group = BTreeMap::<u32, (Vec<u32>, BTreeMap<u32, BTreeSet<u32>>)>::new();
     for row in &phase.rows {
         let group = rows_by_column_group
@@ -2108,7 +2111,7 @@ fn derive_vss_fused_bound_range_candidate_ledger(
     .map_err(|error| format!("VSS fused-bound geometry is invalid: {error:?}"))?;
     let mut range_digit_count_per_material_low_digit = 1_u64;
     let mut range_digit_capacity = range_digit_radix;
-    while range_digit_capacity <= geometry.material_digit_radix - 1 {
+    while range_digit_capacity < geometry.material_digit_radix {
         range_digit_count_per_material_low_digit = range_digit_count_per_material_low_digit
             .checked_add(1)
             .ok_or_else(|| "VSS fused-bound range digit count overflowed".to_owned())?;

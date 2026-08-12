@@ -1851,7 +1851,7 @@ mod tests {
         let mut expected = vec![ProofChallengeExtensionElement::ZERO; 8];
         for row_ordinal in 0..8_usize {
             let row_weight = little_endian_row_weight(&row_point, row_ordinal);
-            for destination_ordinal in 0..8_usize {
+            for (destination_ordinal, expected_destination) in expected.iter_mut().enumerate() {
                 let mut left = ProofChallengeExtensionElement::ZERO;
                 let mut right = ProofChallengeExtensionElement::ZERO;
                 let mut output = ProofChallengeExtensionElement::ZERO;
@@ -1901,8 +1901,8 @@ mod tests {
                     .multiply(role_weights[0])
                     .add(right.multiply(role_weights[1]))
                     .add(output.multiply(role_weights[2]));
-                expected[destination_ordinal] =
-                    expected[destination_ordinal].add(row_weight.multiply(combined_entry));
+                *expected_destination =
+                    expected_destination.add(row_weight.multiply(combined_entry));
             }
         }
         assert_eq!(

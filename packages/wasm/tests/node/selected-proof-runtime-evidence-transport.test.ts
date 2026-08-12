@@ -173,7 +173,6 @@ describe('Selected proof runtime evidence transport', () => {
             serializeDesktopBrowserProofTransportManifestAuthenticationBindings(
                 {
                     'chromium-generation': manifestSha512Hex,
-                    'firefox-generation': '78'.repeat(64),
                 },
             );
         expect(
@@ -182,17 +181,16 @@ describe('Selected proof runtime evidence transport', () => {
             ),
         ).toEqual({
             'chromium-generation': manifestSha512Hex,
-            'firefox-generation': '78'.repeat(64),
         });
         expect(() =>
             parseDesktopBrowserProofTransportManifestAuthenticationBindings(
-                '{"firefox-generation":"' +
-                    '78'.repeat(64) +
-                    '","chromium-generation":"' +
+                '{"chromium-generation":"' +
                     manifestSha512Hex +
+                    '","unexpected":"' +
+                    '78'.repeat(64) +
                     '"}',
             ),
-        ).toThrow(/not canonical/u);
+        ).toThrow(/malformed/u);
 
         await expect(
             readDesktopBrowserProofTransportManifest({
@@ -293,13 +291,13 @@ describe('Selected proof runtime evidence transport', () => {
             command: 'verify-selected-proof-runtime-evidence',
             generationCaseIdentifier: 'same-secret-generation',
             generationRunOrdinal: 1,
-            generationSessionIdentifier: 'firefox-generation',
+            generationSessionIdentifier: 'chromium-generation',
             ownershipRole: 'verification',
             proofBytes,
             suiteId,
             verificationCaseIdentifier: 'same-secret-verification',
             verificationRunOrdinal: 2,
-            verificationSessionIdentifier: 'webkit-verification',
+            verificationSessionIdentifier: 'chromium-verification',
             wasmSha256Hex,
         } as const;
         expect(

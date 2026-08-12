@@ -277,10 +277,14 @@ impl WhirStaticLedger {
         round_log_inverse_rates: [u32; WHIR_ROUND_COUNT],
         opening_evaluation_count: u64,
         initial_oracle_value_byte_length: u64,
-        external_mask_group_specifications: Vec<MaskGroupStaticSpecification>,
-        external_generalized_relation_claim_count: u64,
-        external_carried_mask_message_randomness_element_count: u64,
+        external_mask_input: WhirExternalMaskInput,
     ) -> Result<Self, CompactStaticCatalogError> {
+        let WhirExternalMaskInput {
+            group_specifications: external_mask_group_specifications,
+            generalized_relation_claim_count: external_generalized_relation_claim_count,
+            carried_message_randomness_element_count:
+                external_carried_mask_message_randomness_element_count,
+        } = external_mask_input;
         if external_mask_group_specifications.is_empty()
             && (external_generalized_relation_claim_count != 0
                 || external_carried_mask_message_randomness_element_count != 0)
@@ -376,9 +380,9 @@ impl WhirStaticLedger {
             SUMCHECK_MASK_MESSAGE_LENGTH,
             MaskEncodingRandomnessLength::LocalMaskQueryCount,
         ));
-        for round_ordinal in 0..WHIR_ROUND_COUNT {
+        for query_count in query_counts.iter().copied().take(WHIR_ROUND_COUNT) {
             mask_code_shapes.push((
-                query_counts[round_ordinal],
+                query_count,
                 MaskEncodingRandomnessLength::LocalMaskQueryCount,
             ));
             mask_code_shapes.push((
@@ -1184,6 +1188,12 @@ impl WhirStaticLedger {
     }
 }
 
+struct WhirExternalMaskInput {
+    group_specifications: Vec<MaskGroupStaticSpecification>,
+    generalized_relation_claim_count: u64,
+    carried_message_randomness_element_count: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PackingStaticCatalog {
     packing_factor: u64,
@@ -1231,17 +1241,31 @@ struct PackingStaticCatalog {
     maximum_phase_recomputation_count: u64,
 }
 
+#[derive(Clone, Copy)]
+struct PackingStaticCatalogInput<'catalog> {
+    relation: &'catalog CompactPublicKeyRelationCatalog,
+    cfw_reduction: &'catalog cfw_reduction::CfwReductionCatalog,
+    cfw_to_whir_handoff: &'catalog cfw_to_whir_handoff::CfwToWhirHandoffCatalog,
+    cfw_lifecycle: &'catalog cfw_lifecycle::CfwLifecycleCatalog,
+    row_source_lifecycle: &'catalog row_source_lifecycle::RowSourceLifecycleCatalog,
+    resource_overlap: &'catalog resource_overlap::CompactPublicKeyResourceOverlapCatalog,
+    witness_covector: &'catalog witness_covector::WitnessCovectorCatalog,
+}
+
 impl PackingStaticCatalog {
     fn derive(
-        relation: &CompactPublicKeyRelationCatalog,
-        cfw_reduction: &cfw_reduction::CfwReductionCatalog,
-        cfw_to_whir_handoff: &cfw_to_whir_handoff::CfwToWhirHandoffCatalog,
-        cfw_lifecycle: &cfw_lifecycle::CfwLifecycleCatalog,
-        row_source_lifecycle: &row_source_lifecycle::RowSourceLifecycleCatalog,
-        resource_overlap: &resource_overlap::CompactPublicKeyResourceOverlapCatalog,
-        witness_covector: &witness_covector::WitnessCovectorCatalog,
+        input: PackingStaticCatalogInput<'_>,
         packing_factor: u64,
     ) -> Result<Self, CompactStaticCatalogError> {
+        let PackingStaticCatalogInput {
+            relation,
+            cfw_reduction,
+            cfw_to_whir_handoff,
+            cfw_lifecycle,
+            row_source_lifecycle,
+            resource_overlap,
+            witness_covector,
+        } = input;
         if !matches!(packing_factor, 1 | 2 | 4 | 8) {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -1299,9 +1323,12 @@ impl PackingStaticCatalog {
             round_log_inverse_rates,
             1,
             BASE_FIELD_ELEMENT_BYTE_LENGTH,
-            vec![preliminary_cross_epoch_mask_specification],
-            0,
-            CROSS_EPOCH_MASK_WIDTH * CROSS_EPOCH_MASK_MESSAGE_LENGTH,
+            WhirExternalMaskInput {
+                group_specifications: vec![preliminary_cross_epoch_mask_specification],
+                generalized_relation_claim_count: 0,
+                carried_message_randomness_element_count: CROSS_EPOCH_MASK_WIDTH
+                    * CROSS_EPOCH_MASK_MESSAGE_LENGTH,
+            },
         )?;
         let mut preliminary_main_mask_group_specifications = cfw_mask_group_specifications.clone();
         preliminary_main_mask_group_specifications.push(MaskGroupStaticSpecification {
@@ -1314,9 +1341,13 @@ impl PackingStaticCatalog {
             round_log_inverse_rates,
             2,
             EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
-            preliminary_main_mask_group_specifications,
-            cfw_reduction.generalized_committed_relation_claim_count(),
-            cfw_reduction.fresh_mask_randomness_element_count(),
+            WhirExternalMaskInput {
+                group_specifications: preliminary_main_mask_group_specifications,
+                generalized_relation_claim_count: cfw_reduction
+                    .generalized_committed_relation_claim_count(),
+                carried_message_randomness_element_count: cfw_reduction
+                    .fresh_mask_randomness_element_count(),
+            },
         )?;
         let shared_cross_epoch_encoding_randomness_length = checked_add(
             preliminary_pre_challenge_whir.mask_query_count,
@@ -1334,9 +1365,12 @@ impl PackingStaticCatalog {
             round_log_inverse_rates,
             1,
             BASE_FIELD_ELEMENT_BYTE_LENGTH,
-            vec![cross_epoch_mask_specification],
-            0,
-            CROSS_EPOCH_MASK_WIDTH * CROSS_EPOCH_MASK_MESSAGE_LENGTH,
+            WhirExternalMaskInput {
+                group_specifications: vec![cross_epoch_mask_specification],
+                generalized_relation_claim_count: 0,
+                carried_message_randomness_element_count: CROSS_EPOCH_MASK_WIDTH
+                    * CROSS_EPOCH_MASK_MESSAGE_LENGTH,
+            },
         )?;
         let mut main_mask_group_specifications = cfw_mask_group_specifications;
         main_mask_group_specifications.push(MaskGroupStaticSpecification {
@@ -1349,9 +1383,13 @@ impl PackingStaticCatalog {
             round_log_inverse_rates,
             2,
             EXTENSION_FIELD_ELEMENT_BYTE_LENGTH,
-            main_mask_group_specifications,
-            cfw_reduction.generalized_committed_relation_claim_count(),
-            cfw_reduction.fresh_mask_randomness_element_count(),
+            WhirExternalMaskInput {
+                group_specifications: main_mask_group_specifications,
+                generalized_relation_claim_count: cfw_reduction
+                    .generalized_committed_relation_claim_count(),
+                carried_message_randomness_element_count: cfw_reduction
+                    .fresh_mask_randomness_element_count(),
+            },
         )?;
         if pre_challenge_whir.mask_query_union_branch_count != 9
             || main_whir.mask_query_union_branch_count != 11
@@ -1759,20 +1797,18 @@ impl CompactPublicKeyStaticCatalog {
             &row_source_lifecycle,
         )?;
         let witness_covector = witness_covector::WitnessCovectorCatalog::derive(&relation)?;
+        let packing_input = PackingStaticCatalogInput {
+            relation: &relation,
+            cfw_reduction: &cfw_reduction,
+            cfw_to_whir_handoff: &cfw_to_whir_handoff,
+            cfw_lifecycle: &cfw_lifecycle,
+            row_source_lifecycle: &row_source_lifecycle,
+            resource_overlap: &resource_overlap,
+            witness_covector: &witness_covector,
+        };
         let factor_catalogs = [1_u64, 2, 4, 8]
             .into_iter()
-            .map(|factor| {
-                PackingStaticCatalog::derive(
-                    &relation,
-                    &cfw_reduction,
-                    &cfw_to_whir_handoff,
-                    &cfw_lifecycle,
-                    &row_source_lifecycle,
-                    &resource_overlap,
-                    &witness_covector,
-                    factor,
-                )
-            })
+            .map(|factor| PackingStaticCatalog::derive(packing_input, factor))
             .collect::<Result<Vec<_>, _>>()?;
         let field_order = BigUint::from(GOLDILOCKS_BASE_FIELD_MODULUS).pow(
             u32::try_from(QUINTIC_EXTENSION_DEGREE)
@@ -1828,20 +1864,18 @@ impl CompactPublicKeyStaticCatalog {
             &row_source_lifecycle,
         )?;
         let witness_covector = witness_covector::WitnessCovectorCatalog::derive(&relation)?;
+        let packing_input = PackingStaticCatalogInput {
+            relation: &relation,
+            cfw_reduction: &cfw_reduction,
+            cfw_to_whir_handoff: &cfw_to_whir_handoff,
+            cfw_lifecycle: &cfw_lifecycle,
+            row_source_lifecycle: &row_source_lifecycle,
+            resource_overlap: &resource_overlap,
+            witness_covector: &witness_covector,
+        };
         let factor_catalogs = [1_u64, 2, 4, 8]
             .into_iter()
-            .map(|factor| {
-                PackingStaticCatalog::derive(
-                    &relation,
-                    &cfw_reduction,
-                    &cfw_to_whir_handoff,
-                    &cfw_lifecycle,
-                    &row_source_lifecycle,
-                    &resource_overlap,
-                    &witness_covector,
-                    factor,
-                )
-            })
+            .map(|factor| PackingStaticCatalog::derive(packing_input, factor))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             relation_plan_hash: relation.relation_plan_hash(),
@@ -1893,7 +1927,7 @@ fn conservative_full_dimension_unique_decoding_query_count(
 ) -> Result<u64, CompactStaticCatalogError> {
     if message_length == 0
         || domain_size <= message_length
-        || domain_size % message_length != 0
+        || !domain_size.is_multiple_of(message_length)
         || !(domain_size / message_length).is_power_of_two()
     {
         return Err(CompactStaticCatalogError::InvalidGeometry);
@@ -2233,7 +2267,7 @@ mod tests {
     fn mask_group_catalog_preserves_cfw_then_whir_commitment_order() {
         let catalog = CompactPublicKeyStaticCatalog::derive()
             .expect("compact public-key static packing ledger");
-        let expected_whir_roles = vec![
+        let expected_whir_roles = [
             MaskGroupRole::WhirSumcheck { batch_ordinal: 0 },
             MaskGroupRole::WhirCodeSwitch { round_ordinal: 0 },
             MaskGroupRole::WhirSumcheck { batch_ordinal: 1 },

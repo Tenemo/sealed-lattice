@@ -1027,7 +1027,7 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
             reader.read_strictly_sorted_dictionary(frontier_dictionary_count)?;
         let (frontier_reference_bytes, used_dictionary_entries) =
             reader.read_frontier_references(frontier_node_count, frontier_dictionary_count)?;
-        if used_dictionary_entries.iter().any(|used| *used == 0) {
+        if used_dictionary_entries.contains(&0) {
             return Err(CompactProofWireError::UnusedFrontierDictionaryEntry);
         }
         decoded_responses.push(DecodedCompactProofResponse {

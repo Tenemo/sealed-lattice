@@ -9,7 +9,7 @@ export type PrimitiveMeasurementRecord = Readonly<{
     checksumHex: string;
     dimensions: readonly PrimitiveMeasurementDimension[];
     elapsedNanoseconds: number;
-    executionTarget: "release-native" | "wasm32-unknown-unknown";
+    executionTarget: 'release-native' | 'wasm32-unknown-unknown';
     iterationCount: number;
     modeledPeakLiveByteLength: number;
     schemaVersion: 2;
@@ -23,7 +23,7 @@ export type DesktopBrowserPrimitiveCaseMeasurement = Readonly<{
 }>;
 
 export type DesktopBrowserFocusedPrimitiveMeasurementEvidence = Readonly<{
-    browserEngine: "chromium" | "firefox";
+    browserEngine: 'chromium';
     browserUserAgent: string;
     primitiveCase: DesktopBrowserPrimitiveCaseMeasurement;
     schemaVersion: 1;
@@ -79,7 +79,7 @@ export type DesktopBrowserAuthenticatedStorageMeasurement = Readonly<{
 
 export type DesktopBrowserPrimitiveMeasurementEvidence = Readonly<{
     boundaryCopies: DesktopBrowserBoundaryCopyMeasurement;
-    browserEngine: "chromium" | "firefox";
+    browserEngine: 'chromium';
     browserUserAgent: string;
     primitiveCases: readonly DesktopBrowserPrimitiveCaseMeasurement[];
     schemaVersion: 1;
@@ -91,7 +91,7 @@ export type ReleaseNativePrimitiveMeasurementEvidence = Readonly<{
     schemaVersion: 1;
 }>;
 
-export type DesktopBrowserPrimitiveMeasurementBundle = Readonly<{
+type DesktopBrowserPrimitiveMeasurementBundle = Readonly<{
     browserEvidence: readonly DesktopBrowserPrimitiveMeasurementEvidence[];
     measurementWasm: Readonly<{
         byteLength: number;
@@ -101,9 +101,9 @@ export type DesktopBrowserPrimitiveMeasurementBundle = Readonly<{
     schemaVersion: 1;
 }>;
 
-export type DesktopBrowserFocusedPrimitiveMeasurementBundle = Readonly<{
+type DesktopBrowserFocusedPrimitiveMeasurementBundle = Readonly<{
     focusedPrimitiveEvidence: readonly DesktopBrowserFocusedPrimitiveMeasurementEvidence[];
-    measurementWasm: DesktopBrowserPrimitiveMeasurementBundle["measurementWasm"];
+    measurementWasm: DesktopBrowserPrimitiveMeasurementBundle['measurementWasm'];
     schemaVersion: 1;
 }>;
 
@@ -119,7 +119,7 @@ export const compactLookupProjectionOwnerCaseIdentifiers = Object.freeze([
 export const primitiveMeasurementCaseCatalog = Object.freeze([
     Object.freeze({
         caseIdentifier: 1,
-        caseName: "bounded-phase-lane-dft",
+        caseName: 'bounded-phase-lane-dft',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             butterflyCount: 4_980_736,
@@ -129,7 +129,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 2,
-        caseName: "salted-phase-column-leaf",
+        caseName: 'salted-phase-column-leaf',
         expectedIterationCount: 512,
         requiredDimensions: Object.freeze({
             keccakPermutationCount: 34_816,
@@ -139,7 +139,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 3,
-        caseName: "private-leaf-salt-kmac",
+        caseName: 'private-leaf-salt-kmac',
         expectedIterationCount: 4_096,
         requiredDimensions: Object.freeze({
             leafCount: 16_777_216,
@@ -149,7 +149,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 4,
-        caseName: "five-level-digest-carry",
+        caseName: 'five-level-digest-carry',
         expectedIterationCount: 32_768,
         requiredDimensions: Object.freeze({
             merkleParentHashCount: 163_840,
@@ -157,7 +157,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 5,
-        caseName: "selected-vss-source-replay",
+        caseName: 'selected-vss-source-replay',
         expectedIterationCount: 4,
         requiredDimensions: Object.freeze({
             basePhaseBoundSourceReplayCount: 0,
@@ -266,7 +266,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 6,
-        caseName: "authenticated-scratch-record-codec",
+        caseName: 'authenticated-scratch-record-codec',
         expectedIterationCount: 8,
         requiredDimensions: Object.freeze({
             canonicalEnvelopeByteLength:
@@ -277,7 +277,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 7,
-        caseName: "selected-vss-checkpoint-opening-lane-dfts",
+        caseName: 'selected-vss-checkpoint-opening-lane-dfts',
         expectedIterationCount: 32,
         requiredDimensions: Object.freeze({
             checkpointLeafCount: 4,
@@ -298,7 +298,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 8,
-        caseName: "selected-vss-production-weighted-source-replay",
+        caseName: 'selected-vss-production-weighted-source-replay',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             basePhaseCoefficientChunkCountPerSource: 3,
@@ -314,7 +314,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 9,
-        caseName: "vss-relation-replay-candidate-retained-group",
+        caseName: 'vss-relation-replay-candidate-retained-group',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             logicalRowChunkByteLength: 16_777_216,
@@ -331,7 +331,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 10,
-        caseName: "vss-relation-replay-candidate-row-lane-stripe",
+        caseName: 'vss-relation-replay-candidate-row-lane-stripe',
         expectedIterationCount: 9,
         requiredDimensions: Object.freeze({
             butterflyCountPerLane: 4_980_736,
@@ -364,7 +364,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 11,
-        caseName: "vss-fused-radix-51-retained-group",
+        caseName: 'vss-fused-radix-51-retained-group',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             basePhaseRowCount: 42,
@@ -386,7 +386,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 12,
-        caseName: "vss-fused-radix-51-row-lane-stripe",
+        caseName: 'vss-fused-radix-51-row-lane-stripe',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             basePhaseRowCount: 42,
@@ -437,7 +437,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 13,
-        caseName: "ring-native-proof-field-ntt-round-trip",
+        caseName: 'ring-native-proof-field-ntt-round-trip',
         expectedIterationCount: 2,
         requiredDimensions: Object.freeze({
             butterflyCount: 491_520,
@@ -456,7 +456,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 14,
-        caseName: "compact-logarithmic-derivative-inverse-chunk",
+        caseName: 'compact-logarithmic-derivative-inverse-chunk',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             candidateCompleteTwoPassButterflyCount: 14_193_524_736,
@@ -474,7 +474,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 15,
-        caseName: "compact-lookup-randomized-full-stripe-transform",
+        caseName: 'compact-lookup-randomized-full-stripe-transform',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             butterflyCount: 301_989_888,
@@ -501,7 +501,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 16,
-        caseName: "compact-lookup-salted-leaf",
+        caseName: 'compact-lookup-salted-leaf',
         expectedIterationCount: 4_096,
         requiredDimensions: Object.freeze({
             candidateCompleteTwoPassKeccakPermutationCount: 113_246_208,
@@ -514,7 +514,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 17,
-        caseName: "compact-lookup-incremental-stripe-root",
+        caseName: 'compact-lookup-incremental-stripe-root',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             batchEncodedElementCount: 8_388_608,
@@ -540,7 +540,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 18,
-        caseName: "wide-key-switch-fixed-width-crt",
+        caseName: 'wide-key-switch-fixed-width-crt',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             dataBlockCount: 3,
@@ -560,7 +560,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 19,
-        caseName: "compact-quintic-public-main-code-root-pass",
+        caseName: 'compact-quintic-public-main-code-root-pass',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             batchEncodedBaseFieldElementCount: 5_242_880,
@@ -597,7 +597,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
     }),
     Object.freeze({
         caseIdentifier: 20,
-        caseName: "compact-quintic-post-vss-main-code-root-pass",
+        caseName: 'compact-quintic-post-vss-main-code-root-pass',
         expectedIterationCount: 1,
         requiredDimensions: Object.freeze({
             batchEncodedBaseFieldElementCount: 5_242_880,
@@ -637,7 +637,7 @@ export const primitiveMeasurementCaseCatalog = Object.freeze([
 type JsonObject = Record<string, unknown>;
 
 const isJsonObject = (value: unknown): value is JsonObject =>
-    typeof value === "object" && value !== null && !Array.isArray(value);
+    typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const requireSafeUnsignedInteger = (
     value: unknown,
@@ -645,7 +645,7 @@ const requireSafeUnsignedInteger = (
     allowZero = false,
 ): number => {
     if (
-        typeof value !== "number" ||
+        typeof value !== 'number' ||
         !Number.isSafeInteger(value) ||
         value < (allowZero ? 0 : 1)
     ) {
@@ -675,32 +675,32 @@ const saltedPhaseColumnLeafKeccakPermutationCount = (
 
 export const validatePrimitiveMeasurementRecord = (
     value: unknown,
-    expectedExecutionTarget?: PrimitiveMeasurementRecord["executionTarget"],
+    expectedExecutionTarget?: PrimitiveMeasurementRecord['executionTarget'],
 ): PrimitiveMeasurementRecord => {
     if (!isJsonObject(value)) {
-        throw new Error("Primitive measurement is not an object.");
+        throw new Error('Primitive measurement is not an object.');
     }
     requireExactKeys(
         value,
         [
-            "caseIdentifier",
-            "caseName",
-            "checksumHex",
-            "dimensions",
-            "elapsedNanoseconds",
-            "executionTarget",
-            "iterationCount",
-            "modeledPeakLiveByteLength",
-            "schemaVersion",
+            'caseIdentifier',
+            'caseName',
+            'checksumHex',
+            'dimensions',
+            'elapsedNanoseconds',
+            'executionTarget',
+            'iterationCount',
+            'modeledPeakLiveByteLength',
+            'schemaVersion',
         ],
-        "Primitive measurement",
+        'Primitive measurement',
     );
     if (value.schemaVersion !== 2) {
-        throw new Error("Primitive measurement schema version is unsupported.");
+        throw new Error('Primitive measurement schema version is unsupported.');
     }
     const caseIdentifier = requireSafeUnsignedInteger(
         value.caseIdentifier,
-        "Primitive measurement case identifier",
+        'Primitive measurement case identifier',
     );
     const catalogEntry = primitiveMeasurementCaseCatalog.find(
         (candidate) => candidate.caseIdentifier === caseIdentifier,
@@ -709,19 +709,19 @@ export const validatePrimitiveMeasurementRecord = (
         catalogEntry === undefined ||
         value.caseName !== catalogEntry.caseName
     ) {
-        throw new Error("Primitive measurement case identity is unsupported.");
+        throw new Error('Primitive measurement case identity is unsupported.');
     }
     if (!/^[0-9a-f]{16}$/u.test(String(value.checksumHex))) {
         throw new Error(
-            "Primitive measurement checksum is not canonical hexadecimal.",
+            'Primitive measurement checksum is not canonical hexadecimal.',
         );
     }
     if (
-        value.executionTarget !== "release-native" &&
-        value.executionTarget !== "wasm32-unknown-unknown"
+        value.executionTarget !== 'release-native' &&
+        value.executionTarget !== 'wasm32-unknown-unknown'
     ) {
         throw new Error(
-            "Primitive measurement execution target is unsupported.",
+            'Primitive measurement execution target is unsupported.',
         );
     }
     if (
@@ -729,31 +729,31 @@ export const validatePrimitiveMeasurementRecord = (
         value.executionTarget !== expectedExecutionTarget
     ) {
         throw new Error(
-            "Primitive measurement execution target is unexpected.",
+            'Primitive measurement execution target is unexpected.',
         );
     }
     if (!Array.isArray(value.dimensions) || value.dimensions.length === 0) {
-        throw new Error("Primitive measurement dimensions are absent.");
+        throw new Error('Primitive measurement dimensions are absent.');
     }
     const dimensionNames = new Set<string>();
     const dimensions = value.dimensions.map((rawDimension) => {
         if (!isJsonObject(rawDimension)) {
             throw new Error(
-                "Primitive measurement dimension is not an object.",
+                'Primitive measurement dimension is not an object.',
             );
         }
         requireExactKeys(
             rawDimension,
-            ["name", "value"],
-            "Primitive measurement dimension",
+            ['name', 'value'],
+            'Primitive measurement dimension',
         );
         if (
-            typeof rawDimension.name !== "string" ||
+            typeof rawDimension.name !== 'string' ||
             !/^[a-z][A-Za-z0-9]*$/u.test(rawDimension.name) ||
             dimensionNames.has(rawDimension.name)
         ) {
             throw new Error(
-                "Primitive measurement dimension name is noncanonical or duplicated.",
+                'Primitive measurement dimension name is noncanonical or duplicated.',
             );
         }
         dimensionNames.add(rawDimension.name);
@@ -771,7 +771,7 @@ export const validatePrimitiveMeasurementRecord = (
     );
     const modeledPeakLiveByteLength = requireSafeUnsignedInteger(
         value.modeledPeakLiveByteLength,
-        "Primitive measurement modeled peak live byte length",
+        'Primitive measurement modeled peak live byte length',
     );
     for (const [dimensionName, expectedValue] of Object.entries(
         catalogEntry.requiredDimensions,
@@ -784,34 +784,34 @@ export const validatePrimitiveMeasurementRecord = (
     }
     if (caseIdentifier === 1) {
         requireSafeUnsignedInteger(
-            dimensionsByName.get("pollCount"),
-            "Primitive measurement DFT poll count",
+            dimensionsByName.get('pollCount'),
+            'Primitive measurement DFT poll count',
         );
     }
     if (caseIdentifier === 5) {
         for (const dimensionName of [
-            "traceValueCount",
-            "nonzeroSourceCoefficientCount",
-            "retainedInputByteLength",
-            "basePhaseSourceReplayCount",
-            "basePhaseProverSourceReplayCount",
-            "basePhaseLaneDftCount",
-            "basePhaseButterflyCount",
-            "basePhaseCosetMultiplicationCount",
-            "basePhaseColumnValueDeliveryCount",
-            "basePhaseTransportedValueByteLength",
-            "basePhaseLeafHashQueryCount",
-            "basePhaseSaltedLeafKeccakPermutationCount",
-            "basePhaseMerkleParentHashQueryCount",
-            "basePhasePrivateLeafSaltDerivationCount",
-            "modeledCandidateQuotientConstructionIdentityByteLength",
-            "modeledCandidateQuotientPhaseOrderCount",
-            "modeledCandidateQuotientTranscriptOperationCount",
-            "modeledCandidateQuotientOpeningBatchCount",
-            "modeledCandidateQuotientProofSectionCount",
-            "modeledCandidateQuotientCheckpointCount",
-            "modeledCandidateQuotientMaximumTranscriptHashQueryCount",
-            "modeledCandidateQuotientLogicalVerifierMessageCount",
+            'traceValueCount',
+            'nonzeroSourceCoefficientCount',
+            'retainedInputByteLength',
+            'basePhaseSourceReplayCount',
+            'basePhaseProverSourceReplayCount',
+            'basePhaseLaneDftCount',
+            'basePhaseButterflyCount',
+            'basePhaseCosetMultiplicationCount',
+            'basePhaseColumnValueDeliveryCount',
+            'basePhaseTransportedValueByteLength',
+            'basePhaseLeafHashQueryCount',
+            'basePhaseSaltedLeafKeccakPermutationCount',
+            'basePhaseMerkleParentHashQueryCount',
+            'basePhasePrivateLeafSaltDerivationCount',
+            'modeledCandidateQuotientConstructionIdentityByteLength',
+            'modeledCandidateQuotientPhaseOrderCount',
+            'modeledCandidateQuotientTranscriptOperationCount',
+            'modeledCandidateQuotientOpeningBatchCount',
+            'modeledCandidateQuotientProofSectionCount',
+            'modeledCandidateQuotientCheckpointCount',
+            'modeledCandidateQuotientMaximumTranscriptHashQueryCount',
+            'modeledCandidateQuotientLogicalVerifierMessageCount',
         ]) {
             requireSafeUnsignedInteger(
                 dimensionsByName.get(dimensionName),
@@ -819,65 +819,65 @@ export const validatePrimitiveMeasurementRecord = (
             );
         }
         requireSafeUnsignedInteger(
-            dimensionsByName.get("basePhaseBoundSourceReplayCount"),
-            "Primitive measurement basePhaseBoundSourceReplayCount",
+            dimensionsByName.get('basePhaseBoundSourceReplayCount'),
+            'Primitive measurement basePhaseBoundSourceReplayCount',
             true,
         );
         requireSafeUnsignedInteger(
             dimensionsByName.get(
-                "basePhaseReversedPolynomialReconstructionCount",
+                'basePhaseReversedPolynomialReconstructionCount',
             ),
-            "Primitive measurement basePhaseReversedPolynomialReconstructionCount",
+            'Primitive measurement basePhaseReversedPolynomialReconstructionCount',
             true,
         );
         const materializationPassCount = dimensionsByName.get(
-            "basePhaseMaterializationPassCount",
+            'basePhaseMaterializationPassCount',
         )!;
         const physicalRowWidth = dimensionsByName.get(
-            "basePhasePhysicalRowWidth",
+            'basePhasePhysicalRowWidth',
         )!;
         const logicalPolynomialCoefficientCount = dimensionsByName.get(
-            "basePhaseLogicalPolynomialCoefficientCount",
+            'basePhaseLogicalPolynomialCoefficientCount',
         )!;
         const tracePackingFactor = dimensionsByName.get(
-            "basePhaseTracePackingFactor",
+            'basePhaseTracePackingFactor',
         )!;
         const traceMaskDegreeBoundExclusive = dimensionsByName.get(
-            "basePhaseTraceMaskDegreeBoundExclusive",
+            'basePhaseTraceMaskDegreeBoundExclusive',
         )!;
         const proverColumnDegreeBoundExclusive = dimensionsByName.get(
-            "basePhaseProverColumnDegreeBoundExclusive",
+            'basePhaseProverColumnDegreeBoundExclusive',
         )!;
-        const rowCount = dimensionsByName.get("basePhaseRowCount")!;
-        const laneCount = dimensionsByName.get("basePhaseLaneCount")!;
+        const rowCount = dimensionsByName.get('basePhaseRowCount')!;
+        const laneCount = dimensionsByName.get('basePhaseLaneCount')!;
         const logicalChunkCountPerLane = dimensionsByName.get(
-            "basePhaseLogicalChunkCountPerLane",
+            'basePhaseLogicalChunkCountPerLane',
         )!;
         const sourceReplayCount = dimensionsByName.get(
-            "basePhaseSourceReplayCount",
+            'basePhaseSourceReplayCount',
         )!;
         const directSourceChunkCountPerLane = dimensionsByName.get(
-            "basePhaseDirectSourceChunkCountPerLane",
+            'basePhaseDirectSourceChunkCountPerLane',
         )!;
         const directSourceColumnCountPerLane = dimensionsByName.get(
-            "basePhaseDirectSourceColumnCountPerLane",
+            'basePhaseDirectSourceColumnCountPerLane',
         )!;
         const coefficientChunkCountPerSource = dimensionsByName.get(
-            "basePhaseCoefficientChunkCountPerSource",
+            'basePhaseCoefficientChunkCountPerSource',
         )!;
         const reversedSourceChunkCountPerLane = dimensionsByName.get(
-            "basePhaseReversedSourceChunkCountPerLane",
+            'basePhaseReversedSourceChunkCountPerLane',
         )!;
         const boundSourceReplayCount = dimensionsByName.get(
-            "basePhaseBoundSourceReplayCount",
+            'basePhaseBoundSourceReplayCount',
         )!;
         const proverSourceReplayCount = dimensionsByName.get(
-            "basePhaseProverSourceReplayCount",
+            'basePhaseProverSourceReplayCount',
         )!;
-        const laneDftCount = dimensionsByName.get("basePhaseLaneDftCount")!;
-        const traceValueCount = dimensionsByName.get("traceValueCount")!;
+        const laneDftCount = dimensionsByName.get('basePhaseLaneDftCount')!;
+        const traceValueCount = dimensionsByName.get('traceValueCount')!;
         const retainedInputByteLength = dimensionsByName.get(
-            "retainedInputByteLength",
+            'retainedInputByteLength',
         )!;
         const fullDomainSize =
             primitiveMeasurementCaseCatalog[0].requiredDimensions
@@ -889,156 +889,156 @@ export const validatePrimitiveMeasurementRecord = (
             primitiveMeasurementCaseCatalog[0].requiredDimensions
                 .butterflyCount;
         const modeledCandidateTracePackingFactor = dimensionsByName.get(
-            "modeledCandidateTracePackingFactor",
+            'modeledCandidateTracePackingFactor',
         )!;
         const modeledCandidatePhysicalRowWidth = dimensionsByName.get(
-            "modeledCandidatePhysicalRowWidth",
+            'modeledCandidatePhysicalRowWidth',
         )!;
         const modeledCandidateRelationTraceValueCount = dimensionsByName.get(
-            "modeledCandidateRelationTraceValueCount",
+            'modeledCandidateRelationTraceValueCount',
         )!;
         const modeledCandidateProverColumnCount = dimensionsByName.get(
-            "modeledCandidateProverColumnCount",
+            'modeledCandidateProverColumnCount',
         )!;
         const modeledCandidateProverColumnDegreeBoundExclusive =
             dimensionsByName.get(
-                "modeledCandidateProverColumnDegreeBoundExclusive",
+                'modeledCandidateProverColumnDegreeBoundExclusive',
             )!;
         const modeledCandidateOpeningDegreeBoundExclusive =
             dimensionsByName.get(
-                "modeledCandidateOpeningDegreeBoundExclusive",
+                'modeledCandidateOpeningDegreeBoundExclusive',
             )!;
         const modeledCandidateCoefficientChunkCountPerSource =
             dimensionsByName.get(
-                "modeledCandidateCoefficientChunkCountPerSource",
+                'modeledCandidateCoefficientChunkCountPerSource',
             )!;
         const modeledCandidateRowCount = dimensionsByName.get(
-            "modeledCandidateRowCount",
+            'modeledCandidateRowCount',
         )!;
         const modeledCandidateLeafHashQueryCount = dimensionsByName.get(
-            "modeledCandidateLeafHashQueryCount",
+            'modeledCandidateLeafHashQueryCount',
         )!;
         const modeledCandidateOpeningPointCount = dimensionsByName.get(
-            "modeledCandidateOpeningPointCount",
+            'modeledCandidateOpeningPointCount',
         )!;
         const modeledCandidateBoundReductionAggregateColumnCount =
             dimensionsByName.get(
-                "modeledCandidateBoundReductionAggregateColumnCount",
+                'modeledCandidateBoundReductionAggregateColumnCount',
             )!;
         const modeledCandidateAggregateColumnRoleCount = dimensionsByName.get(
-            "modeledCandidateAggregateColumnRoleCount",
+            'modeledCandidateAggregateColumnRoleCount',
         )!;
         const modeledCandidateAggregateTableWidth = dimensionsByName.get(
-            "modeledCandidateAggregateTableWidth",
+            'modeledCandidateAggregateTableWidth',
         )!;
         const modeledCandidateDirectAggregateColumnRoleCount =
             dimensionsByName.get(
-                "modeledCandidateDirectAggregateColumnRoleCount",
+                'modeledCandidateDirectAggregateColumnRoleCount',
             )!;
         const modeledCandidateQuotientAggregateColumnRoleCount =
             dimensionsByName.get(
-                "modeledCandidateQuotientAggregateColumnRoleCount",
+                'modeledCandidateQuotientAggregateColumnRoleCount',
             )!;
         const modeledCandidateQuotientSourceDegreeBoundExclusive =
             dimensionsByName.get(
-                "modeledCandidateQuotientSourceDegreeBoundExclusive",
+                'modeledCandidateQuotientSourceDegreeBoundExclusive',
             )!;
         const modeledCandidateQuotientOpeningClaimCount = dimensionsByName.get(
-            "modeledCandidateQuotientOpeningClaimCount",
+            'modeledCandidateQuotientOpeningClaimCount',
         )!;
         const modeledCandidateBatchedQuotientDegreeBoundExclusive =
             dimensionsByName.get(
-                "modeledCandidateBatchedQuotientDegreeBoundExclusive",
+                'modeledCandidateBatchedQuotientDegreeBoundExclusive',
             )!;
         const modeledCandidateQuotientDiscrepancyDegreeBound =
             dimensionsByName.get(
-                "modeledCandidateQuotientDiscrepancyNumeratorDegreeBoundInclusive",
+                'modeledCandidateQuotientDiscrepancyNumeratorDegreeBoundInclusive',
             )!;
         const modeledCandidateQuotientQueryDomainSize = dimensionsByName.get(
-            "modeledCandidateQuotientQueryDomainSize",
+            'modeledCandidateQuotientQueryDomainSize',
         )!;
         const modeledCandidateQuotientQueryCount = dimensionsByName.get(
-            "modeledCandidateQuotientQueryCount",
+            'modeledCandidateQuotientQueryCount',
         )!;
         const modeledCandidateQuotientAgreementCeiling = dimensionsByName.get(
-            "modeledCandidateQuotientAgreementCeiling",
+            'modeledCandidateQuotientAgreementCeiling',
         )!;
         const modeledCandidateQuotientPhysicalRowWitnessVariableCount =
             dimensionsByName.get(
-                "modeledCandidateQuotientPhysicalRowWitnessVariableCount",
+                'modeledCandidateQuotientPhysicalRowWitnessVariableCount',
             )!;
         const modeledCandidateQuotientTableVariableCount = dimensionsByName.get(
-            "modeledCandidateQuotientTableVariableCount",
+            'modeledCandidateQuotientTableVariableCount',
         )!;
         const modeledCandidateQuotientPolynomialCommitmentVariableCount =
             dimensionsByName.get(
-                "modeledCandidateQuotientPolynomialCommitmentVariableCount",
+                'modeledCandidateQuotientPolynomialCommitmentVariableCount',
             )!;
         const modeledCandidateQuotientRowCodeLogInverseRate =
             dimensionsByName.get(
-                "modeledCandidateQuotientRowCodeLogInverseRate",
+                'modeledCandidateQuotientRowCodeLogInverseRate',
             )!;
         const modeledCandidateQuotientAggregateLogicalColumnCount =
             dimensionsByName.get(
-                "modeledCandidateQuotientAggregateLogicalColumnCount",
+                'modeledCandidateQuotientAggregateLogicalColumnCount',
             )!;
         const modeledCandidateQuotientAggregateTableWidth =
             dimensionsByName.get(
-                "modeledCandidateQuotientAggregateTableWidth",
+                'modeledCandidateQuotientAggregateTableWidth',
             )!;
         const modeledCandidateQuotientOuterOpeningBatchCount =
             dimensionsByName.get(
-                "modeledCandidateQuotientOuterOpeningBatchCount",
+                'modeledCandidateQuotientOuterOpeningBatchCount',
             )!;
         const modeledCandidateQuotientBoundQueryCount = dimensionsByName.get(
-            "modeledCandidateQuotientBoundQueryCount",
+            'modeledCandidateQuotientBoundQueryCount',
         )!;
         const modeledCandidateQuotientBoundDegreeTestCount =
             dimensionsByName.get(
-                "modeledCandidateQuotientBoundDegreeTestCount",
+                'modeledCandidateQuotientBoundDegreeTestCount',
             )!;
         const modeledCandidateQuotientBoundOpeningBatchCount =
             dimensionsByName.get(
-                "modeledCandidateQuotientBoundOpeningBatchCount",
+                'modeledCandidateQuotientBoundOpeningBatchCount',
             )!;
         const modeledCandidateQuotientOpeningBatchCount = dimensionsByName.get(
-            "modeledCandidateQuotientOpeningBatchCount",
+            'modeledCandidateQuotientOpeningBatchCount',
         )!;
         const singleAggregateCandidateTracePackingFactor = dimensionsByName.get(
-            "singleAggregateCandidateTracePackingFactor",
+            'singleAggregateCandidateTracePackingFactor',
         )!;
         const singleAggregateCandidatePhysicalRowWidth = dimensionsByName.get(
-            "singleAggregateCandidatePhysicalRowWidth",
+            'singleAggregateCandidatePhysicalRowWidth',
         )!;
         const singleAggregateCandidateRowCount = dimensionsByName.get(
-            "singleAggregateCandidateRowCount",
+            'singleAggregateCandidateRowCount',
         )!;
         const singleAggregateCandidateLaneDftCount = dimensionsByName.get(
-            "singleAggregateCandidateLaneDftCount",
+            'singleAggregateCandidateLaneDftCount',
         )!;
         const singleAggregateCandidateAggregateColumnRoleCount =
             dimensionsByName.get(
-                "singleAggregateCandidateAggregateColumnRoleCount",
+                'singleAggregateCandidateAggregateColumnRoleCount',
             )!;
         const singleAggregateCandidateAggregateTableWidth =
             dimensionsByName.get(
-                "singleAggregateCandidateAggregateTableWidth",
+                'singleAggregateCandidateAggregateTableWidth',
             )!;
         const singleAggregateCandidateWorkingBufferByteLength =
             dimensionsByName.get(
-                "singleAggregateCandidateBasePhaseWorkingBufferByteLength",
+                'singleAggregateCandidateBasePhaseWorkingBufferByteLength',
             )!;
         const singleAggregateCandidateHashStateByteLength =
             dimensionsByName.get(
-                "singleAggregateCandidateBasePhaseHashStateByteLength",
+                'singleAggregateCandidateBasePhaseHashStateByteLength',
             )!;
         const singleAggregateCandidateDigestPlaneByteLength =
             dimensionsByName.get(
-                "singleAggregateCandidateBasePhaseDigestPlaneByteLength",
+                'singleAggregateCandidateBasePhaseDigestPlaneByteLength',
             )!;
         const singleAggregateCandidateAlgorithmLiveSetByteLength =
             dimensionsByName.get(
-                "singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength",
+                'singleAggregateCandidateBasePhaseAlgorithmLiveSetByteLength',
             )!;
         const messageTraceValueCount = traceValueCount / tracePackingFactor;
         const deriveVssOpeningPointCount = (
@@ -1242,12 +1242,12 @@ export const validatePrimitiveMeasurementRecord = (
             Number.isInteger(messageTraceValueCount) &&
             physicalRowWidth * logicalPolynomialCoefficientCount >
                 dimensionsByName.get(
-                    "basePhaseMaximumRangeConstraintNumeratorDegree",
+                    'basePhaseMaximumRangeConstraintNumeratorDegree',
                 )! &&
             proverColumnDegreeBoundExclusive ===
                 traceValueCount + traceMaskDegreeBoundExclusive &&
             dimensionsByName.get(
-                "basePhaseMaximumRangeConstraintNumeratorDegree",
+                'basePhaseMaximumRangeConstraintNumeratorDegree',
             ) ===
                 (proverColumnDegreeBoundExclusive - 1) * 3 &&
             logicalChunkCountPerLane <= rowCount * physicalRowWidth &&
@@ -1262,96 +1262,96 @@ export const validatePrimitiveMeasurementRecord = (
             sourceReplayCount ===
                 boundSourceReplayCount + proverSourceReplayCount &&
             dimensionsByName.get(
-                "basePhaseReversedPolynomialReconstructionCount",
+                'basePhaseReversedPolynomialReconstructionCount',
             ) ===
                 reversedSourceChunkCountPerLane *
                     laneCount *
                     materializationPassCount &&
             laneDftCount === rowCount * laneCount * materializationPassCount &&
-            dimensionsByName.get("basePhaseButterflyCount") ===
+            dimensionsByName.get('basePhaseButterflyCount') ===
                 laneDftCount * butterflyCountPerLaneDft &&
-            dimensionsByName.get("basePhaseCosetMultiplicationCount") ===
+            dimensionsByName.get('basePhaseCosetMultiplicationCount') ===
                 laneDftCount * laneColumnCount &&
-            dimensionsByName.get("basePhaseColumnValueDeliveryCount") ===
+            dimensionsByName.get('basePhaseColumnValueDeliveryCount') ===
                 rowCount * fullDomainSize * materializationPassCount &&
-            dimensionsByName.get("basePhaseTransportedValueByteLength") ===
+            dimensionsByName.get('basePhaseTransportedValueByteLength') ===
                 rowCount * fullDomainSize * materializationPassCount * 8 &&
-            dimensionsByName.get("basePhaseLeafHashQueryCount") ===
+            dimensionsByName.get('basePhaseLeafHashQueryCount') ===
                 fullDomainSize * materializationPassCount &&
-            dimensionsByName.get("basePhaseMerkleParentHashQueryCount") ===
+            dimensionsByName.get('basePhaseMerkleParentHashQueryCount') ===
                 (fullDomainSize - 1) * materializationPassCount &&
-            dimensionsByName.get("basePhasePrivateLeafSaltDerivationCount") ===
+            dimensionsByName.get('basePhasePrivateLeafSaltDerivationCount') ===
                 fullDomainSize * materializationPassCount &&
             dimensionsByName.get(
-                "basePhaseSaltedLeafKeccakPermutationCount",
+                'basePhaseSaltedLeafKeccakPermutationCount',
             ) ===
-                dimensionsByName.get("basePhaseLeafHashQueryCount")! *
+                dimensionsByName.get('basePhaseLeafHashQueryCount')! *
                     saltedPhaseColumnLeafKeccakPermutationCount(rowCount) &&
             modeledCandidateRelationTraceValueCount ===
                 independentlyDerivedModeledRelationTraceValueCount &&
             modeledCandidateProverColumnDegreeBoundExclusive ===
                 independentlyDerivedModeledSourceDegreeBoundExclusive &&
             dimensionsByName.get(
-                "modeledCandidateMaximumRangeConstraintNumeratorDegree",
+                'modeledCandidateMaximumRangeConstraintNumeratorDegree',
             ) ===
                 (modeledCandidateProverColumnDegreeBoundExclusive - 1) * 3 &&
             modeledCandidateOpeningDegreeBoundExclusive ===
                 independentlyDerivedModeledOpeningDegreeBoundExclusive &&
             modeledCandidateOpeningDegreeBoundExclusive >
                 dimensionsByName.get(
-                    "modeledCandidateMaximumRangeConstraintNumeratorDegree",
+                    'modeledCandidateMaximumRangeConstraintNumeratorDegree',
                 )! &&
-            dimensionsByName.get("modeledCandidateRowCodeInverseRate") ===
+            dimensionsByName.get('modeledCandidateRowCodeInverseRate') ===
                 fullDomainSize /
                     (modeledCandidateOpeningDegreeBoundExclusive * 2) &&
             modeledCandidateCoefficientChunkCountPerSource ===
                 independentlyDerivedModeledCoefficientChunkCount &&
             modeledCandidateRowCount === independentlyDerivedModeledRowCount &&
-            dimensionsByName.get("modeledCandidateMaterialProverColumnCount")! +
+            dimensionsByName.get('modeledCandidateMaterialProverColumnCount')! +
                 dimensionsByName.get(
-                    "modeledCandidateQuotientProverColumnCount",
+                    'modeledCandidateQuotientProverColumnCount',
                 )! +
                 dimensionsByName.get(
-                    "modeledCandidateShiftSelectorColumnCount",
+                    'modeledCandidateShiftSelectorColumnCount',
                 )! ===
                 modeledCandidateProverColumnCount &&
-            dimensionsByName.get("modeledCandidateLaneDftCount") ===
+            dimensionsByName.get('modeledCandidateLaneDftCount') ===
                 independentlyDerivedModeledLaneDftCount &&
-            dimensionsByName.get("modeledCandidateButterflyCount") ===
+            dimensionsByName.get('modeledCandidateButterflyCount') ===
                 independentlyDerivedModeledLaneDftCount *
                     butterflyCountPerLaneDft &&
-            dimensionsByName.get("modeledCandidateColumnValueDeliveryCount") ===
+            dimensionsByName.get('modeledCandidateColumnValueDeliveryCount') ===
                 independentlyDerivedModeledColumnValueDeliveryCount &&
             dimensionsByName.get(
-                "modeledCandidateTransportedValueByteLength",
+                'modeledCandidateTransportedValueByteLength',
             ) ===
                 independentlyDerivedModeledColumnValueDeliveryCount * 8 &&
             modeledCandidateLeafHashQueryCount ===
                 fullDomainSize * materializationPassCount &&
             dimensionsByName.get(
-                "modeledCandidateSaltedLeafKeccakPermutationCount",
+                'modeledCandidateSaltedLeafKeccakPermutationCount',
             ) ===
                 modeledCandidateLeafHashQueryCount *
                     saltedPhaseColumnLeafKeccakPermutationCount(
                         modeledCandidateRowCount,
                     ) &&
             dimensionsByName.get(
-                "modeledCandidateMerkleParentHashQueryCount",
+                'modeledCandidateMerkleParentHashQueryCount',
             ) ===
                 (fullDomainSize - 1) * materializationPassCount &&
             dimensionsByName.get(
-                "modeledCandidatePrivateLeafSaltDerivationCount",
+                'modeledCandidatePrivateLeafSaltDerivationCount',
             ) === modeledCandidateLeafHashQueryCount &&
             dimensionsByName.get(
-                "modeledCandidateRetainedSourceMaterializationCount",
+                'modeledCandidateRetainedSourceMaterializationCount',
             ) === independentlyDerivedModeledSourceMaterializationCount &&
             dimensionsByName.get(
-                "modeledCandidateSourceTraceValueGenerationCount",
+                'modeledCandidateSourceTraceValueGenerationCount',
             ) ===
                 independentlyDerivedModeledSourceMaterializationCount *
                     modeledCandidateRelationTraceValueCount &&
             dimensionsByName.get(
-                "modeledCandidateRetainedCoefficientGroupByteLength",
+                'modeledCandidateRetainedCoefficientGroupByteLength',
             ) ===
                 Math.min(
                     modeledCandidateProverColumnCount,
@@ -1360,7 +1360,7 @@ export const validatePrimitiveMeasurementRecord = (
                     modeledCandidateProverColumnDegreeBoundExclusive *
                     8 &&
             dimensionsByName.get(
-                "modeledCandidateLogicalRowChunkByteLength",
+                'modeledCandidateLogicalRowChunkByteLength',
             ) ===
                 modeledCandidateOpeningDegreeBoundExclusive * 8 &&
             modeledCandidateOpeningPointCount ===
@@ -1372,7 +1372,7 @@ export const validatePrimitiveMeasurementRecord = (
                 modeledCandidateOpeningPointCount +
                     modeledCandidateBoundReductionAggregateColumnCount &&
             modeledCandidateAggregateTableWidth ===
-                dimensionsByName.get("modeledCandidateRowCodeInverseRate") &&
+                dimensionsByName.get('modeledCandidateRowCodeInverseRate') &&
             modeledCandidateAggregateColumnRoleCount >
                 modeledCandidateAggregateTableWidth &&
             modeledCandidateDirectAggregateColumnRoleCount ===
@@ -1391,7 +1391,7 @@ export const validatePrimitiveMeasurementRecord = (
                 independentlyDerivedQuotientDiscrepancyDegreeBound &&
             modeledCandidateQuotientQueryDomainSize === fullDomainSize &&
             modeledCandidateQuotientQueryCount ===
-                dimensionsByName.get("basePhaseOpeningQueryCount") &&
+                dimensionsByName.get('basePhaseOpeningQueryCount') &&
             modeledCandidateQuotientPhysicalRowWitnessVariableCount ===
                 Math.log2(modeledCandidateOpeningDegreeBoundExclusive) &&
             modeledCandidateQuotientTableVariableCount ===
@@ -1410,7 +1410,7 @@ export const validatePrimitiveMeasurementRecord = (
             modeledCandidateQuotientOuterOpeningBatchCount ===
                 modeledCandidateQuotientQueryCount &&
             dimensionsByName.get(
-                "modeledCandidateQuotientBoundReductionBlockCount",
+                'modeledCandidateQuotientBoundReductionBlockCount',
             ) === 1 &&
             modeledCandidateQuotientBoundOpeningBatchCount ===
                 independentlyDerivedQuotientBoundOpeningBatchCount &&
@@ -1418,31 +1418,31 @@ export const validatePrimitiveMeasurementRecord = (
                 modeledCandidateQuotientOuterOpeningBatchCount +
                     modeledCandidateQuotientBoundOpeningBatchCount &&
             dimensionsByName.get(
-                "modeledCandidateQuotientConstructionIdentityHashByteLength",
+                'modeledCandidateQuotientConstructionIdentityHashByteLength',
             ) === 64 &&
             dimensionsByName.get(
-                "modeledCandidateQuotientOracleEquationCatalogHashByteLength",
+                'modeledCandidateQuotientOracleEquationCatalogHashByteLength',
             ) === 64 &&
             dimensionsByName.get(
-                "modeledCandidateQuotientConstructionIdentityByteLength",
+                'modeledCandidateQuotientConstructionIdentityByteLength',
             )! > 0 &&
-            dimensionsByName.get("modeledCandidateQuotientPhaseOrderCount") ===
+            dimensionsByName.get('modeledCandidateQuotientPhaseOrderCount') ===
                 2 &&
             dimensionsByName.get(
-                "modeledCandidateQuotientTranscriptOperationCount",
+                'modeledCandidateQuotientTranscriptOperationCount',
             )! >
                 dimensionsByName.get(
-                    "modeledCandidateQuotientLogicalVerifierMessageCount",
+                    'modeledCandidateQuotientLogicalVerifierMessageCount',
                 )! &&
-            dimensionsByName.get("modeledCandidateQuotientProofSectionCount")! >
+            dimensionsByName.get('modeledCandidateQuotientProofSectionCount')! >
                 0 &&
-            dimensionsByName.get("modeledCandidateQuotientCheckpointCount")! >
+            dimensionsByName.get('modeledCandidateQuotientCheckpointCount')! >
                 0 &&
             dimensionsByName.get(
-                "modeledCandidateQuotientMaximumTranscriptHashQueryCount",
+                'modeledCandidateQuotientMaximumTranscriptHashQueryCount',
             )! >
                 dimensionsByName.get(
-                    "modeledCandidateQuotientLogicalVerifierMessageCount",
+                    'modeledCandidateQuotientLogicalVerifierMessageCount',
                 )! &&
             independentlySelectedSingleAggregateCandidate !== undefined &&
             singleAggregateCandidateTracePackingFactor ===
@@ -1462,7 +1462,7 @@ export const validatePrimitiveMeasurementRecord = (
             singleAggregateCandidateAggregateColumnRoleCount <=
                 singleAggregateCandidateAggregateTableWidth &&
             dimensionsByName.get(
-                "singleAggregateCandidateOpeningDegreeBoundExclusive",
+                'singleAggregateCandidateOpeningDegreeBoundExclusive',
             ) ===
                 logicalPolynomialCoefficientCount *
                     singleAggregateCandidatePhysicalRowWidth &&
@@ -1471,7 +1471,7 @@ export const validatePrimitiveMeasurementRecord = (
                     laneCount *
                     materializationPassCount &&
             dimensionsByName.get(
-                "singleAggregateCandidateSaltedLeafKeccakPermutationCount",
+                'singleAggregateCandidateSaltedLeafKeccakPermutationCount',
             ) ===
                 fullDomainSize *
                     materializationPassCount *
@@ -1480,58 +1480,58 @@ export const validatePrimitiveMeasurementRecord = (
                     ) &&
             rowCount < singleAggregateCandidateRowCount * 10 &&
             dimensionsByName.get(
-                "singleAggregateCandidatePhysicalRowWitnessVariableCount",
+                'singleAggregateCandidatePhysicalRowWitnessVariableCount',
             ) ===
                 Math.log2(
                     logicalPolynomialCoefficientCount *
                         singleAggregateCandidatePhysicalRowWidth,
                 ) &&
             dimensionsByName.get(
-                "singleAggregateCandidateTableVariableCount",
+                'singleAggregateCandidateTableVariableCount',
             ) ===
                 dimensionsByName.get(
-                    "singleAggregateCandidatePhysicalRowWitnessVariableCount",
+                    'singleAggregateCandidatePhysicalRowWitnessVariableCount',
                 )! +
                     1 &&
             dimensionsByName.get(
-                "singleAggregateCandidatePolynomialCommitmentVariableCount",
+                'singleAggregateCandidatePolynomialCommitmentVariableCount',
             ) === Math.log2(fullDomainSize) &&
             dimensionsByName.get(
-                "singleAggregateCandidateRowCodeLogInverseRate",
+                'singleAggregateCandidateRowCodeLogInverseRate',
             ) === Math.log2(singleAggregateCandidateAggregateTableWidth) &&
             dimensionsByName.get(
-                "singleAggregateCandidateConstructionIdentityHashByteLength",
+                'singleAggregateCandidateConstructionIdentityHashByteLength',
             ) === 64 &&
             dimensionsByName.get(
-                "singleAggregateCandidateOracleEquationCatalogHashByteLength",
+                'singleAggregateCandidateOracleEquationCatalogHashByteLength',
             ) === 64 &&
             dimensionsByName.get(
-                "singleAggregateCandidateConstructionIdentityByteLength",
+                'singleAggregateCandidateConstructionIdentityByteLength',
             )! > 0 &&
             singleAggregateCandidateAlgorithmLiveSetByteLength ===
                 singleAggregateCandidateWorkingBufferByteLength +
                     singleAggregateCandidateHashStateByteLength +
                     singleAggregateCandidateDigestPlaneByteLength &&
             dimensionsByName.get(
-                "singleAggregateCandidateMaximumTranscriptHashQueryCount",
+                'singleAggregateCandidateMaximumTranscriptHashQueryCount',
             )! >
                 dimensionsByName.get(
-                    "singleAggregateCandidateLogicalVerifierMessageCount",
+                    'singleAggregateCandidateLogicalVerifierMessageCount',
                 )! &&
             independentlyDerivedModeledLaneDftCount * 10 <= laneDftCount &&
             modeledPeakLiveByteLength ===
                 retainedInputByteLength + traceValueCount * 8;
         if (!identitiesHold) {
             throw new Error(
-                "Primitive measurement selected VSS work-ledger identities are inconsistent.",
+                'Primitive measurement selected VSS work-ledger identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 6) {
-        const plaintextByteLength = dimensionsByName.get("plaintextByteLength");
+        const plaintextByteLength = dimensionsByName.get('plaintextByteLength');
         const canonicalEnvelopeByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("canonicalEnvelopeByteLength"),
-            "Primitive measurement canonical envelope byte length",
+            dimensionsByName.get('canonicalEnvelopeByteLength'),
+            'Primitive measurement canonical envelope byte length',
         );
         if (
             plaintextByteLength === undefined ||
@@ -1539,36 +1539,36 @@ export const validatePrimitiveMeasurementRecord = (
             canonicalEnvelopeByteLength > plaintextByteLength + 968
         ) {
             throw new Error(
-                "Primitive measurement canonical envelope length exceeds the exact secret-record overhead.",
+                'Primitive measurement canonical envelope length exceeds the exact secret-record overhead.',
             );
         }
     }
     if (caseIdentifier === 7) {
         for (const dimensionName of [
-            "pollCount",
-            "lowerScheduleHeapByteLength",
-            "higherScheduleHeapByteLength",
+            'pollCount',
+            'lowerScheduleHeapByteLength',
+            'higherScheduleHeapByteLength',
         ]) {
             requireSafeUnsignedInteger(
                 dimensionsByName.get(dimensionName),
                 `Primitive measurement ${dimensionName}`,
             );
         }
-        const laneColumnCount = dimensionsByName.get("laneColumnCount")!;
-        const laneCount = dimensionsByName.get("laneCount")!;
+        const laneColumnCount = dimensionsByName.get('laneColumnCount')!;
+        const laneCount = dimensionsByName.get('laneCount')!;
         const higherOutputLaneCount = dimensionsByName.get(
-            "higherOutputLaneCount",
+            'higherOutputLaneCount',
         )!;
         const higherSelectedOutputCount = dimensionsByName.get(
-            "higherSelectedOutputCount",
+            'higherSelectedOutputCount',
         )!;
         const lowerOutputLaneCount = dimensionsByName.get(
-            "lowerOutputLaneCount",
+            'lowerOutputLaneCount',
         )!;
         const lowerSelectedOutputCount = dimensionsByName.get(
-            "lowerSelectedOutputCount",
+            'lowerSelectedOutputCount',
         )!;
-        const selectedValueCount = dimensionsByName.get("selectedValueCount")!;
+        const selectedValueCount = dimensionsByName.get('selectedValueCount')!;
         const butterflyBound = (selectedOutputCount: number): number =>
             Array.from(
                 { length: Math.log2(laneColumnCount) },
@@ -1587,52 +1587,52 @@ export const validatePrimitiveMeasurementRecord = (
             higherOutputLaneCount * higherSelectedOutputCount +
                 lowerOutputLaneCount * lowerSelectedOutputCount !==
                 selectedValueCount ||
-            dimensionsByName.get("maximumRecomputedLeafCount") !==
+            dimensionsByName.get('maximumRecomputedLeafCount') !==
                 selectedValueCount ||
-            dimensionsByName.get("checkpointLeafCount") !==
-                2 ** dimensionsByName.get("checkpointLevel")! ||
-            dimensionsByName.get("executedButterflyCount") !==
+            dimensionsByName.get('checkpointLeafCount') !==
+                2 ** dimensionsByName.get('checkpointLevel')! ||
+            dimensionsByName.get('executedButterflyCount') !==
                 independentlyDerivedButterflyCount ||
-            dimensionsByName.get("fullButterflyCount") !==
+            dimensionsByName.get('fullButterflyCount') !==
                 laneCount *
                     (laneColumnCount / 2) *
                     Math.log2(laneColumnCount) ||
             modeledPeakLiveByteLength >= 671_088_640
         ) {
             throw new Error(
-                "Primitive measurement modeled checkpoint DFT identities are inconsistent.",
+                'Primitive measurement modeled checkpoint DFT identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 8) {
         const retainedInputByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("retainedInputByteLength"),
-            "Primitive measurement retainedInputByteLength",
+            dimensionsByName.get('retainedInputByteLength'),
+            'Primitive measurement retainedInputByteLength',
         );
-        const traceValueCount = dimensionsByName.get("traceValueCount")!;
+        const traceValueCount = dimensionsByName.get('traceValueCount')!;
         const productionRecipeCount = dimensionsByName.get(
-            "productionRecipeCount",
+            'productionRecipeCount',
         )!;
         const directSourceChunkCountPerLane = dimensionsByName.get(
-            "basePhaseDirectSourceChunkCountPerLane",
+            'basePhaseDirectSourceChunkCountPerLane',
         )!;
         const directSourceColumnCountPerLane = dimensionsByName.get(
-            "basePhaseDirectSourceColumnCountPerLane",
+            'basePhaseDirectSourceColumnCountPerLane',
         )!;
         const coefficientChunkCountPerSource = dimensionsByName.get(
-            "basePhaseCoefficientChunkCountPerSource",
+            'basePhaseCoefficientChunkCountPerSource',
         )!;
         const rootPassCount = dimensionsByName.get(
-            "basePhaseRootPassSourceCatalogPassCount",
+            'basePhaseRootPassSourceCatalogPassCount',
         )!;
         if (
             productionRecipeCount !== directSourceColumnCountPerLane ||
             productionRecipeCount * coefficientChunkCountPerSource !==
                 directSourceChunkCountPerLane ||
-            dimensionsByName.get("basePhaseReversedSourceChunkCountPerLane") !==
+            dimensionsByName.get('basePhaseReversedSourceChunkCountPerLane') !==
                 0 ||
             dimensionsByName.get(
-                "basePhaseCurrentTwoPassSourceCatalogPassCount",
+                'basePhaseCurrentTwoPassSourceCatalogPassCount',
             ) !==
                 rootPassCount * 2 ||
             rootPassCount !== 32 * coefficientChunkCountPerSource ||
@@ -1640,39 +1640,39 @@ export const validatePrimitiveMeasurementRecord = (
                 retainedInputByteLength + traceValueCount * 8
         ) {
             throw new Error(
-                "Primitive measurement production-weighted source-replay identities are inconsistent.",
+                'Primitive measurement production-weighted source-replay identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 9 || caseIdentifier === 11) {
         const retainedInputByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("retainedInputByteLength"),
-            "Primitive measurement retainedInputByteLength",
+            dimensionsByName.get('retainedInputByteLength'),
+            'Primitive measurement retainedInputByteLength',
         );
         const retainedGroupHeaderByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("retainedGroupHeaderByteLength"),
-            "Primitive measurement retainedGroupHeaderByteLength",
+            dimensionsByName.get('retainedGroupHeaderByteLength'),
+            'Primitive measurement retainedGroupHeaderByteLength',
         );
-        const traceValueCount = dimensionsByName.get("traceValueCount")!;
+        const traceValueCount = dimensionsByName.get('traceValueCount')!;
         const degreeBound = dimensionsByName.get(
-            "proverColumnDegreeBoundExclusive",
+            'proverColumnDegreeBoundExclusive',
         )!;
         const retainedRecipeCount = dimensionsByName.get(
-            "retainedRecipeCount",
+            'retainedRecipeCount',
         )!;
-        const physicalRowWidth = dimensionsByName.get("physicalRowWidth")!;
+        const physicalRowWidth = dimensionsByName.get('physicalRowWidth')!;
         const replayBufferByteLength = dimensionsByName.get(
-            "replayBufferByteLength",
+            'replayBufferByteLength',
         )!;
         const retainedCoefficientPayloadByteLength = dimensionsByName.get(
-            "retainedCoefficientPayloadByteLength",
+            'retainedCoefficientPayloadByteLength',
         )!;
         if (
             retainedRecipeCount !== physicalRowWidth ||
             replayBufferByteLength !== traceValueCount * 8 ||
             retainedCoefficientPayloadByteLength !==
                 retainedRecipeCount * degreeBound * 8 ||
-            dimensionsByName.get("logicalRowChunkByteLength") !==
+            dimensionsByName.get('logicalRowChunkByteLength') !==
                 physicalRowWidth * 32_768 * 8 ||
             modeledPeakLiveByteLength !==
                 retainedInputByteLength +
@@ -1682,126 +1682,126 @@ export const validatePrimitiveMeasurementRecord = (
             modeledPeakLiveByteLength >= 671_088_640
         ) {
             throw new Error(
-                "Primitive measurement VSS retained-group identities are inconsistent.",
+                'Primitive measurement VSS retained-group identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 11) {
         const productionRecipeCount = dimensionsByName.get(
-            "productionRecipeCount",
+            'productionRecipeCount',
         )!;
-        const physicalRowWidth = dimensionsByName.get("physicalRowWidth")!;
+        const physicalRowWidth = dimensionsByName.get('physicalRowWidth')!;
         const materializationPassCount = dimensionsByName.get(
-            "phaseMaterializationPassCount",
+            'phaseMaterializationPassCount',
         )!;
         const completeSourceMaterializationCount = dimensionsByName.get(
-            "completeSourceMaterializationCount",
+            'completeSourceMaterializationCount',
         )!;
         if (
-            dimensionsByName.get("basePhaseRowCount") !==
+            dimensionsByName.get('basePhaseRowCount') !==
                 Math.ceil(productionRecipeCount / physicalRowWidth) ||
             completeSourceMaterializationCount !==
                 productionRecipeCount * materializationPassCount ||
-            dimensionsByName.get("completeSourceTraceValueGenerationCount") !==
+            dimensionsByName.get('completeSourceTraceValueGenerationCount') !==
                 completeSourceMaterializationCount *
-                    dimensionsByName.get("traceValueCount")!
+                    dimensionsByName.get('traceValueCount')!
         ) {
             throw new Error(
-                "Primitive measurement fused VSS retained-group work identities are inconsistent.",
+                'Primitive measurement fused VSS retained-group work identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 10 || caseIdentifier === 12) {
         const retainedInputByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("retainedInputByteLength"),
-            "Primitive measurement retainedInputByteLength",
+            dimensionsByName.get('retainedInputByteLength'),
+            'Primitive measurement retainedInputByteLength',
         );
         const retainedGroupHeaderByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("retainedGroupHeaderByteLength"),
-            "Primitive measurement retainedGroupHeaderByteLength",
+            dimensionsByName.get('retainedGroupHeaderByteLength'),
+            'Primitive measurement retainedGroupHeaderByteLength',
         );
         const retainedGroupContainerByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("retainedGroupContainerByteLength"),
-            "Primitive measurement retainedGroupContainerByteLength",
+            dimensionsByName.get('retainedGroupContainerByteLength'),
+            'Primitive measurement retainedGroupContainerByteLength',
         );
         const ownedFixedStateByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("ownedFixedStateByteLength"),
-            "Primitive measurement ownedFixedStateByteLength",
+            dimensionsByName.get('ownedFixedStateByteLength'),
+            'Primitive measurement ownedFixedStateByteLength',
         );
         const materializationPeakLiveByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("materializationPeakLiveByteLength"),
-            "Primitive measurement materializationPeakLiveByteLength",
+            dimensionsByName.get('materializationPeakLiveByteLength'),
+            'Primitive measurement materializationPeakLiveByteLength',
         );
         const stripePeakLiveByteLength = requireSafeUnsignedInteger(
-            dimensionsByName.get("stripePeakLiveByteLength"),
-            "Primitive measurement stripePeakLiveByteLength",
+            dimensionsByName.get('stripePeakLiveByteLength'),
+            'Primitive measurement stripePeakLiveByteLength',
         );
         requireSafeUnsignedInteger(
-            dimensionsByName.get("pollCount"),
-            "Primitive measurement VSS row-lane poll count",
+            dimensionsByName.get('pollCount'),
+            'Primitive measurement VSS row-lane poll count',
         );
-        const traceValueCount = dimensionsByName.get("traceValueCount")!;
-        const physicalRowWidth = dimensionsByName.get("physicalRowWidth")!;
+        const traceValueCount = dimensionsByName.get('traceValueCount')!;
+        const physicalRowWidth = dimensionsByName.get('physicalRowWidth')!;
         const productionRecipeCount = dimensionsByName.get(
-            "productionRecipeCount",
+            'productionRecipeCount',
         )!;
         const degreeBound = dimensionsByName.get(
-            "proverColumnDegreeBoundExclusive",
+            'proverColumnDegreeBoundExclusive',
         )!;
         const logicalPolynomialCoefficientCount = dimensionsByName.get(
-            "logicalPolynomialCoefficientCount",
+            'logicalPolynomialCoefficientCount',
         )!;
         const coefficientChunkCount = dimensionsByName.get(
-            "coefficientChunkCount",
+            'coefficientChunkCount',
         )!;
-        const witnessValueCount = dimensionsByName.get("witnessValueCount")!;
+        const witnessValueCount = dimensionsByName.get('witnessValueCount')!;
         const paddedCoefficientCount = dimensionsByName.get(
-            "paddedCoefficientCount",
+            'paddedCoefficientCount',
         )!;
-        const fullDomainSize = dimensionsByName.get("fullDomainSize")!;
-        const laneColumnCount = dimensionsByName.get("laneColumnCount")!;
-        const laneCount = dimensionsByName.get("laneCount")!;
+        const fullDomainSize = dimensionsByName.get('fullDomainSize')!;
+        const laneColumnCount = dimensionsByName.get('laneColumnCount')!;
+        const laneCount = dimensionsByName.get('laneCount')!;
         const retainedCoefficientPayloadByteLength = dimensionsByName.get(
-            "retainedCoefficientPayloadByteLength",
+            'retainedCoefficientPayloadByteLength',
         )!;
         const replayBufferByteLength = dimensionsByName.get(
-            "replayBufferByteLength",
+            'replayBufferByteLength',
         )!;
         const rowWorkingBufferByteLength = dimensionsByName.get(
-            "rowWorkingBufferByteLength",
+            'rowWorkingBufferByteLength',
         )!;
         const coefficientFoldCountPerLane = dimensionsByName.get(
-            "coefficientFoldCountPerLane",
+            'coefficientFoldCountPerLane',
         )!;
         if (
-            dimensionsByName.get("retainedRecipeCount") !== physicalRowWidth ||
+            dimensionsByName.get('retainedRecipeCount') !== physicalRowWidth ||
             witnessValueCount !==
                 physicalRowWidth * logicalPolynomialCoefficientCount ||
             paddedCoefficientCount !== witnessValueCount * 2 ||
             fullDomainSize !== paddedCoefficientCount * 4 ||
             fullDomainSize !== laneCount * laneColumnCount ||
-            dimensionsByName.get("laneOrdinal")! >= laneCount ||
+            dimensionsByName.get('laneOrdinal')! >= laneCount ||
             coefficientChunkCount !==
                 Math.ceil(degreeBound / logicalPolynomialCoefficientCount) ||
             dimensionsByName.get(
                 caseIdentifier === 10
-                    ? "physicalRowCount"
-                    : "basePhaseRowCount",
+                    ? 'physicalRowCount'
+                    : 'basePhaseRowCount',
             ) !==
                 Math.ceil(productionRecipeCount / physicalRowWidth) *
                     coefficientChunkCount ||
             coefficientFoldCountPerLane !==
                 paddedCoefficientCount - laneColumnCount ||
-            dimensionsByName.get("stripeCoefficientFoldCount") !==
+            dimensionsByName.get('stripeCoefficientFoldCount') !==
                 coefficientFoldCountPerLane * coefficientChunkCount ||
-            dimensionsByName.get("stripeButterflyCount") !==
-                dimensionsByName.get("butterflyCountPerLane")! *
+            dimensionsByName.get('stripeButterflyCount') !==
+                dimensionsByName.get('butterflyCountPerLane')! *
                     coefficientChunkCount ||
-            dimensionsByName.get("stripeCosetMultiplicationCount") !==
+            dimensionsByName.get('stripeCosetMultiplicationCount') !==
                 laneColumnCount * coefficientChunkCount ||
-            dimensionsByName.get("copiedCoefficientValueCount") !==
+            dimensionsByName.get('copiedCoefficientValueCount') !==
                 physicalRowWidth * degreeBound ||
-            dimensionsByName.get("stripePrivateHighHalfValueCount") !==
+            dimensionsByName.get('stripePrivateHighHalfValueCount') !==
                 witnessValueCount * coefficientChunkCount ||
             retainedCoefficientPayloadByteLength !==
                 physicalRowWidth * degreeBound * 8 ||
@@ -1829,59 +1829,59 @@ export const validatePrimitiveMeasurementRecord = (
             modeledPeakLiveByteLength >= 671_088_640
         ) {
             throw new Error(
-                "Primitive measurement VSS row-lane stripe identities are inconsistent.",
+                'Primitive measurement VSS row-lane stripe identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 12) {
-        const basePhaseRowCount = dimensionsByName.get("basePhaseRowCount")!;
+        const basePhaseRowCount = dimensionsByName.get('basePhaseRowCount')!;
         const quotientPhaseRowCount = dimensionsByName.get(
-            "quotientPhaseRowCount",
+            'quotientPhaseRowCount',
         )!;
         const completePhaseRowCount = dimensionsByName.get(
-            "completePhaseRowCount",
+            'completePhaseRowCount',
         )!;
-        const phaseGeometryCount = dimensionsByName.get("phaseGeometryCount")!;
+        const phaseGeometryCount = dimensionsByName.get('phaseGeometryCount')!;
         const materializationPassCount = dimensionsByName.get(
-            "phaseMaterializationPassCount",
+            'phaseMaterializationPassCount',
         )!;
-        const laneCount = dimensionsByName.get("laneCount")!;
-        const fullDomainSize = dimensionsByName.get("fullDomainSize")!;
-        const witnessValueCount = dimensionsByName.get("witnessValueCount")!;
+        const laneCount = dimensionsByName.get('laneCount')!;
+        const fullDomainSize = dimensionsByName.get('fullDomainSize')!;
+        const witnessValueCount = dimensionsByName.get('witnessValueCount')!;
         const completeLaneDftCount = dimensionsByName.get(
-            "completeLaneDftCount",
+            'completeLaneDftCount',
         )!;
         const completeLeafHashQueryCount = dimensionsByName.get(
-            "completeLeafHashQueryCount",
+            'completeLeafHashQueryCount',
         )!;
         const productionRecipeCount = dimensionsByName.get(
-            "productionRecipeCount",
+            'productionRecipeCount',
         )!;
         const completeSourceMaterializationCount = dimensionsByName.get(
-            "completeSourceMaterializationCount",
+            'completeSourceMaterializationCount',
         )!;
         if (
             completePhaseRowCount !==
                 basePhaseRowCount + quotientPhaseRowCount ||
             completeLaneDftCount !==
                 completePhaseRowCount * laneCount * materializationPassCount ||
-            dimensionsByName.get("completeButterflyCount") !==
+            dimensionsByName.get('completeButterflyCount') !==
                 completeLaneDftCount *
-                    dimensionsByName.get("butterflyCountPerLane")! ||
-            dimensionsByName.get("completeCoefficientFoldCount") !==
+                    dimensionsByName.get('butterflyCountPerLane')! ||
+            dimensionsByName.get('completeCoefficientFoldCount') !==
                 completeLaneDftCount *
-                    dimensionsByName.get("coefficientFoldCountPerLane")! ||
-            dimensionsByName.get("completeCosetMultiplicationCount") !==
+                    dimensionsByName.get('coefficientFoldCountPerLane')! ||
+            dimensionsByName.get('completeCosetMultiplicationCount') !==
                 completeLaneDftCount *
-                    dimensionsByName.get("laneColumnCount")! ||
-            dimensionsByName.get("completeColumnValueDeliveryCount") !==
+                    dimensionsByName.get('laneColumnCount')! ||
+            dimensionsByName.get('completeColumnValueDeliveryCount') !==
                 completePhaseRowCount *
                     fullDomainSize *
                     materializationPassCount ||
-            dimensionsByName.get("completeTransportedValueByteLength") !==
-                dimensionsByName.get("completeColumnValueDeliveryCount")! * 8 ||
+            dimensionsByName.get('completeTransportedValueByteLength') !==
+                dimensionsByName.get('completeColumnValueDeliveryCount')! * 8 ||
             dimensionsByName.get(
-                "completePrivateHighHalfValueGenerationCount",
+                'completePrivateHighHalfValueGenerationCount',
             ) !==
                 completePhaseRowCount *
                     witnessValueCount *
@@ -1890,13 +1890,13 @@ export const validatePrimitiveMeasurementRecord = (
                 phaseGeometryCount *
                     fullDomainSize *
                     materializationPassCount ||
-            dimensionsByName.get("completeMerkleParentHashQueryCount") !==
+            dimensionsByName.get('completeMerkleParentHashQueryCount') !==
                 phaseGeometryCount *
                     (fullDomainSize - 1) *
                     materializationPassCount ||
-            dimensionsByName.get("completePrivateLeafSaltDerivationCount") !==
+            dimensionsByName.get('completePrivateLeafSaltDerivationCount') !==
                 completeLeafHashQueryCount ||
-            dimensionsByName.get("completeSaltedLeafKeccakPermutationCount") !==
+            dimensionsByName.get('completeSaltedLeafKeccakPermutationCount') !==
                 fullDomainSize *
                     materializationPassCount *
                     (saltedPhaseColumnLeafKeccakPermutationCount(
@@ -1907,116 +1907,116 @@ export const validatePrimitiveMeasurementRecord = (
                         )) ||
             completeSourceMaterializationCount !==
                 productionRecipeCount * materializationPassCount ||
-            dimensionsByName.get("completeSourceTraceValueGenerationCount") !==
+            dimensionsByName.get('completeSourceTraceValueGenerationCount') !==
                 completeSourceMaterializationCount *
-                    dimensionsByName.get("traceValueCount")!
+                    dimensionsByName.get('traceValueCount')!
         ) {
             throw new Error(
-                "Primitive measurement fused VSS complete-work identities are inconsistent.",
+                'Primitive measurement fused VSS complete-work identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 13) {
-        const fieldLimbCount = dimensionsByName.get("fieldLimbCount")!;
+        const fieldLimbCount = dimensionsByName.get('fieldLimbCount')!;
         const fieldElementByteLength = dimensionsByName.get(
-            "fieldElementByteLength",
+            'fieldElementByteLength',
         )!;
-        const polynomialDegree = dimensionsByName.get("polynomialDegree")!;
-        const butterflyCount = dimensionsByName.get("butterflyCount")!;
+        const polynomialDegree = dimensionsByName.get('polynomialDegree')!;
+        const butterflyCount = dimensionsByName.get('butterflyCount')!;
         const twistMultiplicationCount = dimensionsByName.get(
-            "twistMultiplicationCount",
+            'twistMultiplicationCount',
         )!;
         const planFieldElementCount = dimensionsByName.get(
-            "planFieldElementCount",
+            'planFieldElementCount',
         )!;
         const retainedFieldElementCount = dimensionsByName.get(
-            "retainedFieldElementCount",
+            'retainedFieldElementCount',
         )!;
         if (
-            dimensionsByName.get("fieldBitLength")! <=
+            dimensionsByName.get('fieldBitLength')! <=
                 (fieldLimbCount - 1) * 64 ||
-            dimensionsByName.get("fieldBitLength")! > fieldLimbCount * 64 ||
+            dimensionsByName.get('fieldBitLength')! > fieldLimbCount * 64 ||
             fieldElementByteLength !== fieldLimbCount * 8 ||
-            dimensionsByName.get("negacyclicRootOrder") !==
+            dimensionsByName.get('negacyclicRootOrder') !==
                 polynomialDegree * 2 ||
-            dimensionsByName.get("transformCount") !== 2 ||
+            dimensionsByName.get('transformCount') !== 2 ||
             butterflyCount !== polynomialDegree * Math.log2(polynomialDegree) ||
             twistMultiplicationCount !== polynomialDegree * 2 ||
-            dimensionsByName.get("transformFieldMultiplicationCount") !==
+            dimensionsByName.get('transformFieldMultiplicationCount') !==
                 butterflyCount + twistMultiplicationCount ||
             planFieldElementCount !== polynomialDegree * 4 - 2 ||
             retainedFieldElementCount !== polynomialDegree * 2 ||
-            dimensionsByName.get("planConstructionIncluded") !== 1 ||
+            dimensionsByName.get('planConstructionIncluded') !== 1 ||
             modeledPeakLiveByteLength !==
                 (planFieldElementCount + retainedFieldElementCount) *
                     fieldElementByteLength ||
             modeledPeakLiveByteLength >= 671_088_640
         ) {
             throw new Error(
-                "Primitive measurement ring-native proof-field NTT identities are inconsistent.",
+                'Primitive measurement ring-native proof-field NTT identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 14) {
-        const extensionDegree = dimensionsByName.get("extensionDegree")!;
+        const extensionDegree = dimensionsByName.get('extensionDegree')!;
         const extensionElementByteLength = dimensionsByName.get(
-            "extensionElementByteLength",
+            'extensionElementByteLength',
         )!;
         const inverseChunkElementCount = dimensionsByName.get(
-            "inverseChunkElementCount",
+            'inverseChunkElementCount',
         )!;
-        const quotientEntryCount = dimensionsByName.get("quotientEntryCount")!;
+        const quotientEntryCount = dimensionsByName.get('quotientEntryCount')!;
         const paddedLookupTableEntryCount = dimensionsByName.get(
-            "paddedLookupTableEntryCount",
+            'paddedLookupTableEntryCount',
         )!;
         const completeInverseElementCount = dimensionsByName.get(
-            "completeInverseElementCount",
+            'completeInverseElementCount',
         )!;
         if (
             extensionDegree !== 5 ||
             extensionElementByteLength !== extensionDegree * 8 ||
             completeInverseElementCount !==
                 quotientEntryCount + paddedLookupTableEntryCount ||
-            dimensionsByName.get("projectedChunkCount") !==
+            dimensionsByName.get('projectedChunkCount') !==
                 Math.ceil(
                     completeInverseElementCount / inverseChunkElementCount,
                 ) ||
             modeledPeakLiveByteLength !==
                 inverseChunkElementCount * extensionElementByteLength * 2 ||
-            dimensionsByName.get("candidateLogicalColumnCount") !== 2_980 ||
-            dimensionsByName.get("candidatePeakLiveByteLength")! >=
+            dimensionsByName.get('candidateLogicalColumnCount') !== 2_980 ||
+            dimensionsByName.get('candidatePeakLiveByteLength')! >=
                 603_979_776 ||
-            dimensionsByName.get("candidateCompleteTwoPassButterflyCount")! >=
+            dimensionsByName.get('candidateCompleteTwoPassButterflyCount')! >=
                 365_944_635_392 ||
             dimensionsByName.get(
-                "candidateCompleteTwoPassSaltedLeafHashCount",
+                'candidateCompleteTwoPassSaltedLeafHashCount',
             )! >= 2_382_364_672
         ) {
             throw new Error(
-                "Primitive measurement compact lookup identities are inconsistent.",
+                'Primitive measurement compact lookup identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 15) {
-        const sourceRowCount = dimensionsByName.get("sourceRowCount")!;
-        const encodedRowCount = dimensionsByName.get("encodedRowCount")!;
+        const sourceRowCount = dimensionsByName.get('sourceRowCount')!;
+        const encodedRowCount = dimensionsByName.get('encodedRowCount')!;
         const physicalStripeWidth = dimensionsByName.get(
-            "physicalStripeWidth",
+            'physicalStripeWidth',
         )!;
         const encodedElementCount = dimensionsByName.get(
-            "encodedElementCount",
+            'encodedElementCount',
         )!;
         const relationMessageRowCount = dimensionsByName.get(
-            "relationMessageRowCount",
+            'relationMessageRowCount',
         )!;
         const privateRandomCoefficientCount = dimensionsByName.get(
-            "privateRandomCoefficientCountPerLogicalColumn",
+            'privateRandomCoefficientCountPerLogicalColumn',
         )!;
         const unconstrainedPaddingRowCount = dimensionsByName.get(
-            "unconstrainedPaddingRowCount",
+            'unconstrainedPaddingRowCount',
         )!;
         const candidatePhysicalColumnCount = dimensionsByName.get(
-            "candidatePhysicalColumnCount",
+            'candidatePhysicalColumnCount',
         )!;
         if (
             encodedRowCount !== sourceRowCount * 4 ||
@@ -2026,109 +2026,109 @@ export const validatePrimitiveMeasurementRecord = (
                 privateRandomCoefficientCount +
                 unconstrainedPaddingRowCount !==
                 sourceRowCount ||
-            dimensionsByName.get("sourceElementCount") !==
+            dimensionsByName.get('sourceElementCount') !==
                 sourceRowCount * physicalStripeWidth ||
             encodedElementCount !== encodedRowCount * physicalStripeWidth ||
-            dimensionsByName.get("butterflyCount") !==
+            dimensionsByName.get('butterflyCount') !==
                 (encodedElementCount / 2) * Math.log2(encodedRowCount) ||
-            dimensionsByName.get("twiddleFieldElementCount") !==
+            dimensionsByName.get('twiddleFieldElementCount') !==
                 2 * (encodedRowCount - 1) ||
             modeledPeakLiveByteLength !==
                 (encodedElementCount +
-                    dimensionsByName.get("twiddleFieldElementCount")!) *
+                    dimensionsByName.get('twiddleFieldElementCount')!) *
                     8 ||
-            dimensionsByName.get("candidatePhysicalStripeCount") !== 24 ||
-            dimensionsByName.get("candidateFullWidthStripeCount") !== 23 ||
-            dimensionsByName.get("candidateTailPhysicalStripeCount") !== 1 ||
-            dimensionsByName.get("candidateMinimumTailPhysicalStripeWidth") !==
+            dimensionsByName.get('candidatePhysicalStripeCount') !== 24 ||
+            dimensionsByName.get('candidateFullWidthStripeCount') !== 23 ||
+            dimensionsByName.get('candidateTailPhysicalStripeCount') !== 1 ||
+            dimensionsByName.get('candidateMinimumTailPhysicalStripeWidth') !==
                 64 ||
-            dimensionsByName.get("candidateMaximumTailPhysicalStripeWidth") !==
+            dimensionsByName.get('candidateMaximumTailPhysicalStripeWidth') !==
                 64 ||
             candidatePhysicalColumnCount !== 3_008 ||
             dimensionsByName.get(
-                "candidateCompleteTwoPassEncodedElementCount",
+                'candidateCompleteTwoPassEncodedElementCount',
             ) !==
                 candidatePhysicalColumnCount * encodedRowCount * 2 ||
-            dimensionsByName.get("candidateCompleteTwoPassButterflyCount") !==
+            dimensionsByName.get('candidateCompleteTwoPassButterflyCount') !==
                 candidatePhysicalColumnCount *
                     (encodedRowCount / 2) *
                     Math.log2(encodedRowCount) *
                     2 ||
-            dimensionsByName.get("candidatePrivateRandomFieldElementCount") !==
+            dimensionsByName.get('candidatePrivateRandomFieldElementCount') !==
                 2_980 * privateRandomCoefficientCount ||
-            dimensionsByName.get("candidatePeakLiveByteLength")! >= 603_979_776
+            dimensionsByName.get('candidatePeakLiveByteLength')! >= 603_979_776
         ) {
             throw new Error(
-                "Primitive measurement compact lookup transform identities are inconsistent.",
+                'Primitive measurement compact lookup transform identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 16) {
-        const logicalLeafWidth = dimensionsByName.get("logicalLeafWidth")!;
+        const logicalLeafWidth = dimensionsByName.get('logicalLeafWidth')!;
         const perLeafKeccakPermutationCount = dimensionsByName.get(
-            "perLeafKeccakPermutationCount",
+            'perLeafKeccakPermutationCount',
         )!;
         const completeSaltedLeafHashCount = dimensionsByName.get(
-            "candidateCompleteTwoPassSaltedLeafHashCount",
+            'candidateCompleteTwoPassSaltedLeafHashCount',
         )!;
         if (
-            dimensionsByName.get("saltByteLength") !== 128 ||
+            dimensionsByName.get('saltByteLength') !== 128 ||
             perLeafKeccakPermutationCount !==
                 Math.floor((7 + 128 / 8 + logicalLeafWidth) / 17) + 1 ||
-            dimensionsByName.get("measuredKeccakPermutationCount") !==
+            dimensionsByName.get('measuredKeccakPermutationCount') !==
                 perLeafKeccakPermutationCount * 4_096 ||
             dimensionsByName.get(
-                "candidateCompleteTwoPassKeccakPermutationCount",
+                'candidateCompleteTwoPassKeccakPermutationCount',
             ) !==
                 perLeafKeccakPermutationCount * completeSaltedLeafHashCount ||
             modeledPeakLiveByteLength !== 1_568
         ) {
             throw new Error(
-                "Primitive measurement compact lookup salted-leaf identities are inconsistent.",
+                'Primitive measurement compact lookup salted-leaf identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 17) {
-        const sourceRowCount = dimensionsByName.get("sourceRowCount")!;
+        const sourceRowCount = dimensionsByName.get('sourceRowCount')!;
         const populatedSourceRowCount = dimensionsByName.get(
-            "populatedSourceRowCount",
+            'populatedSourceRowCount',
         )!;
         const relationMessageRowCount = dimensionsByName.get(
-            "relationMessageRowCount",
+            'relationMessageRowCount',
         )!;
         const privateRandomCoefficientCount = dimensionsByName.get(
-            "privateRandomCoefficientCountPerLogicalColumn",
+            'privateRandomCoefficientCountPerLogicalColumn',
         )!;
-        const encodedRowCount = dimensionsByName.get("encodedRowCount")!;
+        const encodedRowCount = dimensionsByName.get('encodedRowCount')!;
         const physicalStripeWidth = dimensionsByName.get(
-            "physicalStripeWidth",
+            'physicalStripeWidth',
         )!;
         const transformBatchWidth = dimensionsByName.get(
-            "transformBatchWidth",
+            'transformBatchWidth',
         )!;
         const transformBatchCount = dimensionsByName.get(
-            "transformBatchCount",
+            'transformBatchCount',
         )!;
         const batchMatrixByteLength = dimensionsByName.get(
-            "batchMatrixByteLength",
+            'batchMatrixByteLength',
         )!;
         const replayColumnByteLength = dimensionsByName.get(
-            "replayColumnByteLength",
+            'replayColumnByteLength',
         )!;
         const hashStateByteLength = dimensionsByName.get(
-            "hashStateByteLength",
+            'hashStateByteLength',
         )!;
         const twiddleFieldElementCount = dimensionsByName.get(
-            "twiddleFieldElementCount",
+            'twiddleFieldElementCount',
         )!;
-        const twiddleByteLength = dimensionsByName.get("twiddleByteLength")!;
+        const twiddleByteLength = dimensionsByName.get('twiddleByteLength')!;
         if (
             populatedSourceRowCount !==
                 relationMessageRowCount + privateRandomCoefficientCount ||
             populatedSourceRowCount > sourceRowCount ||
             encodedRowCount !== sourceRowCount * 4 ||
             transformBatchWidth * transformBatchCount !== physicalStripeWidth ||
-            dimensionsByName.get("batchEncodedElementCount") !==
+            dimensionsByName.get('batchEncodedElementCount') !==
                 encodedRowCount * transformBatchWidth ||
             batchMatrixByteLength !==
                 encodedRowCount * transformBatchWidth * 8 ||
@@ -2136,19 +2136,19 @@ export const validatePrimitiveMeasurementRecord = (
             hashStateByteLength !== encodedRowCount * 25 * 8 ||
             twiddleFieldElementCount !== 2 * (encodedRowCount - 1) ||
             twiddleByteLength !== twiddleFieldElementCount * 8 ||
-            dimensionsByName.get("rootPassButterflyCount") !==
+            dimensionsByName.get('rootPassButterflyCount') !==
                 (encodedRowCount / 2) *
                     Math.log2(encodedRowCount) *
                     physicalStripeWidth ||
-            dimensionsByName.get("rootPassKeccakPermutationCount") !==
+            dimensionsByName.get('rootPassKeccakPermutationCount') !==
                 encodedRowCount *
                     saltedPhaseColumnLeafKeccakPermutationCount(
                         physicalStripeWidth,
                     ) ||
-            dimensionsByName.get("rootPassMerkleParentHashCount") !==
+            dimensionsByName.get('rootPassMerkleParentHashCount') !==
                 encodedRowCount - 1 ||
-            dimensionsByName.get("candidateFullWidthStripeCount") !== 23 ||
-            dimensionsByName.get("candidateCompleteRootPassCount") !== 48 ||
+            dimensionsByName.get('candidateFullWidthStripeCount') !== 23 ||
+            dimensionsByName.get('candidateCompleteRootPassCount') !== 48 ||
             modeledPeakLiveByteLength !==
                 batchMatrixByteLength +
                     replayColumnByteLength +
@@ -2157,39 +2157,39 @@ export const validatePrimitiveMeasurementRecord = (
             modeledPeakLiveByteLength >= 402_653_184
         ) {
             throw new Error(
-                "Primitive measurement compact lookup incremental-root identities are inconsistent.",
+                'Primitive measurement compact lookup incremental-root identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 18) {
-        const polynomialDegree = dimensionsByName.get("polynomialDegree")!;
+        const polynomialDegree = dimensionsByName.get('polynomialDegree')!;
         const fixedWidthWordCount = dimensionsByName.get(
-            "fixedWidthWordCount",
+            'fixedWidthWordCount',
         )!;
-        const dataBlockCount = dimensionsByName.get("dataBlockCount")!;
-        const specialLimbCount = dimensionsByName.get("specialLimbCount")!;
-        const extendedLimbCount = dimensionsByName.get("extendedLimbCount")!;
+        const dataBlockCount = dimensionsByName.get('dataBlockCount')!;
+        const specialLimbCount = dimensionsByName.get('specialLimbCount')!;
+        const extendedLimbCount = dimensionsByName.get('extendedLimbCount')!;
         const retainedInputByteLength = dimensionsByName.get(
-            "retainedInputByteLength",
+            'retainedInputByteLength',
         )!;
         const reconstructionRetainedByteLength = dimensionsByName.get(
-            "maximumReconstructionRetainedByteLength",
+            'maximumReconstructionRetainedByteLength',
         )!;
         const outputResidueByteLength = dimensionsByName.get(
-            "outputResidueByteLength",
+            'outputResidueByteLength',
         )!;
         if (
             fixedWidthWordCount !== 5 ||
-            dimensionsByName.get("dataBlockWidth") !== 10 ||
+            dimensionsByName.get('dataBlockWidth') !== 10 ||
             dataBlockCount !== Math.ceil(23 / 10) ||
             specialLimbCount !== 6 ||
             extendedLimbCount !== 23 + specialLimbCount ||
-            dimensionsByName.get("dataReconstructionCount") !==
+            dimensionsByName.get('dataReconstructionCount') !==
                 dataBlockCount ||
-            dimensionsByName.get("specialReconstructionCount") !== 2 ||
-            dimensionsByName.get("dataResidueProjectionCount") !==
+            dimensionsByName.get('specialReconstructionCount') !== 2 ||
+            dimensionsByName.get('dataResidueProjectionCount') !==
                 dataBlockCount * extendedLimbCount ||
-            dimensionsByName.get("specialResidueProjectionCount") !== 2 * 23 ||
+            dimensionsByName.get('specialResidueProjectionCount') !== 2 * 23 ||
             retainedInputByteLength !==
                 (23 + 2 * specialLimbCount) * polynomialDegree * 8 ||
             reconstructionRetainedByteLength !==
@@ -2203,62 +2203,62 @@ export const validatePrimitiveMeasurementRecord = (
             modeledPeakLiveByteLength >= 402_653_184
         ) {
             throw new Error(
-                "Primitive measurement wide key-switch fixed-width CRT identities are inconsistent.",
+                'Primitive measurement wide key-switch fixed-width CRT identities are inconsistent.',
             );
         }
     }
     if (caseIdentifier === 19 || caseIdentifier === 20) {
         const fieldExtensionDegree = dimensionsByName.get(
-            "fieldExtensionDegree",
+            'fieldExtensionDegree',
         )!;
         const mainLogicalComponentCount = dimensionsByName.get(
-            "mainLogicalComponentCount",
+            'mainLogicalComponentCount',
         )!;
         const serializedBaseCoordinateRowCount = dimensionsByName.get(
-            "serializedBaseCoordinateRowCount",
+            'serializedBaseCoordinateRowCount',
         )!;
         const transformBatchLogicalComponentCount = dimensionsByName.get(
-            "transformBatchLogicalComponentCount",
+            'transformBatchLogicalComponentCount',
         )!;
         const transformBatchBaseCoordinateWidth = dimensionsByName.get(
-            "transformBatchBaseCoordinateWidth",
+            'transformBatchBaseCoordinateWidth',
         )!;
         const transformBatchCount = dimensionsByName.get(
-            "transformBatchCount",
+            'transformBatchCount',
         )!;
         const relationMessageRowCount = dimensionsByName.get(
-            "relationMessageRowCount",
+            'relationMessageRowCount',
         )!;
         const privateRandomCoefficientCount = dimensionsByName.get(
-            "privateRandomCoefficientCountPerLogicalComponent",
+            'privateRandomCoefficientCountPerLogicalComponent',
         )!;
         const populatedMessageElementCount = dimensionsByName.get(
-            "populatedMessageElementCountPerLogicalComponent",
+            'populatedMessageElementCountPerLogicalComponent',
         )!;
-        const encodedRowCount = dimensionsByName.get("encodedRowCount")!;
+        const encodedRowCount = dimensionsByName.get('encodedRowCount')!;
         const batchMatrixByteLength = dimensionsByName.get(
-            "batchMatrixByteLength",
+            'batchMatrixByteLength',
         )!;
         const replayBaseCoordinateByteLength = dimensionsByName.get(
-            "replayBaseCoordinateByteLength",
+            'replayBaseCoordinateByteLength',
         )!;
         const hashStateByteLength = dimensionsByName.get(
-            "hashStateByteLength",
+            'hashStateByteLength',
         )!;
         const twiddleFieldElementCount = dimensionsByName.get(
-            "twiddleFieldElementCount",
+            'twiddleFieldElementCount',
         )!;
-        const twiddleByteLength = dimensionsByName.get("twiddleByteLength")!;
+        const twiddleByteLength = dimensionsByName.get('twiddleByteLength')!;
         const mainCompleteTwoPassButterflyCount = dimensionsByName.get(
-            "candidateMainCompleteTwoPassBaseCoordinateButterflyCount",
+            'candidateMainCompleteTwoPassBaseCoordinateButterflyCount',
         )!;
         const ringVectorPackingFactor = dimensionsByName.get(
-            "ringVectorPackingFactor",
+            'ringVectorPackingFactor',
         )!;
         if (
             fieldExtensionDegree !== 5 ||
             !Number.isInteger(Math.log2(ringVectorPackingFactor)) ||
-            dimensionsByName.get("extensionElementByteLength") !==
+            dimensionsByName.get('extensionElementByteLength') !==
                 fieldExtensionDegree * 8 ||
             serializedBaseCoordinateRowCount !==
                 mainLogicalComponentCount * fieldExtensionDegree ||
@@ -2271,7 +2271,7 @@ export const validatePrimitiveMeasurementRecord = (
             relationMessageRowCount !== 32_768 * ringVectorPackingFactor ||
             !Number.isInteger(Math.log2(encodedRowCount)) ||
             encodedRowCount < populatedMessageElementCount * 2 ||
-            dimensionsByName.get("batchEncodedBaseFieldElementCount") !==
+            dimensionsByName.get('batchEncodedBaseFieldElementCount') !==
                 encodedRowCount * transformBatchBaseCoordinateWidth ||
             batchMatrixByteLength !==
                 encodedRowCount * transformBatchBaseCoordinateWidth * 8 ||
@@ -2279,41 +2279,41 @@ export const validatePrimitiveMeasurementRecord = (
             hashStateByteLength !== encodedRowCount * 25 * 8 ||
             twiddleFieldElementCount !== 2 * (encodedRowCount - 1) ||
             twiddleByteLength !== twiddleFieldElementCount * 8 ||
-            dimensionsByName.get("rootPassBaseCoordinateButterflyCount") !==
+            dimensionsByName.get('rootPassBaseCoordinateButterflyCount') !==
                 serializedBaseCoordinateRowCount *
                     (encodedRowCount / 2) *
                     Math.log2(encodedRowCount) ||
-            dimensionsByName.get("rootPassBaseCoordinateElementCount") !==
+            dimensionsByName.get('rootPassBaseCoordinateElementCount') !==
                 serializedBaseCoordinateRowCount * encodedRowCount ||
-            dimensionsByName.get("rootPassKeccakPermutationCount") !==
+            dimensionsByName.get('rootPassKeccakPermutationCount') !==
                 encodedRowCount *
                     saltedPhaseColumnLeafKeccakPermutationCount(
                         serializedBaseCoordinateRowCount,
                     ) ||
-            dimensionsByName.get("rootPassMerkleParentHashCount") !==
+            dimensionsByName.get('rootPassMerkleParentHashCount') !==
                 encodedRowCount - 1 ||
-            dimensionsByName.get("candidateMainRootPassCount") !== 2 ||
+            dimensionsByName.get('candidateMainRootPassCount') !== 2 ||
             mainCompleteTwoPassButterflyCount !==
                 2 *
                     dimensionsByName.get(
-                        "rootPassBaseCoordinateButterflyCount",
+                        'rootPassBaseCoordinateButterflyCount',
                     )! ||
             dimensionsByName.get(
-                "candidateCompleteTwoPassBaseCoordinateButterflyCount",
+                'candidateCompleteTwoPassBaseCoordinateButterflyCount',
             )! <= mainCompleteTwoPassButterflyCount ||
             dimensionsByName.get(
-                "candidateIncrementalCommitmentPeakLiveByteLength",
+                'candidateIncrementalCommitmentPeakLiveByteLength',
             )! < modeledPeakLiveByteLength ||
-            dimensionsByName.get("candidateConservativePeakLiveByteLength")! >=
+            dimensionsByName.get('candidateConservativePeakLiveByteLength')! >=
                 603_979_776 ||
             dimensionsByName.get(
-                "candidateKnownComponentNaivePathSubtotalByteLength",
+                'candidateKnownComponentNaivePathSubtotalByteLength',
             )! >= 268_435_456 ||
-            dimensionsByName.get("candidateMainOracleQueryAnswerByteLength") !==
+            dimensionsByName.get('candidateMainOracleQueryAnswerByteLength') !==
                 mainLogicalComponentCount *
                     privateRandomCoefficientCount *
-                    dimensionsByName.get("extensionElementByteLength")! ||
-            dimensionsByName.get("transformPlanConstructionIncluded") !== 0 ||
+                    dimensionsByName.get('extensionElementByteLength')! ||
+            dimensionsByName.get('transformPlanConstructionIncluded') !== 0 ||
             modeledPeakLiveByteLength !==
                 batchMatrixByteLength +
                     replayBaseCoordinateByteLength +
@@ -2322,18 +2322,18 @@ export const validatePrimitiveMeasurementRecord = (
             modeledPeakLiveByteLength >= 402_653_184
         ) {
             throw new Error(
-                "Primitive measurement compact quintic main-code root-pass identities are inconsistent.",
+                'Primitive measurement compact quintic main-code root-pass identities are inconsistent.',
             );
         }
     }
 
     const iterationCount = requireSafeUnsignedInteger(
         value.iterationCount,
-        "Primitive measurement iteration count",
+        'Primitive measurement iteration count',
     );
     if (iterationCount !== catalogEntry.expectedIterationCount) {
         throw new Error(
-            "Primitive measurement iteration count differs from the bounded case.",
+            'Primitive measurement iteration count differs from the bounded case.',
         );
     }
 
@@ -2344,7 +2344,7 @@ export const validatePrimitiveMeasurementRecord = (
         dimensions: Object.freeze(dimensions),
         elapsedNanoseconds: requireSafeUnsignedInteger(
             value.elapsedNanoseconds,
-            "Primitive measurement elapsed nanoseconds",
+            'Primitive measurement elapsed nanoseconds',
         ),
         executionTarget: value.executionTarget,
         iterationCount,
@@ -2357,7 +2357,7 @@ export const requireCompletePrimitiveMeasurementCatalog = (
     records: readonly PrimitiveMeasurementRecord[],
 ): void => {
     if (records.length !== primitiveMeasurementCaseCatalog.length) {
-        throw new Error("Primitive measurement catalog is incomplete.");
+        throw new Error('Primitive measurement catalog is incomplete.');
     }
     const observedIdentifiers = records.map((record) => record.caseIdentifier);
     if (
@@ -2367,7 +2367,7 @@ export const requireCompletePrimitiveMeasurementCatalog = (
         )
     ) {
         throw new Error(
-            "Primitive measurement catalog is duplicated, omitted, or reordered.",
+            'Primitive measurement catalog is duplicated, omitted, or reordered.',
         );
     }
     const saltedLeafRecord = records[1];
@@ -2388,7 +2388,7 @@ export const requireCompletePrimitiveMeasurementCatalog = (
         fusedRetainedGroupCandidateRecord === undefined ||
         fusedRowLaneCandidateRecord === undefined
     ) {
-        throw new Error("Primitive measurement catalog work ledger is absent.");
+        throw new Error('Primitive measurement catalog work ledger is absent.');
     }
     const saltedLeafDimensions = new Map(
         saltedLeafRecord.dimensions.map((dimension) => [
@@ -2439,13 +2439,13 @@ export const requireCompletePrimitiveMeasurementCatalog = (
         ]),
     );
     const measuredPermutationCount = saltedLeafDimensions.get(
-        "keccakPermutationCount",
+        'keccakPermutationCount',
     );
     const projectedPermutationCount = selectedVssDimensions.get(
-        "basePhaseSaltedLeafKeccakPermutationCount",
+        'basePhaseSaltedLeafKeccakPermutationCount',
     );
     const projectedLeafCount = selectedVssDimensions.get(
-        "basePhaseLeafHashQueryCount",
+        'basePhaseLeafHashQueryCount',
     );
     if (
         measuredPermutationCount === undefined ||
@@ -2457,60 +2457,60 @@ export const requireCompletePrimitiveMeasurementCatalog = (
                 (measuredPermutationCount / saltedLeafRecord.iterationCount)
     ) {
         throw new Error(
-            "Primitive measurement salted-leaf projection is inconsistent.",
+            'Primitive measurement salted-leaf projection is inconsistent.',
         );
     }
     if (
-        modeledCheckpointDftDimensions.get("laneCount") !==
-            selectedVssDimensions.get("basePhaseLaneCount") ||
-        modeledCheckpointDftDimensions.get("maximumRecomputedLeafCount") !==
-            selectedVssDimensions.get("basePhaseOpeningQueryCount")! *
-                modeledCheckpointDftDimensions.get("checkpointLeafCount")!
+        modeledCheckpointDftDimensions.get('laneCount') !==
+            selectedVssDimensions.get('basePhaseLaneCount') ||
+        modeledCheckpointDftDimensions.get('maximumRecomputedLeafCount') !==
+            selectedVssDimensions.get('basePhaseOpeningQueryCount')! *
+                modeledCheckpointDftDimensions.get('checkpointLeafCount')!
     ) {
         throw new Error(
-            "Primitive measurement modeled checkpoint projection is inconsistent.",
+            'Primitive measurement modeled checkpoint projection is inconsistent.',
         );
     }
     if (
         productionWeightedSourceReplayDimensions.get(
-            "productionRecipeCount",
+            'productionRecipeCount',
         ) !==
             selectedVssDimensions.get(
-                "basePhaseDirectSourceColumnCountPerLane",
+                'basePhaseDirectSourceColumnCountPerLane',
             ) ||
         productionWeightedSourceReplayDimensions.get(
-            "basePhaseCoefficientChunkCountPerSource",
+            'basePhaseCoefficientChunkCountPerSource',
         ) !==
             selectedVssDimensions.get(
-                "basePhaseCoefficientChunkCountPerSource",
+                'basePhaseCoefficientChunkCountPerSource',
             ) ||
         productionWeightedSourceReplayDimensions.get(
-            "basePhaseReversedSourceChunkCountPerLane",
+            'basePhaseReversedSourceChunkCountPerLane',
         ) !==
             selectedVssDimensions.get(
-                "basePhaseReversedSourceChunkCountPerLane",
+                'basePhaseReversedSourceChunkCountPerLane',
             )
     ) {
         throw new Error(
-            "Primitive measurement source-replay catalogs are inconsistent.",
+            'Primitive measurement source-replay catalogs are inconsistent.',
         );
     }
     for (const [modeledDimensionName, measuredDimensionName] of [
-        ["modeledCandidateTracePackingFactor", "tracePackingFactor"],
-        ["modeledCandidatePhysicalRowWidth", "physicalRowWidth"],
-        ["modeledCandidateRelationTraceValueCount", "traceValueCount"],
-        ["modeledCandidateProverColumnCount", "productionRecipeCount"],
+        ['modeledCandidateTracePackingFactor', 'tracePackingFactor'],
+        ['modeledCandidatePhysicalRowWidth', 'physicalRowWidth'],
+        ['modeledCandidateRelationTraceValueCount', 'traceValueCount'],
+        ['modeledCandidateProverColumnCount', 'productionRecipeCount'],
         [
-            "modeledCandidateProverColumnDegreeBoundExclusive",
-            "proverColumnDegreeBoundExclusive",
+            'modeledCandidateProverColumnDegreeBoundExclusive',
+            'proverColumnDegreeBoundExclusive',
         ],
         [
-            "modeledCandidateRetainedCoefficientGroupByteLength",
-            "retainedCoefficientPayloadByteLength",
+            'modeledCandidateRetainedCoefficientGroupByteLength',
+            'retainedCoefficientPayloadByteLength',
         ],
         [
-            "modeledCandidateLogicalRowChunkByteLength",
-            "logicalRowChunkByteLength",
+            'modeledCandidateLogicalRowChunkByteLength',
+            'logicalRowChunkByteLength',
         ],
     ] as const) {
         if (
@@ -2518,27 +2518,27 @@ export const requireCompletePrimitiveMeasurementCatalog = (
             retainedGroupCandidateDimensions.get(measuredDimensionName)
         ) {
             throw new Error(
-                "Primitive measurement retained-group candidate disagrees with the modeled relation geometry.",
+                'Primitive measurement retained-group candidate disagrees with the modeled relation geometry.',
             );
         }
     }
     for (const [modeledDimensionName, measuredDimensionName] of [
-        ["modeledCandidateTracePackingFactor", "tracePackingFactor"],
-        ["modeledCandidatePhysicalRowWidth", "physicalRowWidth"],
-        ["modeledCandidateRelationTraceValueCount", "traceValueCount"],
-        ["modeledCandidateProverColumnCount", "productionRecipeCount"],
+        ['modeledCandidateTracePackingFactor', 'tracePackingFactor'],
+        ['modeledCandidatePhysicalRowWidth', 'physicalRowWidth'],
+        ['modeledCandidateRelationTraceValueCount', 'traceValueCount'],
+        ['modeledCandidateProverColumnCount', 'productionRecipeCount'],
         [
-            "modeledCandidateProverColumnDegreeBoundExclusive",
-            "proverColumnDegreeBoundExclusive",
+            'modeledCandidateProverColumnDegreeBoundExclusive',
+            'proverColumnDegreeBoundExclusive',
         ],
         [
-            "modeledCandidateCoefficientChunkCountPerSource",
-            "coefficientChunkCount",
+            'modeledCandidateCoefficientChunkCountPerSource',
+            'coefficientChunkCount',
         ],
-        ["modeledCandidateRowCount", "physicalRowCount"],
+        ['modeledCandidateRowCount', 'physicalRowCount'],
         [
-            "modeledCandidateRetainedCoefficientGroupByteLength",
-            "retainedCoefficientPayloadByteLength",
+            'modeledCandidateRetainedCoefficientGroupByteLength',
+            'retainedCoefficientPayloadByteLength',
         ],
     ] as const) {
         if (
@@ -2546,98 +2546,98 @@ export const requireCompletePrimitiveMeasurementCatalog = (
             rowLaneCandidateDimensions.get(measuredDimensionName)
         ) {
             throw new Error(
-                "Primitive measurement row-lane candidate disagrees with the modeled relation geometry.",
+                'Primitive measurement row-lane candidate disagrees with the modeled relation geometry.',
             );
         }
     }
     const candidateLaneDftCount = selectedVssDimensions.get(
-        "modeledCandidateLaneDftCount",
+        'modeledCandidateLaneDftCount',
     )!;
     const candidateCoefficientChunkCount = rowLaneCandidateDimensions.get(
-        "coefficientChunkCount",
+        'coefficientChunkCount',
     )!;
     const candidateStripeCount =
         candidateLaneDftCount / candidateCoefficientChunkCount;
     if (
         !Number.isSafeInteger(candidateStripeCount) ||
         candidateLaneDftCount !==
-            rowLaneCandidateDimensions.get("physicalRowCount")! *
-                rowLaneCandidateDimensions.get("laneCount")! *
+            rowLaneCandidateDimensions.get('physicalRowCount')! *
+                rowLaneCandidateDimensions.get('laneCount')! *
                 selectedVssDimensions.get(
-                    "basePhaseMaterializationPassCount",
+                    'basePhaseMaterializationPassCount',
                 )! ||
-        selectedVssDimensions.get("modeledCandidateButterflyCount") !==
-            rowLaneCandidateDimensions.get("stripeButterflyCount")! *
+        selectedVssDimensions.get('modeledCandidateButterflyCount') !==
+            rowLaneCandidateDimensions.get('stripeButterflyCount')! *
                 candidateStripeCount ||
-        selectedVssDimensions.get("modeledCandidateCoefficientFoldCount") !==
-            rowLaneCandidateDimensions.get("stripeCoefficientFoldCount")! *
-                candidateStripeCount ||
-        selectedVssDimensions.get(
-            "modeledCandidateCosetMultiplicationCount",
-        ) !==
-            rowLaneCandidateDimensions.get("stripeCosetMultiplicationCount")! *
+        selectedVssDimensions.get('modeledCandidateCoefficientFoldCount') !==
+            rowLaneCandidateDimensions.get('stripeCoefficientFoldCount')! *
                 candidateStripeCount ||
         selectedVssDimensions.get(
-            "modeledCandidatePrivateHighHalfValueGenerationCount",
+            'modeledCandidateCosetMultiplicationCount',
         ) !==
-            rowLaneCandidateDimensions.get("stripePrivateHighHalfValueCount")! *
+            rowLaneCandidateDimensions.get('stripeCosetMultiplicationCount')! *
+                candidateStripeCount ||
+        selectedVssDimensions.get(
+            'modeledCandidatePrivateHighHalfValueGenerationCount',
+        ) !==
+            rowLaneCandidateDimensions.get('stripePrivateHighHalfValueCount')! *
                 candidateStripeCount
     ) {
         throw new Error(
-            "Primitive measurement row-lane workload does not reconcile to the modeled candidate.",
+            'Primitive measurement row-lane workload does not reconcile to the modeled candidate.',
         );
     }
     for (const dimensionName of [
-        "rangeDigitRadix",
-        "tracePackingFactor",
-        "traceValueCount",
-        "physicalRowWidth",
-        "basePhaseRowCount",
-        "productionRecipeCount",
-        "proverColumnDegreeBoundExclusive",
-        "retainedRecipeCount",
-        "retainedCoefficientPayloadByteLength",
-        "replayBufferByteLength",
-        "phaseMaterializationPassCount",
-        "completeSourceMaterializationCount",
-        "completeSourceTraceValueGenerationCount",
-        "relationPlanHashByteLength",
+        'rangeDigitRadix',
+        'tracePackingFactor',
+        'traceValueCount',
+        'physicalRowWidth',
+        'basePhaseRowCount',
+        'productionRecipeCount',
+        'proverColumnDegreeBoundExclusive',
+        'retainedRecipeCount',
+        'retainedCoefficientPayloadByteLength',
+        'replayBufferByteLength',
+        'phaseMaterializationPassCount',
+        'completeSourceMaterializationCount',
+        'completeSourceTraceValueGenerationCount',
+        'relationPlanHashByteLength',
     ] as const) {
         if (
             fusedRetainedGroupCandidateDimensions.get(dimensionName) !==
             fusedRowLaneCandidateDimensions.get(dimensionName)
         ) {
             throw new Error(
-                "Primitive measurement fused VSS candidate records disagree.",
+                'Primitive measurement fused VSS candidate records disagree.',
             );
         }
     }
     if (
-        fusedRowLaneCandidateDimensions.get("completeLaneDftCount")! * 10 >
-            selectedVssDimensions.get("basePhaseLaneDftCount")! ||
-        fusedRowLaneCandidateDimensions.get("completeButterflyCount")! * 10 >
-            selectedVssDimensions.get("basePhaseButterflyCount")! ||
+        fusedRowLaneCandidateDimensions.get('completeLaneDftCount')! * 10 >
+            selectedVssDimensions.get('basePhaseLaneDftCount')! ||
+        fusedRowLaneCandidateDimensions.get('completeButterflyCount')! * 10 >
+            selectedVssDimensions.get('basePhaseButterflyCount')! ||
         fusedRowLaneCandidateDimensions.get(
-            "completeColumnValueDeliveryCount",
+            'completeColumnValueDeliveryCount',
         )! *
             10 >
-            selectedVssDimensions.get("basePhaseColumnValueDeliveryCount")! ||
+            selectedVssDimensions.get('basePhaseColumnValueDeliveryCount')! ||
         fusedRowLaneCandidateDimensions.get(
-            "completeSaltedLeafKeccakPermutationCount",
+            'completeSaltedLeafKeccakPermutationCount',
         )! *
             10 >
             selectedVssDimensions.get(
-                "basePhaseSaltedLeafKeccakPermutationCount",
+                'basePhaseSaltedLeafKeccakPermutationCount',
             )! ||
         fusedRowLaneCandidateDimensions.get(
-            "completeSourceTraceValueGenerationCount",
+            'completeSourceTraceValueGenerationCount',
         )! *
             10 >
-            selectedVssDimensions.get("basePhaseSourceReplayCount")! *
-                selectedVssDimensions.get("traceValueCount")!
+            selectedVssDimensions.get('basePhaseSourceReplayCount')! *
+                selectedVssDimensions.get('traceValueCount')!
     ) {
         throw new Error(
-            "Primitive measurement fused VSS candidate fails its tenfold static work gate.",
+            'Primitive measurement fused VSS candidate fails its tenfold static work gate.',
         );
     }
 };
@@ -2647,7 +2647,7 @@ export const parseReleaseNativePrimitiveMeasurementOutput = (
     requireCompleteCatalog: boolean,
     expectedFocusedCaseIdentifiers?: readonly number[],
 ): ReleaseNativePrimitiveMeasurementEvidence => {
-    const outputMarker = "primitive measurement: ";
+    const outputMarker = 'primitive measurement: ';
     const primitiveCases: PrimitiveMeasurementRecord[] = [];
     for (const outputLine of output.split(/\r?\n/u)) {
         const markerIndex = outputLine.indexOf(outputMarker);
@@ -2662,35 +2662,35 @@ export const parseReleaseNativePrimitiveMeasurementOutput = (
             decodedRecord = JSON.parse(serializedRecord) as unknown;
         } catch {
             throw new Error(
-                "Release-native primitive measurement output is not canonical JSON.",
+                'Release-native primitive measurement output is not canonical JSON.',
             );
         }
         primitiveCases.push(
-            validatePrimitiveMeasurementRecord(decodedRecord, "release-native"),
+            validatePrimitiveMeasurementRecord(decodedRecord, 'release-native'),
         );
     }
     if (primitiveCases.length === 0) {
         throw new Error(
-            "Release-native primitive measurement output has no measurement record.",
+            'Release-native primitive measurement output has no measurement record.',
         );
     }
     const identifiers = primitiveCases.map((record) => record.caseIdentifier);
     if (new Set(identifiers).size !== identifiers.length) {
         throw new Error(
-            "Release-native primitive measurement output duplicates a case.",
+            'Release-native primitive measurement output duplicates a case.',
         );
     }
     if (requireCompleteCatalog) {
         if (expectedFocusedCaseIdentifiers !== undefined) {
             throw new Error(
-                "Complete release-native primitive measurement output cannot declare focused cases.",
+                'Complete release-native primitive measurement output cannot declare focused cases.',
             );
         }
         requireCompletePrimitiveMeasurementCatalog(primitiveCases);
     } else if (expectedFocusedCaseIdentifiers === undefined) {
         if (primitiveCases.length !== 1) {
             throw new Error(
-                "Focused release-native primitive measurement output must contain one case.",
+                'Focused release-native primitive measurement output must contain one case.',
             );
         }
     } else {
@@ -2709,7 +2709,7 @@ export const parseReleaseNativePrimitiveMeasurementOutput = (
             )
         ) {
             throw new Error(
-                "Focused release-native primitive measurement output differs from its expected case set.",
+                'Focused release-native primitive measurement output differs from its expected case set.',
             );
         }
         primitiveCases.sort(
@@ -2731,39 +2731,39 @@ export const validateReleaseNativePrimitiveMeasurementEvidence = (
 ): ReleaseNativePrimitiveMeasurementEvidence => {
     if (!isJsonObject(value)) {
         throw new Error(
-            "Release-native primitive measurement evidence is not an object.",
+            'Release-native primitive measurement evidence is not an object.',
         );
     }
     requireExactKeys(
         value,
-        ["primitiveCases", "schemaVersion"],
-        "Release-native primitive measurement evidence",
+        ['primitiveCases', 'schemaVersion'],
+        'Release-native primitive measurement evidence',
     );
     if (value.schemaVersion !== 1 || !Array.isArray(value.primitiveCases)) {
         throw new Error(
-            "Release-native primitive measurement evidence schema is invalid.",
+            'Release-native primitive measurement evidence schema is invalid.',
         );
     }
     const primitiveCases = value.primitiveCases.map((record) =>
-        validatePrimitiveMeasurementRecord(record, "release-native"),
+        validatePrimitiveMeasurementRecord(record, 'release-native'),
     );
     const identifiers = primitiveCases.map((record) => record.caseIdentifier);
     if (new Set(identifiers).size !== identifiers.length) {
         throw new Error(
-            "Release-native primitive measurement evidence duplicates a case.",
+            'Release-native primitive measurement evidence duplicates a case.',
         );
     }
     if (requireCompleteCatalog) {
         if (expectedFocusedCaseIdentifiers !== undefined) {
             throw new Error(
-                "Complete release-native primitive measurement evidence cannot declare focused cases.",
+                'Complete release-native primitive measurement evidence cannot declare focused cases.',
             );
         }
         requireCompletePrimitiveMeasurementCatalog(primitiveCases);
     } else if (expectedFocusedCaseIdentifiers === undefined) {
         if (primitiveCases.length !== 1) {
             throw new Error(
-                "Focused release-native primitive measurement evidence must contain one case.",
+                'Focused release-native primitive measurement evidence must contain one case.',
             );
         }
     } else if (
@@ -2778,7 +2778,7 @@ export const validateReleaseNativePrimitiveMeasurementEvidence = (
         )
     ) {
         throw new Error(
-            "Focused release-native primitive measurement evidence differs from its expected canonical case set.",
+            'Focused release-native primitive measurement evidence differs from its expected canonical case set.',
         );
     }
     return Object.freeze({
@@ -2793,7 +2793,7 @@ const requireFiniteNonnegativeNumber = (
     allowZero = true,
 ): number => {
     if (
-        typeof value !== "number" ||
+        typeof value !== 'number' ||
         !Number.isFinite(value) ||
         value < 0 ||
         (!allowZero && value === 0)
@@ -2804,23 +2804,23 @@ const requireFiniteNonnegativeNumber = (
 };
 
 const physicalAccountingKeys = [
-    "deletedByteLength",
-    "deletionCount",
-    "deletionDurationMilliseconds",
-    "physicalReadByteLength",
-    "physicalReadCallCount",
-    "physicalQuotaByteLength",
-    "physicalQuotaHeadroomByteLength",
-    "physicalQuotaReservedByteLength",
-    "physicalStoredEndByteLength",
-    "physicalStoredPeakByteLength",
-    "physicalStoredStartByteLength",
-    "physicalWriteByteLength",
-    "physicalWriteCallCount",
-    "repairHashCallCount",
-    "repairHashedByteLength",
-    "storageRequestCount",
-    "storageTransactionCount",
+    'deletedByteLength',
+    'deletionCount',
+    'deletionDurationMilliseconds',
+    'physicalReadByteLength',
+    'physicalReadCallCount',
+    'physicalQuotaByteLength',
+    'physicalQuotaHeadroomByteLength',
+    'physicalQuotaReservedByteLength',
+    'physicalStoredEndByteLength',
+    'physicalStoredPeakByteLength',
+    'physicalStoredStartByteLength',
+    'physicalWriteByteLength',
+    'physicalWriteCallCount',
+    'repairHashCallCount',
+    'repairHashedByteLength',
+    'storageRequestCount',
+    'storageTransactionCount',
 ] as const satisfies readonly (keyof PrimitiveStoragePhysicalAccounting)[];
 
 const validateStorageEstimate = (
@@ -2832,7 +2832,7 @@ const validateStorageEstimate = (
     }
     const keys = Object.keys(value);
     if (
-        keys.some((key) => key !== "quota" && key !== "usage") ||
+        keys.some((key) => key !== 'quota' && key !== 'usage') ||
         keys.length === 0
     ) {
         throw new Error(`${label} has noncanonical fields.`);
@@ -2857,33 +2857,33 @@ export const validateDesktopBrowserAuthenticatedStorageMeasurement = (
 ): DesktopBrowserAuthenticatedStorageMeasurement => {
     if (!isJsonObject(value)) {
         throw new Error(
-            "Desktop-browser authenticated storage evidence is absent.",
+            'Desktop-browser authenticated storage evidence is absent.',
         );
     }
     requireExactKeys(
         value,
         [
-            "cleanupElapsedMilliseconds",
-            "iterationCount",
-            "physicalAccounting",
-            "readElapsedMilliseconds",
-            "readPassCount",
-            "recordByteLength",
-            "storageEstimateAfter",
-            "storageEstimateBefore",
-            "writeElapsedMilliseconds",
+            'cleanupElapsedMilliseconds',
+            'iterationCount',
+            'physicalAccounting',
+            'readElapsedMilliseconds',
+            'readPassCount',
+            'recordByteLength',
+            'storageEstimateAfter',
+            'storageEstimateBefore',
+            'writeElapsedMilliseconds',
         ],
-        "Desktop-browser authenticated storage evidence",
+        'Desktop-browser authenticated storage evidence',
     );
     if (!isJsonObject(value.physicalAccounting)) {
         throw new Error(
-            "Desktop-browser storage physical accounting is absent.",
+            'Desktop-browser storage physical accounting is absent.',
         );
     }
     requireExactKeys(
         value.physicalAccounting,
         physicalAccountingKeys,
-        "Desktop-browser storage physical accounting",
+        'Desktop-browser storage physical accounting',
     );
     const rawPhysicalAccounting = value.physicalAccounting;
     const physicalAccountingEntries = physicalAccountingKeys.map(
@@ -2904,38 +2904,38 @@ export const validateDesktopBrowserAuthenticatedStorageMeasurement = (
     const storage = Object.freeze({
         cleanupElapsedMilliseconds: requireFiniteNonnegativeNumber(
             value.cleanupElapsedMilliseconds,
-            "Desktop-browser storage cleanup duration",
+            'Desktop-browser storage cleanup duration',
             false,
         ),
         iterationCount: requireSafeUnsignedInteger(
             value.iterationCount,
-            "Desktop-browser storage iteration count",
+            'Desktop-browser storage iteration count',
         ),
         physicalAccounting,
         readElapsedMilliseconds: requireFiniteNonnegativeNumber(
             value.readElapsedMilliseconds,
-            "Desktop-browser storage read duration",
+            'Desktop-browser storage read duration',
             false,
         ),
         readPassCount: requireSafeUnsignedInteger(
             value.readPassCount,
-            "Desktop-browser storage read-pass count",
+            'Desktop-browser storage read-pass count',
         ),
         recordByteLength: requireSafeUnsignedInteger(
             value.recordByteLength,
-            "Desktop-browser storage record byte length",
+            'Desktop-browser storage record byte length',
         ),
         storageEstimateAfter: validateStorageEstimate(
             value.storageEstimateAfter,
-            "Desktop-browser storage estimate after",
+            'Desktop-browser storage estimate after',
         ),
         storageEstimateBefore: validateStorageEstimate(
             value.storageEstimateBefore,
-            "Desktop-browser storage estimate before",
+            'Desktop-browser storage estimate before',
         ),
         writeElapsedMilliseconds: requireFiniteNonnegativeNumber(
             value.writeElapsedMilliseconds,
-            "Desktop-browser storage write duration",
+            'Desktop-browser storage write duration',
             false,
         ),
     });
@@ -2953,7 +2953,7 @@ export const validateDesktopBrowserAuthenticatedStorageMeasurement = (
             storage.recordByteLength
     ) {
         throw new Error(
-            "Desktop-browser authenticated storage evidence does not cover the exact scratch-record geometry.",
+            'Desktop-browser authenticated storage evidence does not cover the exact scratch-record geometry.',
         );
     }
     return storage;
@@ -2964,48 +2964,48 @@ export const validateDesktopBrowserBoundaryCopyMeasurement = (
     expectedByteLength: number,
 ): DesktopBrowserBoundaryCopyMeasurement => {
     if (!isJsonObject(value)) {
-        throw new Error("Desktop-browser boundary-copy evidence is absent.");
+        throw new Error('Desktop-browser boundary-copy evidence is absent.');
     }
     requireExactKeys(
         value,
         [
-            "byteLengthPerCopy",
-            "checksumHex",
-            "copyFromWasmElapsedMilliseconds",
-            "copyIntoWasmElapsedMilliseconds",
-            "iterationCount",
-            "wasmMemoryByteLengthAfter",
-            "wasmMemoryByteLengthBefore",
+            'byteLengthPerCopy',
+            'checksumHex',
+            'copyFromWasmElapsedMilliseconds',
+            'copyIntoWasmElapsedMilliseconds',
+            'iterationCount',
+            'wasmMemoryByteLengthAfter',
+            'wasmMemoryByteLengthBefore',
         ],
-        "Desktop-browser boundary-copy evidence",
+        'Desktop-browser boundary-copy evidence',
     );
     const wasmMemoryByteLengthBefore = requireSafeUnsignedInteger(
         value.wasmMemoryByteLengthBefore,
-        "Boundary-copy initial WASM memory",
+        'Boundary-copy initial WASM memory',
     );
     const wasmMemoryByteLengthAfter = requireSafeUnsignedInteger(
         value.wasmMemoryByteLengthAfter,
-        "Boundary-copy final WASM memory",
+        'Boundary-copy final WASM memory',
     );
     const measurement = Object.freeze({
         byteLengthPerCopy: requireSafeUnsignedInteger(
             value.byteLengthPerCopy,
-            "Boundary-copy byte length",
+            'Boundary-copy byte length',
         ),
         checksumHex: String(value.checksumHex),
         copyFromWasmElapsedMilliseconds: requireFiniteNonnegativeNumber(
             value.copyFromWasmElapsedMilliseconds,
-            "Boundary-copy read duration",
+            'Boundary-copy read duration',
             false,
         ),
         copyIntoWasmElapsedMilliseconds: requireFiniteNonnegativeNumber(
             value.copyIntoWasmElapsedMilliseconds,
-            "Boundary-copy write duration",
+            'Boundary-copy write duration',
             false,
         ),
         iterationCount: requireSafeUnsignedInteger(
             value.iterationCount,
-            "Boundary-copy iteration count",
+            'Boundary-copy iteration count',
         ),
         wasmMemoryByteLengthAfter,
         wasmMemoryByteLengthBefore,
@@ -3018,48 +3018,48 @@ export const validateDesktopBrowserBoundaryCopyMeasurement = (
         wasmMemoryByteLengthAfter < wasmMemoryByteLengthBefore
     ) {
         throw new Error(
-            "Desktop-browser boundary-copy geometry or checksum is invalid.",
+            'Desktop-browser boundary-copy geometry or checksum is invalid.',
         );
     }
     return measurement;
 };
 
-export const validateDesktopBrowserPrimitiveCaseMeasurement = (
+const validateDesktopBrowserPrimitiveCaseMeasurement = (
     value: unknown,
 ): DesktopBrowserPrimitiveCaseMeasurement => {
     if (!isJsonObject(value)) {
-        throw new Error("Desktop-browser primitive case is not an object.");
+        throw new Error('Desktop-browser primitive case is not an object.');
     }
     requireExactKeys(
         value,
         [
-            "record",
-            "wallElapsedMilliseconds",
-            "wasmMemoryByteLengthAfter",
-            "wasmMemoryByteLengthBefore",
+            'record',
+            'wallElapsedMilliseconds',
+            'wasmMemoryByteLengthAfter',
+            'wasmMemoryByteLengthBefore',
         ],
-        "Desktop-browser primitive case",
+        'Desktop-browser primitive case',
     );
     const record = validatePrimitiveMeasurementRecord(
         value.record,
-        "wasm32-unknown-unknown",
+        'wasm32-unknown-unknown',
     );
     const wasmMemoryByteLengthBefore = requireSafeUnsignedInteger(
         value.wasmMemoryByteLengthBefore,
-        "Primitive case initial WASM memory",
+        'Primitive case initial WASM memory',
     );
     const wasmMemoryByteLengthAfter = requireSafeUnsignedInteger(
         value.wasmMemoryByteLengthAfter,
-        "Primitive case final WASM memory",
+        'Primitive case final WASM memory',
     );
     if (wasmMemoryByteLengthAfter < wasmMemoryByteLengthBefore) {
-        throw new Error("Primitive case WASM memory shrank unexpectedly.");
+        throw new Error('Primitive case WASM memory shrank unexpectedly.');
     }
     return Object.freeze({
         record,
         wallElapsedMilliseconds: requireFiniteNonnegativeNumber(
             value.wallElapsedMilliseconds,
-            "Primitive case wall duration",
+            'Primitive case wall duration',
             false,
         ),
         wasmMemoryByteLengthAfter,
@@ -3069,22 +3069,21 @@ export const validateDesktopBrowserPrimitiveCaseMeasurement = (
 
 const validateBrowserIdentity = (
     value: Readonly<Record<string, unknown>>,
-    expectedBrowserEngine?: "chromium" | "firefox",
+    expectedBrowserEngine?: 'chromium',
 ): Readonly<{
-    browserEngine: "chromium" | "firefox";
+    browserEngine: 'chromium';
     browserUserAgent: string;
 }> => {
     if (
-        (value.browserEngine !== "chromium" &&
-            value.browserEngine !== "firefox") ||
+        value.browserEngine !== 'chromium' ||
         (expectedBrowserEngine !== undefined &&
             value.browserEngine !== expectedBrowserEngine) ||
-        typeof value.browserUserAgent !== "string" ||
+        typeof value.browserUserAgent !== 'string' ||
         value.browserUserAgent.length === 0 ||
         value.browserUserAgent.length > 1_024
     ) {
         throw new Error(
-            "Desktop-browser primitive evidence has an invalid engine or user agent.",
+            'Desktop-browser primitive evidence has an invalid engine or user agent.',
         );
     }
     return Object.freeze({
@@ -3095,22 +3094,22 @@ const validateBrowserIdentity = (
 
 export const validateDesktopBrowserFocusedPrimitiveMeasurementEvidence = (
     value: unknown,
-    expectedBrowserEngine?: "chromium" | "firefox",
+    expectedBrowserEngine?: 'chromium',
     expectedCaseIdentifier?: number,
 ): DesktopBrowserFocusedPrimitiveMeasurementEvidence => {
     if (!isJsonObject(value)) {
         throw new Error(
-            "Focused desktop-browser primitive evidence is not an object.",
+            'Focused desktop-browser primitive evidence is not an object.',
         );
     }
     requireExactKeys(
         value,
-        ["browserEngine", "browserUserAgent", "primitiveCase", "schemaVersion"],
-        "Focused desktop-browser primitive evidence",
+        ['browserEngine', 'browserUserAgent', 'primitiveCase', 'schemaVersion'],
+        'Focused desktop-browser primitive evidence',
     );
     if (value.schemaVersion !== 1) {
         throw new Error(
-            "Focused desktop-browser primitive evidence has an invalid version.",
+            'Focused desktop-browser primitive evidence has an invalid version.',
         );
     }
     const browserIdentity = validateBrowserIdentity(
@@ -3137,26 +3136,26 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementEvidence = (
 
 export const validateDesktopBrowserPrimitiveMeasurementEvidence = (
     value: unknown,
-    expectedBrowserEngine?: "chromium" | "firefox",
+    expectedBrowserEngine?: 'chromium',
 ): DesktopBrowserPrimitiveMeasurementEvidence => {
     if (!isJsonObject(value)) {
-        throw new Error("Desktop-browser primitive evidence is not an object.");
+        throw new Error('Desktop-browser primitive evidence is not an object.');
     }
     requireExactKeys(
         value,
         [
-            "boundaryCopies",
-            "browserEngine",
-            "browserUserAgent",
-            "primitiveCases",
-            "schemaVersion",
-            "storage",
+            'boundaryCopies',
+            'browserEngine',
+            'browserUserAgent',
+            'primitiveCases',
+            'schemaVersion',
+            'storage',
         ],
-        "Desktop-browser primitive evidence",
+        'Desktop-browser primitive evidence',
     );
     if (value.schemaVersion !== 1) {
         throw new Error(
-            "Desktop-browser primitive evidence has an invalid version.",
+            'Desktop-browser primitive evidence has an invalid version.',
         );
     }
     const browserIdentity = validateBrowserIdentity(
@@ -3164,7 +3163,7 @@ export const validateDesktopBrowserPrimitiveMeasurementEvidence = (
         expectedBrowserEngine,
     );
     if (!Array.isArray(value.primitiveCases)) {
-        throw new Error("Desktop-browser primitive cases are absent.");
+        throw new Error('Desktop-browser primitive cases are absent.');
     }
     const primitiveCases = value.primitiveCases.map((rawCase) =>
         validateDesktopBrowserPrimitiveCaseMeasurement(rawCase),
@@ -3177,11 +3176,11 @@ export const validateDesktopBrowserPrimitiveMeasurementEvidence = (
         (measurement) => measurement.record.caseIdentifier === 6,
     );
     const expectedRecordByteLength = scratchCodec?.record.dimensions.find(
-        (dimension) => dimension.name === "canonicalEnvelopeByteLength",
+        (dimension) => dimension.name === 'canonicalEnvelopeByteLength',
     )?.value;
     if (expectedRecordByteLength === undefined) {
         throw new Error(
-            "Desktop-browser scratch-record extent is absent from the codec measurement.",
+            'Desktop-browser scratch-record extent is absent from the codec measurement.',
         );
     }
     const storage = validateDesktopBrowserAuthenticatedStorageMeasurement(
@@ -3204,21 +3203,21 @@ export const validateDesktopBrowserPrimitiveMeasurementEvidence = (
 
 const validateMeasurementWasmIdentity = (
     value: unknown,
-): DesktopBrowserPrimitiveMeasurementBundle["measurementWasm"] => {
+): DesktopBrowserPrimitiveMeasurementBundle['measurementWasm'] => {
     if (!isJsonObject(value)) {
         throw new Error(
-            "Desktop-browser primitive-measurement WASM identity is absent.",
+            'Desktop-browser primitive-measurement WASM identity is absent.',
         );
     }
     requireExactKeys(
         value,
-        ["byteLength", "normalizedSha256Hex", "rawSha256Hex"],
-        "Desktop-browser primitive-measurement WASM identity",
+        ['byteLength', 'normalizedSha256Hex', 'rawSha256Hex'],
+        'Desktop-browser primitive-measurement WASM identity',
     );
     const measurementWasm = Object.freeze({
         byteLength: requireSafeUnsignedInteger(
             value.byteLength,
-            "Primitive-measurement WASM byte length",
+            'Primitive-measurement WASM byte length',
         ),
         normalizedSha256Hex: String(value.normalizedSha256Hex),
         rawSha256Hex: String(value.rawSha256Hex),
@@ -3228,25 +3227,18 @@ const validateMeasurementWasmIdentity = (
         !/^[0-9a-f]{64}$/u.test(measurementWasm.rawSha256Hex)
     ) {
         throw new Error(
-            "Desktop-browser primitive-measurement WASM hash is noncanonical.",
+            'Desktop-browser primitive-measurement WASM hash is noncanonical.',
         );
     }
     return measurementWasm;
 };
 
-const requireCanonicalBrowserEngineOrder = (
-    browserEngines: readonly ("chromium" | "firefox")[],
+const requireSingleChromiumBrowserEngine = (
+    browserEngines: readonly 'chromium'[],
 ): void => {
-    if (
-        browserEngines.length === 0 ||
-        browserEngines.length > 2 ||
-        new Set(browserEngines).size !== browserEngines.length ||
-        (browserEngines.length === 2 &&
-            (browserEngines[0] !== "chromium" ||
-                browserEngines[1] !== "firefox"))
-    ) {
+    if (browserEngines.length !== 1 || browserEngines[0] !== 'chromium') {
         throw new Error(
-            "Desktop-browser primitive-measurement bundle engines are duplicated or noncanonical.",
+            'Desktop-browser primitive-measurement bundle must contain exactly one Chromium evidence set.',
         );
     }
 };
@@ -3256,23 +3248,23 @@ export const validateDesktopBrowserPrimitiveMeasurementBundle = (
 ): DesktopBrowserPrimitiveMeasurementBundle => {
     if (!isJsonObject(value)) {
         throw new Error(
-            "Desktop-browser primitive-measurement bundle is not an object.",
+            'Desktop-browser primitive-measurement bundle is not an object.',
         );
     }
     requireExactKeys(
         value,
-        ["browserEvidence", "measurementWasm", "schemaVersion"],
-        "Desktop-browser primitive-measurement bundle",
+        ['browserEvidence', 'measurementWasm', 'schemaVersion'],
+        'Desktop-browser primitive-measurement bundle',
     );
     if (value.schemaVersion !== 1 || !Array.isArray(value.browserEvidence)) {
         throw new Error(
-            "Desktop-browser primitive-measurement bundle has an invalid schema.",
+            'Desktop-browser primitive-measurement bundle has an invalid schema.',
         );
     }
     const browserEvidence = value.browserEvidence.map((evidence) =>
         validateDesktopBrowserPrimitiveMeasurementEvidence(evidence),
     );
-    requireCanonicalBrowserEngineOrder(
+    requireSingleChromiumBrowserEngine(
         browserEvidence.map((evidence) => evidence.browserEngine),
     );
     const measurementWasm = validateMeasurementWasmIdentity(
@@ -3291,20 +3283,20 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
 ): DesktopBrowserFocusedPrimitiveMeasurementBundle => {
     if (!isJsonObject(value)) {
         throw new Error(
-            "Focused desktop-browser primitive-measurement bundle is not an object.",
+            'Focused desktop-browser primitive-measurement bundle is not an object.',
         );
     }
     requireExactKeys(
         value,
-        ["focusedPrimitiveEvidence", "measurementWasm", "schemaVersion"],
-        "Focused desktop-browser primitive-measurement bundle",
+        ['focusedPrimitiveEvidence', 'measurementWasm', 'schemaVersion'],
+        'Focused desktop-browser primitive-measurement bundle',
     );
     if (
         value.schemaVersion !== 1 ||
         !Array.isArray(value.focusedPrimitiveEvidence)
     ) {
         throw new Error(
-            "Focused desktop-browser primitive-measurement bundle has an invalid schema.",
+            'Focused desktop-browser primitive-measurement bundle has an invalid schema.',
         );
     }
     const focusedPrimitiveEvidence = value.focusedPrimitiveEvidence.map(
@@ -3314,7 +3306,7 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
     const normalizedExpectedCaseIdentifiers =
         expectedCaseIdentifiers === undefined
             ? undefined
-            : typeof expectedCaseIdentifiers === "number"
+            : typeof expectedCaseIdentifiers === 'number'
               ? [expectedCaseIdentifiers]
               : [...expectedCaseIdentifiers];
     if (
@@ -3341,11 +3333,11 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
             ))
     ) {
         throw new Error(
-            "Focused desktop-browser primitive-measurement bundle expected case identifiers are empty, duplicated, unsupported, or noncanonical.",
+            'Focused desktop-browser primitive-measurement bundle expected case identifiers are empty, duplicated, unsupported, or noncanonical.',
         );
     }
     const browserGroups: Array<{
-        browserEngine: "chromium" | "firefox";
+        browserEngine: 'chromium';
         caseIdentifiers: number[];
     }> = [];
     for (const evidence of focusedPrimitiveEvidence) {
@@ -3357,7 +3349,7 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
                 )
             ) {
                 throw new Error(
-                    "Focused desktop-browser primitive-measurement bundle has noncontiguous browser groups.",
+                    'Focused desktop-browser primitive-measurement bundle has noncontiguous browser groups.',
                 );
             }
             currentGroup = {
@@ -3370,7 +3362,7 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
             evidence.primitiveCase.record.caseIdentifier,
         );
     }
-    requireCanonicalBrowserEngineOrder(
+    requireSingleChromiumBrowserEngine(
         browserGroups.map((group) => group.browserEngine),
     );
     const canonicalCaseIdentifiers =
@@ -3391,7 +3383,7 @@ export const validateDesktopBrowserFocusedPrimitiveMeasurementBundle = (
         )
     ) {
         throw new Error(
-            "Focused desktop-browser primitive-measurement bundle differs from its exact canonical case set.",
+            'Focused desktop-browser primitive-measurement bundle differs from its exact canonical case set.',
         );
     }
     return Object.freeze({

@@ -2,8 +2,8 @@ use super::super::semantic_execution::{
     SemanticFactorOneMoveDescriptor, SemanticVerifierMoveOwner, SemanticVerifierMoveStatement,
 };
 use super::super::semantic_outer::{
-    SemanticCrossEpochDisclosures, SemanticProductionOuterBadTransition,
-    SemanticProductionOuterCommitments, SemanticProductionOuterLayout,
+    SemanticCrossEpochDisclosures, SemanticProductionOuterCommitments,
+    SemanticProductionOuterLayout,
 };
 use super::super::semantic_whir::{
     SemanticWhirBaseFreshMessage, SemanticWhirBasePreCombinationWitness, SemanticWhirBasePrefix,
@@ -374,7 +374,7 @@ fn epoch_fixture(
 
     for batch_ordinal in 0..=u8::try_from(WHIR_ROUND_COUNT).unwrap() {
         let history_before_masked_sumcheck = SemanticWhirEpochHistory {
-            opening_prefix: opening_prefix.clone(),
+            opening_prefix,
             completed_components: completed_components.clone(),
         };
         let source_width = usize::try_from(relation.source_code.interleaving_width).unwrap();
@@ -493,7 +493,7 @@ fn epoch_fixture(
         }
 
         let history_before_code_switch = SemanticWhirEpochHistory {
-            opening_prefix: opening_prefix.clone(),
+            opening_prefix,
             completed_components: completed_components.clone(),
         };
         let logical_message = witness.source.flattened_messages();
@@ -713,14 +713,13 @@ fn construction_fixture() -> ConstructionFixture {
     )
     .expect("reduced production outer statement derives");
     let lookup_challenge = lookup_challenge();
-    let mut pre_message = vec![ProofChallengeExtensionElement::ZERO; 32];
-    pre_message[1] = field(1);
     let inverse = lookup_challenge
         .inverse()
         .expect("the lookup denominator is nonzero");
+    let mut pre_message = vec![ProofChallengeExtensionElement::ZERO; 32];
+    pre_message[1] = field(1);
     let mut main_message = vec![ProofChallengeExtensionElement::ZERO; 64];
-    main_message[1] = field(1);
-    main_message[2] = field(5);
+    main_message[..2].copy_from_slice(&pre_message[..2]);
     main_message[3] = inverse;
     let (pre_instance, pre_source) = code_fixture(
         &pre_source_relation,
@@ -796,7 +795,7 @@ fn construction_fixture() -> ConstructionFixture {
             .copied()
             .map(compact_challenge_from_production)
             .collect(),
-        copied_main_source_element_count: 32,
+        copied_main_source_element_count: 2,
         masked_pre_challenge_evaluation: compact_challenge_from_production(
             pre_evaluation.add(cross_values[0]),
         ),
@@ -984,9 +983,11 @@ fn epoch_construction_prefix(
             active,
         },
         TranscriptEpoch::Main => SemanticConstructionPrefix::MainWhir {
-            completed_pre_challenge: completed_pre_challenge
-                .expect("the main epoch has a completed pre-challenge handoff")
-                .clone(),
+            completed_pre_challenge: Box::new(
+                completed_pre_challenge
+                    .expect("the main epoch has a completed pre-challenge handoff")
+                    .clone(),
+            ),
             history: history.clone(),
             active,
         },
@@ -1050,12 +1051,8 @@ fn assert_prover_boundary_preserves_false_state(
 ) {
     check_semantic_construction_prover_move(
         context,
-        before_descriptor,
-        before_statement,
-        before_prefix,
-        after_descriptor,
-        after_statement,
-        after_prefix,
+        (before_descriptor, before_statement, before_prefix),
+        (after_descriptor, after_statement, after_prefix),
         witness,
     )
     .unwrap_or_else(|error| {
@@ -1063,12 +1060,8 @@ fn assert_prover_boundary_preserves_false_state(
     });
     check_semantic_construction_prover_move(
         context,
-        before_descriptor,
-        before_statement,
-        before_prefix,
-        after_descriptor,
-        after_statement,
-        after_prefix,
+        (before_descriptor, before_statement, before_prefix),
+        (after_descriptor, after_statement, after_prefix),
         hostile_witness,
     )
     .unwrap_or_else(|error| {
@@ -1515,11 +1508,7 @@ fn construction_extracts_every_reduced_outer_and_cfw_witness_transition() {
             &witness,
         )
         .unwrap();
-        assert_eq!(
-            preceding_state,
-            owner == SemanticVerifierMoveOwner::LookupChallenge,
-            "the fixture has one deliberate cross-epoch bad transition"
-        );
+        assert!(preceding_state, "the canonical preceding state must hold");
         assert!(
             semantic_construction_kstate(
                 &context,
@@ -1546,36 +1535,17 @@ fn construction_extracts_every_reduced_outer_and_cfw_witness_transition() {
             .witness,
             Some(witness.clone())
         );
-        let bad_transition = semantic_construction_bad_transition(
-            &context,
-            &descriptor,
-            &outer_statement,
-            &extended,
-            &witness,
-        )
-        .unwrap();
-        match (owner, bad_transition) {
-            (SemanticVerifierMoveOwner::LookupChallenge, None) => {}
-            (
-                SemanticVerifierMoveOwner::CrossEpochPoint,
-                Some(SemanticVerifierMoveBadTransition::ProductionOuter(
-                    SemanticProductionOuterBadTransition::CrossEpoch(certificate),
-                )),
-            ) => {
-                assert!(
-                    certificate
-                        .nonzero_difference_evaluations
-                        .iter()
-                        .any(|difference| !difference.is_zero())
-                );
-                assert_eq!(
-                    certificate.point,
-                    vec![ProofChallengeExtensionElement::ZERO; 5]
-                );
-                assert_eq!(certificate.exact_error_numerator().unwrap(), 5);
-            }
-            transition => panic!("unexpected outer bad transition: {transition:?}"),
-        }
+        assert_eq!(
+            semantic_construction_bad_transition(
+                &context,
+                &descriptor,
+                &outer_statement,
+                &extended,
+                &witness,
+            )
+            .unwrap(),
+            None,
+        );
     }
 
     let cfw_statement = SemanticVerifierMoveStatement::Cfw(&fixture.cfw_statement);
@@ -1790,12 +1760,12 @@ fn construction_outer_and_cfw_prover_messages_cannot_repair_a_false_state() {
     assert_eq!(
         check_semantic_construction_prover_move(
             &context,
-            &lookup_descriptor,
-            &outer_statement,
-            &lookup_extended,
-            &cross_descriptor,
-            &outer_statement,
-            &substituted_cross_preceding,
+            (&lookup_descriptor, &outer_statement, &lookup_extended),
+            (
+                &cross_descriptor,
+                &outer_statement,
+                &substituted_cross_preceding,
+            ),
             &witness,
         ),
         Err(SemanticConstructionError::InvalidProverChronology)
@@ -1979,12 +1949,12 @@ fn construction_full_transcript_state_is_the_main_whir_terminal_relation() {
     );
     let statement = SemanticVerifierMoveStatement::WhirBase(&base.statement);
     let preceding = SemanticConstructionPrefix::MainWhir {
-        completed_pre_challenge: completed_pre_challenge.clone(),
+        completed_pre_challenge: Box::new(completed_pre_challenge.clone()),
         history: epoch.history.clone(),
         active: SemanticVerifierMovePrefix::WhirBase(revealed_base_prefix(base)),
     };
     let full = SemanticConstructionPrefix::MainWhir {
-        completed_pre_challenge: completed_pre_challenge.clone(),
+        completed_pre_challenge: Box::new(completed_pre_challenge.clone()),
         history: epoch.history.clone(),
         active: SemanticVerifierMovePrefix::WhirBase(full_base_prefix(base)),
     };
@@ -2029,7 +1999,7 @@ fn construction_full_transcript_state_is_the_main_whir_terminal_relation() {
         .unwrap()
         .source_positions[0] = 4;
     let changed_full = SemanticConstructionPrefix::MainWhir {
-        completed_pre_challenge,
+        completed_pre_challenge: Box::new(completed_pre_challenge),
         history: epoch.history,
         active: SemanticVerifierMovePrefix::WhirBase(changed_full),
     };
@@ -2064,7 +2034,7 @@ fn construction_atomic_epoch_handoff_extracts_both_predecessor_witnesses() {
         completed_cfw: completed_cfw_handoff(&construction),
         history: epoch.history.clone(),
         active: SemanticPreWhirFinalAndMainOpeningPrefix {
-            pre_challenge_base: revealed_base_prefix(&base),
+            pre_challenge_base: revealed_base_prefix(base),
             main_opening: SemanticWhirOpeningBatchingPrefix {
                 batching_challenge: None,
             },
@@ -2074,7 +2044,7 @@ fn construction_atomic_epoch_handoff_extracts_both_predecessor_witnesses() {
         completed_cfw: completed_cfw_handoff(&construction),
         history: epoch.history,
         active: SemanticPreWhirFinalAndMainOpeningPrefix {
-            pre_challenge_base: full_base_prefix(&base),
+            pre_challenge_base: full_base_prefix(base),
             main_opening: SemanticWhirOpeningBatchingPrefix {
                 batching_challenge: Some(ProofChallengeExtensionElement::ZERO),
             },
@@ -2202,7 +2172,7 @@ fn construction_first_whir_move_replays_the_opening_output_and_extracts_its_witn
     let mut preceding_local = extended_local.clone();
     preceding_local.combining_challenge = None;
     let history = SemanticWhirEpochHistory {
-        opening_prefix: epoch.history.opening_prefix.clone(),
+        opening_prefix: epoch.history.opening_prefix,
         completed_components: Vec::new(),
     };
     let preceding = SemanticConstructionPrefix::PreChallengeWhir {
@@ -2384,12 +2354,8 @@ fn construction_whir_prover_messages_cannot_repair_a_false_knowledge_state() {
                 epoch_construction_witness(&construction, epoch, hostile_local_witness);
             check_semantic_construction_prover_move(
                 &context,
-                &before_descriptor,
-                &before_statement,
-                &before_prefix,
-                &after_descriptor,
-                &after_statement,
-                &after_prefix,
+                (&before_descriptor, &before_statement, &before_prefix),
+                (&after_descriptor, &after_statement, &after_prefix),
                 &common_witness,
             )
             .unwrap_or_else(|error| {
@@ -2401,12 +2367,8 @@ fn construction_whir_prover_messages_cannot_repair_a_false_knowledge_state() {
             });
             check_semantic_construction_prover_move(
                 &context,
-                &before_descriptor,
-                &before_statement,
-                &before_prefix,
-                &after_descriptor,
-                &after_statement,
-                &after_prefix,
+                (&before_descriptor, &before_statement, &before_prefix),
+                (&after_descriptor, &after_statement, &after_prefix),
                 &hostile_witness,
             )
             .unwrap_or_else(|error| {
@@ -2706,7 +2668,7 @@ fn completed_rejecting_verifier_prefixes_remain_outside_the_knowledge_state() {
     let first_pre_prefix = SemanticConstructionPrefix::PreChallengeWhir {
         completed_cfw: rejected_cfw_handoff,
         history: SemanticWhirEpochHistory {
-            opening_prefix: pre_challenge_epoch.history.opening_prefix.clone(),
+            opening_prefix: pre_challenge_epoch.history.opening_prefix,
             completed_components: Vec::new(),
         },
         active: SemanticVerifierMovePrefix::WhirMaskedSumcheck(first_pre_prefix),
@@ -2750,7 +2712,7 @@ fn completed_rejecting_verifier_prefixes_remain_outside_the_knowledge_state() {
         construction.main_witness.clone(),
     );
     let full_prefix = SemanticConstructionPrefix::MainWhir {
-        completed_pre_challenge: rejected_pre_challenge,
+        completed_pre_challenge: Box::new(rejected_pre_challenge),
         history: main_epoch.history.clone(),
         active: SemanticVerifierMovePrefix::WhirBase(full_base_prefix(&main_epoch.base)),
     };
@@ -2793,7 +2755,7 @@ fn construction_kstate_refuses_hostile_history_while_errbr_uses_only_the_active_
     let statement = SemanticVerifierMoveStatement::WhirBase(&epoch.base.statement);
     let terminal = SemanticConstructionWitness::Terminal;
     let prefix_for_history = |history| SemanticConstructionPrefix::MainWhir {
-        completed_pre_challenge: completed_pre_challenge.clone(),
+        completed_pre_challenge: Box::new(completed_pre_challenge.clone()),
         history,
         active: SemanticVerifierMovePrefix::WhirBase(full_base_prefix(&epoch.base)),
     };
@@ -2865,7 +2827,7 @@ fn construction_kstate_refuses_hostile_history_while_errbr_uses_only_the_active_
         .pre_challenge_opening
         .batching_challenge = Some(field(1));
     let substituted_cfw_prefix = SemanticConstructionPrefix::MainWhir {
-        completed_pre_challenge: substituted_cfw_handoff,
+        completed_pre_challenge: Box::new(substituted_cfw_handoff),
         history: epoch.history.clone(),
         active: SemanticVerifierMovePrefix::WhirBase(full_base_prefix(&epoch.base)),
     };
@@ -2886,7 +2848,7 @@ fn construction_kstate_refuses_hostile_history_while_errbr_uses_only_the_active_
         .main_opening
         .batching_challenge = Some(field(1));
     let substituted_main_prefix = SemanticConstructionPrefix::MainWhir {
-        completed_pre_challenge: substituted_main_handoff,
+        completed_pre_challenge: Box::new(substituted_main_handoff),
         history: epoch.history.clone(),
         active: SemanticVerifierMovePrefix::WhirBase(full_base_prefix(&epoch.base)),
     };

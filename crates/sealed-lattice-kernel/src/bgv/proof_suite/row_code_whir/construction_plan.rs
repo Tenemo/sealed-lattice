@@ -5631,8 +5631,8 @@ mod tests {
             ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER => 157_508,
             ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 123_450,
             ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 20_680,
-            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => 1_728,
-            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => 25_670,
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => 1_573,
+            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => 18_594,
             ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER => 3_451,
             ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 2_528,
             _ => panic!("unexpected selected proof family"),
@@ -7282,7 +7282,7 @@ mod tests {
             vec![
                 (23, 387),
                 (22, 288),
-                (21, 268),
+                (21, 269),
                 (20, 264),
                 (19, 263),
                 (18, 263),
@@ -7664,9 +7664,9 @@ mod tests {
                 independently_derived_extension_hash_query_count,
                 independently_derived_distinct_hash_query_count,
             ),
-            (6_166, 4_235, 387, 549_540, 44_473),
+            (6_166, 4_235, 387, 549_540, 44_489),
         );
-        assert_eq!(maximum_transcript_hash_query_count, 604_801);
+        assert_eq!(maximum_transcript_hash_query_count, 604_817);
         assert_eq!(
             logical_verifier_message_count,
             u64::try_from(
@@ -7943,7 +7943,7 @@ mod tests {
             catalog
                 .supplied_commitment_opening_count()
                 .expect("the supplied commitment opening count derives"),
-            3_943,
+            3_944,
         );
         let opening_query_order =
             linear_bcs_transcript::LinearBcsOpeningQueryOrder::AcceptedTranscriptOrder;
@@ -8033,7 +8033,7 @@ mod tests {
                             epoch_ordinal: 2,
                         },
                     payload_leaf_count: 2_097_152,
-                    query_count: 268,
+                    query_count: 269,
                     query_order: opening_query_order,
                     merkle_traversal_order,
                 },

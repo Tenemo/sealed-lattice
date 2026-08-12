@@ -121,7 +121,7 @@ impl WitnessCovectorCatalog {
         let padded_row_count = relation.padded_constraint_count();
         if !ring_degree.is_power_of_two()
             || !padded_row_count.is_power_of_two()
-            || padded_row_count % ring_degree != 0
+            || !padded_row_count.is_multiple_of(ring_degree)
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -746,15 +746,15 @@ mod tests {
         );
         assert_eq!(catalog.maximum_resident_owned_byte_length, 174_349_712);
         assert_eq!(catalog.claim_continuation_heap_payload_byte_length, 1_840);
-        assert_eq!(catalog.handoff_inline_byte_length, 1_040);
-        assert_eq!(catalog.handoff_control_byte_length, 14_160);
+        assert_eq!(catalog.handoff_inline_byte_length, 1_072);
+        assert_eq!(catalog.handoff_control_byte_length, 14_192);
         assert_eq!(
             catalog.handoff_initialization_resident_owned_byte_length,
-            169_110_040
+            169_110_072
         );
         assert_eq!(
             catalog.handoff_maximum_resident_owned_byte_length,
-            174_352_000
+            174_352_032
         );
     }
 

@@ -33,6 +33,7 @@ pub(super) struct SemanticProductionOuterLayout {
     table_value_count: usize,
     inverse_first_element: usize,
     inverse_element_count: usize,
+    copied_main_source_element_count: usize,
     pre_challenge_message_element_count: usize,
     main_message_element_count: usize,
     soundness_numerator: u64,
@@ -117,6 +118,7 @@ impl SemanticProductionOuterLayout {
             table_value_count,
             inverse_first_element,
             inverse_element_count,
+            copied_main_source_element_count: occupied_pre_challenge_element_count,
             pre_challenge_message_element_count,
             main_message_element_count,
             soundness_numerator,
@@ -567,6 +569,7 @@ pub(super) struct SemanticCrossEpochStatement {
     mask_relation: CommittedMaskCodeRelation,
     mask_instance: SemanticCommittedCodeInstance,
     variable_count: usize,
+    pre_challenge_message_element_count: usize,
     copied_message_element_count: usize,
 }
 
@@ -578,21 +581,20 @@ impl SemanticCrossEpochStatement {
         main_source_instance: SemanticCommittedCodeInstance,
         mask_relation: CommittedMaskCodeRelation,
         mask_instance: SemanticCommittedCodeInstance,
-        variable_count: usize,
+        layout: SemanticProductionOuterLayout,
     ) -> Result<Self, SemanticOuterError> {
+        let variable_count = layout.variable_count();
+        let pre_challenge_message_element_count = layout.pre_challenge_message_element_count;
+        let copied_message_element_count = layout.copied_main_source_element_count;
         if variable_count == 0 || variable_count >= usize::BITS as usize {
             return Err(SemanticOuterError::InvalidGeometry);
         }
-        let copied_message_element_count = 1_usize
-            .checked_shl(
-                u32::try_from(variable_count)
-                    .map_err(|_| SemanticOuterError::ArithmeticOverflow)?,
-            )
-            .ok_or(SemanticOuterError::ArithmeticOverflow)?;
         if committed_message_element_count(&pre_challenge_source_relation)?
-            != copied_message_element_count
+            != pre_challenge_message_element_count
             || committed_message_element_count(&main_source_relation)?
-                < copied_message_element_count
+                != layout.main_message_element_count
+            || copied_message_element_count == 0
+            || copied_message_element_count > pre_challenge_message_element_count
             || mask_relation.role != MaskGroupRole::CrossEpochOpening
             || committed_message_element_count(&mask_relation.code)? != 2
         {
@@ -612,6 +614,7 @@ impl SemanticCrossEpochStatement {
             mask_relation,
             mask_instance,
             variable_count,
+            pre_challenge_message_element_count,
             copied_message_element_count,
         })
     }
@@ -769,17 +772,16 @@ pub(super) fn semantic_cross_epoch_bad_transition(
     }))
 }
 
+type SemanticCrossEpochMessageParts = (
+    Vec<ProofChallengeExtensionElement>,
+    Vec<ProofChallengeExtensionElement>,
+    Vec<ProofChallengeExtensionElement>,
+);
+
 fn cross_epoch_message_parts(
     statement: &SemanticCrossEpochStatement,
     witness: &SemanticCrossEpochWitness,
-) -> Result<
-    (
-        Vec<ProofChallengeExtensionElement>,
-        Vec<ProofChallengeExtensionElement>,
-        Vec<ProofChallengeExtensionElement>,
-    ),
-    SemanticOuterError,
-> {
+) -> Result<SemanticCrossEpochMessageParts, SemanticOuterError> {
     for (relation, instance, code_witness) in [
         (
             &statement.pre_challenge_source_relation,
@@ -803,12 +805,16 @@ fn cross_epoch_message_parts(
     }
     let pre_challenge_coefficients = witness.pre_challenge_source.flattened_messages();
     let main_message = witness.main_source.flattened_messages();
-    let main_copied_prefix = main_message
+    let mut main_copied_prefix = main_message
         .get(..statement.copied_message_element_count)
         .ok_or(SemanticOuterError::InvalidGeometry)?
         .to_vec();
+    main_copied_prefix.resize(
+        statement.pre_challenge_message_element_count,
+        ProofChallengeExtensionElement::ZERO,
+    );
     let masks = witness.shared_masks.flattened_messages();
-    if pre_challenge_coefficients.len() != statement.copied_message_element_count
+    if pre_challenge_coefficients.len() != statement.pre_challenge_message_element_count
         || masks.len() != 2
     {
         return Err(SemanticOuterError::InvalidGeometry);
@@ -1220,7 +1226,7 @@ fn production_cross_epoch_statement(
         commitments.main_source.clone(),
         statement.shared_mask_relation.clone(),
         commitments.shared_masks.clone(),
-        statement.layout.variable_count(),
+        statement.layout,
     )
 }
 
@@ -1292,7 +1298,7 @@ fn multilinear_evaluation(
     }
     let mut folded = evaluations.to_vec();
     for &coordinate in point {
-        if folded.len() % 2 != 0 {
+        if !folded.len().is_multiple_of(2) {
             return Err(SemanticOuterError::InvalidGeometry);
         }
         let half = folded.len() / 2;

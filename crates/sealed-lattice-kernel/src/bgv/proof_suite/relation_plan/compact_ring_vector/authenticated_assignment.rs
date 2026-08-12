@@ -156,15 +156,17 @@ impl CompactAuthenticatedAssignmentCatalog {
                 &requested_source_column_set,
                 &mut source_halves_by_column,
                 *vector,
-                CompactAssignmentStorage::PublicInput,
-                1_u64
-                    .checked_add(
-                        vector_ordinal
-                            .checked_mul(relation.ring_degree)
-                            .ok_or(RelationPlanError::CountOverflow)?,
-                    )
-                    .ok_or(RelationPlanError::CountOverflow)?,
-                trace_domain_size,
+                CompactVectorHalfDestination {
+                    storage: CompactAssignmentStorage::PublicInput,
+                    first_element: 1_u64
+                        .checked_add(
+                            vector_ordinal
+                                .checked_mul(relation.ring_degree)
+                                .ok_or(RelationPlanError::CountOverflow)?,
+                        )
+                        .ok_or(RelationPlanError::CountOverflow)?,
+                    element_count: trace_domain_size,
+                },
                 |half_ordinal| CompactAuthenticatedSourceRole::PublicInput {
                     vector_ordinal,
                     half_ordinal,
@@ -201,9 +203,11 @@ impl CompactAuthenticatedAssignmentCatalog {
                 &requested_source_column_set,
                 &mut source_halves_by_column,
                 descriptor.vector,
-                CompactAssignmentStorage::Witness,
-                destination_first_element,
-                trace_domain_size,
+                CompactVectorHalfDestination {
+                    storage: CompactAssignmentStorage::Witness,
+                    first_element: destination_first_element,
+                    element_count: trace_domain_size,
+                },
                 |half_ordinal| CompactAuthenticatedSourceRole::ShiftedSmallValue {
                     kind: descriptor.kind,
                     vector_ordinal_within_kind,
@@ -239,9 +243,11 @@ impl CompactAuthenticatedAssignmentCatalog {
                 &requested_source_column_set,
                 &mut source_halves_by_column,
                 *quotient_vector,
-                CompactAssignmentStorage::Witness,
-                destination_first_element,
-                trace_domain_size,
+                CompactVectorHalfDestination {
+                    storage: CompactAssignmentStorage::Witness,
+                    first_element: destination_first_element,
+                    element_count: trace_domain_size,
+                },
                 |half_ordinal| CompactAuthenticatedSourceRole::ModularQuotient {
                     relation_ordinal,
                     half_ordinal,
@@ -1244,14 +1250,19 @@ fn lookup_denominator(
     Ok(denominator)
 }
 
+#[derive(Clone, Copy)]
+struct CompactVectorHalfDestination {
+    storage: CompactAssignmentStorage,
+    first_element: u64,
+    element_count: u64,
+}
+
 fn insert_vector_halves(
     relation_plan_variant: &RelationPlanVariant,
     requested_source_column_set: &BTreeSet<u32>,
     source_halves_by_column: &mut BTreeMap<u32, CompactAuthenticatedSourceHalf>,
     vector: CompactRingVectorReference,
-    destination_storage: CompactAssignmentStorage,
-    destination_first_element: u64,
-    trace_domain_size: u64,
+    destination: CompactVectorHalfDestination,
     mut role: impl FnMut(u8) -> CompactAuthenticatedSourceRole,
 ) -> Result<(), RelationPlanError> {
     for (half_ordinal, source_column_ordinal) in vector.column_ordinals.into_iter().enumerate() {
@@ -1280,7 +1291,7 @@ fn insert_vector_halves(
         let half_ordinal =
             u8::try_from(half_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
         let half_offset = u64::from(half_ordinal)
-            .checked_mul(trace_domain_size)
+            .checked_mul(destination.element_count)
             .ok_or(RelationPlanError::CountOverflow)?;
         if source_halves_by_column
             .insert(
@@ -1290,11 +1301,12 @@ fn insert_vector_halves(
                     source_degree_bound_exclusive: descriptor.source_degree_bound_exclusive(),
                     source_origin,
                     role: role(half_ordinal),
-                    destination_storage,
-                    destination_first_element: destination_first_element
+                    destination_storage: destination.storage,
+                    destination_first_element: destination
+                        .first_element
                         .checked_add(half_offset)
                         .ok_or(RelationPlanError::CountOverflow)?,
-                    element_count: trace_domain_size,
+                    element_count: destination.element_count,
                 },
             )
             .is_some()
@@ -1924,19 +1936,14 @@ mod tests {
             .begin_lookup_inverse_materialization(lookup_challenge)
             .expect("bounded lookup inverse materializer starts");
         let mut materialization_poll_count = 0_u64;
-        loop {
-            match materializer
-                .advance(8_192)
-                .expect("bounded lookup inverse step succeeds")
-            {
-                CompactLookupInverseMaterializationPoll::ArithmeticStepCompleted {
-                    processed_element_count,
-                } => {
-                    assert!(processed_element_count > 0);
-                    materialization_poll_count += 1;
-                }
-                CompactLookupInverseMaterializationPoll::Complete => break,
-            }
+        while let CompactLookupInverseMaterializationPoll::ArithmeticStepCompleted {
+            processed_element_count,
+        } = materializer
+            .advance(8_192)
+            .expect("bounded lookup inverse step succeeds")
+        {
+            assert!(processed_element_count > 0);
+            materialization_poll_count += 1;
         }
         assert_eq!(materialization_poll_count, 233);
         let assignment = materializer

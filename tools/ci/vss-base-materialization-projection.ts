@@ -15,7 +15,7 @@ const maximumScratchByteLength = 1_073_741_824;
 const modeledCheckpointLevel = 2;
 
 type ProjectionTarget = Readonly<{
-    browserEngine?: 'chromium' | 'firefox';
+    browserEngine?: 'chromium';
     primitiveCases: readonly PrimitiveMeasurementRecord[];
     storage?: DesktopBrowserPrimitiveMeasurementEvidence['storage'];
     boundaryCopies?: DesktopBrowserPrimitiveMeasurementEvidence['boundaryCopies'];
@@ -32,7 +32,7 @@ type WorkCounts = Readonly<{
     sourceTraceValueGenerationCount: number;
 }>;
 
-export type VssBaseMaterializationProjection = Readonly<{
+type VssBaseMaterializationProjection = Readonly<{
     checkpointCandidates: readonly Readonly<Record<string, unknown>>[];
     currentTwoPass: Readonly<{
         columnValueDeliveryCount: number;
@@ -386,7 +386,7 @@ const requireFusedRadix51ProjectionOwnerCaseSet = (
     }
 };
 
-export type VssFusedRadix51OwnerProjection = Readonly<{
+type VssFusedRadix51OwnerProjection = Readonly<{
     candidateWork: WorkCounts;
     schemaVersion: 1;
     selectedWork: WorkCounts;
@@ -400,51 +400,39 @@ export const deriveVssFusedRadix51OwnerProjection = (input: {
     const nativeCases = input.nativeEvidence.primitiveCases;
     requireFusedRadix51ProjectionOwnerCaseSet(nativeCases, 'release-native');
     const expectedBrowserEvidenceCount =
-        vssFusedRadix51ProjectionOwnerCaseIdentifiers.length * 2;
+        vssFusedRadix51ProjectionOwnerCaseIdentifiers.length;
     if (input.browserEvidence.length !== expectedBrowserEvidenceCount) {
         throw new Error(
-            'VSS fused radix-51 projection requires exact Chromium and Firefox owner sets.',
+            'VSS fused radix-51 projection requires one exact Chromium owner set.',
         );
     }
-    const browserTargets = (['chromium', 'firefox'] as const).map(
-        (browserEngine, browserIndex) => {
-            const firstEvidenceIndex =
-                browserIndex *
-                vssFusedRadix51ProjectionOwnerCaseIdentifiers.length;
-            const evidence = input.browserEvidence.slice(
-                firstEvidenceIndex,
-                firstEvidenceIndex +
-                    vssFusedRadix51ProjectionOwnerCaseIdentifiers.length,
-            );
-            if (
-                evidence.some(
-                    (entry, entryIndex) =>
-                        entry.browserEngine !== browserEngine ||
-                        entry.primitiveCase.record.caseIdentifier !==
-                            vssFusedRadix51ProjectionOwnerCaseIdentifiers[
-                                entryIndex
-                            ],
-                )
-            ) {
-                throw new Error(
-                    'VSS fused radix-51 projection browser owner sets are duplicated or noncanonical.',
-                );
-            }
-            const primitiveCases = evidence.map(
-                (entry) => entry.primitiveCase.record,
-            );
-            requireFusedRadix51ProjectionOwnerCaseSet(
-                primitiveCases,
-                'wasm32-unknown-unknown',
-            );
-            assertMeasurementCorrespondence(nativeCases, primitiveCases);
-            return Object.freeze({
-                browserEngine,
-                evidence,
-                primitiveCases,
-            });
-        },
+    if (
+        input.browserEvidence.some(
+            (entry, entryIndex) =>
+                entry.browserEngine !== 'chromium' ||
+                entry.primitiveCase.record.caseIdentifier !==
+                    vssFusedRadix51ProjectionOwnerCaseIdentifiers[entryIndex],
+        )
+    ) {
+        throw new Error(
+            'VSS fused radix-51 Chromium owner set is noncanonical.',
+        );
+    }
+    const browserPrimitiveCases = input.browserEvidence.map(
+        (entry) => entry.primitiveCase.record,
     );
+    requireFusedRadix51ProjectionOwnerCaseSet(
+        browserPrimitiveCases,
+        'wasm32-unknown-unknown',
+    );
+    assertMeasurementCorrespondence(nativeCases, browserPrimitiveCases);
+    const browserTargets = [
+        Object.freeze({
+            browserEngine: 'chromium' as const,
+            evidence: input.browserEvidence,
+            primitiveCases: browserPrimitiveCases,
+        }),
+    ];
     const selectedWork = deriveSelectedVssWork(nativeCases);
     const candidateWork = deriveFusedRadix51Work(nativeCases);
     const targets = [
@@ -523,12 +511,11 @@ export const deriveVssBaseMaterializationProjection = (input: {
     const nativeCases = input.nativeEvidence.primitiveCases;
     requireCompletePrimitiveMeasurementCatalog(nativeCases);
     if (
-        input.browserEvidence.length !== 2 ||
-        input.browserEvidence[0]?.browserEngine !== 'chromium' ||
-        input.browserEvidence[1]?.browserEngine !== 'firefox'
+        input.browserEvidence.length !== 1 ||
+        input.browserEvidence[0]?.browserEngine !== 'chromium'
     ) {
         throw new Error(
-            'VSS materialization projection requires Chromium and Firefox evidence in canonical order.',
+            'VSS materialization projection requires exactly one Chromium evidence catalog.',
         );
     }
     for (const browserEvidence of input.browserEvidence) {

@@ -395,7 +395,7 @@ mod runtime_limit_tests {
     }
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn derive_selected_proof_family_application_inventory()
 -> Result<crate::foundation::ProofFamilyApplicationInventory, SelectedProofAccountingError> {
     use crate::bgv::evaluator::program::selected_evaluator_program_set;
@@ -2166,19 +2166,19 @@ pub(crate) mod resource_accounting {
                 .iter()
                 .map(|section| section.byte_length())
                 .sum::<u64>();
-            assert_eq!(aggregate_opening_byte_length, 2_942_104);
+            assert_eq!(aggregate_opening_byte_length, 2_943_336);
             let independently_reconciled_family_body_byte_length = non_opening_prefix_byte_length
                 + phase_opening_byte_length
                 + prior_proof_bound_opening_byte_length
                 + direct_bound_opening_byte_length
                 + aggregate_opening_byte_length;
-            assert_eq!(independently_reconciled_family_body_byte_length, 5_813_652);
+            assert_eq!(independently_reconciled_family_body_byte_length, 5_814_884);
             assert_eq!(
                 same_secret.canonical_family_body_byte_length(),
                 independently_reconciled_family_body_byte_length
             );
-            assert_eq!(same_secret.canonical_proof_byte_length(), 5_814_554);
-            assert_eq!(same_secret.nominal_proof_overage_byte_length(), 571_674);
+            assert_eq!(same_secret.canonical_proof_byte_length(), 5_815_786);
+            assert_eq!(same_secret.nominal_proof_overage_byte_length(), 572_906);
             assert_eq!(same_secret.nominal_proof_headroom_byte_length(), 0);
             assert_eq!(same_secret.automatic_acceptance_overage_byte_length(), 0);
 

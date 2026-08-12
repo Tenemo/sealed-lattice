@@ -638,7 +638,7 @@ fn extension_relation_prover_refuses_malformed_caller_owned_dimensions() {
     );
 
     let mut short_source_challenger = test_challenger();
-    let mut short_source_randomness = SmallRng::seed_from_u64(0x5A_0C_E);
+    let mut short_source_randomness = SmallRng::seed_from_u64(0x0005_A0CE);
     let (_, short_source_prover_data) = prover.commit_extension(
         Poly::new(extension_vector(1 << TEST_VARIABLE_COUNT, 2_501)),
         &mut short_source_challenger,

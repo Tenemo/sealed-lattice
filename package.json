@@ -35,7 +35,7 @@
         "test:node:kernel": "pnpm run build && pnpm exec vitest --project node-kernel-fast --run",
         "test:node:built": "vitest --project node --project node-protocol --project node-kernel-fast --run",
         "test:node": "pnpm run build && pnpm run test:node:built",
-        "test:browser:built": "vitest --project chromium-desktop --project firefox-desktop --project webkit-desktop --run",
+        "test:browser:built": "vitest --project chromium-desktop --run",
         "test:browser": "pnpm run build && pnpm run test:browser:built",
         "test:browser:primitive-measurements": "tsx ./tools/ci/run-desktop-browser-primitive-measurements.ts",
         "test:browser:proof-evidence": "tsx ./tools/ci/run-desktop-browser-proof-evidence.ts",

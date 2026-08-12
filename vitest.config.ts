@@ -122,14 +122,6 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
         browser: 'chromium',
         name: 'chromium-desktop',
     },
-    {
-        browser: 'firefox',
-        name: 'firefox-desktop',
-    },
-    {
-        browser: 'webkit',
-        name: 'webkit-desktop',
-    },
 ];
 
 const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] =
@@ -200,9 +192,8 @@ const makeBrowserProject = ({
             include: [...include],
             ...(exclude === undefined ? {} : { exclude: [...exclude] }),
             // Each real-WASM browser file can instantiate a large kernel and
-            // create workers. Running every file concurrently has exhausted the
-            // Firefox WebAssembly compiler and left its test process unable to
-            // shut down under otherwise valid multi-browser runs.
+            // create workers. Keep the canonical Chromium lane serialized so
+            // concurrent files cannot inflate the measured working set.
             fileParallelism: false,
             ...(hookTimeout === undefined ? {} : { hookTimeout }),
             ...(testTimeout === undefined ? {} : { testTimeout }),
@@ -220,9 +211,9 @@ const makeBrowserProject = ({
                 headless: true,
                 instances,
                 // Playwright writes active .network chunks to one project-level
-                // directory before Vitest can add browser or worker identity.
-                // Routine multi-engine coverage therefore keeps tracing off.
-                // Each manual evidence command selects one isolated instance.
+                // directory before Vitest can add worker identity. Routine
+                // coverage therefore keeps tracing off. Each manual evidence
+                // command selects one isolated instance.
                 trace:
                     retainFailureTrace &&
                     projectAttachmentDirectoryPath !== undefined

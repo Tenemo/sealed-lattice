@@ -136,16 +136,14 @@ pub(super) fn derive_bad_transition_certificate_events(
         }
         (
             SemanticVerifierMoveOwner::CfwSumcheckRound { round_ordinal },
-            SemanticVerifierMoveBadTransition::Cfw(
-                SemanticCfwBadTransition::NonzeroPolynomialRoot {
-                    transition:
-                        SemanticCfwVerifierTransition::SumcheckRound {
-                            round_ordinal: certificate_round_ordinal,
-                        },
-                    coefficients,
-                    challenge,
-                },
-            ),
+            SemanticVerifierMoveBadTransition::Cfw(SemanticCfwBadTransition::NonzeroPolynomial {
+                transition:
+                    SemanticCfwVerifierTransition::SumcheckRound {
+                        round_ordinal: certificate_round_ordinal,
+                    },
+                coefficients,
+                challenge,
+            }),
         ) if usize::try_from(round_ordinal).ok() == Some(*certificate_round_ordinal) => {
             let numerator = compact_polynomial_root_degree(coefficients, *challenge)?;
             vec![semantic_root_event(
@@ -489,12 +487,11 @@ fn validate_cross_epoch_certificate(
         .nonzero_difference_evaluations
         .iter()
         .all(|difference| difference.is_zero())
-        || proof_multilinear_evaluation(
+        || !proof_multilinear_evaluation(
             &certificate.nonzero_difference_evaluations,
             &certificate.point,
         )?
         .is_zero()
-            == false
     {
         return Err(CompactStaticCatalogError::InvalidGeometry);
     }
@@ -504,7 +501,7 @@ fn validate_cross_epoch_certificate(
 fn validate_cfw_initial_certificate(
     certificate: &SemanticCfwBadTransition,
 ) -> Result<(), CompactStaticCatalogError> {
-    let SemanticCfwBadTransition::InitialConsistencyRoot {
+    let SemanticCfwBadTransition::InitialConsistency {
         auxiliary_difference,
         masked_constraint_hypercube_residuals,
         constraint_combining_challenge,
@@ -536,7 +533,7 @@ fn validate_cfw_initial_certificate(
 fn validate_cfw_zero_evader_certificate(
     certificate: &SemanticCfwBadTransition,
 ) -> Result<(), CompactStaticCatalogError> {
-    let SemanticCfwBadTransition::ZeroEvaderRoot {
+    let SemanticCfwBadTransition::ZeroEvader {
         residuals,
         weights,
         challenge,
@@ -1065,8 +1062,8 @@ mod tests {
             [SemanticBadEventFamily::CrossEpochMultilinearIdentity]
         );
 
-        let cfw_initial = SemanticVerifierMoveBadTransition::Cfw(
-            SemanticCfwBadTransition::InitialConsistencyRoot {
+        let cfw_initial =
+            SemanticVerifierMoveBadTransition::Cfw(SemanticCfwBadTransition::InitialConsistency {
                 auxiliary_difference: CompactChallengeField::ZERO,
                 masked_constraint_hypercube_residuals: vec![
                     CompactChallengeField::ZERO,
@@ -1074,20 +1071,18 @@ mod tests {
                 ],
                 constraint_combining_challenge: compact_field(7),
                 equality_point: vec![CompactChallengeField::ZERO],
-            },
-        );
+            });
         assert_eq!(
             families(SemanticVerifierMoveOwner::CfwInitialRandomness, cfw_initial,),
             [SemanticBadEventFamily::CfwInitialConsistencyIdentity]
         );
 
-        let cfw_sumcheck = SemanticVerifierMoveBadTransition::Cfw(
-            SemanticCfwBadTransition::NonzeroPolynomialRoot {
+        let cfw_sumcheck =
+            SemanticVerifierMoveBadTransition::Cfw(SemanticCfwBadTransition::NonzeroPolynomial {
                 transition: SemanticCfwVerifierTransition::SumcheckRound { round_ordinal: 0 },
                 coefficients: vec![CompactChallengeField::ZERO, compact_field(1)],
                 challenge: CompactChallengeField::ZERO,
-            },
-        );
+            });
         assert_eq!(
             families(
                 SemanticVerifierMoveOwner::CfwSumcheckRound { round_ordinal: 0 },
@@ -1096,7 +1091,7 @@ mod tests {
             [SemanticBadEventFamily::CfwSumcheckIdentity]
         );
 
-        let cfw_zero_evader = SemanticCfwBadTransition::ZeroEvaderRoot {
+        let cfw_zero_evader = SemanticCfwBadTransition::ZeroEvader {
             residuals: [
                 CompactChallengeField::ZERO,
                 compact_field(1),

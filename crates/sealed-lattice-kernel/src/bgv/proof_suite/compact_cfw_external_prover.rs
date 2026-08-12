@@ -546,7 +546,7 @@ impl CompactCfwExternalProverState {
         CompactCfwExternalProverExecutionError<StorageError>,
     > {
         let maximum_row_pair_count = self.maximum_chunk_element_count::<StorageError>()? / 2;
-        if maximum_row_pair_count == 0 || self.derivation_element_offset % 2 != 0 {
+        if maximum_row_pair_count == 0 || !self.derivation_element_offset.is_multiple_of(2) {
             return Err(resource_limit_error());
         }
         let row_count = row_source.row_count()?;
@@ -626,7 +626,7 @@ impl CompactCfwExternalProverState {
             return Ok(None);
         }
 
-        if chunk_element_count % 2 != 0
+        if !chunk_element_count.is_multiple_of(2)
             || self
                 .work_chunks
                 .iter()
@@ -701,7 +701,9 @@ impl CompactCfwExternalProverState {
     ) -> Result<(), CompactCfwExternalProverExecutionError<StorageError>> {
         let maximum_output_element_count = self.maximum_chunk_element_count::<StorageError>()?;
         let row_count = row_source.row_count()?;
-        if self.fold_input_element_offset >= row_count || self.fold_input_element_offset % 2 != 0 {
+        if self.fold_input_element_offset >= row_count
+            || !self.fold_input_element_offset.is_multiple_of(2)
+        {
             return Err(CompactCfwError::WrongProverPhase.into());
         }
         let remaining_output_element_count = (row_count - self.fold_input_element_offset) / 2;

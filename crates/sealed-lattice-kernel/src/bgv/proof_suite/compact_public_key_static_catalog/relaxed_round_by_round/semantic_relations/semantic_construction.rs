@@ -198,7 +198,7 @@ pub(super) enum SemanticConstructionPrefix {
         active: SemanticPreWhirFinalAndMainOpeningPrefix,
     },
     MainWhir {
-        completed_pre_challenge: SemanticCompletedPreChallengeWhirHandoff,
+        completed_pre_challenge: Box<SemanticCompletedPreChallengeWhirHandoff>,
         history: SemanticWhirEpochHistory,
         active: SemanticVerifierMovePrefix,
     },
@@ -519,16 +519,20 @@ pub(super) fn check_semantic_construction_initial_prover_move<Matrices: CompactC
 /// The prefix comparison rejects any change to prior prover or verifier data;
 /// only the next canonical prover message may be appended. The state
 /// implication is then checked for the same mathematical witness on both sides.
+type SemanticConstructionMove<'reference, 'borrow, 'cfw_statement, Matrices> = (
+    &'reference SemanticFactorOneMoveDescriptor,
+    &'reference SemanticVerifierMoveStatement<'borrow, 'cfw_statement, Matrices>,
+    &'reference SemanticConstructionPrefix,
+);
+
 pub(super) fn check_semantic_construction_prover_move<Matrices: CompactCfwR1csMatrices>(
     context: &SemanticConstructionContext<'_, '_, Matrices>,
-    before_descriptor: &SemanticFactorOneMoveDescriptor,
-    before_statement: &SemanticVerifierMoveStatement<'_, '_, Matrices>,
-    before_prefix: &SemanticConstructionPrefix,
-    after_descriptor: &SemanticFactorOneMoveDescriptor,
-    after_statement: &SemanticVerifierMoveStatement<'_, '_, Matrices>,
-    after_prefix: &SemanticConstructionPrefix,
+    before_move: SemanticConstructionMove<'_, '_, '_, Matrices>,
+    after_move: SemanticConstructionMove<'_, '_, '_, Matrices>,
     witness: &SemanticConstructionWitness,
 ) -> Result<(), SemanticConstructionError> {
+    let (before_descriptor, before_statement, before_prefix) = before_move;
+    let (after_descriptor, after_statement, after_prefix) = after_move;
     validate_statement_and_phase(context, before_descriptor, before_statement, before_prefix)?;
     validate_statement_and_phase(context, after_descriptor, after_statement, after_prefix)?;
     let before_local_prefix = local_prefix(before_descriptor, before_prefix)?;
@@ -788,7 +792,7 @@ fn prover_prefix_is_exact_successor<Matrices: CompactCfwR1csMatrices>(
             },
         ) => {
             core::ptr::eq(*main_opening, context.main_opening)
-                && completed_pre_challenge
+                && completed_pre_challenge.as_ref()
                     == &SemanticCompletedPreChallengeWhirHandoff {
                         completed_cfw: completed_cfw.clone(),
                         pre_challenge_history: pre_challenge_history.clone(),
@@ -872,7 +876,7 @@ fn cfw_prefix_appends_round_polynomial(
         return false;
     };
     let mut expected = before.clone();
-    expected.round_polynomials.push(next_polynomial.clone());
+    expected.round_polynomials.push(*next_polynomial);
     expected == *after
 }
 

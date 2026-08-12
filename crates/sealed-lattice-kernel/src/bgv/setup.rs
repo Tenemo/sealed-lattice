@@ -103,7 +103,7 @@ pub(crate) use accepted_setup::{
     populate_exact_same_secret_evidence_authority,
     with_setup_generation_vss_material_for_exact_same_secret_evidence,
 };
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(in crate::bgv) use accepted_setup::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
     selected_setup_generation_compact_public_key_development_retained_payload_byte_length,
@@ -125,6 +125,7 @@ pub(in crate::bgv) use accepted_setup::{
     with_exclusive_setup_generation_compact_public_key_development_relation,
 };
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) use commitment::selected_lattice_anchor_commitment_canonical_byte_length;
 #[cfg(test)]
 pub(crate) use commitment::{

@@ -37,23 +37,22 @@ pub(super) use opening_batching::{
     semantic_whir_opening_batching_errbr, semantic_whir_opening_batching_kstate,
 };
 
+type SemanticWhirRelationInstance = (
+    GeneralizedCommittedRelation,
+    SemanticGeneralizedRelationInstance,
+);
+type SemanticWhirOpeningBatchingBoundaries =
+    (SemanticWhirRelationInstance, SemanticWhirRelationInstance);
+type SemanticWhirBinaryFoldRows = (
+    Vec<Vec<ProofChallengeExtensionElement>>,
+    Vec<Vec<ProofChallengeExtensionElement>>,
+);
+
 pub(super) fn semantic_whir_opening_batching_boundaries(
     input_relation: GeneralizedCommittedRelation,
     input_instance: SemanticGeneralizedRelationInstance,
     batching_challenge: ProofChallengeExtensionElement,
-) -> Result<
-    (
-        (
-            GeneralizedCommittedRelation,
-            SemanticGeneralizedRelationInstance,
-        ),
-        (
-            GeneralizedCommittedRelation,
-            SemanticGeneralizedRelationInstance,
-        ),
-    ),
-    SemanticWhirError,
-> {
+) -> Result<SemanticWhirOpeningBatchingBoundaries, SemanticWhirError> {
     let statement = opening_batching::SemanticWhirOpeningBatchingStatement::new(
         input_relation,
         input_instance,
@@ -144,7 +143,7 @@ impl SemanticWhirMaskedSumcheckStatement {
             || input_relation.opening_evaluation_claim_count != 0
             || input_relation.carried_reduction_claim_count != 1
             || input_relation.claim_count != 1
-            || input_instance.opening_claims.len() != 0
+            || !input_instance.opening_claims.is_empty()
             || input_instance.carried_reduction_claims.len() != 1
             || input_instance.masks.len() != input_relation.mask_codes.len()
         {
@@ -558,13 +557,11 @@ pub(super) fn semantic_whir_masked_sumcheck_bad_transition(
             )
         }
     };
-    debug_assert!(
-        semantic_generalized_relation_holds(
-            &preceding_relation,
-            &preceding_instance,
-            &preceding_witness,
-        )? == false
-    );
+    debug_assert!(!semantic_generalized_relation_holds(
+        &preceding_relation,
+        &preceding_instance,
+        &preceding_witness,
+    )?);
     if coefficients.iter().all(|coefficient| coefficient.is_zero())
         || !evaluate_polynomial(&coefficients, challenge).is_zero()
     {
@@ -612,7 +609,7 @@ impl SemanticWhirCodeSwitchStatement {
             || input_relation.opening_evaluation_claim_count != 0
             || input_relation.carried_reduction_claim_count != 1
             || input_relation.claim_count != 1
-            || input_instance.opening_claims.len() != 0
+            || !input_instance.opening_claims.is_empty()
             || input_instance.carried_reduction_claims.len() != 1
             || input_instance.masks.len() != input_relation.mask_codes.len()
             || input_message_count != output_message_count
@@ -1349,7 +1346,7 @@ fn expected_round_polynomial(
     validate_claim_shape(preceding_relation, claim)?;
     let source_width = usize::try_from(preceding_relation.source_code.interleaving_width)
         .map_err(|_| SemanticWhirError::InvalidGeometry)?;
-    if source_width < 2 || source_width % 2 != 0 {
+    if source_width < 2 || !source_width.is_multiple_of(2) {
         return Err(SemanticWhirError::InvalidGeometry);
     }
     let source_messages = &preceding_witness.source.message_columns;
@@ -1424,9 +1421,12 @@ fn expected_round_polynomial(
         {
             return Err(SemanticWhirError::InvalidGeometry);
         }
-        for mask_ordinal in 0..statement.folding_factor {
-            let message = &mask_witness.message_columns[mask_ordinal];
-            let covector = &member_covectors[mask_ordinal];
+        for (mask_ordinal, (message, covector)) in mask_witness
+            .message_columns
+            .iter()
+            .zip(&member_covectors)
+            .enumerate()
+        {
             if mask_ordinal == round_ordinal {
                 let remaining_round_count = statement
                     .folding_factor
@@ -1554,18 +1554,12 @@ fn reconstruct_binary_mca_components(
 
 fn split_binary_fold_rows(
     rows: &[Vec<ProofChallengeExtensionElement>],
-) -> Result<
-    (
-        Vec<Vec<ProofChallengeExtensionElement>>,
-        Vec<Vec<ProofChallengeExtensionElement>>,
-    ),
-    SemanticWhirError,
-> {
+) -> Result<SemanticWhirBinaryFoldRows, SemanticWhirError> {
     let width = rows
         .first()
         .map(Vec::len)
         .ok_or(SemanticWhirError::InvalidGeometry)?;
-    if width < 2 || width % 2 != 0 || rows.iter().any(|row| row.len() != width) {
+    if width < 2 || !width.is_multiple_of(2) || rows.iter().any(|row| row.len() != width) {
         return Err(SemanticWhirError::InvalidGeometry);
     }
     let half_width = width / 2;
@@ -1806,7 +1800,7 @@ fn fold_columns(
     }
     let mut folded = columns.to_vec();
     for &challenge in challenges {
-        if folded.len() < 2 || folded.len() % 2 != 0 {
+        if folded.len() < 2 || !folded.len().is_multiple_of(2) {
             return Err(SemanticWhirError::InvalidGeometry);
         }
         let half_width = folded.len() / 2;
@@ -1832,7 +1826,7 @@ fn split_flattened_columns(
     flattened: &[ProofChallengeExtensionElement],
     width: usize,
 ) -> Result<Vec<Vec<ProofChallengeExtensionElement>>, SemanticWhirError> {
-    if width == 0 || flattened.is_empty() || flattened.len() % width != 0 {
+    if width == 0 || flattened.is_empty() || !flattened.len().is_multiple_of(width) {
         return Err(SemanticWhirError::InvalidGeometry);
     }
     let column_length = flattened.len() / width;

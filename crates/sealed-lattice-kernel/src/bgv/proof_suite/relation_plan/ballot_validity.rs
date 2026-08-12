@@ -3219,9 +3219,7 @@ mod tests {
         let compilation = compile_ballot_validity_relation(&relation_input(), &context)
             .expect("the direct ballot relation must compile");
         let source_plan = compilation.source_plan();
-        let scores = [
-            1_u64, 10, 2, 9, 3, 8, 4, 7, 5, 6, 10, 1, 9, 2, 8, 3, 7, 4, 6, 5,
-        ];
+        let scores = [1_u64, 10, 2, 9, 3, 8, 4, 7, 5, 6];
         let plaintexts = pair_character_plaintexts(
             &scores,
             source_plan.plaintext_modulus(),
@@ -3230,7 +3228,11 @@ mod tests {
         .expect("the bounded scores must encode");
         assert!(source_plan.encoder_profile_sequence(2, 0, 0).is_none());
         assert!(source_plan.encoder_profile_sequence(0, 2, 0).is_none());
-        assert!(source_plan.encoder_profile_sequence(0, 0, 20).is_none());
+        assert!(
+            source_plan
+                .encoder_profile_sequence(0, 0, u16::try_from(scores.len()).unwrap())
+                .is_none()
+        );
 
         for (ciphertext_ordinal, plaintext) in plaintexts.iter().enumerate() {
             for (auxiliary_ordinal, auxiliary_coefficients) in [

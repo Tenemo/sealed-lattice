@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::BTreeMap, mem::size_of, rc::Rc, sync::Arc}
 
 use zeroize::{Zeroize, Zeroizing};
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 use crate::bgv::setup::selected_lattice_anchor_commitment_canonical_byte_length;
 
 use super::generation_relinearization::{
@@ -997,7 +997,7 @@ pub(crate) struct SetupGenerationAuthorityInput {
 /// development slice. This authority deliberately excludes VSS,
 /// relinearization, and Galois material, and it cannot be serialized or used
 /// as a ceremony setup authority.
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) struct SetupGenerationCompactPublicKeyDevelopmentAuthorityInput {
     pub(crate) suite_identifier: [u8; Hash512::BYTE_LENGTH],
     pub(crate) manifest_hash: [u8; Hash512::BYTE_LENGTH],
@@ -1948,12 +1948,12 @@ impl SetupGenerationRelinearizationRoundTwoActivation {
 /// Nonserializable, Rust-worker-owned capability for the standalone compact
 /// public-key development slice. Cloning the surrounding `Rc` aliases this
 /// one state machine; it does not duplicate witness material.
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) struct SetupGenerationCompactPublicKeyDevelopmentAuthority {
     state: RefCell<SetupGenerationCompactPublicKeyDevelopmentAuthorityState>,
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 struct SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
@@ -2088,7 +2088,7 @@ fn canonical_selected_same_secret_generation_statement(
     .map_err(|_| RefusalReason::OutsideSupportedProfile)
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 impl SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
     fn from_browser_owned_input(
         input: SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
@@ -2334,7 +2334,7 @@ impl SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
     }
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn selected_setup_generation_compact_public_key_development_retained_payload_byte_length()
 -> Result<u64, RefusalReason> {
     let relation_input = selected_public_key_share_relation_plan_input()
@@ -2415,7 +2415,7 @@ pub(crate) fn selected_setup_generation_compact_public_key_development_retained_
     Ok(total)
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn retain_setup_generation_compact_public_key_development_authority(
     input: SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
 ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
@@ -4041,7 +4041,7 @@ impl<'statement> SetupGenerationKeyRelationApplication<'statement> {
 enum SetupGenerationKeyRelationRetainedAuthority<'authority> {
     AllFamilies(&'authority SetupGenerationAuthority),
     VssProof(&'authority SetupGenerationVssProofAuthority),
-    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[cfg(test)]
     CompactPublicKeyDevelopment(
         &'authority SetupGenerationCompactPublicKeyDevelopmentAuthorityState,
     ),
@@ -4053,7 +4053,7 @@ macro_rules! setup_generation_key_relation_authority_copy_field {
             match self {
                 Self::AllFamilies(authority) => authority.$field,
                 Self::VssProof(authority) => authority.$field,
-                #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+                #[cfg(test)]
                 Self::CompactPublicKeyDevelopment(authority) => authority.$field,
             }
         }
@@ -4113,7 +4113,7 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => authority.common_secret_coefficients.as_slice(),
             Self::VssProof(authority) => authority.common_secret_coefficients.as_slice(),
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => {
                 authority.common_secret_coefficients.as_slice()
             }
@@ -4124,7 +4124,7 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => &authority.anchor_openings,
             Self::VssProof(authority) => &authority.anchor_openings,
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => &authority.anchor_openings,
         }
     }
@@ -4133,7 +4133,7 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => Ok(&authority.public_key_share),
             Self::VssProof(_) => Err(RefusalReason::MissingPrerequisite),
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => Ok(&authority.public_key_share),
         }
     }
@@ -4149,7 +4149,7 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
             Self::VssProof(authority) => {
                 authority.degree_zero_material(degree_zero_material_ordinal)
             }
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(_) => Err(RefusalReason::MissingPrerequisite),
         }
     }
@@ -4158,7 +4158,7 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => authority.degree_zero_material_count(),
             Self::VssProof(authority) => authority.degree_zero_material_count(),
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(_) => Err(RefusalReason::MissingPrerequisite),
         }
     }
@@ -4167,7 +4167,7 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => &authority.action_private_randomness,
             Self::VssProof(authority) => &authority.action_private_randomness,
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => &authority.action_private_randomness,
         }
     }
@@ -4177,7 +4177,7 @@ pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
     authority_identifier: u32,
     authority: SetupGenerationKeyRelationRetainedAuthority<'authority>,
     application: &'authority SetupGenerationKeyRelationApplication<'statement>,
-    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[cfg(test)]
     compact_public_key_development_authority:
         Option<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>>,
 }
@@ -4201,7 +4201,7 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         self.authority_identifier
     }
 
-    #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+    #[cfg(test)]
     pub(crate) fn compact_public_key_development_authority(
         &self,
     ) -> Option<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>> {
@@ -6697,7 +6697,7 @@ pub(crate) fn setup_generation_retained_memory_accounting(
     }
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn setup_generation_compact_public_key_development_retained_payload_byte_length(
     authority: &SetupGenerationCompactPublicKeyDevelopmentAuthority,
 ) -> Result<u64, RefusalReason> {
@@ -6708,7 +6708,7 @@ pub(crate) fn setup_generation_compact_public_key_development_retained_payload_b
         .retained_payload_byte_length()
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn resolve_setup_generation_compact_public_key_development_preparation_source(
     authority: &SetupGenerationCompactPublicKeyDevelopmentAuthority,
 ) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
@@ -6781,7 +6781,7 @@ where
                 authority_identifier: handle.0,
                 authority: SetupGenerationKeyRelationRetainedAuthority::AllFamilies(authority),
                 application,
-                #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+                #[cfg(test)]
                 compact_public_key_development_authority: None,
             })
         });
@@ -6804,13 +6804,13 @@ where
             authority_identifier: handle.0,
             authority: SetupGenerationKeyRelationRetainedAuthority::VssProof(authority),
             application,
-            #[cfg(any(test, feature = "primitive-measurement-evidence"))]
+            #[cfg(test)]
             compact_public_key_development_authority: None,
         })
     })
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn with_exclusive_setup_generation_compact_public_key_development_relation<
     Value,
     Error,
@@ -6843,7 +6843,7 @@ where
     })
 }
 
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(crate) fn with_setup_generation_compact_public_key_development_relation_reentry<Value, Error>(
     authority: &Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>,
     application: &SetupGenerationKeyRelationApplication<'_>,

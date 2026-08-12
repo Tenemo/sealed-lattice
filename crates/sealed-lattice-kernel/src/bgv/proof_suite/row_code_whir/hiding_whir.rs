@@ -67,9 +67,10 @@ pub(super) const fn selected_hiding_parameters() -> ZkParameters {
 
 /// Derives the hiding configuration for the selected construction parameters.
 ///
-/// The plain and hiding configurations share one round structure, so the folding
-/// factors, domains, query counts, and proof-of-work bits are the same values the
-/// construction plan already binds. Only the mask budgets are new.
+/// The aggregate-wide construction consumes this configuration's inner round
+/// structure directly. In unique-decoding mode the source-hiding randomness
+/// changes the derived query counts and proof-of-work gaps, so no independently
+/// reconstructed plain configuration may act as a second schedule authority.
 pub(super) fn selected_hiding_whir_config(
     parameters: RowCodeWhirSelectedParameters,
 ) -> Result<SelectedHidingWhirConfig, HidingWhirConfigurationError> {
@@ -413,7 +414,7 @@ mod tests {
         // corroborates the response census behind the transcript ceiling.
         assert_eq!(
             configuration.oracle_randomness,
-            vec![387, 288, 268, 264, 263, 263]
+            vec![387, 288, 269, 264, 263, 263]
         );
         assert_eq!(configuration.sumcheck_mask.domain_size, 2_048);
         assert_eq!(
@@ -425,7 +426,7 @@ mod tests {
             vec![
                 (387, 4_096),
                 (288, 4_096),
-                (268, 4_096),
+                (269, 4_096),
                 (264, 4_096),
                 (263, 4_096),
             ],

@@ -61,7 +61,7 @@ const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] =
     ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS;
 
 mod domain;
-#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+#[cfg(test)]
 pub(super) mod generator_hybrid;
 mod material;
 mod proof_coins;

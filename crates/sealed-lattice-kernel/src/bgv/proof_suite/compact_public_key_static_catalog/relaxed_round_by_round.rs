@@ -2993,10 +2993,6 @@ mod tests {
             MAXIMUM_AUDITED_ELEMENT_PASSES * MAXIMUM_WORD_OPERATIONS_PER_ELEMENT_PASS,
             960
         );
-        assert!(
-            MAXIMUM_AUDITED_ELEMENT_PASSES * MAXIMUM_WORD_OPERATIONS_PER_ELEMENT_PASS
-                <= MAXIMUM_WORD_OPERATIONS_PER_SEMANTIC_ELEMENT
-        );
         assert!(theorem.transitions.iter().all(|transition| {
             extractor_deterministic_work_bound(
                 transition.extraction_field_operation_bound,

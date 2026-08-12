@@ -328,9 +328,55 @@ fn cross_epoch_fixture(
             code: mask_code,
         },
         mask_instance,
-        2,
+        SemanticProductionOuterLayout::new(0, 2, 2, 2, 4, 2, 4, 8, 3)
+            .expect("small cross-epoch layout derives"),
     )
     .expect("small cross-epoch statement derives");
+    (
+        statement,
+        SemanticCrossEpochWitness {
+            pre_challenge_source,
+            main_source,
+            shared_masks,
+        },
+    )
+}
+
+fn padded_cross_epoch_fixture(
+    pre_challenge_message: Vec<ProofChallengeExtensionElement>,
+    main_message: Vec<ProofChallengeExtensionElement>,
+) -> (SemanticCrossEpochStatement, SemanticCrossEpochWitness) {
+    assert_eq!(pre_challenge_message.len(), 8);
+    assert_eq!(main_message.len(), 16);
+    let pre_challenge_source_relation = committed_code_relation(8, 1, 16, 1);
+    let main_source_relation = committed_code_relation(16, 1, 32, 1);
+    let mask_code = committed_code_relation(1, 1, 8, 2);
+    let (pre_challenge_source_instance, pre_challenge_source) = code_fixture(
+        &pre_challenge_source_relation,
+        vec![pre_challenge_message],
+        451,
+    );
+    let (main_source_instance, main_source) =
+        code_fixture(&main_source_relation, vec![main_message], 551);
+    let (mask_instance, shared_masks) = code_fixture(
+        &mask_code,
+        vec![vec![extension(23)], vec![extension(29)]],
+        651,
+    );
+    let statement = SemanticCrossEpochStatement::new(
+        pre_challenge_source_relation,
+        pre_challenge_source_instance,
+        main_source_relation,
+        main_source_instance,
+        CommittedMaskCodeRelation {
+            role: MaskGroupRole::CrossEpochOpening,
+            code: mask_code,
+        },
+        mask_instance,
+        SemanticProductionOuterLayout::new(0, 2, 2, 2, 8, 2, 8, 16, 3)
+            .expect("padded cross-epoch layout derives"),
+    )
+    .expect("padded cross-epoch statement derives");
     (
         statement,
         SemanticCrossEpochWitness {
@@ -442,8 +488,10 @@ fn production_outer_layout_is_derived_from_the_compiled_relation() {
     assert_eq!(layout.soundness_numerator(), 1_081_343);
     assert_eq!(layout.pre_challenge_message_element_count, 2_097_152);
     assert_eq!(layout.main_message_element_count, 4_194_304);
+    assert_eq!(layout.copied_main_source_element_count, 1_081_344);
     assert_eq!(layout.inverse_first_element, 1_867_776);
     assert_eq!(layout.inverse_element_count, 950_272);
+    assert!(layout.copied_main_source_element_count < layout.inverse_first_element);
 }
 
 #[test]
@@ -824,4 +872,125 @@ fn cross_epoch_bad_transition_derives_nonzero_committed_multilinear_root() {
         .is_zero()
     );
     assert_eq!(certificate.exact_error_numerator().unwrap(), 2);
+}
+
+#[test]
+fn cross_epoch_copied_prefix_mutation_derives_the_expected_bad_transition() {
+    let pre_challenge_message = vec![
+        extension(0),
+        extension(1),
+        extension(0),
+        extension(0),
+        extension(0),
+        extension(0),
+        extension(0),
+        extension(0),
+    ];
+    let main_message = vec![extension(0); 16];
+    let (statement, witness) = padded_cross_epoch_fixture(pre_challenge_message, main_message);
+    assert!(!semantic_cross_epoch_kstate(&statement, None, &witness).unwrap());
+
+    let point = vec![extension(0); 3];
+    let prefix = SemanticCrossEpochPrefix {
+        point: Some(point.clone()),
+        disclosures: None,
+    };
+    assert!(semantic_cross_epoch_kstate(&statement, Some(&prefix), &witness).unwrap());
+    let certificate = semantic_cross_epoch_bad_transition(&statement, &prefix, &witness)
+        .unwrap()
+        .expect("a copied-prefix difference at an accepting point is a bad transition");
+    assert_eq!(certificate.point, point);
+    assert_eq!(
+        certificate.nonzero_difference_evaluations,
+        vec![
+            extension(0),
+            extension(1),
+            extension(0),
+            extension(0),
+            extension(0),
+            extension(0),
+            extension(0),
+            extension(0),
+        ]
+    );
+    assert_eq!(certificate.exact_error_numerator().unwrap(), 3);
+}
+
+#[test]
+fn cross_epoch_rejects_nonzero_pre_challenge_padding() {
+    let mut pre_challenge_message = vec![extension(0); 8];
+    pre_challenge_message[..4].copy_from_slice(&[
+        extension(2),
+        extension(3),
+        extension(5),
+        extension(7),
+    ]);
+    pre_challenge_message[4] = extension(11);
+    let mut main_message = vec![extension(0); 16];
+    main_message[..4].copy_from_slice(&[extension(2), extension(3), extension(5), extension(7)]);
+    let (statement, witness) = padded_cross_epoch_fixture(pre_challenge_message, main_message);
+
+    assert_eq!(
+        semantic_cross_epoch_kstate(&statement, None, &witness),
+        Ok(false)
+    );
+}
+
+#[test]
+fn cross_epoch_copy_ignores_later_main_witness_coordinates() {
+    let mut pre_challenge_message = vec![extension(0); 8];
+    pre_challenge_message[..4].copy_from_slice(&[
+        extension(2),
+        extension(3),
+        extension(5),
+        extension(7),
+    ]);
+    let mut first_main_message = vec![extension(0); 16];
+    first_main_message[..4].copy_from_slice(&[
+        extension(2),
+        extension(3),
+        extension(5),
+        extension(7),
+    ]);
+    first_main_message[4..].copy_from_slice(&[
+        extension(11),
+        extension(13),
+        extension(17),
+        extension(19),
+        extension(23),
+        extension(29),
+        extension(31),
+        extension(37),
+        extension(41),
+        extension(43),
+        extension(47),
+        extension(53),
+    ]);
+    let mut second_main_message = first_main_message.clone();
+    second_main_message[4..].copy_from_slice(&[
+        extension(59),
+        extension(61),
+        extension(67),
+        extension(71),
+        extension(73),
+        extension(79),
+        extension(83),
+        extension(89),
+        extension(97),
+        extension(101),
+        extension(103),
+        extension(107),
+    ]);
+
+    let (first_statement, first_witness) =
+        padded_cross_epoch_fixture(pre_challenge_message.clone(), first_main_message);
+    let (second_statement, second_witness) =
+        padded_cross_epoch_fixture(pre_challenge_message, second_main_message);
+    assert!(semantic_cross_epoch_kstate(&first_statement, None, &first_witness).unwrap());
+    assert!(semantic_cross_epoch_kstate(&second_statement, None, &second_witness).unwrap());
+
+    let first_parts = cross_epoch_message_parts(&first_statement, &first_witness).unwrap();
+    let second_parts = cross_epoch_message_parts(&second_statement, &second_witness).unwrap();
+    assert_eq!(first_parts.0, second_parts.0);
+    assert_eq!(first_parts.1, second_parts.1);
 }

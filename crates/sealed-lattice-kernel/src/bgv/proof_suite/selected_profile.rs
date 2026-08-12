@@ -746,20 +746,6 @@ pub(crate) fn selected_relation_plans()
     selected_relation_plans_internal(None)
 }
 
-#[cfg(all(test, feature = "theorem-evidence"))]
-pub(crate) fn selected_relation_plan_for_schema(
-    application_statement_schema_identifier: u16,
-) -> Result<ValidatedRelationPlanArtifact, ProofProfileError> {
-    let mut matching_plans =
-        selected_relation_plans_internal(Some(application_statement_schema_identifier))?;
-    if matching_plans.len() != 1 {
-        return Err(ProofProfileError::InvalidRelationPlan);
-    }
-    matching_plans
-        .pop()
-        .ok_or(ProofProfileError::InvalidRelationPlan)
-}
-
 fn selected_relation_plans_internal(
     requested_schema_identifier: Option<u16>,
 ) -> Result<Vec<ValidatedRelationPlanArtifact>, ProofProfileError> {
