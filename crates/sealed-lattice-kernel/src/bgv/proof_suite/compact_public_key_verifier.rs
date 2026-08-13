@@ -91,12 +91,19 @@ impl From<CompactMerklePrivacyError> for CompactPublicKeyTransportError {
 /// salted Merkle openings have all been verified. Algebraic proof validity is
 /// outside this type's guarantee.
 pub(crate) struct VerifiedCompactPublicKeyTransport {
-    contract: CompactPublicKeyProofContract,
     canonical_proof_bytes: Box<[u8]>,
-    canonical_public_input_bytes: Box<[u8]>,
     decoded_proof: DecodedCompactProofWire,
-    decoded_public_input: DecodedCompactPublicInput,
+    public_input: VerifiedCompactPublicInputTransport,
     verifier_messages: Box<[DecodedFixedUniformVerifierMessage]>,
+}
+
+/// Owning result of the one strict canonical public-input decode used by the
+/// compact transport and the semantic covector authority.
+pub(crate) struct VerifiedCompactPublicInputTransport {
+    contract: CompactPublicKeyProofContract,
+    canonical_bytes: Box<[u8]>,
+    decoded: DecodedCompactPublicInput,
+    binding: [u8; Hash512::BYTE_LENGTH],
 }
 
 /// Borrowed proof bytes inseparably paired with their decoded range owner.
@@ -117,9 +124,11 @@ impl VerifiedCompactProofTransportView<'_> {
 
 /// Borrowed public-input bytes inseparably paired with their decoded range
 /// owner.
+#[derive(Clone, Copy)]
 pub(crate) struct VerifiedCompactPublicInputTransportView<'transport> {
     canonical_bytes: &'transport [u8],
     decoded: &'transport DecodedCompactPublicInput,
+    binding: [u8; Hash512::BYTE_LENGTH],
 }
 
 impl VerifiedCompactPublicInputTransportView<'_> {
@@ -130,11 +139,67 @@ impl VerifiedCompactPublicInputTransportView<'_> {
     pub(crate) const fn decoded(&self) -> &DecodedCompactPublicInput {
         self.decoded
     }
+
+    pub(crate) const fn field_element_count(&self) -> usize {
+        self.decoded.field_element_count()
+    }
+
+    pub(crate) fn field_element(
+        &self,
+        element_ordinal: usize,
+    ) -> Result<super::ProofBaseFieldElement, CompactProofWireError> {
+        self.decoded
+            .field_element(self.canonical_bytes, element_ordinal)
+    }
+
+    pub(crate) const fn binding(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.binding
+    }
+}
+
+impl VerifiedCompactPublicInputTransport {
+    fn from_selected_decoded(
+        contract: CompactPublicKeyProofContract,
+        bindings: CompactPublicInputBindings,
+        canonical_bytes: Box<[u8]>,
+        decoded: DecodedCompactPublicInput,
+    ) -> Result<Self, CompactPublicKeyTransportError> {
+        let verifier_inputs = contract.verifier_inputs();
+        if bindings.relation_plan_hash().into_bytes()
+            != verifier_inputs.relation.relation_plan_variant_hash()
+            || decoded.canonical_byte_length() != canonical_bytes.len()
+        {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        let binding = transport_byte_digest(
+            COMPACT_TRANSPORT_PUBLIC_INPUT_DIGEST_DOMAIN,
+            &canonical_bytes,
+        )
+        .into_bytes();
+        Ok(Self {
+            contract,
+            canonical_bytes,
+            decoded,
+            binding,
+        })
+    }
+
+    pub(crate) fn verifier_inputs(&self) -> CompactPublicKeyVerifierInputs<'_> {
+        self.contract.verifier_inputs()
+    }
+
+    pub(crate) fn view(&self) -> VerifiedCompactPublicInputTransportView<'_> {
+        VerifiedCompactPublicInputTransportView {
+            canonical_bytes: &self.canonical_bytes,
+            decoded: &self.decoded,
+            binding: self.binding,
+        }
+    }
 }
 
 impl VerifiedCompactPublicKeyTransport {
     pub(crate) fn verifier_inputs(&self) -> CompactPublicKeyVerifierInputs<'_> {
-        self.contract.verifier_inputs()
+        self.public_input.verifier_inputs()
     }
 
     pub(crate) fn proof_view(&self) -> VerifiedCompactProofTransportView<'_> {
@@ -145,15 +210,31 @@ impl VerifiedCompactPublicKeyTransport {
     }
 
     pub(crate) fn public_input_view(&self) -> VerifiedCompactPublicInputTransportView<'_> {
-        VerifiedCompactPublicInputTransportView {
-            canonical_bytes: &self.canonical_public_input_bytes,
-            decoded: &self.decoded_public_input,
-        }
+        self.public_input.view()
     }
 
     pub(crate) fn verifier_messages(&self) -> &[DecodedFixedUniformVerifierMessage] {
         &self.verifier_messages
     }
+}
+
+pub(crate) fn verify_selected_compact_public_input_transport_with_test_bindings(
+    public_input_bindings: CompactPublicInputBindings,
+    canonical_public_input_bytes: Box<[u8]>,
+) -> Result<VerifiedCompactPublicInputTransport, CompactPublicKeyTransportError> {
+    let contract = CompactPublicKeyProofContract::decode_selected()?;
+    let verifier_inputs = contract.verifier_inputs();
+    let decoded = decode_compact_public_input(
+        verifier_inputs.public_input_wire_geometry,
+        public_input_bindings,
+        &canonical_public_input_bytes,
+    )?;
+    VerifiedCompactPublicInputTransport::from_selected_decoded(
+        contract,
+        public_input_bindings,
+        canonical_public_input_bytes,
+        decoded,
+    )
 }
 
 /// In-memory response-boundary token used to exercise exact replay and
@@ -176,6 +257,11 @@ pub(super) fn verify_selected_compact_public_key_transport_with_test_bindings(
 ) -> Result<VerifiedCompactPublicKeyTransport, CompactPublicKeyTransportError> {
     let contract = CompactPublicKeyProofContract::decode_selected()?;
     let verifier_inputs = contract.verifier_inputs();
+    if public_input_bindings.relation_plan_hash().into_bytes()
+        != verifier_inputs.relation.relation_plan_variant_hash()
+    {
+        return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+    }
     let contract_source_hash = verifier_inputs.canonical_source_hash()?;
     let proof_digest = transport_byte_digest(
         COMPACT_TRANSPORT_PROOF_DIGEST_DOMAIN,
@@ -221,11 +307,14 @@ pub(super) fn verify_selected_compact_public_key_transport_with_test_bindings(
             CompactPublicKeyTransportBytePoll::ResponseBoundary { .. } => {}
             CompactPublicKeyTransportBytePoll::Complete => {
                 return Ok(VerifiedCompactPublicKeyTransport {
-                    contract,
                     canonical_proof_bytes,
-                    canonical_public_input_bytes,
                     decoded_proof: state.decoded_proof,
-                    decoded_public_input: state.decoded_public_input,
+                    public_input: VerifiedCompactPublicInputTransport::from_selected_decoded(
+                        contract,
+                        public_input_bindings,
+                        canonical_public_input_bytes,
+                        state.decoded_public_input,
+                    )?,
                     verifier_messages: state.verifier_messages.into_boxed_slice(),
                 });
             }

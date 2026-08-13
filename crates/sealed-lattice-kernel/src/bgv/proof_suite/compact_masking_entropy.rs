@@ -97,11 +97,27 @@ impl CompactBaseFreshClaimCoefficients {
     }
 
     #[cfg(test)]
-    pub(crate) fn new(epoch: u8, coefficients: Vec<CompactChallengeField>) -> Self {
+    fn new(epoch: u8, coefficients: Vec<CompactChallengeField>) -> Self {
         Self {
             epoch,
             coefficients,
         }
+    }
+
+    pub(crate) fn from_carried_covector(
+        covector: &super::compact_factor_one_semantics::CompactFactorOneCarriedCovector,
+    ) -> Result<Self, CompactMaskingEntropyError> {
+        let epoch = covector
+            .epoch()
+            .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?;
+        let coefficients = covector
+            .coefficients()
+            .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?
+            .to_vec();
+        Ok(Self {
+            epoch,
+            coefficients,
+        })
     }
 }
 
@@ -427,11 +443,25 @@ pub(crate) struct CompactMaskingEntropyCursor {
 }
 
 impl CompactMaskingEntropyCursor {
-    pub(crate) fn is_complete(&self, certificate: &CompactMaskingEntropyCertificate) -> bool {
-        self.contract_binding == certificate.contract_binding
-            && self.disclosure_digest == certificate.disclosure_digest
-            && self.next_step_ordinal == certificate.steps.len()
-            && self.cumulative_rank == certificate.joint_disclosure_rank
+    pub(crate) fn finish(
+        self,
+        certificate: &CompactMaskingEntropyCertificate,
+        identity: CompactMaskingAttemptIdentity,
+    ) -> Result<(), CompactMaskingEntropyError> {
+        if self.identity != identity {
+            return Err(CompactMaskingEntropyError::AttemptIdentityMismatch);
+        }
+        if self.contract_binding != certificate.contract_binding
+            || self.disclosure_digest != certificate.disclosure_digest
+        {
+            return Err(CompactMaskingEntropyError::CertificateMismatch);
+        }
+        if self.next_step_ordinal != certificate.steps.len()
+            || self.cumulative_rank != certificate.joint_disclosure_rank
+        {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+        Ok(())
     }
 }
 
@@ -439,6 +469,16 @@ impl CompactMaskingEntropyCursor {
 pub(crate) struct CompactBaseFreshClaimRequirement {
     epoch: u8,
     coefficient_count: u64,
+}
+
+impl CompactBaseFreshClaimRequirement {
+    pub(crate) const fn epoch(self) -> u8 {
+        self.epoch
+    }
+
+    pub(crate) const fn coefficient_count(self) -> u64 {
+        self.coefficient_count
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -753,6 +793,25 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
         Ok(&self.steps[self.message_range.clone()])
     }
 
+    pub(crate) fn finish(
+        self,
+    ) -> Result<CompactMaskingEntropyCertificate, CompactMaskingEntropyError> {
+        if self.phase != CompactMaskingEntropyAuthorityPhase::AwaitingResponse
+            || self.next_move_ordinal != self.inputs.verifier_moves.len()
+        {
+            return Err(CompactMaskingEntropyError::WrongAuthorityPhase);
+        }
+        let (certificate, certified_sources) = certify_compact_masking_entropy_with_sources(
+            &self.inputs,
+            self.coefficient_maps,
+            &self.transcript,
+        )?;
+        if self.steps != certificate.steps || self.sources != certified_sources {
+            return Err(CompactMaskingEntropyError::CertificateMismatch);
+        }
+        Ok(certificate)
+    }
+
     fn current_move(&self) -> Result<&CompactVerifierMoveContract, CompactMaskingEntropyError> {
         self.inputs
             .verifier_moves
@@ -839,6 +898,15 @@ pub(crate) fn certify_compact_masking_entropy(
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
     transcript: &CompactMaskingEntropyTranscript,
 ) -> Result<CompactMaskingEntropyCertificate, CompactMaskingEntropyError> {
+    certify_compact_masking_entropy_with_sources(inputs, coefficient_maps, transcript)
+        .map(|(certificate, _)| certificate)
+}
+
+fn certify_compact_masking_entropy_with_sources(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    transcript: &CompactMaskingEntropyTranscript,
+) -> Result<(CompactMaskingEntropyCertificate, Vec<SourceState>), CompactMaskingEntropyError> {
     coefficient_maps
         .check()
         .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientMap)?;
@@ -901,16 +969,19 @@ pub(crate) fn certify_compact_masking_entropy(
     let shared_cross_epoch_query_overlap = shared_cross_query_overlap(inputs, transcript)?;
     let disclosure_digest = hash_steps(&steps);
     let contract_binding = hash_contract_binding(inputs, coefficient_maps, &disclosure_digest)?;
-    Ok(CompactMaskingEntropyCertificate {
-        steps,
-        private_coordinate_count,
-        joint_disclosure_rank: cumulative_rank,
-        residual_conditional_entropy_dimension: private_coordinate_count - cumulative_rank,
-        shared_cross_epoch_query_overlap,
-        disclosure_digest,
-        contract_binding,
-        coefficient_map_binding: coefficient_maps.certificate_digest(),
-    })
+    Ok((
+        CompactMaskingEntropyCertificate {
+            steps,
+            private_coordinate_count,
+            joint_disclosure_rank: cumulative_rank,
+            residual_conditional_entropy_dimension: private_coordinate_count - cumulative_rank,
+            shared_cross_epoch_query_overlap,
+            disclosure_digest,
+            contract_binding,
+            coefficient_map_binding: coefficient_maps.certificate_digest(),
+        },
+        sources,
+    ))
 }
 
 fn validate_transcript_inputs(
@@ -3329,6 +3400,20 @@ fn hash_transcript_prefix(
             bytes.extend_from_slice(&index.to_le_bytes());
         }
     }
+    bytes.extend_from_slice(&(transcript.base_fresh_claims.len() as u64).to_le_bytes());
+    for claim in &transcript.base_fresh_claims {
+        bytes.push(claim.epoch);
+        bytes.extend_from_slice(&(claim.coefficients.len() as u64).to_le_bytes());
+        for coefficient in &claim.coefficients {
+            for coordinate in
+                <CompactChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(
+                    coefficient,
+                )
+            {
+                bytes.extend_from_slice(&coordinate.as_canonical_u64().to_le_bytes());
+            }
+        }
+    }
     hash_framed_parts_512(
         "sealed-lattice/proof/compact-masking-entropy-prefix/v1",
         &[&coefficient_map_binding, &bytes],
@@ -3869,7 +3954,41 @@ mod tests {
                 .verify_simulator_disclosure(&mut replay, reset_identity, step)
                 .expect("ordered replay under new reset identity");
         }
-        assert!(replay.is_complete(&certificate));
+        replay
+            .finish(&certificate, reset_identity)
+            .expect("ordered replay consumes the complete disclosure cursor");
+    }
+
+    #[test]
+    fn entropy_terminal_rejects_incomplete_authority_and_tampered_cursor() {
+        let (contract, maps) = selected();
+        let inputs = contract.verifier_inputs();
+        let identity = CompactMaskingAttemptIdentity::new([9; 32], 0, [13; 64]);
+        let authority = CompactMaskingEntropyAuthority::begin(inputs, &maps, identity)
+            .expect("selected streaming entropy authority begins");
+        assert_eq!(
+            authority.finish(),
+            Err(CompactMaskingEntropyError::WrongAuthorityPhase)
+        );
+
+        let certificate =
+            selected_test_compact_masking_entropy_certificate(&contract.verifier_inputs(), &maps)
+                .expect("selected entropy certificate");
+        assert_eq!(
+            certificate
+                .begin_disclosures(identity)
+                .finish(&certificate, identity),
+            Err(CompactMaskingEntropyError::DisclosureOutOfOrder)
+        );
+
+        let mut tampered = certificate.begin_disclosures(identity);
+        tampered.next_step_ordinal = certificate.steps.len();
+        tampered.cumulative_rank = certificate.joint_disclosure_rank;
+        tampered.disclosure_digest[0] ^= 1;
+        assert_eq!(
+            tampered.finish(&certificate, identity),
+            Err(CompactMaskingEntropyError::CertificateMismatch)
+        );
     }
 
     #[test]
@@ -3883,6 +4002,21 @@ mod tests {
         assert_ne!(
             hash_transcript_prefix(maps.certificate_digest(), identity, &transcript, 5),
             hash_transcript_prefix(maps.certificate_digest(), reset_identity, &transcript, 5),
+        );
+    }
+
+    #[test]
+    fn conditional_image_prefix_binding_commits_to_carried_covector_coefficients() {
+        let (contract, maps) = selected();
+        let transcript =
+            selected_test_transcript(&contract.verifier_inputs()).expect("selected transcript");
+        let identity = CompactMaskingAttemptIdentity::new([8; 32], 0, [12; 64]);
+        let mut altered = transcript.clone();
+        altered.base_fresh_claims[0].coefficients[0] += CompactChallengeField::ONE;
+
+        assert_ne!(
+            hash_transcript_prefix(maps.certificate_digest(), identity, &transcript, 5),
+            hash_transcript_prefix(maps.certificate_digest(), identity, &altered, 5),
         );
     }
 }

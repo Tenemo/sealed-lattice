@@ -775,6 +775,10 @@ impl CompactPublicInputBindings {
             self.relation_plan_hash,
         ]
     }
+
+    pub(crate) const fn relation_plan_hash(self) -> Hash512 {
+        self.relation_plan_hash
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -7,6 +7,10 @@
 //! salted-Merkle roots, and EPRO programming are separate replacement games.
 
 use super::compact_cfw::CompactChallengeField;
+use super::compact_factor_one_semantics::{
+    CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorAuthority,
+    CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorError,
+};
 use super::compact_masking_coefficient_maps::{
     CompactCommitmentQuerySource, CompactConstructionCommitmentEmbedding,
     CompactConstructionCommitmentOwnership, CompactMaskingCoefficientMapCertificate,
@@ -108,6 +112,45 @@ pub(crate) struct CompactIdealMaskingMoveRecord {
     post_message_disclosures: Vec<CompactIdealDisclosure>,
 }
 
+/// Opaque exact simulator-prefix capability. Only the simulator can mint one;
+/// semantic replay may inspect it but cannot substitute proof-transport
+/// messages or caller-provided bytes for this owned adaptive-game history.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CompactMaskingSemanticPrefix {
+    attempt_identity: CompactMaskingAttemptIdentity,
+    verifier_move_ordinal: u32,
+    epoch: u8,
+    contract_source_hash: [u8; 64],
+    canonical_exposed_move_prefix: Box<[u8]>,
+    completed_messages: Box<[DecodedFixedUniformVerifierMessage]>,
+}
+
+impl CompactMaskingSemanticPrefix {
+    pub(crate) const fn attempt_identity(&self) -> CompactMaskingAttemptIdentity {
+        self.attempt_identity
+    }
+
+    pub(crate) const fn verifier_move_ordinal(&self) -> u32 {
+        self.verifier_move_ordinal
+    }
+
+    pub(crate) const fn epoch(&self) -> u8 {
+        self.epoch
+    }
+
+    pub(crate) const fn contract_source_hash(&self) -> [u8; 64] {
+        self.contract_source_hash
+    }
+
+    pub(crate) fn canonical_exposed_move_prefix(&self) -> &[u8] {
+        &self.canonical_exposed_move_prefix
+    }
+
+    pub(crate) fn completed_messages(&self) -> &[DecodedFixedUniformVerifierMessage] {
+        &self.completed_messages
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CompactAttemptState {
     attempt_identifier: CompactMaskingAttemptIdentifier,
@@ -149,6 +192,7 @@ impl CompactAttemptState {
 pub(crate) struct CompactMaskingSimulationCheckpoint {
     contract_source_hash: Hash512,
     coefficient_map_binding: [u8; 64],
+    public_input_binding: Option<[u8; 64]>,
     attempt: CompactAttemptState,
     exposed_prefix_binding: [u8; 64],
     retired_coin_ranges: Vec<CompactRetiredCoinRange>,
@@ -156,7 +200,7 @@ pub(crate) struct CompactMaskingSimulationCheckpoint {
     ideal_oracle_binding: [u8; 64],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CompactMaskingSimulatorError {
     Contract(CompactProofContractError),
     Entropy(CompactMaskingEntropyError),
@@ -171,6 +215,9 @@ pub(crate) enum CompactMaskingSimulatorError {
     InvalidVerifierMessage,
     WrongCheckpoint,
     WrongTranscript,
+    Role18AuthorizationRequired,
+    InvalidRole18Authorization,
+    PublicCovector(CompactFactorOnePublicCovectorError),
 }
 
 impl From<CompactProofContractError> for CompactMaskingSimulatorError {
@@ -182,6 +229,12 @@ impl From<CompactProofContractError> for CompactMaskingSimulatorError {
 impl From<CompactMaskingEntropyError> for CompactMaskingSimulatorError {
     fn from(error: CompactMaskingEntropyError) -> Self {
         Self::Entropy(error)
+    }
+}
+
+impl From<CompactFactorOnePublicCovectorError> for CompactMaskingSimulatorError {
+    fn from(error: CompactFactorOnePublicCovectorError) -> Self {
+        Self::PublicCovector(error)
     }
 }
 
@@ -342,6 +395,7 @@ pub(crate) struct CompactAdaptiveMaskingSimulator<'contract> {
     retired_coin_ranges: Vec<CompactRetiredCoinRange>,
     retired_commitment_handles: Vec<CompactConstructionCommitmentHandle>,
     ideal_oracle: CompactAddressedIdealUniformOracle,
+    public_covector_authority: Option<CompactFactorOnePublicCovectorAuthority<'contract>>,
 }
 
 impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
@@ -367,7 +421,32 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
             retired_coin_ranges: Vec::new(),
             retired_commitment_handles: Vec::new(),
             ideal_oracle: CompactAddressedIdealUniformOracle::new(private_ideal_oracle_key),
+            public_covector_authority: None,
         })
+    }
+
+    pub(crate) fn new_with_public_covector_authority(
+        verifier_inputs: CompactPublicKeyVerifierInputs<'contract>,
+        coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+        attempt_identifier: CompactMaskingAttemptIdentifier,
+        initial_exposed_prefix_binding: [u8; 64],
+        private_ideal_oracle_key: [u8; 64],
+        public_covector_authority: CompactFactorOnePublicCovectorAuthority<'contract>,
+    ) -> Result<Self, CompactMaskingSimulatorError> {
+        let mut simulator = Self::new(
+            verifier_inputs,
+            coefficient_maps,
+            attempt_identifier,
+            initial_exposed_prefix_binding,
+            private_ideal_oracle_key,
+        )?;
+        if public_covector_authority.contract_source_hash()
+            != simulator.contract_source_hash.into_bytes()
+        {
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        }
+        simulator.public_covector_authority = Some(public_covector_authority);
+        Ok(simulator)
     }
 
     pub(crate) fn checkpoint(
@@ -376,9 +455,16 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
         Ok(CompactMaskingSimulationCheckpoint {
             contract_source_hash: self.contract_source_hash,
             coefficient_map_binding: self.coefficient_maps.certificate_digest(),
+            public_input_binding: self
+                .public_covector_authority
+                .as_ref()
+                .map(CompactFactorOnePublicCovectorAuthority::public_input_binding),
             exposed_prefix_binding: prefix_binding(
                 self.contract_source_hash,
                 self.coefficient_maps.certificate_digest(),
+                self.public_covector_authority
+                    .as_ref()
+                    .map(CompactFactorOnePublicCovectorAuthority::public_input_binding),
                 self.attempt.attempt_identifier,
                 self.attempt.reset_ordinal,
                 self.attempt.initial_exposed_prefix_binding,
@@ -412,6 +498,29 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
         Ok(simulator)
     }
 
+    pub(crate) fn restore_with_public_covector_authority(
+        verifier_inputs: CompactPublicKeyVerifierInputs<'contract>,
+        coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+        checkpoint: CompactMaskingSimulationCheckpoint,
+        private_ideal_oracle_key: [u8; 64],
+        public_covector_authority: CompactFactorOnePublicCovectorAuthority<'contract>,
+    ) -> Result<Self, CompactMaskingSimulatorError> {
+        let mut simulator = Self::new_with_public_covector_authority(
+            verifier_inputs,
+            coefficient_maps,
+            checkpoint.attempt.attempt_identifier,
+            checkpoint.attempt.initial_exposed_prefix_binding,
+            private_ideal_oracle_key,
+            public_covector_authority,
+        )?;
+        simulator.validate_checkpoint_authentication(&checkpoint)?;
+        simulator.attempt = checkpoint.attempt;
+        simulator.retired_coin_ranges = checkpoint.retired_coin_ranges;
+        simulator.retired_commitment_handles = checkpoint.retired_commitment_handles;
+        simulator.validate_attempt_prefix()?;
+        Ok(simulator)
+    }
+
     /// Security-game rewind only. This is not a resettable-ZK claim.
     ///
     /// The exact exposed prefix is reused. Every abandoned suffix coin range
@@ -422,6 +531,11 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
         checkpoint: CompactMaskingSimulationCheckpoint,
     ) -> Result<(), CompactMaskingSimulatorError> {
         self.validate_checkpoint_authentication(&checkpoint)?;
+        self.replay_validated_attempt_state(
+            &checkpoint.attempt,
+            &checkpoint.retired_coin_ranges,
+            &checkpoint.retired_commitment_handles,
+        )?;
         if checkpoint.attempt.attempt_identifier != self.attempt.attempt_identifier
             || !self.attempt.moves.starts_with(&checkpoint.attempt.moves)
             || checkpoint.attempt.moves.len() > self.attempt.moves.len()
@@ -453,9 +567,81 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
         self.validate_attempt_prefix()
     }
 
+    pub(crate) fn begin_role18_covector_derivation(
+        &self,
+    ) -> Result<CompactFactorOnePublicCovectorDerivation<'_, 'contract>, CompactMaskingSimulatorError>
+    {
+        let prefix = self.mint_semantic_prefix()?;
+        self.public_covector_authority
+            .as_ref()
+            .ok_or(CompactMaskingSimulatorError::WrongTranscript)?
+            .begin_prefix_derivation(prefix)
+            .map_err(Into::into)
+    }
+
     pub(crate) fn advance(
         &mut self,
         verifier: &mut impl CompactAdaptiveVerifier,
+    ) -> Result<u32, CompactMaskingSimulatorError> {
+        self.advance_inner(verifier, None)
+    }
+
+    pub(crate) fn advance_role18(
+        &mut self,
+        verifier: &mut impl CompactAdaptiveVerifier,
+        authorization: &mut CompactFactorOneCarriedCovector,
+    ) -> Result<u32, CompactMaskingSimulatorError> {
+        self.advance_inner(verifier, Some(authorization))
+    }
+
+    pub(crate) fn finish(
+        self,
+    ) -> Result<CompactMaskingSimulationCheckpoint, CompactMaskingSimulatorError> {
+        let entropy_authority = self.replay_validated_attempt_prefix()?;
+        if self.attempt.moves.len() != self.verifier_inputs.verifier_moves.len() {
+            return Err(CompactMaskingSimulatorError::SimulationNotActive);
+        }
+        let identity = self.attempt_identity();
+        let certificate = entropy_authority.finish()?;
+        let mut disclosure_cursor = certificate.begin_disclosures(identity);
+        for disclosure in self.attempt.moves.iter().flat_map(|record| {
+            record
+                .conditioned_view
+                .disclosures
+                .iter()
+                .chain(&record.post_message_disclosures)
+        }) {
+            certificate.verify_simulator_disclosure(
+                &mut disclosure_cursor,
+                identity,
+                &disclosure.entropy_step,
+            )?;
+        }
+        disclosure_cursor.finish(&certificate, identity)?;
+        if self.attempt.next_coin_coordinate != certificate.joint_disclosure_rank() {
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        }
+        let programmed_embeddings = self
+            .attempt
+            .moves
+            .iter()
+            .flat_map(|record| &record.conditioned_view.new_construction_commitments)
+            .map(|program| program.embedding);
+        if !programmed_embeddings.eq(self
+            .coefficient_maps
+            .construction_commitment_embeddings()
+            .iter()
+            .copied())
+        {
+            return Err(CompactMaskingSimulatorError::WrongCommitmentProgression);
+        }
+        self.checkpoint()
+    }
+
+    fn advance_inner(
+        &mut self,
+        verifier: &mut impl CompactAdaptiveVerifier,
+        mut authorization: Option<&mut CompactFactorOneCarriedCovector>,
     ) -> Result<u32, CompactMaskingSimulatorError> {
         let move_index = self.attempt.moves.len();
         let verifier_move = self
@@ -466,16 +652,42 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
             .ok_or(CompactMaskingSimulatorError::SimulationNotActive)?;
         let identity = self.attempt_identity();
         let mut entropy_authority = self.replay_entropy_authority()?;
-        if entropy_authority.next_base_claim_requirement()?.is_some() {
-            // The exact carried-reduction covector is deterministic semantic
-            // prefix state, not ideal masking entropy. This game remains gated
-            // until the executable semantic owner supplies its opaque,
-            // attempt-bound token; it must never accept a caller Vec.
-            return Err(CompactMaskingSimulatorError::WrongTranscript);
-        }
+        let requirement = entropy_authority.next_base_claim_requirement()?;
+        let (semantic_prefix, public_input_binding, base_fresh_claim) =
+            match (requirement, authorization.as_deref()) {
+                (None, None) => (None, None, None),
+                (None, Some(_)) => {
+                    return Err(CompactMaskingSimulatorError::InvalidRole18Authorization);
+                }
+                (Some(_), None) => {
+                    return Err(CompactMaskingSimulatorError::Role18AuthorizationRequired);
+                }
+                (Some(requirement), Some(authorization)) => {
+                    let authority = self
+                        .public_covector_authority
+                        .as_ref()
+                        .ok_or(CompactMaskingSimulatorError::InvalidRole18Authorization)?;
+                    let prefix = self.mint_semantic_prefix_for_requirement(requirement)?;
+                    let public_input_binding = authority.public_input_binding();
+                    if !authorization.authorizes(&prefix, public_input_binding) {
+                        return Err(CompactMaskingSimulatorError::InvalidRole18Authorization);
+                    }
+                    let claim =
+                        CompactBaseFreshClaimCoefficients::from_carried_covector(authorization)?;
+                    if claim.epoch() != requirement.epoch()
+                        || u64::try_from(claim.coefficients().len()).ok()
+                            != Some(requirement.coefficient_count())
+                    {
+                        return Err(CompactMaskingSimulatorError::InvalidRole18Authorization);
+                    }
+                    (Some(prefix), Some(public_input_binding), Some(claim))
+                }
+            };
         let mut staged_attempt = self.attempt.clone();
         let mut staged_ideal_oracle = self.ideal_oracle.clone();
-        let response_steps = entropy_authority.authorize_next_response(None)?.to_vec();
+        let response_steps = entropy_authority
+            .authorize_next_response(base_fresh_claim.as_ref())?
+            .to_vec();
         let disclosures = sample_disclosures(
             &mut staged_ideal_oracle,
             CompactDisclosureSamplingContext {
@@ -520,11 +732,18 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
             &mut staged_attempt.next_coin_coordinate,
         )?;
         staged_attempt.moves.push(CompactIdealMaskingMoveRecord {
-            base_fresh_claim: None,
+            base_fresh_claim,
             conditioned_view,
             verifier_message: message,
             post_message_disclosures,
         });
+        if let (Some(authorization), Some(prefix), Some(public_input_binding)) = (
+            authorization.as_deref_mut(),
+            semantic_prefix.as_ref(),
+            public_input_binding,
+        ) {
+            authorization.consume(prefix, public_input_binding)?;
+        }
         self.attempt = staged_attempt;
         self.ideal_oracle = staged_ideal_oracle;
         Ok(verifier_move.ordinal)
@@ -533,13 +752,20 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
     fn replay_entropy_authority(
         &self,
     ) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingSimulatorError> {
-        let identity = self.attempt_identity();
+        self.replay_entropy_authority_for_attempt(&self.attempt)
+    }
+
+    fn replay_entropy_authority_for_attempt(
+        &self,
+        attempt: &CompactAttemptState,
+    ) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingSimulatorError> {
+        let identity = attempt_identity(attempt);
         let mut authority = CompactMaskingEntropyAuthority::begin(
             copy_verifier_inputs(&self.verifier_inputs),
             self.coefficient_maps,
             identity,
         )?;
-        for (move_index, record) in self.attempt.moves.iter().enumerate() {
+        for (move_index, record) in attempt.moves.iter().enumerate() {
             let expected_pre =
                 authority.authorize_next_response(record.base_fresh_claim.as_ref())?;
             verify_authorized_steps(&record.conditioned_view.disclosures, expected_pre)?;
@@ -553,6 +779,51 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
             verify_authorized_steps(&record.post_message_disclosures, expected_post)?;
         }
         Ok(authority)
+    }
+
+    fn mint_semantic_prefix(
+        &self,
+    ) -> Result<CompactMaskingSemanticPrefix, CompactMaskingSimulatorError> {
+        let entropy_authority = self.replay_entropy_authority()?;
+        let requirement = entropy_authority
+            .next_base_claim_requirement()?
+            .ok_or(CompactMaskingSimulatorError::WrongTranscript)?;
+        self.mint_semantic_prefix_for_requirement(requirement)
+    }
+
+    fn mint_semantic_prefix_for_requirement(
+        &self,
+        requirement: super::compact_masking_entropy::CompactBaseFreshClaimRequirement,
+    ) -> Result<CompactMaskingSemanticPrefix, CompactMaskingSimulatorError> {
+        let next_move = self
+            .verifier_inputs
+            .verifier_moves
+            .get(self.attempt.moves.len())
+            .ok_or(CompactMaskingSimulatorError::SimulationNotActive)?;
+        let [role] = next_move.role_coordinates.as_slice() else {
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        };
+        if role.role_tag != 10
+            || role.epoch != requirement.epoch()
+            || role.batch_ordinal != 0
+            || role.round_ordinal != 0
+        {
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        }
+        Ok(CompactMaskingSemanticPrefix {
+            attempt_identity: self.attempt_identity(),
+            verifier_move_ordinal: next_move.ordinal,
+            epoch: role.epoch,
+            contract_source_hash: self.contract_source_hash.into_bytes(),
+            canonical_exposed_move_prefix: encode_moves(&self.attempt.moves)?.into_boxed_slice(),
+            completed_messages: self
+                .attempt
+                .moves
+                .iter()
+                .map(|record| record.verifier_message.clone())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        })
     }
 
     fn program_new_commitments(
@@ -605,11 +876,7 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
     }
 
     fn attempt_identity(&self) -> CompactMaskingAttemptIdentity {
-        CompactMaskingAttemptIdentity::new(
-            self.attempt.attempt_identifier,
-            self.attempt.reset_ordinal,
-            self.attempt.initial_exposed_prefix_binding,
-        )
+        attempt_identity(&self.attempt)
     }
 
     fn validate_checkpoint_authentication(
@@ -618,11 +885,17 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
     ) -> Result<(), CompactMaskingSimulatorError> {
         if checkpoint.contract_source_hash != self.contract_source_hash
             || checkpoint.coefficient_map_binding != self.coefficient_maps.certificate_digest()
+            || checkpoint.public_input_binding
+                != self
+                    .public_covector_authority
+                    .as_ref()
+                    .map(CompactFactorOnePublicCovectorAuthority::public_input_binding)
             || checkpoint.ideal_oracle_binding != self.ideal_oracle.binding()
             || checkpoint.exposed_prefix_binding
                 != prefix_binding(
                     self.contract_source_hash,
                     self.coefficient_maps.certificate_digest(),
+                    checkpoint.public_input_binding,
                     checkpoint.attempt.attempt_identifier,
                     checkpoint.attempt.reset_ordinal,
                     checkpoint.attempt.initial_exposed_prefix_binding,
@@ -635,24 +908,60 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
     }
 
     fn validate_attempt_prefix(&self) -> Result<(), CompactMaskingSimulatorError> {
-        if self.attempt.moves.len() > self.verifier_inputs.verifier_moves.len()
-            || self
-                .retired_coin_ranges
-                .iter()
-                .any(|range| range.start >= range.end)
-        {
-            return Err(CompactMaskingSimulatorError::WrongCheckpoint);
-        }
-        self.replay_entropy_authority()?;
-        validate_move_prefix(
-            &self.verifier_inputs,
-            self.coefficient_maps,
-            self.attempt_identity(),
-            &self.attempt.moves,
+        self.replay_validated_attempt_prefix().map(|_| ())
+    }
+
+    fn replay_validated_attempt_prefix(
+        &self,
+    ) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingSimulatorError> {
+        self.replay_validated_attempt_state(
+            &self.attempt,
             &self.retired_coin_ranges,
             &self.retired_commitment_handles,
         )
     }
+
+    fn replay_validated_attempt_state(
+        &self,
+        attempt: &CompactAttemptState,
+        retired_coin_ranges: &[CompactRetiredCoinRange],
+        retired_commitment_handles: &[CompactConstructionCommitmentHandle],
+    ) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingSimulatorError> {
+        if attempt.moves.len() > self.verifier_inputs.verifier_moves.len()
+            || retired_coin_ranges
+                .iter()
+                .any(|range| range.start >= range.end)
+            || retired_coin_ranges.windows(2).any(|ranges| {
+                ranges[0].identity == ranges[1].identity && ranges[0].end > ranges[1].start
+            })
+            || retired_commitment_handles
+                .windows(2)
+                .any(|handles| handles[0] >= handles[1])
+        {
+            return Err(CompactMaskingSimulatorError::WrongCheckpoint);
+        }
+        let entropy_authority = self.replay_entropy_authority_for_attempt(attempt)?;
+        let replayed_coin_coordinate = validate_move_prefix(
+            &self.verifier_inputs,
+            self.coefficient_maps,
+            attempt_identity(attempt),
+            &attempt.moves,
+            retired_coin_ranges,
+            retired_commitment_handles,
+        )?;
+        if replayed_coin_coordinate != attempt.next_coin_coordinate {
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        }
+        Ok(entropy_authority)
+    }
+}
+
+fn attempt_identity(attempt: &CompactAttemptState) -> CompactMaskingAttemptIdentity {
+    CompactMaskingAttemptIdentity::new(
+        attempt.attempt_identifier,
+        attempt.reset_ordinal,
+        attempt.initial_exposed_prefix_binding,
+    )
 }
 
 struct CompactDisclosureSamplingContext<'a, 'contract> {
@@ -1008,7 +1317,7 @@ fn validate_move_prefix(
     moves: &[CompactIdealMaskingMoveRecord],
     retired_coin_ranges: &[CompactRetiredCoinRange],
     retired_commitment_handles: &[CompactConstructionCommitmentHandle],
-) -> Result<(), CompactMaskingSimulatorError> {
+) -> Result<u64, CompactMaskingSimulatorError> {
     let mut next_coin_coordinate = 0_u64;
     let mut commitment_count = 0_usize;
     let mut handles = Vec::new();
@@ -1061,7 +1370,18 @@ fn validate_move_prefix(
             retired_coin_ranges,
         )?;
     }
-    Ok(())
+    let expected_commitment_count = verifier_inputs
+        .verifier_moves
+        .get(moves.len())
+        .map(|next_move| Ok(next_move.preceding_commitment_count))
+        .unwrap_or_else(|| {
+            u32::try_from(coefficient_maps.construction_commitment_embeddings().len())
+                .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)
+        })?;
+    if u32::try_from(commitment_count).ok() != Some(expected_commitment_count) {
+        return Err(CompactMaskingSimulatorError::WrongCommitmentProgression);
+    }
+    Ok(next_coin_coordinate)
 }
 
 fn validate_disclosure_coordinates(
@@ -1092,6 +1412,7 @@ fn validate_disclosure_coordinates(
 fn prefix_binding(
     contract_source_hash: Hash512,
     coefficient_map_binding: [u8; 64],
+    public_input_binding: Option<[u8; 64]>,
     attempt_identifier: CompactMaskingAttemptIdentifier,
     reset_ordinal: u32,
     initial_exposed_prefix_binding: [u8; 64],
@@ -1099,11 +1420,17 @@ fn prefix_binding(
 ) -> Result<[u8; 64], CompactMaskingSimulatorError> {
     let reset_bytes = reset_ordinal.to_le_bytes();
     let moves_bytes = encode_moves(moves)?;
+    let mut public_input_bytes = [0_u8; 65];
+    if let Some(binding) = public_input_binding {
+        public_input_bytes[0] = 1;
+        public_input_bytes[1..].copy_from_slice(&binding);
+    }
     Ok(hash_framed_parts_512(
         IDEAL_PREFIX_BINDING_DOMAIN,
         &[
             contract_source_hash.as_bytes(),
             &coefficient_map_binding,
+            &public_input_bytes,
             &attempt_identifier,
             &reset_bytes,
             &initial_exposed_prefix_binding,
@@ -1115,20 +1442,9 @@ fn prefix_binding(
 fn encode_moves(
     moves: &[CompactIdealMaskingMoveRecord],
 ) -> Result<Vec<u8>, CompactMaskingSimulatorError> {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(
-        &u64::try_from(moves.len())
-            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
-            .to_le_bytes(),
-    );
+    let mut bytes = encoded_move_count_prefix(moves.len())?;
     for record in moves {
-        bytes.extend_from_slice(
-            &record
-                .conditioned_view
-                .preceding_prover_response_ordinal
-                .to_le_bytes(),
-        );
-        encode_disclosures(&mut bytes, &record.conditioned_view.disclosures)?;
+        encode_exposed_move_prefix(&mut bytes, record)?;
         match &record.base_fresh_claim {
             None => bytes.push(0),
             Some(claim) => {
@@ -1149,19 +1465,46 @@ fn encode_moves(
                 }
             }
         }
-        bytes.extend_from_slice(
-            &u64::try_from(record.conditioned_view.new_construction_commitments.len())
-                .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
-                .to_le_bytes(),
-        );
-        for program in &record.conditioned_view.new_construction_commitments {
-            encode_embedding(&mut bytes, program.embedding);
-            bytes.extend_from_slice(program.handle.as_bytes());
-        }
-        encode_verifier_message(&mut bytes, &record.verifier_message)?;
-        encode_disclosures(&mut bytes, &record.post_message_disclosures)?;
+        encode_exposed_move_suffix(&mut bytes, record)?;
     }
     Ok(bytes)
+}
+
+fn encoded_move_count_prefix(move_count: usize) -> Result<Vec<u8>, CompactMaskingSimulatorError> {
+    Ok(u64::try_from(move_count)
+        .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+        .to_le_bytes()
+        .to_vec())
+}
+
+fn encode_exposed_move_prefix(
+    bytes: &mut Vec<u8>,
+    record: &CompactIdealMaskingMoveRecord,
+) -> Result<(), CompactMaskingSimulatorError> {
+    bytes.extend_from_slice(
+        &record
+            .conditioned_view
+            .preceding_prover_response_ordinal
+            .to_le_bytes(),
+    );
+    encode_disclosures(bytes, &record.conditioned_view.disclosures)
+}
+
+fn encode_exposed_move_suffix(
+    bytes: &mut Vec<u8>,
+    record: &CompactIdealMaskingMoveRecord,
+) -> Result<(), CompactMaskingSimulatorError> {
+    bytes.extend_from_slice(
+        &u64::try_from(record.conditioned_view.new_construction_commitments.len())
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for program in &record.conditioned_view.new_construction_commitments {
+        encode_embedding(bytes, program.embedding);
+        bytes.extend_from_slice(program.handle.as_bytes());
+    }
+    encode_verifier_message(bytes, &record.verifier_message)?;
+    encode_disclosures(bytes, &record.post_message_disclosures)
 }
 
 fn encode_disclosures(
@@ -1312,9 +1655,17 @@ fn copy_verifier_inputs<'contract>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::compact_factor_one_semantics::CompactFactorOnePublicCovectorPoll;
     use super::super::compact_masking_coefficient_maps::derive_compact_masking_coefficient_map_certificate;
     use super::super::compact_masking_entropy::selected_test_compact_masking_entropy_certificate;
     use super::super::compact_proof_contract::selected_compact_public_key_proof_contract;
+    use super::super::compact_proof_wire::{
+        CompactPublicInputBindings, encode_compact_public_input,
+    };
+    use super::super::compact_public_key_verifier::{
+        CompactPublicKeyTransportError, VerifiedCompactPublicInputTransport,
+        verify_selected_compact_public_input_transport_with_test_bindings,
+    };
     use super::super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
     use super::super::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
     use super::*;
@@ -1333,11 +1684,18 @@ mod tests {
     fn selected_adversarial_message(
         verifier_move: &CompactVerifierMoveContract,
     ) -> DecodedFixedUniformVerifierMessage {
+        selected_adversarial_message_with_offset(verifier_move, 0)
+    }
+
+    fn selected_adversarial_message_with_offset(
+        verifier_move: &CompactVerifierMoveContract,
+        extension_offset: u64,
+    ) -> DecodedFixedUniformVerifierMessage {
         let geometry = &verifier_move.message_geometry;
         let extension_elements = (0..geometry.extension_output_count())
             .map(|ordinal| {
                 ProofChallengeExtensionElement::from_canonical_coordinates([
-                    100 + u64::from(verifier_move.ordinal) * 1_000 + ordinal,
+                    100 + u64::from(verifier_move.ordinal) * 1_000 + ordinal + extension_offset,
                     1,
                     2,
                     3,
@@ -1363,6 +1721,20 @@ mod tests {
             distinct_query_groups,
         )
         .expect("typed adversarial verifier message")
+    }
+
+    struct PrefixVariantVerifier;
+
+    impl CompactAdaptiveVerifier for PrefixVariantVerifier {
+        fn choose_message(
+            &mut self,
+            view: CompactAdaptiveVerifierView<'_>,
+        ) -> DecodedFixedUniformVerifierMessage {
+            selected_adversarial_message_with_offset(
+                view.verifier_move(),
+                u64::from(view.verifier_move().ordinal == 0),
+            )
+        }
     }
 
     fn wrong_shape_adversarial_message(
@@ -1425,6 +1797,26 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct InvalidOnceAtPreRole18Verifier {
+        refused_move_ordinals: Vec<u32>,
+    }
+
+    impl CompactAdaptiveVerifier for InvalidOnceAtPreRole18Verifier {
+        fn choose_message(
+            &mut self,
+            view: CompactAdaptiveVerifierView<'_>,
+        ) -> DecodedFixedUniformVerifierMessage {
+            let move_ordinal = view.verifier_move().ordinal;
+            if move_ordinal == 52 && !self.refused_move_ordinals.contains(&move_ordinal) {
+                self.refused_move_ordinals.push(move_ordinal);
+                wrong_shape_adversarial_message(view.verifier_move())
+            } else {
+                selected_adversarial_message(view.verifier_move())
+            }
+        }
+    }
+
     fn selected_simulator(
         private_key: [u8; 64],
     ) -> (
@@ -1436,6 +1828,141 @@ mod tests {
             .expect("selected coefficient maps");
         let _ = private_key;
         (contract, maps)
+    }
+
+    fn selected_verified_public_input(
+        contract: &super::super::compact_proof_contract::CompactPublicKeyProofContract,
+        first_value: ProofBaseFieldElement,
+        check_wrong_relation_binding: bool,
+    ) -> VerifiedCompactPublicInputTransport {
+        let inputs = contract.verifier_inputs();
+        let bindings = CompactPublicInputBindings::new(
+            Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x23; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes(inputs.relation.relation_plan_variant_hash()),
+        );
+        let field_element_count =
+            usize::try_from(inputs.public_input_wire_geometry.field_element_count())
+                .expect("selected public-input count fits memory");
+        let mut field_elements = vec![ProofBaseFieldElement::ZERO; field_element_count];
+        field_elements[0] = first_value;
+        if check_wrong_relation_binding {
+            let mut wrong_relation_hash = inputs.relation.relation_plan_variant_hash();
+            wrong_relation_hash[0] ^= 1;
+            let wrong_bindings = CompactPublicInputBindings::new(
+                Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x23; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes(wrong_relation_hash),
+            );
+            let wrong_bytes = encode_compact_public_input(
+                inputs.public_input_wire_geometry,
+                wrong_bindings,
+                &field_elements,
+            )
+            .expect("wrong-relation public input remains canonically encoded");
+            assert_eq!(
+                verify_selected_compact_public_input_transport_with_test_bindings(
+                    wrong_bindings,
+                    wrong_bytes.into_boxed_slice(),
+                )
+                .err(),
+                Some(CompactPublicKeyTransportError::InvalidResponseRegistry)
+            );
+        }
+        let canonical_bytes = encode_compact_public_input(
+            inputs.public_input_wire_geometry,
+            bindings,
+            &field_elements,
+        )
+        .expect("selected public input encodes");
+        drop(field_elements);
+        verify_selected_compact_public_input_transport_with_test_bindings(
+            bindings,
+            canonical_bytes.into_boxed_slice(),
+        )
+        .expect("strict selected public-input transport verifies")
+    }
+
+    fn advance_to_move_count(
+        simulator: &mut CompactAdaptiveMaskingSimulator<'_>,
+        verifier: &mut impl CompactAdaptiveVerifier,
+        target_move_count: usize,
+    ) {
+        while simulator.attempt.moves.len() < target_move_count {
+            simulator
+                .advance(verifier)
+                .expect("ordinary verifier move advances before role 18");
+        }
+        assert_eq!(simulator.attempt.moves.len(), target_move_count);
+    }
+
+    fn derive_role18_authorization(
+        simulator: &CompactAdaptiveMaskingSimulator<'_>,
+    ) -> (CompactFactorOneCarriedCovector, usize) {
+        let mut derivation = simulator
+            .begin_role18_covector_derivation()
+            .expect("role-18 semantic derivation begins from simulator prefix");
+        let mut work_boundary_count = 0_usize;
+        loop {
+            match derivation
+                .advance(65_536)
+                .expect("bounded role-18 semantic work advances")
+            {
+                CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                    completed_element_count,
+                } => {
+                    assert!(completed_element_count > 0);
+                    work_boundary_count += 1;
+                }
+                CompactFactorOnePublicCovectorPoll::Complete(authorization) => {
+                    return (authorization, work_boundary_count);
+                }
+            }
+        }
+    }
+
+    fn advance_to_terminal_prefix(
+        simulator: &mut CompactAdaptiveMaskingSimulator<'_>,
+        verifier: &mut impl CompactAdaptiveVerifier,
+    ) {
+        while simulator.attempt.moves.len() < simulator.verifier_inputs.verifier_moves.len() {
+            advance_next_move_with_role18(simulator, verifier);
+        }
+    }
+
+    fn advance_next_move_with_role18(
+        simulator: &mut CompactAdaptiveMaskingSimulator<'_>,
+        verifier: &mut impl CompactAdaptiveVerifier,
+    ) -> u32 {
+        let role18_authorization_required = simulator
+            .replay_entropy_authority()
+            .expect("entropy authority replays the current simulator prefix")
+            .next_base_claim_requirement()
+            .expect("the next response requirement is canonical")
+            .is_some();
+        if role18_authorization_required {
+            let (mut authorization, _) = derive_role18_authorization(simulator);
+            let move_ordinal = simulator
+                .advance_role18(verifier, &mut authorization)
+                .expect("opaque role-18 authorization advances its exact move");
+            assert_eq!(authorization.epoch(), None);
+            move_ordinal
+        } else {
+            simulator
+                .advance(verifier)
+                .expect("ordinary verifier move advances")
+        }
+    }
+
+    fn programmed_commitment_count(simulator: &CompactAdaptiveMaskingSimulator<'_>) -> usize {
+        simulator
+            .attempt
+            .moves
+            .iter()
+            .map(|record| record.conditioned_view.new_construction_commitments.len())
+            .sum()
     }
 
     #[test]
@@ -1555,7 +2082,24 @@ mod tests {
             Some(CompactMaskingSimulatorError::WrongCheckpoint)
         );
 
+        let mut altered_cursor = initial_checkpoint;
+        altered_cursor.attempt.next_coin_coordinate = 1;
+        assert_eq!(
+            CompactAdaptiveMaskingSimulator::restore(
+                contract.verifier_inputs(),
+                &maps,
+                altered_cursor,
+                private_key,
+            )
+            .err(),
+            Some(CompactMaskingSimulatorError::WrongTranscript)
+        );
+
         assert_eq!(simulator.attempt.next_coin_coordinate, 0);
+        assert_eq!(
+            simulator.finish().err(),
+            Some(CompactMaskingSimulatorError::SimulationNotActive)
+        );
     }
 
     #[test]
@@ -1714,7 +2258,10 @@ mod tests {
                 Err(error) => break error,
             }
         };
-        assert_eq!(refusal, CompactMaskingSimulatorError::WrongTranscript);
+        assert_eq!(
+            refusal,
+            CompactMaskingSimulatorError::Role18AuthorizationRequired
+        );
         assert!(
             simulator
                 .replay_entropy_authority()
@@ -1722,6 +2269,366 @@ mod tests {
                 .next_base_claim_requirement()
                 .expect("requirement query")
                 .is_some()
+        );
+    }
+
+    #[test]
+    #[ignore = "guarded selected pre-challenge role-18 public-covector lifecycle"]
+    fn heavy_rust_kernel_selected_pre_role18_covector_is_prefix_bound_transactional_and_one_shot() {
+        const PRE_ROLE18_MOVE_ORDINAL: u32 = 52;
+        const PRE_ROLE18_COEFFICIENT_COUNT: usize = 1_292;
+
+        let private_key = [0x8d; 64];
+        let attempt_identifier = [0x72; 32];
+        let initial_prefix_binding = [0x82; 64];
+        let (contract, maps) = selected_simulator(private_key);
+        let verified_public_input =
+            selected_verified_public_input(&contract, ProofBaseFieldElement::ZERO, true);
+
+        let prefix_a_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("first selected public-input authority");
+        let mut prefix_a = CompactAdaptiveMaskingSimulator::new_with_public_covector_authority(
+            contract.verifier_inputs(),
+            &maps,
+            attempt_identifier,
+            initial_prefix_binding,
+            private_key,
+            prefix_a_authority,
+        )
+        .expect("first authority-bound simulator");
+        let mut selected_verifier = SelectedAdversarialVerifier;
+        advance_to_move_count(
+            &mut prefix_a,
+            &mut selected_verifier,
+            usize::try_from(PRE_ROLE18_MOVE_ORDINAL).expect("selected ordinal fits"),
+        );
+        assert_eq!(
+            prefix_a.advance(&mut selected_verifier),
+            Err(CompactMaskingSimulatorError::Role18AuthorizationRequired)
+        );
+        let (mut prefix_a_authorization, prefix_a_work_boundary_count) =
+            derive_role18_authorization(&prefix_a);
+        assert_eq!(prefix_a_work_boundary_count, 0);
+        assert_eq!(prefix_a_authorization.epoch(), Some(1));
+        assert_eq!(
+            prefix_a_authorization
+                .coefficients()
+                .expect("pre authorization is pending")
+                .len(),
+            PRE_ROLE18_COEFFICIENT_COUNT
+        );
+        drop(prefix_a);
+
+        let prefix_b_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("second selected public-input authority");
+        let mut simulator = CompactAdaptiveMaskingSimulator::new_with_public_covector_authority(
+            contract.verifier_inputs(),
+            &maps,
+            attempt_identifier,
+            initial_prefix_binding,
+            private_key,
+            prefix_b_authority,
+        )
+        .expect("second authority-bound simulator");
+        let mut prefix_variant_verifier = PrefixVariantVerifier;
+        advance_to_move_count(
+            &mut simulator,
+            &mut prefix_variant_verifier,
+            usize::try_from(PRE_ROLE18_MOVE_ORDINAL - 1).expect("selected ordinal fits"),
+        );
+        let rewind_checkpoint = simulator
+            .checkpoint()
+            .expect("checkpoint immediately before the pre-role18 prefix suffix");
+        assert_eq!(
+            simulator.advance(&mut prefix_variant_verifier),
+            Ok(PRE_ROLE18_MOVE_ORDINAL - 1)
+        );
+        assert_eq!(
+            simulator.advance(&mut prefix_variant_verifier),
+            Err(CompactMaskingSimulatorError::Role18AuthorizationRequired)
+        );
+
+        let before_prefix_substitution = simulator
+            .checkpoint()
+            .expect("prefix-substitution checkpoint");
+        assert_eq!(
+            simulator.advance_role18(&mut prefix_variant_verifier, &mut prefix_a_authorization,),
+            Err(CompactMaskingSimulatorError::InvalidRole18Authorization)
+        );
+        assert_eq!(
+            simulator
+                .checkpoint()
+                .expect("prefix substitution does not mutate simulator"),
+            before_prefix_substitution
+        );
+        assert_eq!(prefix_a_authorization.epoch(), Some(1));
+        drop(before_prefix_substitution);
+        drop(prefix_a_authorization);
+
+        let (mut stale_authorization, stale_work_boundary_count) =
+            derive_role18_authorization(&simulator);
+        assert_eq!(stale_work_boundary_count, 0);
+        let reset_ordinal_before_rewind = simulator.attempt.reset_ordinal;
+        simulator
+            .rewind_security_game_suffix(rewind_checkpoint)
+            .expect("authenticated suffix rewind");
+        assert_eq!(
+            simulator.attempt.reset_ordinal,
+            reset_ordinal_before_rewind + 1
+        );
+        assert_eq!(
+            simulator.attempt.moves.len(),
+            usize::try_from(PRE_ROLE18_MOVE_ORDINAL - 1).expect("selected ordinal fits")
+        );
+        assert_eq!(
+            simulator.advance(&mut prefix_variant_verifier),
+            Ok(PRE_ROLE18_MOVE_ORDINAL - 1)
+        );
+        assert_eq!(
+            simulator.advance(&mut prefix_variant_verifier),
+            Err(CompactMaskingSimulatorError::Role18AuthorizationRequired)
+        );
+        assert_eq!(
+            simulator.advance_role18(&mut prefix_variant_verifier, &mut stale_authorization),
+            Err(CompactMaskingSimulatorError::InvalidRole18Authorization)
+        );
+        assert_eq!(stale_authorization.epoch(), Some(1));
+        drop(stale_authorization);
+
+        let (mut pre_authorization, pre_work_boundary_count) =
+            derive_role18_authorization(&simulator);
+        assert_eq!(pre_work_boundary_count, 0);
+        assert_eq!(pre_authorization.epoch(), Some(1));
+        assert_eq!(
+            pre_authorization
+                .coefficients()
+                .expect("reminted pre authorization is pending")
+                .len(),
+            PRE_ROLE18_COEFFICIENT_COUNT
+        );
+        let mut retry_verifier = InvalidOnceAtPreRole18Verifier::default();
+        let before_invalid_pre_message = simulator
+            .checkpoint()
+            .expect("checkpoint before invalid pre-role18 message");
+        assert_eq!(
+            simulator.advance_role18(&mut retry_verifier, &mut pre_authorization),
+            Err(CompactMaskingSimulatorError::InvalidVerifierMessage)
+        );
+        assert_eq!(
+            simulator
+                .checkpoint()
+                .expect("invalid pre-role18 message rolls back"),
+            before_invalid_pre_message
+        );
+        assert_eq!(pre_authorization.epoch(), Some(1));
+        drop(before_invalid_pre_message);
+        assert_eq!(
+            simulator.advance_role18(&mut retry_verifier, &mut pre_authorization),
+            Ok(PRE_ROLE18_MOVE_ORDINAL)
+        );
+        assert_eq!(pre_authorization.epoch(), None);
+        let after_pre_role18 = simulator
+            .checkpoint()
+            .expect("authority-bound checkpoint after pre role18");
+        assert_eq!(
+            simulator.advance_role18(&mut retry_verifier, &mut pre_authorization),
+            Err(CompactMaskingSimulatorError::InvalidRole18Authorization)
+        );
+        assert_eq!(
+            simulator
+                .checkpoint()
+                .expect("consumed pre authorization cannot mutate next move"),
+            after_pre_role18
+        );
+
+        assert_eq!(
+            CompactAdaptiveMaskingSimulator::restore(
+                contract.verifier_inputs(),
+                &maps,
+                after_pre_role18.clone(),
+                private_key,
+            )
+            .err(),
+            Some(CompactMaskingSimulatorError::WrongCheckpoint)
+        );
+        let restored_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("same-input restore authority");
+        let restored = CompactAdaptiveMaskingSimulator::restore_with_public_covector_authority(
+            contract.verifier_inputs(),
+            &maps,
+            after_pre_role18.clone(),
+            private_key,
+            restored_authority,
+        )
+        .expect("same-input authority restores checkpoint");
+        assert_eq!(
+            restored
+                .checkpoint()
+                .expect("restored checkpoint authenticates"),
+            after_pre_role18
+        );
+        drop(restored);
+
+        let substituted_public_input =
+            selected_verified_public_input(&contract, ProofBaseFieldElement::ONE, false);
+        let substituted_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &substituted_public_input,
+            )
+            .expect("substituted canonical public input has its own authority");
+        assert_eq!(
+            CompactAdaptiveMaskingSimulator::restore_with_public_covector_authority(
+                contract.verifier_inputs(),
+                &maps,
+                after_pre_role18,
+                private_key,
+                substituted_authority,
+            )
+            .err(),
+            Some(CompactMaskingSimulatorError::WrongCheckpoint)
+        );
+        drop(substituted_public_input);
+    }
+
+    #[test]
+    #[ignore = "guarded selected terminal adaptive masking-simulator lifecycle"]
+    fn heavy_rust_kernel_selected_masking_simulator_terminal_authenticates_restore_and_rewind() {
+        let private_key = [0x9d; 64];
+        let (contract, maps) = selected_simulator(private_key);
+        let verified_public_input =
+            selected_verified_public_input(&contract, ProofBaseFieldElement::ZERO, false);
+        let public_covector_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("selected public-input authority");
+        let mut simulator = CompactAdaptiveMaskingSimulator::new_with_public_covector_authority(
+            contract.verifier_inputs(),
+            &maps,
+            [0x73; 32],
+            [0x83; 64],
+            private_key,
+            public_covector_authority,
+        )
+        .expect("authority-bound selected simulator");
+        let mut verifier = SelectedAdversarialVerifier;
+        simulator
+            .advance(&mut verifier)
+            .expect("first ordinary move advances");
+        let nonterminal_checkpoint = simulator
+            .checkpoint()
+            .expect("nonempty nonterminal checkpoint");
+
+        let continuation_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("same-input continuation authority");
+        let mut simulator =
+            CompactAdaptiveMaskingSimulator::restore_with_public_covector_authority(
+                contract.verifier_inputs(),
+                &maps,
+                nonterminal_checkpoint.clone(),
+                private_key,
+                continuation_authority,
+            )
+            .expect("same-key nonterminal continuation restores");
+        assert_eq!(
+            simulator
+                .checkpoint()
+                .expect("restored nonterminal checkpoint authenticates"),
+            nonterminal_checkpoint
+        );
+
+        let abandoned_identity = simulator.attempt_identity();
+        let abandoned_coin_start = simulator.attempt.next_coin_coordinate;
+        let abandoned_commitment_start = programmed_commitment_count(&simulator);
+        while simulator.attempt.next_coin_coordinate == abandoned_coin_start
+            || programmed_commitment_count(&simulator) == abandoned_commitment_start
+        {
+            advance_next_move_with_role18(&mut simulator, &mut verifier);
+        }
+        let abandoned_coin_end = simulator.attempt.next_coin_coordinate;
+        let abandoned_handles = simulator.attempt.moves
+            [nonterminal_checkpoint.attempt.moves.len()..]
+            .iter()
+            .flat_map(|record| &record.conditioned_view.new_construction_commitments)
+            .map(CompactConstructionCommitmentProgram::handle)
+            .collect::<Vec<_>>();
+        assert!(!abandoned_handles.is_empty());
+        let reset_ordinal = simulator.attempt.reset_ordinal;
+        simulator
+            .rewind_security_game_suffix(nonterminal_checkpoint)
+            .expect("authenticated nonempty suffix rewinds");
+        assert_eq!(simulator.attempt.reset_ordinal, reset_ordinal + 1);
+        assert!(simulator.retired_coin_ranges.iter().any(|range| {
+            range.identity == abandoned_identity
+                && range.start == abandoned_coin_start
+                && range.end == abandoned_coin_end
+        }));
+        assert!(
+            abandoned_handles
+                .iter()
+                .all(|handle| simulator.retired_commitment_handles.contains(handle))
+        );
+
+        advance_to_terminal_prefix(&mut simulator, &mut verifier);
+        assert_eq!(
+            simulator.attempt.moves.len(),
+            simulator.verifier_inputs.verifier_moves.len()
+        );
+        let terminal_checkpoint = simulator
+            .finish()
+            .expect("terminal simulator authenticates");
+
+        let terminal_restore_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("same-input terminal restore authority");
+        let restored_terminal =
+            CompactAdaptiveMaskingSimulator::restore_with_public_covector_authority(
+                contract.verifier_inputs(),
+                &maps,
+                terminal_checkpoint.clone(),
+                private_key,
+                terminal_restore_authority,
+            )
+            .expect("same-key terminal checkpoint restores")
+            .finish()
+            .expect("restored terminal prefix authenticates");
+        assert_eq!(restored_terminal, terminal_checkpoint);
+
+        let mut altered_terminal_cursor = terminal_checkpoint;
+        altered_terminal_cursor.attempt.next_coin_coordinate = altered_terminal_cursor
+            .attempt
+            .next_coin_coordinate
+            .checked_add(1)
+            .expect("selected terminal coin cursor increments");
+        let altered_cursor_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("same-input altered-cursor authority");
+        assert_eq!(
+            CompactAdaptiveMaskingSimulator::restore_with_public_covector_authority(
+                contract.verifier_inputs(),
+                &maps,
+                altered_terminal_cursor,
+                private_key,
+                altered_cursor_authority,
+            )
+            .err(),
+            Some(CompactMaskingSimulatorError::WrongTranscript)
         );
     }
 

@@ -383,6 +383,22 @@ pub(crate) trait StructuredTransposeValueSource {
     ) -> Result<ProofBaseFieldElement, CommonProofProverError>;
 }
 
+impl<Source> StructuredTransposeValueSource for &Source
+where
+    Source: StructuredTransposeValueSource + ?Sized,
+{
+    fn lookup_challenge(&self) -> ProofChallengeExtensionElement {
+        Source::lookup_challenge(*self)
+    }
+
+    fn public_input_base_value(
+        &self,
+        element_ordinal: u64,
+    ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
+        Source::public_input_base_value(*self, element_ordinal)
+    }
+}
+
 impl<Assignment: CompactStructuredAssignmentSource + ?Sized> StructuredTransposeValueSource
     for CompactStructuredR1csRowSource<'_, Assignment>
 {
@@ -484,6 +500,7 @@ impl LittleEndianEqualityBuilder {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CompactStructuredWitnessCovectorAccumulatorStep {
+    DestinationProjection,
     CoefficientEquality,
     BlockEquality,
     SparseWitness,
@@ -496,6 +513,11 @@ pub(crate) enum CompactStructuredWitnessCovectorAccumulatorStep {
     PointwiseProduct,
     ProductPolynomialInverseTransform,
     NegacyclicProductFold,
+    ProjectedPublicAdjointFill,
+    ProjectedPublicPolynomialForwardTransform,
+    ProjectedPointwiseProduct,
+    ProjectedProductPolynomialInverseTransform,
+    ProjectedNegacyclicProductFold,
 }
 
 pub(crate) enum CompactStructuredWitnessCovectorAccumulatorPoll {
@@ -555,6 +577,7 @@ impl CompactStructuredWitnessCovectorHandoffPoll {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AccumulatorPhase {
+    BuildDestinationProjection,
     BuildCoefficientEquality,
     BuildBlockEquality,
     SparseWitness {
@@ -591,17 +614,35 @@ enum AccumulatorPhase {
         task_ordinal: usize,
         next_coefficient_ordinal: u64,
     },
+    ProjectedPublicAdjointFill {
+        task_ordinal: usize,
+        next_coefficient_ordinal: u64,
+    },
+    ProjectedPublicPolynomialForwardTransform,
+    ProjectedPointwiseProduct {
+        next_evaluation_ordinal: u64,
+    },
+    ProjectedProductPolynomialInverseTransform,
+    ProjectedNegacyclicProductFold {
+        next_coefficient_ordinal: u64,
+    },
     Complete,
 }
 
-pub(crate) struct CompactStructuredWitnessCovectorAccumulator<'source, Source>
+struct DestinationBlockFold {
+    builder: Option<LittleEndianEqualityBuilder>,
+    weights: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+}
+
+pub(crate) struct CompactStructuredWitnessCovectorAccumulator<Source>
 where
-    Source: StructuredTransposeValueSource + ?Sized,
+    Source: StructuredTransposeValueSource,
 {
-    source: &'source Source,
+    source: Source,
     plan: StructuredTransposePlan,
     matrix_role_weights: [ProofChallengeExtensionElement; COMPACT_CFW_MATRIX_COUNT],
     destination: Option<Vec<CompactChallengeField>>,
+    destination_block_fold: Option<DestinationBlockFold>,
     coefficient_equality_builder: Option<LittleEndianEqualityBuilder>,
     block_equality_builder: Option<LittleEndianEqualityBuilder>,
     coefficient_equality: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
@@ -617,28 +658,98 @@ pub(crate) struct CompactStructuredWitnessCovectorHandoff<'source, Source>
 where
     Source: StructuredTransposeValueSource + ?Sized,
 {
-    accumulator: CompactStructuredWitnessCovectorAccumulator<'source, Source>,
+    accumulator: CompactStructuredWitnessCovectorAccumulator<&'source Source>,
     continuation: Option<CompactCfwClaimCombinationContinuation>,
 }
 
-impl<'source, Source> CompactStructuredWitnessCovectorAccumulator<'source, Source>
+impl<Source> CompactStructuredWitnessCovectorAccumulator<Source>
 where
-    Source: StructuredTransposeValueSource + ?Sized,
+    Source: StructuredTransposeValueSource,
 {
+    /// Builds the public transpose directly in the image of one complete
+    /// block fold. The projection is certified by the relation geometry: it
+    /// must collapse every source block onto the single ring-sized
+    /// destination, so no full witness-length covector is ever resident.
+    pub(crate) fn from_projected_public_relation(
+        source: Source,
+        relation: &CompactPublicKeyRelationCatalog,
+        row_point: &[CompactChallengeField],
+        matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+        destination: Vec<CompactChallengeField>,
+        block_folding_challenges: &[CompactChallengeField],
+    ) -> Result<Self, CommonProofProverError> {
+        let matrices = CompactStructuredR1csCatalog::derive(relation)?;
+        let geometry = CompactStructuredWitnessCovectorGeometry::derive(relation, &matrices)?;
+        let plan = StructuredTransposePlan::from_production(relation, &matrices, geometry)?;
+        Self::new_with_block_fold(
+            source,
+            plan,
+            row_point,
+            matrix_role_weights,
+            destination,
+            block_folding_challenges,
+        )
+    }
+
     fn new(
-        source: &'source Source,
+        source: Source,
         plan: StructuredTransposePlan,
         row_point: &[CompactChallengeField],
         matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
         destination: Vec<CompactChallengeField>,
+    ) -> Result<Self, CommonProofProverError> {
+        Self::new_with_optional_block_fold(
+            source,
+            plan,
+            row_point,
+            matrix_role_weights,
+            destination,
+            None,
+        )
+    }
+
+    fn new_with_block_fold(
+        source: Source,
+        plan: StructuredTransposePlan,
+        row_point: &[CompactChallengeField],
+        matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+        destination: Vec<CompactChallengeField>,
+        block_folding_challenges: &[CompactChallengeField],
+    ) -> Result<Self, CommonProofProverError> {
+        Self::new_with_optional_block_fold(
+            source,
+            plan,
+            row_point,
+            matrix_role_weights,
+            destination,
+            Some(block_folding_challenges),
+        )
+    }
+
+    fn new_with_optional_block_fold(
+        source: Source,
+        plan: StructuredTransposePlan,
+        row_point: &[CompactChallengeField],
+        matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+        destination: Vec<CompactChallengeField>,
+        block_folding_challenges: Option<&[CompactChallengeField]>,
     ) -> Result<Self, CommonProofProverError> {
         plan.check()?;
         let expected_row_point_length = plan
             .ring_variable_count
             .checked_add(plan.ring_block_variable_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        let expected_destination_length = usize::try_from(plan.source_covector_element_count)
-            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let source_block_count = plan
+            .source_covector_element_count
+            .checked_div(plan.ring_degree)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let projected = block_folding_challenges.is_some();
+        let expected_destination_length = usize::try_from(if projected {
+            plan.ring_degree
+        } else {
+            plan.source_covector_element_count
+        })
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
         if row_point.len()
             != usize::try_from(expected_row_point_length)
                 .map_err(|_| CommonProofProverError::CountOverflow)?
@@ -647,6 +758,37 @@ where
         {
             return Err(CommonProofProverError::InvalidInput);
         }
+        let destination_block_fold = if let Some(challenges) = block_folding_challenges {
+            if !plan
+                .source_covector_element_count
+                .is_multiple_of(plan.ring_degree)
+                || source_block_count < 2
+                || !source_block_count.is_power_of_two()
+                || challenges.len()
+                    != usize::try_from(source_block_count.ilog2())
+                        .map_err(|_| CommonProofProverError::CountOverflow)?
+                || plan.public_product_tasks.iter().any(|task| {
+                    !task
+                        .private_vector_first_destination_element
+                        .is_multiple_of(plan.ring_degree)
+                })
+            {
+                return Err(CommonProofProverError::InvalidInput);
+            }
+            let reversed_point = challenges
+                .iter()
+                .rev()
+                .copied()
+                .map(compact_challenge_to_production)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| CommonProofProverError::InvalidInput)?;
+            Some(DestinationBlockFold {
+                builder: Some(LittleEndianEqualityBuilder::new(reversed_point)?),
+                weights: None,
+            })
+        } else {
+            None
+        };
         let ring_variable_count = usize::try_from(plan.ring_variable_count)
             .map_err(|_| CommonProofProverError::CountOverflow)?;
         let coefficient_point = fallible_challenge_point_copy(&row_point[..ring_variable_count])?;
@@ -673,6 +815,7 @@ where
             plan,
             matrix_role_weights,
             destination: Some(destination),
+            destination_block_fold,
             coefficient_equality_builder: Some(LittleEndianEqualityBuilder::new(
                 coefficient_point,
             )?),
@@ -683,10 +826,21 @@ where
             public_transform: None,
             product_transform: None,
             transform_domain,
-            phase: AccumulatorPhase::BuildCoefficientEquality,
+            phase: if projected {
+                AccumulatorPhase::BuildDestinationProjection
+            } else {
+                AccumulatorPhase::BuildCoefficientEquality
+            },
         })
     }
 
+    /// Advances through one element chunk or one isolated transform.
+    ///
+    /// Every returned `StepCompleted` is a deterministic orchestration
+    /// checkpoint boundary. Radix-two transforms themselves are deliberately
+    /// indivisible: their phase and complete input buffer are the state that a
+    /// future authenticated checkpoint format would have to retain. This type
+    /// does not speculate about or serialize that format.
     pub(crate) fn advance(
         &mut self,
         maximum_element_count: u64,
@@ -698,6 +852,32 @@ where
         }
         loop {
             match self.phase {
+                AccumulatorPhase::BuildDestinationProjection => {
+                    let projection = self
+                        .destination_block_fold
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?;
+                    let builder = projection
+                        .builder
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?;
+                    if builder.is_complete() {
+                        projection.weights = Some(
+                            projection
+                                .builder
+                                .take()
+                                .ok_or(CommonProofProverError::InvalidInput)?
+                                .finish()?,
+                        );
+                        self.phase = AccumulatorPhase::BuildCoefficientEquality;
+                        continue;
+                    }
+                    let completed_parent_count = builder.advance(maximum_element_count_usize)?;
+                    return step_completed(
+                        CompactStructuredWitnessCovectorAccumulatorStep::DestinationProjection,
+                        completed_parent_count,
+                    );
+                }
                 AccumulatorPhase::BuildCoefficientEquality => {
                     let builder = self
                         .coefficient_equality_builder
@@ -914,9 +1094,19 @@ where
                                 .as_mut()
                                 .ok_or(CommonProofProverError::InvalidInput)?,
                         )?;
-                    self.phase = AccumulatorPhase::PublicAdjointFill {
-                        task_ordinal: 0,
-                        next_coefficient_ordinal: 0,
+                    self.phase = if self.destination_block_fold.is_some() {
+                        self.product_transform = Some(fallible_zeroed_extension_vector(
+                            self.plan.transform_domain_size,
+                        )?);
+                        AccumulatorPhase::ProjectedPublicAdjointFill {
+                            task_ordinal: 0,
+                            next_coefficient_ordinal: 0,
+                        }
+                    } else {
+                        AccumulatorPhase::PublicAdjointFill {
+                            task_ordinal: 0,
+                            next_coefficient_ordinal: 0,
+                        }
                     };
                     return Ok(
                         CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
@@ -1137,6 +1327,195 @@ where
                         },
                     );
                 }
+                AccumulatorPhase::ProjectedPublicAdjointFill {
+                    task_ordinal,
+                    next_coefficient_ordinal,
+                } => {
+                    let Some(&task) = self.plan.public_product_tasks.get(task_ordinal) else {
+                        self.phase = AccumulatorPhase::ProjectedPublicPolynomialForwardTransform;
+                        continue;
+                    };
+                    if next_coefficient_ordinal == self.plan.ring_degree {
+                        self.phase = AccumulatorPhase::ProjectedPublicAdjointFill {
+                            task_ordinal: task_ordinal
+                                .checked_add(1)
+                                .ok_or(CommonProofProverError::CountOverflow)?,
+                            next_coefficient_ordinal: 0,
+                        };
+                        continue;
+                    }
+                    let completed_coefficient_count = self
+                        .plan
+                        .ring_degree
+                        .checked_sub(next_coefficient_ordinal)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        .min(maximum_element_count);
+                    let end_coefficient_ordinal = next_coefficient_ordinal
+                        .checked_add(completed_coefficient_count)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let destination_block_ordinal = task
+                        .private_vector_first_destination_element
+                        .checked_div(self.plan.ring_degree)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let destination_projection_weight =
+                        self.destination_projection_weight(destination_block_ordinal)?;
+                    let scale = self
+                        .block_weight(task.row_block_ordinal)?
+                        .multiply(self.matrix_role_weights[task.matrix_role.ordinal()])
+                        .multiply_base(base_element_from_signed_integer(task.integer_coefficient)?)
+                        .multiply(destination_projection_weight);
+                    let product_transform = self
+                        .product_transform
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?;
+                    for adjoint_coefficient_ordinal in
+                        next_coefficient_ordinal..end_coefficient_ordinal
+                    {
+                        let source_coefficient_ordinal = if adjoint_coefficient_ordinal == 0 {
+                            0
+                        } else {
+                            self.plan.ring_degree - adjoint_coefficient_ordinal
+                        };
+                        let mut coefficient = self.source.public_input_base_value(
+                            task.public_vector_first_element
+                                .checked_add(source_coefficient_ordinal)
+                                .ok_or(CommonProofProverError::CountOverflow)?,
+                        )?;
+                        if adjoint_coefficient_ordinal != 0 {
+                            coefficient = coefficient.negate();
+                        }
+                        let coefficient_index = usize::try_from(adjoint_coefficient_ordinal)
+                            .map_err(|_| CommonProofProverError::CountOverflow)?;
+                        product_transform[coefficient_index] = product_transform[coefficient_index]
+                            .add(scale.multiply_base(coefficient));
+                    }
+                    self.phase = AccumulatorPhase::ProjectedPublicAdjointFill {
+                        task_ordinal,
+                        next_coefficient_ordinal: end_coefficient_ordinal,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicAdjointFill,
+                            completed_work_unit_count: completed_coefficient_count,
+                        },
+                    );
+                }
+                AccumulatorPhase::ProjectedPublicPolynomialForwardTransform => {
+                    self.transform_domain
+                        .evaluate_extension_polynomial_in_place(
+                            self.product_transform
+                                .as_mut()
+                                .ok_or(CommonProofProverError::InvalidInput)?,
+                        )?;
+                    self.phase = AccumulatorPhase::ProjectedPointwiseProduct {
+                        next_evaluation_ordinal: 0,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicPolynomialForwardTransform,
+                            completed_work_unit_count: transform_butterfly_count(
+                                self.plan.transform_domain_size,
+                            )?,
+                        },
+                    );
+                }
+                AccumulatorPhase::ProjectedPointwiseProduct {
+                    next_evaluation_ordinal,
+                } => {
+                    if next_evaluation_ordinal == self.plan.transform_domain_size {
+                        self.phase = AccumulatorPhase::ProjectedProductPolynomialInverseTransform;
+                        continue;
+                    }
+                    let completed_evaluation_count = self
+                        .plan
+                        .transform_domain_size
+                        .checked_sub(next_evaluation_ordinal)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        .min(maximum_element_count);
+                    let end_evaluation_ordinal = next_evaluation_ordinal
+                        .checked_add(completed_evaluation_count)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let coefficient_equality = self
+                        .coefficient_equality
+                        .as_ref()
+                        .ok_or(CommonProofProverError::InvalidInput)?;
+                    let product_transform = self
+                        .product_transform
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?;
+                    for evaluation_ordinal in next_evaluation_ordinal..end_evaluation_ordinal {
+                        let evaluation_index = usize::try_from(evaluation_ordinal)
+                            .map_err(|_| CommonProofProverError::CountOverflow)?;
+                        product_transform[evaluation_index] = product_transform[evaluation_index]
+                            .multiply(coefficient_equality[evaluation_index]);
+                    }
+                    self.phase = AccumulatorPhase::ProjectedPointwiseProduct {
+                        next_evaluation_ordinal: end_evaluation_ordinal,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPointwiseProduct,
+                            completed_work_unit_count: completed_evaluation_count,
+                        },
+                    );
+                }
+                AccumulatorPhase::ProjectedProductPolynomialInverseTransform => {
+                    self.transform_domain
+                        .interpolate_extension_polynomial_in_place(
+                            self.product_transform
+                                .as_mut()
+                                .ok_or(CommonProofProverError::InvalidInput)?,
+                        )?;
+                    self.phase = AccumulatorPhase::ProjectedNegacyclicProductFold {
+                        next_coefficient_ordinal: 0,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::ProjectedProductPolynomialInverseTransform,
+                            completed_work_unit_count: transform_butterfly_count(
+                                self.plan.transform_domain_size,
+                            )?,
+                        },
+                    );
+                }
+                AccumulatorPhase::ProjectedNegacyclicProductFold {
+                    next_coefficient_ordinal,
+                } => {
+                    if next_coefficient_ordinal == self.plan.ring_degree {
+                        self.product_transform = None;
+                        self.coefficient_equality = None;
+                        self.block_equality = None;
+                        self.phase = AccumulatorPhase::Complete;
+                        continue;
+                    }
+                    let completed_coefficient_count = self
+                        .plan
+                        .ring_degree
+                        .checked_sub(next_coefficient_ordinal)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        .min(maximum_element_count);
+                    let end_coefficient_ordinal = next_coefficient_ordinal
+                        .checked_add(completed_coefficient_count)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    for coefficient_ordinal in next_coefficient_ordinal..end_coefficient_ordinal {
+                        let lower = self.product_coefficient(coefficient_ordinal)?;
+                        let upper = self.product_coefficient(
+                            coefficient_ordinal
+                                .checked_add(self.plan.ring_degree)
+                                .ok_or(CommonProofProverError::CountOverflow)?,
+                        )?;
+                        self.add_projected_destination(coefficient_ordinal, lower.subtract(upper))?;
+                    }
+                    self.phase = AccumulatorPhase::ProjectedNegacyclicProductFold {
+                        next_coefficient_ordinal: end_coefficient_ordinal,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::ProjectedNegacyclicProductFold,
+                            completed_work_unit_count: completed_coefficient_count,
+                        },
+                    );
+                }
                 AccumulatorPhase::Complete => {
                     return Ok(CompactStructuredWitnessCovectorAccumulatorPoll::Complete(
                         self.destination
@@ -1258,6 +1637,42 @@ where
         destination_element: u64,
         contribution: ProofChallengeExtensionElement,
     ) -> Result<(), CommonProofProverError> {
+        if self.destination_block_fold.is_some() {
+            let destination_block_ordinal = destination_element
+                .checked_div(self.plan.ring_degree)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let projected_destination_element = destination_element % self.plan.ring_degree;
+            let projection_weight =
+                self.destination_projection_weight(destination_block_ordinal)?;
+            return self.add_projected_destination(
+                projected_destination_element,
+                contribution.multiply(projection_weight),
+            );
+        }
+        self.add_projected_destination(destination_element, contribution)
+    }
+
+    fn destination_projection_weight(
+        &self,
+        destination_block_ordinal: u64,
+    ) -> Result<ProofChallengeExtensionElement, CommonProofProverError> {
+        self.destination_block_fold
+            .as_ref()
+            .and_then(|projection| projection.weights.as_ref())
+            .and_then(|weights| {
+                usize::try_from(destination_block_ordinal)
+                    .ok()
+                    .and_then(|ordinal| weights.get(ordinal))
+            })
+            .copied()
+            .ok_or(CommonProofProverError::InvalidInput)
+    }
+
+    fn add_projected_destination(
+        &mut self,
+        destination_element: u64,
+        contribution: ProofChallengeExtensionElement,
+    ) -> Result<(), CommonProofProverError> {
         let destination = self
             .destination
             .as_mut()
@@ -1375,6 +1790,17 @@ fn fallible_extension_vector(
     Ok(Zeroizing::new(values))
 }
 
+fn fallible_zeroed_extension_vector(
+    length: u64,
+) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
+    let mut values = fallible_extension_vector(length)?;
+    values.resize(
+        usize::try_from(length).map_err(|_| CommonProofProverError::CountOverflow)?,
+        ProofChallengeExtensionElement::ZERO,
+    );
+    Ok(values)
+}
+
 fn fallible_challenge_point_copy(
     point: &[CompactChallengeField],
 ) -> Result<Vec<ProofChallengeExtensionElement>, CommonProofProverError> {
@@ -1414,6 +1840,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     use super::*;
+    use crate::bgv::proof_suite::relation_plan::compact_ring_vector::selected_compact_public_key_relation_catalog;
 
     struct SmallTransposeSource {
         public_values: Vec<ProofBaseFieldElement>,
@@ -1497,77 +1924,358 @@ mod tests {
     }
 
     #[test]
-    fn small_pollable_transpose_matches_direct_dense_matrix_interpretation() {
+    fn selected_projected_transpose_has_no_full_covector_buffer() {
+        let relation = selected_compact_public_key_relation_catalog()
+            .expect("selected compact public-key relation");
+        let matrices =
+            CompactStructuredR1csCatalog::derive(&relation).expect("selected structured matrices");
+        let geometry = CompactStructuredWitnessCovectorGeometry::derive(&relation, &matrices)
+            .expect("selected transpose geometry");
+        let plan = StructuredTransposePlan::from_production(&relation, &matrices, geometry)
+            .expect("selected transpose plan");
+        let source_block_count = plan.source_covector_element_count / plan.ring_degree;
+        let projected_destination_element_count = plan.ring_degree;
+
+        assert_eq!(source_block_count, 128);
+        assert_eq!(source_block_count.ilog2(), 7);
+        assert_eq!(projected_destination_element_count, 32_768);
+        assert_eq!(plan.source_covector_element_count, 4_194_304);
+        assert_eq!(plan.public_product_tasks.len(), 32);
+        assert!(plan.public_product_tasks.iter().all(|task| {
+            task.private_vector_first_destination_element
+                .is_multiple_of(plan.ring_degree)
+        }));
+
+        let lookup_phase_logical_extension_element_inventory = projected_destination_element_count
+            + source_block_count
+            + plan.ring_degree
+            + plan.ring_block_count
+            + plan.lookup_reciprocal_task.table_value_count;
+        let aggregate_product_phase_logical_extension_element_inventory =
+            projected_destination_element_count
+                + source_block_count
+                + plan.ring_block_count
+                + 2 * plan.transform_domain_size;
+        assert_eq!(lookup_phase_logical_extension_element_inventory, 196_992);
+        assert_eq!(
+            aggregate_product_phase_logical_extension_element_inventory,
+            164_224
+        );
+        assert!(
+            lookup_phase_logical_extension_element_inventory < plan.source_covector_element_count
+                && aggregate_product_phase_logical_extension_element_inventory
+                    < plan.source_covector_element_count
+        );
+    }
+
+    #[test]
+    fn small_projected_transpose_matches_dense_accumulator_and_direct_matrix() {
         let ring_degree = 4_u64;
-        let public_values = [2_u64, 3, 5, 7]
+        let public_values = [2_u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
             .into_iter()
             .map(|value| ProofBaseFieldElement::from_canonical(value).expect("public value"))
             .collect::<Vec<_>>();
         let lookup_challenge =
             compact_challenge_to_production(challenge(11)).expect("lookup challenge");
-        let source = SmallTransposeSource {
-            public_values: public_values.clone(),
-            lookup_challenge,
-        };
         let plan = StructuredTransposePlan {
             ring_degree,
             ring_variable_count: 2,
-            ring_block_count: 2,
-            ring_block_variable_count: 1,
-            source_covector_element_count: 8,
+            ring_block_count: 4,
+            ring_block_variable_count: 2,
+            source_covector_element_count: 16,
             transform_domain_size: 8,
             sparse_tasks: vec![
                 SparseTask::Block(BlockStaticTask {
                     row_block_ordinal: 0,
-                    first_destination_element: 0,
+                    first_destination_element: 4,
                     integer_coefficient: 2,
                     matrix_role: CompactCfwMatrixRole::LeftMultiplicand,
                 }),
                 SparseTask::Block(BlockStaticTask {
-                    row_block_ordinal: 0,
-                    first_destination_element: 4,
+                    row_block_ordinal: 2,
+                    first_destination_element: 0,
                     integer_coefficient: -1,
                     matrix_role: CompactCfwMatrixRole::RightMultiplicand,
                 }),
                 SparseTask::Range(RangeStaticTask {
-                    row_block_ordinal: 1,
+                    row_block_ordinal: 3,
                     row_coefficient_ordinal: 0,
-                    first_destination_element: 1,
+                    first_destination_element: 9,
                     element_count: 3,
                     integer_coefficient: 1,
-                    matrix_role: CompactCfwMatrixRole::LeftMultiplicand,
+                    matrix_role: CompactCfwMatrixRole::Product,
                 }),
             ]
             .into_boxed_slice(),
-            public_product_tasks: vec![PublicProductTask {
-                row_block_ordinal: 0,
-                public_vector_first_element: 0,
-                private_vector_first_destination_element: 0,
-                integer_coefficient: -3,
-                matrix_role: CompactCfwMatrixRole::Product,
-            }]
+            public_product_tasks: vec![
+                PublicProductTask {
+                    row_block_ordinal: 0,
+                    public_vector_first_element: 0,
+                    private_vector_first_destination_element: 0,
+                    integer_coefficient: -3,
+                    matrix_role: CompactCfwMatrixRole::Product,
+                },
+                PublicProductTask {
+                    row_block_ordinal: 1,
+                    public_vector_first_element: 4,
+                    private_vector_first_destination_element: 8,
+                    integer_coefficient: 2,
+                    matrix_role: CompactCfwMatrixRole::LeftMultiplicand,
+                },
+                PublicProductTask {
+                    row_block_ordinal: 3,
+                    public_vector_first_element: 8,
+                    private_vector_first_destination_element: 12,
+                    integer_coefficient: -2,
+                    matrix_role: CompactCfwMatrixRole::RightMultiplicand,
+                },
+            ]
             .into_boxed_slice(),
             lookup_reciprocal_task: LookupReciprocalTask {
-                row_block_ordinal: 1,
+                row_block_ordinal: 2,
                 row_coefficient_ordinal: 0,
                 first_destination_element: 4,
                 table_value_count: 4,
                 matrix_role: CompactCfwMatrixRole::RightMultiplicand,
             },
         };
-        let compact_row_point = [challenge(31), challenge(41), challenge(51)];
+        let compact_row_point = [challenge(31), challenge(41), challenge(51), challenge(57)];
         let matrix_role_weights = [challenge(61), challenge(71), challenge(81)];
-        let mut accumulator = CompactStructuredWitnessCovectorAccumulator::new(
-            &source,
-            plan,
-            &compact_row_point,
-            matrix_role_weights,
-            vec![CompactChallengeField::ZERO; 8],
+        let folding_challenges = [challenge(91), challenge(101)];
+        let [first_challenge, second_challenge] = folding_challenges;
+        let block_weights = [
+            (CompactChallengeField::ONE - first_challenge)
+                * (CompactChallengeField::ONE - second_challenge),
+            (CompactChallengeField::ONE - first_challenge) * second_challenge,
+            first_challenge * (CompactChallengeField::ONE - second_challenge),
+            first_challenge * second_challenge,
+        ];
+        let dense_initial = (0..16_u64)
+            .map(|ordinal| challenge(131 + ordinal))
+            .collect::<Vec<_>>();
+        let projected_initial = (0..4)
+            .map(|coefficient_ordinal| {
+                block_weights.iter().enumerate().fold(
+                    CompactChallengeField::ZERO,
+                    |value, (block_ordinal, weight)| {
+                        value + *weight * dense_initial[4 * block_ordinal + coefficient_ordinal]
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let dense_source = SmallTransposeSource {
+            public_values: public_values.clone(),
+            lookup_challenge,
+        };
+        let (actual, step_work) = drain_accumulator(
+            CompactStructuredWitnessCovectorAccumulator::new(
+                dense_source,
+                plan.clone(),
+                &compact_row_point,
+                matrix_role_weights,
+                dense_initial.clone(),
+            )
+            .expect("small dense accumulator"),
+            3,
+        );
+
+        let row_point = compact_row_point
+            .map(|value| compact_challenge_to_production(value).expect("row point"));
+        let role_weights = matrix_role_weights
+            .map(|value| compact_challenge_to_production(value).expect("role weight"));
+        let mut direct = dense_initial
+            .iter()
+            .copied()
+            .map(|value| compact_challenge_to_production(value).expect("initial coefficient"))
+            .collect::<Vec<_>>();
+        for row_ordinal in 0..16_usize {
+            let row_block_ordinal = row_ordinal / 4;
+            let ring_row_ordinal = row_ordinal % 4;
+            let row_weight = little_endian_row_weight(&row_point, row_ordinal);
+            for (destination_ordinal, destination) in direct.iter_mut().enumerate() {
+                let mut entries = [ProofChallengeExtensionElement::ZERO; 3];
+                match row_block_ordinal {
+                    0 => {
+                        if destination_ordinal == 4 + ring_row_ordinal {
+                            entries[0] = entries[0].add(signed_extension(2));
+                        }
+                        if destination_ordinal < 4 {
+                            entries[2] = entries[2].add(direct_public_band_entry(
+                                &public_values[0..4],
+                                ring_row_ordinal,
+                                destination_ordinal,
+                                -3,
+                            ));
+                        }
+                    }
+                    1 if (8..12).contains(&destination_ordinal) => {
+                        entries[0] = entries[0].add(direct_public_band_entry(
+                            &public_values[4..8],
+                            ring_row_ordinal,
+                            destination_ordinal - 8,
+                            2,
+                        ));
+                    }
+                    2 => {
+                        if destination_ordinal == ring_row_ordinal {
+                            entries[1] = entries[1].add(signed_extension(-1));
+                        }
+                        if ring_row_ordinal == 0 && (4..8).contains(&destination_ordinal) {
+                            let table_value =
+                                u64::try_from(destination_ordinal - 4).expect("small table value");
+                            entries[1] = entries[1].add(
+                                lookup_challenge
+                                    .add(ProofChallengeExtensionElement::from_base(
+                                        ProofBaseFieldElement::from_canonical(table_value)
+                                            .expect("table value"),
+                                    ))
+                                    .inverse()
+                                    .expect("nonzero lookup denominator")
+                                    .negate(),
+                            );
+                        }
+                    }
+                    3 => {
+                        if ring_row_ordinal == 0 && (9..12).contains(&destination_ordinal) {
+                            entries[2] = entries[2].add(ProofChallengeExtensionElement::ONE);
+                        }
+                        if (12..16).contains(&destination_ordinal) {
+                            entries[1] = entries[1].add(direct_public_band_entry(
+                                &public_values[8..12],
+                                ring_row_ordinal,
+                                destination_ordinal - 12,
+                                -2,
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+                let combined_entry = entries.into_iter().zip(role_weights).fold(
+                    ProofChallengeExtensionElement::ZERO,
+                    |value, (entry, role)| value.add(entry.multiply(role)),
+                );
+                *destination = destination.add(row_weight.multiply(combined_entry));
+            }
+        }
+        assert_eq!(
+            actual,
+            direct
+                .into_iter()
+                .map(compact_challenge_from_production)
+                .collect::<Vec<_>>()
+        );
+
+        let projected_source = SmallTransposeSource {
+            public_values,
+            lookup_challenge,
+        };
+        let (projected_actual, projected_step_work) = drain_accumulator(
+            CompactStructuredWitnessCovectorAccumulator::new_with_block_fold(
+                projected_source,
+                plan,
+                &compact_row_point,
+                matrix_role_weights,
+                projected_initial,
+                &folding_challenges,
+            )
+            .expect("small projected accumulator"),
+            3,
+        );
+        let projected_expected = (0..4)
+            .map(|coefficient_ordinal| {
+                block_weights.iter().enumerate().fold(
+                    CompactChallengeField::ZERO,
+                    |value, (block_ordinal, weight)| {
+                        value + *weight * actual[4 * block_ordinal + coefficient_ordinal]
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(projected_actual, projected_expected);
+        assert_eq!(
+            projected_step_work,
+            BTreeMap::from([
+                (CompactStructuredWitnessCovectorAccumulatorStep::DestinationProjection, 3),
+                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEquality, 3),
+                (CompactStructuredWitnessCovectorAccumulatorStep::BlockEquality, 3),
+                (CompactStructuredWitnessCovectorAccumulatorStep::SparseWitness, 11),
+                (CompactStructuredWitnessCovectorAccumulatorStep::LookupTablePrefixProduct, 4),
+                (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableProductInversion, 1),
+                (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableReversePass, 4),
+                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicAdjointFill, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicPolynomialForwardTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPointwiseProduct, 8),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedProductPolynomialInverseTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedNegacyclicProductFold, 4),
+            ])
+        );
+        assert_eq!(
+            step_work,
+            BTreeMap::from([
+                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEquality, 3),
+                (CompactStructuredWitnessCovectorAccumulatorStep::BlockEquality, 3),
+                (CompactStructuredWitnessCovectorAccumulatorStep::SparseWitness, 11),
+                (CompactStructuredWitnessCovectorAccumulatorStep::LookupTablePrefixProduct, 4),
+                (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableProductInversion, 1),
+                (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableReversePass, 4),
+                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::PublicAdjointFill, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::PublicPolynomialForwardTransform, 36),
+                (CompactStructuredWitnessCovectorAccumulatorStep::PointwiseProduct, 24),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProductPolynomialInverseTransform, 36),
+                (CompactStructuredWitnessCovectorAccumulatorStep::NegacyclicProductFold, 12),
+            ])
+        );
+    }
+
+    fn direct_public_band_entry(
+        public_values: &[ProofBaseFieldElement],
+        row_coefficient_ordinal: usize,
+        destination_coefficient_ordinal: usize,
+        integer_coefficient: i128,
+    ) -> ProofChallengeExtensionElement {
+        public_values.iter().copied().enumerate().fold(
+            ProofChallengeExtensionElement::ZERO,
+            |value, (public_coefficient_ordinal, public_value)| {
+                let (private_coefficient_ordinal, wrapped) =
+                    if public_coefficient_ordinal <= row_coefficient_ordinal {
+                        (row_coefficient_ordinal - public_coefficient_ordinal, false)
+                    } else {
+                        (
+                            4 + row_coefficient_ordinal - public_coefficient_ordinal,
+                            true,
+                        )
+                    };
+                if private_coefficient_ordinal != destination_coefficient_ordinal {
+                    return value;
+                }
+                let coefficient = if wrapped {
+                    -integer_coefficient
+                } else {
+                    integer_coefficient
+                };
+                value.add(
+                    ProofChallengeExtensionElement::from_base(public_value)
+                        .multiply(signed_extension(coefficient)),
+                )
+            },
         )
-        .expect("small accumulator");
+    }
+
+    fn drain_accumulator<Source: StructuredTransposeValueSource>(
+        mut accumulator: CompactStructuredWitnessCovectorAccumulator<Source>,
+        maximum_element_count: u64,
+    ) -> (
+        Vec<CompactChallengeField>,
+        BTreeMap<CompactStructuredWitnessCovectorAccumulatorStep, u64>,
+    ) {
         let mut step_work = BTreeMap::new();
-        let actual = loop {
-            match accumulator.advance(3).expect("bounded accumulator poll") {
+        loop {
+            match accumulator
+                .advance(maximum_element_count)
+                .expect("bounded accumulator poll")
+            {
                 CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
                     step,
                     completed_work_unit_count,
@@ -1575,131 +2283,9 @@ mod tests {
                     *step_work.entry(step).or_insert(0_u64) += completed_work_unit_count;
                 }
                 CompactStructuredWitnessCovectorAccumulatorPoll::Complete(destination) => {
-                    break destination;
+                    return (destination, step_work);
                 }
-            }
-        };
-
-        let row_point = compact_row_point
-            .map(|value| compact_challenge_to_production(value).expect("row point"));
-        let role_weights = matrix_role_weights
-            .map(|value| compact_challenge_to_production(value).expect("role weight"));
-        let mut expected = vec![ProofChallengeExtensionElement::ZERO; 8];
-        for row_ordinal in 0..8_usize {
-            let row_weight = little_endian_row_weight(&row_point, row_ordinal);
-            for (destination_ordinal, expected_destination) in expected.iter_mut().enumerate() {
-                let mut left = ProofChallengeExtensionElement::ZERO;
-                let mut right = ProofChallengeExtensionElement::ZERO;
-                let mut output = ProofChallengeExtensionElement::ZERO;
-                if row_ordinal < 4 {
-                    if destination_ordinal == row_ordinal {
-                        left = left.add(signed_extension(2));
-                    }
-                    if destination_ordinal == 4 + row_ordinal {
-                        right = right.add(signed_extension(-1));
-                    }
-                    for (public_coefficient_ordinal, public_value) in
-                        public_values.iter().copied().enumerate()
-                    {
-                        let (private_coefficient_ordinal, negative) =
-                            if public_coefficient_ordinal <= row_ordinal {
-                                (row_ordinal - public_coefficient_ordinal, false)
-                            } else {
-                                (4 + row_ordinal - public_coefficient_ordinal, true)
-                            };
-                        if destination_ordinal == private_coefficient_ordinal {
-                            let signed_product_coefficient = if negative { 3 } else { -3 };
-                            output = output.add(
-                                ProofChallengeExtensionElement::from_base(public_value)
-                                    .multiply(signed_extension(signed_product_coefficient)),
-                            );
-                        }
-                    }
-                } else if row_ordinal == 4 {
-                    if (1..4).contains(&destination_ordinal) {
-                        left = left.add(ProofChallengeExtensionElement::ONE);
-                    }
-                    if destination_ordinal >= 4 {
-                        let table_value =
-                            u64::try_from(destination_ordinal - 4).expect("small table value");
-                        let reciprocal = lookup_challenge
-                            .add(ProofChallengeExtensionElement::from_base(
-                                ProofBaseFieldElement::from_canonical(table_value)
-                                    .expect("table value"),
-                            ))
-                            .inverse()
-                            .expect("nonzero lookup denominator")
-                            .negate();
-                        right = right.add(reciprocal);
-                    }
-                }
-                let combined_entry = left
-                    .multiply(role_weights[0])
-                    .add(right.multiply(role_weights[1]))
-                    .add(output.multiply(role_weights[2]));
-                *expected_destination =
-                    expected_destination.add(row_weight.multiply(combined_entry));
             }
         }
-        assert_eq!(
-            actual,
-            expected
-                .into_iter()
-                .map(compact_challenge_from_production)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            step_work,
-            BTreeMap::from([
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEquality,
-                    3,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::BlockEquality,
-                    1,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::SparseWitness,
-                    11,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::LookupTablePrefixProduct,
-                    4,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::LookupTableProductInversion,
-                    1,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::LookupTableReversePass,
-                    4,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform,
-                    12,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::PublicAdjointFill,
-                    4,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::PublicPolynomialForwardTransform,
-                    12,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::PointwiseProduct,
-                    8,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::ProductPolynomialInverseTransform,
-                    12,
-                ),
-                (
-                    CompactStructuredWitnessCovectorAccumulatorStep::NegacyclicProductFold,
-                    4,
-                ),
-            ])
-        );
     }
 }

@@ -21,6 +21,7 @@ pub(crate) use super::compact_cfw_geometry::{
 use super::field::{PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement};
 
 pub(crate) type CompactChallengeField = BinomialExtensionField<Goldilocks, 5>;
+const COMPACT_CFW_CROSS_EPOCH_MASK_COVECTOR_COUNT: usize = 2;
 
 pub(crate) fn compact_challenge_from_production(
     value: ProofChallengeExtensionElement,
@@ -1081,6 +1082,34 @@ pub(crate) struct CompactCfwClaimCombinationContinuation {
     preceding_opening_claim_count: usize,
 }
 
+/// Target-free public coefficient seed for the selected main WHIR opening.
+///
+/// This is coefficient algebra only. It is derived from verifier challenges
+/// and contract geometry and cannot replace the separate CFW target and
+/// endpoint checks on the proof-verification path.
+pub(crate) struct CompactCfwPublicMainCovectorCombination {
+    continuation: CompactCfwPublicMainCovectorContinuation,
+    source_covector: Vec<CompactChallengeField>,
+}
+
+pub(crate) struct CompactCfwPublicMainCovectorContinuation {
+    geometry: CompactCfwGeometry,
+    projected_source_element_count: usize,
+    sumcheck_point: Vec<CompactChallengeField>,
+    joint_inner_mask_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+    batching_challenge: CompactChallengeField,
+    joint_batching_coefficient: CompactChallengeField,
+    cross_mask_covectors: Vec<Vec<CompactChallengeField>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCfwPublicMainCovectors {
+    pub(crate) source: Vec<CompactChallengeField>,
+    pub(crate) inner_masks: Vec<Vec<CompactChallengeField>>,
+    pub(crate) outer_masks: Vec<Vec<CompactChallengeField>>,
+    pub(crate) cross_epoch_masks: Vec<Vec<CompactChallengeField>>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactCfwToWhirPayloadGeometry {
     source_variable_count: usize,
@@ -1285,8 +1314,6 @@ impl CompactCfwClaimBatch {
         batching_challenge: CompactChallengeField,
     ) -> Result<CompactCfwMatrixClaimCombination, CompactCfwError> {
         const CROSS_EPOCH_CLAIM_COUNT: usize = 2;
-        const CROSS_EPOCH_MASK_COVECTOR_ELEMENT_COUNT: usize = 2;
-
         if self.sumcheck_point.len() != self.geometry.sumcheck_round_count()
             || self.outer_evaluations.len() != self.geometry.outer_mask_count()
             || self.sumcheck_point.capacity() != self.sumcheck_point.len()
@@ -1298,7 +1325,7 @@ impl CompactCfwClaimBatch {
             CompactCfwToWhirPayloadGeometry::derive_with_preceding_mask_covector_element_count(
                 self.geometry,
                 CROSS_EPOCH_CLAIM_COUNT,
-                CROSS_EPOCH_MASK_COVECTOR_ELEMENT_COUNT,
+                COMPACT_CFW_CROSS_EPOCH_MASK_COVECTOR_COUNT,
             )?;
         let expected_cross_epoch_point_coordinate_count = payload_geometry
             .source_variable_count()
@@ -1363,6 +1390,157 @@ impl CompactCfwClaimBatch {
                 preceding_opening_claim_count: CROSS_EPOCH_CLAIM_COUNT,
             },
             source_covector,
+        })
+    }
+}
+
+impl CompactCfwPublicMainCovectorCombination {
+    pub(crate) fn from_public_challenges_after_first_whir_fold(
+        geometry: CompactCfwGeometry,
+        cross_epoch_point: &[CompactChallengeField],
+        copied_main_source_element_count: usize,
+        sumcheck_point: &[CompactChallengeField],
+        joint_challenge: CompactChallengeField,
+        batching_challenge: CompactChallengeField,
+        first_fold_challenges: &[CompactChallengeField],
+    ) -> Result<Self, CompactCfwError> {
+        let expected_cross_epoch_point_coordinate_count =
+            usize::try_from(geometry.witness_length().ilog2())
+                .map_err(|_| CompactCfwError::CountOverflow)?
+                .checked_sub(1)
+                .ok_or(CompactCfwError::InvalidClaimInput)?;
+        let pre_challenge_message_element_count = 1_usize
+            .checked_shl(
+                u32::try_from(expected_cross_epoch_point_coordinate_count)
+                    .map_err(|_| CompactCfwError::CountOverflow)?,
+            )
+            .ok_or(CompactCfwError::CountOverflow)?;
+        let projected_source_element_count = geometry
+            .witness_length()
+            .checked_shr(
+                u32::try_from(first_fold_challenges.len())
+                    .map_err(|_| CompactCfwError::CountOverflow)?,
+            )
+            .ok_or(CompactCfwError::CountOverflow)?;
+        if first_fold_challenges.is_empty()
+            || projected_source_element_count == 0
+            || !projected_source_element_count.is_power_of_two()
+            || cross_epoch_point.len() != expected_cross_epoch_point_coordinate_count
+            || copied_main_source_element_count == 0
+            || copied_main_source_element_count > pre_challenge_message_element_count
+            || geometry.witness_length()
+                != pre_challenge_message_element_count
+                    .checked_mul(2)
+                    .ok_or(CompactCfwError::CountOverflow)?
+            || sumcheck_point.len() != geometry.sumcheck_round_count()
+        {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+
+        let mut source_covector = Vec::new();
+        source_covector
+            .try_reserve_exact(projected_source_element_count)
+            .map_err(|_| CompactCfwError::AllocationLimitExceeded)?;
+        source_covector.resize(projected_source_element_count, CompactChallengeField::ZERO);
+        if source_covector.capacity() != projected_source_element_count {
+            return Err(CompactCfwError::AllocationLimitExceeded);
+        }
+        accumulate_projected_multilinear_prefix_covector(
+            &mut source_covector,
+            cross_epoch_point,
+            copied_main_source_element_count,
+            first_fold_challenges,
+        )?;
+        let joint_batching_coefficient = batching_challenge * batching_challenge;
+        Ok(Self {
+            continuation: CompactCfwPublicMainCovectorContinuation {
+                geometry,
+                projected_source_element_count,
+                sumcheck_point: sumcheck_point.to_vec(),
+                joint_inner_mask_weights: compact_cfw_zero_evader_weights(joint_challenge),
+                batching_challenge,
+                joint_batching_coefficient,
+                cross_mask_covectors: vec![
+                    vec![batching_challenge],
+                    vec![CompactChallengeField::ONE - batching_challenge],
+                ],
+            },
+            source_covector,
+        })
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        CompactCfwPublicMainCovectorContinuation,
+        Vec<CompactChallengeField>,
+    ) {
+        (self.continuation, self.source_covector)
+    }
+}
+
+impl CompactCfwPublicMainCovectorContinuation {
+    pub(crate) fn row_point(&self) -> &[CompactChallengeField] {
+        &self.sumcheck_point
+    }
+
+    pub(crate) fn matrix_role_weights(&self) -> [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT] {
+        self.joint_inner_mask_weights
+            .map(|weight| weight * self.joint_batching_coefficient)
+    }
+
+    pub(crate) fn finish_after_projected_matrix_accumulation(
+        self,
+        source_covector: Vec<CompactChallengeField>,
+    ) -> Result<CompactCfwPublicMainCovectors, CompactCfwError> {
+        if source_covector.len() != self.projected_source_element_count
+            || source_covector.capacity() != self.projected_source_element_count
+        {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        let inner_mask_multiplier =
+            CompactChallengeField::from_u64(COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER);
+        let mut batching_coefficient = self.joint_batching_coefficient * self.batching_challenge;
+        let mut inner_mask_covectors = Vec::with_capacity(self.geometry.inner_mask_count());
+        for &point_coordinate in &self.sumcheck_point {
+            for matrix_role in CompactCfwMatrixRole::ALL {
+                let mut covector = polynomial_evaluation_covector::<
+                    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH,
+                >(point_coordinate);
+                let joint_scale = self.joint_batching_coefficient
+                    * inner_mask_multiplier
+                    * self.joint_inner_mask_weights[matrix_role.ordinal()];
+                for coefficient in &mut covector {
+                    *coefficient *= joint_scale;
+                }
+                covector[0] += batching_coefficient;
+                batching_coefficient *= self.batching_challenge;
+                for coefficient in &mut covector {
+                    *coefficient += batching_coefficient;
+                }
+                batching_coefficient *= self.batching_challenge;
+                inner_mask_covectors.push(covector.to_vec());
+            }
+        }
+        let mut outer_mask_covectors = Vec::with_capacity(self.geometry.outer_mask_count());
+        for &point_coordinate in &self.sumcheck_point {
+            let mut covector = polynomial_evaluation_covector::<
+                COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH,
+            >(point_coordinate);
+            for coefficient in &mut covector {
+                *coefficient *= batching_coefficient;
+            }
+            batching_coefficient *= self.batching_challenge;
+            outer_mask_covectors.push(covector.to_vec());
+        }
+        if self.cross_mask_covectors.len() != COMPACT_CFW_CROSS_EPOCH_MASK_COVECTOR_COUNT {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        Ok(CompactCfwPublicMainCovectors {
+            source: source_covector,
+            inner_masks: inner_mask_covectors,
+            outer_masks: outer_mask_covectors,
+            cross_epoch_masks: self.cross_mask_covectors,
         })
     }
 }
@@ -1882,6 +2060,76 @@ fn accumulate_scaled_multilinear_prefix_covector(
     Ok(())
 }
 
+/// Applies the known leading WHIR block fold while constructing the public
+/// cross-epoch prefix covector. The full CFW source has one leading zero-half
+/// selector followed by `point`; consequently the first folding coordinate
+/// selects that half and each remaining folded coordinate aligns with the
+/// leading coordinates of `point`.
+fn accumulate_projected_multilinear_prefix_covector(
+    destination: &mut [CompactChallengeField],
+    point: &[CompactChallengeField],
+    copied_element_count: usize,
+    folding_challenges: &[CompactChallengeField],
+) -> Result<(), CompactCfwError> {
+    let folded_coordinate_count = folding_challenges.len();
+    if folded_coordinate_count == 0 || folded_coordinate_count > point.len() + 1 {
+        return Err(CompactCfwError::InvalidClaimInput);
+    }
+    let high_point_coordinate_count = folded_coordinate_count - 1;
+    let low_point = &point[high_point_coordinate_count..];
+    let projected_element_count = 1_usize
+        .checked_shl(u32::try_from(low_point.len()).map_err(|_| CompactCfwError::CountOverflow)?)
+        .ok_or(CompactCfwError::CountOverflow)?;
+    let source_element_count = 1_usize
+        .checked_shl(u32::try_from(point.len()).map_err(|_| CompactCfwError::CountOverflow)?)
+        .ok_or(CompactCfwError::CountOverflow)?;
+    if destination.len() != projected_element_count
+        || copied_element_count == 0
+        || copied_element_count > source_element_count
+    {
+        return Err(CompactCfwError::InvalidClaimInput);
+    }
+
+    let complete_block_count = copied_element_count / projected_element_count;
+    let partial_block_element_count = copied_element_count % projected_element_count;
+    let high_point = &point[..high_point_coordinate_count];
+    let maximum_source_block_count = 1_usize
+        .checked_shl(
+            u32::try_from(high_point_coordinate_count)
+                .map_err(|_| CompactCfwError::CountOverflow)?,
+        )
+        .ok_or(CompactCfwError::CountOverflow)?;
+    if complete_block_count > maximum_source_block_count
+        || (complete_block_count == maximum_source_block_count && partial_block_element_count != 0)
+    {
+        return Err(CompactCfwError::InvalidClaimInput);
+    }
+
+    let mut complete_block_scale = CompactChallengeField::ZERO;
+    for block_ordinal in 0..complete_block_count {
+        complete_block_scale += whir_multilinear_point_weight(folding_challenges, block_ordinal)
+            * whir_multilinear_point_weight(high_point, block_ordinal);
+    }
+    if complete_block_scale != CompactChallengeField::ZERO {
+        accumulate_scaled_multilinear_equality_covector(
+            destination,
+            low_point,
+            complete_block_scale,
+        )?;
+    }
+    if partial_block_element_count != 0 {
+        let block_scale = whir_multilinear_point_weight(folding_challenges, complete_block_count)
+            * whir_multilinear_point_weight(high_point, complete_block_count);
+        accumulate_scaled_multilinear_prefix_covector(
+            destination,
+            low_point,
+            partial_block_element_count,
+            block_scale,
+        )?;
+    }
+    Ok(())
+}
+
 fn field_from_usize(value: usize) -> Result<CompactChallengeField, CompactCfwError> {
     u64::try_from(value)
         .map(CompactChallengeField::from_u64)
@@ -1894,6 +2142,48 @@ mod tests {
     use crate::bgv::proof_suite::field::PROOF_BASE_FIELD_MODULUS;
     use p3_field::{BasedVectorSpace, Field};
     use p3_multilinear_util::poly::Poly;
+
+    #[test]
+    fn projected_public_prefix_matches_dense_first_whir_fold() {
+        let point = [3_u64, 5, 7, 11, 13].map(CompactChallengeField::from_u64);
+        let folding_challenges = [17_u64, 19, 23].map(CompactChallengeField::from_u64);
+        let full_source_element_count = 1_usize << (point.len() + 1);
+        let projected_element_count = full_source_element_count >> folding_challenges.len();
+
+        for copied_element_count in [1_usize, 8, 21, 1 << point.len()] {
+            let mut dense = vec![CompactChallengeField::ZERO; full_source_element_count];
+            accumulate_scaled_multilinear_prefix_covector(
+                &mut dense,
+                &point,
+                copied_element_count,
+                CompactChallengeField::ONE,
+            )
+            .expect("dense public prefix");
+            let expected = (0..projected_element_count)
+                .map(|coefficient_ordinal| {
+                    (0..(1_usize << folding_challenges.len())).fold(
+                        CompactChallengeField::ZERO,
+                        |value, block_ordinal| {
+                            value
+                                + whir_multilinear_point_weight(&folding_challenges, block_ordinal)
+                                    * dense[block_ordinal * projected_element_count
+                                        + coefficient_ordinal]
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut actual = vec![CompactChallengeField::ZERO; projected_element_count];
+            accumulate_projected_multilinear_prefix_covector(
+                &mut actual,
+                &point,
+                copied_element_count,
+                &folding_challenges,
+            )
+            .expect("projected public prefix");
+
+            assert_eq!(actual, expected);
+        }
+    }
 
     #[test]
     fn production_and_compact_challenge_fields_have_identical_canonical_arithmetic() {
