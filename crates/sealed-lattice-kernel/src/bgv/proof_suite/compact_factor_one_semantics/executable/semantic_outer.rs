@@ -9,11 +9,9 @@
 //! commitment. Every backward extractor reruns the selected canonical decoder;
 //! no producer verdict or uncommitted idealized coefficient vector is trusted.
 
+use super::super::{GOLDILOCKS_BASE_FIELD_MODULUS, MaskGroupRole};
 use super::*;
 use crate::bgv::proof_suite::ProofBaseFieldElement;
-use crate::bgv::proof_suite::compact_public_key_static_catalog::{
-    GOLDILOCKS_BASE_FIELD_MODULUS, MaskGroupRole,
-};
 use crate::bgv::proof_suite::relation_plan::{
     CompactLookupRelationGeometry, CompactPublicKeyRelationCatalog,
 };

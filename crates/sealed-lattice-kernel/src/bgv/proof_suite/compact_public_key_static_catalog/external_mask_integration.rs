@@ -12,19 +12,24 @@
 use p3_challenger::{CanObserve, FieldChallenger, HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DFTSmallBatch;
-use p3_field::{PrimeCharacteristicRing, PrimeField64, dot_product};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField64, dot_product};
 use p3_goldilocks::Goldilocks;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_multilinear_util::poly::Poly;
-use p3_sumcheck::zk::stack_codewords;
+use p3_sumcheck::{
+    product_polynomial::ProductPolynomial,
+    strategy::{SumcheckProver, VariableOrder},
+    zk::{ZkSumcheckData, stack_codewords},
+};
 use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher};
 use p3_whir::pcs::zk::{
-    CombinedRelationProverInput, CombinedRelationVerifierInput, HidingWhirProver,
+    BaseCaseFreshMaskGroup, BaseCaseFreshMaterial, BaseCaseZkConfig, BaseCaseZkProver,
+    CombinedRelationProverInput, CombinedRelationVerifierInput, FoldedRsCode, HidingWhirProver,
     HidingWhirRelationInputError, HidingWhirVerifier, MaskCodeShape, MaskGroupShape,
-    MaskProverData, PrecommittedMaskProverGroup, PrecommittedMaskVerifierGroup, ZkVerifierError,
-    ZkWhirConfig, ZkWhirProof,
+    MaskGroupWitness, MaskProverData, PrecommittedMaskProverGroup, PrecommittedMaskVerifierGroup,
+    ZkVerifierError, ZkWhirConfig, ZkWhirProof,
 };
-use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameters};
+use p3_whir::{FoldingFactor, ProtocolParameters, QueryOpening, SecurityAssumption, ZkParameters};
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 use sha3::{
@@ -33,6 +38,16 @@ use sha3::{
 };
 
 use super::ChallengeField;
+use crate::bgv::proof_suite::{
+    compact_masking_coefficient_maps::{
+        CompactCoefficientProjection, CompactMaskingViewRole, apply_affine_mirror,
+        apply_whir_base_case_claim_view, apply_whir_sumcheck_mask_view,
+        derive_selected_compact_masking_coefficient_map_certificate,
+    },
+    compact_proof_contract::{
+        CompactWhirMaskGroupContract, selected_compact_public_key_proof_contract,
+    },
+};
 
 const TEST_HASH_OUTPUT_BYTE_LENGTH: usize = 64;
 const TEST_HASH_OUTPUT_WORD_LENGTH: usize = TEST_HASH_OUTPUT_BYTE_LENGTH / size_of::<u64>();
@@ -186,6 +201,24 @@ fn extension_vector(length: usize, seed: u64) -> Vec<ChallengeField> {
         .collect()
 }
 
+fn selected_mask_group_shape(group: CompactWhirMaskGroupContract) -> MaskGroupShape {
+    let populated_length = usize::try_from(group.message_length + group.randomness_length)
+        .expect("selected mask dimension fits usize");
+    let domain_size = usize::try_from(group.domain_size).expect("selected mask domain fits usize");
+    let padded_populated_length = populated_length.next_power_of_two();
+    assert!(domain_size.is_multiple_of(padded_populated_length));
+    let inverse_rate = domain_size / padded_populated_length;
+    assert!(inverse_rate.is_power_of_two());
+    MaskGroupShape {
+        shape: MaskCodeShape::new(
+            usize::try_from(group.message_length).expect("selected mask message fits usize"),
+            usize::try_from(group.randomness_length).expect("selected mask randomness fits usize"),
+            usize::try_from(inverse_rate.ilog2()).expect("selected mask inverse rate fits usize"),
+        ),
+        width: usize::try_from(group.width).expect("selected mask width fits usize"),
+    }
+}
+
 fn dot(left: &[ChallengeField], right: &[ChallengeField]) -> ChallengeField {
     assert_eq!(left.len(), right.len());
     dot_product::<ChallengeField, _, _>(left.iter().copied(), right.iter().copied())
@@ -236,6 +269,405 @@ fn build_committed_mask_group(
         randomness,
         commitment,
         data,
+    }
+}
+
+pub(in crate::bgv::proof_suite) fn assert_selected_masking_producer_differentials() {
+    let contract = selected_compact_public_key_proof_contract()
+        .expect("selected compact proof contract decodes");
+    let certificate = derive_selected_compact_masking_coefficient_map_certificate()
+        .expect("selected coefficient maps derive");
+    let inputs = contract.verifier_inputs();
+
+    let commitment_scheme = test_commitment_scheme();
+    let extension_commitment_scheme = TestExtensionCommitmentScheme::new(commitment_scheme);
+    let sumcheck_maps = certificate
+        .maps()
+        .iter()
+        .enumerate()
+        .filter(|(_, map)| {
+            matches!(
+                map.projection,
+                CompactCoefficientProjection::WhirSumcheckTranscript { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sumcheck_maps.len(), 8);
+    for (map_ordinal, map) in sumcheck_maps {
+        let CompactCoefficientProjection::WhirSumcheckTranscript {
+            round_count,
+            mask_message_length,
+        } = map.projection
+        else {
+            unreachable!("filtered sumcheck map")
+        };
+        let round_count = usize::try_from(round_count).expect("selected round count fits usize");
+        let evaluations = Poly::new(vec![ChallengeField::ZERO; 1 << round_count]);
+        let weights = Poly::new(extension_vector(
+            1 << round_count,
+            13_000 + map_ordinal as u64,
+        ));
+        let product = ProductPolynomial::<Goldilocks, ChallengeField>::new_unpacked(
+            VariableOrder::Prefix,
+            evaluations,
+            weights,
+        );
+        let prover = SumcheckProver::new(product, ChallengeField::ZERO);
+        let mut data = ZkSumcheckData::default();
+        let mut challenger = test_challenger();
+        let mut random_source = SmallRng::seed_from_u64(0x5100_0000 + map_ordinal as u64);
+        let epoch = &inputs.whir_epochs[usize::from(map.coordinate.epoch - 1)];
+        let group = epoch
+            .internal_mask_groups
+            .iter()
+            .find(|group| group.role_tag == 4 && group.coordinate == map.coordinate.batch_ordinal)
+            .copied()
+            .expect("selected sumcheck group exists");
+        let selected_sumcheck_group = selected_mask_group_shape(group);
+        assert_eq!(selected_sumcheck_group.width, round_count);
+        assert_eq!(
+            selected_sumcheck_group.shape.message_len,
+            usize::try_from(mask_message_length)
+                .expect("selected sumcheck mask message length fits usize"),
+        );
+        let selected_sumcheck_encoding = selected_sumcheck_group.shape;
+        let handoff = prover.into_zk_sumcheck(
+            &mut data,
+            &selected_sumcheck_encoding.encoding::<ChallengeField>(),
+            &extension_commitment_scheme,
+            round_count,
+            0,
+            ChallengeField::ZERO,
+            &mut challenger,
+            &mut random_source,
+        );
+        let challenges = handoff.randomness.iter().copied().collect::<Vec<_>>();
+        let expected = apply_whir_sumcheck_mask_view(&handoff.mask_messages, &challenges)
+            .expect("coefficient map accepts the real p3 masks");
+        let actual = core::iter::once(data.mu_tilde)
+            .chain(data.round_coefficients.into_iter().flatten())
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "selected WHIR sumcheck map {map_ordinal}");
+    }
+
+    assert_eq!(inputs.whir_epochs.len(), 2);
+    let cross_epoch_groups = inputs
+        .whir_epochs
+        .iter()
+        .flat_map(|epoch| &epoch.external_mask_groups)
+        .filter(|group| group.role_tag == 1)
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(cross_epoch_groups.len(), 2);
+    assert_eq!(cross_epoch_groups[0].committed_encoding_source, 1);
+    assert_eq!(cross_epoch_groups[1].committed_encoding_source, 2);
+    let shared_cross_epoch_shape = selected_mask_group_shape(cross_epoch_groups[0]);
+    assert_eq!(
+        selected_mask_group_shape(cross_epoch_groups[1]),
+        shared_cross_epoch_shape,
+    );
+    let shared_cross_epoch_messages = (0..shared_cross_epoch_shape.width)
+        .map(|member| {
+            extension_vector(
+                shared_cross_epoch_shape.shape.message_len,
+                18_000 + member as u64,
+            )
+        })
+        .collect::<Vec<_>>();
+    let shared_cross_epoch_randomness = (0..shared_cross_epoch_shape.width)
+        .map(|member| {
+            extension_vector(
+                shared_cross_epoch_shape.shape.randomness_len,
+                19_000 + member as u64,
+            )
+        })
+        .collect::<Vec<_>>();
+    let shared_cross_epoch_group = build_committed_mask_group(
+        shared_cross_epoch_shape,
+        shared_cross_epoch_messages,
+        shared_cross_epoch_randomness,
+        &extension_commitment_scheme,
+    );
+
+    let dft = Radix2DFTSmallBatch::<Goldilocks>::default();
+    for (epoch_index, epoch) in inputs.whir_epochs.iter().enumerate() {
+        let base_claim_map = certificate
+            .maps()
+            .iter()
+            .find(|map| {
+                map.coordinate.role == CompactMaskingViewRole::Terminal
+                    && usize::from(map.coordinate.epoch) == epoch_index + 1
+                    && matches!(
+                        map.projection,
+                        CompactCoefficientProjection::WhirBaseCaseClaim { .. }
+                    )
+            })
+            .expect("selected base-claim map exists");
+        let CompactCoefficientProjection::WhirBaseCaseClaim { dependencies } =
+            &base_claim_map.projection
+        else {
+            unreachable!("selected base-claim map")
+        };
+        let final_fold = &inputs.whir_folds[epoch_index * 4 + 3];
+        let source_message_length = usize::try_from(final_fold.message_length)
+            .expect("selected final source message fits usize");
+        let source_randomness_length = usize::try_from(final_fold.hiding_randomness_length)
+            .expect("selected final source randomness fits usize");
+        let source_code = FoldedRsCode::<Goldilocks>::new(
+            source_message_length,
+            source_randomness_length,
+            usize::try_from(final_fold.block_length).expect("selected final domain fits usize"),
+        );
+        let group_contracts = epoch
+            .external_mask_groups
+            .iter()
+            .chain(&epoch.internal_mask_groups)
+            .copied()
+            .collect::<Vec<_>>();
+        let groups = group_contracts
+            .iter()
+            .copied()
+            .map(selected_mask_group_shape)
+            .collect::<Vec<_>>();
+        assert_eq!(groups.len() + 1, dependencies.len());
+        let source_dependency = dependencies
+            .first()
+            .expect("selected base-case source dependency exists");
+        assert_eq!(source_dependency.lane_count, 1);
+        assert_eq!(
+            usize::try_from(source_dependency.message_length_per_lane)
+                .expect("selected source dependency message length fits usize"),
+            source_message_length,
+        );
+        assert_eq!(
+            usize::try_from(source_dependency.randomness_length_per_lane)
+                .expect("selected source dependency randomness length fits usize"),
+            source_randomness_length,
+        );
+        for (shape, dependency) in groups.iter().zip(dependencies.iter().skip(1)) {
+            assert_eq!(
+                usize::try_from(dependency.lane_count)
+                    .expect("selected mask dependency lane count fits usize"),
+                shape.width,
+            );
+            assert_eq!(
+                usize::try_from(dependency.message_length_per_lane)
+                    .expect("selected mask dependency message length fits usize"),
+                shape.shape.message_len,
+            );
+            assert_eq!(
+                usize::try_from(dependency.randomness_length_per_lane)
+                    .expect("selected mask dependency randomness length fits usize"),
+                shape.shape.randomness_len,
+            );
+        }
+
+        let source_message = extension_vector(source_message_length, 20_000 + epoch_index as u64);
+        let source_randomness =
+            extension_vector(source_randomness_length, 21_000 + epoch_index as u64);
+        let source_covector = extension_vector(source_message_length, 22_000 + epoch_index as u64);
+        let source_codeword = source_code.encode_column(&dft, &source_message, &source_randomness);
+        let (_, source_data) = extension_commitment_scheme.commit_matrix(source_codeword);
+
+        let mut owned_groups = Vec::new();
+        let mut group_covectors = Vec::new();
+        for (group_ordinal, (group_contract, shape)) in group_contracts
+            .iter()
+            .zip(groups.iter().copied())
+            .enumerate()
+        {
+            let covectors = (0..shape.width)
+                .map(|member| {
+                    extension_vector(
+                        shape.shape.message_len,
+                        25_000 + 101 * group_ordinal as u64 + member as u64,
+                    )
+                })
+                .collect::<Vec<_>>();
+            group_covectors.push(covectors);
+            if group_contract.role_tag == 1 {
+                assert_eq!(shape, shared_cross_epoch_group.shape);
+                owned_groups.push(None);
+                continue;
+            }
+            let messages = (0..shape.width)
+                .map(|member| {
+                    extension_vector(
+                        shape.shape.message_len,
+                        23_000 + 101 * group_ordinal as u64 + member as u64,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let randomness = (0..shape.width)
+                .map(|member| {
+                    extension_vector(
+                        shape.shape.randomness_len,
+                        24_000 + 101 * group_ordinal as u64 + member as u64,
+                    )
+                })
+                .collect::<Vec<_>>();
+            owned_groups.push(Some(build_committed_mask_group(
+                shape,
+                messages,
+                randomness,
+                &extension_commitment_scheme,
+            )));
+        }
+
+        let carried_groups = group_contracts
+            .iter()
+            .enumerate()
+            .map(|(group_ordinal, group_contract)| {
+                if group_contract.role_tag == 1 {
+                    &shared_cross_epoch_group
+                } else {
+                    owned_groups[group_ordinal]
+                        .as_ref()
+                        .expect("non-shared selected group is committed once")
+                }
+            })
+            .collect::<Vec<_>>();
+        let witnesses = carried_groups
+            .iter()
+            .enumerate()
+            .map(|(group_ordinal, group)| MaskGroupWitness {
+                messages: &group.messages,
+                randomness: &group.randomness,
+                covectors: &group_covectors[group_ordinal],
+                data: &group.data,
+            })
+            .collect::<Vec<_>>();
+        let fresh_source_message =
+            extension_vector(source_message_length, 26_000 + epoch_index as u64);
+        let fresh_source_randomness =
+            extension_vector(source_randomness_length, 27_000 + epoch_index as u64);
+        let fresh_groups = groups
+            .iter()
+            .enumerate()
+            .map(|(group_ordinal, shape)| BaseCaseFreshMaskGroup {
+                messages: (0..shape.width)
+                    .map(|member| {
+                        extension_vector(
+                            shape.shape.message_len,
+                            28_000 + 101 * group_ordinal as u64 + member as u64,
+                        )
+                    })
+                    .collect(),
+                randomness: (0..shape.width)
+                    .map(|member| {
+                        extension_vector(
+                            shape.shape.randomness_len,
+                            29_000 + 101 * group_ordinal as u64 + member as u64,
+                        )
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        let fresh_material = BaseCaseFreshMaterial {
+            source_message: fresh_source_message.clone(),
+            source_randomness: fresh_source_randomness,
+            mask_groups: fresh_groups.clone(),
+        };
+        let config = BaseCaseZkConfig {
+            code: source_code,
+            mask_groups: groups,
+            num_queries: 1,
+            mask_queries: 1,
+            pow_bits: 0,
+        };
+        let prover = BaseCaseZkProver {
+            config: &config,
+            extension_mmcs: &extension_commitment_scheme,
+        };
+        let mut challenger = test_challenger();
+        let prepared = prover.prepare_with_material(
+            &dft,
+            &source_message,
+            &source_randomness,
+            &source_covector,
+            &witnesses,
+            &fresh_material,
+            &mut challenger,
+        );
+
+        let mut fresh_coordinates = fresh_source_message;
+        let mut fresh_claim_covector = source_covector;
+        for ((fresh_group, covectors), dependency) in fresh_groups
+            .iter()
+            .zip(&group_covectors)
+            .zip(dependencies.iter().skip(1))
+        {
+            assert_eq!(
+                fresh_group.messages.len(),
+                usize::try_from(dependency.lane_count).expect("selected lane count fits usize"),
+            );
+            for (message, covector) in fresh_group.messages.iter().zip(covectors) {
+                fresh_coordinates.extend_from_slice(message);
+                fresh_claim_covector.extend_from_slice(covector);
+            }
+        }
+        let source_positions = prepared.source_positions().to_vec();
+        let source_queries = source_positions
+            .iter()
+            .map(|position| {
+                let opening = extension_commitment_scheme.open_batch(*position, &source_data);
+                QueryOpening::Extension {
+                    values: opening.opened_values.into_iter().next().unwrap(),
+                    proof: opening.opening_proof,
+                }
+            })
+            .collect();
+        let proof = prepared
+            .finish(source_queries)
+            .expect("prepared base-case source openings are complete");
+        assert_eq!(
+            proof.masked_claim,
+            apply_whir_base_case_claim_view(&fresh_coordinates, &fresh_claim_covector)
+                .expect("base-claim coefficient map accepts production fresh coordinates"),
+            "selected base-case map for epoch {}",
+            epoch_index + 1,
+        );
+
+        let challenge = (proof.blinded_message[0] - fresh_material.source_message[0])
+            * source_message[0].inverse();
+        let mut carried_source_coordinates = source_message.clone();
+        carried_source_coordinates.extend_from_slice(&source_randomness);
+        let mut fresh_source_coordinates = fresh_material.source_message.clone();
+        fresh_source_coordinates.extend_from_slice(&fresh_material.source_randomness);
+        let mut actual_source_reveal = proof.blinded_message.clone();
+        actual_source_reveal.extend_from_slice(&proof.blinded_randomness);
+        assert_eq!(
+            apply_affine_mirror(
+                &carried_source_coordinates,
+                &fresh_source_coordinates,
+                challenge,
+            )
+            .expect("source affine-mirror map accepts production coordinates"),
+            actual_source_reveal,
+        );
+        let mut blinded_mask_ordinal = 0;
+        for (group_ordinal, carried_group) in carried_groups.iter().enumerate() {
+            for member_ordinal in 0..carried_group.messages.len() {
+                let mut carried = carried_group.messages[member_ordinal].clone();
+                carried.extend_from_slice(&carried_group.randomness[member_ordinal]);
+                let mut fresh =
+                    fresh_material.mask_groups[group_ordinal].messages[member_ordinal].clone();
+                fresh.extend_from_slice(
+                    &fresh_material.mask_groups[group_ordinal].randomness[member_ordinal],
+                );
+                let mut actual = proof.blinded_masks[blinded_mask_ordinal].message.clone();
+                actual.extend_from_slice(&proof.blinded_masks[blinded_mask_ordinal].randomness);
+                assert_eq!(
+                    apply_affine_mirror(&carried, &fresh, challenge)
+                        .expect("mask affine-mirror map accepts production coordinates"),
+                    actual,
+                    "selected base-case mirror for epoch {}, group {group_ordinal}, member {member_ordinal}",
+                    epoch_index + 1,
+                );
+                blinded_mask_ordinal += 1;
+            }
+        }
+        assert_eq!(blinded_mask_ordinal, proof.blinded_masks.len());
     }
 }
 

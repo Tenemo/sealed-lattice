@@ -1,4 +1,4 @@
-//! Canonical salted Merkle commitments for compact logical responses.
+//! Canonical salted-Merkle geometry for compact logical responses.
 //!
 //! The verifier owns every response, component, and leaf coordinate. Leaves
 //! bind that geometry, their canonical field encoding, and one fresh 128-byte
@@ -6,10 +6,15 @@
 //! openings carry no coordinates: the verifier derives the unique minimal
 //! frontier from its sorted query indices before reconstructing the root.
 //!
-//! This module owns canonical hashing, verifier-message query mapping,
-//! postorder tree writing and scanning, and transported-opening verification.
-//! The selected-size response-value source, external-memory transaction driver,
-//! and authenticated restart record remain separate implementation owners.
+//! The release build retains the contract geometry and query-source registry.
+//! Canonical hashing, query materialization, postorder storage, and opening
+//! verification remain test-only until the release verifier consumes them.
+
+#[cfg(test)]
+use sha3::{
+    Shake256,
+    digest::{ExtendableOutput, Update, XofReader},
+};
 
 use super::compact_proof_wire::CompactProofResponseWireGeometry;
 #[cfg(test)]
@@ -26,7 +31,11 @@ use super::{
     ProofBaseFieldElement, ProofChallengeExtensionElement,
 };
 #[cfg(test)]
-use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512};
+use crate::foundation::{
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItemType, Hash512,
+};
+#[cfg(test)]
+use crate::foundation::{CanonicalItem, canonical_foundation_tuple_hash_preimage};
 
 pub(crate) const COMPACT_RESPONSE_LEAF_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/compact-response/leaf/v1";
@@ -416,7 +425,7 @@ impl CompactResponseMerkleGeometry {
     }
 
     #[cfg(test)]
-    fn validate_query_leaf_ordinals(
+    pub(crate) fn validate_query_leaf_ordinals(
         &self,
         query_leaf_ordinals: &[u64],
     ) -> Result<(), CompactResponseMerkleError> {
@@ -677,7 +686,7 @@ impl CompactResponseQuerySchedule {
         if verifier_messages.len() != wire_geometries.len() {
             return Err(CompactResponseMerkleError::InvalidOpeningIndices);
         }
-        validate_decoded_verifier_message_prefix(wire_geometries, verifier_messages)?;
+        validate_verifier_message_prefix(wire_geometries, verifier_messages)?;
         Self::derive_from_validated_messages(merkle_geometry, verifier_messages)
     }
 
@@ -704,7 +713,7 @@ impl CompactResponseQuerySchedule {
         {
             return Err(CompactResponseMerkleError::InvalidOpeningIndices);
         }
-        validate_decoded_verifier_message_prefix(
+        validate_verifier_message_prefix(
             &wire_geometries[..expected_prefix_length],
             verifier_message_prefix,
         )?;
@@ -804,7 +813,7 @@ impl CompactResponseQuerySchedule {
 }
 
 #[cfg(test)]
-fn validate_decoded_verifier_message_prefix(
+fn validate_verifier_message_prefix(
     wire_geometries: &[CompactProofResponseWireGeometry],
     verifier_messages: &[DecodedFixedUniformVerifierMessage],
 ) -> Result<(), CompactResponseMerkleError> {
@@ -968,8 +977,65 @@ pub(crate) enum CompactResponseLeafValue<'value> {
 }
 
 #[cfg(test)]
+impl CompactResponseLeafValue<'_> {
+    #[cfg(test)]
+    fn canonical_bytes(
+        self,
+        descriptor: CompactResponseLeafDescriptor,
+    ) -> Result<Vec<u8>, CompactResponseMerkleError> {
+        let mut canonical_bytes = Vec::new();
+        match (descriptor.value_kind, self) {
+            (
+                CompactResponseLeafValueKind::BaseField,
+                CompactResponseLeafValue::BaseField(values),
+            ) => {
+                if u64::try_from(values.len()).ok() != Some(descriptor.field_element_count) {
+                    return Err(CompactResponseMerkleError::WrongLeafValueCount);
+                }
+                canonical_bytes
+                    .try_reserve_exact(
+                        values
+                            .len()
+                            .checked_mul(size_of::<u64>())
+                            .ok_or(CompactResponseMerkleError::CountOverflow)?,
+                    )
+                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+                for value in values {
+                    canonical_bytes.extend_from_slice(&value.canonical().to_le_bytes());
+                }
+            }
+            (
+                CompactResponseLeafValueKind::ExtensionField,
+                CompactResponseLeafValue::ExtensionField(values),
+            ) => {
+                if u64::try_from(values.len()).ok() != Some(descriptor.field_element_count) {
+                    return Err(CompactResponseMerkleError::WrongLeafValueCount);
+                }
+                canonical_bytes
+                    .try_reserve_exact(
+                        values
+                            .len()
+                            .checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                            .and_then(|count| count.checked_mul(size_of::<u64>()))
+                            .ok_or(CompactResponseMerkleError::CountOverflow)?,
+                    )
+                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+                for value in values {
+                    for coordinate in value.canonical_coordinates() {
+                        canonical_bytes.extend_from_slice(&coordinate.to_le_bytes());
+                    }
+                }
+            }
+            (CompactResponseLeafValueKind::Padding, CompactResponseLeafValue::Padding) => {}
+            _ => return Err(CompactResponseMerkleError::WrongLeafValueKind),
+        }
+        Ok(canonical_bytes)
+    }
+}
+
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CompactResponseLeafDescriptor {
+pub(crate) struct CompactResponseLeafDescriptor {
     component_ordinal: u32,
     component_leaf_ordinal: u64,
     leaf_ordinal: u64,
@@ -997,6 +1063,10 @@ pub(crate) enum CompactResponseMerkleError {
     RootMismatch,
     #[cfg(test)]
     InvalidWireValue,
+    #[cfg(test)]
+    ParentHashPending,
+    #[cfg(test)]
+    ParentHashNotPending,
     #[cfg(test)]
     OutputChunkPending,
     #[cfg(test)]
@@ -1397,58 +1467,15 @@ fn compact_response_postorder_digest_ordinal(
 }
 
 #[cfg(test)]
-pub(crate) fn compact_response_leaf_digest(
+fn compact_response_leaf_hash_preimage(
     geometry: &CompactResponseMerkleGeometry,
     leaf_ordinal: u64,
     value: CompactResponseLeafValue<'_>,
     leaf_salt: &[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
-) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+) -> Result<Vec<u8>, CompactResponseMerkleError> {
     let descriptor = geometry.leaf_descriptor(leaf_ordinal)?;
-    let mut canonical_value_bytes = Vec::new();
-    match (descriptor.value_kind, value) {
-        (CompactResponseLeafValueKind::BaseField, CompactResponseLeafValue::BaseField(values)) => {
-            if u64::try_from(values.len()).ok() != Some(descriptor.field_element_count) {
-                return Err(CompactResponseMerkleError::WrongLeafValueCount);
-            }
-            canonical_value_bytes
-                .try_reserve_exact(
-                    values
-                        .len()
-                        .checked_mul(size_of::<u64>())
-                        .ok_or(CompactResponseMerkleError::CountOverflow)?,
-                )
-                .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-            for value in values {
-                canonical_value_bytes.extend_from_slice(&value.canonical().to_le_bytes());
-            }
-        }
-        (
-            CompactResponseLeafValueKind::ExtensionField,
-            CompactResponseLeafValue::ExtensionField(values),
-        ) => {
-            if u64::try_from(values.len()).ok() != Some(descriptor.field_element_count) {
-                return Err(CompactResponseMerkleError::WrongLeafValueCount);
-            }
-            canonical_value_bytes
-                .try_reserve_exact(
-                    values
-                        .len()
-                        .checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE)
-                        .and_then(|count| count.checked_mul(size_of::<u64>()))
-                        .ok_or(CompactResponseMerkleError::CountOverflow)?,
-                )
-                .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-            for value in values {
-                for coordinate in value.canonical_coordinates() {
-                    canonical_value_bytes.extend_from_slice(&coordinate.to_le_bytes());
-                }
-            }
-        }
-        (CompactResponseLeafValueKind::Padding, CompactResponseLeafValue::Padding) => {}
-        _ => return Err(CompactResponseMerkleError::WrongLeafValueKind),
-    }
-
-    hash_foundation_tuple_512(
+    let canonical_value_bytes = value.canonical_bytes(descriptor)?;
+    canonical_foundation_tuple_hash_preimage(
         COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
         &[
             CanonicalItem::unsigned32(geometry.response_ordinal),
@@ -1464,18 +1491,412 @@ pub(crate) fn compact_response_leaf_digest(
                 .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)?,
         ],
     )
-    .map(Hash512::into_bytes)
+    .map(|preimage| preimage.to_vec())
     .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
 }
 
 #[cfg(test)]
-pub(crate) fn compact_response_merkle_parent_digest(
+fn update_canonical_tuple_header(hasher: &mut Shake256, item_count: u32) {
+    hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
+    hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
+    hasher.update(&item_count.to_le_bytes());
+}
+
+#[cfg(test)]
+fn update_canonical_item(
+    hasher: &mut Shake256,
+    item_type: CanonicalItemType,
+    canonical_value_bytes: &[u8],
+) -> Result<(), CompactResponseMerkleError> {
+    let canonical_byte_length = u32::try_from(canonical_value_bytes.len())
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    hasher.update(&item_type.canonical_code().to_le_bytes());
+    hasher.update(&canonical_byte_length.to_le_bytes());
+    hasher.update(canonical_value_bytes);
+    Ok(())
+}
+
+#[cfg(test)]
+fn update_canonical_u16(
+    hasher: &mut Shake256,
+    value: u16,
+) -> Result<(), CompactResponseMerkleError> {
+    update_canonical_item(hasher, CanonicalItemType::Unsigned16, &value.to_le_bytes())
+}
+
+#[cfg(test)]
+fn update_canonical_u32(
+    hasher: &mut Shake256,
+    value: u32,
+) -> Result<(), CompactResponseMerkleError> {
+    update_canonical_item(hasher, CanonicalItemType::Unsigned32, &value.to_le_bytes())
+}
+
+#[cfg(test)]
+fn update_canonical_u64(
+    hasher: &mut Shake256,
+    value: u64,
+) -> Result<(), CompactResponseMerkleError> {
+    update_canonical_item(hasher, CanonicalItemType::Unsigned64, &value.to_le_bytes())
+}
+
+#[cfg(test)]
+fn update_canonical_hash512(
+    hasher: &mut Shake256,
+    value: &[u8; Hash512::BYTE_LENGTH],
+) -> Result<(), CompactResponseMerkleError> {
+    update_canonical_item(hasher, CanonicalItemType::Hash512, value)
+}
+
+#[cfg(test)]
+fn update_canonical_fixed_bytes(
+    hasher: &mut Shake256,
+    value: &[u8],
+) -> Result<(), CompactResponseMerkleError> {
+    update_canonical_item(hasher, CanonicalItemType::RawBytes, value)
+}
+
+#[cfg(test)]
+fn update_canonical_variable_bytes_header(
+    hasher: &mut Shake256,
+    value_byte_length: usize,
+) -> Result<(), CompactResponseMerkleError> {
+    let value_byte_length =
+        u32::try_from(value_byte_length).map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let canonical_byte_length = value_byte_length
+        .checked_add(
+            u32::try_from(size_of::<u32>())
+                .map_err(|_| CompactResponseMerkleError::CountOverflow)?,
+        )
+        .ok_or(CompactResponseMerkleError::CountOverflow)?;
+    hasher.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
+    hasher.update(&canonical_byte_length.to_le_bytes());
+    hasher.update(&value_byte_length.to_le_bytes());
+    Ok(())
+}
+
+#[cfg(test)]
+fn update_canonical_ascii(
+    hasher: &mut Shake256,
+    value: &str,
+) -> Result<(), CompactResponseMerkleError> {
+    if value.is_empty() || !value.bytes().all(|byte| (0x20..=0x7e).contains(&byte)) {
+        return Err(CompactResponseMerkleError::CanonicalEncoding);
+    }
+    let value_byte_length =
+        u32::try_from(value.len()).map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let canonical_byte_length = value_byte_length
+        .checked_add(
+            u32::try_from(size_of::<u32>())
+                .map_err(|_| CompactResponseMerkleError::CountOverflow)?,
+        )
+        .ok_or(CompactResponseMerkleError::CountOverflow)?;
+    hasher.update(&CanonicalItemType::Ascii.canonical_code().to_le_bytes());
+    hasher.update(&canonical_byte_length.to_le_bytes());
+    hasher.update(&value_byte_length.to_le_bytes());
+    hasher.update(value.as_bytes());
+    Ok(())
+}
+
+#[cfg(test)]
+fn finish_streamed_compact_response_hash(hasher: Shake256) -> [u8; Hash512::BYTE_LENGTH] {
+    let mut reader = hasher.finalize_xof();
+    let mut digest = [0_u8; Hash512::BYTE_LENGTH];
+    reader.read(&mut digest);
+    digest
+}
+
+#[cfg(test)]
+fn compact_response_leaf_digest_from_canonical_value_bytes(
+    geometry: &CompactResponseMerkleGeometry,
+    descriptor: CompactResponseLeafDescriptor,
+    canonical_value_bytes: &[u8],
+    leaf_salt: &[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+    let expected_value_byte_length = match descriptor.value_kind {
+        CompactResponseLeafValueKind::BaseField => usize::try_from(descriptor.field_element_count)
+            .ok()
+            .and_then(|count| count.checked_mul(size_of::<u64>())),
+        CompactResponseLeafValueKind::ExtensionField => {
+            usize::try_from(descriptor.field_element_count)
+                .ok()
+                .and_then(|count| count.checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE))
+                .and_then(|count| count.checked_mul(size_of::<u64>()))
+        }
+        CompactResponseLeafValueKind::Padding => Some(0),
+    }
+    .ok_or(CompactResponseMerkleError::CountOverflow)?;
+    if canonical_value_bytes.len() != expected_value_byte_length {
+        return Err(CompactResponseMerkleError::WrongLeafValueCount);
+    }
+
+    let mut hasher =
+        begin_compact_response_leaf_hash(geometry, descriptor, canonical_value_bytes.len())?;
+    hasher.update(canonical_value_bytes);
+    update_canonical_fixed_bytes(&mut hasher, leaf_salt)?;
+    Ok(finish_streamed_compact_response_hash(hasher))
+}
+
+#[cfg(test)]
+fn begin_compact_response_leaf_hash(
+    geometry: &CompactResponseMerkleGeometry,
+    descriptor: CompactResponseLeafDescriptor,
+    canonical_value_byte_length: usize,
+) -> Result<Shake256, CompactResponseMerkleError> {
+    let mut hasher = Shake256::default();
+    update_canonical_tuple_header(&mut hasher, 10);
+    update_canonical_ascii(&mut hasher, COMPACT_RESPONSE_LEAF_HASH_DOMAIN)?;
+    update_canonical_u32(&mut hasher, geometry.response_ordinal)?;
+    update_canonical_u32(&mut hasher, geometry.vector_commitment_oracle_identifier())?;
+    update_canonical_u32(&mut hasher, descriptor.component_ordinal)?;
+    update_canonical_u64(&mut hasher, descriptor.component_leaf_ordinal)?;
+    update_canonical_u64(&mut hasher, descriptor.leaf_ordinal)?;
+    update_canonical_u16(&mut hasher, descriptor.value_kind as u16)?;
+    update_canonical_u64(&mut hasher, descriptor.field_element_count)?;
+    update_canonical_variable_bytes_header(&mut hasher, canonical_value_byte_length)?;
+    Ok(hasher)
+}
+
+#[cfg(test)]
+fn compact_response_leaf_hash_preimage_from_canonical_value_bytes(
+    geometry: &CompactResponseMerkleGeometry,
+    descriptor: CompactResponseLeafDescriptor,
+    canonical_value_bytes: &[u8],
+    leaf_salt: &[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+) -> Result<Vec<u8>, CompactResponseMerkleError> {
+    canonical_foundation_tuple_hash_preimage(
+        COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
+        &[
+            CanonicalItem::unsigned32(geometry.response_ordinal),
+            CanonicalItem::unsigned32(geometry.vector_commitment_oracle_identifier()),
+            CanonicalItem::unsigned32(descriptor.component_ordinal),
+            CanonicalItem::unsigned64(descriptor.component_leaf_ordinal),
+            CanonicalItem::unsigned64(descriptor.leaf_ordinal),
+            CanonicalItem::unsigned16(descriptor.value_kind as u16),
+            CanonicalItem::unsigned64(descriptor.field_element_count),
+            CanonicalItem::variable_bytes(canonical_value_bytes)
+                .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)?,
+            CanonicalItem::fixed_bytes(leaf_salt)
+                .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)?,
+        ],
+    )
+    .map(|preimage| preimage.to_vec())
+    .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
+}
+
+#[cfg(test)]
+pub(crate) fn compact_response_leaf_digest(
+    geometry: &CompactResponseMerkleGeometry,
+    leaf_ordinal: u64,
+    value: CompactResponseLeafValue<'_>,
+    leaf_salt: &[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+    let descriptor = geometry.leaf_descriptor(leaf_ordinal)?;
+    let canonical_value_byte_length = match (descriptor.value_kind, value) {
+        (CompactResponseLeafValueKind::BaseField, CompactResponseLeafValue::BaseField(values))
+            if u64::try_from(values.len()).ok() == Some(descriptor.field_element_count) =>
+        {
+            values
+                .len()
+                .checked_mul(size_of::<u64>())
+                .ok_or(CompactResponseMerkleError::CountOverflow)?
+        }
+        (
+            CompactResponseLeafValueKind::ExtensionField,
+            CompactResponseLeafValue::ExtensionField(values),
+        ) if u64::try_from(values.len()).ok() == Some(descriptor.field_element_count) => values
+            .len()
+            .checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE)
+            .and_then(|count| count.checked_mul(size_of::<u64>()))
+            .ok_or(CompactResponseMerkleError::CountOverflow)?,
+        (CompactResponseLeafValueKind::Padding, CompactResponseLeafValue::Padding) => 0,
+        (CompactResponseLeafValueKind::BaseField, CompactResponseLeafValue::BaseField(_))
+        | (
+            CompactResponseLeafValueKind::ExtensionField,
+            CompactResponseLeafValue::ExtensionField(_),
+        ) => return Err(CompactResponseMerkleError::WrongLeafValueCount),
+        _ => return Err(CompactResponseMerkleError::WrongLeafValueKind),
+    };
+    let mut hasher =
+        begin_compact_response_leaf_hash(geometry, descriptor, canonical_value_byte_length)?;
+    match value {
+        CompactResponseLeafValue::BaseField(values) => {
+            for value in values {
+                hasher.update(&value.canonical().to_le_bytes());
+            }
+        }
+        CompactResponseLeafValue::ExtensionField(values) => {
+            for value in values {
+                for coordinate in value.canonical_coordinates() {
+                    hasher.update(&coordinate.to_le_bytes());
+                }
+            }
+        }
+        CompactResponseLeafValue::Padding => {}
+    }
+    update_canonical_fixed_bytes(&mut hasher, leaf_salt)?;
+    Ok(finish_streamed_compact_response_hash(hasher))
+}
+
+#[cfg(test)]
+struct CompactResponseOpenedLeaf<'opening> {
+    descriptor: CompactResponseLeafDescriptor,
+    canonical_value_bytes: &'opening [u8],
+    leaf_salt: [u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+}
+
+/// Exact decoded opened-leaf traversal shared by fixed-SHAKE verification and
+/// the finite EPRO game. Values, salts, and leaf coordinates all come from one
+/// canonical decoded response and one verifier-derived query schedule.
+#[cfg(test)]
+pub(super) struct CompactResponseOpenedLeafHashCursor<'opening> {
+    geometry: &'opening CompactResponseMerkleGeometry,
+    decoded_response: &'opening DecodedCompactProofResponse,
+    canonical_proof_bytes: &'opening [u8],
+    query_schedule: &'opening CompactResponseQuerySchedule,
+    next_query_ordinal: usize,
+    base_field_value_offset: usize,
+    extension_field_value_offset: usize,
+}
+
+#[cfg(test)]
+impl<'opening> CompactResponseOpenedLeafHashCursor<'opening> {
+    pub(super) fn new(
+        geometry: &'opening CompactResponseMerkleGeometry,
+        decoded_response: &'opening DecodedCompactProofResponse,
+        canonical_proof_bytes: &'opening [u8],
+        query_schedule: &'opening CompactResponseQuerySchedule,
+    ) -> Result<Self, CompactResponseMerkleError> {
+        geometry.validate_query_leaf_ordinals(query_schedule.as_slice())?;
+        if decoded_response.ordinal() != geometry.response_ordinal
+            || decoded_response.queried_leaf_count() != query_schedule.as_slice().len()
+        {
+            return Err(CompactResponseMerkleError::WireGeometryMismatch);
+        }
+        Ok(Self {
+            geometry,
+            decoded_response,
+            canonical_proof_bytes,
+            query_schedule,
+            next_query_ordinal: 0,
+            base_field_value_offset: 0,
+            extension_field_value_offset: 0,
+        })
+    }
+
+    fn next_opened_leaf(
+        &mut self,
+    ) -> Result<Option<CompactResponseOpenedLeaf<'opening>>, CompactResponseMerkleError> {
+        let Some(leaf_ordinal) = self
+            .query_schedule
+            .as_slice()
+            .get(self.next_query_ordinal)
+            .copied()
+        else {
+            if self.base_field_value_offset
+                != self.decoded_response.queried_base_field_element_count()
+                || self.extension_field_value_offset
+                    != self
+                        .decoded_response
+                        .queried_extension_field_element_count()
+            {
+                return Err(CompactResponseMerkleError::WireGeometryMismatch);
+            }
+            return Ok(None);
+        };
+        let descriptor = self.geometry.leaf_descriptor(leaf_ordinal)?;
+        let leaf_salt = self
+            .decoded_response
+            .leaf_salt(self.canonical_proof_bytes, self.next_query_ordinal)
+            .map_err(map_wire_error)?;
+        let canonical_value_bytes = match descriptor.value_kind {
+            CompactResponseLeafValueKind::BaseField => {
+                let value_count = usize::try_from(descriptor.field_element_count)
+                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+                let value_end = self
+                    .base_field_value_offset
+                    .checked_add(value_count)
+                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
+                let canonical_value_bytes = self
+                    .decoded_response
+                    .canonical_base_field_value_bytes(
+                        self.canonical_proof_bytes,
+                        self.base_field_value_offset,
+                        value_count,
+                    )
+                    .map_err(map_wire_error)?;
+                self.base_field_value_offset = value_end;
+                canonical_value_bytes
+            }
+            CompactResponseLeafValueKind::ExtensionField => {
+                let value_count = usize::try_from(descriptor.field_element_count)
+                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+                let value_end = self
+                    .extension_field_value_offset
+                    .checked_add(value_count)
+                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
+                let canonical_value_bytes = self
+                    .decoded_response
+                    .canonical_extension_field_value_bytes(
+                        self.canonical_proof_bytes,
+                        self.extension_field_value_offset,
+                        value_count,
+                    )
+                    .map_err(map_wire_error)?;
+                self.extension_field_value_offset = value_end;
+                canonical_value_bytes
+            }
+            CompactResponseLeafValueKind::Padding => {
+                return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+            }
+        };
+        self.next_query_ordinal = self
+            .next_query_ordinal
+            .checked_add(1)
+            .ok_or(CompactResponseMerkleError::CountOverflow)?;
+        Ok(Some(CompactResponseOpenedLeaf {
+            descriptor,
+            canonical_value_bytes,
+            leaf_salt,
+        }))
+    }
+
+    fn next_digest(
+        &mut self,
+    ) -> Result<Option<[u8; Hash512::BYTE_LENGTH]>, CompactResponseMerkleError> {
+        self.next_opened_leaf()?
+            .map(|opened_leaf| {
+                compact_response_leaf_digest_from_canonical_value_bytes(
+                    self.geometry,
+                    opened_leaf.descriptor,
+                    opened_leaf.canonical_value_bytes,
+                    &opened_leaf.leaf_salt,
+                )
+            })
+            .transpose()
+    }
+
+    #[cfg(test)]
+    pub(super) fn next_preimage(&mut self) -> Result<Option<Vec<u8>>, CompactResponseMerkleError> {
+        self.next_opened_leaf()?
+            .map(|opened_leaf| {
+                compact_response_leaf_hash_preimage_from_canonical_value_bytes(
+                    self.geometry,
+                    opened_leaf.descriptor,
+                    opened_leaf.canonical_value_bytes,
+                    &opened_leaf.leaf_salt,
+                )
+            })
+            .transpose()
+    }
+}
+
+#[cfg(test)]
+fn validate_parent_coordinate(
     geometry: &CompactResponseMerkleGeometry,
     parent_level: u32,
     left_child_ordinal: u64,
-    left_child_digest: [u8; Hash512::BYTE_LENGTH],
-    right_child_digest: [u8; Hash512::BYTE_LENGTH],
-) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+) -> Result<(), CompactResponseMerkleError> {
     let tree_depth = geometry.merkle_leaf_count.trailing_zeros();
     if parent_level == 0 || parent_level > tree_depth {
         return Err(CompactResponseMerkleError::InvalidGeometry);
@@ -1491,7 +1912,19 @@ pub(crate) fn compact_response_merkle_parent_digest(
     {
         return Err(CompactResponseMerkleError::InvalidGeometry);
     }
-    hash_foundation_tuple_512(
+    Ok(())
+}
+
+#[cfg(test)]
+fn compact_response_merkle_parent_hash_preimage(
+    geometry: &CompactResponseMerkleGeometry,
+    parent_level: u32,
+    left_child_ordinal: u64,
+    left_child_digest: [u8; Hash512::BYTE_LENGTH],
+    right_child_digest: [u8; Hash512::BYTE_LENGTH],
+) -> Result<Vec<u8>, CompactResponseMerkleError> {
+    validate_parent_coordinate(geometry, parent_level, left_child_ordinal)?;
+    canonical_foundation_tuple_hash_preimage(
         COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
         &[
             CanonicalItem::unsigned32(geometry.response_ordinal),
@@ -1502,8 +1935,58 @@ pub(crate) fn compact_response_merkle_parent_digest(
             CanonicalItem::hash512(right_child_digest),
         ],
     )
-    .map(Hash512::into_bytes)
+    .map(|preimage| preimage.to_vec())
     .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
+}
+
+#[cfg(test)]
+pub(crate) fn compact_response_merkle_parent_digest(
+    geometry: &CompactResponseMerkleGeometry,
+    parent_level: u32,
+    left_child_ordinal: u64,
+    left_child_digest: [u8; Hash512::BYTE_LENGTH],
+    right_child_digest: [u8; Hash512::BYTE_LENGTH],
+) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+    validate_parent_coordinate(geometry, parent_level, left_child_ordinal)?;
+    compact_response_merkle_parent_digest_from_coordinates(
+        geometry.response_ordinal(),
+        geometry.vector_commitment_oracle_identifier(),
+        parent_level,
+        left_child_ordinal,
+        &left_child_digest,
+        &right_child_digest,
+    )
+}
+
+#[cfg(test)]
+fn compact_response_merkle_parent_digest_from_coordinates(
+    response_ordinal: u32,
+    vector_commitment_oracle_identifier: u32,
+    parent_level: u32,
+    left_child_ordinal: u64,
+    left_child_digest: &[u8; Hash512::BYTE_LENGTH],
+    right_child_digest: &[u8; Hash512::BYTE_LENGTH],
+) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+    let mut hasher = Shake256::default();
+    update_canonical_tuple_header(&mut hasher, 7);
+    update_canonical_ascii(&mut hasher, COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN)?;
+    update_canonical_u32(&mut hasher, response_ordinal)?;
+    update_canonical_u32(&mut hasher, vector_commitment_oracle_identifier)?;
+    update_canonical_u32(&mut hasher, parent_level)?;
+    update_canonical_u64(&mut hasher, left_child_ordinal)?;
+    update_canonical_hash512(&mut hasher, left_child_digest)?;
+    update_canonical_hash512(&mut hasher, right_child_digest)?;
+    Ok(finish_streamed_compact_response_hash(hasher))
+}
+
+#[cfg(test)]
+pub(crate) fn compact_response_hash_preimage(preimage: &[u8]) -> [u8; Hash512::BYTE_LENGTH] {
+    let mut hasher = Shake256::default();
+    hasher.update(preimage);
+    let mut reader = hasher.finalize_xof();
+    let mut digest = [0_u8; Hash512::BYTE_LENGTH];
+    reader.read(&mut digest);
+    digest
 }
 
 #[cfg(test)]
@@ -1512,8 +1995,46 @@ pub(crate) fn verify_decoded_compact_response_opening(
     wire_geometry: &CompactProofResponseWireGeometry,
     decoded_response: &DecodedCompactProofResponse,
     canonical_proof_bytes: &[u8],
+    query_schedule: &CompactResponseQuerySchedule,
+) -> Result<(), CompactResponseMerkleError> {
+    verify_decoded_compact_response_opening_with_schedule(
+        merkle_geometry,
+        wire_geometry,
+        decoded_response,
+        canonical_proof_bytes,
+        query_schedule,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
+    merkle_geometry: &CompactResponseMerkleGeometry,
+    wire_geometry: &CompactProofResponseWireGeometry,
+    decoded_response: &DecodedCompactProofResponse,
+    canonical_proof_bytes: &[u8],
     query_leaf_ordinals: &[u64],
 ) -> Result<(), CompactResponseMerkleError> {
+    let query_schedule = CompactResponseQuerySchedule {
+        leaf_ordinals: query_leaf_ordinals.to_vec(),
+    };
+    verify_decoded_compact_response_opening_with_schedule(
+        merkle_geometry,
+        wire_geometry,
+        decoded_response,
+        canonical_proof_bytes,
+        &query_schedule,
+    )
+}
+
+#[cfg(test)]
+fn verify_decoded_compact_response_opening_with_schedule(
+    merkle_geometry: &CompactResponseMerkleGeometry,
+    wire_geometry: &CompactProofResponseWireGeometry,
+    decoded_response: &DecodedCompactProofResponse,
+    canonical_proof_bytes: &[u8],
+    query_schedule: &CompactResponseQuerySchedule,
+) -> Result<(), CompactResponseMerkleError> {
+    let query_leaf_ordinals = query_schedule.as_slice();
     merkle_geometry.validate_wire_geometry(wire_geometry)?;
     merkle_geometry.validate_query_leaf_ordinals(query_leaf_ordinals)?;
     if decoded_response.ordinal() != merkle_geometry.response_ordinal
@@ -1522,84 +2043,18 @@ pub(crate) fn verify_decoded_compact_response_opening(
         return Err(CompactResponseMerkleError::WireGeometryMismatch);
     }
 
-    let mut base_field_value_offset = 0_usize;
-    let mut extension_field_value_offset = 0_usize;
     let mut opened_leaf_digests = Vec::new();
     opened_leaf_digests
         .try_reserve_exact(query_leaf_ordinals.len())
         .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-    for (query_ordinal, leaf_ordinal) in query_leaf_ordinals.iter().copied().enumerate() {
-        let descriptor = merkle_geometry.leaf_descriptor(leaf_ordinal)?;
-        let leaf_salt = decoded_response
-            .leaf_salt(canonical_proof_bytes, query_ordinal)
-            .map_err(map_wire_error)?;
-        let digest = match descriptor.value_kind {
-            CompactResponseLeafValueKind::BaseField => {
-                let value_count = usize::try_from(descriptor.field_element_count)
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-                let mut values = Vec::new();
-                values
-                    .try_reserve_exact(value_count)
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-                for value_ordinal in base_field_value_offset
-                    ..base_field_value_offset
-                        .checked_add(value_count)
-                        .ok_or(CompactResponseMerkleError::CountOverflow)?
-                {
-                    values.push(
-                        decoded_response
-                            .base_field_value(canonical_proof_bytes, value_ordinal)
-                            .map_err(map_wire_error)?,
-                    );
-                }
-                base_field_value_offset = base_field_value_offset
-                    .checked_add(value_count)
-                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
-                compact_response_leaf_digest(
-                    merkle_geometry,
-                    leaf_ordinal,
-                    CompactResponseLeafValue::BaseField(&values),
-                    &leaf_salt,
-                )?
-            }
-            CompactResponseLeafValueKind::ExtensionField => {
-                let value_count = usize::try_from(descriptor.field_element_count)
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-                let mut values = Vec::new();
-                values
-                    .try_reserve_exact(value_count)
-                    .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-                for value_ordinal in extension_field_value_offset
-                    ..extension_field_value_offset
-                        .checked_add(value_count)
-                        .ok_or(CompactResponseMerkleError::CountOverflow)?
-                {
-                    values.push(
-                        decoded_response
-                            .extension_field_value(canonical_proof_bytes, value_ordinal)
-                            .map_err(map_wire_error)?,
-                    );
-                }
-                extension_field_value_offset = extension_field_value_offset
-                    .checked_add(value_count)
-                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
-                compact_response_leaf_digest(
-                    merkle_geometry,
-                    leaf_ordinal,
-                    CompactResponseLeafValue::ExtensionField(&values),
-                    &leaf_salt,
-                )?
-            }
-            CompactResponseLeafValueKind::Padding => {
-                return Err(CompactResponseMerkleError::InvalidOpeningIndices);
-            }
-        };
-        opened_leaf_digests.push((leaf_ordinal, digest));
-    }
-    if base_field_value_offset != decoded_response.queried_base_field_element_count()
-        || extension_field_value_offset != decoded_response.queried_extension_field_element_count()
-    {
-        return Err(CompactResponseMerkleError::WireGeometryMismatch);
+    let mut leaf_cursor = CompactResponseOpenedLeafHashCursor::new(
+        merkle_geometry,
+        decoded_response,
+        canonical_proof_bytes,
+        query_schedule,
+    )?;
+    while let Some(digest) = leaf_cursor.next_digest()? {
+        opened_leaf_digests.push(digest);
     }
 
     let mut frontier = Vec::new();
@@ -1613,62 +2068,197 @@ pub(crate) fn verify_decoded_compact_response_opening(
                 .map_err(map_wire_error)?,
         );
     }
-    reconstruct_compact_response_root(
+    let reconstructed_root = reconstruct_compact_response_root(
         merkle_geometry,
+        query_schedule,
         &opened_leaf_digests,
         &frontier,
-        decoded_response.root(),
-    )
+    )?;
+    if reconstructed_root != decoded_response.root() {
+        return Err(CompactResponseMerkleError::RootMismatch);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
-fn reconstruct_compact_response_root(
+pub(crate) fn reconstruct_compact_response_root(
     geometry: &CompactResponseMerkleGeometry,
-    opened_leaf_digests: &[(u64, [u8; Hash512::BYTE_LENGTH])],
+    query_schedule: &CompactResponseQuerySchedule,
+    opened_leaf_digests: &[[u8; Hash512::BYTE_LENGTH]],
     frontier: &[[u8; Hash512::BYTE_LENGTH]],
-    expected_root: [u8; Hash512::BYTE_LENGTH],
-) -> Result<(), CompactResponseMerkleError> {
-    let query_leaf_ordinals = opened_leaf_digests
-        .iter()
-        .map(|(leaf_ordinal, _)| *leaf_ordinal)
-        .collect::<Vec<_>>();
-    geometry.validate_query_leaf_ordinals(&query_leaf_ordinals)?;
-    let leaf_count = usize::try_from(geometry.merkle_leaf_count)
-        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-    let frontier_coordinates = minimal_frontier_coordinates(&query_leaf_ordinals, leaf_count)
-        .map_err(|_| CompactResponseMerkleError::InvalidOpeningIndices)?;
-    if frontier.len() != frontier_coordinates.len() {
-        return Err(CompactResponseMerkleError::WrongFrontierLength);
+) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+    let mut reconstruction = CompactResponseRootReconstruction::new(
+        geometry,
+        query_schedule,
+        opened_leaf_digests,
+        frontier,
+    )?;
+    loop {
+        match reconstruction.poll()? {
+            CompactResponseRootReconstructionPoll::ParentHash(request) => {
+                let digest = request.digest()?;
+                reconstruction.absorb_parent_digest(digest)?;
+            }
+            CompactResponseRootReconstructionPoll::Complete(root) => return Ok(root),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(super) struct CompactResponseParentHashRequest {
+    response_ordinal: u32,
+    vector_commitment_oracle_identifier: u32,
+    parent_level: u32,
+    left_child_ordinal: u64,
+    left_child_digest: [u8; Hash512::BYTE_LENGTH],
+    right_child_digest: [u8; Hash512::BYTE_LENGTH],
+    is_root: bool,
+}
+
+#[cfg(test)]
+impl CompactResponseParentHashRequest {
+    fn digest(&self) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
+        compact_response_merkle_parent_digest_from_coordinates(
+            self.response_ordinal,
+            self.vector_commitment_oracle_identifier,
+            self.parent_level,
+            self.left_child_ordinal,
+            &self.left_child_digest,
+            &self.right_child_digest,
+        )
     }
 
-    let mut current_nodes = opened_leaf_digests.to_vec();
-    let mut frontier_offset = 0_usize;
-    for level in 0..geometry.merkle_leaf_count.trailing_zeros() {
-        let mut next_nodes = Vec::new();
-        next_nodes
-            .try_reserve_exact(current_nodes.len().div_ceil(2))
+    #[cfg(test)]
+    pub(super) fn preimage(&self) -> Result<Vec<u8>, CompactResponseMerkleError> {
+        canonical_foundation_tuple_hash_preimage(
+            COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
+            &[
+                CanonicalItem::unsigned32(self.response_ordinal),
+                CanonicalItem::unsigned32(self.vector_commitment_oracle_identifier),
+                CanonicalItem::unsigned32(self.parent_level),
+                CanonicalItem::unsigned64(self.left_child_ordinal),
+                CanonicalItem::hash512(self.left_child_digest),
+                CanonicalItem::hash512(self.right_child_digest),
+            ],
+        )
+        .map(|preimage| preimage.to_vec())
+        .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
+    }
+
+    pub(super) const fn is_root(&self) -> bool {
+        self.is_root
+    }
+}
+
+#[cfg(test)]
+pub(super) enum CompactResponseRootReconstructionPoll {
+    ParentHash(CompactResponseParentHashRequest),
+    Complete([u8; Hash512::BYTE_LENGTH]),
+}
+
+/// Exact response-tree traversal shared by fixed-SHAKE verification and the
+/// finite EPRO test game. Production hashes retained coordinates directly;
+/// only the test adapter materializes their canonical preimages.
+#[cfg(test)]
+pub(super) struct CompactResponseRootReconstruction<'geometry> {
+    geometry: &'geometry CompactResponseMerkleGeometry,
+    frontier_coordinates: Vec<(u32, u64)>,
+    frontier: &'geometry [[u8; Hash512::BYTE_LENGTH]],
+    current_nodes: Vec<(u64, [u8; Hash512::BYTE_LENGTH])>,
+    next_nodes: Vec<(u64, [u8; Hash512::BYTE_LENGTH])>,
+    level: u32,
+    current_offset: usize,
+    frontier_offset: usize,
+    pending_parent_ordinal: Option<u64>,
+}
+
+#[cfg(test)]
+impl<'geometry> CompactResponseRootReconstruction<'geometry> {
+    pub(super) fn new(
+        geometry: &'geometry CompactResponseMerkleGeometry,
+        query_schedule: &CompactResponseQuerySchedule,
+        opened_leaf_digests: &[[u8; Hash512::BYTE_LENGTH]],
+        frontier: &'geometry [[u8; Hash512::BYTE_LENGTH]],
+    ) -> Result<Self, CompactResponseMerkleError> {
+        let query_leaf_ordinals = query_schedule.as_slice();
+        geometry.validate_query_leaf_ordinals(query_leaf_ordinals)?;
+        if opened_leaf_digests.len() != query_leaf_ordinals.len() {
+            return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+        }
+        let leaf_count = usize::try_from(geometry.merkle_leaf_count)
             .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
-        let mut current_offset = 0_usize;
-        while current_offset < current_nodes.len() {
-            let (node_ordinal, node_digest) = current_nodes[current_offset];
+        let frontier_coordinates = minimal_frontier_coordinates(query_leaf_ordinals, leaf_count)
+            .map_err(|_| CompactResponseMerkleError::InvalidOpeningIndices)?;
+        if frontier.len() != frontier_coordinates.len() {
+            return Err(CompactResponseMerkleError::WrongFrontierLength);
+        }
+        let current_nodes = query_leaf_ordinals
+            .iter()
+            .copied()
+            .zip(opened_leaf_digests.iter().copied())
+            .collect();
+        Ok(Self {
+            geometry,
+            frontier_coordinates,
+            frontier,
+            current_nodes,
+            next_nodes: Vec::new(),
+            level: 0,
+            current_offset: 0,
+            frontier_offset: 0,
+            pending_parent_ordinal: None,
+        })
+    }
+
+    pub(super) fn poll(
+        &mut self,
+    ) -> Result<CompactResponseRootReconstructionPoll, CompactResponseMerkleError> {
+        if self.pending_parent_ordinal.is_some() {
+            return Err(CompactResponseMerkleError::ParentHashPending);
+        }
+        loop {
+            if self.level == self.geometry.merkle_leaf_count.trailing_zeros() {
+                if self.frontier_offset != self.frontier.len()
+                    || self.current_nodes.len() != 1
+                    || self.current_nodes[0].0 != 0
+                {
+                    return Err(CompactResponseMerkleError::RootMismatch);
+                }
+                return Ok(CompactResponseRootReconstructionPoll::Complete(
+                    self.current_nodes[0].1,
+                ));
+            }
+            if self.current_offset == self.current_nodes.len() {
+                std::mem::swap(&mut self.current_nodes, &mut self.next_nodes);
+                self.next_nodes.clear();
+                self.level += 1;
+                self.current_offset = 0;
+                continue;
+            }
+
+            let (node_ordinal, node_digest) = self.current_nodes[self.current_offset];
             let (left_child_digest, right_child_digest) = if node_ordinal & 1 == 0
-                && current_nodes
-                    .get(current_offset + 1)
+                && self
+                    .current_nodes
+                    .get(self.current_offset + 1)
                     .is_some_and(|(next_ordinal, _)| *next_ordinal == node_ordinal + 1)
             {
-                let right_digest = current_nodes[current_offset + 1].1;
-                current_offset += 2;
+                let right_digest = self.current_nodes[self.current_offset + 1].1;
+                self.current_offset += 2;
                 (node_digest, right_digest)
             } else {
-                let expected_coordinate = (level, node_ordinal ^ 1);
-                if frontier_coordinates.get(frontier_offset).copied() != Some(expected_coordinate) {
+                let expected_coordinate = (self.level, node_ordinal ^ 1);
+                if self.frontier_coordinates.get(self.frontier_offset).copied()
+                    != Some(expected_coordinate)
+                {
                     return Err(CompactResponseMerkleError::IncompleteFrontier);
                 }
-                let sibling_digest = *frontier
-                    .get(frontier_offset)
+                let sibling_digest = *self
+                    .frontier
+                    .get(self.frontier_offset)
                     .ok_or(CompactResponseMerkleError::IncompleteFrontier)?;
-                frontier_offset += 1;
-                current_offset += 1;
+                self.frontier_offset += 1;
+                self.current_offset += 1;
                 if node_ordinal & 1 == 0 {
                     (node_digest, sibling_digest)
                 } else {
@@ -1676,29 +2266,45 @@ fn reconstruct_compact_response_root(
                 }
             };
             let parent_ordinal = node_ordinal >> 1;
-            if next_nodes
+            if self
+                .next_nodes
                 .last()
                 .is_some_and(|(previous_ordinal, _)| *previous_ordinal >= parent_ordinal)
             {
                 return Err(CompactResponseMerkleError::IncompleteFrontier);
             }
-            next_nodes.push((
-                parent_ordinal,
-                compact_response_merkle_parent_digest(
-                    geometry,
-                    level + 1,
-                    parent_ordinal << 1,
+            let parent_level = self.level + 1;
+            let left_child_ordinal = parent_ordinal << 1;
+            validate_parent_coordinate(self.geometry, parent_level, left_child_ordinal)?;
+            self.pending_parent_ordinal = Some(parent_ordinal);
+            let is_root = parent_level == self.geometry.merkle_leaf_count.trailing_zeros();
+            return Ok(CompactResponseRootReconstructionPoll::ParentHash(
+                CompactResponseParentHashRequest {
+                    response_ordinal: self.geometry.response_ordinal(),
+                    vector_commitment_oracle_identifier: self
+                        .geometry
+                        .vector_commitment_oracle_identifier(),
+                    parent_level,
+                    left_child_ordinal,
                     left_child_digest,
                     right_child_digest,
-                )?,
+                    is_root,
+                },
             ));
         }
-        current_nodes = next_nodes;
     }
-    if frontier_offset != frontier.len() || current_nodes.as_slice() != [(0, expected_root)] {
-        return Err(CompactResponseMerkleError::RootMismatch);
+
+    pub(super) fn absorb_parent_digest(
+        &mut self,
+        digest: [u8; Hash512::BYTE_LENGTH],
+    ) -> Result<(), CompactResponseMerkleError> {
+        let parent_ordinal = self
+            .pending_parent_ordinal
+            .take()
+            .ok_or(CompactResponseMerkleError::ParentHashNotPending)?;
+        self.next_nodes.push((parent_ordinal, digest));
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -2044,7 +2650,7 @@ mod tests {
         );
         assert_eq!(decoded.responses()[0].queried_leaf_count(), 4);
         assert_eq!(
-            verify_decoded_compact_response_opening(
+            verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                 &shared_merkle_geometry,
                 &wire_geometries[0],
                 &decoded.responses()[0],
@@ -2068,7 +2674,7 @@ mod tests {
 
         let wrong_schedule = [1, 3, 5];
         assert_eq!(
-            verify_decoded_compact_response_opening(
+            verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                 &shared_merkle_geometry,
                 &wire_geometries[0],
                 &decoded.responses()[0],
@@ -2287,7 +2893,7 @@ mod tests {
             encoded_opening(&geometry, &query_leaf_ordinals, false, false, false, false);
         let decoded = decode_compact_proof_wire(&wire_geometry, &canonical_proof_bytes).unwrap();
         assert_eq!(
-            verify_decoded_compact_response_opening(
+            verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                 &geometry,
                 &wire_geometry.responses()[0],
                 &decoded.responses()[0],
@@ -2314,7 +2920,7 @@ mod tests {
             let mutated =
                 decode_compact_proof_wire(&mutated_wire_geometry, &mutated_bytes).unwrap();
             assert_eq!(
-                verify_decoded_compact_response_opening(
+                verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                     &geometry,
                     &mutated_wire_geometry.responses()[0],
                     &mutated.responses()[0],
@@ -2327,7 +2933,7 @@ mod tests {
 
         for malformed_queries in [&[2, 0, 4][..], &[0, 0, 4], &[0, 2, 6], &[0, 2, 8]] {
             assert_eq!(
-                verify_decoded_compact_response_opening(
+                verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                     &geometry,
                     &wire_geometry.responses()[0],
                     &decoded.responses()[0],
@@ -2340,7 +2946,7 @@ mod tests {
 
         let changed_query_position = [1, 2, 4];
         assert_eq!(
-            verify_decoded_compact_response_opening(
+            verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                 &geometry,
                 &wire_geometry.responses()[0],
                 &decoded.responses()[0],
@@ -2351,7 +2957,7 @@ mod tests {
         );
         let changed_response_geometry = response_geometry_for_ordinal(1);
         assert_eq!(
-            verify_decoded_compact_response_opening(
+            verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                 &changed_response_geometry,
                 &wire_geometry.responses()[0],
                 &decoded.responses()[0],
@@ -2369,6 +2975,33 @@ mod tests {
         let salts = leaf_salts();
         let base_digest =
             compact_response_leaf_digest(&geometry, 0, values[0].borrowed(), &salts[0]).unwrap();
+        let leaf_preimage =
+            compact_response_leaf_hash_preimage(&geometry, 0, values[0].borrowed(), &salts[0])
+                .unwrap();
+        let leaf_descriptor = geometry.leaf_descriptor(0).unwrap();
+        let leaf_value_bytes = values[0]
+            .borrowed()
+            .canonical_bytes(leaf_descriptor)
+            .unwrap();
+        assert_eq!(
+            compact_response_hash_preimage(&leaf_preimage),
+            crate::foundation::hash_foundation_tuple_512(
+                COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
+                &[
+                    CanonicalItem::unsigned32(geometry.response_ordinal()),
+                    CanonicalItem::unsigned32(geometry.vector_commitment_oracle_identifier(),),
+                    CanonicalItem::unsigned32(leaf_descriptor.component_ordinal),
+                    CanonicalItem::unsigned64(leaf_descriptor.component_leaf_ordinal),
+                    CanonicalItem::unsigned64(leaf_descriptor.leaf_ordinal),
+                    CanonicalItem::unsigned16(leaf_descriptor.value_kind as u16),
+                    CanonicalItem::unsigned64(leaf_descriptor.field_element_count),
+                    CanonicalItem::variable_bytes(leaf_value_bytes).unwrap(),
+                    CanonicalItem::fixed_bytes(salts[0]).unwrap(),
+                ],
+            )
+            .unwrap()
+            .into_bytes()
+        );
         assert_eq!(
             compact_response_leaf_digest(
                 &geometry,
@@ -2392,6 +3025,30 @@ mod tests {
         let parent =
             compact_response_merkle_parent_digest(&geometry, 1, 0, base_digest, second_base_digest)
                 .unwrap();
+        let parent_preimage = compact_response_merkle_parent_hash_preimage(
+            &geometry,
+            1,
+            0,
+            base_digest,
+            second_base_digest,
+        )
+        .unwrap();
+        assert_eq!(
+            compact_response_hash_preimage(&parent_preimage),
+            crate::foundation::hash_foundation_tuple_512(
+                COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
+                &[
+                    CanonicalItem::unsigned32(geometry.response_ordinal()),
+                    CanonicalItem::unsigned32(geometry.vector_commitment_oracle_identifier(),),
+                    CanonicalItem::unsigned32(1),
+                    CanonicalItem::unsigned64(0),
+                    CanonicalItem::hash512(base_digest),
+                    CanonicalItem::hash512(second_base_digest),
+                ],
+            )
+            .unwrap()
+            .into_bytes()
+        );
         assert_ne!(
             parent,
             compact_response_merkle_parent_digest(
@@ -2427,6 +3084,163 @@ mod tests {
             COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
             COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN
         );
+    }
+
+    #[test]
+    fn streamed_leaf_hashes_match_materialized_framing_for_all_value_kinds_and_boundaries() {
+        let geometry = response_geometry();
+        let values = leaf_values();
+        let salts = leaf_salts();
+        for leaf_ordinal in [0_u64, 1, 2, 5, 6, 7] {
+            let leaf_index = usize::try_from(leaf_ordinal).unwrap();
+            let descriptor = geometry.leaf_descriptor(leaf_ordinal).unwrap();
+            let canonical_value_bytes = values[leaf_index]
+                .borrowed()
+                .canonical_bytes(descriptor)
+                .unwrap();
+            let streamed = compact_response_leaf_digest_from_canonical_value_bytes(
+                &geometry,
+                descriptor,
+                &canonical_value_bytes,
+                &salts[leaf_index],
+            )
+            .unwrap();
+            let materialized = compact_response_leaf_hash_preimage(
+                &geometry,
+                leaf_ordinal,
+                values[leaf_index].borrowed(),
+                &salts[leaf_index],
+            )
+            .unwrap();
+            assert_eq!(streamed, compact_response_hash_preimage(&materialized));
+            assert_eq!(
+                streamed,
+                compact_response_leaf_digest(
+                    &geometry,
+                    leaf_ordinal,
+                    values[leaf_index].borrowed(),
+                    &salts[leaf_index],
+                )
+                .unwrap()
+            );
+        }
+
+        let base_descriptor = geometry.leaf_descriptor(0).unwrap();
+        assert_eq!(
+            compact_response_leaf_digest_from_canonical_value_bytes(
+                &geometry,
+                base_descriptor,
+                &[0_u8; 8],
+                &salts[0],
+            ),
+            Err(CompactResponseMerkleError::WrongLeafValueCount)
+        );
+        let extension_descriptor = geometry.leaf_descriptor(2).unwrap();
+        assert_eq!(
+            compact_response_leaf_digest_from_canonical_value_bytes(
+                &geometry,
+                extension_descriptor,
+                &[0_u8; 32],
+                &salts[2],
+            ),
+            Err(CompactResponseMerkleError::WrongLeafValueCount)
+        );
+        let padding_descriptor = geometry.leaf_descriptor(6).unwrap();
+        assert_eq!(
+            compact_response_leaf_digest_from_canonical_value_bytes(
+                &geometry,
+                padding_descriptor,
+                &[0],
+                &salts[6],
+            ),
+            Err(CompactResponseMerkleError::WrongLeafValueCount)
+        );
+    }
+
+    #[test]
+    fn streamed_parent_hashes_match_materialized_framing_at_every_tree_boundary() {
+        let geometry = response_geometry();
+        for (parent_level, left_child_ordinal) in [(1, 0), (1, 6), (2, 0), (2, 2), (3, 0)] {
+            let left = [u8::try_from(parent_level).unwrap(); Hash512::BYTE_LENGTH];
+            let right = [u8::try_from(left_child_ordinal + 17).unwrap(); Hash512::BYTE_LENGTH];
+            let streamed = compact_response_merkle_parent_digest(
+                &geometry,
+                parent_level,
+                left_child_ordinal,
+                left,
+                right,
+            )
+            .unwrap();
+            let materialized = compact_response_merkle_parent_hash_preimage(
+                &geometry,
+                parent_level,
+                left_child_ordinal,
+                left,
+                right,
+            )
+            .unwrap();
+            assert_eq!(streamed, compact_response_hash_preimage(&materialized));
+        }
+    }
+
+    #[test]
+    fn opened_leaf_cursor_streams_exact_canonical_wire_slices_without_reencoding() {
+        let geometry = response_geometry();
+        let query_leaf_ordinals = [0, 2, 4];
+        let (wire_geometry, canonical_proof_bytes) =
+            encoded_opening(&geometry, &query_leaf_ordinals, false, false, false, false);
+        let decoded = decode_compact_proof_wire(&wire_geometry, &canonical_proof_bytes).unwrap();
+        let query_schedule = CompactResponseQuerySchedule {
+            leaf_ordinals: query_leaf_ordinals.to_vec(),
+        };
+        let mut cursor = CompactResponseOpenedLeafHashCursor::new(
+            &geometry,
+            &decoded.responses()[0],
+            &canonical_proof_bytes,
+            &query_schedule,
+        )
+        .unwrap();
+        let expected_value_bytes = [
+            vec![base(11), base(13)]
+                .into_iter()
+                .flat_map(|value| value.canonical().to_le_bytes())
+                .collect::<Vec<_>>(),
+            vec![extension(23)]
+                .into_iter()
+                .flat_map(|value| value.canonical_coordinates())
+                .flat_map(u64::to_le_bytes)
+                .collect::<Vec<_>>(),
+            vec![extension(31)]
+                .into_iter()
+                .flat_map(|value| value.canonical_coordinates())
+                .flat_map(u64::to_le_bytes)
+                .collect::<Vec<_>>(),
+        ];
+        let mut opened_leaf_offset = 0_usize;
+        while let Some(opened_leaf) = cursor.next_opened_leaf().unwrap() {
+            match opened_leaf.descriptor.value_kind {
+                CompactResponseLeafValueKind::BaseField => {
+                    assert_eq!(
+                        opened_leaf.canonical_value_bytes.len(),
+                        2 * size_of::<u64>()
+                    );
+                }
+                CompactResponseLeafValueKind::ExtensionField => {
+                    assert_eq!(
+                        opened_leaf.canonical_value_bytes.len(),
+                        PROOF_CHALLENGE_EXTENSION_DEGREE * size_of::<u64>()
+                    );
+                }
+                CompactResponseLeafValueKind::Padding => panic!("padding cannot be queried"),
+            }
+            assert_eq!(
+                opened_leaf.canonical_value_bytes,
+                expected_value_bytes[opened_leaf_offset]
+            );
+            opened_leaf_offset += 1;
+        }
+        assert_eq!(opened_leaf_offset, expected_value_bytes.len());
+        assert!(cursor.next_opened_leaf().unwrap().is_none());
     }
 
     #[test]
@@ -2502,21 +3316,19 @@ mod tests {
         assert_eq!(scanned_frontier, expected_frontier);
         let opened_leaf_digests = query_leaf_ordinals
             .iter()
-            .map(|leaf_ordinal| {
-                (
-                    *leaf_ordinal,
-                    independent_levels[0][usize::try_from(*leaf_ordinal).unwrap()],
-                )
-            })
+            .map(|leaf_ordinal| independent_levels[0][usize::try_from(*leaf_ordinal).unwrap()])
             .collect::<Vec<_>>();
+        let query_schedule = CompactResponseQuerySchedule {
+            leaf_ordinals: query_leaf_ordinals.to_vec(),
+        };
         assert_eq!(
             reconstruct_compact_response_root(
                 &geometry,
+                &query_schedule,
                 &opened_leaf_digests,
                 &scanned_frontier,
-                root,
             ),
-            Ok(())
+            Ok(root)
         );
 
         let mut truncated_scanner =

@@ -309,7 +309,7 @@ impl ArtifactKind {
         match self {
             Self::EncoderAndBallotLayout => 4,
             Self::LatticeCommitmentProfile => 3,
-            Self::ProofProfileSet => 8,
+            Self::ProofProfileSet => 9,
             Self::VerifiableSecretSharingProfile
             | Self::EvaluatorProgramSet
             | Self::TargetDecryptionProfile => FOUNDATION_SCHEMA_VERSION,

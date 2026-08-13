@@ -33,7 +33,7 @@ use super::super::relation_plan::{
 #[cfg(test)]
 use super::super::{PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE};
 
-const COMMON_PROOF_PRIVATE_COIN_COORDINATE_HASH_DOMAIN: &str =
+pub(crate) const COMMON_PROOF_PRIVATE_COIN_COORDINATE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/private-coin-coordinate/v1";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CommonProofPrivateCoinCoordinate {

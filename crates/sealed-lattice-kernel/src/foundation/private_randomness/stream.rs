@@ -46,7 +46,7 @@ impl fmt::Debug for PrivateRandomBlockInput {
 }
 
 impl PrivateRandomBlockInput {
-    pub(super) fn new(
+    pub(crate) fn new(
         derivation_input: ActionRandomnessDerivationInput,
         domain: PrivateRandomnessDomain,
         derivation_context_hash: Hash512,

@@ -17,7 +17,7 @@ accepts the same transported hostile corpus.
 The tracked collective-setup security record was regenerated through a guarded
 Rust production-authority export, binds 44 source paths, and has canonical
 record SHA-256
-`71244aed3d8dea1cc6f946bb503fbfe4b8d958159f02353c03a19fede74387e1`.
+`bc34038c2d8d9642a1f31de3ec4f2c65d9fbdbf0609cc8ee0e06e7a347a16896`.
 Its routine Node consumer does not independently repeat that export: it reads
 `productionAuthority` from the tracked record and feeds the same value to the
 expected-record builder. The consumer therefore checks canonical internal
@@ -32,10 +32,14 @@ remain open; it has no production capability consumer and cannot select a suite.
 
 The compact ring-vector semantic, prover, transport, and hostile-verifier
 modules remain test-only. The measurement feature contains only bounded
-measurement owners and ring-native arithmetic. Independently derived
-production view matrices, conditioned image factorization, the ideal-uniform
-adaptive simulator, the KMAC256 and SHAKE256 hybrid, one complete transported
-production proof, and its exact CDHZ/Merkle/QROM partition remain open.
+measurement owners and ring-native arithmetic. Test-only coefficient maps,
+streaming entropy, adaptive simulation through the first carried-covector
+boundary, finite-Merkle accounting, the KMAC census, emitted-byte accounting,
+and Appendix arithmetic are partial development evidence. Terminal simulation,
+the same-transcript carried-covector authority, a joint KMAC256/SHAKE256
+reduction or compatible explicit assumption, one complete transported
+production proof, an available fixed-tape shared-QRO premise, and ceremony
+composition remain open.
 
 `selected-lattice-security-estimator-evidence.json` still binds the superseded
 twenty-option topology with data-block width three and three special primes. Its

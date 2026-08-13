@@ -195,8 +195,8 @@ pub(crate) struct CompactWitnessSegment {
 /// ranges in the relation owner prevents semantic proof code from reconstructing
 /// a parallel layout or accepting an inverse vector unrelated to the committed
 /// main witness.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactLookupRelationGeometry {
     source_first_element: u64,
     source_element_count: u64,

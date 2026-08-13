@@ -539,18 +539,6 @@ impl CfwReductionCatalog {
     pub(super) fn last_round_excluded_element_count(&self) -> u64 {
         self.verifier_randomness.last_round_excluded_element_count
     }
-
-    pub(super) fn initial_consistency_soundness_numerator(&self) -> u64 {
-        self.initial_consistency_soundness_numerator
-    }
-
-    pub(super) fn per_round_soundness_numerator(&self) -> u64 {
-        self.per_round_soundness_numerator
-    }
-
-    pub(super) fn joint_constraint_soundness_numerator(&self) -> u64 {
-        self.joint_constraint_soundness_numerator
-    }
 }
 
 fn production_cfw_geometry(

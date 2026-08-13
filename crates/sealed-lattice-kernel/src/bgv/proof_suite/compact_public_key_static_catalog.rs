@@ -1,14 +1,14 @@
-//! Static packing ledger for the compact public-key-share development slice.
+//! Static packing and transport-geometry ledger for the compact public-key-share
+//! development slice.
 //!
 //! This pre-prover owner derives the two oracle epochs, the CFW masks, both
 //! zero-knowledge WHIR executions, the logical transcript chronology, one
-//! response commitment per logical response, exact interactive and conditional
-//! non-interactive soundness arithmetic, bounded query sampling, and the
+//! response commitment per logical response, bounded query sampling, and the
 //! selected factor-one packing. It feeds the independently derived response
 //! geometry into the canonical wire codec and accounts for the production
-//! transcript's complete prefixes. Emitted-proof integration and the concrete
-//! QROM correspondence remain open, so this ledger does not authorize proof
-//! generation. It contains no producer-supplied acceptance field.
+//! transcript's complete prefixes. Semantic execution, masking reductions, and
+//! adaptive soundness belong to their dedicated owners; this catalog does not
+//! authorize proof generation or verification.
 
 use num_bigint::BigUint;
 use num_traits::One;
@@ -35,21 +35,17 @@ use super::relation_plan::{
     selected_compact_public_key_relation_catalog,
 };
 
-mod canonical_reed_solomon;
 mod cfw_lifecycle;
 mod cfw_reduction;
 mod cfw_to_whir_handoff;
 mod emitted_byte_correspondence;
 #[cfg(test)]
 mod external_mask_integration;
+#[cfg(test)]
+pub(super) use external_mask_integration::assert_selected_masking_producer_differentials;
 mod lifecycle;
-mod masking_leakage;
-mod non_interactive_soundness;
-mod relaxed_round_by_round;
 mod response_commitment;
 mod row_source_lifecycle;
-mod soundness;
-mod transcript_binding;
 mod transcript_chronology;
 mod uniform_verifier_randomness;
 
@@ -1196,15 +1192,10 @@ struct SelectedStaticCatalog {
     uniform_verifier_randomness: uniform_verifier_randomness::PackingUniformVerifierRandomness,
     response_commitments: response_commitment::PackingResponseCommitmentCatalog,
     query_sampling_lifecycle: lifecycle::PackingQuerySamplingLifecycle,
-    masking_leakage: masking_leakage::PackingMaskingLeakageCorrespondence,
-    interactive_soundness: soundness::PackingInteractiveSoundness,
-    relaxed_round_by_round: relaxed_round_by_round::RelaxedRoundByRoundCatalog,
     decoded_challenge_consumers: emitted_byte_correspondence::DecodedChallengeConsumers,
-    non_interactive_soundness: non_interactive_soundness::PackingNonInteractiveSoundness,
     proof_wire_geometry: CompactProofWireGeometry,
     response_checkpoint_schedule: CompactResponseCheckpointSchedule,
     public_input_wire_geometry: CompactPublicInputWireGeometry,
-    transcript_binding: transcript_binding::PackingTranscriptBindingLedger,
     maximum_proof_byte_length: u64,
     public_input_byte_length: u64,
     transport_byte_length: u64,
@@ -1362,35 +1353,6 @@ impl SelectedStaticCatalog {
         )?;
         let query_sampling_lifecycle =
             lifecycle::PackingQuerySamplingLifecycle::derive(&pre_challenge_whir, &main_whir)?;
-        let masking_leakage = masking_leakage::PackingMaskingLeakageCorrespondence::derive(
-            &pre_challenge_whir,
-            &main_whir,
-            &transcript_chronology,
-            &query_sampling_lifecycle,
-            cfw_reduction,
-        )?;
-        let interactive_soundness = soundness::PackingInteractiveSoundness::derive(
-            relation,
-            &pre_challenge_whir,
-            &main_whir,
-            &transcript_chronology,
-            cfw_reduction,
-        )?;
-        let relaxed_round_by_round = relaxed_round_by_round::RelaxedRoundByRoundCatalog::derive(
-            relation,
-            cfw_reduction,
-            cfw_to_whir_handoff,
-            &pre_challenge_whir,
-            &main_whir,
-            &transcript_chronology,
-            &interactive_soundness,
-        )?;
-        relaxed_round_by_round.check_factor_one_semantic_error_theorem(
-            relation,
-            cfw_reduction,
-            &pre_challenge_whir,
-            &main_whir,
-        )?;
         if transcript_chronology.distinct_query_group_count
             != query_sampling_lifecycle.query_group_count
             || transcript_chronology.fixed_query_candidate_slot_count
@@ -1432,23 +1394,11 @@ impl SelectedStaticCatalog {
         {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
-        let transcript_binding = transcript_binding::PackingTranscriptBindingLedger::derive(
-            &proof_wire_geometry,
-            &uniform_verifier_randomness,
-        )?;
         let decoded_challenge_consumers =
             emitted_byte_correspondence::DecodedChallengeConsumers::derive(
                 &transcript_chronology,
                 &uniform_verifier_randomness,
                 cfw_reduction,
-            )?;
-        let non_interactive_soundness =
-            non_interactive_soundness::PackingNonInteractiveSoundness::derive(
-                &transcript_chronology,
-                &uniform_verifier_randomness,
-                &response_commitments,
-                &transcript_binding,
-                &relaxed_round_by_round,
             )?;
         let maximum_proof_byte_length =
             u64::try_from(proof_wire_geometry.maximum_canonical_byte_length())
@@ -1536,15 +1486,10 @@ impl SelectedStaticCatalog {
             uniform_verifier_randomness,
             response_commitments,
             query_sampling_lifecycle,
-            masking_leakage,
-            interactive_soundness,
-            relaxed_round_by_round,
             decoded_challenge_consumers,
-            non_interactive_soundness,
             proof_wire_geometry,
             response_checkpoint_schedule,
             public_input_wire_geometry,
-            transcript_binding,
             maximum_proof_byte_length,
             public_input_byte_length,
             transport_byte_length,

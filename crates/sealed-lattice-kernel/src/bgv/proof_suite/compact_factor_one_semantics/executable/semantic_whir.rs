@@ -10,27 +10,26 @@
 //! is classified only after the post-challenge state holds and the preceding
 //! state reconstructed by that extractor does not.
 
+use super::super::{CommittedMaskCodeRelation, GeneralizedCommittedRelation};
 use super::*;
-use crate::bgv::proof_suite::compact_public_key_static_catalog::canonical_reed_solomon::{
+use crate::bgv::proof_suite::compact_reed_solomon::{
     canonical_reed_solomon_evaluation_points, correct_canonical_interleaved_reed_solomon_erasures,
     encode_canonical_interleaved_reed_solomon_with_operation_count,
-};
-use crate::bgv::proof_suite::compact_public_key_static_catalog::relaxed_round_by_round::{
-    CommittedMaskCodeRelation, GeneralizedCommittedRelation,
 };
 
 mod base_case;
 mod opening_batching;
 
 pub(super) use base_case::{
-    SemanticWhirBaseCombinationBadTransition, SemanticWhirBaseFreshMessage,
-    SemanticWhirBaseKnowledgeWitness, SemanticWhirBaseOracleRole,
-    SemanticWhirBasePreCombinationWitness, SemanticWhirBasePrefix, SemanticWhirBaseQueryChallenges,
+    SemanticWhirBaseCombinationBadTransition, SemanticWhirBaseKnowledgeWitness,
+    SemanticWhirBaseOracleRole, SemanticWhirBasePreCombinationWitness, SemanticWhirBasePrefix,
     SemanticWhirBaseQueryEscape, SemanticWhirBaseStatement,
     semantic_whir_base_combination_bad_transition, semantic_whir_base_combination_errbr,
     semantic_whir_base_final_bad_transition, semantic_whir_base_final_errbr,
     semantic_whir_base_kstate,
 };
+#[cfg(test)]
+pub(super) use base_case::{SemanticWhirBaseFreshMessage, SemanticWhirBaseQueryChallenges};
 pub(super) use opening_batching::{
     SemanticWhirOpeningBatchingBadTransition, SemanticWhirOpeningBatchingPrefix,
     SemanticWhirOpeningBatchingStatement, semantic_whir_opening_batching_bad_transition,
@@ -1713,7 +1712,7 @@ fn decode_unchanged_masks(
 }
 
 fn semantic_witness_from_canonical_decoding(
-    decoded: &crate::bgv::proof_suite::compact_public_key_static_catalog::canonical_reed_solomon::CanonicalReedSolomonDecodedWitness,
+    decoded: &crate::bgv::proof_suite::compact_reed_solomon::CanonicalReedSolomonDecodedWitness,
 ) -> SemanticCommittedCodeWitness {
     SemanticCommittedCodeWitness {
         message_columns: decoded.message_columns().to_vec(),

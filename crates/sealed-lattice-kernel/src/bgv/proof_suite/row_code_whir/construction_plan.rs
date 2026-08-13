@@ -217,6 +217,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirSelectedParameters {
 }
 
 impl RowCodeWhirSelectedParameters {
+    #[cfg(test)]
     pub(in crate::bgv::proof_suite) const fn selected() -> Self {
         Self {
             logical_polynomial_coefficient_count:

@@ -1,6 +1,6 @@
 use super::*;
 use crate::bgv::proof_suite::ProofBaseFieldElement;
-use crate::bgv::proof_suite::compact_public_key_static_catalog::relaxed_round_by_round::MaskGroupRole;
+use crate::bgv::proof_suite::compact_factor_one_semantics::MaskGroupRole;
 
 fn field(value: u64) -> ProofChallengeExtensionElement {
     ProofChallengeExtensionElement::from_base(

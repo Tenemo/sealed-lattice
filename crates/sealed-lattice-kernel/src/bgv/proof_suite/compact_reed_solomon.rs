@@ -1,4 +1,5 @@
-//! Deterministic Reed-Solomon correction used by the compact extractor.
+//! Test-only deterministic Reed-Solomon correction for the compact semantic
+//! extractor.
 //!
 //! The compact CFW and hiding-WHIR theorem uses the complete
 //! `message || hiding randomness` coefficient dimension. This owner evaluates

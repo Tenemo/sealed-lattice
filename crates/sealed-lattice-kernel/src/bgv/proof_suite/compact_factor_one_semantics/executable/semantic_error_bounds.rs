@@ -1,18 +1,23 @@
 //! Error bounds derived from the executable bad-transition owners.
 //!
-//! The chronology and numerical soundness ledgers are comparison inputs only.
-//! This module starts from the semantic owner assigned to each factor-one
-//! verifier move, enumerates every bad-event family that owner can emit, and
-//! derives its probability from the production relation, code, and challenge
-//! geometry. The sum is then required to equal the independently constructed
-//! transition ledger.
+//! This module starts from the executable semantic owner assigned to each
+//! factor-one verifier move, exhaustively maps the owner's bad-transition
+//! certificate variants to bad-event families, and derives their ceilings from
+//! the production relation, code, and challenge geometry. The same event
+//! values populate each move descriptor and validate emitted certificates.
 
 use num_bigint::BigUint;
 use num_traits::CheckedSub;
 
+#[cfg(test)]
+use super::super::CompactFactorOneMoveErrorBound;
 use super::super::{
-    CodeRole, ExactProbability, GOLDILOCKS_BASE_FIELD_MODULUS, RelaxedRoundByRoundCatalog,
-    TranscriptEpoch, UniqueDecodingCode, WHIR_ROUND_COUNT, extension_field_order,
+    CodeRole, CompactFactorOneBadEventBound, CompactFactorOneBadEventFamily,
+    CompactFactorOneContractView, CompactFactorOneEpoch, CompactFactorOneExactProbability,
+    CompactFactorOneSemanticError, CompactFactorOneSemanticErrorTheorem,
+    CompactFactorOneSemanticOwner, ExactProbability, GOLDILOCKS_BASE_FIELD_MODULUS,
+    TranscriptEpoch, WHIR_ROUND_COUNT, epoch_and_folds, extension_field_order,
+    final_code_descriptors, root_event, source_code_descriptor, sumcheck_mask_message_length,
 };
 use super::semantic_composition::{
     SemanticCfwAndPreWhirOpeningBadTransition, SemanticPreWhirFinalAndMainOpeningBadTransition,
@@ -23,7 +28,6 @@ use super::semantic_execution::{
 };
 use super::semantic_outer::{
     SemanticCrossEpochBadTransition, SemanticProductionOuterBadTransition,
-    SemanticProductionOuterLayout,
 };
 use super::semantic_whir::{
     SemanticWhirBadTransition, SemanticWhirBaseCombinationBadTransition,
@@ -34,51 +38,194 @@ use super::semantic_whir::{
 use super::{SemanticCfwBadTransition, SemanticCfwVerifierTransition};
 use crate::bgv::proof_suite::ProofChallengeExtensionElement;
 use crate::bgv::proof_suite::compact_cfw::{
-    COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, COMPACT_CFW_ZERO_EVADER_EXPONENTS, CompactCfwGeometry,
     CompactChallengeField, compact_cfw_zero_evader_weights,
 };
-use crate::bgv::proof_suite::compact_public_key_static_catalog::{
-    CompactStaticCatalogError, SUMCHECK_MASK_MESSAGE_LENGTH, WhirStaticLedger,
-    cfw_reduction::CfwReductionCatalog,
-};
-use crate::bgv::proof_suite::relation_plan::CompactPublicKeyRelationCatalog;
 use p3_field::PrimeCharacteristicRing;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SemanticBadEventFamily {
-    LookupRationalIdentity,
-    CrossEpochMultilinearIdentity,
-    CfwInitialConsistencyIdentity,
-    CfwSumcheckIdentity,
-    CfwZeroEvaderIdentity,
-    WhirOpeningBatchingIdentity,
-    WhirMaskedCombinationIdentity,
-    WhirBinaryMutualCorrelatedAgreement,
-    WhirMaskedSumcheckIdentity,
-    WhirDistinctQueryEscape { code_role: CodeRole },
-    WhirCodeSwitchCombinationIdentity,
-    WhirBaseMutualCorrelatedAgreement { code_role: CodeRole },
-    WhirBaseCombinationIdentity,
+pub(super) type SemanticBadEventFamily = CompactFactorOneBadEventFamily;
+pub(super) type SemanticBadEventBound = CompactFactorOneBadEventBound;
+
+pub(super) fn derive_owner_bad_transition_event_ceiling(
+    contract: CompactFactorOneContractView<'_>,
+    owner: CompactFactorOneSemanticOwner,
+) -> Result<Vec<SemanticBadEventBound>, CompactFactorOneSemanticError> {
+    let cfw = contract.cfw_configuration;
+    match owner {
+        CompactFactorOneSemanticOwner::LookupChallenge => {
+            let numerator = cfw
+                .cross_epoch()
+                .copied_element_count
+                .checked_sub(1)
+                .ok_or(CompactFactorOneSemanticError::InvalidContractGeometry)?;
+            Ok(vec![root_event(
+                CompactFactorOneBadEventFamily::LookupRationalIdentity,
+                numerator,
+                GOLDILOCKS_BASE_FIELD_MODULUS,
+            )?])
+        }
+        CompactFactorOneSemanticOwner::CrossEpochPoint => Ok(vec![root_event(
+            CompactFactorOneBadEventFamily::CrossEpochMultilinearIdentity,
+            u64::from(cfw.cross_epoch().point_coordinate_count),
+            0,
+        )?]),
+        CompactFactorOneSemanticOwner::CfwInitialRandomness => Ok(vec![root_event(
+            CompactFactorOneBadEventFamily::CfwInitialConsistencyIdentity,
+            u64::try_from(cfw.geometry().sumcheck_round_count())
+                .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?
+                .checked_add(1)
+                .ok_or(CompactFactorOneSemanticError::ArithmeticOverflow)?,
+            0,
+        )?]),
+        CompactFactorOneSemanticOwner::CfwSumcheckRound { round_ordinal } => {
+            let round_count = u32::try_from(cfw.geometry().sumcheck_round_count())
+                .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?;
+            if round_ordinal >= round_count {
+                return Err(CompactFactorOneSemanticError::InvalidOwnerChronology);
+            }
+            Ok(vec![root_event(
+                CompactFactorOneBadEventFamily::CfwSumcheckIdentity,
+                cfw.outer_mask_message_length(),
+                if round_ordinal + 1 == round_count {
+                    u64::try_from(cfw.last_round_excluded_canonical_elements().len())
+                        .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?
+                } else {
+                    0
+                },
+            )?])
+        }
+        CompactFactorOneSemanticOwner::CfwJointAndPreWhirOpening => Ok(vec![
+            root_event(
+                CompactFactorOneBadEventFamily::CfwZeroEvaderIdentity,
+                cfw.zero_evader_exponents()
+                    .into_iter()
+                    .max()
+                    .map(u64::from)
+                    .ok_or(CompactFactorOneSemanticError::InvalidContractGeometry)?,
+                0,
+            )?,
+            opening_batching_event(1)?,
+        ]),
+        CompactFactorOneSemanticOwner::WhirMaskedSumcheckCombination { .. } => {
+            Ok(vec![root_event(
+                CompactFactorOneBadEventFamily::WhirMaskedCombinationIdentity,
+                1,
+                0,
+            )?])
+        }
+        CompactFactorOneSemanticOwner::WhirFolding {
+            epoch,
+            batch_ordinal,
+            round_ordinal,
+        } => {
+            let (epoch_contract, _) = epoch_and_folds(contract, epoch)?;
+            if u32::from(round_ordinal)
+                >= *epoch_contract
+                    .folding_schedule
+                    .get(usize::from(batch_ordinal))
+                    .ok_or(CompactFactorOneSemanticError::InvalidOwnerChronology)?
+            {
+                return Err(CompactFactorOneSemanticError::InvalidOwnerChronology);
+            }
+            let source = source_code_descriptor(contract, epoch, batch_ordinal)?;
+            Ok(vec![
+                root_event(
+                    CompactFactorOneBadEventFamily::WhirBinaryMutualCorrelatedAgreement,
+                    source.block_length,
+                    0,
+                )?,
+                root_event(
+                    CompactFactorOneBadEventFamily::WhirMaskedSumcheckIdentity,
+                    sumcheck_mask_message_length(epoch_contract, batch_ordinal)?,
+                    0,
+                )?,
+            ])
+        }
+        CompactFactorOneSemanticOwner::WhirCodeSwitch {
+            epoch,
+            round_ordinal,
+        } => {
+            let code = source_code_descriptor(contract, epoch, round_ordinal)?;
+            Ok(vec![
+                CompactFactorOneBadEventBound {
+                    family: CompactFactorOneBadEventFamily::WhirDistinctQueryEscape {
+                        code_role: code.role,
+                    },
+                    probability: code.exact_query_failure()?,
+                },
+                root_event(
+                    CompactFactorOneBadEventFamily::WhirCodeSwitchCombinationIdentity,
+                    code.hiding_randomness_length
+                        .checked_add(1)
+                        .ok_or(CompactFactorOneSemanticError::ArithmeticOverflow)?,
+                    0,
+                )?,
+            ])
+        }
+        CompactFactorOneSemanticOwner::WhirBaseCombination { epoch } => {
+            let mut events = final_code_descriptors(contract, epoch)?
+                .into_iter()
+                .map(|code| {
+                    root_event(
+                        CompactFactorOneBadEventFamily::WhirBaseMutualCorrelatedAgreement {
+                            code_role: code.role,
+                        },
+                        code.block_length,
+                        0,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            events.push(root_event(
+                CompactFactorOneBadEventFamily::WhirBaseCombinationIdentity,
+                1,
+                0,
+            )?);
+            Ok(events)
+        }
+        CompactFactorOneSemanticOwner::PreWhirFinalAndMainWhirOpening => {
+            let mut events = final_query_events(contract, CompactFactorOneEpoch::PreChallenge)?;
+            let main_opening_claim_count = cfw
+                .cross_epoch_preceding_claim_count()
+                .checked_add(
+                    u64::try_from(cfw.geometry().generalized_committed_relation_claim_count())
+                        .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?,
+                )
+                .ok_or(CompactFactorOneSemanticError::ArithmeticOverflow)?;
+            events.push(opening_batching_event(main_opening_claim_count)?);
+            Ok(events)
+        }
+        CompactFactorOneSemanticOwner::MainWhirFinalQueries => {
+            final_query_events(contract, CompactFactorOneEpoch::Main)
+        }
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SemanticBadEventBound {
-    pub(super) family: SemanticBadEventFamily,
-    pub(super) probability: ExactProbability,
+fn opening_batching_event(
+    claim_count: u64,
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
+    root_event(
+        CompactFactorOneBadEventFamily::WhirOpeningBatchingIdentity,
+        claim_count
+            .checked_sub(1)
+            .ok_or(CompactFactorOneSemanticError::InvalidContractGeometry)?,
+        0,
+    )
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in super::super) struct SemanticMoveErrorBound {
-    pub(in super::super) verifier_move_ordinal: u32,
-    pub(super) owner: SemanticVerifierMoveOwner,
-    pub(super) events: Vec<SemanticBadEventBound>,
-    pub(in super::super) total_probability: ExactProbability,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in super::super) struct SemanticFactorOneErrorTheorem {
-    pub(in super::super) moves: Vec<SemanticMoveErrorBound>,
-    pub(in super::super) maximum_per_move_error: ExactProbability,
+fn final_query_events(
+    contract: CompactFactorOneContractView<'_>,
+    epoch: CompactFactorOneEpoch,
+) -> Result<Vec<SemanticBadEventBound>, CompactFactorOneSemanticError> {
+    final_code_descriptors(contract, epoch)?
+        .into_iter()
+        .map(|code| {
+            Ok(CompactFactorOneBadEventBound {
+                family: CompactFactorOneBadEventFamily::WhirDistinctQueryEscape {
+                    code_role: code.role,
+                },
+                probability: code.exact_query_failure()?,
+            })
+        })
+        .collect()
 }
 
 /// Independently interprets one concrete executable bad-transition
@@ -91,7 +238,7 @@ pub(in super::super) struct SemanticFactorOneErrorTheorem {
 pub(super) fn derive_bad_transition_certificate_events(
     descriptor: &SemanticFactorOneMoveDescriptor,
     bad_transition: &SemanticVerifierMoveBadTransition,
-) -> Result<Vec<SemanticBadEventBound>, CompactStaticCatalogError> {
+) -> Result<Vec<SemanticBadEventBound>, CompactFactorOneSemanticError> {
     let owner = descriptor.owner();
     let events = match (owner, bad_transition) {
         (
@@ -103,7 +250,7 @@ pub(super) fn derive_bad_transition_certificate_events(
             SemanticBadEventFamily::LookupRationalIdentity,
             certificate
                 .exact_error_numerator()
-                .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?,
+                .map_err(|_| CompactFactorOneSemanticError::InvalidGeometry)?,
             GOLDILOCKS_BASE_FIELD_MODULUS,
         )?],
         (
@@ -117,7 +264,7 @@ pub(super) fn derive_bad_transition_certificate_events(
                 SemanticBadEventFamily::CrossEpochMultilinearIdentity,
                 certificate
                     .exact_error_numerator()
-                    .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?,
+                    .map_err(|_| CompactFactorOneSemanticError::InvalidGeometry)?,
                 0,
             )?]
         }
@@ -130,7 +277,7 @@ pub(super) fn derive_bad_transition_certificate_events(
                 SemanticBadEventFamily::CfwInitialConsistencyIdentity,
                 certificate
                     .polynomial_identity_numerator()
-                    .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
+                    .ok_or(CompactFactorOneSemanticError::InvalidGeometry)?,
                 0,
             )?]
         }
@@ -200,250 +347,56 @@ pub(super) fn derive_bad_transition_certificate_events(
             .iter()
             .map(|escape| final_query_escape_event(TranscriptEpoch::Main, escape))
             .collect::<Result<Vec<_>, _>>()?,
-        _ => return Err(CompactStaticCatalogError::InvalidGeometry),
+        _ => return Err(CompactFactorOneSemanticError::InvalidGeometry),
     };
     if events.is_empty() {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(events)
 }
 
 pub(in super::super) fn derive_factor_one_semantic_error_theorem(
-    catalog: &RelaxedRoundByRoundCatalog,
-    relation: &CompactPublicKeyRelationCatalog,
-    cfw_reduction: &CfwReductionCatalog,
-    pre_challenge_whir: &WhirStaticLedger,
-    main_whir: &WhirStaticLedger,
-) -> Result<SemanticFactorOneErrorTheorem, CompactStaticCatalogError> {
-    let schedule = SemanticFactorOneSchedule::from_catalog(catalog)
-        .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
-    let production_layout = SemanticProductionOuterLayout::from_relation(relation)
-        .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
-    let cfw_geometry = CompactCfwGeometry::derive(
-        usize::try_from(relation.padded_witness_element_count())
-            .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-    )
-    .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
-    let expected_initial_numerator = u64::try_from(
-        cfw_geometry
-            .sumcheck_round_count()
-            .checked_add(1)
-            .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
-    )
-    .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
-    let expected_sumcheck_numerator = u64::try_from(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
-        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
-    let expected_joint_numerator = COMPACT_CFW_ZERO_EVADER_EXPONENTS
-        .into_iter()
-        .max()
-        .map(u64::from)
-        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    if expected_initial_numerator != cfw_reduction.initial_consistency_soundness_numerator()
-        || expected_sumcheck_numerator != cfw_reduction.per_round_soundness_numerator()
-        || expected_joint_numerator != cfw_reduction.joint_constraint_soundness_numerator()
-        || u32::try_from(cfw_geometry.sumcheck_round_count()).ok()
-            != Some(cfw_reduction.sumcheck_round_count())
-    {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
-    }
-
+    contract: CompactFactorOneContractView<'_>,
+) -> Result<CompactFactorOneSemanticErrorTheorem, CompactFactorOneSemanticError> {
+    let schedule = SemanticFactorOneSchedule::from_contract(contract)
+        .map_err(|_| CompactFactorOneSemanticError::InvalidOwnerChronology)?;
+    let mut maximum_per_move_error = CompactFactorOneExactProbability::zero();
+    #[cfg(test)]
     let mut moves = Vec::with_capacity(schedule.moves().len());
-    let mut maximum_per_move_error = ExactProbability::zero();
     for descriptor in schedule.moves() {
-        let events = semantic_events_for_owner(
-            descriptor.owner(),
-            catalog,
-            production_layout,
-            cfw_reduction,
-            pre_challenge_whir,
-            main_whir,
-        )?;
+        let events = descriptor.bad_transition_event_ceiling();
         if events.is_empty() {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
+            return Err(CompactFactorOneSemanticError::InvalidOwnerChronology);
         }
-        let total_probability = events
-            .iter()
-            .try_fold(ExactProbability::zero(), |sum, event| {
-                sum.add(&event.probability)
-            })?;
+        let total_probability = descriptor.extraction_error().clone();
         if total_probability.is_greater_than(&maximum_per_move_error) {
             maximum_per_move_error = total_probability.clone();
         }
-        moves.push(SemanticMoveErrorBound {
+        #[cfg(test)]
+        moves.push(CompactFactorOneMoveErrorBound {
             verifier_move_ordinal: descriptor.verifier_move_ordinal(),
             owner: descriptor.owner(),
-            events,
+            events: events.to_vec(),
             total_probability,
         });
     }
-    Ok(SemanticFactorOneErrorTheorem {
+    Ok(CompactFactorOneSemanticErrorTheorem {
+        #[cfg(test)]
         moves,
         maximum_per_move_error,
     })
 }
 
-fn semantic_events_for_owner(
-    owner: SemanticVerifierMoveOwner,
-    catalog: &RelaxedRoundByRoundCatalog,
-    production_layout: SemanticProductionOuterLayout,
-    cfw_reduction: &CfwReductionCatalog,
-    pre_challenge_whir: &WhirStaticLedger,
-    main_whir: &WhirStaticLedger,
-) -> Result<Vec<SemanticBadEventBound>, CompactStaticCatalogError> {
-    let root_event = |family, numerator, excluded_element_count| {
-        semantic_root_event(family, numerator, excluded_element_count)
-    };
-    match owner {
-        SemanticVerifierMoveOwner::LookupChallenge => Ok(vec![root_event(
-            SemanticBadEventFamily::LookupRationalIdentity,
-            production_layout.soundness_numerator(),
-            GOLDILOCKS_BASE_FIELD_MODULUS,
-        )?]),
-        SemanticVerifierMoveOwner::CrossEpochPoint => Ok(vec![root_event(
-            SemanticBadEventFamily::CrossEpochMultilinearIdentity,
-            u64::try_from(production_layout.variable_count())
-                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
-            0,
-        )?]),
-        SemanticVerifierMoveOwner::CfwInitialRandomness => Ok(vec![root_event(
-            SemanticBadEventFamily::CfwInitialConsistencyIdentity,
-            cfw_reduction.initial_consistency_soundness_numerator(),
-            0,
-        )?]),
-        SemanticVerifierMoveOwner::CfwSumcheckRound { round_ordinal } => {
-            if round_ordinal >= cfw_reduction.sumcheck_round_count() {
-                return Err(CompactStaticCatalogError::InvalidGeometry);
-            }
-            Ok(vec![root_event(
-                SemanticBadEventFamily::CfwSumcheckIdentity,
-                cfw_reduction.per_round_soundness_numerator(),
-                if round_ordinal + 1 == cfw_reduction.sumcheck_round_count() {
-                    cfw_reduction.last_round_excluded_element_count()
-                } else {
-                    0
-                },
-            )?])
-        }
-        SemanticVerifierMoveOwner::CfwJointAndPreWhirOpening => Ok(vec![
-            root_event(
-                SemanticBadEventFamily::CfwZeroEvaderIdentity,
-                cfw_reduction.joint_constraint_soundness_numerator(),
-                0,
-            )?,
-            opening_batching_event(pre_challenge_whir)?,
-        ]),
-        SemanticVerifierMoveOwner::WhirMaskedSumcheckCombination { .. } => Ok(vec![root_event(
-            SemanticBadEventFamily::WhirMaskedCombinationIdentity,
-            1,
-            0,
-        )?]),
-        SemanticVerifierMoveOwner::WhirFolding {
-            epoch,
-            batch_ordinal,
-            round_ordinal,
-        } => {
-            let source_code = unique_code(
-                catalog,
-                CodeRole::WhirSource {
-                    epoch,
-                    batch_ordinal,
-                },
-            )?;
-            let whir = match epoch {
-                TranscriptEpoch::PreChallenge => pre_challenge_whir,
-                TranscriptEpoch::Main => main_whir,
-            };
-            let batch_ordinal = usize::from(batch_ordinal);
-            if usize::from(round_ordinal)
-                >= usize::try_from(
-                    *whir
-                        .folding_schedule
-                        .get(batch_ordinal)
-                        .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
-                )
-                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
-                || source_code.block_length
-                    != *whir
-                        .oracle_heights
-                        .get(batch_ordinal)
-                        .ok_or(CompactStaticCatalogError::InvalidGeometry)?
-            {
-                return Err(CompactStaticCatalogError::InvalidGeometry);
-            }
-            Ok(vec![
-                root_event(
-                    SemanticBadEventFamily::WhirBinaryMutualCorrelatedAgreement,
-                    source_code.block_length,
-                    0,
-                )?,
-                root_event(
-                    SemanticBadEventFamily::WhirMaskedSumcheckIdentity,
-                    SUMCHECK_MASK_MESSAGE_LENGTH,
-                    0,
-                )?,
-            ])
-        }
-        SemanticVerifierMoveOwner::WhirCodeSwitch {
-            epoch,
-            round_ordinal,
-        } => {
-            let code_role = CodeRole::WhirSource {
-                epoch,
-                batch_ordinal: round_ordinal,
-            };
-            let code = unique_code(catalog, code_role)?;
-            Ok(vec![
-                SemanticBadEventBound {
-                    family: SemanticBadEventFamily::WhirDistinctQueryEscape { code_role },
-                    probability: code.exact_query_failure()?,
-                },
-                root_event(
-                    SemanticBadEventFamily::WhirCodeSwitchCombinationIdentity,
-                    code.hiding_randomness_length
-                        .checked_add(1)
-                        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
-                    0,
-                )?,
-            ])
-        }
-        SemanticVerifierMoveOwner::WhirBaseCombination { epoch } => {
-            let mut events = Vec::new();
-            for code_role in whir_final_code_roles(catalog, epoch)? {
-                let code = unique_code(catalog, code_role)?;
-                events.push(root_event(
-                    SemanticBadEventFamily::WhirBaseMutualCorrelatedAgreement { code_role },
-                    code.block_length,
-                    0,
-                )?);
-            }
-            events.push(root_event(
-                SemanticBadEventFamily::WhirBaseCombinationIdentity,
-                1,
-                0,
-            )?);
-            Ok(events)
-        }
-        SemanticVerifierMoveOwner::PreWhirFinalAndMainWhirOpening => {
-            let mut events = final_query_events(catalog, TranscriptEpoch::PreChallenge)?;
-            events.push(opening_batching_event(main_whir)?);
-            Ok(events)
-        }
-        SemanticVerifierMoveOwner::MainWhirFinalQueries => {
-            final_query_events(catalog, TranscriptEpoch::Main)
-        }
-    }
-}
-
 fn combined_cfw_and_opening_certificate_events(
     certificate: &SemanticCfwAndPreWhirOpeningBadTransition,
-) -> Result<Vec<SemanticBadEventBound>, CompactStaticCatalogError> {
+) -> Result<Vec<SemanticBadEventBound>, CompactFactorOneSemanticError> {
     let mut events = Vec::with_capacity(2);
     if let Some(cfw) = &certificate.cfw {
         validate_cfw_zero_evader_certificate(cfw)?;
         events.push(semantic_root_event(
             SemanticBadEventFamily::CfwZeroEvaderIdentity,
             cfw.polynomial_identity_numerator()
-                .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
+                .ok_or(CompactFactorOneSemanticError::InvalidGeometry)?,
             0,
         )?);
     }
@@ -451,18 +404,18 @@ fn combined_cfw_and_opening_certificate_events(
         events.push(opening_batching_certificate_event(opening)?);
     }
     if events.is_empty() {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(events)
 }
 
 fn pre_final_and_main_opening_certificate_events(
     certificate: &SemanticPreWhirFinalAndMainOpeningBadTransition,
-) -> Result<Vec<SemanticBadEventBound>, CompactStaticCatalogError> {
+) -> Result<Vec<SemanticBadEventBound>, CompactFactorOneSemanticError> {
     let mut events = Vec::new();
     if let Some(escapes) = &certificate.pre_challenge_query_escapes {
         if escapes.is_empty() {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
+            return Err(CompactFactorOneSemanticError::InvalidGeometry);
         }
         events.extend(
             escapes
@@ -475,14 +428,14 @@ fn pre_final_and_main_opening_certificate_events(
         events.push(opening_batching_certificate_event(opening)?);
     }
     if events.is_empty() {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(events)
 }
 
 fn validate_cross_epoch_certificate(
     certificate: &SemanticCrossEpochBadTransition,
-) -> Result<(), CompactStaticCatalogError> {
+) -> Result<(), CompactFactorOneSemanticError> {
     if certificate
         .nonzero_difference_evaluations
         .iter()
@@ -493,14 +446,14 @@ fn validate_cross_epoch_certificate(
         )?
         .is_zero()
     {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(())
 }
 
 fn validate_cfw_initial_certificate(
     certificate: &SemanticCfwBadTransition,
-) -> Result<(), CompactStaticCatalogError> {
+) -> Result<(), CompactFactorOneSemanticError> {
     let SemanticCfwBadTransition::InitialConsistency {
         auxiliary_difference,
         masked_constraint_hypercube_residuals,
@@ -508,45 +461,45 @@ fn validate_cfw_initial_certificate(
         equality_point,
     } = certificate
     else {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     };
     if *auxiliary_difference == CompactChallengeField::ZERO
         && masked_constraint_hypercube_residuals
             .iter()
             .all(|residual| *residual == CompactChallengeField::ZERO)
     {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     let residual_at_equality_point = super::compact_multilinear_evaluation(
         masked_constraint_hypercube_residuals,
         equality_point,
     )
-    .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?;
+    .map_err(|_| CompactFactorOneSemanticError::InvalidGeometry)?;
     if *auxiliary_difference + *constraint_combining_challenge * residual_at_equality_point
         != CompactChallengeField::ZERO
     {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(())
 }
 
 fn validate_cfw_zero_evader_certificate(
     certificate: &SemanticCfwBadTransition,
-) -> Result<(), CompactStaticCatalogError> {
+) -> Result<(), CompactFactorOneSemanticError> {
     let SemanticCfwBadTransition::ZeroEvader {
         residuals,
         weights,
         challenge,
     } = certificate
     else {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     };
     if residuals
         .iter()
         .all(|residual| *residual == CompactChallengeField::ZERO)
         || *weights != compact_cfw_zero_evader_weights(*challenge)
     {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     let evaluation = residuals
         .iter()
@@ -555,7 +508,7 @@ fn validate_cfw_zero_evader_certificate(
             sum + *residual * *weight
         });
     if evaluation != CompactChallengeField::ZERO {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(())
 }
@@ -563,7 +516,7 @@ fn validate_cfw_zero_evader_certificate(
 fn whir_folding_certificate_event(
     round_ordinal: u8,
     certificate: &SemanticWhirBadTransition,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     match certificate {
         SemanticWhirBadTransition::MutualCorrelatedAgreement {
             transition:
@@ -589,7 +542,7 @@ fn whir_folding_certificate_event(
                 *challenge,
             )
         }
-        _ => Err(CompactStaticCatalogError::InvalidGeometry),
+        _ => Err(CompactFactorOneSemanticError::InvalidGeometry),
     }
 }
 
@@ -597,7 +550,7 @@ fn whir_code_switch_certificate_event(
     epoch: TranscriptEpoch,
     round_ordinal: u8,
     certificate: &SemanticWhirCodeSwitchBadTransition,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     match certificate {
         SemanticWhirCodeSwitchBadTransition::QueryEscape {
             domain_size,
@@ -630,7 +583,7 @@ fn whir_code_switch_certificate_event(
 fn whir_base_combination_certificate_event(
     epoch: TranscriptEpoch,
     certificate: &SemanticWhirBaseCombinationBadTransition,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     match certificate {
         SemanticWhirBaseCombinationBadTransition::MutualCorrelatedAgreement {
             role,
@@ -655,7 +608,7 @@ fn whir_base_combination_certificate_event(
 fn final_query_escape_event(
     epoch: TranscriptEpoch,
     escape: &SemanticWhirBaseQueryEscape,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     query_escape_event(
         SemanticBadEventFamily::WhirDistinctQueryEscape {
             code_role: final_code_role(epoch, escape.role)?,
@@ -670,24 +623,24 @@ fn final_query_escape_event(
 fn final_code_role(
     epoch: TranscriptEpoch,
     role: SemanticWhirBaseOracleRole,
-) -> Result<CodeRole, CompactStaticCatalogError> {
+) -> Result<CodeRole, CompactFactorOneSemanticError> {
     Ok(match role {
         SemanticWhirBaseOracleRole::Source => CodeRole::WhirSource {
             epoch,
             batch_ordinal: u8::try_from(WHIR_ROUND_COUNT)
-                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?,
         },
         SemanticWhirBaseOracleRole::MaskGroup { group_ordinal } => CodeRole::WhirMask {
             epoch,
             group_ordinal: u8::try_from(group_ordinal)
-                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?,
         },
     })
 }
 
 fn opening_batching_certificate_event(
     certificate: &SemanticWhirOpeningBatchingBadTransition,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     proof_polynomial_root_event(
         SemanticBadEventFamily::WhirOpeningBatchingIdentity,
         &certificate.coefficients,
@@ -698,7 +651,7 @@ fn opening_batching_certificate_event(
 fn mca_certificate_event(
     family: SemanticBadEventFamily,
     certificate: &SemanticWhirMcaCertificate,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     if certificate.target_domain_size == 0
         || certificate.selected_decoding_error_count >= certificate.target_domain_size
         || certificate.agreement_positions.is_empty()
@@ -707,13 +660,13 @@ fn mca_certificate_event(
             certificate.target_domain_size,
         )
     {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     semantic_root_event(
         family,
         certificate
             .exact_error_numerator()
-            .map_err(|_| CompactStaticCatalogError::InvalidGeometry)?,
+            .map_err(|_| CompactFactorOneSemanticError::InvalidGeometry)?,
         0,
     )
 }
@@ -724,7 +677,7 @@ fn query_escape_event(
     selected_decoding_error_count: usize,
     differing_row_count: usize,
     query_positions: &[usize],
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     if domain_size == 0
         || !domain_size.is_power_of_two()
         || selected_decoding_error_count >= domain_size
@@ -733,13 +686,13 @@ fn query_escape_event(
         || query_positions.is_empty()
         || !strictly_increasing_and_bounded(query_positions, domain_size)
     {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     let agreement_count = domain_size
         .checked_sub(differing_row_count)
-        .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?;
+        .ok_or(CompactFactorOneSemanticError::ArithmeticOverflow)?;
     if query_positions.len() > agreement_count {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(SemanticBadEventBound {
         family,
@@ -758,9 +711,9 @@ fn strictly_increasing_and_bounded(values: &[usize], bound: usize) -> bool {
 fn ordered_selection_count(
     population_size: usize,
     selection_count: usize,
-) -> Result<BigUint, CompactStaticCatalogError> {
+) -> Result<BigUint, CompactFactorOneSemanticError> {
     if selection_count == 0 || selection_count > population_size {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     Ok(
         (0..selection_count).fold(BigUint::from(1_u8), |product, offset| {
@@ -772,11 +725,11 @@ fn ordered_selection_count(
 fn compact_polynomial_root_degree(
     coefficients: &[CompactChallengeField],
     challenge: CompactChallengeField,
-) -> Result<u64, CompactStaticCatalogError> {
+) -> Result<u64, CompactFactorOneSemanticError> {
     let degree = coefficients
         .iter()
         .rposition(|coefficient| *coefficient != CompactChallengeField::ZERO)
-        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+        .ok_or(CompactFactorOneSemanticError::InvalidGeometry)?;
     let evaluation = coefficients
         .iter()
         .rev()
@@ -784,30 +737,30 @@ fn compact_polynomial_root_degree(
             value * challenge + *coefficient
         });
     if evaluation != CompactChallengeField::ZERO {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
-    u64::try_from(degree).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)
+    u64::try_from(degree).map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)
 }
 
 fn proof_polynomial_root_event(
     family: SemanticBadEventFamily,
     coefficients: &[ProofChallengeExtensionElement],
     challenge: ProofChallengeExtensionElement,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     let degree = coefficients
         .iter()
         .rposition(|coefficient| !coefficient.is_zero())
-        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+        .ok_or(CompactFactorOneSemanticError::InvalidGeometry)?;
     let evaluation = coefficients.iter().rev().fold(
         ProofChallengeExtensionElement::ZERO,
         |value, coefficient| value.multiply(challenge).add(*coefficient),
     );
     if !evaluation.is_zero() {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     semantic_root_event(
         family,
-        u64::try_from(degree).map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+        u64::try_from(degree).map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?,
         0,
     )
 }
@@ -815,12 +768,12 @@ fn proof_polynomial_root_event(
 fn proof_multilinear_evaluation(
     evaluations: &[ProofChallengeExtensionElement],
     point: &[ProofChallengeExtensionElement],
-) -> Result<ProofChallengeExtensionElement, CompactStaticCatalogError> {
+) -> Result<ProofChallengeExtensionElement, CompactFactorOneSemanticError> {
     if evaluations.is_empty()
         || !evaluations.len().is_power_of_two()
         || point.len() != evaluations.len().ilog2() as usize
     {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
     }
     let mut folded = evaluations.to_vec();
     for challenge in point {
@@ -835,7 +788,7 @@ fn proof_multilinear_evaluation(
     folded
         .first()
         .copied()
-        .ok_or(CompactStaticCatalogError::InvalidGeometry)
+        .ok_or(CompactFactorOneSemanticError::InvalidGeometry)
 }
 
 fn descriptor_extension_exclusion(descriptor: &SemanticFactorOneMoveDescriptor) -> u64 {
@@ -852,94 +805,18 @@ fn semantic_root_event(
     family: SemanticBadEventFamily,
     numerator: u64,
     excluded_element_count: u64,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
+) -> Result<SemanticBadEventBound, CompactFactorOneSemanticError> {
     let denominator = extension_field_order()
         .checked_sub(&BigUint::from(excluded_element_count))
-        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
+        .ok_or(CompactFactorOneSemanticError::InvalidGeometry)?;
     Ok(SemanticBadEventBound {
         family,
         probability: ExactProbability::new(BigUint::from(numerator), denominator)?,
     })
 }
 
-fn opening_batching_event(
-    whir: &WhirStaticLedger,
-) -> Result<SemanticBadEventBound, CompactStaticCatalogError> {
-    semantic_root_event(
-        SemanticBadEventFamily::WhirOpeningBatchingIdentity,
-        whir.opening_batching_claim_count
-            .checked_sub(1)
-            .ok_or(CompactStaticCatalogError::InvalidGeometry)?,
-        0,
-    )
-}
-
-fn final_query_events(
-    catalog: &RelaxedRoundByRoundCatalog,
-    epoch: TranscriptEpoch,
-) -> Result<Vec<SemanticBadEventBound>, CompactStaticCatalogError> {
-    whir_final_code_roles(catalog, epoch)?
-        .into_iter()
-        .map(|code_role| {
-            Ok(SemanticBadEventBound {
-                family: SemanticBadEventFamily::WhirDistinctQueryEscape { code_role },
-                probability: unique_code(catalog, code_role)?.exact_query_failure()?,
-            })
-        })
-        .collect()
-}
-
-fn whir_final_code_roles(
-    catalog: &RelaxedRoundByRoundCatalog,
-    epoch: TranscriptEpoch,
-) -> Result<Vec<CodeRole>, CompactStaticCatalogError> {
-    let final_batch_ordinal = u8::try_from(WHIR_ROUND_COUNT)
-        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?;
-    let mut roles = vec![CodeRole::WhirSource {
-        epoch,
-        batch_ordinal: final_batch_ordinal,
-    }];
-    let mut mask_ordinals = catalog
-        .codes
-        .iter()
-        .filter_map(|code| match code.role {
-            CodeRole::WhirMask {
-                epoch: code_epoch,
-                group_ordinal,
-            } if code_epoch == epoch => Some(group_ordinal),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    mask_ordinals.sort_unstable();
-    for (expected_ordinal, group_ordinal) in mask_ordinals.into_iter().enumerate() {
-        if usize::from(group_ordinal) != expected_ordinal {
-            return Err(CompactStaticCatalogError::InvalidGeometry);
-        }
-        roles.push(CodeRole::WhirMask {
-            epoch,
-            group_ordinal,
-        });
-    }
-    Ok(roles)
-}
-
-fn unique_code(
-    catalog: &RelaxedRoundByRoundCatalog,
-    role: CodeRole,
-) -> Result<&UniqueDecodingCode, CompactStaticCatalogError> {
-    let mut matches = catalog.codes.iter().filter(|code| code.role == role);
-    let code = matches
-        .next()
-        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    if matches.next().is_some() {
-        return Err(CompactStaticCatalogError::InvalidGeometry);
-    }
-    Ok(code)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::super::super::CompactPublicKeyStaticCatalog;
     use super::super::semantic_execution::SemanticExecutionError;
     use super::super::semantic_outer::{
         SemanticLookupBadTransition, SemanticLookupMultiplicityDifference,
@@ -973,55 +850,6 @@ mod tests {
             .into_iter()
             .map(|event| event.family)
             .collect()
-    }
-
-    #[test]
-    fn factor_one_semantic_bad_event_families_rederive_every_move_error() {
-        let relation =
-            crate::bgv::proof_suite::relation_plan::selected_compact_public_key_relation_catalog()
-                .expect("selected relation derives");
-        let catalog =
-            CompactPublicKeyStaticCatalog::derive().expect("compact public-key catalog derives");
-        let factor_one = &catalog.selected;
-        let theorem = derive_factor_one_semantic_error_theorem(
-            &factor_one.relaxed_round_by_round,
-            &relation,
-            &catalog.cfw_reduction,
-            &factor_one.pre_challenge_whir,
-            &factor_one.main_whir,
-        )
-        .expect("semantic error theorem derives");
-
-        assert_eq!(theorem.moves.len(), 82);
-        assert!(theorem.moves.iter().all(|move_bound| {
-            !move_bound.events.is_empty()
-                && move_bound.total_probability
-                    == factor_one.relaxed_round_by_round.transitions
-                        [usize::try_from(move_bound.verifier_move_ordinal).unwrap()]
-                    .extraction_error
-        }));
-        assert_eq!(
-            theorem.maximum_per_move_error,
-            factor_one
-                .relaxed_round_by_round
-                .maximum_per_move_extraction_error
-        );
-        assert!(theorem.moves.iter().any(|move_bound| {
-            move_bound.events.iter().any(|event| {
-                matches!(
-                    event.family,
-                    SemanticBadEventFamily::WhirBinaryMutualCorrelatedAgreement
-                )
-            })
-        }));
-        assert!(theorem.moves.iter().any(|move_bound| {
-            move_bound.events.iter().any(|event| {
-                matches!(
-                    event.family,
-                    SemanticBadEventFamily::WhirDistinctQueryEscape { .. }
-                )
-            })
-        }));
     }
 
     #[test]
@@ -1326,7 +1154,7 @@ mod tests {
                 }),
                 &certificate,
             ),
-            Err(CompactStaticCatalogError::InvalidGeometry)
+            Err(CompactFactorOneSemanticError::InvalidGeometry)
         );
 
         let zero_error_descriptor = descriptor(SemanticVerifierMoveOwner::WhirCodeSwitch {
@@ -1370,7 +1198,7 @@ mod tests {
                     }),
                     &SemanticVerifierMoveBadTransition::WhirCodeSwitch(malformed),
                 ),
-                Err(CompactStaticCatalogError::InvalidGeometry)
+                Err(CompactFactorOneSemanticError::InvalidGeometry)
             );
         }
     }

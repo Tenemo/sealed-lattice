@@ -1,0 +1,1797 @@
+//! Adaptive ideal masking simulation for the selected compact proof chronology.
+//!
+//! This security-game owner exposes only ideal-uniform conditioned disclosures.
+//! The coefficient-map owner fixes every disclosed coordinate and construction-
+//! commitment embedding; the streaming entropy owner authorizes disclosure rank
+//! against the verifier messages actually chosen so far. Concrete KMAC coins,
+//! salted-Merkle roots, and EPRO programming are separate replacement games.
+
+use super::compact_cfw::CompactChallengeField;
+use super::compact_masking_coefficient_maps::{
+    CompactCommitmentQuerySource, CompactConstructionCommitmentEmbedding,
+    CompactConstructionCommitmentOwnership, CompactMaskingCoefficientMapCertificate,
+};
+use super::compact_masking_entropy::{
+    CompactBaseFreshClaimCoefficients, CompactMaskingAttemptIdentity,
+    CompactMaskingDisclosureImage, CompactMaskingDisclosureKind, CompactMaskingEntropyAuthority,
+    CompactMaskingEntropyError, CompactMaskingEntropyStep,
+};
+use super::compact_proof_contract::{
+    CompactProofContractError, CompactPublicKeyVerifierInputs, CompactVerifierMoveContract,
+};
+use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
+use super::profile::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
+use crate::foundation::Hash512;
+use crate::hashing::hash_framed_parts_512;
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64};
+use p3_goldilocks::Goldilocks;
+use tiny_keccak::{Hasher, Shake};
+
+const IDEAL_PREFIX_BINDING_DOMAIN: &str = "sealed-lattice/proof/compact-adaptive-masking-prefix/v1";
+const IDEAL_PRIVATE_COORDINATE_DOMAIN: &[u8] =
+    b"sealed-lattice/proof/compact-adaptive-masking-private-coordinate/v1";
+const IDEAL_COMMITMENT_DOMAIN: &[u8] =
+    b"sealed-lattice/proof/compact-adaptive-masking-commitment/v1";
+pub(crate) const COMPACT_MASKING_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
+
+pub(crate) type CompactMaskingAttemptIdentifier =
+    [u8; COMPACT_MASKING_ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+
+/// An abstract construction commitment, not an outer BCS Merkle root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct CompactConstructionCommitmentHandle([u8; Hash512::BYTE_LENGTH]);
+
+impl CompactConstructionCommitmentHandle {
+    pub(crate) const fn as_bytes(&self) -> &[u8; Hash512::BYTE_LENGTH] {
+        &self.0
+    }
+}
+
+/// One opaque construction-commitment handle embedded into an exact outer-response component.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CompactConstructionCommitmentProgram {
+    embedding: CompactConstructionCommitmentEmbedding,
+    handle: CompactConstructionCommitmentHandle,
+}
+
+impl CompactConstructionCommitmentProgram {
+    pub(crate) const fn handle(&self) -> CompactConstructionCommitmentHandle {
+        self.handle
+    }
+}
+
+/// One ideal-uniform block authorized by a conditional-entropy step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactIdealDisclosure {
+    entropy_step: CompactMaskingEntropyStep,
+    field_values: Vec<CompactChallengeField>,
+    coin_coordinate_start: u64,
+}
+
+/// Ideal information exposed before a malicious verifier chooses its message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactIdealConditionedView {
+    preceding_prover_response_ordinal: u32,
+    disclosures: Vec<CompactIdealDisclosure>,
+    new_construction_commitments: Vec<CompactConstructionCommitmentProgram>,
+}
+
+/// Complete exposed prefix supplied to an adaptive malicious verifier.
+pub(crate) struct CompactAdaptiveVerifierView<'a> {
+    verifier_move: &'a CompactVerifierMoveContract,
+    current_conditioned_view: &'a CompactIdealConditionedView,
+}
+
+impl CompactAdaptiveVerifierView<'_> {
+    pub(crate) const fn verifier_move(&self) -> &CompactVerifierMoveContract {
+        self.verifier_move
+    }
+
+    pub(crate) const fn current_conditioned_view(&self) -> &CompactIdealConditionedView {
+        self.current_conditioned_view
+    }
+}
+
+pub(crate) trait CompactAdaptiveVerifier {
+    fn choose_message(
+        &mut self,
+        view: CompactAdaptiveVerifierView<'_>,
+    ) -> DecodedFixedUniformVerifierMessage;
+}
+
+/// One complete verifier move, including query disclosures exposed after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactIdealMaskingMoveRecord {
+    base_fresh_claim: Option<CompactBaseFreshClaimCoefficients>,
+    conditioned_view: CompactIdealConditionedView,
+    verifier_message: DecodedFixedUniformVerifierMessage,
+    post_message_disclosures: Vec<CompactIdealDisclosure>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CompactAttemptState {
+    attempt_identifier: CompactMaskingAttemptIdentifier,
+    reset_ordinal: u32,
+    initial_exposed_prefix_binding: [u8; 64],
+    next_coin_coordinate: u64,
+    moves: Vec<CompactIdealMaskingMoveRecord>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompactRetiredCoinRange {
+    identity: CompactMaskingAttemptIdentity,
+    start: u64,
+    end: u64,
+}
+
+impl CompactRetiredCoinRange {
+    fn overlaps(self, identity: CompactMaskingAttemptIdentity, start: u64, end: u64) -> bool {
+        self.identity == identity && start < self.end && self.start < end
+    }
+}
+
+impl CompactAttemptState {
+    const fn new(
+        attempt_identifier: CompactMaskingAttemptIdentifier,
+        initial_exposed_prefix_binding: [u8; 64],
+    ) -> Self {
+        Self {
+            attempt_identifier,
+            reset_ordinal: 0,
+            initial_exposed_prefix_binding,
+            next_coin_coordinate: 0,
+            moves: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactMaskingSimulationCheckpoint {
+    contract_source_hash: Hash512,
+    coefficient_map_binding: [u8; 64],
+    attempt: CompactAttemptState,
+    exposed_prefix_binding: [u8; 64],
+    retired_coin_ranges: Vec<CompactRetiredCoinRange>,
+    retired_commitment_handles: Vec<CompactConstructionCommitmentHandle>,
+    ideal_oracle_binding: [u8; 64],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactMaskingSimulatorError {
+    Contract(CompactProofContractError),
+    Entropy(CompactMaskingEntropyError),
+    InvalidCoefficientMap,
+    SimulationNotActive,
+    IdealOracleRefused,
+    ArithmeticOverflow,
+    ReusedCoinCoordinate,
+    ReusedCommitmentHandle,
+    WrongCommitmentProgression,
+    WrongCommitmentEmbedding,
+    InvalidVerifierMessage,
+    WrongCheckpoint,
+    WrongTranscript,
+}
+
+impl From<CompactProofContractError> for CompactMaskingSimulatorError {
+    fn from(error: CompactProofContractError) -> Self {
+        Self::Contract(error)
+    }
+}
+
+impl From<CompactMaskingEntropyError> for CompactMaskingSimulatorError {
+    fn from(error: CompactMaskingEntropyError) -> Self {
+        Self::Entropy(error)
+    }
+}
+
+/// The ideal random oracle is sealed inside this module. No production caller
+/// can supply a tape, couple it to a witness, or mint a transcript from values.
+trait CompactSealedIdealUniformOracle {
+    /// Samples only the independently uniform extension-field coordinates
+    /// named by an authority-minted image request. It never fabricates a
+    /// constrained output vector.
+    fn sample_independent_coordinates(
+        &mut self,
+        identity: CompactMaskingAttemptIdentity,
+        step_ordinal: u32,
+        coordinate_count: u64,
+        coin_coordinate_start: u64,
+    ) -> Result<Vec<CompactChallengeField>, CompactMaskingSimulatorError>;
+
+    fn program_construction_commitment(
+        &mut self,
+        identity: CompactMaskingAttemptIdentity,
+        embedding: CompactConstructionCommitmentEmbedding,
+    ) -> Result<CompactConstructionCommitmentHandle, CompactMaskingSimulatorError>;
+}
+
+/// In-module addressed ideal oracle. The private key is never encoded into an
+/// ideal transcript, and callers cannot supply a coordinate tape. Coordinate
+/// addresses include the attempt/reset identity and the entropy step, so a
+/// rewound suffix is domain-separated while an exact checkpoint replay is
+/// reproducible.
+#[derive(Clone)]
+struct CompactAddressedIdealUniformOracle {
+    private_key: [u8; 64],
+}
+
+fn sample_exact_goldilocks(
+    mut candidate_at: impl FnMut(u32) -> u64,
+) -> Result<Goldilocks, CompactMaskingSimulatorError> {
+    for draw_ordinal in 0..PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT {
+        let candidate = candidate_at(draw_ordinal);
+        if candidate < Goldilocks::ORDER_U64 {
+            return Ok(Goldilocks::from_u64(candidate));
+        }
+    }
+    Err(CompactMaskingSimulatorError::IdealOracleRefused)
+}
+
+impl CompactAddressedIdealUniformOracle {
+    const fn new(private_key: [u8; 64]) -> Self {
+        Self { private_key }
+    }
+
+    fn binding(&self) -> [u8; 64] {
+        hash_framed_parts_512(
+            "sealed-lattice/proof/compact-adaptive-masking-private-key-binding/v1",
+            &[&self.private_key],
+        )
+    }
+
+    fn sample_coordinate(
+        &self,
+        domain: &[u8],
+        identity: CompactMaskingAttemptIdentity,
+        step_ordinal: u32,
+        coin_coordinate: u64,
+    ) -> Result<CompactChallengeField, CompactMaskingSimulatorError> {
+        let extension_degree = <CompactChallengeField as BasedVectorSpace<Goldilocks>>::DIMENSION;
+        let mut coefficients = Vec::with_capacity(extension_degree);
+        for basis_coordinate in 0..extension_degree {
+            coefficients.push(sample_exact_goldilocks(|draw_ordinal| {
+                let mut shake = Shake::v256();
+                shake.update(domain);
+                shake.update(&self.private_key);
+                shake.update(&identity.binding_bytes());
+                shake.update(&step_ordinal.to_le_bytes());
+                shake.update(&coin_coordinate.to_le_bytes());
+                shake.update(&(basis_coordinate as u64).to_le_bytes());
+                shake.update(&draw_ordinal.to_le_bytes());
+                let mut bytes = [0_u8; 8];
+                shake.finalize(&mut bytes);
+                u64::from_le_bytes(bytes)
+            })?);
+        }
+        Ok(CompactChallengeField::from_basis_coefficients_fn(
+            |basis_coordinate| coefficients[basis_coordinate],
+        ))
+    }
+
+    fn addressed_bytes(
+        &self,
+        domain: &[u8],
+        identity: CompactMaskingAttemptIdentity,
+        address_parts: &[&[u8]],
+    ) -> [u8; 64] {
+        let mut shake = Shake::v256();
+        shake.update(domain);
+        shake.update(&self.private_key);
+        shake.update(&identity.binding_bytes());
+        for part in address_parts {
+            shake.update(&(part.len() as u64).to_le_bytes());
+            shake.update(part);
+        }
+        let mut output = [0_u8; 64];
+        shake.finalize(&mut output);
+        output
+    }
+}
+
+impl CompactSealedIdealUniformOracle for CompactAddressedIdealUniformOracle {
+    fn sample_independent_coordinates(
+        &mut self,
+        identity: CompactMaskingAttemptIdentity,
+        step_ordinal: u32,
+        coordinate_count: u64,
+        coin_coordinate_start: u64,
+    ) -> Result<Vec<CompactChallengeField>, CompactMaskingSimulatorError> {
+        let capacity = usize::try_from(coordinate_count)
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        (0..coordinate_count)
+            .map(|coordinate| {
+                let absolute_coordinate = coin_coordinate_start
+                    .checked_add(coordinate)
+                    .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+                self.sample_coordinate(
+                    IDEAL_PRIVATE_COORDINATE_DOMAIN,
+                    identity,
+                    step_ordinal,
+                    absolute_coordinate,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|mut coordinates| {
+                coordinates.shrink_to(capacity);
+                coordinates
+            })
+    }
+
+    fn program_construction_commitment(
+        &mut self,
+        identity: CompactMaskingAttemptIdentity,
+        embedding: CompactConstructionCommitmentEmbedding,
+    ) -> Result<CompactConstructionCommitmentHandle, CompactMaskingSimulatorError> {
+        let ordinal = embedding.commitment_ordinal.to_le_bytes();
+        Ok(CompactConstructionCommitmentHandle(self.addressed_bytes(
+            IDEAL_COMMITMENT_DOMAIN,
+            identity,
+            &[&ordinal],
+        )))
+    }
+}
+
+/// Abstract interaction engine. The streaming entropy authority is joined in
+/// `advance` once it has authorized the actual malicious-verifier prefix.
+pub(crate) struct CompactAdaptiveMaskingSimulator<'contract> {
+    verifier_inputs: CompactPublicKeyVerifierInputs<'contract>,
+    coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+    contract_source_hash: Hash512,
+    attempt: CompactAttemptState,
+    retired_coin_ranges: Vec<CompactRetiredCoinRange>,
+    retired_commitment_handles: Vec<CompactConstructionCommitmentHandle>,
+    ideal_oracle: CompactAddressedIdealUniformOracle,
+}
+
+impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
+    pub(crate) fn new(
+        verifier_inputs: CompactPublicKeyVerifierInputs<'contract>,
+        coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+        attempt_identifier: CompactMaskingAttemptIdentifier,
+        initial_exposed_prefix_binding: [u8; 64],
+        private_ideal_oracle_key: [u8; 64],
+    ) -> Result<Self, CompactMaskingSimulatorError> {
+        let contract_source_hash = verifier_inputs.canonical_source_hash()?;
+        coefficient_maps
+            .check()
+            .map_err(|_| CompactMaskingSimulatorError::InvalidCoefficientMap)?;
+        if coefficient_maps.certificate_digest() != contract_source_hash.into_bytes() {
+            return Err(CompactMaskingSimulatorError::InvalidCoefficientMap);
+        }
+        Ok(Self {
+            contract_source_hash,
+            verifier_inputs,
+            coefficient_maps,
+            attempt: CompactAttemptState::new(attempt_identifier, initial_exposed_prefix_binding),
+            retired_coin_ranges: Vec::new(),
+            retired_commitment_handles: Vec::new(),
+            ideal_oracle: CompactAddressedIdealUniformOracle::new(private_ideal_oracle_key),
+        })
+    }
+
+    pub(crate) fn checkpoint(
+        &self,
+    ) -> Result<CompactMaskingSimulationCheckpoint, CompactMaskingSimulatorError> {
+        Ok(CompactMaskingSimulationCheckpoint {
+            contract_source_hash: self.contract_source_hash,
+            coefficient_map_binding: self.coefficient_maps.certificate_digest(),
+            exposed_prefix_binding: prefix_binding(
+                self.contract_source_hash,
+                self.coefficient_maps.certificate_digest(),
+                self.attempt.attempt_identifier,
+                self.attempt.reset_ordinal,
+                self.attempt.initial_exposed_prefix_binding,
+                &self.attempt.moves,
+            )?,
+            attempt: self.attempt.clone(),
+            retired_coin_ranges: self.retired_coin_ranges.clone(),
+            retired_commitment_handles: self.retired_commitment_handles.clone(),
+            ideal_oracle_binding: self.ideal_oracle.binding(),
+        })
+    }
+
+    pub(crate) fn restore(
+        verifier_inputs: CompactPublicKeyVerifierInputs<'contract>,
+        coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+        checkpoint: CompactMaskingSimulationCheckpoint,
+        private_ideal_oracle_key: [u8; 64],
+    ) -> Result<Self, CompactMaskingSimulatorError> {
+        let mut simulator = Self::new(
+            verifier_inputs,
+            coefficient_maps,
+            checkpoint.attempt.attempt_identifier,
+            checkpoint.attempt.initial_exposed_prefix_binding,
+            private_ideal_oracle_key,
+        )?;
+        simulator.validate_checkpoint_authentication(&checkpoint)?;
+        simulator.attempt = checkpoint.attempt;
+        simulator.retired_coin_ranges = checkpoint.retired_coin_ranges;
+        simulator.retired_commitment_handles = checkpoint.retired_commitment_handles;
+        simulator.validate_attempt_prefix()?;
+        Ok(simulator)
+    }
+
+    /// Security-game rewind only. This is not a resettable-ZK claim.
+    ///
+    /// The exact exposed prefix is reused. Every abandoned suffix coin range
+    /// and construction-commitment handle is permanently retired, and a fresh reset
+    /// ordinal addresses all subsequent ideal-oracle requests.
+    pub(crate) fn rewind_security_game_suffix(
+        &mut self,
+        checkpoint: CompactMaskingSimulationCheckpoint,
+    ) -> Result<(), CompactMaskingSimulatorError> {
+        self.validate_checkpoint_authentication(&checkpoint)?;
+        if checkpoint.attempt.attempt_identifier != self.attempt.attempt_identifier
+            || !self.attempt.moves.starts_with(&checkpoint.attempt.moves)
+            || checkpoint.attempt.moves.len() > self.attempt.moves.len()
+        {
+            return Err(CompactMaskingSimulatorError::WrongCheckpoint);
+        }
+        let next_reset_ordinal = self
+            .attempt
+            .reset_ordinal
+            .checked_add(1)
+            .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        if checkpoint.attempt.next_coin_coordinate < self.attempt.next_coin_coordinate {
+            self.retired_coin_ranges.push(CompactRetiredCoinRange {
+                identity: self.attempt_identity(),
+                start: checkpoint.attempt.next_coin_coordinate,
+                end: self.attempt.next_coin_coordinate,
+            });
+        }
+        self.retired_commitment_handles.extend(
+            self.attempt.moves[checkpoint.attempt.moves.len()..]
+                .iter()
+                .flat_map(|record| &record.conditioned_view.new_construction_commitments)
+                .map(CompactConstructionCommitmentProgram::handle),
+        );
+        self.retired_commitment_handles.sort_unstable();
+        self.retired_commitment_handles.dedup();
+        self.attempt = checkpoint.attempt;
+        self.attempt.reset_ordinal = next_reset_ordinal;
+        self.validate_attempt_prefix()
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        verifier: &mut impl CompactAdaptiveVerifier,
+    ) -> Result<u32, CompactMaskingSimulatorError> {
+        let move_index = self.attempt.moves.len();
+        let verifier_move = self
+            .verifier_inputs
+            .verifier_moves
+            .get(move_index)
+            .cloned()
+            .ok_or(CompactMaskingSimulatorError::SimulationNotActive)?;
+        let identity = self.attempt_identity();
+        let mut entropy_authority = self.replay_entropy_authority()?;
+        if entropy_authority.next_base_claim_requirement()?.is_some() {
+            // The exact carried-reduction covector is deterministic semantic
+            // prefix state, not ideal masking entropy. This game remains gated
+            // until the executable semantic owner supplies its opaque,
+            // attempt-bound token; it must never accept a caller Vec.
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        }
+        let mut staged_attempt = self.attempt.clone();
+        let mut staged_ideal_oracle = self.ideal_oracle.clone();
+        let response_steps = entropy_authority.authorize_next_response(None)?.to_vec();
+        let disclosures = sample_disclosures(
+            &mut staged_ideal_oracle,
+            CompactDisclosureSamplingContext {
+                identity,
+                authority: &entropy_authority,
+                prior_moves: &staged_attempt.moves,
+                current_response_disclosures: &[],
+                retired_coin_ranges: &self.retired_coin_ranges,
+            },
+            &response_steps,
+            &mut staged_attempt.next_coin_coordinate,
+        )?;
+        let new_construction_commitments = self.program_new_commitments(
+            &mut staged_ideal_oracle,
+            &staged_attempt,
+            identity,
+            &verifier_move,
+        )?;
+        let conditioned_view = CompactIdealConditionedView {
+            preceding_prover_response_ordinal: verifier_move.preceding_prover_response_ordinal,
+            disclosures,
+            new_construction_commitments,
+        };
+        let message = verifier.choose_message(CompactAdaptiveVerifierView {
+            verifier_move: &verifier_move,
+            current_conditioned_view: &conditioned_view,
+        });
+        let query_steps = entropy_authority
+            .ingest_verifier_message(verifier_move.ordinal, &message)
+            .map_err(|_| CompactMaskingSimulatorError::InvalidVerifierMessage)?
+            .to_vec();
+        let post_message_disclosures = sample_disclosures(
+            &mut staged_ideal_oracle,
+            CompactDisclosureSamplingContext {
+                identity,
+                authority: &entropy_authority,
+                prior_moves: &staged_attempt.moves,
+                current_response_disclosures: &conditioned_view.disclosures,
+                retired_coin_ranges: &self.retired_coin_ranges,
+            },
+            &query_steps,
+            &mut staged_attempt.next_coin_coordinate,
+        )?;
+        staged_attempt.moves.push(CompactIdealMaskingMoveRecord {
+            base_fresh_claim: None,
+            conditioned_view,
+            verifier_message: message,
+            post_message_disclosures,
+        });
+        self.attempt = staged_attempt;
+        self.ideal_oracle = staged_ideal_oracle;
+        Ok(verifier_move.ordinal)
+    }
+
+    fn replay_entropy_authority(
+        &self,
+    ) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingSimulatorError> {
+        let identity = self.attempt_identity();
+        let mut authority = CompactMaskingEntropyAuthority::begin(
+            copy_verifier_inputs(&self.verifier_inputs),
+            self.coefficient_maps,
+            identity,
+        )?;
+        for (move_index, record) in self.attempt.moves.iter().enumerate() {
+            let expected_pre =
+                authority.authorize_next_response(record.base_fresh_claim.as_ref())?;
+            verify_authorized_steps(&record.conditioned_view.disclosures, expected_pre)?;
+            let move_contract = self
+                .verifier_inputs
+                .verifier_moves
+                .get(move_index)
+                .ok_or(CompactMaskingSimulatorError::WrongCheckpoint)?;
+            let expected_post = authority
+                .ingest_verifier_message(move_contract.ordinal, &record.verifier_message)?;
+            verify_authorized_steps(&record.post_message_disclosures, expected_post)?;
+        }
+        Ok(authority)
+    }
+
+    fn program_new_commitments(
+        &self,
+        ideal_oracle: &mut impl CompactSealedIdealUniformOracle,
+        attempt: &CompactAttemptState,
+        identity: CompactMaskingAttemptIdentity,
+        verifier_move: &CompactVerifierMoveContract,
+    ) -> Result<Vec<CompactConstructionCommitmentProgram>, CompactMaskingSimulatorError> {
+        let already_programmed = attempt.moves.iter().try_fold(0_usize, |count, record| {
+            count
+                .checked_add(record.conditioned_view.new_construction_commitments.len())
+                .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)
+        })?;
+        let expected_count = usize::try_from(verifier_move.preceding_commitment_count)
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        let embeddings = self
+            .coefficient_maps
+            .construction_commitment_embeddings()
+            .get(already_programmed..expected_count)
+            .ok_or(CompactMaskingSimulatorError::WrongCommitmentProgression)?;
+        let mut programs = Vec::with_capacity(embeddings.len());
+        for embedding in embeddings {
+            if embedding.outer_response_ordinal != verifier_move.ordinal {
+                return Err(CompactMaskingSimulatorError::WrongCommitmentEmbedding);
+            }
+            let handle = ideal_oracle.program_construction_commitment(identity, *embedding)?;
+            if self.retired_commitment_handles.contains(&handle)
+                || attempt
+                    .moves
+                    .iter()
+                    .flat_map(|record| &record.conditioned_view.new_construction_commitments)
+                    .any(|program| program.handle == handle)
+                || programs
+                    .iter()
+                    .any(|program: &CompactConstructionCommitmentProgram| program.handle == handle)
+            {
+                return Err(if self.retired_commitment_handles.contains(&handle) {
+                    CompactMaskingSimulatorError::ReusedCommitmentHandle
+                } else {
+                    CompactMaskingSimulatorError::WrongCommitmentProgression
+                });
+            }
+            programs.push(CompactConstructionCommitmentProgram {
+                embedding: *embedding,
+                handle,
+            });
+        }
+        Ok(programs)
+    }
+
+    fn attempt_identity(&self) -> CompactMaskingAttemptIdentity {
+        CompactMaskingAttemptIdentity::new(
+            self.attempt.attempt_identifier,
+            self.attempt.reset_ordinal,
+            self.attempt.initial_exposed_prefix_binding,
+        )
+    }
+
+    fn validate_checkpoint_authentication(
+        &self,
+        checkpoint: &CompactMaskingSimulationCheckpoint,
+    ) -> Result<(), CompactMaskingSimulatorError> {
+        if checkpoint.contract_source_hash != self.contract_source_hash
+            || checkpoint.coefficient_map_binding != self.coefficient_maps.certificate_digest()
+            || checkpoint.ideal_oracle_binding != self.ideal_oracle.binding()
+            || checkpoint.exposed_prefix_binding
+                != prefix_binding(
+                    self.contract_source_hash,
+                    self.coefficient_maps.certificate_digest(),
+                    checkpoint.attempt.attempt_identifier,
+                    checkpoint.attempt.reset_ordinal,
+                    checkpoint.attempt.initial_exposed_prefix_binding,
+                    &checkpoint.attempt.moves,
+                )?
+        {
+            return Err(CompactMaskingSimulatorError::WrongCheckpoint);
+        }
+        Ok(())
+    }
+
+    fn validate_attempt_prefix(&self) -> Result<(), CompactMaskingSimulatorError> {
+        if self.attempt.moves.len() > self.verifier_inputs.verifier_moves.len()
+            || self
+                .retired_coin_ranges
+                .iter()
+                .any(|range| range.start >= range.end)
+        {
+            return Err(CompactMaskingSimulatorError::WrongCheckpoint);
+        }
+        self.replay_entropy_authority()?;
+        validate_move_prefix(
+            &self.verifier_inputs,
+            self.coefficient_maps,
+            self.attempt_identity(),
+            &self.attempt.moves,
+            &self.retired_coin_ranges,
+            &self.retired_commitment_handles,
+        )
+    }
+}
+
+struct CompactDisclosureSamplingContext<'a, 'contract> {
+    identity: CompactMaskingAttemptIdentity,
+    authority: &'a CompactMaskingEntropyAuthority<'contract>,
+    prior_moves: &'a [CompactIdealMaskingMoveRecord],
+    current_response_disclosures: &'a [CompactIdealDisclosure],
+    retired_coin_ranges: &'a [CompactRetiredCoinRange],
+}
+
+fn sample_disclosures(
+    oracle: &mut impl CompactSealedIdealUniformOracle,
+    context: CompactDisclosureSamplingContext<'_, '_>,
+    steps: &[CompactMaskingEntropyStep],
+    next_coin_coordinate: &mut u64,
+) -> Result<Vec<CompactIdealDisclosure>, CompactMaskingSimulatorError> {
+    let mut disclosures = Vec::with_capacity(steps.len());
+    for (step_index, step) in steps.iter().enumerate() {
+        let request = context.authority.ideal_image_request(step)?;
+        if request.attempt_identity() != context.identity
+            || request.step_ordinal() != step.ordinal()
+            || request.verifier_move_ordinal() != step.verifier_move_ordinal()
+            || request.output_coordinate_count() != step.output_coordinate_count()
+            || request.independent_coordinate_count() != step.conditional_rank()
+            || request.image() != step.image()
+        {
+            return Err(CompactMaskingSimulatorError::IdealOracleRefused);
+        }
+        let start = *next_coin_coordinate;
+        let end = start
+            .checked_add(request.independent_coordinate_count())
+            .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        if context
+            .retired_coin_ranges
+            .iter()
+            .any(|range| range.overlaps(context.identity, start, end))
+        {
+            return Err(CompactMaskingSimulatorError::ReusedCoinCoordinate);
+        }
+        let independent_coordinates = oracle.sample_independent_coordinates(
+            context.identity,
+            request.step_ordinal(),
+            request.independent_coordinate_count(),
+            start,
+        )?;
+        let field_values = match request.image() {
+            CompactMaskingDisclosureImage::FullCoordinateSpace => independent_coordinates,
+            CompactMaskingDisclosureImage::LinearClaimFiber {
+                pivot_output_coordinate,
+            } => sample_linear_claim_fiber(
+                CompactLinearClaimFiberContext {
+                    authority: context.authority,
+                    step,
+                    pivot_output_coordinate,
+                    prior_moves: context.prior_moves,
+                    current_response_disclosures: context.current_response_disclosures,
+                    current_disclosures: &disclosures,
+                    remaining_steps: &steps[step_index + 1..],
+                },
+                independent_coordinates,
+            )?,
+            CompactMaskingDisclosureImage::CoefficientMapImage {
+                map_ordinal,
+                first_output_coordinate,
+            } => {
+                let preceding_output_values = retained_map_prefix(
+                    map_ordinal,
+                    first_output_coordinate,
+                    context.prior_moves,
+                    context.current_response_disclosures,
+                    &disclosures,
+                )?;
+                let retained_mirror_coefficients = retained_mirror_coefficients(
+                    step.kind(),
+                    context.prior_moves,
+                    context.current_response_disclosures,
+                    &disclosures,
+                )?;
+                let coefficient_request = context.authority.prepare_coefficient_image(
+                    step,
+                    &preceding_output_values,
+                    retained_mirror_coefficients.as_deref(),
+                )?;
+                if coefficient_request.output_coordinate_count()
+                    != request.output_coordinate_count()
+                    || coefficient_request.independent_coordinate_count()
+                        != request.independent_coordinate_count()
+                {
+                    return Err(CompactMaskingSimulatorError::IdealOracleRefused);
+                }
+                context.authority.execute_coefficient_image(
+                    step,
+                    &coefficient_request,
+                    &independent_coordinates,
+                )?
+            }
+        };
+        if u64::try_from(field_values.len()).ok() != Some(step.output_coordinate_count()) {
+            return Err(CompactMaskingSimulatorError::IdealOracleRefused);
+        }
+        disclosures.push(CompactIdealDisclosure {
+            entropy_step: step.clone(),
+            field_values,
+            coin_coordinate_start: start,
+        });
+        *next_coin_coordinate = end;
+    }
+    Ok(disclosures)
+}
+
+fn retained_map_prefix(
+    map_ordinal: usize,
+    first_output_coordinate: u64,
+    prior_moves: &[CompactIdealMaskingMoveRecord],
+    current_response_disclosures: &[CompactIdealDisclosure],
+    current_disclosures: &[CompactIdealDisclosure],
+) -> Result<Vec<CompactChallengeField>, CompactMaskingSimulatorError> {
+    let expected = usize::try_from(first_output_coordinate)
+        .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?;
+    if expected == 0 {
+        return Ok(Vec::new());
+    }
+    let values = prior_moves
+        .iter()
+        .flat_map(|record| {
+            record
+                .conditioned_view
+                .disclosures
+                .iter()
+                .chain(&record.post_message_disclosures)
+        })
+        .chain(current_response_disclosures)
+        .chain(current_disclosures)
+        .filter(|disclosure| {
+            matches!(
+                disclosure.entropy_step.image(),
+                CompactMaskingDisclosureImage::CoefficientMapImage {
+                    map_ordinal: disclosure_map_ordinal,
+                    ..
+                } if disclosure_map_ordinal == map_ordinal
+            )
+        })
+        .flat_map(|disclosure| disclosure.field_values.iter().copied())
+        .collect::<Vec<_>>();
+    if values.len() != expected {
+        return Err(CompactMaskingSimulatorError::WrongTranscript);
+    }
+    Ok(values)
+}
+
+fn retained_mirror_coefficients(
+    kind: CompactMaskingDisclosureKind,
+    prior_moves: &[CompactIdealMaskingMoveRecord],
+    current_response_disclosures: &[CompactIdealDisclosure],
+    current_disclosures: &[CompactIdealDisclosure],
+) -> Result<Option<Vec<CompactChallengeField>>, CompactMaskingSimulatorError> {
+    let disclosures = prior_moves
+        .iter()
+        .flat_map(|record| {
+            record
+                .conditioned_view
+                .disclosures
+                .iter()
+                .chain(&record.post_message_disclosures)
+        })
+        .chain(current_response_disclosures)
+        .chain(current_disclosures)
+        .collect::<Vec<_>>();
+    match kind {
+        CompactMaskingDisclosureKind::FreshSourceQueries { epoch } => {
+            let message = unique_retained_disclosure(
+                &disclosures,
+                CompactMaskingDisclosureKind::BaseBlindedSourceMessage { epoch },
+            )?;
+            let randomness = unique_retained_disclosure(
+                &disclosures,
+                CompactMaskingDisclosureKind::BaseBlindedSourceRandomness { epoch },
+            )?;
+            if message.entropy_step.ordinal() >= randomness.entropy_step.ordinal() {
+                return Err(CompactMaskingSimulatorError::WrongTranscript);
+            }
+            let coordinate_count = message
+                .field_values
+                .len()
+                .checked_add(randomness.field_values.len())
+                .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+            let mut coefficients = Vec::with_capacity(coordinate_count);
+            coefficients.extend_from_slice(&message.field_values);
+            coefficients.extend_from_slice(&randomness.field_values);
+            Ok(Some(coefficients))
+        }
+        CompactMaskingDisclosureKind::FreshMaskQueries {
+            epoch,
+            group_ordinal,
+        } => Ok(Some(
+            unique_retained_disclosure(
+                &disclosures,
+                CompactMaskingDisclosureKind::BaseBlindedMaskGroup {
+                    epoch,
+                    group_ordinal,
+                },
+            )?
+            .field_values
+            .clone(),
+        )),
+        _ => Ok(None),
+    }
+}
+
+fn unique_retained_disclosure<'a>(
+    disclosures: &[&'a CompactIdealDisclosure],
+    kind: CompactMaskingDisclosureKind,
+) -> Result<&'a CompactIdealDisclosure, CompactMaskingSimulatorError> {
+    let mut matches = disclosures
+        .iter()
+        .copied()
+        .filter(|disclosure| disclosure.entropy_step.kind() == kind);
+    let disclosure = matches
+        .next()
+        .ok_or(CompactMaskingSimulatorError::WrongTranscript)?;
+    if matches.next().is_some()
+        || u64::try_from(disclosure.field_values.len()).ok()
+            != Some(disclosure.entropy_step.output_coordinate_count())
+    {
+        return Err(CompactMaskingSimulatorError::WrongTranscript);
+    }
+    Ok(disclosure)
+}
+
+struct CompactLinearClaimFiberContext<'a, 'contract> {
+    authority: &'a CompactMaskingEntropyAuthority<'contract>,
+    step: &'a CompactMaskingEntropyStep,
+    pivot_output_coordinate: u64,
+    prior_moves: &'a [CompactIdealMaskingMoveRecord],
+    current_response_disclosures: &'a [CompactIdealDisclosure],
+    current_disclosures: &'a [CompactIdealDisclosure],
+    remaining_steps: &'a [CompactMaskingEntropyStep],
+}
+
+fn sample_linear_claim_fiber(
+    context: CompactLinearClaimFiberContext<'_, '_>,
+    independent_coordinates: Vec<CompactChallengeField>,
+) -> Result<Vec<CompactChallengeField>, CompactMaskingSimulatorError> {
+    let covector = context.authority.reveal_output_covector(context.step)?;
+    let output_count = usize::try_from(context.step.output_coordinate_count())
+        .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?;
+    let pivot = usize::try_from(context.pivot_output_coordinate)
+        .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?;
+    if covector.len() != output_count
+        || pivot >= output_count
+        || covector[pivot] == CompactChallengeField::ZERO
+        || independent_coordinates.len() + 1 != output_count
+    {
+        return Err(CompactMaskingSimulatorError::IdealOracleRefused);
+    }
+    let epoch = match context.step.kind() {
+        CompactMaskingDisclosureKind::BaseBlindedSourceMessage { epoch }
+        | CompactMaskingDisclosureKind::BaseBlindedMaskGroup { epoch, .. } => epoch,
+        _ => return Err(CompactMaskingSimulatorError::IdealOracleRefused),
+    };
+    let mut target = base_claim_target(
+        epoch,
+        context.prior_moves,
+        context.current_response_disclosures,
+        context.current_disclosures,
+    )?;
+    for disclosure in context
+        .current_response_disclosures
+        .iter()
+        .chain(context.current_disclosures)
+        .filter(|disclosure| disclosure.entropy_step.kind().reveal_epoch() == Some(epoch))
+    {
+        let preceding_covector = context
+            .authority
+            .reveal_output_covector(&disclosure.entropy_step)?;
+        if preceding_covector.len() != disclosure.field_values.len() {
+            return Err(CompactMaskingSimulatorError::IdealOracleRefused);
+        }
+        target -= preceding_covector
+            .iter()
+            .zip(&disclosure.field_values)
+            .map(|(coefficient, value)| *coefficient * *value)
+            .sum::<CompactChallengeField>();
+    }
+    for remaining in context
+        .remaining_steps
+        .iter()
+        .filter(|remaining| remaining.kind().reveal_epoch() == Some(epoch))
+    {
+        if context
+            .authority
+            .reveal_output_covector(remaining)?
+            .iter()
+            .any(|coefficient| *coefficient != CompactChallengeField::ZERO)
+        {
+            return Err(CompactMaskingSimulatorError::IdealOracleRefused);
+        }
+    }
+    let mut output = Vec::with_capacity(output_count);
+    let mut independent = independent_coordinates.into_iter();
+    for coordinate in 0..output_count {
+        output.push(if coordinate == pivot {
+            CompactChallengeField::ZERO
+        } else {
+            independent
+                .next()
+                .ok_or(CompactMaskingSimulatorError::IdealOracleRefused)?
+        });
+    }
+    let partial = output
+        .iter()
+        .zip(&covector)
+        .map(|(value, coefficient)| *value * *coefficient)
+        .sum::<CompactChallengeField>();
+    output[pivot] = (target - partial) * covector[pivot].inverse();
+    Ok(output)
+}
+
+fn base_claim_target(
+    epoch: u8,
+    prior_moves: &[CompactIdealMaskingMoveRecord],
+    current_response_disclosures: &[CompactIdealDisclosure],
+    current_disclosures: &[CompactIdealDisclosure],
+) -> Result<CompactChallengeField, CompactMaskingSimulatorError> {
+    let mut matches = prior_moves
+        .iter()
+        .flat_map(|record| {
+            record
+                .conditioned_view
+                .disclosures
+                .iter()
+                .chain(&record.post_message_disclosures)
+        })
+        .chain(current_response_disclosures)
+        .chain(current_disclosures)
+        .filter(|disclosure| {
+            disclosure.entropy_step.kind() == CompactMaskingDisclosureKind::BaseFreshClaim { epoch }
+        });
+    let target = *matches
+        .next()
+        .and_then(|disclosure| disclosure.field_values.first())
+        .ok_or(CompactMaskingSimulatorError::WrongTranscript)?;
+    if matches.next().is_some() {
+        return Err(CompactMaskingSimulatorError::WrongTranscript);
+    }
+    Ok(target)
+}
+
+fn validate_move_prefix(
+    verifier_inputs: &CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    moves: &[CompactIdealMaskingMoveRecord],
+    retired_coin_ranges: &[CompactRetiredCoinRange],
+    retired_commitment_handles: &[CompactConstructionCommitmentHandle],
+) -> Result<(), CompactMaskingSimulatorError> {
+    let mut next_coin_coordinate = 0_u64;
+    let mut commitment_count = 0_usize;
+    let mut handles = Vec::new();
+    for (move_index, record) in moves.iter().enumerate() {
+        let move_contract = verifier_inputs
+            .verifier_moves
+            .get(move_index)
+            .ok_or(CompactMaskingSimulatorError::WrongTranscript)?;
+        if record.conditioned_view.preceding_prover_response_ordinal
+            != move_contract.preceding_prover_response_ordinal
+        {
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        }
+        let expected_embeddings = coefficient_maps
+            .construction_commitment_embeddings()
+            .get(
+                commitment_count
+                    ..usize::try_from(move_contract.preceding_commitment_count)
+                        .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?,
+            )
+            .ok_or(CompactMaskingSimulatorError::WrongCommitmentProgression)?;
+        if record.conditioned_view.new_construction_commitments.len() != expected_embeddings.len() {
+            return Err(CompactMaskingSimulatorError::WrongCommitmentProgression);
+        }
+        for (program, embedding) in record
+            .conditioned_view
+            .new_construction_commitments
+            .iter()
+            .zip(expected_embeddings)
+        {
+            if program.embedding != *embedding
+                || handles.contains(&program.handle)
+                || retired_commitment_handles.contains(&program.handle)
+            {
+                return Err(CompactMaskingSimulatorError::WrongCommitmentEmbedding);
+            }
+            handles.push(program.handle);
+        }
+        commitment_count += expected_embeddings.len();
+        validate_disclosure_coordinates(
+            &record.conditioned_view.disclosures,
+            identity,
+            &mut next_coin_coordinate,
+            retired_coin_ranges,
+        )?;
+        validate_disclosure_coordinates(
+            &record.post_message_disclosures,
+            identity,
+            &mut next_coin_coordinate,
+            retired_coin_ranges,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_disclosure_coordinates(
+    disclosures: &[CompactIdealDisclosure],
+    identity: CompactMaskingAttemptIdentity,
+    next_coin_coordinate: &mut u64,
+    retired_coin_ranges: &[CompactRetiredCoinRange],
+) -> Result<(), CompactMaskingSimulatorError> {
+    for disclosure in disclosures {
+        let end = disclosure
+            .coin_coordinate_start
+            .checked_add(disclosure.entropy_step.conditional_rank())
+            .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        if disclosure.coin_coordinate_start != *next_coin_coordinate
+            || u64::try_from(disclosure.field_values.len()).ok()
+                != Some(disclosure.entropy_step.output_coordinate_count())
+            || retired_coin_ranges
+                .iter()
+                .any(|range| range.overlaps(identity, disclosure.coin_coordinate_start, end))
+        {
+            return Err(CompactMaskingSimulatorError::WrongTranscript);
+        }
+        *next_coin_coordinate = end;
+    }
+    Ok(())
+}
+
+fn prefix_binding(
+    contract_source_hash: Hash512,
+    coefficient_map_binding: [u8; 64],
+    attempt_identifier: CompactMaskingAttemptIdentifier,
+    reset_ordinal: u32,
+    initial_exposed_prefix_binding: [u8; 64],
+    moves: &[CompactIdealMaskingMoveRecord],
+) -> Result<[u8; 64], CompactMaskingSimulatorError> {
+    let reset_bytes = reset_ordinal.to_le_bytes();
+    let moves_bytes = encode_moves(moves)?;
+    Ok(hash_framed_parts_512(
+        IDEAL_PREFIX_BINDING_DOMAIN,
+        &[
+            contract_source_hash.as_bytes(),
+            &coefficient_map_binding,
+            &attempt_identifier,
+            &reset_bytes,
+            &initial_exposed_prefix_binding,
+            &moves_bytes,
+        ],
+    ))
+}
+
+fn encode_moves(
+    moves: &[CompactIdealMaskingMoveRecord],
+) -> Result<Vec<u8>, CompactMaskingSimulatorError> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(
+        &u64::try_from(moves.len())
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for record in moves {
+        bytes.extend_from_slice(
+            &record
+                .conditioned_view
+                .preceding_prover_response_ordinal
+                .to_le_bytes(),
+        );
+        encode_disclosures(&mut bytes, &record.conditioned_view.disclosures)?;
+        match &record.base_fresh_claim {
+            None => bytes.push(0),
+            Some(claim) => {
+                bytes.push(1);
+                bytes.push(claim.epoch());
+                bytes.extend_from_slice(
+                    &u64::try_from(claim.coefficients().len())
+                        .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+                        .to_le_bytes(),
+                );
+                for coefficient in claim.coefficients() {
+                    let production =
+                        super::compact_cfw::compact_challenge_to_production(*coefficient)
+                            .map_err(|_| CompactMaskingSimulatorError::WrongTranscript)?;
+                    for coordinate in production.canonical_coordinates() {
+                        bytes.extend_from_slice(&coordinate.to_le_bytes());
+                    }
+                }
+            }
+        }
+        bytes.extend_from_slice(
+            &u64::try_from(record.conditioned_view.new_construction_commitments.len())
+                .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+                .to_le_bytes(),
+        );
+        for program in &record.conditioned_view.new_construction_commitments {
+            encode_embedding(&mut bytes, program.embedding);
+            bytes.extend_from_slice(program.handle.as_bytes());
+        }
+        encode_verifier_message(&mut bytes, &record.verifier_message)?;
+        encode_disclosures(&mut bytes, &record.post_message_disclosures)?;
+    }
+    Ok(bytes)
+}
+
+fn encode_disclosures(
+    bytes: &mut Vec<u8>,
+    disclosures: &[CompactIdealDisclosure],
+) -> Result<(), CompactMaskingSimulatorError> {
+    bytes.extend_from_slice(
+        &u64::try_from(disclosures.len())
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for disclosure in disclosures {
+        bytes.extend_from_slice(&disclosure.entropy_step.ordinal().to_le_bytes());
+        bytes.extend_from_slice(&disclosure.coin_coordinate_start.to_le_bytes());
+        bytes.extend_from_slice(
+            &u64::try_from(disclosure.field_values.len())
+                .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+                .to_le_bytes(),
+        );
+        for value in &disclosure.field_values {
+            for coordinate in
+                <CompactChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(
+                    value,
+                )
+            {
+                bytes.extend_from_slice(&coordinate.as_canonical_u64().to_le_bytes());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn encode_embedding(bytes: &mut Vec<u8>, embedding: CompactConstructionCommitmentEmbedding) {
+    bytes.extend_from_slice(&embedding.commitment_ordinal.to_le_bytes());
+    bytes.extend_from_slice(&embedding.outer_response_ordinal.to_le_bytes());
+    bytes.extend_from_slice(&embedding.component_ordinal.to_le_bytes());
+    bytes.push(embedding.semantic_role as u8);
+    bytes.extend_from_slice(&[
+        embedding.component_role.role_tag,
+        embedding.component_role.epoch,
+        embedding.component_role.batch_ordinal,
+    ]);
+    bytes.extend_from_slice(&embedding.component_role.round_ordinal.to_le_bytes());
+    match embedding.ownership {
+        CompactConstructionCommitmentOwnership::OwnedByEpoch { epoch } => {
+            bytes.push(0);
+            bytes.push(epoch);
+        }
+        CompactConstructionCommitmentOwnership::OwnedByPreChallengeEpochReusedByMainEpoch => {
+            bytes.push(1);
+        }
+    }
+    match embedding.query_source {
+        CompactCommitmentQuerySource::Component => bytes.push(0),
+        CompactCommitmentQuerySource::SharedCrossEpochUnion {
+            owned_pre_challenge,
+            reused_main,
+        } => {
+            bytes.push(1);
+            bytes.extend_from_slice(
+                &owned_pre_challenge
+                    .logical_verifier_move_ordinal
+                    .to_le_bytes(),
+            );
+            bytes.extend_from_slice(
+                &owned_pre_challenge
+                    .distinct_query_group_ordinal
+                    .to_le_bytes(),
+            );
+            bytes.extend_from_slice(&reused_main.logical_verifier_move_ordinal.to_le_bytes());
+            bytes.extend_from_slice(&reused_main.distinct_query_group_ordinal.to_le_bytes());
+        }
+    }
+}
+
+fn encode_verifier_message(
+    bytes: &mut Vec<u8>,
+    message: &DecodedFixedUniformVerifierMessage,
+) -> Result<(), CompactMaskingSimulatorError> {
+    bytes.extend_from_slice(
+        &u64::try_from(message.extension_elements().len())
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for element in message.extension_elements() {
+        for coordinate in element.canonical_coordinates() {
+            bytes.extend_from_slice(&coordinate.to_le_bytes());
+        }
+    }
+    bytes.extend_from_slice(
+        &u64::try_from(message.base_field_elements().len())
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for element in message.base_field_elements() {
+        bytes.extend_from_slice(&element.canonical().to_le_bytes());
+    }
+    bytes.extend_from_slice(
+        &u64::try_from(message.distinct_query_groups().len())
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+            .to_le_bytes(),
+    );
+    for group in message.distinct_query_groups() {
+        bytes.extend_from_slice(
+            &u64::try_from(group.len())
+                .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?
+                .to_le_bytes(),
+        );
+        for query in group {
+            bytes.extend_from_slice(&query.to_le_bytes());
+        }
+    }
+    Ok(())
+}
+
+fn verify_authorized_steps(
+    disclosures: &[CompactIdealDisclosure],
+    expected_steps: &[CompactMaskingEntropyStep],
+) -> Result<(), CompactMaskingSimulatorError> {
+    if disclosures.len() != expected_steps.len()
+        || disclosures
+            .iter()
+            .zip(expected_steps)
+            .any(|(disclosure, step)| disclosure.entropy_step != *step)
+    {
+        return Err(CompactMaskingSimulatorError::WrongTranscript);
+    }
+    Ok(())
+}
+
+fn copy_verifier_inputs<'contract>(
+    inputs: &CompactPublicKeyVerifierInputs<'contract>,
+) -> CompactPublicKeyVerifierInputs<'contract> {
+    CompactPublicKeyVerifierInputs {
+        relation: inputs.relation,
+        cfw_configuration: inputs.cfw_configuration,
+        statement_layout: inputs.statement_layout,
+        public_input_wire_geometry: inputs.public_input_wire_geometry,
+        proof_wire_geometry: inputs.proof_wire_geometry,
+        response_merkle_geometries: inputs.response_merkle_geometries,
+        response_component_roles: inputs.response_component_roles,
+        checkpoint_schedule: inputs.checkpoint_schedule,
+        verifier_moves: inputs.verifier_moves,
+        whir_epochs: inputs.whir_epochs,
+        whir_folds: inputs.whir_folds,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::compact_masking_coefficient_maps::derive_compact_masking_coefficient_map_certificate;
+    use super::super::compact_masking_entropy::selected_test_compact_masking_entropy_certificate;
+    use super::super::compact_proof_contract::selected_compact_public_key_proof_contract;
+    use super::super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
+    use super::super::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
+    use super::*;
+
+    struct SelectedAdversarialVerifier;
+
+    impl CompactAdaptiveVerifier for SelectedAdversarialVerifier {
+        fn choose_message(
+            &mut self,
+            view: CompactAdaptiveVerifierView<'_>,
+        ) -> DecodedFixedUniformVerifierMessage {
+            selected_adversarial_message(view.verifier_move())
+        }
+    }
+
+    fn selected_adversarial_message(
+        verifier_move: &CompactVerifierMoveContract,
+    ) -> DecodedFixedUniformVerifierMessage {
+        let geometry = &verifier_move.message_geometry;
+        let extension_elements = (0..geometry.extension_output_count())
+            .map(|ordinal| {
+                ProofChallengeExtensionElement::from_canonical_coordinates([
+                    100 + u64::from(verifier_move.ordinal) * 1_000 + ordinal,
+                    1,
+                    2,
+                    3,
+                    5,
+                ])
+                .expect("canonical challenge")
+            })
+            .collect();
+        let base_field_elements = (0..geometry.base_field_output_count())
+            .map(|ordinal| {
+                ProofBaseFieldElement::from_canonical(17 + ordinal).expect("canonical base element")
+            })
+            .collect();
+        let distinct_query_groups = geometry
+            .distinct_query_groups()
+            .iter()
+            .map(|group| (0..group.query_count()).collect())
+            .collect();
+        DecodedFixedUniformVerifierMessage::from_adversarial_values(
+            geometry,
+            extension_elements,
+            base_field_elements,
+            distinct_query_groups,
+        )
+        .expect("typed adversarial verifier message")
+    }
+
+    fn wrong_shape_adversarial_message(
+        verifier_move: &CompactVerifierMoveContract,
+    ) -> DecodedFixedUniformVerifierMessage {
+        let extension_output_count = verifier_move
+            .message_geometry
+            .extension_output_count()
+            .checked_add(1)
+            .expect("selected extension count increments");
+        let wrong_geometry =
+            FixedUniformVerifierMessageGeometry::new(extension_output_count, 0, 0, Vec::new())
+                .expect("nonempty wrong message geometry");
+        let extension_elements = (0..extension_output_count)
+            .map(|ordinal| {
+                ProofChallengeExtensionElement::from_canonical_coordinates([
+                    500 + ordinal,
+                    1,
+                    0,
+                    0,
+                    0,
+                ])
+                .expect("canonical wrong-shape challenge")
+            })
+            .collect();
+        DecodedFixedUniformVerifierMessage::from_adversarial_values(
+            &wrong_geometry,
+            extension_elements,
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("typed message for the wrong geometry")
+    }
+
+    #[derive(Default)]
+    struct InvalidThenValidVerifier {
+        exposed_conditioned_views: Vec<CompactIdealConditionedView>,
+        invalid_message_move_ordinal: Option<u32>,
+    }
+
+    impl CompactAdaptiveVerifier for InvalidThenValidVerifier {
+        fn choose_message(
+            &mut self,
+            view: CompactAdaptiveVerifierView<'_>,
+        ) -> DecodedFixedUniformVerifierMessage {
+            let issue_invalid_message = self.invalid_message_move_ordinal.is_none()
+                && !view.current_conditioned_view().disclosures.is_empty()
+                && !view
+                    .current_conditioned_view()
+                    .new_construction_commitments
+                    .is_empty();
+            self.exposed_conditioned_views
+                .push(view.current_conditioned_view().clone());
+            if issue_invalid_message {
+                self.invalid_message_move_ordinal = Some(view.verifier_move().ordinal);
+                wrong_shape_adversarial_message(view.verifier_move())
+            } else {
+                selected_adversarial_message(view.verifier_move())
+            }
+        }
+    }
+
+    fn selected_simulator(
+        private_key: [u8; 64],
+    ) -> (
+        super::super::compact_proof_contract::CompactPublicKeyProofContract,
+        CompactMaskingCoefficientMapCertificate,
+    ) {
+        let contract = selected_compact_public_key_proof_contract().expect("selected contract");
+        let maps = derive_compact_masking_coefficient_map_certificate(contract.verifier_inputs())
+            .expect("selected coefficient maps");
+        let _ = private_key;
+        (contract, maps)
+    }
+
+    #[test]
+    fn fresh_source_mirror_prefix_uses_message_then_randomness() {
+        let (contract, maps) = selected_simulator([0x6a; 64]);
+        let certificate =
+            selected_test_compact_masking_entropy_certificate(&contract.verifier_inputs(), &maps)
+                .expect("selected entropy certificate");
+        let epoch = 1;
+        let message_step = certificate
+            .steps()
+            .iter()
+            .find(|step| {
+                step.kind() == CompactMaskingDisclosureKind::BaseBlindedSourceMessage { epoch }
+            })
+            .expect("source message reveal")
+            .clone();
+        let randomness_step = certificate
+            .steps()
+            .iter()
+            .find(|step| {
+                step.kind() == CompactMaskingDisclosureKind::BaseBlindedSourceRandomness { epoch }
+            })
+            .expect("source randomness reveal")
+            .clone();
+        let message_value = CompactChallengeField::from_u64(41);
+        let randomness_value = CompactChallengeField::from_u64(73);
+        let message = CompactIdealDisclosure {
+            field_values: vec![
+                message_value;
+                usize::try_from(message_step.output_coordinate_count())
+                    .expect("message geometry fits")
+            ],
+            entropy_step: message_step,
+            coin_coordinate_start: 0,
+        };
+        let randomness = CompactIdealDisclosure {
+            field_values: vec![
+                randomness_value;
+                usize::try_from(randomness_step.output_coordinate_count())
+                    .expect("randomness geometry fits")
+            ],
+            entropy_step: randomness_step,
+            coin_coordinate_start: 0,
+        };
+
+        // Input storage order is irrelevant: the retained coefficient vector
+        // follows the certified affine-mirror geometry.
+        let reversed_disclosures = [randomness.clone(), message.clone()];
+        let retained = retained_mirror_coefficients(
+            CompactMaskingDisclosureKind::FreshSourceQueries { epoch },
+            &[],
+            &[],
+            &reversed_disclosures,
+        )
+        .expect("complete source mirror prefix")
+        .expect("source queries require mirror coefficients");
+        assert_eq!(
+            retained.len(),
+            message.field_values.len() + randomness.field_values.len()
+        );
+        assert!(
+            retained[..message.field_values.len()]
+                .iter()
+                .all(|value| *value == message_value)
+        );
+        assert!(
+            retained[message.field_values.len()..]
+                .iter()
+                .all(|value| *value == randomness_value)
+        );
+
+        let duplicate_message = [randomness.clone(), message.clone(), message.clone()];
+        assert_eq!(
+            retained_mirror_coefficients(
+                CompactMaskingDisclosureKind::FreshSourceQueries { epoch },
+                &[],
+                &[],
+                &duplicate_message,
+            ),
+            Err(CompactMaskingSimulatorError::WrongTranscript)
+        );
+        let mut malformed_message = message;
+        malformed_message.field_values.pop();
+        assert_eq!(
+            retained_mirror_coefficients(
+                CompactMaskingDisclosureKind::FreshSourceQueries { epoch },
+                &[],
+                &[],
+                &[randomness, malformed_message],
+            ),
+            Err(CompactMaskingSimulatorError::WrongTranscript)
+        );
+    }
+
+    #[test]
+    fn checkpoint_key_binding_fails_closed() {
+        let private_key = [0x6b; 64];
+        let (contract, maps) = selected_simulator(private_key);
+        let simulator = CompactAdaptiveMaskingSimulator::new(
+            contract.verifier_inputs(),
+            &maps,
+            [0x51; 32],
+            [0x61; 64],
+            private_key,
+        )
+        .expect("selected simulator");
+        let initial_checkpoint = simulator.checkpoint().expect("initial checkpoint");
+        assert_eq!(
+            CompactAdaptiveMaskingSimulator::restore(
+                contract.verifier_inputs(),
+                &maps,
+                initial_checkpoint.clone(),
+                [0x7c; 64],
+            )
+            .err(),
+            Some(CompactMaskingSimulatorError::WrongCheckpoint)
+        );
+
+        assert_eq!(simulator.attempt.next_coin_coordinate, 0);
+    }
+
+    #[test]
+    fn invalid_message_retry_replays_the_staged_view_and_commits_it_once() {
+        let private_key = [0x6c; 64];
+        let (contract, maps) = selected_simulator(private_key);
+        let mut simulator = CompactAdaptiveMaskingSimulator::new(
+            contract.verifier_inputs(),
+            &maps,
+            [0x53; 32],
+            [0x63; 64],
+            private_key,
+        )
+        .expect("selected simulator");
+        let mut verifier = InvalidThenValidVerifier::default();
+
+        let (attempt_before_invalid_message, checkpoint_before_invalid_message) = loop {
+            let staged_attempt = simulator.attempt.clone();
+            let staged_checkpoint = simulator.checkpoint().expect("prefix checkpoint");
+            match simulator.advance(&mut verifier) {
+                Ok(_) => {}
+                Err(CompactMaskingSimulatorError::InvalidVerifierMessage) => {
+                    break (staged_attempt, staged_checkpoint);
+                }
+                Err(error) => panic!("unexpected simulator refusal before retry: {error:?}"),
+            }
+        };
+        assert_eq!(simulator.attempt, attempt_before_invalid_message);
+        assert_eq!(
+            simulator.checkpoint().expect("checkpoint after refusal"),
+            checkpoint_before_invalid_message
+        );
+        let refused_view = verifier
+            .exposed_conditioned_views
+            .last()
+            .expect("the invalid message observed one conditioned view")
+            .clone();
+        assert!(!refused_view.disclosures.is_empty());
+        assert!(!refused_view.new_construction_commitments.is_empty());
+
+        let refused_move_ordinal = verifier
+            .invalid_message_move_ordinal
+            .expect("one invalid message was issued");
+        let view_count_before_retry = verifier.exposed_conditioned_views.len();
+        assert_eq!(simulator.advance(&mut verifier), Ok(refused_move_ordinal));
+        assert_eq!(
+            verifier.exposed_conditioned_views.len(),
+            view_count_before_retry + 1
+        );
+        assert_eq!(
+            verifier.exposed_conditioned_views.last(),
+            Some(&refused_view)
+        );
+        assert_eq!(
+            simulator.attempt.moves.len(),
+            attempt_before_invalid_message.moves.len() + 1
+        );
+        assert!(
+            simulator
+                .attempt
+                .moves
+                .starts_with(&attempt_before_invalid_message.moves)
+        );
+        let committed_move = simulator
+            .attempt
+            .moves
+            .last()
+            .expect("the retried move committed");
+        assert_eq!(committed_move.conditioned_view, refused_view);
+        assert_eq!(
+            simulator
+                .attempt
+                .moves
+                .iter()
+                .map(|record| { record.conditioned_view.new_construction_commitments.len() })
+                .sum::<usize>(),
+            attempt_before_invalid_message
+                .moves
+                .iter()
+                .map(|record| { record.conditioned_view.new_construction_commitments.len() })
+                .sum::<usize>()
+                + committed_move
+                    .conditioned_view
+                    .new_construction_commitments
+                    .len()
+        );
+        let committed_coin_count = committed_move
+            .conditioned_view
+            .disclosures
+            .iter()
+            .chain(&committed_move.post_message_disclosures)
+            .map(|disclosure| disclosure.entropy_step.conditional_rank())
+            .sum::<u64>();
+        assert_eq!(
+            simulator.attempt.next_coin_coordinate,
+            attempt_before_invalid_message.next_coin_coordinate + committed_coin_count
+        );
+    }
+
+    #[test]
+    fn rewind_authenticates_oracle_key_and_exposed_prefix() {
+        let (contract, maps) = selected_simulator([0x6d; 64]);
+        let mut simulator = CompactAdaptiveMaskingSimulator::new(
+            contract.verifier_inputs(),
+            &maps,
+            [0x52; 32],
+            [0x62; 64],
+            [0x6d; 64],
+        )
+        .expect("selected simulator");
+        let foreign_checkpoint = CompactAdaptiveMaskingSimulator::new(
+            contract.verifier_inputs(),
+            &maps,
+            [0x52; 32],
+            [0x62; 64],
+            [0x7d; 64],
+        )
+        .expect("foreign-key simulator")
+        .checkpoint()
+        .expect("foreign checkpoint");
+        assert_eq!(
+            simulator
+                .rewind_security_game_suffix(foreign_checkpoint)
+                .err(),
+            Some(CompactMaskingSimulatorError::WrongCheckpoint)
+        );
+
+        let mut altered_prefix = simulator.checkpoint().expect("local checkpoint");
+        altered_prefix.exposed_prefix_binding[0] ^= 1;
+        assert_eq!(
+            simulator.rewind_security_game_suffix(altered_prefix).err(),
+            Some(CompactMaskingSimulatorError::WrongCheckpoint)
+        );
+        assert_eq!(simulator.attempt.reset_ordinal, 0);
+        assert_eq!(simulator.attempt.next_coin_coordinate, 0);
+        assert!(simulator.retired_coin_ranges.is_empty());
+        assert!(simulator.retired_commitment_handles.is_empty());
+    }
+
+    #[test]
+    fn semantic_base_claim_move_is_gated_without_an_opaque_prefix_token() {
+        let private_key = [0x7d; 64];
+        let (contract, maps) = selected_simulator(private_key);
+        let mut simulator = CompactAdaptiveMaskingSimulator::new(
+            contract.verifier_inputs(),
+            &maps,
+            [0x71; 32],
+            [0x81; 64],
+            private_key,
+        )
+        .expect("selected simulator");
+        let mut verifier = SelectedAdversarialVerifier;
+        let refusal = loop {
+            match simulator.advance(&mut verifier) {
+                Ok(_) => {}
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(refusal, CompactMaskingSimulatorError::WrongTranscript);
+        assert!(
+            simulator
+                .replay_entropy_authority()
+                .expect("authority replays to gated move")
+                .next_base_claim_requirement()
+                .expect("requirement query")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn exact_goldilocks_sampler_rejects_out_of_range_candidates() {
+        let mut draws = vec![Goldilocks::ORDER_U64, 19].into_iter();
+        let sampled = sample_exact_goldilocks(|_| draws.next().expect("bounded candidate"))
+            .expect("second candidate is accepted");
+        assert_eq!(sampled.as_canonical_u64(), 19);
+        assert_eq!(
+            sample_exact_goldilocks(|_| Goldilocks::ORDER_U64),
+            Err(CompactMaskingSimulatorError::IdealOracleRefused)
+        );
+    }
+
+    #[test]
+    fn affine_mask_and_ideal_uniform_samples_have_equal_distributions_not_equal_samples() {
+        const SMALL_FIELD_CARDINALITY: usize = 257;
+        let secret = 83_usize;
+        let mut real_histogram = [0_u16; SMALL_FIELD_CARDINALITY];
+        let mut ideal_histogram = [0_u16; SMALL_FIELD_CARDINALITY];
+        let mut samples_all_equal = true;
+        for mask in 0..SMALL_FIELD_CARDINALITY {
+            let real = (secret + mask) % SMALL_FIELD_CARDINALITY;
+            let ideal = (17 * mask + 11) % SMALL_FIELD_CARDINALITY;
+            real_histogram[real] += 1;
+            ideal_histogram[ideal] += 1;
+            samples_all_equal &= real == ideal;
+        }
+        assert_eq!(real_histogram, ideal_histogram);
+        assert!(!samples_all_equal);
+    }
+
+    #[test]
+    fn adversarial_verifier_message_boundary_rejects_invalid_queries() {
+        use super::super::fixed_uniform_verifier_message::FixedUniformDistinctQueryGeometry;
+
+        let geometry = FixedUniformVerifierMessageGeometry::new(
+            0,
+            0,
+            0,
+            vec![FixedUniformDistinctQueryGeometry::new(8, 2)],
+        )
+        .expect("valid geometry");
+        assert!(
+            DecodedFixedUniformVerifierMessage::from_adversarial_values(
+                &geometry,
+                Vec::new(),
+                Vec::new(),
+                vec![vec![1, 7]],
+            )
+            .is_ok()
+        );
+        assert!(
+            DecodedFixedUniformVerifierMessage::from_adversarial_values(
+                &geometry,
+                Vec::new(),
+                Vec::new(),
+                vec![vec![1, 1]],
+            )
+            .is_err()
+        );
+        assert!(
+            DecodedFixedUniformVerifierMessage::from_adversarial_values(
+                &geometry,
+                Vec::new(),
+                Vec::new(),
+                vec![vec![1, 8]],
+            )
+            .is_err()
+        );
+    }
+}

@@ -1,4 +1,4 @@
-//! Canonical transported bytes for the compact ring-vector proof slice.
+//! Canonical wire geometry for the compact ring-vector proof slice.
 //!
 //! All geometry is verifier-owned. The wire carries roots, independent
 //! Fiat-Shamir round salts, canonical field values, fresh Merkle leaf salts,
@@ -6,19 +6,23 @@
 //! no producer status, assurance, accounting, or section-length claims.
 //! Dictionary entries are strictly sorted and unique, every entry is
 //! referenced, and every response ordinal is fixed by the checked
-//! construction. The decoder validates the complete authenticated transport
-//! length before proportional work or allocation.
+//! construction. The retained encoder and decoder are test-only until a
+//! release verifier consumes this transport; the release build keeps only the
+//! contract-owned geometry and its exact byte ceilings.
 
 #[cfg(test)]
 use std::ops::Range;
 
+use super::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
+use super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH;
+#[cfg(test)]
+use super::compact_proof_contract::CompactPublicKeyProofContract;
 #[cfg(test)]
 use super::field::PROOF_BASE_FIELD_MODULUS;
 use super::field::PROOF_CHALLENGE_EXTENSION_DEGREE;
 #[cfg(test)]
 use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
-use super::{COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_BYTE_LENGTH};
 use crate::foundation::Hash512;
 
 pub(crate) const COMPACT_PROOF_WIRE_MAGIC: [u8; 8] = *b"SLCPRF01";
@@ -286,7 +290,7 @@ impl CompactProofWireGeometry {
     #[cfg(test)]
     fn total_queried_leaf_count(&self) -> Result<usize, CompactProofWireError> {
         self.responses.iter().try_fold(0_usize, |count, response| {
-            checked_usize(response.queried_leaf_count())
+            checked_usize(response.maximum_queried_leaf_count())
                 .and_then(|response_count| checked_usize_add(count, response_count))
         })
     }
@@ -403,7 +407,16 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
             .map_err(|_| CompactProofWireError::LengthOverflow)?;
         canonical.extend_from_slice(canonical_prefix_bytes);
 
-        let mut accepted_leaf_salts = decoded_prefix.accepted_leaf_salts;
+        let mut accepted_leaf_salts = decoded_prefix
+            .accepted_leaf_salt_offsets
+            .into_iter()
+            .map(|offset| {
+                read_array_at::<COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH>(
+                    canonical_prefix_bytes,
+                    offset as usize,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         accepted_leaf_salts
             .try_reserve_exact(
                 geometry
@@ -530,6 +543,7 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
 #[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedCompactProofResponse {
+    canonical_bytes: Range<usize>,
     ordinal: u32,
     root: [u8; MERKLE_DIGEST_BYTE_LENGTH],
     queried_base_field_element_count: usize,
@@ -567,6 +581,28 @@ impl DecodedCompactProofResponse {
         self.queried_leaf_count
     }
 
+    pub(crate) fn canonical_byte_length(&self) -> usize {
+        self.canonical_bytes.len()
+    }
+
+    pub(crate) fn answer_byte_length(&self) -> usize {
+        self.base_field_value_bytes.len() + self.extension_field_value_bytes.len()
+    }
+
+    /// Exact transported Merkle opening length, excluding the opened answer
+    /// values. This includes leaf salts, the two frontier counts, the sorted
+    /// digest dictionary, and every dictionary reference.
+    pub(crate) fn merkle_opening_byte_length(&self) -> usize {
+        self.leaf_salt_bytes.len()
+            + 2 * size_of::<u32>()
+            + self.frontier_dictionary_bytes.len()
+            + self.frontier_reference_bytes.len()
+    }
+
+    pub(crate) const fn frontier_dictionary_count(&self) -> usize {
+        self.frontier_dictionary_count
+    }
+
     pub(crate) fn fiat_shamir_round_salt(
         &self,
         canonical_proof_bytes: &[u8],
@@ -591,6 +627,24 @@ impl DecodedCompactProofResponse {
             .map_err(|_| CompactProofWireError::NonCanonicalBaseFieldElement)
     }
 
+    /// Borrows an already-decoded base-field value range exactly as carried
+    /// on the canonical proof wire. The decoder established canonical field
+    /// encodings before this response was constructed.
+    pub(super) fn canonical_base_field_value_bytes<'proof>(
+        &self,
+        canonical_proof_bytes: &'proof [u8],
+        first_value_ordinal: usize,
+        value_count: usize,
+    ) -> Result<&'proof [u8], CompactProofWireError> {
+        canonical_value_bytes(
+            canonical_proof_bytes,
+            &self.base_field_value_bytes,
+            first_value_ordinal,
+            value_count,
+            size_of::<u64>(),
+        )
+    }
+
     pub(crate) fn extension_field_value(
         &self,
         canonical_proof_bytes: &[u8],
@@ -605,6 +659,26 @@ impl DecodedCompactProofResponse {
             extension_byte_length,
         )?;
         read_extension_at(canonical_proof_bytes, offset)
+    }
+
+    /// Borrows an already-decoded extension-field value range exactly as
+    /// carried on the canonical proof wire.
+    pub(super) fn canonical_extension_field_value_bytes<'proof>(
+        &self,
+        canonical_proof_bytes: &'proof [u8],
+        first_value_ordinal: usize,
+        value_count: usize,
+    ) -> Result<&'proof [u8], CompactProofWireError> {
+        let extension_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
+            .checked_mul(size_of::<u64>())
+            .ok_or(CompactProofWireError::LengthOverflow)?;
+        canonical_value_bytes(
+            canonical_proof_bytes,
+            &self.extension_field_value_bytes,
+            first_value_ordinal,
+            value_count,
+            extension_byte_length,
+        )
     }
 
     pub(crate) fn leaf_salt(
@@ -678,6 +752,7 @@ pub(crate) struct CompactPublicInputBindings {
 
 #[cfg(test)]
 impl CompactPublicInputBindings {
+    #[cfg(test)]
     pub(crate) const fn new(
         suite_identifier: Hash512,
         application_statement_hash: Hash512,
@@ -884,7 +959,7 @@ fn enforce_compact_proof_byte_ceiling(
 #[cfg(test)]
 struct DecodedCompactProofWirePrefix {
     responses: Vec<DecodedCompactProofResponse>,
-    accepted_leaf_salts: Vec<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+    accepted_leaf_salt_offsets: Vec<u32>,
 }
 
 #[cfg(test)]
@@ -928,8 +1003,8 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
         return Err(CompactProofWireError::WrongResponseCount);
     }
 
-    let mut accepted_leaf_salts = Vec::new();
-    accepted_leaf_salts
+    let mut accepted_leaf_salt_offsets = Vec::new();
+    accepted_leaf_salt_offsets
         .try_reserve_exact(geometry.total_queried_leaf_count()?)
         .map_err(|_| CompactProofWireError::LengthOverflow)?;
     let mut decoded_responses = Vec::new();
@@ -937,6 +1012,7 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
         .try_reserve_exact(geometry.responses.len())
         .map_err(|_| CompactProofWireError::LengthOverflow)?;
     for response_geometry in &geometry.responses[..completed_response_count] {
+        let canonical_response_start = reader.offset;
         let ordinal = reader.read_u32()?;
         if ordinal != response_geometry.ordinal {
             return Err(CompactProofWireError::WrongResponseOrdinal);
@@ -976,7 +1052,7 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
         let extension_field_value_bytes =
             reader.read_canonical_extension_field_values(queried_extension_field_element_count)?;
         let leaf_salt_bytes =
-            reader.read_leaf_salts(queried_leaf_count, &mut accepted_leaf_salts)?;
+            reader.read_leaf_salts(queried_leaf_count, &mut accepted_leaf_salt_offsets)?;
 
         let frontier_dictionary_count = usize::try_from(reader.read_u32()?)
             .map_err(|_| CompactProofWireError::LengthOverflow)?;
@@ -1003,6 +1079,7 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
             return Err(CompactProofWireError::UnusedFrontierDictionaryEntry);
         }
         decoded_responses.push(DecodedCompactProofResponse {
+            canonical_bytes: canonical_response_start..reader.offset,
             ordinal,
             root,
             queried_base_field_element_count,
@@ -1019,16 +1096,19 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
         });
     }
     reader.finish()?;
-    accepted_leaf_salts.sort_unstable();
-    if accepted_leaf_salts
-        .windows(2)
-        .any(|pair| pair[0] == pair[1])
-    {
+    accepted_leaf_salt_offsets.sort_unstable_by(|left, right| {
+        leaf_salt_bytes_at_offset(canonical_prefix_bytes, *left)
+            .cmp(leaf_salt_bytes_at_offset(canonical_prefix_bytes, *right))
+    });
+    if accepted_leaf_salt_offsets.windows(2).any(|pair| {
+        leaf_salt_bytes_at_offset(canonical_prefix_bytes, pair[0])
+            == leaf_salt_bytes_at_offset(canonical_prefix_bytes, pair[1])
+    }) {
         return Err(CompactProofWireError::DuplicateLeafSalt);
     }
     Ok(DecodedCompactProofWirePrefix {
         responses: decoded_responses,
-        accepted_leaf_salts,
+        accepted_leaf_salt_offsets,
     })
 }
 
@@ -1217,12 +1297,14 @@ impl<'bytes> CompactWireReader<'bytes> {
     fn read_leaf_salts(
         &mut self,
         leaf_count: usize,
-        accepted_leaf_salts: &mut Vec<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+        accepted_leaf_salt_offsets: &mut Vec<u32>,
     ) -> Result<Range<usize>, CompactProofWireError> {
         let start = self.offset;
         for _ in 0..leaf_count {
-            let salt = self.read_array()?;
-            accepted_leaf_salts.push(salt);
+            let salt_offset =
+                u32::try_from(self.offset).map_err(|_| CompactProofWireError::LengthOverflow)?;
+            self.take_range(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH)?;
+            accepted_leaf_salt_offsets.push(salt_offset);
         }
         Ok(start..self.offset)
     }
@@ -1283,6 +1365,15 @@ impl<'bytes> CompactWireReader<'bytes> {
     }
 }
 
+#[cfg(test)]
+fn leaf_salt_bytes_at_offset(canonical_proof_bytes: &[u8], offset: u32) -> &[u8] {
+    // The reader mints an offset only after the complete salt range is in the
+    // canonical proof, whose verifier-owned geometry is capped below u32::MAX.
+    let start = offset as usize;
+    let end = start + COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
+    &canonical_proof_bytes[start..end]
+}
+
 fn checked_usize(value: u64) -> Result<usize, CompactProofWireError> {
     usize::try_from(value).map_err(|_| CompactProofWireError::LengthOverflow)
 }
@@ -1317,6 +1408,32 @@ fn indexed_offset(
         return Err(CompactProofWireError::InvalidGeometry);
     }
     Ok(offset)
+}
+
+#[cfg(test)]
+fn canonical_value_bytes<'proof>(
+    canonical_proof_bytes: &'proof [u8],
+    response_value_range: &Range<usize>,
+    first_value_ordinal: usize,
+    value_count: usize,
+    value_byte_length: usize,
+) -> Result<&'proof [u8], CompactProofWireError> {
+    let first_byte_offset = first_value_ordinal
+        .checked_mul(value_byte_length)
+        .and_then(|offset| response_value_range.start.checked_add(offset))
+        .ok_or(CompactProofWireError::LengthOverflow)?;
+    let byte_length = value_count
+        .checked_mul(value_byte_length)
+        .ok_or(CompactProofWireError::LengthOverflow)?;
+    let end = first_byte_offset
+        .checked_add(byte_length)
+        .ok_or(CompactProofWireError::LengthOverflow)?;
+    if first_byte_offset < response_value_range.start || end > response_value_range.end {
+        return Err(CompactProofWireError::InvalidGeometry);
+    }
+    canonical_proof_bytes
+        .get(first_byte_offset..end)
+        .ok_or(CompactProofWireError::Truncated)
 }
 
 #[cfg(test)]
@@ -1459,6 +1576,40 @@ mod tests {
                 .unwrap()
                 .canonical_coordinates(),
             [29, 2, 3, 5, 7]
+        );
+        assert_eq!(
+            decoded.responses()[0]
+                .canonical_base_field_value_bytes(&canonical, 0, 3)
+                .unwrap(),
+            [13_u64, 17, 19]
+                .into_iter()
+                .flat_map(u64::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            decoded.responses()[1]
+                .canonical_extension_field_value_bytes(&canonical, 1, 1)
+                .unwrap(),
+            [29_u64, 2, 3, 5, 7]
+                .into_iter()
+                .flat_map(u64::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            decoded.responses()[0].canonical_base_field_value_bytes(&canonical, 3, 0),
+            Ok(&[][..])
+        );
+        assert_eq!(
+            decoded.responses()[0].canonical_base_field_value_bytes(&canonical, 2, 2),
+            Err(CompactProofWireError::InvalidGeometry)
+        );
+        assert_eq!(
+            decoded.responses()[1].canonical_extension_field_value_bytes(&canonical, 2, 1),
+            Err(CompactProofWireError::InvalidGeometry)
+        );
+        assert_eq!(
+            decoded.responses()[0].canonical_base_field_value_bytes(&canonical[..1], 0, 1),
+            Err(CompactProofWireError::Truncated)
         );
         assert_eq!(
             decoded.responses()[0].leaf_salt(&canonical, 1).unwrap(),
@@ -1678,16 +1829,26 @@ mod tests {
             Err(CompactProofWireError::NonCanonicalExtensionFieldElement)
         );
 
-        let mut duplicate_salt = canonical;
+        let mut duplicate_salt = canonical.clone();
         let first_salt = decoded.responses[0].leaf_salt_bytes.start;
         let second_salt = first_salt + COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
-        let copied = duplicate_salt
-            [first_salt..first_salt + COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]
-            .to_vec();
+        let copied =
+            read_array_at::<COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH>(&duplicate_salt, first_salt)
+                .unwrap();
         duplicate_salt[second_salt..second_salt + COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]
             .copy_from_slice(&copied);
         assert_eq!(
             decode_compact_proof_wire(&geometry, &duplicate_salt),
+            Err(CompactProofWireError::DuplicateLeafSalt)
+        );
+
+        let mut duplicate_across_responses = canonical;
+        let second_response_salt = decoded.responses[1].leaf_salt_bytes.start;
+        duplicate_across_responses[second_response_salt
+            ..second_response_salt + COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]
+            .copy_from_slice(&copied);
+        assert_eq!(
+            decode_compact_proof_wire(&geometry, &duplicate_across_responses),
             Err(CompactProofWireError::DuplicateLeafSalt)
         );
     }
@@ -1763,12 +1924,15 @@ mod tests {
             decode_compact_public_input(geometry, bindings, &wrong_factor),
             Err(CompactProofWireError::WrongPackingFactor)
         );
-        let mut wrong_binding = canonical.clone();
-        wrong_binding[COMPACT_PUBLIC_INPUT_WIRE_MAGIC.len() + size_of::<u16>()] ^= 1;
-        assert_eq!(
-            decode_compact_public_input(geometry, bindings, &wrong_binding),
-            Err(CompactProofWireError::WrongPublicInputBinding)
-        );
+        let binding_start = COMPACT_PUBLIC_INPUT_WIRE_MAGIC.len() + size_of::<u16>();
+        for binding_ordinal in 0..PUBLIC_INPUT_BINDING_COUNT {
+            let mut wrong_binding = canonical.clone();
+            wrong_binding[binding_start + binding_ordinal * Hash512::BYTE_LENGTH] ^= 1;
+            assert_eq!(
+                decode_compact_public_input(geometry, bindings, &wrong_binding),
+                Err(CompactProofWireError::WrongPublicInputBinding)
+            );
+        }
         let mut wrong_count = canonical.clone();
         let count_offset = COMPACT_PUBLIC_INPUT_WIRE_MAGIC.len()
             + size_of::<u16>()
@@ -1820,6 +1984,28 @@ mod tests {
         assert_eq!(
             CompactPublicInputWireGeometry::new(u64::from(u32::MAX), 2),
             Err(CompactProofWireError::LengthOverflow)
+        );
+    }
+
+    #[test]
+    fn selected_geometry_bounds_leaf_salt_registry_to_four_byte_offsets() {
+        let contract = CompactPublicKeyProofContract::decode_selected().unwrap();
+        let verifier_inputs = contract.verifier_inputs();
+        let geometry = verifier_inputs.proof_wire_geometry;
+        let leaf_salt_count = geometry.total_queried_leaf_count().unwrap();
+        let offset_storage_byte_length =
+            checked_usize_product(&[leaf_salt_count, size_of::<u32>()]).unwrap();
+        let copied_salt_storage_byte_length =
+            checked_usize_product(&[leaf_salt_count, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH])
+                .unwrap();
+
+        assert_eq!(leaf_salt_count, 79_310);
+        assert!(u32::try_from(geometry.maximum_canonical_byte_length()).is_ok());
+        assert_eq!(offset_storage_byte_length, 317_240);
+        assert_eq!(copied_salt_storage_byte_length, 10_151_680);
+        assert_eq!(
+            copied_salt_storage_byte_length / offset_storage_byte_length,
+            32
         );
     }
 }

@@ -116,7 +116,7 @@ pub(crate) use finality_runtime::{
     release_verified_evaluator_replay, release_verified_finality, retain_verified_evaluator_replay,
     verify_finality, with_verified_finality,
 };
-#[cfg(all(test, feature = "theorem-evidence"))]
+#[cfg(test)]
 pub(crate) use hash::canonical_foundation_tuple_hash_preimage;
 pub(crate) use hash::{
     FoundationTupleHash512BlockReader, StreamingFoundationHashError,
@@ -169,7 +169,7 @@ pub(crate) use private_randomness::generator_hybrid::{
     MaskGeneratorHybridLoss, action_root_expansion_summary, deployed_mask_generator_hybrid,
     quantum_mask_generator_hybrid,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "theorem-evidence"))]
 pub(crate) use private_randomness::generator_hybrid::{
     deployed_private_stream_hybrid, quantum_private_stream_hybrid,
 };
@@ -178,13 +178,21 @@ pub use private_randomness::{
     ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,
     ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, OrdinaryProofCoinInput,
     PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, PRIVATE_PROOF_SALT_PURPOSE,
-    PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
+    PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER, PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION,
     PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH,
     PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER, PersistentProofCoinInput, PrivateRandomBlockInput,
     PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
     PrivateRandomnessStream, ProofApplicationSlot, RANDOM_CURSOR_SCHEMA_IDENTIFIER,
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
+};
+#[cfg(test)]
+pub(crate) use private_randomness::{
+    ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION, ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH,
+    ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION, PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION,
+    PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION, PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION,
+    PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH, PROOF_COIN_KEY_BYTE_LENGTH,
+    SETUP_ATTEMPT_CUSTOMIZATION, TARGET_RELEASE_ATTEMPT_CUSTOMIZATION,
 };
 pub(crate) use private_randomness_runtime::{
     ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,

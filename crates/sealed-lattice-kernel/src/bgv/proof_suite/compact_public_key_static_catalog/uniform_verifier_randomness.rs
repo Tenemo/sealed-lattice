@@ -115,14 +115,6 @@ impl PackingUniformVerifierRandomness {
         derive_catalog(moves)
     }
 
-    pub(super) const fn minimum_uniform_verifier_message_bit_length(&self) -> u64 {
-        self.minimum_uniform_verifier_message_bit_length
-    }
-
-    pub(super) const fn concrete_challenge_stream_hash_query_count(&self) -> u64 {
-        self.concrete_challenge_stream_hash_query_count
-    }
-
     pub(super) fn fixed_message_geometry(
         &self,
         move_ordinal: usize,

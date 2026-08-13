@@ -174,7 +174,7 @@ describe('Selected collective-setup security evidence', () => {
             throw new Error('Expected QROM composition missing evidence.');
         }
         expect(qromCompositionMissingEvidence).toContain(
-            'No compact emitted-byte census',
+            'No selected proof bytes exist',
         );
         expect(qromCompositionImport?.ownerSourcePaths).toEqual([]);
         const quantumRandomOracleLedger = requireArray(record.residualLedgers)

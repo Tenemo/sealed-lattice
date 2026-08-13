@@ -60,29 +60,8 @@ impl ExactProbability {
         )
     }
 
-    pub(super) fn scale(&self, multiplier: &BigUint) -> Result<Self, CompactStaticCatalogError> {
-        Self::new(&self.numerator * multiplier, self.denominator.clone())
-    }
-
     pub(super) fn is_at_most_inverse_power_of_two(&self, exponent: usize) -> bool {
         (&self.numerator << exponent) <= self.denominator
-    }
-
-    pub(super) fn is_greater_than(&self, right: &Self) -> bool {
-        &self.numerator * &right.denominator > &right.numerator * &self.denominator
-    }
-
-    pub(super) fn ceiling_units_at_binary_precision(
-        &self,
-        precision: usize,
-    ) -> Result<BigUint, CompactStaticCatalogError> {
-        let scaled_numerator = &self.numerator << precision;
-        let quotient = &scaled_numerator / &self.denominator;
-        if &quotient * &self.denominator == scaled_numerator {
-            Ok(quotient)
-        } else {
-            Ok(quotient + BigUint::one())
-        }
     }
 }
 

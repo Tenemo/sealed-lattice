@@ -675,7 +675,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
         requiredClosurePredicate: 'completeConstructionExtractorCorrespondence',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The compact semantic owner is test-only and proves the interactive semantic input only. No production compact proof, transported-byte extractor, or noninteractive knowledge-soundness owner exists.',
+            'The test-only compact semantic owner executes the selected factor-one chronology and derives its relaxed round-by-round error theorem, but no decoded-proof-to-semantic statement, prefix, or matrix adapter and no production compact proof exist. Appendix A.1 remains test-only and unavailable without the fixed-tape shared-QRO premise.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[1],
@@ -693,7 +693,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
             'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
         observedStatus: 'unresolved',
         missingEvidence:
-            'No compact emitted-byte census instantiates qPi, qy, qV, tuple, Merkle multi-extraction, or ceremony-composition arithmetic.',
+            'The test-only compact emitted-byte and Appendix A.1 owners derive qPi, qy, qV, tuple, and Merkle coordinates conditionally from one verified transport. No selected proof bytes exist, the fixed-tape shared-QRO premise is unmintable, and setup-family or ceremony composition is absent.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[3],
@@ -701,7 +701,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
         requiredClosurePredicate: 'completeConstructionMaskingCorrespondence',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The rejected row-code affine-image and sequential-simulation objects are accounting and proof plans. Compact production matrices, conditioned inclusion factorization, a witness-free adaptive simulator, and the KMAC256 and SHAKE256 hybrid remain absent.',
+            'The test-only compact coefficient, streaming-entropy, adaptive-simulator, finite-Merkle, and KMAC census owners are partial evidence. The simulator stops at the first carried-covector boundary, no selected 82-response emission drives the finite Merkle game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
     },
 ];
 
@@ -940,7 +940,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['canonicalHashBinding'],
         advantageExpression: 'unresolved_common_construction_knowledge_error',
         statement:
-            'The compact semantic owner proves the test-only interactive semantic input, direct initial-transition bound, and production schedule. A production compact proof, transported-byte extractor, and noninteractive knowledge-soundness composition remain absent.',
+            'The test-only compact semantic owner executes the selected chronology and derives its relaxed round-by-round error theorem. A decoded-proof-to-semantic statement, prefix, and matrix adapter, one production compact proof, the fixed-tape shared-QRO premise, and noninteractive composition remain absent.',
     },
     {
         identifier: 'commonConstructionQromTransform',
@@ -959,7 +959,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['commonConstructionQromTransform'],
         advantageExpression: 'unresolved_common_proof_qrom_composition_error',
         statement:
-            'No compact emitted-byte owner instantiates qPi, qy, qV, tuple size, proof length, Merkle multi-extraction, or ceremony-composition arithmetic.',
+            'The test-only compact emitted-byte and Appendix A.1 owners conditionally instantiate qPi, qy, qV, tuple size, proof length, and Merkle arithmetic from a verified transport. No selected proof bytes exist, the fixed-tape shared-QRO premise is unmintable, and setup-family and ceremony composition remain absent.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',
@@ -968,7 +968,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['shakeQuantumOracle'],
         advantageExpression: 'unresolved_common_construction_privacy_error',
         statement:
-            'The rejected row-code affine-image and sequential-simulation objects are accounting and proof plans. Compact production coefficient-to-view matrices, conditioned image inclusion, a witness-free adaptive simulator, and the KMAC256 and SHAKE256 hybrid remain absent.',
+            'The test-only compact coefficient maps, streaming entropy authority, adaptive simulator, finite-Merkle game, and KMAC census are partial evidence. The simulator stops at the first carried-covector boundary, no selected 82-response emission drives the finite game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
     },
     {
         identifier: 'setupFamilySimulationComposition',

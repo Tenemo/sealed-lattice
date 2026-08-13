@@ -212,6 +212,7 @@ mod tests {
         CompactResponseMerkleError, CompactResponseMerkleGeometry, CompactResponseQuerySchedule,
         CompactResponseQuerySelection, compact_response_leaf_digest,
         compact_response_merkle_parent_digest, verify_decoded_compact_response_opening,
+        verify_decoded_compact_response_opening_with_leaf_ordinals_for_test,
     };
     use crate::bgv::proof_suite::compact_transcript::{
         CompactProverTranscript, derive_compact_fiat_shamir_verifier_message,
@@ -455,7 +456,7 @@ mod tests {
             &fixture.proof_geometry.responses()[0],
             &proof.responses()[0],
             proof_bytes,
-            query_schedule.as_slice(),
+            &query_schedule,
         )?;
         Ok(query_schedule.as_slice().to_vec())
     }
@@ -550,7 +551,7 @@ mod tests {
         frontier_mutation[frontier_start] ^= 1;
         match decode_compact_proof_wire(&fixture.proof_geometry, &frontier_mutation) {
             Ok(proof) => assert_eq!(
-                verify_decoded_compact_response_opening(
+                verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                     &fixture.merkle_geometry,
                     &fixture.proof_geometry.responses()[0],
                     &proof.responses()[0],

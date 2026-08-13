@@ -674,7 +674,6 @@ pub(super) struct PackingResponseCommitmentCatalog {
     minimum_proof_oracle_query_count: u64,
     proof_oracle_query_count: u64,
     maximum_proof_oracle_length: u64,
-    maximum_leaf_value_byte_length: u64,
     maximum_opening_byte_length: u64,
     committed_leaf_count: u64,
     commitment_parent_hash_count: u64,
@@ -716,14 +715,6 @@ impl PackingResponseCommitmentCatalog {
 
     pub(super) const fn minimum_proof_oracle_query_count(&self) -> u64 {
         self.minimum_proof_oracle_query_count
-    }
-
-    pub(super) const fn maximum_proof_oracle_length(&self) -> u64 {
-        self.maximum_proof_oracle_length
-    }
-
-    pub(super) const fn maximum_leaf_value_byte_length(&self) -> u64 {
-        self.maximum_leaf_value_byte_length
     }
 
     pub(super) const fn committed_leaf_count(&self) -> u64 {
@@ -784,15 +775,6 @@ impl PackingResponseCommitmentCatalog {
             .into_iter()
             .max()
             .ok_or(CompactStaticCatalogError::InvalidGeometry)
-    }
-
-    pub(super) fn maximum_verifier_merkle_hash_query_count(
-        &self,
-    ) -> Result<u64, CompactStaticCatalogError> {
-        checked_add(
-            self.proof_oracle_query_count,
-            self.maximum_opening_parent_hash_count,
-        )
     }
 
     pub(super) fn response_tree_geometries(
@@ -908,13 +890,6 @@ fn derive_catalog_fields(
         .map(|response| response.merkle_leaf_count)
         .max()
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    let maximum_leaf_value_byte_length = responses
-        .iter()
-        .flat_map(|response| &response.components)
-        .filter(|component| component.role != ResponseComponentRole::Padding)
-        .map(|component| component.value_byte_length_per_leaf)
-        .max()
-        .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
     let maximum_opening_byte_length = responses.iter().try_fold(0_u64, |count, response| {
         checked_add(count, response.maximum_opening_byte_length()?)
     })?;
@@ -940,7 +915,6 @@ fn derive_catalog_fields(
         minimum_proof_oracle_query_count,
         proof_oracle_query_count,
         maximum_proof_oracle_length,
-        maximum_leaf_value_byte_length,
         maximum_opening_byte_length,
         committed_leaf_count,
         commitment_parent_hash_count,

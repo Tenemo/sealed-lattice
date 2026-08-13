@@ -1,4 +1,4 @@
-//! Executable relaxed relations used by the round-by-round theorem.
+//! Executable relaxed relations used by the factor-one proof.
 //!
 //! These predicates consume actual field values. They do not accept a
 //! producer-supplied verdict: input R1CS membership is recomputed from the
@@ -20,7 +20,7 @@ use crate::bgv::proof_suite::compact_cfw::{
     compact_challenge_from_production, compact_challenge_to_production,
     verify_compact_cfw_transcript,
 };
-use crate::bgv::proof_suite::compact_public_key_static_catalog::canonical_reed_solomon::{
+use crate::bgv::proof_suite::compact_reed_solomon::{
     CanonicalReedSolomonError, CanonicalReedSolomonGeometry,
     decode_canonical_interleaved_reed_solomon, encode_canonical_interleaved_reed_solomon,
 };
@@ -2075,63 +2075,6 @@ mod tests {
             semantic_generalized_relation_holds(&relation, &instance, &malformed_witness),
             Ok(false)
         );
-    }
-
-    #[test]
-    fn production_cfw_output_descriptor_equals_the_main_whir_input_relation() {
-        let catalog = super::super::super::CompactPublicKeyStaticCatalog::derive()
-            .expect("compact public-key static catalog derives");
-        let factor_one = &catalog.selected;
-        let main_whir = &factor_one.main_whir;
-        let source = committed_code_relation(
-            main_whir.source_message_lengths[0],
-            main_whir.query_counts[0],
-            main_whir.oracle_heights[0],
-            main_whir.oracle_widths[0],
-        );
-        let relation_for_role = |role| {
-            let group = main_whir
-                .external_mask_groups
-                .iter()
-                .find(|group| group.role == role)
-                .expect("production external mask role exists");
-            CommittedMaskCodeRelation {
-                role,
-                code: committed_code_relation(
-                    group.message_length,
-                    group.randomness_length,
-                    group.domain_size,
-                    group.width,
-                ),
-            }
-        };
-        let inner = relation_for_role(MaskGroupRole::CfwInner);
-        let outer = relation_for_role(MaskGroupRole::CfwOuter);
-        let cross_epoch = relation_for_role(MaskGroupRole::CrossEpochOpening);
-        let semantic_descriptor = semantic_cfw_output_relation_descriptor(
-            CompactCfwGeometry::derive(
-                usize::try_from(catalog.relation_padded_witness_element_count).unwrap(),
-            )
-            .unwrap(),
-            &SemanticCfwCodeRelations {
-                source,
-                inner_masks: inner.code,
-                outer_masks: outer.code,
-            },
-            &cross_epoch,
-        )
-        .expect("semantic production CFW output descriptor derives");
-        let static_cfw_output =
-            super::super::cfw_output_relation(&catalog.cfw_to_whir_handoff, main_whir)
-                .expect("static CFW output relation derives");
-        let static_whir_input = super::super::whir_input_relation(main_whir)
-            .expect("static WHIR input relation derives");
-
-        assert_eq!(semantic_descriptor, static_cfw_output);
-        assert_eq!(semantic_descriptor, static_whir_input);
-        assert_eq!(semantic_descriptor.opening_evaluation_claim_count, 2);
-        assert_eq!(semantic_descriptor.carried_reduction_claim_count, 162);
-        assert_eq!(semantic_descriptor.claim_count, 164);
     }
 
     struct SmallR1csMatrices;

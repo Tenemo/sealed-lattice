@@ -3,8 +3,9 @@
 //! Response commitments enter Fiat-Shamir chronology before their verifier
 //! messages, but a proper-subset opening may depend on a later message. The
 //! canonical proof encoder can therefore trail the transcript. This module
-//! derives that lag from verifier-owned Merkle geometry and binds the exact
-//! transcript cursor and exact encoded proof prefix at every response move.
+//! derives that lag from verifier-owned Merkle geometry. The release contract
+//! retains the response-count schedule; transcript cursor and encoded-prefix
+//! checkpoint binding remain test-only until release generation consumes them.
 
 #[cfg(test)]
 use super::compact_proof_wire::CompactProofWireAssembler;
@@ -16,7 +17,9 @@ use super::compact_response_merkle::{
 use super::compact_transcript::{CompactProverTranscript, CompactTranscriptError};
 #[cfg(test)]
 use super::prover::CommonProofGenerationCheckpointBoundary;
+#[cfg(test)]
 use crate::foundation::Hash512;
+#[cfg(test)]
 use crate::hashing::StreamingHash512;
 
 const COMPACT_RESPONSE_CHECKPOINT_SCHEDULE_DIGEST_DOMAIN: &str =
@@ -68,6 +71,7 @@ impl From<CompactTranscriptError> for CompactGenerationCheckpointError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactResponseCheckpointSchedule {
     completed_proof_response_counts: Vec<u32>,
+    #[cfg(test)]
     dependency_digest: [u8; Hash512::BYTE_LENGTH],
 }
 
@@ -91,15 +95,19 @@ impl CompactResponseCheckpointSchedule {
         last_query_verifier_move_ordinals
             .try_reserve_exact(response_count)
             .map_err(|_| CompactGenerationCheckpointError::LengthOverflow)?;
-        let digest_part_count = u64::try_from(response_count)
-            .ok()
-            .and_then(|count| count.checked_add(1))
-            .ok_or(CompactGenerationCheckpointError::LengthOverflow)?;
-        let mut schedule_hasher = StreamingHash512::new(
-            COMPACT_RESPONSE_CHECKPOINT_SCHEDULE_DIGEST_DOMAIN,
-            digest_part_count,
-        );
-        schedule_hasher.absorb_part(&response_count_u32.to_le_bytes());
+        #[cfg(test)]
+        let mut schedule_hasher = {
+            let digest_part_count = u64::try_from(response_count)
+                .ok()
+                .and_then(|count| count.checked_add(1))
+                .ok_or(CompactGenerationCheckpointError::LengthOverflow)?;
+            let mut hasher = StreamingHash512::new(
+                COMPACT_RESPONSE_CHECKPOINT_SCHEDULE_DIGEST_DOMAIN,
+                digest_part_count,
+            );
+            hasher.absorb_part(&response_count_u32.to_le_bytes());
+            hasher
+        };
         for (response_index, merkle_geometry) in response_merkle_geometries.iter().enumerate() {
             let response_ordinal = u32::try_from(response_index)
                 .map_err(|_| CompactGenerationCheckpointError::LengthOverflow)?;
@@ -111,10 +119,13 @@ impl CompactResponseCheckpointSchedule {
             {
                 return Err(CompactGenerationCheckpointError::InvalidGeometry);
             }
-            let mut dependency = [0_u8; 8];
-            dependency[..4].copy_from_slice(&response_ordinal.to_le_bytes());
-            dependency[4..].copy_from_slice(&last_query_verifier_move_ordinal.to_le_bytes());
-            schedule_hasher.absorb_part(&dependency);
+            #[cfg(test)]
+            {
+                let mut dependency = [0_u8; 8];
+                dependency[..4].copy_from_slice(&response_ordinal.to_le_bytes());
+                dependency[4..].copy_from_slice(&last_query_verifier_move_ordinal.to_le_bytes());
+                schedule_hasher.absorb_part(&dependency);
+            }
             last_query_verifier_move_ordinals.push(last_query_verifier_move_ordinal);
         }
 
@@ -152,6 +163,7 @@ impl CompactResponseCheckpointSchedule {
 
         Ok(Self {
             completed_proof_response_counts,
+            #[cfg(test)]
             dependency_digest: schedule_hasher.finalize(),
         })
     }

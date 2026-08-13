@@ -4,9 +4,9 @@
 //! string has a plan-derived fixed width and is decoded in a fixed order into
 //! challenge-extension elements, base-field elements, and sorted distinct
 //! query sets. Every logical output owns the same bounded candidate budget.
-//! Accepted decoding consumes all candidate slots, including unused slots
-//! after the first accepted candidate, so stream evaluation and transported-
-//! byte decoding implement the same message geometry.
+//! The release build retains the exact geometry and byte-length calculation.
+//! Seeded-stream evaluation and transported-byte decoding remain test-only
+//! until a release compact verifier consumes them.
 
 #[cfg(test)]
 use std::collections::BTreeSet;
@@ -283,6 +283,46 @@ impl DecodedFixedUniformVerifierMessage {
     pub(crate) fn distinct_query_groups(&self) -> &[Vec<u64>] {
         &self.distinct_query_groups
     }
+
+    /// Test-only malicious-verifier boundary. It permits arbitrary field
+    /// values while preserving the same typed geometry and query invariants as
+    /// the production decoder.
+    #[cfg(test)]
+    pub(crate) fn from_adversarial_values(
+        geometry: &FixedUniformVerifierMessageGeometry,
+        extension_elements: Vec<ProofChallengeExtensionElement>,
+        base_field_elements: Vec<ProofBaseFieldElement>,
+        distinct_query_groups: Vec<Vec<u64>>,
+    ) -> Result<Self, FixedUniformVerifierMessageError> {
+        geometry.validate()?;
+        if u64::try_from(extension_elements.len()).ok() != Some(geometry.extension_output_count)
+            || u64::try_from(base_field_elements.len()).ok()
+                != Some(geometry.base_field_output_count)
+            || distinct_query_groups.len() != geometry.distinct_query_groups.len()
+            || extension_elements.iter().any(|element| {
+                let coordinates = element.canonical_coordinates();
+                coordinates[1..].iter().all(|coordinate| *coordinate == 0)
+                    && coordinates[0] < geometry.excluded_extension_prefix_cardinality
+            })
+            || distinct_query_groups
+                .iter()
+                .zip(&geometry.distinct_query_groups)
+                .any(|(indices, group)| {
+                    u64::try_from(indices.len()).ok() != Some(group.query_count)
+                        || indices
+                            .iter()
+                            .any(|index| *index >= group.domain_cardinality)
+                        || indices.windows(2).any(|pair| pair[0] >= pair[1])
+                })
+        {
+            return Err(FixedUniformVerifierMessageError::InvalidDecodedMessage);
+        }
+        Ok(Self {
+            extension_elements,
+            base_field_elements,
+            distinct_query_groups,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -301,6 +341,8 @@ pub(crate) enum FixedUniformVerifierMessageError {
     InvalidFieldElement,
     #[cfg(test)]
     FoundationHashSchedule,
+    #[cfg(test)]
+    InvalidDecodedMessage,
 }
 
 #[cfg(test)]

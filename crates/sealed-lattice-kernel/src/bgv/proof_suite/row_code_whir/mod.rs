@@ -39,13 +39,14 @@ mod verification;
 #[cfg(test)]
 mod verifier_oracle_accounting;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(in crate::bgv::proof_suite) use construction_plan::ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW;
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirConstructionPlan;
+#[cfg(test)]
 pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirSelectedParameters;
-pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirSoundnessAssumption;
 pub(in crate::bgv::proof_suite) use construction_plan::{
     ROW_CODE_WHIR_BALLOT_OPENING_DEGREE_BOUND_EXCLUSIVE,
     ROW_CODE_WHIR_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE,
-    ROW_CODE_WHIR_COMPACT_LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
     ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE, ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
     ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
     ROW_CODE_WHIR_TARGET_RELEASE_OPENING_DEGREE_BOUND_EXCLUSIVE,

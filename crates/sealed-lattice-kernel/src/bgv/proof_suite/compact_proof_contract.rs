@@ -893,7 +893,7 @@ impl CompactWhirEpochContract {
         Ok(contract)
     }
 
-    fn validate(&self, epoch_index: usize) -> Result<(), CompactProofContractError> {
+    pub(super) fn validate(&self, epoch_index: usize) -> Result<(), CompactProofContractError> {
         let folded_variable_count = self
             .folding_schedule
             .iter()
@@ -1075,7 +1075,7 @@ pub(super) struct CompactWhirFoldContractInput {
 }
 
 impl CompactWhirFoldContract {
-    fn validate(self, fold_index: usize) -> Result<(), CompactProofContractError> {
+    pub(super) fn validate(self, fold_index: usize) -> Result<(), CompactProofContractError> {
         if usize::from(self.epoch) != fold_index / WHIR_FOLD_COUNT_PER_EPOCH + 1
             || usize::from(self.batch_ordinal) != fold_index % WHIR_FOLD_COUNT_PER_EPOCH
             || self.message_length == 0
@@ -1510,7 +1510,7 @@ fn decode_verifier_move(
     })
 }
 
-fn validate_exact_verifier_chronology(
+pub(super) fn validate_exact_verifier_chronology(
     verifier_moves: &[CompactVerifierMoveContract],
     cfw_configuration: CompactCfwVerifierConfiguration,
     whir_epochs: &[CompactWhirEpochContract],

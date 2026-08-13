@@ -4,8 +4,9 @@
 //! vector-commitment pair through `i`, and every independent round salt
 //! through `i`. The compact construction fixes commitment-oracle identifier
 //! `i + 1`, so the identifier is verifier-derived and is not transported.
-//! This module streams the complete canonical public input and ordered prefix
-//! without allocating a second copy of either byte string.
+//! The release build retains the transcript domains and verifier-derived
+//! commitment identifier. Streaming prefix construction and checkpoint
+//! cursors remain test-only until a release compact verifier consumes them.
 //!
 //! The resulting 512-bit prefix digest feeds the fixed-width verifier-message
 //! seed and predecessor-linked block schedule. That concrete multi-call
@@ -16,13 +17,11 @@
 use std::mem::size_of;
 
 #[cfg(test)]
-use super::compact_proof_wire::COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
-#[cfg(test)]
 use super::compact_proof_wire::decode_compact_proof_wire_prefix;
 #[cfg(test)]
 use super::compact_proof_wire::{
-    COMPACT_PACKING_FACTOR, CompactProofWireError, CompactProofWireGeometry,
-    DecodedCompactProofWire, DecodedCompactPublicInput,
+    COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, COMPACT_PACKING_FACTOR, CompactProofWireError,
+    CompactProofWireGeometry, DecodedCompactProofWire, DecodedCompactPublicInput,
 };
 #[cfg(test)]
 use super::fixed_uniform_verifier_message::{

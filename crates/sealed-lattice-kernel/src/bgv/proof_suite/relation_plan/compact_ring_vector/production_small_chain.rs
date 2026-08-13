@@ -66,6 +66,9 @@ use crate::bgv::proof_suite::{
     compact_generation_checkpoint::{
         CompactResponseCheckpointSchedule, compact_response_generation_checkpoint_boundary,
     },
+    compact_masking_coefficient_maps::{
+        apply_cross_epoch_explicit_point_view, apply_quotient_prefix_view,
+    },
     compact_proof_wire::{
         COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireGeometry,
         CompactProofResponseWireInput, CompactProofWireAssembler, CompactProofWireError,
@@ -78,7 +81,8 @@ use crate::bgv::proof_suite::{
         CompactResponseComponentGeometry, CompactResponseLeafValue, CompactResponseLeafValueKind,
         CompactResponseMerkleError, CompactResponseMerkleGeometry,
         CompactResponsePostorderMerkleWriter, CompactResponseQuerySelection,
-        expected_postorder_tree_byte_length, verify_decoded_compact_response_opening,
+        expected_postorder_tree_byte_length,
+        verify_decoded_compact_response_opening_with_leaf_ordinals_for_test,
     },
     compact_response_tree_external::{
         CompactResponseTreeExternalMemoryGeometry, CompactResponseTreeRetentionDriver,
@@ -601,6 +605,44 @@ fn small_chain_multilinear_equality_covector(
     Poly::new_from_point(point, CompactChallengeField::ONE)
         .as_slice()
         .to_vec()
+}
+
+fn small_chain_pre_challenge_source(
+    copied_source: Vec<Goldilocks>,
+    pre_challenge_source_element_count: usize,
+) -> Result<Vec<Goldilocks>, &'static str> {
+    if copied_source.is_empty()
+        || copied_source.len() > pre_challenge_source_element_count
+        || !pre_challenge_source_element_count.is_power_of_two()
+    {
+        return Err("the copied quotient prefix does not fit the earlier source");
+    }
+    let mut source = copied_source;
+    source.resize(pre_challenge_source_element_count, Goldilocks::ZERO);
+    Ok(source)
+}
+
+fn small_chain_cross_epoch_claims(
+    copied_source: &[Goldilocks],
+    equality_covector_prefix: &[CompactChallengeField],
+    pre_challenge_mask: CompactChallengeField,
+    main_mask: CompactChallengeField,
+) -> Result<[CompactChallengeField; 3], &'static str> {
+    if copied_source.is_empty() || copied_source.len() != equality_covector_prefix.len() {
+        return Err("the cross-epoch copied source and equality prefix differ in length");
+    }
+    let copied_source_evaluation = copied_source
+        .iter()
+        .copied()
+        .map(CompactChallengeField::from)
+        .zip(equality_covector_prefix.iter().copied())
+        .map(|(source_value, coefficient)| source_value * coefficient)
+        .sum::<CompactChallengeField>();
+    Ok([
+        copied_source_evaluation + pre_challenge_mask,
+        copied_source_evaluation + main_mask,
+        pre_challenge_mask - main_mask,
+    ])
 }
 
 fn small_chain_commitment_binding(
@@ -2509,19 +2551,21 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let pre_challenge_source_element_count =
         usize::try_from(cross_epoch_copy.pre_challenge_message_element_count())
             .expect("reduced pre-challenge source length fits usize");
-    let mut pre_challenge_source_values = Vec::with_capacity(pre_challenge_source_element_count);
-    for element_ordinal in 0..copied_main_source_element_count {
-        pre_challenge_source_values.push(Goldilocks::from_u64(
-            base_assignment
-                .witness_base_value(
-                    u64::try_from(element_ordinal).expect("copied source ordinal fits u64"),
-                )
-                .expect("the copied quotient-and-multiplicity prefix is base-field material")
-                .canonical(),
-        ));
-    }
-    pre_challenge_source_values.resize(pre_challenge_source_element_count, Goldilocks::ZERO);
-    assert!(pre_challenge_source_values.len().is_power_of_two());
+    let copied_source_values = (0..copied_main_source_element_count)
+        .map(|element_ordinal| {
+            Goldilocks::from_u64(
+                base_assignment
+                    .witness_base_value(
+                        u64::try_from(element_ordinal).expect("copied source ordinal fits u64"),
+                    )
+                    .expect("the copied quotient-and-multiplicity prefix is base-field material")
+                    .canonical(),
+            )
+        })
+        .collect();
+    let pre_challenge_source_values =
+        small_chain_pre_challenge_source(copied_source_values, pre_challenge_source_element_count)
+            .expect("the copied quotient-and-multiplicity prefix fits the earlier source");
 
     let pre_challenge_variable_count = pre_challenge_source_element_count.ilog2() as usize;
     let main_variable_count = usize::try_from(cross_epoch_copy.main_message_element_count())
@@ -2850,6 +2894,21 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             .iter()
             .all(|value| *value == Goldilocks::ZERO)
     );
+    assert_eq!(
+        apply_quotient_prefix_view(
+            &witness,
+            copied_main_source_element_count,
+            pre_challenge_source_element_count,
+        )
+        .expect("the quotient-prefix coefficient map accepts the production source")
+        .to_vec(),
+        pre_challenge_source_values[..copied_main_source_element_count]
+            .iter()
+            .copied()
+            .map(CompactChallengeField::from)
+            .collect::<Vec<_>>(),
+        "the production earlier source is exactly the authenticated main-source prefix followed by zero padding",
+    );
 
     let inner_mask_shape = MaskGroupShape {
         shape: MaskCodeShape::new(
@@ -3047,16 +3106,32 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         cross_epoch_covector.len(),
         pre_challenge_source_element_count
     );
-    let copied_source_evaluation = pre_challenge_source_values
-        .iter()
-        .copied()
-        .map(CompactChallengeField::from)
-        .zip(cross_epoch_covector.iter().copied())
-        .map(|(source_value, coefficient)| source_value * coefficient)
-        .sum::<CompactChallengeField>();
-    let masked_pre_challenge_evaluation = copied_source_evaluation + pre_challenge_mask;
-    let masked_main_evaluation = copied_source_evaluation + main_mask;
-    let mask_difference = pre_challenge_mask - main_mask;
+    let [
+        masked_pre_challenge_evaluation,
+        masked_main_evaluation,
+        mask_difference,
+    ] = small_chain_cross_epoch_claims(
+        &pre_challenge_source_values[..copied_main_source_element_count],
+        &cross_epoch_covector[..copied_main_source_element_count],
+        pre_challenge_mask,
+        main_mask,
+    )
+    .expect("the production cross-epoch source and equality prefix share one length");
+    assert_eq!(
+        [
+            masked_pre_challenge_evaluation,
+            masked_main_evaluation,
+            mask_difference,
+        ],
+        apply_cross_epoch_explicit_point_view(
+            &witness[..copied_main_source_element_count],
+            &cross_epoch_covector[..copied_main_source_element_count],
+            pre_challenge_mask,
+            main_mask,
+        )
+        .expect("the explicit-point coefficient map accepts the production source and point"),
+        "the production cross-epoch response is the exact certified explicit-point projection",
+    );
     assert_eq!(
         masked_pre_challenge_evaluation - masked_main_evaluation - mask_difference,
         CompactChallengeField::ZERO
@@ -3450,7 +3525,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .zip(decoded_proof.responses())
         .enumerate()
     {
-        verify_decoded_compact_response_opening(
+        verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
             &built_response.merkle_geometry,
             wire_geometry,
             decoded_response,
@@ -3867,7 +3942,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .zip(transported_cfw_proof.responses())
         .enumerate()
     {
-        verify_decoded_compact_response_opening(
+        verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
             &built_response.merkle_geometry,
             wire_geometry,
             decoded_response,
@@ -3952,7 +4027,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                     .zip(transported_cfw_proof.responses())
                     .enumerate()
             {
-                verify_decoded_compact_response_opening(
+                verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
                     &built_response.merkle_geometry,
                     wire_geometry,
                     decoded_response,
@@ -4427,7 +4502,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     )
     .expect("the embedded CFW decoder accepts the mutated root bytes");
     assert!(
-        verify_decoded_compact_response_opening(
+        verify_decoded_compact_response_opening_with_leaf_ordinals_for_test(
             &built_responses[0].merkle_geometry,
             &proof_wire_geometry.responses()[0],
             &mutated_outer_cfw_proof.responses()[0],

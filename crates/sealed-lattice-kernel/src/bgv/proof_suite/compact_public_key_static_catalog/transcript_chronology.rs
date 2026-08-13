@@ -194,10 +194,6 @@ impl VerifierMove {
         &self.roles
     }
 
-    pub(super) fn challenge_space(&self) -> &ExactChallengeSpace {
-        &self.challenge_space
-    }
-
     pub(super) const fn preceding_prover_response_ordinal(&self) -> u32 {
         self.preceding_prover_response_ordinal
     }

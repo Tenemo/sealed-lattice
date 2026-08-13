@@ -1,5 +1,6 @@
 pub const PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER: u16 = 0x0109;
 pub const PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0400;
+pub const PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION: u16 = 1;
 pub const PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0401;
 pub const ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0402;
 pub const ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0403;
@@ -11,12 +12,12 @@ pub const PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 pub const PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH: usize = 64;
 pub const PRIVATE_PROOF_SALT_PURPOSE: u16 = 0xfffe;
 
-const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+const FOUNDATION_SCHEMA_VERSION: u16 = PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION;
 const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION: u16 = 3;
-const ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH: usize = 192;
+pub(crate) const ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH: usize = 192;
 const ACTION_RANDOMNESS_COMMITMENT_PREIMAGE_BYTE_LENGTH: usize = 64;
-const PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH: usize = 64;
-const PROOF_COIN_KEY_BYTE_LENGTH: usize = 64;
+pub(crate) const PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH: usize = 64;
+pub(crate) const PROOF_COIN_KEY_BYTE_LENGTH: usize = 64;
 const PRIVATE_RANDOMNESS_BLOCK_BIT_LENGTH: u16 = 512;
 
 const SUITE_DISTRIBUTION_FAMILY: u16 = 0x0116;
@@ -29,20 +30,23 @@ const ORDINARY_BALLOT_PROOF_FAMILY: u16 =
 const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: u16 =
     ProofFamilyIdentifiers::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER;
 
-const ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
+pub(crate) const ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/private-randomness/action-key-hierarchy/v1";
 const ACTION_RANDOMNESS_COMMITMENT_DOMAIN: &str =
     "sealed-lattice/private-randomness/action-root-commitment/v1";
 const SETUP_ACTION_RANDOMNESS_AUTHORIZATION_DOMAIN: &str =
     "sealed-lattice/setup/state/action-randomness/v1";
-const PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION: &[u8] = b"sealed-lattice/private-randomness/v1";
-const SETUP_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/setup/reset-safe-attempt/v1";
-const PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION: &[u8] =
+pub(crate) const PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/private-randomness/v1";
+pub(crate) const SETUP_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/setup/reset-safe-attempt/v1";
+pub(crate) const PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/proof/persistent-preparation/v1";
-const PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION: &[u8] =
+pub(crate) const PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/proof/persistent-canonical-witness-attempt/v1";
-const ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/proof/ordinary-attempt/v1";
-const TARGET_RELEASE_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/target-release/attempt/v1";
+pub(crate) const ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/proof/ordinary-attempt/v1";
+pub(crate) const TARGET_RELEASE_ATTEMPT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/target-release/attempt/v1";
 const APPLICATION_SLOT_HASH_DOMAIN: &str = "sealed-lattice/proof/application-slot/v1";
 const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN: &str =
     "sealed-lattice/setup/structured-commitment-opening-context/v3";

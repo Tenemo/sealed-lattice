@@ -8,6 +8,7 @@
 //! transcript prefixes. No catalog row or producer-supplied completion value
 //! can satisfy the predicate.
 
+use super::super::{MaskGroupRole, TranscriptEpoch, WHIR_ROUND_COUNT};
 use super::semantic_composition::{
     SemanticCfwAndPreWhirOpeningPrefix, SemanticCfwAndPreWhirOpeningWitness,
     SemanticPreWhirFinalAndMainOpeningPrefix, SemanticPreWhirFinalAndMainOpeningWitness,
@@ -37,9 +38,6 @@ use super::semantic_whir::{
     semantic_whir_opening_output_pair,
 };
 use super::*;
-use crate::bgv::proof_suite::compact_public_key_static_catalog::relaxed_round_by_round::{
-    MaskGroupRole, TranscriptEpoch, WHIR_ROUND_COUNT,
-};
 
 pub(super) struct SemanticConstructionContext<
     'context,
