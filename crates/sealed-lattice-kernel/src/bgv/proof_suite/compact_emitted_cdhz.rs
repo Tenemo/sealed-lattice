@@ -464,7 +464,7 @@ fn u64_from_usize(value: usize) -> Result<u64, CompactEmittedCdhzError> {
 mod tests {
     use super::*;
 
-    fn bindings() -> CompactPublicInputBindings {
+    fn arbitrary_bindings() -> CompactPublicInputBindings {
         CompactPublicInputBindings::new(
             Hash512::from_bytes([1; Hash512::BYTE_LENGTH]),
             Hash512::from_bytes([2; Hash512::BYTE_LENGTH]),
@@ -473,22 +473,52 @@ mod tests {
         )
     }
 
+    fn selected_relation_plan_bindings() -> CompactPublicInputBindings {
+        let contract = CompactPublicKeyProofContract::decode_selected()
+            .expect("selected compact proof contract");
+        CompactPublicInputBindings::new(
+            Hash512::from_bytes([1; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([2; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([3; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes(
+                contract
+                    .verifier_inputs()
+                    .relation
+                    .relation_plan_variant_hash(),
+            ),
+        )
+    }
+
     #[test]
     fn absent_producer_outputs_fail_before_contract_arithmetic() {
         assert_eq!(
-            measure_selected_compact_emission_cdhz(None, None, bindings()),
+            measure_selected_compact_emission_cdhz(None, None, arbitrary_bindings()),
             Err(CompactEmittedCdhzError::MissingEmittedProof)
         );
         assert_eq!(
-            measure_selected_compact_emission_cdhz(Some(&[]), None, bindings()),
+            measure_selected_compact_emission_cdhz(Some(&[]), None, arbitrary_bindings()),
             Err(CompactEmittedCdhzError::MissingEmittedPublicInput)
         );
     }
 
     #[test]
-    fn present_empty_outputs_report_proof_wire_truncation() {
+    fn present_empty_outputs_refuse_wrong_context_before_wire_decoding() {
+        assert_eq!(
+            measure_selected_compact_emission_cdhz(Some(&[]), Some(&[]), arbitrary_bindings()),
+            Err(CompactEmittedCdhzError::Transport(
+                CompactPublicKeyTransportError::InvalidResponseRegistry
+            ))
+        );
+    }
+
+    #[test]
+    fn present_empty_outputs_with_selected_context_report_proof_wire_truncation() {
         assert!(matches!(
-            measure_selected_compact_emission_cdhz(Some(&[]), Some(&[]), bindings()),
+            measure_selected_compact_emission_cdhz(
+                Some(&[]),
+                Some(&[]),
+                selected_relation_plan_bindings()
+            ),
             Err(CompactEmittedCdhzError::Transport(
                 CompactPublicKeyTransportError::Wire(CompactProofWireError::Truncated)
             ))
