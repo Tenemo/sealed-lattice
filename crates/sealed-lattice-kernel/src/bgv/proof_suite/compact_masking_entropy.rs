@@ -636,7 +636,8 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
             },
             CompactMaskingDisclosureKind::SourceQueries { .. }
             | CompactMaskingDisclosureKind::CarriedMaskQueries { .. } => {
-                query_positions = query_positions_for_step(&self.inputs, &self.transcript, step)?;
+                query_positions =
+                    query_positions_for_disclosure(&self.inputs, &self.transcript, step.kind)?;
                 CompactConditionalImageRuntime::ReedSolomonQueries {
                     preceding_query_positions: query_positions.preceding,
                     query_positions: query_positions.current,
@@ -644,7 +645,8 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
             }
             CompactMaskingDisclosureKind::FreshSourceQueries { .. }
             | CompactMaskingDisclosureKind::FreshMaskQueries { .. } => {
-                query_positions = query_positions_for_step(&self.inputs, &self.transcript, step)?;
+                query_positions =
+                    query_positions_for_disclosure(&self.inputs, &self.transcript, step.kind)?;
                 CompactConditionalImageRuntime::AffineMirrorQueries {
                     query_positions: query_positions.current,
                     retained_mirror_coefficients: retained_mirror_coefficients
@@ -2303,127 +2305,7 @@ fn append_base_reveal_steps(
     steps: &mut Vec<PendingStep>,
 ) -> Result<(), CompactMaskingEntropyError> {
     for epoch in inputs.whir_epochs {
-        let reveal_move = inputs
-            .verifier_moves
-            .iter()
-            .find(|move_| {
-                move_
-                    .role_coordinates
-                    .iter()
-                    .any(|role| role.role_tag == 11 && role.epoch == epoch.epoch)
-            })
-            .ok_or(CompactMaskingEntropyError::InvalidContract)?;
-        let claim = unique_base_claim(transcript, epoch.epoch)?;
-        let (claim_source, claim_pivot) = claim_pivot_location(inputs, claim)?
-            .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?;
-        let folds = epoch_folds(inputs, epoch.epoch)?;
-        let final_fold = folds
-            .last()
-            .ok_or(CompactMaskingEntropyError::InvalidContract)?;
-        let response_index = usize::try_from(reveal_move.ordinal)
-            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
-        let geometry = inputs
-            .response_merkle_geometries
-            .get(response_index)
-            .ok_or(CompactMaskingEntropyError::InvalidContract)?;
-        let roles = inputs
-            .response_component_roles
-            .get(response_index)
-            .ok_or(CompactMaskingEntropyError::InvalidContract)?;
-        if geometry.components().len() != roles.len() {
-            return Err(CompactMaskingEntropyError::InvalidContract);
-        }
-        // This response is committed before the role-11 message supplies the
-        // final query coordinates. Its scalar disclosures therefore precede
-        // the query openings from that message.
-        for (component_index, (component, role)) in
-            geometry.components().iter().zip(roles).enumerate()
-        {
-            if role.epoch != epoch.epoch || !(19..=21).contains(&role.role_tag) {
-                continue;
-            }
-            let intra_move_ordinal = u32::try_from(component_index)
-                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
-            let (kind, output_coordinate_count, source_rank_increments, image) = match role.role_tag
-            {
-                19 => {
-                    let source = PrivateSource::WhirFreshSourceMessage { epoch: epoch.epoch };
-                    let dimension = final_fold.message_length;
-                    (
-                        CompactMaskingDisclosureKind::BaseBlindedSourceMessage {
-                            epoch: epoch.epoch,
-                        },
-                        dimension,
-                        vec![(
-                            source,
-                            remaining_identity_rank(dimension, source, Some(claim_source))?,
-                        )],
-                        identity_reveal_image(source, claim_source, claim_pivot),
-                    )
-                }
-                20 => {
-                    let source = PrivateSource::WhirFreshSourceEncoding { epoch: epoch.epoch };
-                    let dimension = final_fold.hiding_randomness_length;
-                    (
-                        CompactMaskingDisclosureKind::BaseBlindedSourceRandomness {
-                            epoch: epoch.epoch,
-                        },
-                        dimension,
-                        vec![(source, dimension)],
-                        CompactMaskingDisclosureImage::FullCoordinateSpace,
-                    )
-                }
-                21 => {
-                    let group_ordinal = role.batch_ordinal;
-                    let group = epoch
-                        .external_mask_groups
-                        .iter()
-                        .chain(&epoch.internal_mask_groups)
-                        .nth(usize::from(group_ordinal))
-                        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
-                    let message_source = PrivateSource::WhirFreshMaskMessage {
-                        epoch: epoch.epoch,
-                        group_ordinal,
-                    };
-                    let encoding_source = PrivateSource::WhirFreshMaskEncoding {
-                        epoch: epoch.epoch,
-                        group_ordinal,
-                    };
-                    let message_dimension = checked_product(&[group.width, group.message_length])?;
-                    let encoding_dimension =
-                        checked_product(&[group.width, group.randomness_length])?;
-                    (
-                        CompactMaskingDisclosureKind::BaseBlindedMaskGroup {
-                            epoch: epoch.epoch,
-                            group_ordinal,
-                        },
-                        checked_add(message_dimension, encoding_dimension)?,
-                        vec![
-                            (
-                                message_source,
-                                remaining_identity_rank(
-                                    message_dimension,
-                                    message_source,
-                                    Some(claim_source),
-                                )?,
-                            ),
-                            (encoding_source, encoding_dimension),
-                        ],
-                        identity_reveal_image(message_source, claim_source, claim_pivot),
-                    )
-                }
-                _ => unreachable!(),
-            };
-            require_component(component, output_coordinate_count, 1)?;
-            steps.push(PendingStep {
-                verifier_move_ordinal: reveal_move.ordinal,
-                intra_move_ordinal,
-                kind,
-                source_rank_increments,
-                output_coordinate_count,
-                image,
-            });
-        }
+        append_base_reveal_steps_for_epoch(inputs, transcript, epoch.epoch, steps)?;
     }
     Ok(())
 }
@@ -2434,14 +2316,127 @@ fn append_base_reveal_steps_for_epoch(
     epoch_tag: u8,
     steps: &mut Vec<PendingStep>,
 ) -> Result<(), CompactMaskingEntropyError> {
-    let mut all = Vec::new();
-    append_base_reveal_steps(inputs, transcript, &mut all)?;
-    steps.extend(all.into_iter().filter(|step| match step.kind {
-        CompactMaskingDisclosureKind::BaseBlindedSourceMessage { epoch }
-        | CompactMaskingDisclosureKind::BaseBlindedSourceRandomness { epoch }
-        | CompactMaskingDisclosureKind::BaseBlindedMaskGroup { epoch, .. } => epoch == epoch_tag,
-        _ => false,
-    }));
+    let epoch = inputs
+        .whir_epochs
+        .iter()
+        .find(|epoch| epoch.epoch == epoch_tag)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let reveal_move = inputs
+        .verifier_moves
+        .iter()
+        .find(|move_| {
+            move_
+                .role_coordinates
+                .iter()
+                .any(|role| role.role_tag == 11 && role.epoch == epoch.epoch)
+        })
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let claim = unique_base_claim(transcript, epoch.epoch)?;
+    let (claim_source, claim_pivot) = claim_pivot_location(inputs, claim)?
+        .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?;
+    let folds = epoch_folds(inputs, epoch.epoch)?;
+    let final_fold = folds
+        .last()
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let response_index = usize::try_from(reveal_move.ordinal)
+        .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+    let geometry = inputs
+        .response_merkle_geometries
+        .get(response_index)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let roles = inputs
+        .response_component_roles
+        .get(response_index)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    if geometry.components().len() != roles.len() {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    }
+    // This response is committed before the role-11 message supplies the
+    // final query coordinates. Its scalar disclosures therefore precede
+    // the query openings from that message.
+    for (component_index, (component, role)) in geometry.components().iter().zip(roles).enumerate()
+    {
+        if role.epoch != epoch.epoch || !(19..=21).contains(&role.role_tag) {
+            continue;
+        }
+        let intra_move_ordinal = u32::try_from(component_index)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        let (kind, output_coordinate_count, source_rank_increments, image) = match role.role_tag {
+            19 => {
+                let source = PrivateSource::WhirFreshSourceMessage { epoch: epoch.epoch };
+                let dimension = final_fold.message_length;
+                (
+                    CompactMaskingDisclosureKind::BaseBlindedSourceMessage { epoch: epoch.epoch },
+                    dimension,
+                    vec![(
+                        source,
+                        remaining_identity_rank(dimension, source, Some(claim_source))?,
+                    )],
+                    identity_reveal_image(source, claim_source, claim_pivot),
+                )
+            }
+            20 => {
+                let source = PrivateSource::WhirFreshSourceEncoding { epoch: epoch.epoch };
+                let dimension = final_fold.hiding_randomness_length;
+                (
+                    CompactMaskingDisclosureKind::BaseBlindedSourceRandomness {
+                        epoch: epoch.epoch,
+                    },
+                    dimension,
+                    vec![(source, dimension)],
+                    CompactMaskingDisclosureImage::FullCoordinateSpace,
+                )
+            }
+            21 => {
+                let group_ordinal = role.batch_ordinal;
+                let group = epoch
+                    .external_mask_groups
+                    .iter()
+                    .chain(&epoch.internal_mask_groups)
+                    .nth(usize::from(group_ordinal))
+                    .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+                let message_source = PrivateSource::WhirFreshMaskMessage {
+                    epoch: epoch.epoch,
+                    group_ordinal,
+                };
+                let encoding_source = PrivateSource::WhirFreshMaskEncoding {
+                    epoch: epoch.epoch,
+                    group_ordinal,
+                };
+                let message_dimension = checked_product(&[group.width, group.message_length])?;
+                let encoding_dimension = checked_product(&[group.width, group.randomness_length])?;
+                (
+                    CompactMaskingDisclosureKind::BaseBlindedMaskGroup {
+                        epoch: epoch.epoch,
+                        group_ordinal,
+                    },
+                    checked_add(message_dimension, encoding_dimension)?,
+                    vec![
+                        (
+                            message_source,
+                            remaining_identity_rank(
+                                message_dimension,
+                                message_source,
+                                Some(claim_source),
+                            )?,
+                        ),
+                        (encoding_source, encoding_dimension),
+                    ],
+                    identity_reveal_image(message_source, claim_source, claim_pivot),
+                )
+            }
+            _ => unreachable!(),
+        };
+        require_component(component, output_coordinate_count, 1)?;
+        steps.push(PendingStep {
+            verifier_move_ordinal: reveal_move.ordinal,
+            intra_move_ordinal,
+            kind,
+            source_rank_increments,
+            output_coordinate_count,
+            image,
+        });
+    }
     Ok(())
 }
 
@@ -2907,17 +2902,17 @@ struct CompactStepQueryPositions<'transcript> {
 }
 
 #[cfg(test)]
-fn query_positions_for_step<'transcript>(
+fn query_positions_for_disclosure<'transcript>(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     transcript: &'transcript CompactMaskingEntropyTranscript,
-    step: &CompactMaskingEntropyStep,
+    disclosure_kind: CompactMaskingDisclosureKind,
 ) -> Result<CompactStepQueryPositions<'transcript>, CompactMaskingEntropyError> {
     let component = inputs
         .response_merkle_geometries
         .iter()
         .zip(inputs.response_component_roles)
         .flat_map(|(geometry, roles)| geometry.components().iter().zip(roles))
-        .find(|(_, role)| match step.kind {
+        .find(|(_, role)| match disclosure_kind {
             CompactMaskingDisclosureKind::SourceQueries {
                 epoch,
                 source_ordinal,
@@ -2926,13 +2921,20 @@ fn query_positions_for_step<'transcript>(
                 epoch,
                 group_ordinal,
                 contract_role_tag,
-            } => mask_group_coordinate(inputs, role).is_ok_and(
-                |(role_epoch, role_group, role_contract_tag)| {
-                    role_epoch.epoch == epoch
-                        && role_group == group_ordinal
-                        && role_contract_tag == contract_role_tag
-                },
-            ),
+            } => {
+                if role.role_tag == 5 && contract_role_tag == 1 {
+                    mask_group_ordinal_for_contract_coordinate(inputs, epoch, contract_role_tag, 0)
+                        .is_ok_and(|role_group| role_group == group_ordinal)
+                } else {
+                    mask_group_coordinate(inputs, role).is_ok_and(
+                        |(role_epoch, role_group, role_contract_tag)| {
+                            role_epoch.epoch == epoch
+                                && role_group == group_ordinal
+                                && role_contract_tag == contract_role_tag
+                        },
+                    )
+                }
+            }
             CompactMaskingDisclosureKind::FreshSourceQueries { epoch } => {
                 role.epoch == epoch && role.role_tag == 16
             }
@@ -2945,7 +2947,7 @@ fn query_positions_for_step<'transcript>(
         .ok_or(CompactMaskingEntropyError::InvalidContract)?
         .0;
     let references = component_query_refs(component);
-    let reference_index = match step.kind {
+    let reference_index = match disclosure_kind {
         CompactMaskingDisclosureKind::CarriedMaskQueries { epoch: 2, .. }
             if references.len() == 2 =>
         {
@@ -3139,17 +3141,33 @@ fn mask_group_coordinate<'a>(
         .iter()
         .find(|epoch| epoch.epoch == epoch_tag)
         .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let group_ordinal = mask_group_ordinal_for_contract_coordinate(
+        inputs,
+        epoch_tag,
+        contract_role_tag,
+        coordinate,
+    )?;
+    Ok((epoch, group_ordinal, contract_role_tag))
+}
+
+fn mask_group_ordinal_for_contract_coordinate(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    epoch_tag: u8,
+    contract_role_tag: u8,
+    coordinate: u8,
+) -> Result<u8, CompactMaskingEntropyError> {
+    let epoch = inputs
+        .whir_epochs
+        .iter()
+        .find(|epoch| epoch.epoch == epoch_tag)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
     let group_ordinal = epoch
         .external_mask_groups
         .iter()
         .chain(&epoch.internal_mask_groups)
         .position(|group| group.role_tag == contract_role_tag && group.coordinate == coordinate)
         .ok_or(CompactMaskingEntropyError::InvalidContract)?;
-    Ok((
-        epoch,
-        u8::try_from(group_ordinal).map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?,
-        contract_role_tag,
-    ))
+    u8::try_from(group_ordinal).map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)
 }
 
 fn source_coordinate_for_role(
@@ -3726,7 +3744,7 @@ mod tests {
                     && query.distinct_query_group_ordinal == refs[1].1
             })
             .expect("second shared query set")
-            .indices = retained_first_indices;
+            .indices = retained_first_indices.clone();
         let transcript_through = |move_ordinal| {
             CompactMaskingEntropyTranscript::new(
                 Vec::new(),
@@ -3786,11 +3804,12 @@ mod tests {
             )
         }));
 
+        let second_arm_transcript = transcript_through(refs[1].0);
         let mut second_steps = Vec::new();
         append_query_steps_for_move(
             &inputs,
             &maps,
-            &transcript_through(refs[1].0),
+            &second_arm_transcript,
             refs[1].0,
             &mut second_steps,
         )
@@ -3819,6 +3838,65 @@ mod tests {
                 }
             )
         }));
+        let second_query_positions = query_positions_for_disclosure(
+            &inputs,
+            &second_arm_transcript,
+            second_shared_step.kind,
+        )
+        .expect("the shared component resolves its main-epoch query arm");
+        assert_eq!(second_query_positions.preceding, retained_first_indices);
+        assert_eq!(second_query_positions.current, retained_first_indices);
+    }
+
+    #[test]
+    fn streaming_base_reveal_reads_only_the_current_epoch_claim() {
+        let (contract, _) = selected();
+        let inputs = contract.verifier_inputs();
+        let mut first_epoch_transcript =
+            selected_test_transcript(&inputs).expect("selected entropy transcript");
+        first_epoch_transcript
+            .base_fresh_claims
+            .retain(|claim| claim.epoch() == 1);
+        assert_eq!(first_epoch_transcript.base_fresh_claims.len(), 1);
+
+        let mut first_epoch_steps = Vec::new();
+        append_base_reveal_steps_for_epoch(
+            &inputs,
+            &first_epoch_transcript,
+            1,
+            &mut first_epoch_steps,
+        )
+        .expect("first epoch reveal does not require the future epoch claim");
+        assert!(!first_epoch_steps.is_empty());
+        assert!(
+            first_epoch_steps
+                .iter()
+                .all(|step| step.kind.reveal_epoch() == Some(1))
+        );
+        assert!(first_epoch_steps.iter().any(|step| {
+            step.kind == CompactMaskingDisclosureKind::BaseBlindedSourceMessage { epoch: 1 }
+        }));
+        assert!(first_epoch_steps.iter().any(|step| {
+            step.kind == CompactMaskingDisclosureKind::BaseBlindedSourceRandomness { epoch: 1 }
+        }));
+        assert!(first_epoch_steps.iter().any(|step| {
+            matches!(
+                step.kind,
+                CompactMaskingDisclosureKind::BaseBlindedMaskGroup { epoch: 1, .. }
+            )
+        }));
+
+        let mut future_epoch_steps = Vec::new();
+        assert_eq!(
+            append_base_reveal_steps_for_epoch(
+                &inputs,
+                &first_epoch_transcript,
+                2,
+                &mut future_epoch_steps,
+            ),
+            Err(CompactMaskingEntropyError::MissingTranscriptInput)
+        );
+        assert!(future_epoch_steps.is_empty());
     }
 
     #[test]

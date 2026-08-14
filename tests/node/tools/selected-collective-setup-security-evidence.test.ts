@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -207,6 +209,99 @@ describe('Selected collective-setup security evidence', () => {
         expect(canonicalJsonText(trackedEvidence)).toBe(
             canonicalJsonText(expectedEvidence),
         );
+    });
+
+    it('derives the same source authority across line endings while binding content changes', async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), 'sealed-lattice-source-authority-'),
+        );
+        const lineFeedRoot = path.join(temporaryRoot, 'line-feed');
+        const carriageReturnLineFeedRoot = path.join(
+            temporaryRoot,
+            'carriage-return-line-feed',
+        );
+        const repositoryRoot = path.resolve(
+            path.dirname(selectedCollectiveSetupSecurityEvidencePath),
+            '..',
+        );
+        const expectedRecord = requireRecord(expectedEvidence);
+        const productionAuthority =
+            expectedRecord.productionAuthority as JsonValue;
+        const sourceAuthorityPaths = requireArray(
+            expectedRecord.sourceAuthority,
+        ).map((sourceAuthorityValue) => {
+            const relativePath =
+                requireRecord(sourceAuthorityValue).relativePath;
+            if (typeof relativePath !== 'string') {
+                throw new Error('Expected a source-authority path.');
+            }
+            return relativePath;
+        });
+
+        try {
+            for (const relativePath of sourceAuthorityPaths) {
+                const sourceText = await readFile(
+                    path.join(repositoryRoot, relativePath),
+                    'utf8',
+                );
+                const lineFeedText = sourceText.replace(/\r\n?/gu, '\n');
+                const carriageReturnLineFeedText = lineFeedText.replace(
+                    /\n/gu,
+                    '\r\n',
+                );
+                for (const [rootPath, text] of [
+                    [lineFeedRoot, lineFeedText],
+                    [carriageReturnLineFeedRoot, carriageReturnLineFeedText],
+                ] as const) {
+                    const destinationPath = path.join(rootPath, relativePath);
+                    await mkdir(path.dirname(destinationPath), {
+                        recursive: true,
+                    });
+                    await writeFile(destinationPath, text, 'utf8');
+                }
+            }
+
+            const lineFeedEvidence =
+                await buildSelectedCollectiveSetupSecurityEvidence(
+                    productionAuthority,
+                    lineFeedRoot,
+                );
+            const carriageReturnLineFeedEvidence =
+                await buildSelectedCollectiveSetupSecurityEvidence(
+                    productionAuthority,
+                    carriageReturnLineFeedRoot,
+                );
+            expect(canonicalJsonText(carriageReturnLineFeedEvidence)).toBe(
+                canonicalJsonText(lineFeedEvidence),
+            );
+
+            const changedPath = path.join(
+                lineFeedRoot,
+                sourceAuthorityPaths[0],
+            );
+            await writeFile(
+                changedPath,
+                `${await readFile(changedPath, 'utf8')}\n# changed source authority\n`,
+                'utf8',
+            );
+            const changedEvidence =
+                await buildSelectedCollectiveSetupSecurityEvidence(
+                    productionAuthority,
+                    lineFeedRoot,
+                );
+            expect(
+                canonicalJsonText(
+                    requireRecord(changedEvidence).sourceAuthority as JsonValue,
+                ),
+            ).not.toBe(
+                canonicalJsonText(
+                    requireRecord(lineFeedEvidence)
+                        .sourceAuthority as JsonValue,
+                ),
+            );
+        } finally {
+            await rm(temporaryRoot, { recursive: true, force: true });
+        }
     });
 
     it('refuses the superseded twenty-option production authority', async () => {

@@ -206,7 +206,9 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
                 self.public_input.binding(),
             )?;
             return Ok(CompactFactorOnePublicCovectorDerivation {
-                state: CompactFactorOnePublicCovectorDerivationState::Complete(Some(output)),
+                state: CompactFactorOnePublicCovectorDerivationState::Complete(Some(Box::new(
+                    output,
+                ))),
             });
         }
         if epoch != 2 {
@@ -269,20 +271,22 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
                 first_fold_challenges,
             )?;
         Ok(CompactFactorOnePublicCovectorDerivation {
-            state: CompactFactorOnePublicCovectorDerivationState::MainTranspose {
-                authority: self,
-                prefix: Some(prefix),
-                parsed: Some(parsed),
-                accumulator,
-                continuation: Some(continuation),
-            },
+            state: CompactFactorOnePublicCovectorDerivationState::MainTranspose(Box::new(
+                CompactFactorOneMainTransposeState {
+                    authority: self,
+                    prefix: Some(prefix),
+                    parsed: Some(parsed),
+                    accumulator,
+                    continuation: Some(continuation),
+                },
+            )),
         })
     }
 }
 
 pub(crate) enum CompactFactorOnePublicCovectorPoll {
     WorkCompleted { completed_element_count: u64 },
-    Complete(CompactFactorOneCarriedCovector),
+    Complete(Box<CompactFactorOneCarriedCovector>),
 }
 
 pub(crate) struct CompactFactorOnePublicCovectorDerivation<'authority, 'transport> {
@@ -290,16 +294,18 @@ pub(crate) struct CompactFactorOnePublicCovectorDerivation<'authority, 'transpor
 }
 
 enum CompactFactorOnePublicCovectorDerivationState<'authority, 'transport> {
-    Complete(Option<CompactFactorOneCarriedCovector>),
-    MainTranspose {
-        authority: &'authority CompactFactorOnePublicCovectorAuthority<'transport>,
-        prefix: Option<CompactMaskingSemanticPrefix>,
-        parsed: Option<ParsedVerifierPrefix>,
-        accumulator: CompactStructuredWitnessCovectorAccumulator<
-            CompactFactorOnePublicTransposeSource<'transport>,
-        >,
-        continuation: Option<CompactCfwPublicMainCovectorContinuation>,
-    },
+    Complete(Option<Box<CompactFactorOneCarriedCovector>>),
+    MainTranspose(Box<CompactFactorOneMainTransposeState<'authority, 'transport>>),
+}
+
+struct CompactFactorOneMainTransposeState<'authority, 'transport> {
+    authority: &'authority CompactFactorOnePublicCovectorAuthority<'transport>,
+    prefix: Option<CompactMaskingSemanticPrefix>,
+    parsed: Option<ParsedVerifierPrefix>,
+    accumulator: CompactStructuredWitnessCovectorAccumulator<
+        CompactFactorOnePublicTransposeSource<'transport>,
+    >,
+    continuation: Option<CompactCfwPublicMainCovectorContinuation>,
 }
 
 struct CompactFactorOnePublicTransposeSource<'transport> {
@@ -345,42 +351,43 @@ impl CompactFactorOnePublicCovectorDerivation<'_, '_> {
                 .take()
                 .map(CompactFactorOnePublicCovectorPoll::Complete)
                 .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector),
-            CompactFactorOnePublicCovectorDerivationState::MainTranspose {
-                authority,
-                prefix,
-                parsed,
-                accumulator,
-                continuation,
-            } => match accumulator.advance(maximum_element_count)? {
-                CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
-                    completed_work_unit_count,
-                    ..
-                } => Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
-                    completed_element_count: completed_work_unit_count,
-                }),
-                CompactStructuredWitnessCovectorAccumulatorPoll::Complete(source_covector) => {
-                    let public_main = continuation
-                        .take()
-                        .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
-                        .finish_after_projected_matrix_accumulation(source_covector)?;
-                    let parsed = parsed
-                        .take()
-                        .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
-                    let initial = main_initial_covectors(public_main);
-                    let prefix = prefix
-                        .take()
-                        .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
-                    let output = reduce_whir_epoch(
-                        &authority.verifier_inputs,
-                        parsed,
-                        initial,
-                        1,
-                        prefix,
-                        authority.public_input.binding(),
-                    )?;
-                    Ok(CompactFactorOnePublicCovectorPoll::Complete(output))
+            CompactFactorOnePublicCovectorDerivationState::MainTranspose(state) => {
+                match state.accumulator.advance(maximum_element_count)? {
+                    CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                        completed_work_unit_count,
+                        ..
+                    } => Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                        completed_element_count: completed_work_unit_count,
+                    }),
+                    CompactStructuredWitnessCovectorAccumulatorPoll::Complete(source_covector) => {
+                        let public_main = state
+                            .continuation
+                            .take()
+                            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                            .finish_after_projected_matrix_accumulation(source_covector)?;
+                        let parsed = state
+                            .parsed
+                            .take()
+                            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
+                        let initial = main_initial_covectors(public_main);
+                        let prefix = state
+                            .prefix
+                            .take()
+                            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
+                        let output = reduce_whir_epoch(
+                            &state.authority.verifier_inputs,
+                            parsed,
+                            initial,
+                            1,
+                            prefix,
+                            state.authority.public_input.binding(),
+                        )?;
+                        Ok(CompactFactorOnePublicCovectorPoll::Complete(Box::new(
+                            output,
+                        )))
+                    }
                 }
-            },
+            }
         }
     }
 }
@@ -484,7 +491,7 @@ impl ParsedVerifierPrefix {
             .ok_or(CompactFactorOnePublicCovectorError::InvalidContract)?;
         let folds = epoch_folds(inputs, epoch)?;
         let mut whir_batches = Vec::with_capacity(WHIR_BATCH_COUNT);
-        for batch_ordinal in 0..WHIR_BATCH_COUNT {
+        for (batch_ordinal, fold) in folds.iter().copied().enumerate() {
             let batch = u8::try_from(batch_ordinal)
                 .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
             let combining = unique_role_extension(inputs, messages, 7, epoch, batch, 0)?;
@@ -516,7 +523,7 @@ impl ParsedVerifierPrefix {
                     epoch,
                     u32::try_from(batch_ordinal)
                         .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?,
-                    folds[batch_ordinal],
+                    fold,
                 )?)
             } else {
                 None

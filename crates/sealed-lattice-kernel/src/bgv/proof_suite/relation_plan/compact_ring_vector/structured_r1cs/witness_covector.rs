@@ -13,8 +13,8 @@ mod accumulator;
 #[cfg(test)]
 pub(crate) use accumulator::{
     CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
-    CompactStructuredWitnessCovectorHandoff, CompactStructuredWitnessCovectorHandoffError,
-    CompactStructuredWitnessCovectorHandoffPoll, StructuredTransposeValueSource,
+    CompactStructuredWitnessCovectorHandoff, CompactStructuredWitnessCovectorHandoffPoll,
+    StructuredTransposeValueSource,
 };
 
 use crate::bgv::proof_suite::prover::CommonProofProverError;

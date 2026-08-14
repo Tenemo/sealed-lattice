@@ -641,7 +641,7 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
     fn advance_inner(
         &mut self,
         verifier: &mut impl CompactAdaptiveVerifier,
-        mut authorization: Option<&mut CompactFactorOneCarriedCovector>,
+        authorization: Option<&mut CompactFactorOneCarriedCovector>,
     ) -> Result<u32, CompactMaskingSimulatorError> {
         let move_index = self.attempt.moves.len();
         let verifier_move = self
@@ -738,7 +738,7 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
             post_message_disclosures,
         });
         if let (Some(authorization), Some(prefix), Some(public_input_binding)) = (
-            authorization.as_deref_mut(),
+            authorization,
             semantic_prefix.as_ref(),
             public_input_binding,
         ) {
@@ -1370,14 +1370,12 @@ fn validate_move_prefix(
             retired_coin_ranges,
         )?;
     }
-    let expected_commitment_count = verifier_inputs
-        .verifier_moves
-        .get(moves.len())
-        .map(|next_move| Ok(next_move.preceding_commitment_count))
-        .unwrap_or_else(|| {
-            u32::try_from(coefficient_maps.construction_commitment_embeddings().len())
-                .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)
-        })?;
+    let expected_commitment_count = moves
+        .last()
+        .and_then(|_| verifier_inputs.verifier_moves.get(moves.len() - 1))
+        .map_or(0, |last_completed_move| {
+            last_completed_move.preceding_commitment_count
+        });
     if u32::try_from(commitment_count).ok() != Some(expected_commitment_count) {
         return Err(CompactMaskingSimulatorError::WrongCommitmentProgression);
     }
@@ -1917,7 +1915,7 @@ mod tests {
                     work_boundary_count += 1;
                 }
                 CompactFactorOnePublicCovectorPoll::Complete(authorization) => {
-                    return (authorization, work_boundary_count);
+                    return (*authorization, work_boundary_count);
                 }
             }
         }
@@ -1936,6 +1934,7 @@ mod tests {
         simulator: &mut CompactAdaptiveMaskingSimulator<'_>,
         verifier: &mut impl CompactAdaptiveVerifier,
     ) -> u32 {
+        let next_move_ordinal = simulator.attempt.moves.len();
         let role18_authorization_required = simulator
             .replay_entropy_authority()
             .expect("entropy authority replays the current simulator prefix")
@@ -1946,13 +1945,17 @@ mod tests {
             let (mut authorization, _) = derive_role18_authorization(simulator);
             let move_ordinal = simulator
                 .advance_role18(verifier, &mut authorization)
-                .expect("opaque role-18 authorization advances its exact move");
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "opaque role-18 authorization advances move {next_move_ordinal}: {error:?}"
+                    )
+                });
             assert_eq!(authorization.epoch(), None);
             move_ordinal
         } else {
-            simulator
-                .advance(verifier)
-                .expect("ordinary verifier move advances")
+            simulator.advance(verifier).unwrap_or_else(|error| {
+                panic!("ordinary verifier move {next_move_ordinal} advances: {error:?}")
+            })
         }
     }
 
@@ -2059,10 +2062,10 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_key_binding_fails_closed() {
+    fn checkpoint_restore_accepts_exact_prefix_and_fails_closed_on_wrong_key_or_cursor() {
         let private_key = [0x6b; 64];
         let (contract, maps) = selected_simulator(private_key);
-        let simulator = CompactAdaptiveMaskingSimulator::new(
+        let mut simulator = CompactAdaptiveMaskingSimulator::new(
             contract.verifier_inputs(),
             &maps,
             [0x51; 32],
@@ -2071,6 +2074,19 @@ mod tests {
         )
         .expect("selected simulator");
         let initial_checkpoint = simulator.checkpoint().expect("initial checkpoint");
+        let restored_initial = CompactAdaptiveMaskingSimulator::restore(
+            contract.verifier_inputs(),
+            &maps,
+            initial_checkpoint.clone(),
+            private_key,
+        )
+        .expect("the exact empty prefix restores");
+        assert_eq!(
+            restored_initial
+                .checkpoint()
+                .expect("the restored empty prefix authenticates"),
+            initial_checkpoint
+        );
         assert_eq!(
             CompactAdaptiveMaskingSimulator::restore(
                 contract.verifier_inputs(),
@@ -2096,6 +2112,25 @@ mod tests {
         );
 
         assert_eq!(simulator.attempt.next_coin_coordinate, 0);
+        simulator
+            .advance(&mut SelectedAdversarialVerifier)
+            .expect("the first ordinary move advances");
+        let first_move_checkpoint = simulator
+            .checkpoint()
+            .expect("the first completed move authenticates");
+        let restored_first_move = CompactAdaptiveMaskingSimulator::restore(
+            contract.verifier_inputs(),
+            &maps,
+            first_move_checkpoint.clone(),
+            private_key,
+        )
+        .expect("the exact one-move prefix restores before later commitments exist");
+        assert_eq!(
+            restored_first_move
+                .checkpoint()
+                .expect("the restored one-move prefix authenticates"),
+            first_move_checkpoint
+        );
         assert_eq!(
             simulator.finish().err(),
             Some(CompactMaskingSimulatorError::SimulationNotActive)

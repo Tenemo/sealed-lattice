@@ -208,8 +208,11 @@ const exactResidualLedgerIdentifiers = [
     'statisticalPrivacyAndLeakage',
 ] as const;
 
-const sha256 = (payload: Uint8Array): string =>
+const sha256 = (payload: string | Uint8Array): string =>
     createHash('sha256').update(payload).digest('hex');
+
+const normalizeSourceAuthorityText = (sourceText: string): string =>
+    sourceText.replace(/\r\n?/gu, '\n');
 
 const compareOrdinal = (left: string, right: string): number =>
     left < right ? -1 : left > right ? 1 : 0;
@@ -293,7 +296,11 @@ const deriveSourceAuthority = async (
     return Promise.all(
         sourcePaths.map(async (relativePath) => ({
             relativePath,
-            sha256: sha256(await readFile(path.join(rootPath, relativePath))),
+            sha256: sha256(
+                normalizeSourceAuthorityText(
+                    await readFile(path.join(rootPath, relativePath), 'utf8'),
+                ),
+            ),
         })),
     );
 };
@@ -701,7 +708,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
         requiredClosurePredicate: 'completeConstructionMaskingCorrespondence',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The test-only compact coefficient, streaming-entropy, adaptive-simulator, finite-Merkle, and KMAC census owners are partial evidence. The simulator stops at the first carried-covector boundary, no selected 82-response emission drives the finite Merkle game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
+            'The test-only compact coefficient, streaming-entropy, adaptive-simulator, finite-Merkle, and KMAC census owners are partial evidence. The simulator completes the selected 82-move lifecycle with verified-public-input- and prefix-bound one-shot carried-covector authorization, retry, restore, and nonempty-suffix rewind. No production compact proof emission drives the finite Merkle game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
     },
 ];
 
@@ -968,7 +975,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['shakeQuantumOracle'],
         advantageExpression: 'unresolved_common_construction_privacy_error',
         statement:
-            'The test-only compact coefficient maps, streaming entropy authority, adaptive simulator, finite-Merkle game, and KMAC census are partial evidence. The simulator stops at the first carried-covector boundary, no selected 82-response emission drives the finite game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
+            'The test-only compact coefficient maps, streaming entropy authority, adaptive simulator, finite-Merkle game, and KMAC census are partial evidence. The simulator completes the selected 82-move lifecycle with verified-public-input- and prefix-bound one-shot carried-covector authorization, retry, restore, and nonempty-suffix rewind. No production compact proof emission drives the finite game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
     },
     {
         identifier: 'setupFamilySimulationComposition',
