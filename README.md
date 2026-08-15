@@ -97,10 +97,13 @@ statuses:
   external-memory transaction driver, authenticated assignment loader, bounded
   lookup-inverse materializer, and owned structured-row and transpose path are
   also ordinary release code. The owned row source contains no borrowed
-  worker-lifetime state, but no compact generation state consumes it yet.
-  Merkle writing, checkpoint execution, semantic and complete CFW/WHIR
-  execution, emitted-coordinate measurement, masking, fixed-tape and Appendix
-  arithmetic remain test-only. The release
+  worker-lifetime state. Incremental proof assembly, the prover transcript
+  cursor, bounded response-tree writing and scanning, retained-tree coordination,
+  and the authenticated response-checkpoint boundary are release code with
+  owned retained inputs. No compact generation state drives these components or
+  the relation path yet. Semantic and complete CFW/WHIR execution, emitted-
+  coordinate measurement, masking, fixed-tape and Appendix arithmetic remain
+  test-only. The release
   transport validator derives the exact
   161-component, 45-construction-binding certificate, then gates verifier-
   derived schedules and all 82 response openings through it. It does not check
@@ -162,7 +165,7 @@ The canonical release-WebAssembly producer is scalar-capable again. Its
 ordinary Cargo build carries no target-feature override, rejects inherited
 encoded Rust flags, and has focused tests for its feature-free argument list.
 The ordinary scalar kernel and SDK bytes now reproduce with normalized loader
-SHA-256 `3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
+SHA-256 `83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
 Those release bytes contain the compact transport validator, scalar CFW, and
 owned relation-materialization path but omit connected compact proof generation
 and complete verification.
@@ -228,10 +231,11 @@ statement, relation, transcript-domain, CFW, WHIR, proof-wire, response-Merkle,
 fixed-message, and checkpoint geometry and schema owners are compiled in the
 default kernel. Proof and public-input encoding and decoding, fixed verifier-
 message decoding and derivation, Fiat-Shamir transcript execution, salted-
-Merkle writing and opening verification, response-checkpoint execution,
-semantic and CFW/WHIR execution, Merkle privacy, masking, emitted-coordinate
-measurement, fixed-tape and Appendix arithmetic, and transport verification are
-test-only.
+Merkle writing and opening verification, response-checkpoint execution, the
+bounded response-tree writer and scanner, retained-tree coordination, scalar
+CFW, and transport verification are release code. Semantic and complete WHIR
+execution, Merkle privacy, masking, emitted-coordinate measurement, fixed-tape,
+and Appendix arithmetic remain test-only or incomplete.
 The contract binds the exact target; statement-schema identifier, field
 count, and layout digest; the 128-draw per-output Fiat-Shamir ceiling; the
 `SLCPRF01` and `SLCPUB01` wire magics; the ordered suite-identifier,
@@ -293,8 +297,8 @@ than `10,151,680` bytes of copied salts. Merkle verification absorbs the
 already-canonical opened-value slices and parent coordinates directly into the
 canonical-tuple SHAKE256 hashes, avoiding per-query field-vector re-encoding and
 tuple materialization while retaining byte-identical digests. The complete
-semantic authority, CFW/WHIR verifier, response-tree executor, reduced execution
-fixtures, and retained end-to-end workbench remain test-only. No compact prover,
+semantic authority, complete CFW/WHIR verification, reduced execution
+fixtures, and the retained end-to-end workbench remain test-only or incomplete. No compact prover,
 emitted compact proof,
 selected suite, final `VerificationResult`, algebraic compact verification ABI,
 compact-proof browser run, or physical-phone evidence exists. The
@@ -1223,15 +1227,18 @@ Works today, at component scope:
   driver, authenticated assignment loader, bounded lookup-inverse materializer,
   and owned structured-row and transpose path are ordinary release code but
   have no compact generation-state caller yet. The row source owns its relation
-  and secret assignment rather than borrowing worker-lifetime state.
+  and secret assignment rather than borrowing worker-lifetime state. Incremental
+  proof assembly, the prover transcript cursor, bounded response-tree writing
+  and scanning, retained-tree coordination, and the authenticated response-
+  checkpoint boundary are release code with owned retained inputs. No compact
+  generation state drives those components or the relation path yet.
   It checks canonical bytes and gates verifier-derived schedules and 82
   response openings through the exact 161-component,
   45-construction-binding certificate, but checks no CFW or WHIR equation or
-  proof validity and cannot mint a capability. Merkle writing, checkpoint
-  execution, semantic and CFW/WHIR execution, masking, emitted-coordinate
-  measurement, fixed-tape and Appendix arithmetic, complete CFW/WHIR
-  verification, reduced execution fixtures, the response-tree executor, and
-  the retained end-to-end workbench remain test-only. The response-boundary
+  proof validity and cannot mint a capability. Semantic and complete CFW/WHIR
+  execution, masking, emitted-coordinate measurement, fixed-tape and Appendix
+  arithmetic, reduced execution fixtures, and the retained end-to-end
+  workbench remain test-only or incomplete. The response-boundary
   checkpoint is in-process only, not durable authenticated browser custody. No
   compact prover, production packet compiler, final `VerificationResult`, or
   generated-proof verifier can replace the default calls.
@@ -1856,7 +1863,7 @@ Not yet:
   subsequent reproducibility gate rebuilt the scalar kernel and SDK twice and
   matched every package byte. That historical artifact is superseded. The
   current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-  `3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
+  `83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
   This is release-build and byte-copy development evidence only, not compact-
   proof or physical-phone qualification.
 - The latest retained complete theorem-registry result is

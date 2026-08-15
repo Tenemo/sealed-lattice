@@ -45,6 +45,13 @@ mod compact_emitted_cdhz;
 mod compact_factor_one_semantics;
 #[cfg(test)]
 mod compact_fixed_tape_uniformity;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes release checkpoint construction at the next integration boundary"
+    )
+)]
 mod compact_generation_checkpoint;
 mod compact_masking_coefficient_maps;
 #[cfg(test)]
@@ -55,15 +62,42 @@ mod compact_masking_kmac;
 mod compact_masking_simulator;
 mod compact_merkle_privacy;
 mod compact_proof_contract;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes release proof assembly at the next integration boundary"
+    )
+)]
 mod compact_proof_wire;
 #[cfg(test)]
 mod compact_public_key_static_catalog;
 mod compact_public_key_verifier;
 #[cfg(test)]
 mod compact_reed_solomon;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes release response-tree writing at the next integration boundary"
+    )
+)]
 mod compact_response_merkle;
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes release retained-tree custody at the next integration boundary"
+    )
+)]
 mod compact_response_tree_external;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes the release prover transcript at the next integration boundary"
+    )
+)]
 mod compact_transcript;
 mod compact_whir_geometry;
 mod component_material_stream;

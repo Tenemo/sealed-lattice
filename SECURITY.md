@@ -63,7 +63,7 @@ package, Node, 1,218-entry ordinary Rust, and Chromium lane. Its scalar WASM and
 SDK bytes reproduced, and all 35 retained theorem-registry members passed under
 the serialized guard. That graph's artifact is superseded. The current scalar
 release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-`3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
+`83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
 This is release-build and byte-copy development evidence only, not proof or
 physical-phone qualification. The retained results validate only that recorded
 dirty state. They predate the later
@@ -85,8 +85,11 @@ transport verification, scalar CFW, the bounded external-memory CFW driver,
 authenticated assignment loading, bounded lookup-inverse materialization, and
 the owned structured-row and transpose path are ordinary release code. The row
 source owns reference-counted relation and secret-assignment material rather
-than borrowing worker-lifetime state. Salted-Merkle writing,
-response-checkpoint execution, semantic and complete CFW/WHIR execution,
+than borrowing worker-lifetime state. Incremental proof assembly, the prover
+transcript cursor, bounded response-tree writing and scanning, retained-tree
+coordination, and the authenticated response-checkpoint boundary are release
+code with owned retained inputs. No compact generation state drives these
+components or the relation path yet. Semantic and complete CFW/WHIR execution,
 Merkle privacy, masking, emitted-coordinate measurement, fixed-tape and
 Appendix arithmetic remain test-only or incomplete. The
 contract validates the exact target; statement-schema identifier, field count, and layout
@@ -146,9 +149,9 @@ four-byte offsets into the canonical proof buffer at selected geometry:
 verification absorbs already-canonical opened-value slices and parent
 coordinates directly into canonical-tuple SHAKE256 hashes, avoiding per-query
 field-vector re-encoding and tuple materialization while retaining byte-
-identical digests. The complete semantic authority, CFW/WHIR verifier, reduced
-execution fixtures, response-tree executor, and retained end-to-end workbench
-remain test-only. No compact
+identical digests. The complete semantic authority, complete CFW/WHIR verification, reduced
+execution fixtures, and the retained end-to-end workbench remain test-only or
+incomplete. No compact
 prover, emitted compact proof, selected suite, final `VerificationResult`,
 algebraic compact verification ABI, compact-proof browser run, or
 physical-phone evidence exists. The `primitive-measurement-evidence` feature
@@ -211,16 +214,19 @@ external-memory transaction driver, authenticated assignment loader, bounded
 lookup-inverse materializer, and owned structured-row and transpose path are
 ordinary release code but have no compact generation-state caller. The row
 source owns reference-counted relation and secret-assignment material rather
-than borrowing worker-lifetime state. The transport validator checks canonical
+than borrowing worker-lifetime state. Incremental proof assembly, the prover
+transcript cursor, bounded response-tree writing and scanning, retained-tree
+coordination, and the authenticated response-checkpoint boundary are release
+code with owned retained inputs. No compact generation state drives those
+components or the relation path yet. The transport validator checks canonical
 bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
 bindings, and gates every verifier-derived schedule and all 82 response openings
 through it, including the two query consumers of the one shared cross-epoch
 root. It does not check CFW or WHIR equations, establish proof validity, return
-`isValid`, or mint a capability. Merkle response writing, frontier scanning, the emitted-
-coordinate measurement function, its record types, the Appendix and fixed-tape
-arithmetic, and the external response-tree transaction executor remain test-
-only. The test-only byte-to-consumer owner
+`isValid`, or mint a capability. The emitted-coordinate measurement
+function, its record types, the Appendix and fixed-tape arithmetic, and complete
+CFW/WHIR execution remain test-only or incomplete. The test-only byte-to-consumer owner
 derives static or maximum regions; counted
 frontier regions remain parameterized until bytes exist. Its transported-byte
 test is one small response fixture. The current factor-one schedule has 45
@@ -292,17 +298,17 @@ the snapshot is the newest state.
   geometry and domain owners are default-compiled internal primitives. The
   proof and public-input codecs, fixed-message decoder and derivation,
   transcript execution, Merkle writer and opening verifier, checkpoint
-  execution, semantic and CFW/WHIR execution, privacy-certificate derivation,
-  masking, emitted-coordinate measurement, fixed-tape and Appendix arithmetic,
-  and pollable transport verifier are test-only. The verifier
-  derives the 161-component, 45-construction-binding
-  certificate and gates verifier-derived schedules and 82 response openings
-  through it, but verifies no CFW/WHIR equation or proof validity. No release
-  transport caller consumes that gate. Its checkpoint is in-process only, not
-  durable authenticated browser custody. Complete CFW/WHIR verification,
-  reduced execution fixtures, the response-tree executor, and the end-to-end
-  workbench remain test-only. The
-  compact successor lacks a compact
+  execution, privacy-certificate derivation, the bounded response-tree
+  executor, and the pollable transport verifier are release code. The verifier
+  derives the 161-component, 45-construction-binding certificate and gates
+  verifier-derived schedules and 82 response openings through it, but verifies
+  no CFW/WHIR equation or proof validity. The Rust/WebAssembly boundary and
+  TypeScript worker consume that gate without minting a capability. Compact
+  checkpoint construction remains in-process and is not durable authenticated
+  browser custody. Semantic authority, complete CFW/WHIR verification, masking,
+  emitted-coordinate measurement, fixed-tape and Appendix arithmetic, reduced
+  execution fixtures, and the end-to-end workbench remain test-only or
+  incomplete. The compact successor lacks a compact
   prover, emitted production-size proof, selected suite, final
   `VerificationResult`, release runtime ABI, complete participant runtime,
   browser run, and physical-phone evidence. No proof backend is currently
@@ -349,7 +355,7 @@ the snapshot is the newest state.
   checkpoint, runtime, and package evidence is not one reconciled exact-ten
   authority.
 - `SEC-019`: The current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-  `3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
+  `83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
   This is release-build and byte-copy development evidence only, and the
   retained ordinary desktop-browser graph remains historical. The release build
   contains compact relation materialization but still omits compact proof
@@ -359,8 +365,10 @@ the snapshot is the newest state.
   groundwork, not browser-custody or selected-size durable resume.
 - `SEC-020`: Authenticated assignment loading, bounded lookup materialization,
   owned structured-row preparation and transpose, the codec, transport gate,
-  and scalar CFW compile into release bytes. Merkle writing and reduced CFW/WHIR
-  lifecycle owners still provide development evidence only. Selected-size
+  scalar CFW, incremental proof assembly, the prover transcript cursor, bounded
+  response-tree custody, and authenticated response-checkpoint construction
+  compile into release bytes. Reduced CFW/WHIR lifecycle owners still provide
+  development evidence only. Selected-size
   production execution, response values, unified transcript, authenticated
   restart, CFW-to-WHIR invocation, resource reconciliation, and browser
   execution remain unresolved.

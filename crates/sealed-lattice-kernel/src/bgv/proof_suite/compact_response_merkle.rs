@@ -7,9 +7,8 @@
 //! frontier from its sorted query indices before reconstructing the root.
 //!
 //! Contract geometry, verifier-derived query materialization, canonical
-//! hashing, and strict opening verification are ordinary release code.
-//! Postorder production and finite-oracle preimage adapters remain test-only
-//! until the compact generation state consumes them.
+//! hashing, strict opening verification, and bounded postorder production are
+//! ordinary release code. Finite-oracle preimage adapters remain test-only.
 
 use sha3::{
     Shake256,
@@ -23,7 +22,6 @@ use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
 use super::merkle::maximum_minimal_frontier_node_count;
 use super::merkle::minimal_frontier_coordinates;
 use super::{COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE};
-#[cfg(test)]
 use super::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use crate::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItemType, Hash512,
@@ -35,7 +33,6 @@ pub(crate) const COMPACT_RESPONSE_LEAF_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/compact-response/leaf/v1";
 pub(crate) const COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/compact-response/merkle-node/v1";
-#[cfg(test)]
 pub(crate) const COMPACT_RESPONSE_TREE_STORAGE_CHUNK_BYTE_LENGTH: usize = 1_048_576;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -951,14 +948,12 @@ fn mark_query_group_referenced(
 }
 
 #[derive(Clone, Copy)]
-#[cfg(test)]
 pub(crate) enum CompactResponseLeafValue<'value> {
     BaseField(&'value [ProofBaseFieldElement]),
     ExtensionField(&'value [ProofChallengeExtensionElement]),
     Padding,
 }
 
-#[cfg(test)]
 impl CompactResponseLeafValue<'_> {
     #[cfg(test)]
     fn canonical_bytes(
@@ -1031,7 +1026,6 @@ pub(crate) enum CompactResponseMerkleError {
     CanonicalEncoding,
     WireGeometryMismatch,
     InvalidOpeningIndices,
-    #[cfg(test)]
     WrongLeafValueKind,
     WrongLeafValueCount,
     WrongFrontierLength,
@@ -1040,15 +1034,10 @@ pub(crate) enum CompactResponseMerkleError {
     InvalidWireValue,
     ParentHashPending,
     ParentHashNotPending,
-    #[cfg(test)]
     OutputChunkPending,
-    #[cfg(test)]
     OutputChunkUnavailable,
-    #[cfg(test)]
     WriterIncomplete,
-    #[cfg(test)]
     WrongTreeChunk,
-    #[cfg(test)]
     ScannerIncomplete,
 }
 
@@ -1057,9 +1046,8 @@ pub(crate) enum CompactResponseMerkleError {
 /// A full output chunk must be durably appended before another leaf is
 /// accepted. `acknowledge_output_chunk` is therefore called only after the
 /// surrounding external-memory transaction has committed successfully.
-#[cfg(test)]
-pub(crate) struct CompactResponsePostorderMerkleWriter<'geometry> {
-    geometry: &'geometry CompactResponseMerkleGeometry,
+pub(crate) struct CompactResponsePostorderMerkleWriter {
+    geometry: CompactResponseMerkleGeometry,
     pending_left_digests: Vec<[u8; Hash512::BYTE_LENGTH]>,
     occupied_level_mask: u64,
     pending_emitted_digests: Vec<[u8; Hash512::BYTE_LENGTH]>,
@@ -1071,16 +1059,15 @@ pub(crate) struct CompactResponsePostorderMerkleWriter<'geometry> {
     root: Option<[u8; Hash512::BYTE_LENGTH]>,
 }
 
-#[cfg(test)]
-impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
+impl CompactResponsePostorderMerkleWriter {
     pub(crate) fn new(
-        geometry: &'geometry CompactResponseMerkleGeometry,
+        geometry: &CompactResponseMerkleGeometry,
     ) -> Result<Self, CompactResponseMerkleError> {
         Self::new_with_chunk_byte_length(geometry, COMPACT_RESPONSE_TREE_STORAGE_CHUNK_BYTE_LENGTH)
     }
 
     fn new_with_chunk_byte_length(
-        geometry: &'geometry CompactResponseMerkleGeometry,
+        geometry: &CompactResponseMerkleGeometry,
         output_chunk_byte_length: usize,
     ) -> Result<Self, CompactResponseMerkleError> {
         let tree_depth = usize::try_from(geometry.merkle_leaf_count.trailing_zeros())
@@ -1109,7 +1096,7 @@ impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
             .try_reserve_exact(output_chunk_byte_length)
             .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
         Ok(Self {
-            geometry,
+            geometry: geometry.clone(),
             pending_left_digests,
             occupied_level_mask: 0,
             pending_emitted_digests,
@@ -1137,7 +1124,7 @@ impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
         }
 
         let mut current_digest = compact_response_leaf_digest(
-            self.geometry,
+            &self.geometry,
             self.absorbed_leaf_count,
             value,
             leaf_salt,
@@ -1151,7 +1138,7 @@ impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
             && self.occupied_level_mask & (1_u64 << level) != 0
         {
             current_digest = compact_response_merkle_parent_digest(
-                self.geometry,
+                &self.geometry,
                 u32::try_from(level + 1).map_err(|_| CompactResponseMerkleError::CountOverflow)?,
                 (current_node_ordinal >> 1) << 1,
                 self.pending_left_digests[level],
@@ -1214,7 +1201,7 @@ impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
             && self.pending_emitted_digest_offset == self.pending_emitted_digests.len()
             && self.output_chunk.is_empty()
             && self.root.is_some()
-            && expected_postorder_tree_byte_length(self.geometry)
+            && expected_postorder_tree_byte_length(&self.geometry)
                 .is_ok_and(|expected| expected == self.acknowledged_tree_byte_length)
     }
 
@@ -1243,14 +1230,12 @@ impl<'geometry> CompactResponsePostorderMerkleWriter<'geometry> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(test)]
 struct CompactResponseFrontierScanTarget {
     postorder_digest_ordinal: u64,
     canonical_frontier_ordinal: u64,
 }
 
 /// Extracts a canonical minimal frontier from sequential postorder tree bytes.
-#[cfg(test)]
 pub(crate) struct CompactResponsePostorderFrontierScanner {
     targets: Vec<CompactResponseFrontierScanTarget>,
     frontier: Vec<[u8; Hash512::BYTE_LENGTH]>,
@@ -1260,7 +1245,6 @@ pub(crate) struct CompactResponsePostorderFrontierScanner {
     input_chunk_byte_length: usize,
 }
 
-#[cfg(test)]
 impl CompactResponsePostorderFrontierScanner {
     pub(crate) fn new(
         geometry: &CompactResponseMerkleGeometry,
@@ -1407,7 +1391,6 @@ impl CompactResponsePostorderFrontierScanner {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn expected_postorder_tree_byte_length(
     geometry: &CompactResponseMerkleGeometry,
 ) -> Result<u64, CompactResponseMerkleError> {
@@ -1421,7 +1404,6 @@ pub(crate) fn expected_postorder_tree_byte_length(
         .ok_or(CompactResponseMerkleError::CountOverflow)
 }
 
-#[cfg(test)]
 fn compact_response_postorder_digest_ordinal(
     geometry: &CompactResponseMerkleGeometry,
     level: u32,
@@ -1645,7 +1627,6 @@ fn compact_response_leaf_hash_preimage_from_canonical_value_bytes(
     .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
 }
 
-#[cfg(test)]
 pub(crate) fn compact_response_leaf_digest(
     geometry: &CompactResponseMerkleGeometry,
     leaf_ordinal: u64,
@@ -1896,7 +1877,6 @@ fn compact_response_merkle_parent_hash_preimage(
     .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
 }
 
-#[cfg(test)]
 pub(crate) fn compact_response_merkle_parent_digest(
     geometry: &CompactResponseMerkleGeometry,
     parent_level: u32,

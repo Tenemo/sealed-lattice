@@ -5,8 +5,8 @@
 //! through `i`. The compact construction fixes commitment-oracle identifier
 //! `i + 1`, so the identifier is verifier-derived and is not transported.
 //! Streaming prefix construction and verifier-message derivation are ordinary
-//! release code. Prover checkpoint cursors remain test-only until the compact
-//! generation state consumes them.
+//! release code. Prover checkpoint cursors are canonical release state for
+//! authenticated compact-generation restart.
 //!
 //! The resulting 512-bit prefix digest feeds the fixed-width verifier-message
 //! seed and predecessor-linked block schedule. That concrete multi-call
@@ -15,7 +15,6 @@
 
 use std::mem::size_of;
 
-#[cfg(test)]
 use super::compact_proof_wire::decode_compact_proof_wire_prefix;
 use super::compact_proof_wire::{
     COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, COMPACT_PACKING_FACTOR, CompactProofWireError,
@@ -34,11 +33,8 @@ pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN: &str =
 pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_VERSION: u16 = 1;
 const COMMITMENT_PREFIX_ENTRY_BYTE_LENGTH: usize =
     size_of::<u32>() + Hash512::BYTE_LENGTH + COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
-#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_MAGIC: [u8; 8] = *b"SLCTCP01";
-#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_VERSION: u16 = 1;
-#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_HEADER_BYTE_LENGTH: usize = 8
     + 2 * size_of::<u16>()
     + size_of::<u32>()
@@ -46,10 +42,8 @@ const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_HEADER_BYTE_LENGTH: usize = 8
     + 2 * size_of::<u32>()
     + size_of::<u64>()
     + 2 * Hash512::BYTE_LENGTH;
-#[cfg(test)]
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_ENTRY_BYTE_LENGTH: usize =
     size_of::<u32>() + Hash512::BYTE_LENGTH + COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
-#[cfg(test)]
 pub(crate) const MAXIMUM_COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-transcript-checkpoint-cursor/v1";
@@ -57,7 +51,6 @@ const COMPACT_TRANSCRIPT_CHECKPOINT_PUBLIC_INPUT_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-transcript-checkpoint-public-input/v1";
 const COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-proof-wire-geometry/v1";
-#[cfg(test)]
 const COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_VERSION: u16 = 1;
 
 pub(crate) const fn compact_transcript_binding_domains() -> [&'static str; 4] {
@@ -73,13 +66,9 @@ pub(crate) const fn compact_transcript_binding_domains() -> [&'static str; 4] {
 pub(crate) enum CompactTranscriptError {
     InvalidGeometry,
     LengthOverflow,
-    #[cfg(test)]
     AllocationLimitExceeded,
-    #[cfg(test)]
     WrongProverPhase,
-    #[cfg(test)]
     WrongCheckpointCursor,
-    #[cfg(test)]
     CheckpointCursorDigestMismatch,
     Wire(CompactProofWireError),
     FoundationHash(StreamingFoundationHashError),
@@ -253,22 +242,19 @@ fn compact_fiat_shamir_prefix_digest_from_entries(
 /// once before the next response can be recorded. Response contents and proof
 /// openings remain owned by the proof assembler; this state retains only the
 /// bytes that the challenge prefix actually absorbs.
-#[cfg(test)]
-pub(crate) struct CompactProverTranscript<'input> {
-    geometry: &'input CompactProofWireGeometry,
-    canonical_public_input_bytes: &'input [u8],
+pub(crate) struct CompactProverTranscript {
+    geometry: CompactProofWireGeometry,
+    canonical_public_input_bytes: Vec<u8>,
     commitment_entries: Vec<CompactTranscriptCommitmentEntry>,
     verifier_message_pending: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg(test)]
 pub(crate) struct CompactTranscriptCheckpointCursor {
     canonical_bytes: Vec<u8>,
     digest: [u8; Hash512::BYTE_LENGTH],
 }
 
-#[cfg(test)]
 impl CompactTranscriptCheckpointCursor {
     pub(crate) fn canonical_bytes(&self) -> &[u8] {
         &self.canonical_bytes
@@ -283,7 +269,6 @@ impl CompactTranscriptCheckpointCursor {
     }
 }
 
-#[cfg(test)]
 fn compact_proof_wire_geometry_digest(
     geometry: &CompactProofWireGeometry,
 ) -> Result<Hash512, CompactTranscriptError> {
@@ -357,7 +342,6 @@ fn compact_proof_wire_geometry_digest(
     hasher.finalize().map_err(Into::into)
 }
 
-#[cfg(test)]
 fn compact_transcript_checkpoint_public_input_digest(
     canonical_public_input_bytes: &[u8],
 ) -> [u8; Hash512::BYTE_LENGTH] {
@@ -367,7 +351,6 @@ fn compact_transcript_checkpoint_public_input_digest(
     )
 }
 
-#[cfg(test)]
 fn compact_transcript_checkpoint_cursor_digest(
     canonical_cursor_bytes: &[u8],
 ) -> [u8; Hash512::BYTE_LENGTH] {
@@ -377,12 +360,11 @@ fn compact_transcript_checkpoint_cursor_digest(
     )
 }
 
-#[cfg(test)]
-impl<'input> CompactProverTranscript<'input> {
+impl CompactProverTranscript {
     pub(crate) fn new(
-        geometry: &'input CompactProofWireGeometry,
+        geometry: &CompactProofWireGeometry,
         decoded_public_input: &DecodedCompactPublicInput,
-        canonical_public_input_bytes: &'input [u8],
+        canonical_public_input_bytes: &[u8],
     ) -> Result<Self, CompactTranscriptError> {
         if geometry.responses().is_empty()
             || decoded_public_input.canonical_byte_length() != canonical_public_input_bytes.len()
@@ -397,8 +379,8 @@ impl<'input> CompactProverTranscript<'input> {
             return Err(CompactTranscriptError::AllocationLimitExceeded);
         }
         Ok(Self {
-            geometry,
-            canonical_public_input_bytes,
+            geometry: geometry.clone(),
+            canonical_public_input_bytes: canonical_public_input_bytes.to_vec(),
             commitment_entries,
             verifier_message_pending: false,
         })
@@ -465,10 +447,10 @@ impl<'input> CompactProverTranscript<'input> {
                 .to_le_bytes(),
         );
         canonical_bytes.extend_from_slice(&compact_transcript_checkpoint_public_input_digest(
-            self.canonical_public_input_bytes,
+            &self.canonical_public_input_bytes,
         ));
         canonical_bytes
-            .extend_from_slice(compact_proof_wire_geometry_digest(self.geometry)?.as_bytes());
+            .extend_from_slice(compact_proof_wire_geometry_digest(&self.geometry)?.as_bytes());
         for (response_index, entry) in self.commitment_entries.iter().enumerate() {
             canonical_bytes.extend_from_slice(
                 &u32::try_from(response_index)
@@ -491,9 +473,9 @@ impl<'input> CompactProverTranscript<'input> {
     /// Recomputes every completed verifier message from canonical bytes and
     /// returns the live transcript at the next prover-move boundary.
     pub(crate) fn restore_from_checkpoint_cursor(
-        geometry: &'input CompactProofWireGeometry,
+        geometry: &CompactProofWireGeometry,
         decoded_public_input: &DecodedCompactPublicInput,
-        canonical_public_input_bytes: &'input [u8],
+        canonical_public_input_bytes: &[u8],
         canonical_cursor_bytes: &[u8],
         expected_cursor_digest: [u8; Hash512::BYTE_LENGTH],
     ) -> Result<Self, CompactTranscriptError> {
@@ -598,7 +580,7 @@ impl<'input> CompactProverTranscript<'input> {
             return Err(CompactTranscriptError::WrongCheckpointCursor);
         }
         let decoded_prefix = decode_compact_proof_wire_prefix(
-            self.geometry,
+            &self.geometry,
             canonical_proof_prefix_bytes,
             completed_proof_response_count,
         )?;
@@ -658,8 +640,8 @@ impl<'input> CompactProverTranscript<'input> {
             .get(response_index)
             .ok_or(CompactTranscriptError::InvalidGeometry)?;
         let prefix_digest = compact_fiat_shamir_prefix_digest_from_entries(
-            self.geometry,
-            self.canonical_public_input_bytes,
+            &self.geometry,
+            &self.canonical_public_input_bytes,
             logical_verifier_move_ordinal,
             self.commitment_entries.iter().copied().map(Ok),
         )?;
@@ -682,13 +664,11 @@ impl<'input> CompactProverTranscript<'input> {
     }
 }
 
-#[cfg(test)]
 struct CompactTranscriptCheckpointCursorReader<'bytes> {
     bytes: &'bytes [u8],
     offset: usize,
 }
 
-#[cfg(test)]
 impl<'bytes> CompactTranscriptCheckpointCursorReader<'bytes> {
     const fn new(bytes: &'bytes [u8]) -> Self {
         Self { bytes, offset: 0 }
@@ -989,6 +969,34 @@ mod tests {
             Err(CompactTranscriptError::WrongProverPhase)
         );
         prover_transcript.finish().expect("complete chronology");
+    }
+
+    #[test]
+    fn prover_transcript_owns_geometry_and_canonical_public_input() {
+        let mut prover_transcript = {
+            let geometry = proof_geometry();
+            let (public_geometry, bindings, public_bytes) = public_input(13);
+            let decoded_public =
+                decode_compact_public_input(public_geometry, bindings, &public_bytes)
+                    .expect("decoded public input");
+            CompactProverTranscript::new(&geometry, &decoded_public, &public_bytes)
+                .expect("owned prover transcript")
+        };
+
+        for (root_byte, round_salt_byte) in [(0x11, 0x21), (0x12, 0x22)] {
+            prover_transcript
+                .record_response_commitment(
+                    [root_byte; Hash512::BYTE_LENGTH],
+                    [round_salt_byte; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
+                )
+                .expect("owned transcript accepts a response commitment");
+            prover_transcript
+                .derive_verifier_message()
+                .expect("owned transcript derives the next verifier message");
+        }
+        prover_transcript
+            .finish()
+            .expect("owned transcript completes after its inputs are dropped");
     }
 
     #[test]

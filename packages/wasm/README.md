@@ -17,9 +17,11 @@ transcript-domain, CFW, WHIR, proof-wire, response-Merkle, fixed-message, and
 checkpoint geometry and schema owners are compiled into the ordinary Rust
 kernel. Proof and public-input encoding and decoding, fixed verifier-message
 decoding and derivation, Fiat-Shamir transcript execution, salted-Merkle writing
-and opening verification, response-checkpoint execution, semantic and CFW/WHIR
-execution, Merkle privacy, masking, emitted-coordinate measurement, fixed-tape
-and Appendix arithmetic, and transport verification are test-only. The contract
+and opening verification, response-checkpoint execution, the bounded response-
+tree writer and scanner, retained-tree coordination, scalar CFW, and transport
+verification are release code. Semantic and complete WHIR execution, Merkle
+privacy, masking, emitted-coordinate measurement, fixed-tape, and Appendix
+arithmetic remain test-only or incomplete. The contract
 binds the target; statement-schema identifier, field count, and layout digest; the
 128-draw per-output Fiat-Shamir ceiling; both wire magics; the four ordered
 public-input roles; six release-consumed domains and four frozen checkpoint-
@@ -80,10 +82,12 @@ CFW prover/verifier algebra, bounded external-memory transaction driver,
 authenticated assignment loader, bounded lookup-inverse materializer, and owned
 structured-row and transpose path also compile into the release artifact but
 have no compact generation-state caller. The owned row source contains no
-borrowed worker-lifetime state. The semantic
-authority, complete CFW/WHIR verification, reduced execution fixtures, the
-response-tree executor, and
-the retained end-to-end workbench remain test-only. No compact prover exists. The
+borrowed worker-lifetime state. Incremental proof assembly, the prover
+transcript cursor, bounded response-tree writing and scanning, retained-tree
+coordination, and the authenticated response-checkpoint boundary are release
+code with owned retained inputs. The semantic authority, complete CFW/WHIR
+verification, reduced execution fixtures, and the retained end-to-end
+workbench remain test-only or incomplete. No compact prover exists. The
 measurement feature contains only bounded measurement owners
 and their ring-native arithmetic. Factor one is the sole current packing
 target, but foundation suite selection remains fail-closed and no compact
@@ -93,7 +97,7 @@ compact-proof browser run, or physical-phone evidence. Its separate byte and
 work facts are not contract fields, release-WASM evidence, or
 browser evidence. The current scalar release kernel and SDK byte copy are
 byte-identical and have normalized loader SHA-256
-`3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
+`83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
 This is release-build and byte-copy development evidence only, not compact-
 proof browser or physical-phone qualification. The release bytes still omit the
 compact proof path.

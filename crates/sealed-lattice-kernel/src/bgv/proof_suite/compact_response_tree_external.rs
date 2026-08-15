@@ -108,7 +108,7 @@ impl CompactResponseTreeExternalMemoryGeometry {
             })
             .ok_or(CompactResponseMerkleError::CountOverflow)?;
         let driver_inline_byte_length =
-            u64::try_from(size_of::<CompactResponseTreeExternalMemoryDriver<'static>>())
+            u64::try_from(size_of::<CompactResponseTreeExternalMemoryDriver>())
                 .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
         let executor_owned_heap_byte_length = plan.executor_resident_owned_payload_byte_length()?;
         Ok(Self {
@@ -174,9 +174,9 @@ fn compact_response_tree_external_memory_plan(
     .map_err(Into::into)
 }
 
-enum CompactResponseTreeExternalMemoryPhase<'geometry> {
-    AwaitingObjectCreation(CompactResponsePostorderMerkleWriter<'geometry>),
-    Writing(CompactResponsePostorderMerkleWriter<'geometry>),
+enum CompactResponseTreeExternalMemoryPhase {
+    AwaitingObjectCreation(CompactResponsePostorderMerkleWriter),
+    Writing(CompactResponsePostorderMerkleWriter),
     ReadyToSeal {
         root: [u8; Hash512::BYTE_LENGTH],
     },
@@ -196,11 +196,11 @@ enum CompactResponseTreeExternalMemoryPhase<'geometry> {
     },
 }
 
-pub(crate) struct CompactResponseTreeExternalMemoryDriver<'geometry> {
-    geometry: &'geometry CompactResponseMerkleGeometry,
+pub(crate) struct CompactResponseTreeExternalMemoryDriver {
+    geometry: CompactResponseMerkleGeometry,
     object: ProofExternalMemoryObject,
     executor: Option<ProofExternalMemoryExecutor>,
-    phase: Option<CompactResponseTreeExternalMemoryPhase<'geometry>>,
+    phase: Option<CompactResponseTreeExternalMemoryPhase>,
 }
 
 pub(crate) struct CompactResponseTreeExternalMemoryOutput {
@@ -227,14 +227,14 @@ impl CompactResponseTreeExternalMemoryOutput {
     }
 }
 
-impl<'geometry> CompactResponseTreeExternalMemoryDriver<'geometry> {
+impl CompactResponseTreeExternalMemoryDriver {
     pub(crate) fn new(
-        geometry: &'geometry CompactResponseMerkleGeometry,
+        geometry: &CompactResponseMerkleGeometry,
     ) -> Result<Self, CompactResponseTreeExternalMemorySetupError> {
         let plan = compact_response_tree_external_memory_plan(geometry)?;
         let writer = CompactResponsePostorderMerkleWriter::new(geometry)?;
         Ok(Self {
-            geometry,
+            geometry: geometry.clone(),
             object: ProofExternalMemoryObject::new(geometry.response_ordinal()),
             executor: Some(ProofExternalMemoryExecutor::new(plan)),
             phase: Some(CompactResponseTreeExternalMemoryPhase::AwaitingObjectCreation(writer)),
@@ -359,8 +359,10 @@ impl<'geometry> CompactResponseTreeExternalMemoryDriver<'geometry> {
             Some(CompactResponseTreeExternalMemoryPhase::Sealed { root }) => root,
             _ => return Err(CompactResponseMerkleError::ScannerIncomplete),
         };
-        let scanner =
-            CompactResponsePostorderFrontierScanner::new(self.geometry, query_schedule.as_slice())?;
+        let scanner = CompactResponsePostorderFrontierScanner::new(
+            &self.geometry,
+            query_schedule.as_slice(),
+        )?;
         self.phase = Some(CompactResponseTreeExternalMemoryPhase::Scanning { root, scanner });
         Ok(())
     }
@@ -395,7 +397,7 @@ impl<'geometry> CompactResponseTreeExternalMemoryDriver<'geometry> {
             return Err(CompactResponseTreeExternalMemoryExecutionError::AllocationLimitExceeded);
         }
         tree_chunk.resize(chunk_byte_length, 0);
-        let tree_byte_length = expected_postorder_tree_byte_length(self.geometry)?;
+        let tree_byte_length = expected_postorder_tree_byte_length(&self.geometry)?;
         let read_offset = tree_byte_length
             .checked_sub(remaining_byte_length)
             .ok_or(CompactResponseMerkleError::CountOverflow)?;
@@ -542,10 +544,10 @@ pub(crate) enum CompactResponseTreeRetentionPoll {
 /// the complete live transcript prefix, scans one bounded storage chunk per
 /// poll, returns the canonical frontier, and deletes the object before the move
 /// can complete.
-pub(crate) struct CompactResponseTreeRetentionDriver<'geometry> {
-    merkle_geometries: &'geometry [CompactResponseMerkleGeometry],
-    wire_geometries: &'geometry [CompactProofResponseWireGeometry],
-    response_drivers: Vec<Option<CompactResponseTreeExternalMemoryDriver<'geometry>>>,
+pub(crate) struct CompactResponseTreeRetentionDriver {
+    merkle_geometries: Vec<CompactResponseMerkleGeometry>,
+    wire_geometries: Vec<CompactProofResponseWireGeometry>,
+    response_drivers: Vec<Option<CompactResponseTreeExternalMemoryDriver>>,
     next_response_index: usize,
     active_response_index: Option<usize>,
     next_verifier_move_index: usize,
@@ -555,10 +557,10 @@ pub(crate) struct CompactResponseTreeRetentionDriver<'geometry> {
     terminal: bool,
 }
 
-impl<'geometry> CompactResponseTreeRetentionDriver<'geometry> {
+impl CompactResponseTreeRetentionDriver {
     pub(crate) fn new(
-        merkle_geometries: &'geometry [CompactResponseMerkleGeometry],
-        wire_geometries: &'geometry [CompactProofResponseWireGeometry],
+        merkle_geometries: &[CompactResponseMerkleGeometry],
+        wire_geometries: &[CompactProofResponseWireGeometry],
     ) -> Result<Self, CompactResponseTreeExternalMemorySetupError> {
         CompactResponseQuerySchedule::validate_registry(merkle_geometries, wire_geometries)?;
         let mut response_drivers = Vec::new();
@@ -567,8 +569,8 @@ impl<'geometry> CompactResponseTreeRetentionDriver<'geometry> {
             .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
         response_drivers.resize_with(merkle_geometries.len(), || None);
         Ok(Self {
-            merkle_geometries,
-            wire_geometries,
+            merkle_geometries: merkle_geometries.to_vec(),
+            wire_geometries: wire_geometries.to_vec(),
             response_drivers,
             next_response_index: 0,
             active_response_index: None,
@@ -773,7 +775,7 @@ impl<'geometry> CompactResponseTreeRetentionDriver<'geometry> {
         if !current_scan_started {
             let query_schedule = CompactResponseQuerySchedule::derive_at_last_query_boundary(
                 &self.merkle_geometries[response_index],
-                self.wire_geometries,
+                &self.wire_geometries,
                 verifier_messages,
             )?;
             self.response_drivers[response_index]
@@ -1145,7 +1147,7 @@ mod tests {
     }
 
     fn commit_retained_response(
-        driver: &mut CompactResponseTreeRetentionDriver<'_>,
+        driver: &mut CompactResponseTreeRetentionDriver,
         storage: &mut TestStorage,
         values: &[OwnedLeafValue],
         salts: &[[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]],
@@ -1170,7 +1172,7 @@ mod tests {
     }
 
     fn complete_retained_verifier_move(
-        driver: &mut CompactResponseTreeRetentionDriver<'_>,
+        driver: &mut CompactResponseTreeRetentionDriver,
         verifier_messages: &[super::super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage],
         storage: &mut TestStorage,
     ) -> Vec<CompactResponseTreeLastUseOutput> {
@@ -1528,6 +1530,8 @@ mod tests {
         let mut driver =
             CompactResponseTreeRetentionDriver::new(&merkle_geometries, &wire_geometries)
                 .expect("retained-tree cancellation coordinator starts");
+        drop(merkle_geometries);
+        drop(wire_geometries);
         let mut storage = TestStorage::default();
         let values = [
             OwnedLeafValue::BaseField(vec![base(29)]),

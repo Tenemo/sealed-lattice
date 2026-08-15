@@ -280,7 +280,6 @@ impl CompactProofWireGeometry {
         &self.responses
     }
 
-    #[cfg(test)]
     pub(crate) const fn maximum_canonical_byte_length(&self) -> usize {
         self.maximum_canonical_byte_length
     }
@@ -294,7 +293,6 @@ impl CompactProofWireGeometry {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg(test)]
 pub(crate) struct CompactProofResponseWireInput {
     root: [u8; MERKLE_DIGEST_BYTE_LENGTH],
     fiat_shamir_round_salt: [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
@@ -304,7 +302,6 @@ pub(crate) struct CompactProofResponseWireInput {
     frontier: Vec<[u8; MERKLE_DIGEST_BYTE_LENGTH]>,
 }
 
-#[cfg(test)]
 impl CompactProofResponseWireInput {
     pub(crate) fn new(
         root: [u8; MERKLE_DIGEST_BYTE_LENGTH],
@@ -343,19 +340,15 @@ impl CompactProofWireInput {
 /// This state lets the prover discard each response input after its bytes have
 /// been appended. Global leaf-salt uniqueness is checked before any completed
 /// proof bytes are returned.
-#[cfg(test)]
-pub(crate) struct CompactProofWireAssembler<'geometry> {
-    geometry: &'geometry CompactProofWireGeometry,
+pub(crate) struct CompactProofWireAssembler {
+    geometry: CompactProofWireGeometry,
     canonical: Vec<u8>,
     accepted_leaf_salts: Vec<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
     next_response_index: usize,
 }
 
-#[cfg(test)]
-impl<'geometry> CompactProofWireAssembler<'geometry> {
-    pub(crate) fn new(
-        geometry: &'geometry CompactProofWireGeometry,
-    ) -> Result<Self, CompactProofWireError> {
+impl CompactProofWireAssembler {
+    pub(crate) fn new(geometry: &CompactProofWireGeometry) -> Result<Self, CompactProofWireError> {
         let mut canonical = Vec::new();
         canonical
             .try_reserve_exact(geometry.maximum_canonical_byte_length())
@@ -373,7 +366,7 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
             .try_reserve_exact(geometry.total_queried_leaf_count()?)
             .map_err(|_| CompactProofWireError::LengthOverflow)?;
         Ok(Self {
-            geometry,
+            geometry: geometry.clone(),
             canonical,
             accepted_leaf_salts,
             next_response_index: 0,
@@ -389,7 +382,7 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
     /// salt registry so a duplicate introduced after resume is still refused
     /// by [`Self::finish`].
     pub(crate) fn restore_from_canonical_prefix(
-        geometry: &'geometry CompactProofWireGeometry,
+        geometry: &CompactProofWireGeometry,
         canonical_prefix_bytes: &[u8],
         completed_response_count: usize,
     ) -> Result<Self, CompactProofWireError> {
@@ -423,7 +416,7 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
             )
             .map_err(|_| CompactProofWireError::LengthOverflow)?;
         Ok(Self {
-            geometry,
+            geometry: geometry.clone(),
             canonical,
             accepted_leaf_salts,
             next_response_index: completed_response_count,
@@ -938,7 +931,6 @@ fn enforce_compact_proof_byte_ceiling(
 
 struct DecodedCompactProofWirePrefix {
     responses: Vec<DecodedCompactProofResponse>,
-    #[cfg(test)]
     accepted_leaf_salt_offsets: Vec<u32>,
 }
 
@@ -1086,12 +1078,10 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
     }
     Ok(DecodedCompactProofWirePrefix {
         responses: decoded_responses,
-        #[cfg(test)]
         accepted_leaf_salt_offsets,
     })
 }
 
-#[cfg(test)]
 pub(crate) fn encode_compact_public_input(
     geometry: CompactPublicInputWireGeometry,
     bindings: CompactPublicInputBindings,
@@ -1166,7 +1156,6 @@ pub(crate) fn decode_compact_public_input(
     })
 }
 
-#[cfg(test)]
 fn validate_response_input(
     geometry: &CompactProofResponseWireGeometry,
     response: &CompactProofResponseWireInput,
@@ -1607,6 +1596,7 @@ mod tests {
         let expected = encode_compact_proof_wire(&geometry, &input).unwrap();
 
         let mut assembler = CompactProofWireAssembler::new(&geometry).unwrap();
+        drop(geometry);
         assembler.append_response(&input.responses[0]).unwrap();
         assembler.append_response(&input.responses[1]).unwrap();
         assert_eq!(assembler.finish().unwrap(), expected);

@@ -4,33 +4,25 @@
 //! messages, but a proper-subset opening may depend on a later message. The
 //! canonical proof encoder can therefore trail the transcript. This module
 //! derives that lag from verifier-owned Merkle geometry. The release contract
-//! retains the response-count schedule; transcript cursor and encoded-prefix
-//! checkpoint binding remain test-only until release generation consumes them.
+//! retains the response-count schedule, transcript cursor, and encoded-prefix
+//! checkpoint binding used by release compact generation.
 
-#[cfg(test)]
 use super::compact_proof_wire::CompactProofWireAssembler;
 use super::compact_proof_wire::CompactProofWireGeometry;
 use super::compact_response_merkle::{
     CompactResponseMerkleError, CompactResponseMerkleGeometry, CompactResponseQuerySchedule,
 };
-#[cfg(test)]
 use super::compact_transcript::{CompactProverTranscript, CompactTranscriptError};
-#[cfg(test)]
 use super::prover::CommonProofGenerationCheckpointBoundary;
-#[cfg(test)]
 use crate::foundation::Hash512;
-#[cfg(test)]
 use crate::hashing::StreamingHash512;
 
 const COMPACT_RESPONSE_CHECKPOINT_SCHEDULE_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-response-checkpoint-schedule/v1";
 const COMPACT_RESPONSE_CHECKPOINT_COMMITTED_STATE_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-response-checkpoint-committed-state/v2";
-#[cfg(test)]
 const COMPACT_RESPONSE_CHECKPOINT_POSITION_VERSION: u8 = 1;
-#[cfg(test)]
 const COMPACT_RESPONSE_CHECKPOINT_POSITION_STAGE: u8 = 1;
-#[cfg(test)]
 const MAXIMUM_COMPACT_CONSTRUCTION_PRIVATE_RANDOMNESS_CURSOR_BYTE_LENGTH: usize = 16 * 1_024;
 
 pub(crate) const fn compact_checkpoint_binding_domains() -> [&'static str; 2] {
@@ -43,13 +35,10 @@ pub(crate) const fn compact_checkpoint_binding_domains() -> [&'static str; 2] {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactGenerationCheckpointError {
     InvalidGeometry,
-    #[cfg(test)]
     InvalidPrivateRandomnessCursor,
     LengthOverflow,
-    #[cfg(test)]
     WrongResponseBoundary,
     ResponseMerkle(CompactResponseMerkleError),
-    #[cfg(test)]
     Transcript(CompactTranscriptError),
 }
 
@@ -59,7 +48,6 @@ impl From<CompactResponseMerkleError> for CompactGenerationCheckpointError {
     }
 }
 
-#[cfg(test)]
 impl From<CompactTranscriptError> for CompactGenerationCheckpointError {
     fn from(error: CompactTranscriptError) -> Self {
         Self::Transcript(error)
@@ -71,7 +59,6 @@ impl From<CompactTranscriptError> for CompactGenerationCheckpointError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactResponseCheckpointSchedule {
     completed_proof_response_counts: Vec<u32>,
-    #[cfg(test)]
     dependency_digest: [u8; Hash512::BYTE_LENGTH],
 }
 
@@ -95,7 +82,6 @@ impl CompactResponseCheckpointSchedule {
         last_query_verifier_move_ordinals
             .try_reserve_exact(response_count)
             .map_err(|_| CompactGenerationCheckpointError::LengthOverflow)?;
-        #[cfg(test)]
         let mut schedule_hasher = {
             let digest_part_count = u64::try_from(response_count)
                 .ok()
@@ -119,13 +105,10 @@ impl CompactResponseCheckpointSchedule {
             {
                 return Err(CompactGenerationCheckpointError::InvalidGeometry);
             }
-            #[cfg(test)]
-            {
-                let mut dependency = [0_u8; 8];
-                dependency[..4].copy_from_slice(&response_ordinal.to_le_bytes());
-                dependency[4..].copy_from_slice(&last_query_verifier_move_ordinal.to_le_bytes());
-                schedule_hasher.absorb_part(&dependency);
-            }
+            let mut dependency = [0_u8; 8];
+            dependency[..4].copy_from_slice(&response_ordinal.to_le_bytes());
+            dependency[4..].copy_from_slice(&last_query_verifier_move_ordinal.to_le_bytes());
+            schedule_hasher.absorb_part(&dependency);
             last_query_verifier_move_ordinals.push(last_query_verifier_move_ordinal);
         }
 
@@ -163,7 +146,6 @@ impl CompactResponseCheckpointSchedule {
 
         Ok(Self {
             completed_proof_response_counts,
-            #[cfg(test)]
             dependency_digest: schedule_hasher.finalize(),
         })
     }
@@ -172,7 +154,6 @@ impl CompactResponseCheckpointSchedule {
         self.completed_proof_response_counts.len()
     }
 
-    #[cfg(test)]
     pub(crate) const fn checkpoint_schedule_digest(&self) -> Hash512 {
         Hash512::from_bytes(self.dependency_digest)
     }
@@ -207,7 +188,6 @@ impl CompactResponseCheckpointSchedule {
             .unwrap_or(0)
     }
 
-    #[cfg(test)]
     pub(crate) fn completed_proof_response_count(
         &self,
         completed_transcript_response_count: usize,
@@ -231,11 +211,10 @@ impl CompactResponseCheckpointSchedule {
 /// common private-coin source. The host separately binds the suite and action
 /// context, proof attempt and source authority, the common private-coin cursor
 /// manifest, external object identities and digests, and deletion state.
-#[cfg(test)]
 pub(crate) fn compact_response_generation_checkpoint_boundary(
     checkpoint_schedule: &CompactResponseCheckpointSchedule,
-    prover_transcript: &CompactProverTranscript<'_>,
-    proof_wire_assembler: &CompactProofWireAssembler<'_>,
+    prover_transcript: &CompactProverTranscript,
+    proof_wire_assembler: &CompactProofWireAssembler,
     canonical_construction_private_randomness_cursor_bytes: &[u8],
 ) -> Result<CommonProofGenerationCheckpointBoundary, CompactGenerationCheckpointError> {
     if canonical_construction_private_randomness_cursor_bytes.is_empty()
@@ -443,7 +422,7 @@ mod tests {
     }
 
     fn record_response_and_derive_message(
-        transcript: &mut CompactProverTranscript<'_>,
+        transcript: &mut CompactProverTranscript,
         response_ordinal: usize,
     ) {
         transcript
@@ -460,7 +439,7 @@ mod tests {
     }
 
     fn append_available_responses(
-        assembler: &mut CompactProofWireAssembler<'_>,
+        assembler: &mut CompactProofWireAssembler,
         responses: &[CompactProofResponseWireInput],
         verifier_move_ordinal: usize,
     ) {

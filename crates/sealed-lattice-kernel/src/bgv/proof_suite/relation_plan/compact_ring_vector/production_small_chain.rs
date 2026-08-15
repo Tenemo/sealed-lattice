@@ -1,7 +1,11 @@
-use std::{convert::Infallible, mem::size_of, rc::Rc};
+use std::{convert::Infallible, mem::size_of};
+
+#[cfg(test)]
+use std::rc::Rc;
 
 use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
+#[cfg(test)]
 use p3_dft::Radix2DFTSmallBatch;
 use p3_field::{PrimeCharacteristicRing, PrimeField64};
 use p3_goldilocks::Goldilocks;
@@ -9,9 +13,12 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_multilinear_util::poly::Poly;
 use p3_sumcheck::zk::stack_codewords;
 use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher};
+#[cfg(test)]
 use p3_whir::pcs::zk::{
-    CombinedRelationProverInput, CombinedRelationVerifierInput, HidingWhirProver,
-    HidingWhirVerifier, MaskCodeShape, MaskGroupShape, MaskProverData, PrecommittedMaskProverGroup,
+    CombinedRelationProverInput, HidingWhirProver, MaskCodeShape, PrecommittedMaskProverGroup,
+};
+use p3_whir::pcs::zk::{
+    CombinedRelationVerifierInput, HidingWhirVerifier, MaskGroupShape, MaskProverData,
     PrecommittedMaskVerifierGroup, ZkVerifierError, ZkWhirConfig, ZkWhirProof,
 };
 use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameters};
@@ -23,30 +30,39 @@ use sha3::{
 use tiny_keccak::Kmac;
 use zeroize::Zeroizing;
 
+#[cfg(test)]
 use super::super::super::setup_key_relation_adapter::{
     CompactPublicKeyDevelopmentAnchorCoefficientSource,
     CompactPublicKeyDevelopmentCoefficientSource,
     derive_compact_public_key_development_source_polynomials,
 };
+#[cfg(test)]
 use super::super::authenticated_assignment::{
     CompactAuthenticatedAssignmentCatalog, CompactAuthenticatedAssignmentCursor,
     CompactAuthenticatedAssignmentPoll, CompactLookupInverseMaterializationPoll,
 };
+#[cfg(test)]
 use super::super::{
     CompactPublicKeyRelationCatalog, derive_compact_public_key_relation_catalog,
     selected_input_and_context,
 };
+#[cfg(test)]
 use super::*;
 use crate::bgv::proof_suite::prover::{
-    CheckpointableCommonProofPrivateCoinSource, CommonProofAuthenticatedSourceReadRequest,
-    CommonProofGenerationCheckpointBoundary, CommonProofPrivateCoinCoordinate,
-    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinSource, CommonProofProverError,
-    CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
-    CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialReplayIdentity,
-    CommonProofSourcePolynomialRequest, CommonProofSourcePolynomialRequestContext,
-    CommonProofSourceProviderMemoryAccounting, PrivateRandomnessCommonProofCoinError,
-    PrivateRandomnessCommonProofCoinSource, ProvidedCommonProofSourcePolynomial,
+    CheckpointableCommonProofPrivateCoinSource, CommonProofPrivateCoinCoordinate,
+    CommonProofPrivateCoinSource, PrivateRandomnessCommonProofCoinError,
+    PrivateRandomnessCommonProofCoinSource,
 };
+#[cfg(test)]
+use crate::bgv::proof_suite::prover::{
+    CommonProofAuthenticatedSourceReadRequest, CommonProofGenerationCheckpointBoundary,
+    CommonProofPrivateCoinCoordinateCapacity, CommonProofProverError, CommonProofSourcePolynomial,
+    CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
+    CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
+    CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+    ProvidedCommonProofSourcePolynomial,
+};
+#[cfg(test)]
 use crate::bgv::proof_suite::relation_plan::{
     PublicKeyShareRelationPlanInput, PublicKeyShareSourceLayout, RelationPlanCheckContext,
     RelationPlanVariant, compile_public_key_share_relation_with_source_layout,
@@ -55,12 +71,21 @@ use crate::bgv::proof_suite::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
     compact_cfw::{
-        COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwClaimBatch,
-        CompactCfwError, CompactCfwGeometry, CompactCfwMaskMaterial,
-        CompactCfwMaskedCrossEpochClaims, CompactCfwMatrixRole, CompactCfwR1csMatrices,
-        CompactCfwTranscript, CompactChallengeField, PreparedCompactCfwProver,
-        compact_challenge_from_production, compact_challenge_to_production,
-        verify_compact_cfw_transcript,
+        CompactCfwClaimBatch, CompactCfwError, CompactCfwMaskedCrossEpochClaims,
+        CompactCfwR1csMatrices, CompactChallengeField, compact_challenge_from_production,
+    },
+    compact_proof_wire::{COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofWireError},
+    compact_response_merkle::{
+        CompactResponseLeafValue, CompactResponseLeafValueKind, CompactResponseMerkleError,
+    },
+    compact_transcript::CompactTranscriptError,
+};
+#[cfg(test)]
+use crate::bgv::proof_suite::{
+    compact_cfw::{
+        COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwGeometry,
+        CompactCfwMaskMaterial, CompactCfwMatrixRole, CompactCfwTranscript,
+        PreparedCompactCfwProver, compact_challenge_to_production, verify_compact_cfw_transcript,
     },
     compact_cfw_external_prover::{CompactCfwExternalProverState, CompactCfwExternalRowSource},
     compact_generation_checkpoint::{
@@ -70,16 +95,14 @@ use crate::bgv::proof_suite::{
         apply_cross_epoch_explicit_point_view, apply_quotient_prefix_view,
     },
     compact_proof_wire::{
-        COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireGeometry,
-        CompactProofResponseWireInput, CompactProofWireAssembler, CompactProofWireError,
+        CompactProofResponseWireGeometry, CompactProofResponseWireInput, CompactProofWireAssembler,
         CompactProofWireGeometry, CompactProofWireInput, CompactPublicInputBindings,
         CompactPublicInputWireGeometry, DecodedCompactProofWire, PROOF_FIXED_HEADER_BYTE_LENGTH,
         decode_compact_proof_wire, decode_compact_public_input, encode_compact_proof_wire,
         encode_compact_public_input,
     },
     compact_response_merkle::{
-        CompactResponseComponentGeometry, CompactResponseLeafValue, CompactResponseLeafValueKind,
-        CompactResponseMerkleError, CompactResponseMerkleGeometry,
+        CompactResponseComponentGeometry, CompactResponseMerkleGeometry,
         CompactResponsePostorderMerkleWriter, CompactResponseQuerySelection,
         expected_postorder_tree_byte_length,
         verify_decoded_compact_response_opening_with_leaf_ordinals_for_test,
@@ -88,10 +111,7 @@ use crate::bgv::proof_suite::{
         CompactResponseTreeExternalMemoryGeometry, CompactResponseTreeRetentionDriver,
         CompactResponseTreeRetentionPoll,
     },
-    compact_transcript::{
-        CompactProverTranscript, CompactTranscriptError,
-        derive_compact_fiat_shamir_verifier_message,
-    },
+    compact_transcript::{CompactProverTranscript, derive_compact_fiat_shamir_verifier_message},
     external_memory::{ProofExternalMemoryObject, ProofExternalMemoryUsage, tests::TestStorage},
     fixed_uniform_verifier_message::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
@@ -102,28 +122,38 @@ use crate::bgv::proof_suite::{
         CommonProofGenerationTestCheckpointAuthority,
     },
 };
+#[cfg(test)]
 use crate::bgv::setup::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     compute_lattice_anchor_commitment_for_development_degree, construct_public_key_share_limb,
     sample_collective_public_key_common_reference_limb_for_development_degree,
 };
+#[cfg(test)]
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
-    Hash512, ParticipantIdentity, PersistentProofCoinInput, PrivateRandomnessAttemptIdentifier,
-    ProofApplicationSlot, ProofApplicationSlotCeilings,
+    ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
+    ProofApplicationSlotCeilings,
+};
+use crate::foundation::{
+    Hash512, PrivateRandomnessAttemptIdentifier,
     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
 };
+#[cfg(test)]
 use crate::hashing::hash_framed_parts_512;
+#[cfg(test)]
 use crate::transcript_core::encode_hex;
 
 #[path = "production_small_chain_canonical_transport.rs"]
 mod production_small_chain_canonical_transport;
 
+#[cfg(test)]
 use production_small_chain_canonical_transport::{
     DecodedSmallChainCanonicalProof, SmallChainCanonicalProofEncoding, SmallChainCanonicalSection,
-    SmallChainCanonicalTransportError, SmallChainExternalCommitments,
     decode_small_chain_canonical_proof, encode_small_chain_canonical_proof,
-    encode_small_chain_commitment, small_chain_canonical_section_payload_range,
+    small_chain_canonical_section_payload_range,
+};
+use production_small_chain_canonical_transport::{
+    SmallChainCanonicalTransportError, SmallChainExternalCommitments, encode_small_chain_commitment,
 };
 
 const SMALL_CHAIN_RING_DEGREE: u64 = 2_048;
@@ -1019,6 +1049,7 @@ impl OwnedResponseLeaf {
     }
 }
 
+#[cfg(test)]
 struct BuiltResponse {
     wire_input: CompactProofResponseWireInput,
     merkle_geometry: CompactResponseMerkleGeometry,
@@ -1026,11 +1057,13 @@ struct BuiltResponse {
     external_tree_usage: ProofExternalMemoryUsage,
 }
 
+#[cfg(test)]
 struct SmallChainCheckpointPublication {
     encoded_state: Vec<u8>,
     cursor_manifest_bytes: Vec<u8>,
 }
 
+#[cfg(test)]
 fn response_wire_geometry(
     response_ordinal: u32,
     base_field_element_count: u64,
@@ -1049,6 +1082,7 @@ fn response_wire_geometry(
     .expect("small-chain response wire geometry is valid")
 }
 
+#[cfg(test)]
 fn small_chain_response_merkle_geometries(
     proof_wire_geometry: &CompactProofWireGeometry,
 ) -> Vec<CompactResponseMerkleGeometry> {
@@ -1089,22 +1123,24 @@ fn small_chain_response_merkle_geometries(
         .collect()
 }
 
-struct SmallChainResponseExecutionContext<'execution, 'geometry> {
-    prover_transcript: &'execution mut CompactProverTranscript<'geometry>,
+#[cfg(test)]
+struct SmallChainResponseExecutionContext<'execution> {
+    prover_transcript: &'execution mut CompactProverTranscript,
     verifier_messages: &'execution mut Vec<DecodedFixedUniformVerifierMessage>,
-    proof_wire_assembler: &'execution mut CompactProofWireAssembler<'geometry>,
+    proof_wire_assembler: &'execution mut CompactProofWireAssembler,
     checkpoint_schedule: &'execution CompactResponseCheckpointSchedule,
-    response_tree_retention_driver: &'execution mut CompactResponseTreeRetentionDriver<'geometry>,
+    response_tree_retention_driver: &'execution mut CompactResponseTreeRetentionDriver,
     response_tree_storage: &'execution mut TestStorage,
     checkpoint_chain: &'execution mut CommonProofGenerationCheckpointChain,
     checkpoint_publications: &'execution mut Vec<SmallChainCheckpointPublication>,
 }
 
+#[cfg(test)]
 fn build_commit_open_and_checkpoint_response(
     private_randomness: &SmallChainAttemptPrivateRandomness,
     merkle_geometry: &CompactResponseMerkleGeometry,
     leaves: Vec<OwnedResponseLeaf>,
-    execution_context: SmallChainResponseExecutionContext<'_, '_>,
+    execution_context: SmallChainResponseExecutionContext<'_>,
 ) -> (BuiltResponse, CommonProofGenerationCheckpointBoundary) {
     let SmallChainResponseExecutionContext {
         prover_transcript,
@@ -1302,6 +1338,7 @@ fn build_commit_open_and_checkpoint_response(
     )
 }
 
+#[cfg(test)]
 fn digest_base_field_elements(digest: [u8; Hash512::BYTE_LENGTH]) -> Vec<ProofBaseFieldElement> {
     digest
         .chunks_exact(4)
@@ -1314,6 +1351,7 @@ fn digest_base_field_elements(digest: [u8; Hash512::BYTE_LENGTH]) -> Vec<ProofBa
         .collect()
 }
 
+#[cfg(test)]
 fn decoded_response_digest(
     decoded_proof: &DecodedCompactProofWire,
     canonical_proof_bytes: &[u8],
@@ -1341,6 +1379,7 @@ fn decoded_response_digest(
     Ok(digest)
 }
 
+#[cfg(test)]
 fn verify_small_chain_commitment_bindings(
     decoded_proof: &DecodedCompactProofWire,
     canonical_proof_bytes: &[u8],
@@ -1379,6 +1418,7 @@ fn verify_small_chain_commitment_bindings(
     Ok(())
 }
 
+#[cfg(test)]
 fn compact_challenges(message: &DecodedFixedUniformVerifierMessage) -> Vec<CompactChallengeField> {
     message
         .extension_elements()
@@ -1388,6 +1428,7 @@ fn compact_challenges(message: &DecodedFixedUniformVerifierMessage) -> Vec<Compa
         .collect()
 }
 
+#[cfg(test)]
 fn small_chain_proof_wire_geometry(
     cfw_geometry: CompactCfwGeometry,
     cross_epoch_variable_count: usize,
@@ -1461,17 +1502,23 @@ fn small_chain_proof_wire_geometry(
     CompactProofWireGeometry::new(responses).expect("small-chain proof wire geometry")
 }
 
+#[cfg(test)]
 const SMALL_CHAIN_SOURCE_DESCRIPTOR_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/source-descriptor-binding/v1";
+#[cfg(test)]
 const SMALL_CHAIN_SOURCE_STREAM_DIGEST_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/source-stream-digest/v1";
+#[cfg(test)]
 const SMALL_CHAIN_SOURCE_MATERIAL_ROOT_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/source-material-root/v1";
+#[cfg(test)]
 const SMALL_CHAIN_SOURCE_CATALOG_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/source-catalog-binding/v1";
+#[cfg(test)]
 const SMALL_CHAIN_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/source-replay-identity/v1";
 
+#[cfg(test)]
 struct ReducedRelationFixture {
     input: PublicKeyShareRelationPlanInput,
     relation_context: RelationPlanCheckContext,
@@ -1481,6 +1528,7 @@ struct ReducedRelationFixture {
     assignment_catalog: CompactAuthenticatedAssignmentCatalog,
 }
 
+#[cfg(test)]
 struct AuthenticatedProductionSourceObject {
     column_ordinal: u32,
     descriptor_binding: [u8; 64],
@@ -1491,10 +1539,12 @@ struct AuthenticatedProductionSourceObject {
     coefficient_count: usize,
 }
 
+#[cfg(test)]
 struct AuthenticatedProductionSourceStorage {
     bytes: Zeroizing<Box<[u8]>>,
 }
 
+#[cfg(test)]
 impl AuthenticatedProductionSourceStorage {
     fn read(
         &self,
@@ -1522,11 +1572,13 @@ impl AuthenticatedProductionSourceStorage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 enum AuthenticatedProductionSourceReadPurpose {
     Initial,
     Replay,
 }
 
+#[cfg(test)]
 struct PendingAuthenticatedProductionSourceRead {
     source_index: usize,
     purpose: AuthenticatedProductionSourceReadPurpose,
@@ -1534,6 +1586,7 @@ struct PendingAuthenticatedProductionSourceRead {
     authenticated_bytes: Option<Zeroizing<Box<[u8]>>>,
 }
 
+#[cfg(test)]
 struct AuthenticatedProductionSourceProvider {
     relation_plan_variant: RelationPlanVariant,
     request_context: CommonProofSourcePolynomialRequestContext,
@@ -1544,6 +1597,7 @@ struct AuthenticatedProductionSourceProvider {
     finished: bool,
 }
 
+#[cfg(test)]
 impl AuthenticatedProductionSourceProvider {
     fn new(
         relation: &CompactPublicKeyRelationCatalog,
@@ -1803,6 +1857,7 @@ impl AuthenticatedProductionSourceProvider {
     }
 }
 
+#[cfg(test)]
 impl CommonProofSourcePolynomialProvider for AuthenticatedProductionSourceProvider {
     fn memory_accounting(
         &self,
@@ -1920,6 +1975,7 @@ impl CommonProofSourcePolynomialProvider for AuthenticatedProductionSourceProvid
     }
 }
 
+#[cfg(test)]
 fn reduced_relation() -> ReducedRelationFixture {
     let (mut input, relation_context) =
         selected_input_and_context().expect("selected relation inputs");
@@ -1955,6 +2011,7 @@ fn reduced_relation() -> ReducedRelationFixture {
     }
 }
 
+#[cfg(test)]
 fn reduced_production_coefficient_source(
     fixture: &ReducedRelationFixture,
 ) -> Result<CompactPublicKeyDevelopmentCoefficientSource, CommonProofProverError> {
@@ -2093,6 +2150,7 @@ fn reduced_production_coefficient_source(
     .map_err(|_| CommonProofProverError::InvalidColumn)
 }
 
+#[cfg(test)]
 fn request_context(
     relation: &CompactPublicKeyRelationCatalog,
 ) -> CommonProofSourcePolynomialRequestContext {
@@ -2108,6 +2166,7 @@ fn request_context(
     )
 }
 
+#[cfg(test)]
 fn small_chain_attempt_private_randomness(
     relation_plan_variant: &RelationPlanVariant,
     canonical_public_input_bytes: &[u8],
@@ -2384,6 +2443,7 @@ fn production_small_chain_source_authority_authenticates_exact_derived_coefficie
     assert_ne!(replay_identity.bytes(), [0_u8; 64]);
 }
 
+#[cfg(test)]
 fn replace_small_chain_canonical_section_payload(
     canonical: &[u8],
     section: SmallChainCanonicalSection,

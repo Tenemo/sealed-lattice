@@ -10,7 +10,13 @@
 
 mod witness_covector;
 
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes the release factor-one WHIR primitives at the next integration boundary"
+    )
+)]
 #[path = "production_small_chain.rs"]
 mod production_small_chain;
 
