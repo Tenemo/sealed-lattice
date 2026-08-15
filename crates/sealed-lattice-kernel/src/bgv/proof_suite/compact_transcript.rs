@@ -371,6 +371,13 @@ impl CompactProverTranscript {
         {
             return Err(CompactTranscriptError::InvalidGeometry);
         }
+        Self::new_with_validated_public_input(geometry, canonical_public_input_bytes)
+    }
+
+    fn new_with_validated_public_input(
+        geometry: &CompactProofWireGeometry,
+        canonical_public_input_bytes: &[u8],
+    ) -> Result<Self, CompactTranscriptError> {
         let mut commitment_entries = Vec::new();
         commitment_entries
             .try_reserve_exact(geometry.responses().len())
@@ -485,6 +492,29 @@ impl CompactProverTranscript {
         {
             return Err(CompactTranscriptError::CheckpointCursorDigestMismatch);
         }
+        if decoded_public_input.canonical_byte_length() != canonical_public_input_bytes.len() {
+            return Err(CompactTranscriptError::InvalidGeometry);
+        }
+        Self::restore_from_checkpoint_cursor_for_validated_public_input(
+            geometry,
+            canonical_public_input_bytes,
+            canonical_cursor_bytes,
+            expected_cursor_digest,
+        )
+    }
+
+    fn restore_from_checkpoint_cursor_for_validated_public_input(
+        geometry: &CompactProofWireGeometry,
+        canonical_public_input_bytes: &[u8],
+        canonical_cursor_bytes: &[u8],
+        expected_cursor_digest: [u8; Hash512::BYTE_LENGTH],
+    ) -> Result<Self, CompactTranscriptError> {
+        if canonical_cursor_bytes.len() > MAXIMUM_COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_BYTE_LENGTH
+            || compact_transcript_checkpoint_cursor_digest(canonical_cursor_bytes)
+                != expected_cursor_digest
+        {
+            return Err(CompactTranscriptError::CheckpointCursorDigestMismatch);
+        }
         let mut reader = CompactTranscriptCheckpointCursorReader::new(canonical_cursor_bytes);
         if reader.read_array::<8>()? != COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_MAGIC
             || reader.read_u16()? != COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_VERSION
@@ -527,7 +557,7 @@ impl CompactProverTranscript {
         }
 
         let mut transcript =
-            Self::new(geometry, decoded_public_input, canonical_public_input_bytes)?;
+            Self::new_with_validated_public_input(geometry, canonical_public_input_bytes)?;
         for response_index in 0..completed_response_count {
             let response_ordinal = reader.read_u32()?;
             if usize::try_from(response_ordinal).ok() != Some(response_index) {
@@ -547,6 +577,38 @@ impl CompactProverTranscript {
             return Err(CompactTranscriptError::WrongCheckpointCursor);
         }
         Ok(transcript)
+    }
+
+    /// Rebuilds the live transcript from an authenticated cursor after the
+    /// deterministic prefix replay has reached the same response boundary.
+    /// The replayed response count must match, so a valid cursor cannot skip
+    /// or repeat construction work.
+    pub(crate) fn restore_authenticated_checkpoint_cursor(
+        &mut self,
+        canonical_cursor_bytes: &[u8],
+        expected_cursor_digest: [u8; Hash512::BYTE_LENGTH],
+    ) -> Result<(), CompactTranscriptError> {
+        if self.verifier_message_pending || self.commitment_entries.is_empty() {
+            return Err(CompactTranscriptError::WrongProverPhase);
+        }
+        let expected_completed_response_count = self.commitment_entries.len();
+        let live_cursor = self.checkpoint_cursor()?;
+        if live_cursor.canonical_bytes() != canonical_cursor_bytes
+            || live_cursor.digest() != expected_cursor_digest
+        {
+            return Err(CompactTranscriptError::WrongCheckpointCursor);
+        }
+        let restored = Self::restore_from_checkpoint_cursor_for_validated_public_input(
+            &self.geometry,
+            &self.canonical_public_input_bytes,
+            canonical_cursor_bytes,
+            expected_cursor_digest,
+        )?;
+        if restored.commitment_entries.len() != expected_completed_response_count {
+            return Err(CompactTranscriptError::WrongCheckpointCursor);
+        }
+        *self = restored;
+        Ok(())
     }
 
     /// Binds a durable transcript cursor to the independently decoded proof
@@ -1042,6 +1104,21 @@ mod tests {
         uninterrupted
             .validate_canonical_proof_prefix(&canonical_proof_prefix)
             .unwrap();
+        let mut substituted_authenticated_cursor = cursor.canonical_bytes().to_vec();
+        substituted_authenticated_cursor
+            [COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_HEADER_BYTE_LENGTH + size_of::<u32>()] ^= 1;
+        let substituted_authenticated_cursor_digest =
+            compact_transcript_checkpoint_cursor_digest(&substituted_authenticated_cursor);
+        assert_eq!(
+            uninterrupted.restore_authenticated_checkpoint_cursor(
+                &substituted_authenticated_cursor,
+                substituted_authenticated_cursor_digest,
+            ),
+            Err(CompactTranscriptError::WrongCheckpointCursor)
+        );
+        uninterrupted
+            .restore_authenticated_checkpoint_cursor(cursor.canonical_bytes(), cursor.digest())
+            .expect("the exact authenticated replay cursor restores in place");
 
         let mut restored = CompactProverTranscript::restore_from_checkpoint_cursor(
             &geometry,

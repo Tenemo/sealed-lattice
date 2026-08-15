@@ -79,9 +79,10 @@ mod compact_reed_solomon;
     not(test),
     expect(
         dead_code,
-        reason = "the compact generation state consumes release response-tree writing at the next integration boundary"
+        reason = "the compact common generation state consumes response custody at the next integration boundary"
     )
 )]
+mod compact_response_generation;
 mod compact_response_merkle;
 #[cfg_attr(
     not(test),

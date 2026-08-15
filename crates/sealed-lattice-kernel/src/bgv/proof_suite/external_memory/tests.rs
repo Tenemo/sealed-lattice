@@ -26,15 +26,6 @@ pub(crate) struct TestStorage {
 }
 
 impl TestStorage {
-    pub(crate) fn committed_object_bytes(
-        &self,
-        object: ProofExternalMemoryObject,
-    ) -> Option<&[u8]> {
-        self.committed
-            .get(&object)
-            .map(|stored_object| stored_object.bytes.as_slice())
-    }
-
     pub(crate) fn committed_object_count(&self) -> usize {
         self.committed.len()
     }

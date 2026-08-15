@@ -88,8 +88,12 @@ source owns reference-counted relation and secret-assignment material rather
 than borrowing worker-lifetime state. Incremental proof assembly, the prover
 transcript cursor, bounded response-tree writing and scanning, retained-tree
 coordination, and the authenticated response-checkpoint boundary are release
-code with owned retained inputs. No compact generation state drives these
-components or the relation path yet. Semantic and complete CFW/WHIR execution,
+code with owned retained inputs. A release-owned compact response state now
+drives those response components with verifier-selected leaf replay, exact
+transaction yielding, cancellation, authenticated cursor restoration, and
+byte-identical genesis replay. The complete production-shaped small chain uses
+that state, but the family material provider and production worker adapter
+remain absent. Semantic and complete CFW/WHIR execution,
 Merkle privacy, masking, emitted-coordinate measurement, fixed-tape and
 Appendix arithmetic remain test-only or incomplete. The
 contract validates the exact target; statement-schema identifier, field count, and layout
@@ -217,8 +221,12 @@ source owns reference-counted relation and secret-assignment material rather
 than borrowing worker-lifetime state. Incremental proof assembly, the prover
 transcript cursor, bounded response-tree writing and scanning, retained-tree
 coordination, and the authenticated response-checkpoint boundary are release
-code with owned retained inputs. No compact generation state drives those
-components or the relation path yet. The transport validator checks canonical
+code with owned retained inputs. A release-owned compact response state now
+drives those response components with verifier-selected leaf replay, exact
+transaction yielding, cancellation, authenticated cursor restoration, and
+byte-identical genesis replay. The complete production-shaped small chain uses
+that state, but the family material provider and production worker adapter
+remain absent. The transport validator checks canonical
 bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
 bindings, and gates every verifier-derived schedule and all 82 response openings

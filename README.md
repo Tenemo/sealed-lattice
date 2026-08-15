@@ -100,8 +100,12 @@ statuses:
   worker-lifetime state. Incremental proof assembly, the prover transcript
   cursor, bounded response-tree writing and scanning, retained-tree coordination,
   and the authenticated response-checkpoint boundary are release code with
-  owned retained inputs. No compact generation state drives these components or
-  the relation path yet. Semantic and complete CFW/WHIR execution, emitted-
+  owned retained inputs. A release-owned compact response state now drives those
+  response components with verifier-selected leaf replay, exact transaction
+  yielding, cancellation, authenticated cursor restoration, and byte-identical
+  genesis replay. The complete production-shaped small chain uses that state,
+  but the family material provider and production worker adapter remain absent.
+  Semantic and complete CFW/WHIR execution, emitted-
   coordinate measurement, masking, fixed-tape and Appendix arithmetic remain
   test-only. The release
   transport validator derives the exact
@@ -1138,9 +1142,11 @@ or resource measurement. Its masks and salts now use the production action-
 private KMAC coin source under a fixed test root, and its canonical cursor
 includes both the private-coin manifest and live WHIR byte position. The exact
 cursor now enters every reduced response boundary's committed-state digest, and
-all 24 boundaries publish through the common kernel checkpoint chain. A live
-compact generation state, browser-custody external-memory join, and compact
-deterministic replay remain absent.
+all 24 boundaries publish through the common kernel checkpoint chain.
+The release-owned compact response state now drives this reduced chronology and
+reproduces its canonical proof bytes through deterministic genesis replay.
+The production family state and browser-custody external-memory join remain
+absent.
 
 The static gate remains closed because current generation does not select the
 compact profile or exercise it through a retained live authority, row-source
@@ -1230,8 +1236,12 @@ Works today, at component scope:
   and secret assignment rather than borrowing worker-lifetime state. Incremental
   proof assembly, the prover transcript cursor, bounded response-tree writing
   and scanning, retained-tree coordination, and the authenticated response-
-  checkpoint boundary are release code with owned retained inputs. No compact
-  generation state drives those components or the relation path yet.
+  checkpoint boundary are release code with owned retained inputs. A release-
+  owned compact response state now drives those response components with exact
+  transaction replay, verifier-selected leaf reconstruction, cancellation,
+  authenticated cursor restoration, and byte-identical genesis replay. The
+  complete production-shaped small chain uses that state, but the family
+  material provider and production worker adapter remain absent.
   It checks canonical bytes and gates verifier-derived schedules and 82
   response openings through the exact 161-component,
   45-construction-binding certificate, but checks no CFW or WHIR equation or

@@ -81,11 +81,16 @@ The transport validator is exported by the release WASM artifact. The scalar
 CFW prover/verifier algebra, bounded external-memory transaction driver,
 authenticated assignment loader, bounded lookup-inverse materializer, and owned
 structured-row and transpose path also compile into the release artifact but
-have no compact generation-state caller. The owned row source contains no
+have no compact family-generation caller. The owned row source contains no
 borrowed worker-lifetime state. Incremental proof assembly, the prover
 transcript cursor, bounded response-tree writing and scanning, retained-tree
 coordination, and the authenticated response-checkpoint boundary are release
-code with owned retained inputs. The semantic authority, complete CFW/WHIR
+code with owned retained inputs. A release-owned compact response state now
+drives those response components with verifier-selected leaf replay, exact
+transaction yielding, cancellation, authenticated cursor restoration, and
+byte-identical genesis replay in the complete production-shaped small chain.
+The production family and worker adapters remain incomplete. The semantic
+authority, complete CFW/WHIR
 verification, reduced execution fixtures, and the retained end-to-end
 workbench remain test-only or incomplete. No compact prover exists. The
 measurement feature contains only bounded measurement owners
