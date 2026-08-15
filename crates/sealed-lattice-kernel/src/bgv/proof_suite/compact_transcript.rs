@@ -401,6 +401,10 @@ impl CompactProverTranscript {
         self.geometry.responses().len()
     }
 
+    pub(crate) fn canonical_public_input_bytes(&self) -> &[u8] {
+        &self.canonical_public_input_bytes
+    }
+
     /// Encodes the complete canonical commitment prefix at a deterministic
     /// post-verifier-move boundary. No opaque SHAKE state is serialized.
     pub(crate) fn checkpoint_cursor(

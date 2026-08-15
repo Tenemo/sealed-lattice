@@ -108,11 +108,22 @@ statuses:
   factor-one contract to the retained setup authority, polls the exact 202
   authenticated source columns, and derives canonical public-input bytes from
   verifier-minted suite, application-statement, manifest, and relation bindings
-  before independently decoding them. Guarded selected-size evidence carries
-  that handoff through bounded lookup materialization, owned structured-row
-  preparation, and one CFW poll. The complete production-shaped small chain
-  uses the compact response state, but the later CFW and WHIR family material
-  provider and production worker adapter remain incomplete.
+  before independently decoding them. A release-owned public-key family
+  materialization state accepts the lookup challenge only through a borrowed
+  first-message authority minted by the compact response state for the same
+  proof geometry and canonical public input, then owns bounded lookup inversion
+  and structured-row preparation. Its guarded selected-size owner streams the
+  contract-derived 131,072-leaf, 64-base-element response geometry with
+  deterministic test values, completes 233 lookup polls and 760 structured-row
+  polls, and advances one CFW poll. The latest guarded native run completed in
+  160.77 seconds; its focused retained-authority-preparation-through-CFW portion
+  took 16.505 seconds, with observed peak process-tree RSS of 156,049,408 bytes
+  and peak guarded-job memory of 216,784,896 bytes. Those measurements include
+  native development setup and test response data, not an emitted WHIR
+  commitment, a complete proof, JavaScript/WASM memory, or browser-process
+  memory. The complete production-shaped small chain uses the compact response
+  state, but the later CFW and WHIR family material provider and production
+  worker adapter remain incomplete.
   Semantic and complete CFW/WHIR execution, emitted-
   coordinate measurement, masking, fixed-tape and Appendix arithmetic remain
   test-only. The release
@@ -177,7 +188,7 @@ The canonical release-WebAssembly producer is scalar-capable again. Its
 ordinary Cargo build carries no target-feature override, rejects inherited
 encoded Rust flags, and has focused tests for its feature-free argument list.
 The ordinary scalar kernel and SDK bytes now reproduce with normalized loader
-SHA-256 `83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
+SHA-256 `670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
 Those release bytes contain the compact transport validator, scalar CFW, and
 owned relation-materialization path but omit connected compact proof generation
 and complete verification.
@@ -1239,8 +1250,10 @@ Works today, at component scope:
   consume that validator.
   The scalar CFW prover/verifier algebra, bounded external-memory transaction
   driver, authenticated assignment loader, bounded lookup-inverse materializer,
-  and owned structured-row and transpose path are ordinary release code but
-  have no compact generation-state caller yet. The row source owns its relation
+  and owned structured-row and transpose path are ordinary release code. A
+  release-owned public-key family materialization state connects the
+  authenticated loader to those phases, but no common compact proof worker
+  calls it yet. The row source owns its relation
   and secret assignment rather than borrowing worker-lifetime state. Incremental
   proof assembly, the prover transcript cursor, bounded response-tree writing
   and scanning, retained-tree coordination, and the authenticated response-
@@ -1252,11 +1265,22 @@ Works today, at component scope:
   contract to the retained setup authority, polls the exact 202 authenticated
   source columns, and derives canonical public-input bytes from verifier-minted
   suite, application-statement, manifest, and relation bindings before
-  independently decoding them. Guarded selected-size evidence carries that
-  handoff through bounded lookup materialization, owned structured-row
-  preparation, and one CFW poll. The complete production-shaped small chain
-  uses the compact response state, but the later CFW and WHIR family material
-  provider and production worker adapter remain incomplete.
+  independently decoding them. A release-owned public-key family
+  materialization state accepts the lookup challenge only through a borrowed
+  first-message authority minted by the compact response state for the same
+  proof geometry and canonical public input, then owns bounded lookup inversion
+  and structured-row preparation. Its guarded selected-size owner streams the
+  contract-derived 131,072-leaf, 64-base-element response geometry with
+  deterministic test values, completes 233 lookup polls and 760 structured-row
+  polls, and advances one CFW poll. The latest guarded native run completed in
+  160.77 seconds; its focused retained-authority-preparation-through-CFW portion
+  took 16.505 seconds, with observed peak process-tree RSS of 156,049,408 bytes
+  and peak guarded-job memory of 216,784,896 bytes. Those measurements include
+  native development setup and test response data, not an emitted WHIR
+  commitment, a complete proof, JavaScript/WASM memory, or browser-process
+  memory. The complete production-shaped small chain uses the compact response
+  state, but the later CFW and WHIR family material provider and production
+  worker adapter remain incomplete.
   It checks canonical bytes and gates verifier-derived schedules and 82
   response openings through the exact 161-component,
   45-construction-binding certificate, but checks no CFW or WHIR equation or
@@ -1888,7 +1912,7 @@ Not yet:
   subsequent reproducibility gate rebuilt the scalar kernel and SDK twice and
   matched every package byte. That historical artifact is superseded. The
   current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-  `83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
+  `670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
   This is release-build and byte-copy development evidence only, not compact-
   proof or physical-phone qualification.
 - The latest retained complete theorem-registry result is

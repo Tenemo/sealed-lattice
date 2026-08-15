@@ -80,8 +80,10 @@ output, without per-query field-vector re-encoding or tuple materialization.
 The transport validator is exported by the release WASM artifact. The scalar
 CFW prover/verifier algebra, bounded external-memory transaction driver,
 authenticated assignment loader, bounded lookup-inverse materializer, and owned
-structured-row and transpose path also compile into the release artifact but
-have no compact family-generation caller. The owned row source contains no
+structured-row and transpose path also compile into the release artifact.
+A release-owned public-key family materialization state connects the
+authenticated loader to those phases, but
+the common-proof worker does not call it yet. The owned row source contains no
 borrowed worker-lifetime state. Incremental proof assembly, the prover
 transcript cursor, bounded response-tree writing and scanning, retained-tree
 coordination, and the authenticated response-checkpoint boundary are release
@@ -92,10 +94,15 @@ byte-identical genesis replay in the complete production-shaped small chain.
 A release-owned public-key family adapter also binds the frozen contract to
 the retained setup authority, polls the exact 202 authenticated source
 columns, and constructs then independently decodes canonical public input
-from verifier-minted suite, statement, manifest, and relation bindings. That
-adapter has selected-size guarded Rust coverage but is not yet called by the
-WebAssembly common-proof worker. The later CFW and WHIR family material
-adapter and production worker adapter remain incomplete. The semantic
+from verifier-minted suite, statement, manifest, and relation bindings.
+Its materialization state accepts the lookup challenge only as a borrowed
+first-message authority minted by the compact response state for the same proof
+geometry and canonical public input, then owns bounded lookup inversion and
+structured-row preparation. Selected-size guarded Rust coverage uses
+deterministic test response values at the exact contract-derived geometry; it is
+not an emitted WHIR commitment and is not yet called by the WebAssembly
+common-proof worker. The later CFW and WHIR family material adapter and
+production worker adapter remain incomplete. The semantic
 authority, complete CFW/WHIR
 verification, reduced execution fixtures, and the retained end-to-end
 workbench remain test-only or incomplete. No compact prover exists. The
@@ -108,7 +115,7 @@ compact-proof browser run, or physical-phone evidence. Its separate byte and
 work facts are not contract fields, release-WASM evidence, or
 browser evidence. The current scalar release kernel and SDK byte copy are
 byte-identical and have normalized loader SHA-256
-`83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
+`670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
 This is release-build and byte-copy development evidence only, not compact-
 proof browser or physical-phone qualification. The release bytes still omit the
 compact proof path.

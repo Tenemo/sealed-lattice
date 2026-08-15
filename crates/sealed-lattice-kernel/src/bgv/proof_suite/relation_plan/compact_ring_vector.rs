@@ -15,9 +15,10 @@ use crate::hashing::StreamingHash512;
 
 use super::super::compact_proof_contract::selected_compact_public_key_proof_contract;
 use super::super::compact_proof_wire::{
-    CompactPublicInputBindings, CompactPublicInputWireGeometry, DecodedCompactPublicInput,
-    decode_compact_public_input, encode_compact_public_input,
+    CompactProofWireGeometry, CompactPublicInputBindings, CompactPublicInputWireGeometry,
+    DecodedCompactPublicInput, decode_compact_public_input, encode_compact_public_input,
 };
+use super::super::compact_response_merkle::CompactResponseMerkleGeometry;
 use super::super::{
     CommonProofProverError, CommonProofRelationPlanCapability, CommonProofSourcePolynomialProvider,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
@@ -85,6 +86,14 @@ const CONSTRAINT_SEGMENT_RECORD_TAG: u16 = 0x0601;
     )
 )]
 mod authenticated_assignment;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the common compact proof worker consumes the release family materialization state at the next integration boundary"
+    )
+)]
+mod generation_state;
 #[cfg_attr(
     not(test),
     expect(
@@ -1111,23 +1120,20 @@ pub(crate) struct PreparedCompactPublicKeyAssignmentSources {
     source_polynomials: SetupKeyRelationSourcePolynomialAdapter,
     public_input_bindings: CompactPublicInputBindings,
     public_input_wire_geometry: CompactPublicInputWireGeometry,
+    proof_wire_geometry: CompactProofWireGeometry,
+    response_merkle_geometries: Vec<CompactResponseMerkleGeometry>,
     compact_construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
     checkpoint_schedule_digest: Hash512,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the compact common generation state consumes this release family handoff at the next integration boundary"
-    )
-)]
 pub(crate) struct PreparedCompactPublicKeyBaseAssignment {
     pub(crate) relation: CompactPublicKeyRelationCatalog,
     pub(crate) base_assignment: CompactPublicKeyBaseAssignment,
     pub(crate) public_input_bindings: CompactPublicInputBindings,
     pub(crate) canonical_public_input_bytes: Vec<u8>,
     pub(crate) decoded_public_input: DecodedCompactPublicInput,
+    pub(crate) proof_wire_geometry: CompactProofWireGeometry,
+    pub(crate) response_merkle_geometries: Vec<CompactResponseMerkleGeometry>,
     pub(crate) compact_construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
     pub(crate) checkpoint_schedule_digest: Hash512,
 }
@@ -1173,6 +1179,8 @@ impl PreparedCompactPublicKeyAssignmentSources {
             source_polynomials,
             public_input_bindings,
             public_input_wire_geometry,
+            proof_wire_geometry,
+            response_merkle_geometries,
             compact_construction_identity_hash,
             checkpoint_schedule_digest,
         } = self;
@@ -1201,6 +1209,8 @@ impl PreparedCompactPublicKeyAssignmentSources {
             public_input_bindings,
             canonical_public_input_bytes,
             decoded_public_input,
+            proof_wire_geometry,
+            response_merkle_geometries,
             compact_construction_identity_hash,
             checkpoint_schedule_digest,
         })
@@ -1260,6 +1270,8 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         Hash512::from_bytes(relation.relation_plan_variant_hash()),
     );
     let public_input_wire_geometry = verifier_inputs.public_input_wire_geometry;
+    let proof_wire_geometry = verifier_inputs.proof_wire_geometry.clone();
+    let response_merkle_geometries = verifier_inputs.response_merkle_geometries.to_vec();
     let compact_construction_identity_hash = verifier_inputs
         .canonical_source_hash()
         .map_err(|_| CommonProofProverError::InvalidInput)?
@@ -1291,6 +1303,8 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         source_polynomials,
         public_input_bindings,
         public_input_wire_geometry,
+        proof_wire_geometry,
+        response_merkle_geometries,
         compact_construction_identity_hash,
         checkpoint_schedule_digest,
     })

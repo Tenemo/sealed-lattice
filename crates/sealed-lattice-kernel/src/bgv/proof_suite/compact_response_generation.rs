@@ -191,6 +191,35 @@ pub(crate) enum CompactResponseGenerationPoll {
     Complete,
 }
 
+/// Borrowed authority for one verifier message derived by the owned compact
+/// transcript. The message cannot be detached from its logical move, proof
+/// geometry, or canonical public input before a construction consumer accepts
+/// it.
+pub(crate) struct CompactVerifierMessageAuthority<'state> {
+    logical_verifier_move_ordinal: u32,
+    proof_wire_geometry: &'state CompactProofWireGeometry,
+    canonical_public_input_bytes: &'state [u8],
+    message: &'state DecodedFixedUniformVerifierMessage,
+}
+
+impl CompactVerifierMessageAuthority<'_> {
+    pub(crate) const fn logical_verifier_move_ordinal(&self) -> u32 {
+        self.logical_verifier_move_ordinal
+    }
+
+    pub(crate) const fn proof_wire_geometry(&self) -> &CompactProofWireGeometry {
+        self.proof_wire_geometry
+    }
+
+    pub(crate) const fn canonical_public_input_bytes(&self) -> &[u8] {
+        self.canonical_public_input_bytes
+    }
+
+    pub(crate) const fn message(&self) -> &DecodedFixedUniformVerifierMessage {
+        self.message
+    }
+}
+
 struct PendingCompactResponseOpening {
     query_schedule: CompactResponseQuerySchedule,
     output: CompactResponseTreeLastUseOutput,
@@ -341,6 +370,21 @@ impl CompactResponseGenerationState {
 
     pub(crate) fn verifier_messages(&self) -> &[DecodedFixedUniformVerifierMessage] {
         &self.verifier_messages
+    }
+
+    pub(crate) fn verifier_message_authority(
+        &self,
+        logical_verifier_move_ordinal: u32,
+    ) -> Option<CompactVerifierMessageAuthority<'_>> {
+        let message = self
+            .verifier_messages
+            .get(usize::try_from(logical_verifier_move_ordinal).ok()?)?;
+        Some(CompactVerifierMessageAuthority {
+            logical_verifier_move_ordinal,
+            proof_wire_geometry: &self.proof_wire_geometry,
+            canonical_public_input_bytes: self.prover_transcript.canonical_public_input_bytes(),
+            message,
+        })
     }
 
     pub(crate) fn canonical_proof_prefix_bytes(&self) -> &[u8] {
@@ -1220,6 +1264,36 @@ mod tests {
                         .len()
                         .checked_sub(1)
                         .ok_or(CompactResponseGenerationError::WrongPhase)?;
+                    let logical_verifier_move_ordinal = u32::try_from(response_index)
+                        .map_err(|_| CompactResponseGenerationError::InvalidGeometry)?;
+                    let authority = state
+                        .verifier_message_authority(logical_verifier_move_ordinal)
+                        .ok_or(CompactResponseGenerationError::WrongPhase)?;
+                    assert_eq!(
+                        authority.logical_verifier_move_ordinal(),
+                        logical_verifier_move_ordinal
+                    );
+                    assert_eq!(
+                        authority.proof_wire_geometry(),
+                        &fixture.proof_wire_geometry
+                    );
+                    assert_eq!(
+                        authority.canonical_public_input_bytes(),
+                        fixture.canonical_public_input_bytes
+                    );
+                    assert_eq!(
+                        authority.message(),
+                        &state.verifier_messages()[response_index]
+                    );
+                    assert!(
+                        state
+                            .verifier_message_authority(
+                                logical_verifier_move_ordinal
+                                    .checked_add(1)
+                                    .ok_or(CompactResponseGenerationError::InvalidGeometry)?,
+                            )
+                            .is_none()
+                    );
                     let cursor_bytes = [
                         0xc1,
                         u8::try_from(response_index)

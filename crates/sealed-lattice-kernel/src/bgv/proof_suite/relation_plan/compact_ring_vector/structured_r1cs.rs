@@ -1247,7 +1247,7 @@ struct CompactLookupLogDerivativeEvaluationCache {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum CompactStructuredR1csRowSourcePreparationStep {
+pub(crate) enum CompactStructuredR1csRowSourcePreparationStep {
     LookupInverseSum,
     LookupTablePrefixProduct,
     LookupTableProductInversion,
@@ -3146,9 +3146,8 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     use super::super::{
-        PreparedCompactPublicKeyBaseAssignment,
-        authenticated_assignment::{
-            CompactAuthenticatedAssignmentPoll, CompactLookupInverseMaterializationPoll,
+        generation_state::{
+            CompactPublicKeyFamilyMaterializationPoll, CompactPublicKeyFamilyMaterializationState,
         },
         prepare_compact_public_key_assignment_sources,
     };
@@ -3168,7 +3167,13 @@ mod tests {
     use crate::{
         bgv::{
             proof_suite::{
-                CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
+                COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofRelationPlanCapability,
+                SelectedApplicationStatementContext,
+                compact_response_generation::{
+                    CompactOwnedResponseLeaf, CompactResponseGenerationPoll,
+                    CompactResponseGenerationState,
+                },
+                compact_response_merkle::CompactResponseLeafValueKind,
                 compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement, verified_application_statement_hash,
             },
@@ -3181,6 +3186,7 @@ mod tests {
             },
         },
         foundation::{Hash512, ProofApplicationSlot, prepare_exact_same_secret_evidence_attempt},
+        hashing::hash_framed_parts_512,
     };
 
     struct CountingCompactCfwExternalRowSource<'source, Source> {
@@ -4048,6 +4054,61 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn digest_base_field_elements(
+        digest: [u8; Hash512::BYTE_LENGTH],
+    ) -> Vec<ProofBaseFieldElement> {
+        digest
+            .chunks_exact(4)
+            .map(|chunk| {
+                ProofBaseFieldElement::from_canonical(u64::from(u32::from_le_bytes(
+                    chunk.try_into().expect("digest chunk has four bytes"),
+                )))
+                .expect("a 32-bit digest limb is a canonical base-field element")
+            })
+            .collect()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn deterministic_test_source_response_leaf(
+        base_values: &[ProofBaseFieldElement],
+        source_replay_binding: &[u8; Hash512::BYTE_LENGTH],
+        test_pre_challenge_commitment_binding: &[u8; Hash512::BYTE_LENGTH],
+        leaf_ordinal: u64,
+    ) -> (
+        CompactOwnedResponseLeaf,
+        [u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+    ) {
+        let ordinal_offset = ProofBaseFieldElement::from_canonical(leaf_ordinal)
+            .expect("the selected source-response leaf ordinal is canonical");
+        let values = base_values
+            .iter()
+            .map(|value| value.add(ordinal_offset))
+            .collect();
+        let leaf_ordinal_bytes = leaf_ordinal.to_le_bytes();
+        let first_leaf_salt_block = hash_framed_parts_512(
+            "sealed-lattice/test/compact-public-key-source-response-leaf-salt/v1",
+            &[
+                source_replay_binding,
+                test_pre_challenge_commitment_binding,
+                &leaf_ordinal_bytes,
+                &[0],
+            ],
+        );
+        let second_leaf_salt_block = hash_framed_parts_512(
+            "sealed-lattice/test/compact-public-key-source-response-leaf-salt/v1",
+            &[
+                source_replay_binding,
+                test_pre_challenge_commitment_binding,
+                &leaf_ordinal_bytes,
+                &[1],
+            ],
+        );
+        let mut leaf_salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+        leaf_salt[..Hash512::BYTE_LENGTH].copy_from_slice(&first_leaf_salt_block);
+        leaf_salt[Hash512::BYTE_LENGTH..].copy_from_slice(&second_leaf_salt_block);
+        (CompactOwnedResponseLeaf::base_field(values), leaf_salt)
+    }
+
     #[test]
     #[ignore = "manual retained compact public-key assignment gate"]
     fn heavy_rust_kernel_retained_public_key_authority_drives_one_compact_cfw_poll() {
@@ -4133,7 +4194,7 @@ mod tests {
             decoded_statement.participant_identity(),
             decoded_statement.roster_position(),
         );
-        let mut prepared_sources =
+        let prepared_sources =
             with_exclusive_setup_generation_compact_public_key_development_relation::<
                 _,
                 SetupKeyRelationGenerationPreparationError,
@@ -4167,19 +4228,26 @@ mod tests {
 
         let phase_started_at = Instant::now();
         println!("compact public-key focused owner phase: load 202 authenticated columns");
+        let expected_relation_plan_variant_hash = prepared_sources
+            .relation_plan_variant
+            .canonical_hash()
+            .expect("compact variant hash");
+        let mut family_materialization_state =
+            CompactPublicKeyFamilyMaterializationState::new(prepared_sources);
         let mut loaded_column_ordinals = Vec::new();
         loop {
-            match prepared_sources
-                .poll_source_loading()
-                .expect("retained compact source poll")
+            match family_materialization_state
+                .poll(8_192)
+                .expect("retained compact family materialization poll")
             {
-                CompactAuthenticatedAssignmentPoll::AuthenticatedSourceReadRequired => {
+                CompactPublicKeyFamilyMaterializationPoll::AuthenticatedSourceReadRequired => {
                     panic!("retained setup authority must not request caller source bytes")
                 }
-                CompactAuthenticatedAssignmentPoll::SourceLoaded { column_ordinal } => {
+                CompactPublicKeyFamilyMaterializationPoll::SourceLoaded { column_ordinal } => {
                     loaded_column_ordinals.push(column_ordinal);
                 }
-                CompactAuthenticatedAssignmentPoll::Complete => break,
+                CompactPublicKeyFamilyMaterializationPoll::SourcesComplete => break,
+                unexpected => panic!("unexpected source-loading poll: {unexpected:?}"),
             }
         }
         assert_eq!(loaded_column_ordinals.len(), 202);
@@ -4188,103 +4256,229 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0] < pair[1])
         );
-        let PreparedCompactPublicKeyBaseAssignment {
-            relation,
-            base_assignment,
-            public_input_bindings,
-            canonical_public_input_bytes,
-            decoded_public_input,
-            compact_construction_identity_hash,
-            checkpoint_schedule_digest,
-        } = prepared_sources
-            .finish_source_loading()
-            .expect("completed compact source loading releases its authority");
         assert_eq!(
-            public_input_bindings,
-            crate::bgv::proof_suite::compact_proof_wire::CompactPublicInputBindings::new(
-                Hash512::from_bytes(preparation_source.suite_identifier()),
-                application_statement_hash,
-                Hash512::from_bytes(preparation_source.manifest_hash()),
-                Hash512::from_bytes(relation.relation_plan_variant_hash()),
-            )
+            family_materialization_state
+                .poll(8_192)
+                .expect("the compact family waits for its transcript lookup message"),
+            CompactPublicKeyFamilyMaterializationPoll::LookupVerifierMessageRequired
         );
-        assert_eq!(
-            public_input_bindings.relation_plan_hash().into_bytes(),
-            relation.relation_plan_variant_hash()
-        );
-        assert_eq!(
-            decoded_public_input.canonical_byte_length(),
-            canonical_public_input_bytes.len()
-        );
-        assert!(!canonical_public_input_bytes.is_empty());
         let selected_compact_contract =
             crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
                 .expect("the frozen compact public-key contract decodes");
-        assert_eq!(
+        let (
+            mut response_generation_state,
+            source_response_base_values,
+            source_response_leaf_count,
+            source_response_round_salt,
+            test_pre_challenge_commitment_binding,
             compact_construction_identity_hash,
-            selected_compact_contract
-                .verifier_inputs()
-                .canonical_source_hash()
-                .expect("the frozen compact contract identity derives")
-                .into_bytes()
-        );
-        assert_eq!(
             checkpoint_schedule_digest,
-            selected_compact_contract
-                .verifier_inputs()
-                .checkpoint_schedule
-                .checkpoint_schedule_digest()
-        );
-        let relation = Rc::new(relation);
-        assert_ne!(base_assignment.source_replay_binding(), [0_u8; 64]);
+            source_replay_binding,
+        ) = {
+            let pre_lookup_material = family_materialization_state
+                .pre_lookup_material()
+                .expect("loaded compact sources expose bound pre-lookup material");
+            let expected_public_input_bindings =
+                crate::bgv::proof_suite::compact_proof_wire::CompactPublicInputBindings::new(
+                    Hash512::from_bytes(preparation_source.suite_identifier()),
+                    application_statement_hash,
+                    Hash512::from_bytes(preparation_source.manifest_hash()),
+                    Hash512::from_bytes(expected_relation_plan_variant_hash),
+                );
+            assert_eq!(
+                pre_lookup_material.public_input_bindings(),
+                expected_public_input_bindings
+            );
+            assert_eq!(
+                pre_lookup_material
+                    .public_input_bindings()
+                    .relation_plan_hash()
+                    .into_bytes(),
+                expected_relation_plan_variant_hash
+            );
+            assert_eq!(
+                pre_lookup_material
+                    .decoded_public_input()
+                    .canonical_byte_length(),
+                pre_lookup_material.canonical_public_input_bytes().len()
+            );
+            assert!(
+                !pre_lookup_material
+                    .canonical_public_input_bytes()
+                    .is_empty()
+            );
+            assert_eq!(
+                pre_lookup_material.proof_wire_geometry(),
+                selected_compact_contract
+                    .verifier_inputs()
+                    .proof_wire_geometry
+            );
+            assert_eq!(
+                pre_lookup_material.response_merkle_geometries(),
+                selected_compact_contract
+                    .verifier_inputs()
+                    .response_merkle_geometries
+            );
+            let compact_construction_identity_hash =
+                pre_lookup_material.compact_construction_identity_hash();
+            let checkpoint_schedule_digest = pre_lookup_material.checkpoint_schedule_digest();
+            let source_replay_binding = pre_lookup_material.source_replay_binding();
+            assert_eq!(
+                compact_construction_identity_hash,
+                selected_compact_contract
+                    .verifier_inputs()
+                    .canonical_source_hash()
+                    .expect("the frozen compact contract identity derives")
+                    .into_bytes()
+            );
+            assert_eq!(
+                checkpoint_schedule_digest,
+                selected_compact_contract
+                    .verifier_inputs()
+                    .checkpoint_schedule
+                    .checkpoint_schedule_digest()
+            );
+            assert_ne!(source_replay_binding, [0_u8; Hash512::BYTE_LENGTH]);
+
+            let [source_response_component] =
+                pre_lookup_material.response_merkle_geometries()[0].components()
+            else {
+                panic!("the selected source response must contain one component")
+            };
+            assert_eq!(source_response_component.first_leaf_ordinal(), 0);
+            assert_eq!(
+                source_response_component.leaf_count(),
+                pre_lookup_material.response_merkle_geometries()[0].merkle_leaf_count()
+            );
+            assert!(source_response_component.leaf_count().is_power_of_two());
+            assert_eq!(
+                source_response_component.value_kind(),
+                CompactResponseLeafValueKind::BaseField
+            );
+            let test_pre_challenge_commitment_binding = hash_framed_parts_512(
+                "sealed-lattice/test/compact-public-key-pre-challenge-commitment/v1",
+                &[&compact_construction_identity_hash, &source_replay_binding],
+            );
+            let source_response_element_count =
+                usize::try_from(source_response_component.field_element_count_per_leaf())
+                    .expect("the selected source-response width fits usize");
+            let mut source_response_values = Vec::with_capacity(source_response_element_count);
+            let mut source_response_block_ordinal = 0_u64;
+            while source_response_values.len() < source_response_element_count {
+                source_response_values.extend(digest_base_field_elements(hash_framed_parts_512(
+                    "sealed-lattice/test/compact-public-key-source-response-values/v1",
+                    &[
+                        &source_replay_binding,
+                        &test_pre_challenge_commitment_binding,
+                        &source_response_block_ordinal.to_le_bytes(),
+                    ],
+                )));
+                source_response_block_ordinal = source_response_block_ordinal
+                    .checked_add(1)
+                    .expect("the selected source-response block count fits u64");
+            }
+            source_response_values.truncate(source_response_element_count);
+            assert_eq!(
+                u64::try_from(source_response_values.len())
+                    .expect("source response element count fits u64"),
+                source_response_component.field_element_count_per_leaf()
+            );
+            let source_response_round_salt = hash_framed_parts_512(
+                "sealed-lattice/test/compact-public-key-source-response-round-salt/v1",
+                &[
+                    &source_replay_binding,
+                    &test_pre_challenge_commitment_binding,
+                ],
+            );
+            let response_generation_state = CompactResponseGenerationState::new(
+                pre_lookup_material.proof_wire_geometry(),
+                pre_lookup_material.response_merkle_geometries(),
+                pre_lookup_material.decoded_public_input(),
+                pre_lookup_material.canonical_public_input_bytes(),
+            )
+            .expect("the selected compact response state starts");
+            (
+                response_generation_state,
+                source_response_values,
+                source_response_component.leaf_count(),
+                source_response_round_salt,
+                test_pre_challenge_commitment_binding,
+                compact_construction_identity_hash,
+                checkpoint_schedule_digest,
+                source_replay_binding,
+            )
+        };
         println!(
             "compact public-key focused owner phase complete: load 202 authenticated columns elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
 
         let phase_started_at = Instant::now();
-        println!("compact public-key focused owner phase: materialize lookup inverses");
-        let lookup_challenge =
-            ProofChallengeExtensionElement::from_canonical_coordinates([7, 1, 2, 3, 4])
-                .expect("non-base lookup challenge");
-        let mut lookup_materializer = base_assignment
-            .begin_lookup_inverse_materialization(lookup_challenge)
-            .expect("bounded lookup materialization starts");
-        let mut lookup_materialization_poll_count = 0_u64;
-        while let CompactLookupInverseMaterializationPoll::ArithmeticStepCompleted {
-            processed_element_count,
-        } = lookup_materializer
-            .advance(8_192)
-            .expect("bounded lookup materialization poll")
-        {
-            assert!((1..=8_192).contains(&processed_element_count));
-            lookup_materialization_poll_count += 1;
+        println!("compact public-key focused owner phase: derive transcript lookup message");
+        let mut response_storage = TestStorage::default();
+        loop {
+            match response_generation_state
+                .poll(&mut response_storage)
+                .expect("the source response advances")
+            {
+                CompactResponseGenerationPoll::ResponseRequired {
+                    response_ordinal: 0,
+                } => response_generation_state
+                    .begin_response(source_response_round_salt)
+                    .expect("the source response starts"),
+                CompactResponseGenerationPoll::ResponseLeafRequired {
+                    response_ordinal: 0,
+                    leaf_ordinal,
+                } => {
+                    assert!(leaf_ordinal < source_response_leaf_count);
+                    let (source_response_leaf, leaf_salt) = deterministic_test_source_response_leaf(
+                        &source_response_base_values,
+                        &source_replay_binding,
+                        &test_pre_challenge_commitment_binding,
+                        leaf_ordinal,
+                    );
+                    response_generation_state
+                        .supply_next_response_leaf(&source_response_leaf, &leaf_salt)
+                        .expect("the source response leaf is supplied");
+                }
+                CompactResponseGenerationPoll::ArithmeticStepCompleted
+                | CompactResponseGenerationPoll::StorageTransactionCompleted => {}
+                CompactResponseGenerationPoll::CheckpointCursorRequired => {
+                    let lookup_message_authority = response_generation_state
+                        .verifier_message_authority(0)
+                        .expect("the source response mints the lookup message authority");
+                    family_materialization_state
+                        .supply_lookup_verifier_message(lookup_message_authority)
+                        .expect("the bound transcript message starts lookup materialization");
+                    break;
+                }
+                unexpected => panic!("unexpected source-response poll: {unexpected:?}"),
+            }
         }
-        assert_eq!(lookup_materialization_poll_count, 233);
-        let assignment = Rc::new(
-            lookup_materializer
-                .finish()
-                .expect("bounded lookup materialization finishes"),
-        );
+        response_generation_state
+            .cancel(&mut response_storage)
+            .expect("the partial response state releases its retained tree");
         println!(
-            "compact public-key focused owner phase complete: materialize lookup inverses elapsed_milliseconds={}",
+            "compact public-key focused owner phase complete: derive transcript lookup message elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
 
         let phase_started_at = Instant::now();
-        println!("compact public-key focused owner phase: prepare structured row source");
-        let mut row_source_preparation = CompactStructuredR1csRowSourcePreparation::new(
-            Rc::clone(&relation),
-            Rc::clone(&assignment),
-        )
-        .expect("production assignment starts structured row preparation");
+        println!("compact public-key focused owner phase: materialize lookup and structured rows");
+        let mut lookup_materialization_poll_count = 0_u64;
         let mut row_source_preparation_poll_count = 0_u64;
-        let row_source = loop {
-            match row_source_preparation
-                .advance(8_192)
-                .expect("bounded production row-source preparation poll")
+        loop {
+            match family_materialization_state
+                .poll(8_192)
+                .expect("bounded compact family materialization poll")
             {
-                CompactStructuredR1csRowSourcePreparationPoll::StepCompleted {
+                CompactPublicKeyFamilyMaterializationPoll::LookupInverseArithmeticStepCompleted {
+                    processed_element_count,
+                } => {
+                    assert!((1..=8_192).contains(&processed_element_count));
+                    lookup_materialization_poll_count += 1;
+                }
+                CompactPublicKeyFamilyMaterializationPoll::StructuredRowSourceStepCompleted {
                     step,
                     completed_work_unit_count,
                 } => {
@@ -4297,17 +4491,74 @@ mod tests {
                     assert!((1..=maximum_work_unit_count).contains(&completed_work_unit_count));
                     row_source_preparation_poll_count += 1;
                 }
-                CompactStructuredR1csRowSourcePreparationPoll::Complete(row_source) => {
-                    break *row_source;
-                }
+                CompactPublicKeyFamilyMaterializationPoll::Complete => break,
+                unexpected => panic!("unexpected family-materialization poll: {unexpected:?}"),
             }
-        };
-        drop(row_source_preparation);
-        assert_eq!(Rc::strong_count(&relation), 2);
-        assert_eq!(Rc::strong_count(&assignment), 2);
+        }
+        assert_eq!(lookup_materialization_poll_count, 233);
         assert_eq!(row_source_preparation_poll_count, 760);
+        let family_material = family_materialization_state
+            .finish()
+            .expect("the compact public-key family material is ready");
+        assert_eq!(
+            family_material.public_input_bindings(),
+            crate::bgv::proof_suite::compact_proof_wire::CompactPublicInputBindings::new(
+                Hash512::from_bytes(preparation_source.suite_identifier()),
+                application_statement_hash,
+                Hash512::from_bytes(preparation_source.manifest_hash()),
+                Hash512::from_bytes(expected_relation_plan_variant_hash),
+            )
+        );
+        assert_eq!(
+            family_material
+                .decoded_public_input()
+                .canonical_byte_length(),
+            family_material.canonical_public_input_bytes().len()
+        );
+        assert_eq!(
+            family_material.proof_wire_geometry(),
+            selected_compact_contract
+                .verifier_inputs()
+                .proof_wire_geometry
+        );
+        assert_eq!(
+            family_material.response_merkle_geometries(),
+            selected_compact_contract
+                .verifier_inputs()
+                .response_merkle_geometries
+        );
+        assert_eq!(
+            family_material.compact_construction_identity_hash(),
+            compact_construction_identity_hash
+        );
+        assert_eq!(
+            family_material.checkpoint_schedule_digest(),
+            checkpoint_schedule_digest
+        );
+        assert_eq!(
+            family_material.source_replay_binding(),
+            source_replay_binding
+        );
+        assert_eq!(
+            family_material.witness_length(),
+            u64::try_from(
+                CompactCfwExternalRowSource::witness_length(family_material.row_source())
+                    .expect("production witness length fits usize")
+            )
+            .expect("production witness length fits u64")
+        );
+        assert_eq!(
+            family_material.row_count(),
+            u64::try_from(
+                CompactCfwExternalRowSource::row_count(family_material.row_source())
+                    .expect("production row count fits usize")
+            )
+            .expect("production row count fits u64")
+        );
+        let relation = family_material.relation();
+        let row_source = family_material.row_source();
         println!(
-            "compact public-key focused owner phase complete: prepare structured row source elapsed_milliseconds={}",
+            "compact public-key focused owner phase complete: materialize lookup and structured rows elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
 
@@ -4355,7 +4606,7 @@ mod tests {
         let phase_started_at = Instant::now();
         println!("compact public-key focused owner phase: advance one compact CFW poll");
         let compact_geometry = CompactCfwGeometry::derive(
-            CompactCfwExternalRowSource::witness_length(&row_source)
+            CompactCfwExternalRowSource::witness_length(row_source)
                 .expect("production witness length fits CFW"),
         )
         .expect("production row source has compact CFW geometry");
@@ -4391,7 +4642,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let counting_row_source = CountingCompactCfwExternalRowSource {
-            source: &row_source,
+            source: row_source,
             evaluated_row_count: Cell::new(0),
         };
         let mut external_prover = CompactCfwExternalProverState::prepare(

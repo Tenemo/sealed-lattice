@@ -63,7 +63,7 @@ package, Node, 1,218-entry ordinary Rust, and Chromium lane. Its scalar WASM and
 SDK bytes reproduced, and all 35 retained theorem-registry members passed under
 the serialized guard. That graph's artifact is superseded. The current scalar
 release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-`83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
+`670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
 This is release-build and byte-copy development evidence only, not proof or
 physical-phone qualification. The retained results validate only that recorded
 dirty state. They predate the later
@@ -96,11 +96,17 @@ A release-owned public-key family adapter now joins the frozen factor-one
 contract to the retained setup authority, polls the exact 202 authenticated
 source columns, and derives canonical public-input bytes from verifier-minted
 suite, application-statement, manifest, and relation bindings before
-independently decoding them. Guarded selected-size evidence carries that
-handoff through bounded lookup materialization, owned structured-row
-preparation, and one CFW poll. The complete production-shaped small chain
-uses the compact response state, but the later CFW and WHIR family material
-provider and production worker adapter remain incomplete.
+independently decoding them. A release-owned public-key family
+materialization state accepts the lookup challenge only through a borrowed
+first-message authority minted by the compact response state for the same proof
+geometry and canonical public input, then owns bounded lookup inversion and
+structured-row preparation. The guarded owner streams the contract-derived
+131,072-leaf, 64-base-element response geometry with deterministic test values,
+completes 233 lookup polls and 760 structured-row polls, and advances one CFW
+poll. It does not yet bind an emitted production WHIR commitment to that first
+response. The complete production-shaped small chain uses the compact response
+state, but the later CFW and WHIR family material provider and production worker
+adapter remain incomplete.
 Semantic and complete CFW/WHIR execution,
 Merkle privacy, masking, emitted-coordinate measurement, fixed-tape and
 Appendix arithmetic remain test-only or incomplete. The
@@ -223,8 +229,10 @@ execution, verifier-message derivation, and salted-opening verification are
 ordinary release code. The Rust/WebAssembly ABI and TypeScript worker caller
 consume that boundary. The scalar CFW prover/verifier algebra, bounded
 external-memory transaction driver, authenticated assignment loader, bounded
-lookup-inverse materializer, and owned structured-row and transpose path are
-ordinary release code but have no compact generation-state caller. The row
+lookup-inverse materializer, and owned structured-row and transpose path
+are ordinary release code. A release-owned public-key family materialization
+state connects the authenticated
+loader to those phases, but no common compact proof worker calls it yet. The row
 source owns reference-counted relation and secret-assignment material rather
 than borrowing worker-lifetime state. Incremental proof assembly, the prover
 transcript cursor, bounded response-tree writing and scanning, retained-tree
@@ -237,11 +245,17 @@ A release-owned public-key family adapter now joins the frozen factor-one
 contract to the retained setup authority, polls the exact 202 authenticated
 source columns, and derives canonical public-input bytes from verifier-minted
 suite, application-statement, manifest, and relation bindings before
-independently decoding them. Guarded selected-size evidence carries that
-handoff through bounded lookup materialization, owned structured-row
-preparation, and one CFW poll. The complete production-shaped small chain
-uses the compact response state, but the later CFW and WHIR family material
-provider and production worker adapter remain incomplete.
+independently decoding them. A release-owned public-key family
+materialization state accepts the lookup challenge only through a borrowed
+first-message authority minted by the compact response state for the same proof
+geometry and canonical public input, then owns bounded lookup inversion and
+structured-row preparation. The guarded owner streams the contract-derived
+131,072-leaf, 64-base-element response geometry with deterministic test values,
+completes 233 lookup polls and 760 structured-row polls, and advances one CFW
+poll. It does not yet bind an emitted production WHIR commitment to that first
+response. The complete production-shaped small chain uses the compact response
+state, but the later CFW and WHIR family material provider and production worker
+adapter remain incomplete.
 The transport validator checks canonical
 bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
@@ -379,7 +393,7 @@ the snapshot is the newest state.
   checkpoint, runtime, and package evidence is not one reconciled exact-ten
   authority.
 - `SEC-019`: The current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-  `83b17d2c1be48cdd03cd7be1fbe8147944002e2c9b74142cf0c56eef1a7b96e8`.
+  `670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
   This is release-build and byte-copy development evidence only, and the
   retained ordinary desktop-browser graph remains historical. The release build
   contains compact relation materialization but still omits compact proof
@@ -391,11 +405,11 @@ the snapshot is the newest state.
   owned structured-row preparation and transpose, the codec, transport gate,
   scalar CFW, incremental proof assembly, the prover transcript cursor, bounded
   response-tree custody, and authenticated response-checkpoint construction
-  compile into release bytes. Reduced CFW/WHIR lifecycle owners still provide
-  development evidence only. Selected-size
-  production execution, response values, unified transcript, authenticated
-  restart, CFW-to-WHIR invocation, resource reconciliation, and browser
-  execution remain unresolved.
+  compile into release bytes. Selected-size compact source preparation now has
+  guarded native phase evidence through a transcript-minted lookup challenge,
+  bounded structured-row materialization, and one CFW poll. Actual WHIR response
+  values, complete proof execution, authenticated restart, full resource
+  reconciliation, and browser execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody. Persistence request and recheck, quota admission, eviction
   qualification, and externally anchored coherent-rollback detection are
