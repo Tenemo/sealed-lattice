@@ -15,20 +15,31 @@ use p3_matrix::Matrix;
 
 use crate::bgv::proof_suite::{
     ProofBaseFieldElement,
-    compact_generation_randomness::CompactGenerationAttemptRandomness,
+    compact_generation_randomness::{
+        COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH, CompactGenerationAttemptRandomness,
+        CompactGenerationRandomnessCursorError,
+    },
     compact_proof_contract::selected_compact_public_key_proof_contract,
     compact_proof_wire::{
         CompactProofWireGeometry, CompactPublicInputBindings, DecodedCompactPublicInput,
     },
-    compact_response_generation::{CompactOwnedResponseLeaf, CompactVerifierMessageAuthority},
+    compact_response_generation::{
+        CompactOwnedResponseLeaf, CompactResponseGenerationError, CompactResponseGenerationPoll,
+        CompactResponseGenerationPollError, CompactResponseGenerationState,
+        CompactVerifierMessageAuthority,
+    },
     compact_response_merkle::{CompactResponseLeafValueKind, CompactResponseMerkleGeometry},
     compact_whir::{
         CompactWhirEncodedInitialOracle, CompactWhirError, compact_whir_configuration_from_contract,
     },
+    external_memory::ProofExternalMemory,
     fixed_uniform_verifier_message::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
     },
-    prover::{CommonProofPrivateCoinSource, CommonProofProverError},
+    prover::{
+        CommonProofGenerationCheckpointBoundary, CommonProofPrivateCoinSource,
+        CommonProofProverError,
+    },
 };
 use crate::foundation::Hash512;
 use crate::hashing::hash_framed_parts_512;
@@ -129,6 +140,47 @@ pub(crate) enum CompactPublicKeyFamilyMaterializationPoll {
     Complete,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactPublicKeyGenerationPoll {
+    AuthenticatedSourceReadRequired,
+    SourceLoaded {
+        column_ordinal: u32,
+    },
+    SourcesComplete,
+    PreChallengeSourceEncoded,
+    ResponseLeafSupplied {
+        leaf_ordinal: u64,
+    },
+    OpenedResponseLeafSupplied {
+        leaf_ordinal: u64,
+    },
+    ResponseArithmeticStepCompleted,
+    ResponseStorageTransactionCompleted,
+    PreChallengeCheckpointReady,
+    LookupInverseArithmeticStepCompleted {
+        processed_element_count: u64,
+    },
+    StructuredRowSourceStepCompleted {
+        step: CompactStructuredR1csRowSourcePreparationStep,
+        completed_work_unit_count: u64,
+    },
+    FamilyMaterializationComplete,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CompactPublicKeyGenerationError<PrivateCoinError, StorageError> {
+    FamilyMaterialization(CompactPublicKeyFamilyMaterializationError),
+    PreChallengeEncoding(CompactPublicKeyPreChallengeEncodingError<PrivateCoinError>),
+    ResponseGeneration(CompactResponseGenerationError),
+    ResponsePoll(CompactResponseGenerationPollError<StorageError>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactPublicKeyGenerationInitializationError {
+    FamilyMaterialization(CompactPublicKeyFamilyMaterializationError),
+    ResponseGeneration(CompactResponseGenerationError),
+}
+
 struct CompactPublicKeyFamilyMetadata {
     relation: Rc<CompactPublicKeyRelationCatalog>,
     public_input_bindings: CompactPublicInputBindings,
@@ -201,6 +253,15 @@ pub(crate) struct CompactPublicKeyFamilyMaterializationState {
     phase: CompactPublicKeyFamilyMaterializationPhase,
 }
 
+/// Owns the selected public-key family through its first authenticated compact
+/// response boundary. The retained response state and family material continue
+/// into CFW and the main WHIR epoch; this state cannot emit a proof by itself.
+pub(crate) struct CompactPublicKeyGenerationState {
+    family_materialization_state: CompactPublicKeyFamilyMaterializationState,
+    response_generation_state: Option<CompactResponseGenerationState>,
+    proof_attempt_identifier: [u8; 32],
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct CompactPublicKeyPreLookupMaterialView<'state> {
     public_input_bindings: CompactPublicInputBindings,
@@ -222,7 +283,287 @@ pub(crate) struct CompactPublicKeyPreChallengeMaterial {
     encoded_oracle: CompactWhirEncodedInitialOracle,
     randomness: CompactGenerationAttemptRandomness,
     response_leaf_count: u64,
-    response_field_element_count_per_leaf: u64,
+}
+
+pub(crate) struct PreparedCompactPublicKeyMainEpoch {
+    family_material: CompactPublicKeyFamilyMaterial,
+    response_generation_state: CompactResponseGenerationState,
+}
+
+impl CompactPublicKeyGenerationState {
+    pub(crate) fn new(
+        sources: PreparedCompactPublicKeyAssignmentSources,
+        proof_attempt_identifier: [u8; 32],
+    ) -> Self {
+        Self {
+            family_materialization_state: CompactPublicKeyFamilyMaterializationState::new(sources),
+            response_generation_state: None,
+            proof_attempt_identifier,
+        }
+    }
+
+    pub(crate) fn checkpoint_boundary(&self) -> Option<CommonProofGenerationCheckpointBoundary> {
+        self.response_generation_state
+            .as_ref()?
+            .checkpoint_boundary()
+            .cloned()
+    }
+
+    pub(crate) fn pre_lookup_material(&self) -> Option<CompactPublicKeyPreLookupMaterialView<'_>> {
+        self.family_materialization_state.pre_lookup_material()
+    }
+
+    pub(crate) fn poll_source_loading(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactPublicKeyGenerationPoll, CompactPublicKeyGenerationInitializationError> {
+        match self
+            .family_materialization_state
+            .poll(maximum_work_unit_count)
+            .map_err(CompactPublicKeyGenerationInitializationError::FamilyMaterialization)?
+        {
+            CompactPublicKeyFamilyMaterializationPoll::AuthenticatedSourceReadRequired => {
+                Ok(CompactPublicKeyGenerationPoll::AuthenticatedSourceReadRequired)
+            }
+            CompactPublicKeyFamilyMaterializationPoll::SourceLoaded { column_ordinal } => {
+                Ok(CompactPublicKeyGenerationPoll::SourceLoaded { column_ordinal })
+            }
+            CompactPublicKeyFamilyMaterializationPoll::SourcesComplete => {
+                self.initialize_response_generation_state()
+                    .map_err(CompactPublicKeyGenerationInitializationError::ResponseGeneration)?;
+                Ok(CompactPublicKeyGenerationPoll::SourcesComplete)
+            }
+            _ => Err(
+                CompactPublicKeyGenerationInitializationError::FamilyMaterialization(
+                    CompactPublicKeyFamilyMaterializationError::WrongPhase,
+                ),
+            ),
+        }
+    }
+
+    pub(crate) fn restore_authenticated_checkpoint_transcript_cursor(
+        &mut self,
+        canonical_cursor_bytes: &[u8],
+        expected_cursor_digest: [u8; Hash512::BYTE_LENGTH],
+    ) -> Result<(), CompactResponseGenerationError> {
+        self.response_generation_state
+            .as_mut()
+            .ok_or(CompactResponseGenerationError::WrongPhase)?
+            .restore_authenticated_checkpoint_transcript_cursor(
+                canonical_cursor_bytes,
+                expected_cursor_digest,
+            )
+    }
+
+    pub(crate) fn canonical_randomness_checkpoint_cursor_bytes(
+        &self,
+    ) -> Option<[u8; COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH]> {
+        Some(
+            self.family_materialization_state
+                .pre_challenge_material()?
+                .canonical_randomness_checkpoint_cursor_bytes(),
+        )
+    }
+
+    pub(crate) fn validate_authenticated_randomness_checkpoint_cursor(
+        &self,
+        canonical_cursor_bytes: &[u8],
+    ) -> Result<(), CompactGenerationRandomnessCursorError> {
+        self.family_materialization_state
+            .pre_challenge_material()
+            .ok_or(CompactGenerationRandomnessCursorError::WrongLiveCursor)?
+            .randomness
+            .validate_checkpoint_cursor_bytes(canonical_cursor_bytes)
+    }
+
+    pub(crate) fn poll<Coins, Storage>(
+        &mut self,
+        maximum_work_unit_count: u64,
+        private_coins: &mut Coins,
+        storage: &mut Storage,
+    ) -> Result<
+        CompactPublicKeyGenerationPoll,
+        CompactPublicKeyGenerationError<Coins::Error, Storage::Error>,
+    >
+    where
+        Coins: CommonProofPrivateCoinSource,
+        Storage: ProofExternalMemory,
+    {
+        let family_poll = self
+            .family_materialization_state
+            .poll(maximum_work_unit_count)
+            .map_err(CompactPublicKeyGenerationError::FamilyMaterialization)?;
+        match family_poll {
+            CompactPublicKeyFamilyMaterializationPoll::AuthenticatedSourceReadRequired => {
+                Ok(CompactPublicKeyGenerationPoll::AuthenticatedSourceReadRequired)
+            }
+            CompactPublicKeyFamilyMaterializationPoll::SourceLoaded { column_ordinal } => {
+                Ok(CompactPublicKeyGenerationPoll::SourceLoaded { column_ordinal })
+            }
+            CompactPublicKeyFamilyMaterializationPoll::SourcesComplete => {
+                self.initialize_response_generation_state()
+                    .map_err(CompactPublicKeyGenerationError::ResponseGeneration)?;
+                Ok(CompactPublicKeyGenerationPoll::SourcesComplete)
+            }
+            CompactPublicKeyFamilyMaterializationPoll::PreChallengeEncodingRequired => {
+                self.family_materialization_state
+                    .encode_pre_challenge_source(private_coins, self.proof_attempt_identifier)
+                    .map_err(CompactPublicKeyGenerationError::PreChallengeEncoding)?;
+                Ok(CompactPublicKeyGenerationPoll::PreChallengeSourceEncoded)
+            }
+            CompactPublicKeyFamilyMaterializationPoll::LookupVerifierMessageRequired => {
+                self.poll_pre_challenge_response(storage)
+            }
+            CompactPublicKeyFamilyMaterializationPoll::LookupInverseArithmeticStepCompleted {
+                processed_element_count,
+            } => Ok(
+                CompactPublicKeyGenerationPoll::LookupInverseArithmeticStepCompleted {
+                    processed_element_count,
+                },
+            ),
+            CompactPublicKeyFamilyMaterializationPoll::StructuredRowSourceStepCompleted {
+                step,
+                completed_work_unit_count,
+            } => Ok(
+                CompactPublicKeyGenerationPoll::StructuredRowSourceStepCompleted {
+                    step,
+                    completed_work_unit_count,
+                },
+            ),
+            CompactPublicKeyFamilyMaterializationPoll::Complete => {
+                Ok(CompactPublicKeyGenerationPoll::FamilyMaterializationComplete)
+            }
+        }
+    }
+
+    pub(crate) fn finish(
+        self,
+    ) -> Result<PreparedCompactPublicKeyMainEpoch, CompactPublicKeyFamilyMaterializationError> {
+        let response_generation_state = self
+            .response_generation_state
+            .filter(|state| state.checkpoint_boundary().is_some())
+            .ok_or(CompactPublicKeyFamilyMaterializationError::WrongPhase)?;
+        Ok(PreparedCompactPublicKeyMainEpoch {
+            family_material: self.family_materialization_state.finish()?,
+            response_generation_state,
+        })
+    }
+
+    fn initialize_response_generation_state(
+        &mut self,
+    ) -> Result<(), CompactResponseGenerationError> {
+        if self.response_generation_state.is_some() {
+            return Err(CompactResponseGenerationError::WrongPhase);
+        }
+        let pre_lookup_material = self
+            .family_materialization_state
+            .pre_lookup_material()
+            .ok_or(CompactResponseGenerationError::WrongPhase)?;
+        let response_generation_state = CompactResponseGenerationState::new(
+            pre_lookup_material.proof_wire_geometry(),
+            pre_lookup_material.response_merkle_geometries(),
+            pre_lookup_material.decoded_public_input(),
+            pre_lookup_material.canonical_public_input_bytes(),
+        )?;
+        self.response_generation_state = Some(response_generation_state);
+        Ok(())
+    }
+
+    fn poll_pre_challenge_response<PrivateCoinError, Storage>(
+        &mut self,
+        storage: &mut Storage,
+    ) -> Result<
+        CompactPublicKeyGenerationPoll,
+        CompactPublicKeyGenerationError<PrivateCoinError, Storage::Error>,
+    >
+    where
+        Storage: ProofExternalMemory,
+    {
+        let Self {
+            family_materialization_state,
+            response_generation_state,
+            ..
+        } = self;
+        let pre_challenge_material = family_materialization_state
+            .pre_challenge_material()
+            .ok_or(CompactPublicKeyGenerationError::FamilyMaterialization(
+                CompactPublicKeyFamilyMaterializationError::WrongPhase,
+            ))?;
+        let response_generation_state = response_generation_state.as_mut().ok_or(
+            CompactPublicKeyGenerationError::ResponseGeneration(
+                CompactResponseGenerationError::WrongPhase,
+            ),
+        )?;
+        match response_generation_state
+            .poll(storage)
+            .map_err(CompactPublicKeyGenerationError::ResponsePoll)?
+        {
+            CompactResponseGenerationPoll::ResponseRequired {
+                response_ordinal: 0,
+            } => {
+                response_generation_state
+                    .begin_response(pre_challenge_material.fiat_shamir_round_salt())
+                    .map_err(CompactPublicKeyGenerationError::ResponseGeneration)?;
+                Ok(CompactPublicKeyGenerationPoll::ResponseArithmeticStepCompleted)
+            }
+            CompactResponseGenerationPoll::ResponseLeafRequired {
+                response_ordinal: 0,
+                leaf_ordinal,
+            } => {
+                let leaf = pre_challenge_material
+                    .response_leaf(leaf_ordinal)
+                    .map_err(CompactPublicKeyGenerationError::FamilyMaterialization)?;
+                let leaf_salt = pre_challenge_material.response_leaf_salt(leaf_ordinal, &leaf);
+                response_generation_state
+                    .supply_next_response_leaf(&leaf, &leaf_salt)
+                    .map_err(CompactPublicKeyGenerationError::ResponseGeneration)?;
+                Ok(CompactPublicKeyGenerationPoll::ResponseLeafSupplied { leaf_ordinal })
+            }
+            CompactResponseGenerationPoll::OpenedLeafRequired {
+                response_ordinal: 0,
+                leaf_ordinal,
+            } => {
+                let leaf = pre_challenge_material
+                    .response_leaf(leaf_ordinal)
+                    .map_err(CompactPublicKeyGenerationError::FamilyMaterialization)?;
+                let leaf_salt = pre_challenge_material.response_leaf_salt(leaf_ordinal, &leaf);
+                response_generation_state
+                    .supply_next_opened_leaf(&leaf, leaf_salt)
+                    .map_err(CompactPublicKeyGenerationError::ResponseGeneration)?;
+                Ok(CompactPublicKeyGenerationPoll::OpenedResponseLeafSupplied { leaf_ordinal })
+            }
+            CompactResponseGenerationPoll::ArithmeticStepCompleted => {
+                Ok(CompactPublicKeyGenerationPoll::ResponseArithmeticStepCompleted)
+            }
+            CompactResponseGenerationPoll::StorageTransactionCompleted => {
+                Ok(CompactPublicKeyGenerationPoll::ResponseStorageTransactionCompleted)
+            }
+            CompactResponseGenerationPoll::CheckpointCursorRequired => {
+                let canonical_randomness_cursor =
+                    pre_challenge_material.canonical_randomness_checkpoint_cursor_bytes();
+                response_generation_state
+                    .supply_checkpoint_private_randomness_cursor(&canonical_randomness_cursor)
+                    .map_err(CompactPublicKeyGenerationError::ResponseGeneration)?;
+                let lookup_message_authority = response_generation_state
+                    .verifier_message_authority(0)
+                    .ok_or(CompactPublicKeyGenerationError::ResponseGeneration(
+                        CompactResponseGenerationError::WrongPhase,
+                    ))?;
+                family_materialization_state
+                    .supply_lookup_verifier_message(lookup_message_authority)
+                    .map_err(CompactPublicKeyGenerationError::FamilyMaterialization)?;
+                Ok(CompactPublicKeyGenerationPoll::PreChallengeCheckpointReady)
+            }
+            CompactResponseGenerationPoll::ResponseRequired { .. }
+            | CompactResponseGenerationPoll::ResponseLeafRequired { .. }
+            | CompactResponseGenerationPoll::OpenedLeafRequired { .. }
+            | CompactResponseGenerationPoll::Complete => {
+                Err(CompactPublicKeyGenerationError::ResponseGeneration(
+                    CompactResponseGenerationError::WrongPhase,
+                ))
+            }
+        }
+    }
 }
 
 impl CompactPublicKeyFamilyMaterializationState {
@@ -259,6 +600,17 @@ impl CompactPublicKeyFamilyMaterializationState {
                 pre_challenge,
                 ..
             } => Some(pre_challenge),
+            CompactPublicKeyFamilyMaterializationPhase::MaterializingLookupInverses {
+                metadata,
+                ..
+            }
+            | CompactPublicKeyFamilyMaterializationPhase::PreparingStructuredRowSource {
+                metadata,
+                ..
+            } => Some(&metadata.pre_challenge),
+            CompactPublicKeyFamilyMaterializationPhase::Ready(Some(material)) => {
+                Some(&material.metadata.pre_challenge)
+            }
             _ => None,
         }
     }
@@ -622,14 +974,6 @@ impl CompactPublicKeyFamilyMaterial {
 }
 
 impl CompactPublicKeyPreChallengeMaterial {
-    pub(crate) const fn response_leaf_count(&self) -> u64 {
-        self.response_leaf_count
-    }
-
-    pub(crate) const fn response_field_element_count_per_leaf(&self) -> u64 {
-        self.response_field_element_count_per_leaf
-    }
-
     pub(crate) const fn proof_attempt_identifier(&self) -> [u8; 32] {
         self.randomness.proof_attempt_identifier()
     }
@@ -672,6 +1016,29 @@ impl CompactPublicKeyPreChallengeMaterial {
     ) -> [u8; crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH] {
         self.randomness
             .private_leaf_salt(0, self.response_leaf_count, leaf_ordinal, leaf)
+    }
+
+    pub(crate) fn canonical_randomness_checkpoint_cursor_bytes(
+        &self,
+    ) -> [u8; COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH] {
+        self.randomness.canonical_checkpoint_cursor_bytes()
+    }
+}
+
+impl PreparedCompactPublicKeyMainEpoch {
+    pub(crate) const fn family_material(&self) -> &CompactPublicKeyFamilyMaterial {
+        &self.family_material
+    }
+
+    pub(crate) fn checkpoint_boundary(&self) -> Option<&CommonProofGenerationCheckpointBoundary> {
+        self.response_generation_state.checkpoint_boundary()
+    }
+
+    pub(crate) fn cancel_response_custody<Storage: ProofExternalMemory>(
+        &mut self,
+        storage: &mut Storage,
+    ) -> Result<(), CompactResponseGenerationPollError<Storage::Error>> {
+        self.response_generation_state.cancel(storage)
     }
 }
 
@@ -753,8 +1120,6 @@ fn prepare_pre_challenge_material<Coins: CommonProofPrivateCoinSource>(
         encoded_oracle,
         randomness,
         response_leaf_count: source_response_component.leaf_count(),
-        response_field_element_count_per_leaf: source_response_component
-            .field_element_count_per_leaf(),
     })
 }
 

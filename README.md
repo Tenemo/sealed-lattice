@@ -104,31 +104,37 @@ statuses:
   response components with verifier-selected leaf replay, exact transaction
   yielding, cancellation, authenticated cursor restoration, and byte-identical
   genesis replay.
-  A release-owned public-key family adapter now joins the frozen
+  A release-owned public-key generation state now joins the frozen
   factor-one contract to the retained setup authority, polls the exact 202
   authenticated source columns, and derives canonical public-input bytes from
   verifier-minted suite, application-statement, manifest, and relation bindings
-  before independently decoding them. A release-owned public-key family
-  materialization state accepts the lookup challenge only through a borrowed
-  first-message authority minted by the compact response state for the same
-  proof geometry and canonical public input, then owns bounded lookup inversion
-  and structured-row preparation. Its guarded selected-size owner now derives the
-  first WHIR epoch's exact 2,097,152-element source from authenticated quotient-
-  and-multiplicity values plus canonical zero padding, draws independent WHIR
-  and response-salt seeds from action-private coins, retains WHIR's exact
-  131,072-row by 64-element encoding, and streams those values into the
-  contract-derived salted response tree. It completes 233 lookup polls and 760
-  structured-row polls and advances one CFW poll. The latest guarded native run
-  completed in 164.10 seconds; its focused retained-authority-preparation-
-  through-CFW portion took 17.387 seconds, including 583 milliseconds for WHIR
-  encoding and 543 milliseconds for response streaming and transcript-message
-  derivation. Observed peak process-tree RSS was 143,634,432 bytes and peak
-  guarded-job memory was 306,139,136 bytes. Those measurements include native
-  development setup and the real encoded source and response tree, not a
-  complete emitted WHIR epoch or proof, JavaScript/WASM memory, or browser-
-  process memory. The complete production-shaped small chain uses the compact
-  response state, but the later CFW and WHIR family material provider and
-  production worker adapter remain incomplete.
+  before independently decoding them. It owns family materialization and its
+  first compact response together, accepts the lookup challenge only through a
+  borrowed first-message authority minted by its retained compact response
+  state for the same proof geometry and canonical public input, then owns
+  bounded lookup inversion and structured-row preparation. Its guarded
+  selected-size owner derives the first WHIR epoch's exact 2,097,152-element
+  source from authenticated quotient-and-multiplicity values plus canonical
+  zero padding, draws independent WHIR and response-salt seeds from action-
+  private coins, retains WHIR's exact 131,072-row by 64-element encoding, and
+  streams those values into the contract-derived salted response tree. The same
+  state binds a strict 56-byte attempt-and-WHIR-position cursor into the
+  authenticated response checkpoint, derives the lookup message from that
+  transcript, and retains the response tree through 233 lookup polls, 760
+  structured-row polls, and one CFW poll before cancellation. The latest
+  guarded native test body completed in 163.56 seconds; its focused retained-
+  authority-preparation-through-CFW portion took 17.160 seconds, including 572
+  milliseconds for WHIR encoding and 671 milliseconds for response streaming,
+  tree commitment, checkpoint validation, and transcript-message derivation.
+  Observed peak process-tree RSS was 143,798,272 bytes, peak guarded-job memory
+  was 317,530,112 bytes, and peak process memory was 306,438,144 bytes. Those
+  measurements include native development setup and the overlapping encoded
+  source, retained response tree, structured rows, and first CFW state, not a
+  complete emitted WHIR epoch or proof, cold restoration through the common
+  worker, JavaScript/WASM memory, or browser-process memory. The complete
+  production-shaped small chain uses the compact response state, but the later
+  CFW and WHIR family material provider and production worker adapter remain
+  incomplete.
   Semantic and complete CFW/WHIR execution, emitted-
   coordinate measurement, masking, fixed-tape and Appendix arithmetic remain
   test-only. The release
@@ -1266,31 +1272,37 @@ Works today, at component scope:
   owned compact response state now drives those response components with exact
   transaction replay, verifier-selected leaf reconstruction, cancellation,
   authenticated cursor restoration, and byte-identical genesis replay.
-  A release-owned public-key family adapter now joins the frozen factor-one
-  contract to the retained setup authority, polls the exact 202 authenticated
-  source columns, and derives canonical public-input bytes from verifier-minted
-  suite, application-statement, manifest, and relation bindings before
-  independently decoding them. A release-owned public-key family
-  materialization state accepts the lookup challenge only through a borrowed
-  first-message authority minted by the compact response state for the same
-  proof geometry and canonical public input, then owns bounded lookup inversion
-  and structured-row preparation. Its guarded selected-size owner now derives the
-  first WHIR epoch's exact 2,097,152-element source from authenticated quotient-
-  and-multiplicity values plus canonical zero padding, draws independent WHIR
-  and response-salt seeds from action-private coins, retains WHIR's exact
-  131,072-row by 64-element encoding, and streams those values into the
-  contract-derived salted response tree. It completes 233 lookup polls and 760
-  structured-row polls and advances one CFW poll. The latest guarded native run
-  completed in 164.10 seconds; its focused retained-authority-preparation-
-  through-CFW portion took 17.387 seconds, including 583 milliseconds for WHIR
-  encoding and 543 milliseconds for response streaming and transcript-message
-  derivation. Observed peak process-tree RSS was 143,634,432 bytes and peak
-  guarded-job memory was 306,139,136 bytes. Those measurements include native
-  development setup and the real encoded source and response tree, not a
-  complete emitted WHIR epoch or proof, JavaScript/WASM memory, or browser-
-  process memory. The complete production-shaped small chain uses the compact
-  response state, but the later CFW and WHIR family material provider and
-  production worker adapter remain incomplete.
+  A release-owned public-key generation state now joins the frozen
+  factor-one contract to the retained setup authority, polls the exact 202
+  authenticated source columns, and derives canonical public-input bytes from
+  verifier-minted suite, application-statement, manifest, and relation bindings
+  before independently decoding them. It owns family materialization and its
+  first compact response together, accepts the lookup challenge only through a
+  borrowed first-message authority minted by its retained compact response
+  state for the same proof geometry and canonical public input, then owns
+  bounded lookup inversion and structured-row preparation. Its guarded
+  selected-size owner derives the first WHIR epoch's exact 2,097,152-element
+  source from authenticated quotient-and-multiplicity values plus canonical
+  zero padding, draws independent WHIR and response-salt seeds from action-
+  private coins, retains WHIR's exact 131,072-row by 64-element encoding, and
+  streams those values into the contract-derived salted response tree. The same
+  state binds a strict 56-byte attempt-and-WHIR-position cursor into the
+  authenticated response checkpoint, derives the lookup message from that
+  transcript, and retains the response tree through 233 lookup polls, 760
+  structured-row polls, and one CFW poll before cancellation. The latest
+  guarded native test body completed in 163.56 seconds; its focused retained-
+  authority-preparation-through-CFW portion took 17.160 seconds, including 572
+  milliseconds for WHIR encoding and 671 milliseconds for response streaming,
+  tree commitment, checkpoint validation, and transcript-message derivation.
+  Observed peak process-tree RSS was 143,798,272 bytes, peak guarded-job memory
+  was 317,530,112 bytes, and peak process memory was 306,438,144 bytes. Those
+  measurements include native development setup and the overlapping encoded
+  source, retained response tree, structured rows, and first CFW state, not a
+  complete emitted WHIR epoch or proof, cold restoration through the common
+  worker, JavaScript/WASM memory, or browser-process memory. The complete
+  production-shaped small chain uses the compact response state, but the later
+  CFW and WHIR family material provider and production worker adapter remain
+  incomplete.
   It checks canonical bytes and gates verifier-derived schedules and 82
   response openings through the exact 161-component,
   45-construction-binding certificate, but checks no CFW or WHIR equation or

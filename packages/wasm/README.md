@@ -91,21 +91,24 @@ code with owned retained inputs. A release-owned compact response state now
 drives those response components with verifier-selected leaf replay, exact
 transaction yielding, cancellation, authenticated cursor restoration, and
 byte-identical genesis replay in the complete production-shaped small chain.
-A release-owned public-key family adapter also binds the frozen contract to
-the retained setup authority, polls the exact 202 authenticated source
-columns, and constructs then independently decodes canonical public input
-from verifier-minted suite, statement, manifest, and relation bindings.
-Its materialization state accepts the lookup challenge only as a borrowed
-first-message authority minted by the compact response state for the same proof
-geometry and canonical public input, then owns bounded lookup inversion and
-structured-row preparation. Selected-size guarded Rust coverage now derives
-the exact first-epoch WHIR source from authenticated production values, drives
-its encoding and response salts from action-private coins, and streams the
-retained 131,072-row by 64-element encoding through the response state. The
-materialization state is not yet called by the WebAssembly common-proof worker
-and does not yet own response-tree restoration or a complete WHIR epoch. The
-later CFW and WHIR family material adapter and production worker adapter remain
-incomplete. The semantic authority, complete CFW/WHIR verification, reduced
+A release-owned public-key generation state also binds the frozen contract to
+the retained setup authority, polls the exact 202 authenticated source columns,
+and constructs then independently decodes canonical public input from verifier-
+minted suite, statement, manifest, and relation bindings. It owns family
+materialization and its first compact response together, accepts the lookup
+challenge only as a borrowed first-message authority minted by its retained
+compact response state for the same proof geometry and canonical public input,
+then owns bounded lookup inversion and structured-row preparation. Selected-
+size guarded Rust coverage derives the exact first-epoch WHIR source from
+authenticated production values, drives its encoding and response salts from
+action-private coins, streams the retained 131,072-row by 64-element encoding
+through the response state, binds a strict 56-byte attempt-and-WHIR-position
+cursor into the authenticated response checkpoint, and retains the tree through
+lookup, row preparation, and one CFW poll. The generation state is not yet
+called by the WebAssembly common-proof worker and does not yet support cold
+common-worker restoration or a complete WHIR epoch. The later CFW and WHIR
+family material adapter and production worker adapter remain incomplete.
+The semantic authority, complete CFW/WHIR verification, reduced
 execution fixtures, and the retained end-to-end workbench remain test-only or
 incomplete. No compact prover exists. The
 measurement feature contains only bounded measurement owners

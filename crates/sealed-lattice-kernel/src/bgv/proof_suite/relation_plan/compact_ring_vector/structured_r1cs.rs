@@ -3146,9 +3146,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     use super::super::{
-        generation_state::{
-            CompactPublicKeyFamilyMaterializationPoll, CompactPublicKeyFamilyMaterializationState,
-        },
+        generation_state::{CompactPublicKeyGenerationPoll, CompactPublicKeyGenerationState},
         prepare_compact_public_key_assignment_sources,
     };
     use super::*;
@@ -3168,9 +3166,6 @@ mod tests {
         bgv::{
             proof_suite::{
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
-                compact_response_generation::{
-                    CompactResponseGenerationPoll, CompactResponseGenerationState,
-                },
                 compact_response_merkle::CompactResponseLeafValueKind,
                 compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement,
@@ -4193,21 +4188,21 @@ mod tests {
                 &prepared_sources.relation_plan_variant,
             )
             .expect("compact private-coin coordinate capacity derives");
-        let mut family_materialization_state =
-            CompactPublicKeyFamilyMaterializationState::new(prepared_sources);
+        let mut generation_state =
+            CompactPublicKeyGenerationState::new(prepared_sources, proof_attempt_identifier);
         let mut loaded_column_ordinals = Vec::new();
         loop {
-            match family_materialization_state
-                .poll(8_192)
-                .expect("retained compact family materialization poll")
+            match generation_state
+                .poll_source_loading(8_192)
+                .expect("retained compact source-loading poll")
             {
-                CompactPublicKeyFamilyMaterializationPoll::AuthenticatedSourceReadRequired => {
+                CompactPublicKeyGenerationPoll::AuthenticatedSourceReadRequired => {
                     panic!("retained setup authority must not request caller source bytes")
                 }
-                CompactPublicKeyFamilyMaterializationPoll::SourceLoaded { column_ordinal } => {
+                CompactPublicKeyGenerationPoll::SourceLoaded { column_ordinal } => {
                     loaded_column_ordinals.push(column_ordinal);
                 }
-                CompactPublicKeyFamilyMaterializationPoll::SourcesComplete => break,
+                CompactPublicKeyGenerationPoll::SourcesComplete => break,
                 unexpected => panic!("unexpected source-loading poll: {unexpected:?}"),
             }
         }
@@ -4217,23 +4212,16 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0] < pair[1])
         );
-        assert_eq!(
-            family_materialization_state
-                .poll(8_192)
-                .expect("the compact family waits for its pre-challenge encoding"),
-            CompactPublicKeyFamilyMaterializationPoll::PreChallengeEncodingRequired
-        );
         let selected_compact_contract =
             crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
                 .expect("the frozen compact public-key contract decodes");
         let (
-            mut response_generation_state,
             compact_construction_identity_hash,
             checkpoint_schedule_digest,
             source_replay_binding,
             private_coin_derivation_binding_hash,
         ) = {
-            let pre_lookup_material = family_materialization_state
+            let pre_lookup_material = generation_state
                 .pre_lookup_material()
                 .expect("loaded compact sources expose bound pre-lookup material");
             let expected_public_input_bindings =
@@ -4315,15 +4303,7 @@ mod tests {
             );
             assert_eq!(source_response_component.leaf_count(), 131_072);
             assert_eq!(source_response_component.field_element_count_per_leaf(), 64);
-            let response_generation_state = CompactResponseGenerationState::new(
-                pre_lookup_material.proof_wire_geometry(),
-                pre_lookup_material.response_merkle_geometries(),
-                pre_lookup_material.decoded_public_input(),
-                pre_lookup_material.canonical_public_input_bytes(),
-            )
-            .expect("the selected compact response state starts");
             (
-                response_generation_state,
                 compact_construction_identity_hash,
                 checkpoint_schedule_digest,
                 source_replay_binding,
@@ -4345,86 +4325,67 @@ mod tests {
             private_coin_coordinate_capacity,
         )
         .expect("the compact production-private coin source starts");
-        family_materialization_state
-            .encode_pre_challenge_source(&mut private_coins, proof_attempt_identifier)
-            .expect("the authenticated pre-challenge source encodes through production WHIR");
+        let mut response_storage = TestStorage::default();
         assert_eq!(
-            family_materialization_state
-                .poll(8_192)
-                .expect("the compact family waits for its transcript lookup message"),
-            CompactPublicKeyFamilyMaterializationPoll::LookupVerifierMessageRequired
+            generation_state
+                .poll(8_192, &mut private_coins, &mut response_storage)
+                .expect("the authenticated pre-challenge source encodes through production WHIR"),
+            CompactPublicKeyGenerationPoll::PreChallengeSourceEncoded
         );
-        let pre_challenge_material = family_materialization_state
-            .pre_challenge_material()
-            .expect("the encoded pre-challenge oracle remains in production custody");
-        assert_eq!(pre_challenge_material.response_leaf_count(), 131_072);
-        assert_eq!(
-            pre_challenge_material.response_field_element_count_per_leaf(),
-            64
-        );
-        assert_eq!(
-            pre_challenge_material.proof_attempt_identifier(),
-            proof_attempt_identifier
-        );
-        let source_response_leaf_count = pre_challenge_material.response_leaf_count();
-        let source_response_round_salt = pre_challenge_material.fiat_shamir_round_salt();
         println!(
             "compact public-key focused owner phase complete: encode pre-challenge source elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
 
         let phase_started_at = Instant::now();
-        println!("compact public-key focused owner phase: derive transcript lookup message");
-        let mut response_storage = TestStorage::default();
+        println!(
+            "compact public-key focused owner phase: commit source response and derive transcript lookup message"
+        );
+        let mut supplied_response_leaf_count = 0_u64;
         loop {
-            match response_generation_state
-                .poll(&mut response_storage)
-                .expect("the source response advances")
+            match generation_state
+                .poll(8_192, &mut private_coins, &mut response_storage)
+                .expect("the owned source response advances")
             {
-                CompactResponseGenerationPoll::ResponseRequired {
-                    response_ordinal: 0,
-                } => response_generation_state
-                    .begin_response(source_response_round_salt)
-                    .expect("the source response starts"),
-                CompactResponseGenerationPoll::ResponseLeafRequired {
-                    response_ordinal: 0,
-                    leaf_ordinal,
-                } => {
-                    assert!(leaf_ordinal < source_response_leaf_count);
-                    let (source_response_leaf, leaf_salt) = {
-                        let pre_challenge_material = family_materialization_state
-                            .pre_challenge_material()
-                            .expect("the exact encoded source remains in custody");
-                        let source_response_leaf = pre_challenge_material
-                            .response_leaf(leaf_ordinal)
-                            .expect("the exact encoded source row is available");
-                        let leaf_salt = pre_challenge_material
-                            .response_leaf_salt(leaf_ordinal, &source_response_leaf);
-                        (source_response_leaf, leaf_salt)
-                    };
-                    response_generation_state
-                        .supply_next_response_leaf(&source_response_leaf, &leaf_salt)
-                        .expect("the source response leaf is supplied");
+                CompactPublicKeyGenerationPoll::ResponseLeafSupplied { leaf_ordinal } => {
+                    assert_eq!(leaf_ordinal, supplied_response_leaf_count);
+                    supplied_response_leaf_count += 1;
                 }
-                CompactResponseGenerationPoll::ArithmeticStepCompleted
-                | CompactResponseGenerationPoll::StorageTransactionCompleted => {}
-                CompactResponseGenerationPoll::CheckpointCursorRequired => {
-                    let lookup_message_authority = response_generation_state
-                        .verifier_message_authority(0)
-                        .expect("the source response mints the lookup message authority");
-                    family_materialization_state
-                        .supply_lookup_verifier_message(lookup_message_authority)
-                        .expect("the bound transcript message starts lookup materialization");
-                    break;
-                }
+                CompactPublicKeyGenerationPoll::ResponseArithmeticStepCompleted
+                | CompactPublicKeyGenerationPoll::ResponseStorageTransactionCompleted => {}
+                CompactPublicKeyGenerationPoll::PreChallengeCheckpointReady => break,
                 unexpected => panic!("unexpected source-response poll: {unexpected:?}"),
             }
         }
-        response_generation_state
-            .cancel(&mut response_storage)
-            .expect("the partial response state releases its retained tree");
+        assert_eq!(supplied_response_leaf_count, 131_072);
+        let pre_challenge_checkpoint = generation_state
+            .checkpoint_boundary()
+            .expect("the source response exposes its authenticated checkpoint boundary");
+        let transcript_cursor_digest = pre_challenge_checkpoint
+            .canonical_transcript_cursor_digest()
+            .expect("the compact response checkpoint carries a transcript cursor digest");
+        let randomness_cursor = generation_state
+            .canonical_randomness_checkpoint_cursor_bytes()
+            .expect("the source response retains its attempt-bound randomness cursor");
+        generation_state
+            .validate_authenticated_randomness_checkpoint_cursor(&randomness_cursor)
+            .expect("the live state accepts its authenticated randomness cursor");
+        let mut changed_randomness_cursor = randomness_cursor;
+        changed_randomness_cursor[16] ^= 1;
+        assert!(
+            generation_state
+                .validate_authenticated_randomness_checkpoint_cursor(&changed_randomness_cursor)
+                .is_err(),
+            "a changed proof-attempt binding must fail closed"
+        );
+        generation_state
+            .restore_authenticated_checkpoint_transcript_cursor(
+                pre_challenge_checkpoint.canonical_transcript_cursor_bytes(),
+                transcript_cursor_digest,
+            )
+            .expect("the live state accepts its independently decoded checkpoint cursor");
         println!(
-            "compact public-key focused owner phase complete: derive transcript lookup message elapsed_milliseconds={}",
+            "compact public-key focused owner phase complete: commit source response and derive transcript lookup message elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
 
@@ -4433,17 +4394,17 @@ mod tests {
         let mut lookup_materialization_poll_count = 0_u64;
         let mut row_source_preparation_poll_count = 0_u64;
         loop {
-            match family_materialization_state
-                .poll(8_192)
-                .expect("bounded compact family materialization poll")
+            match generation_state
+                .poll(8_192, &mut private_coins, &mut response_storage)
+                .expect("bounded compact public-key generation poll")
             {
-                CompactPublicKeyFamilyMaterializationPoll::LookupInverseArithmeticStepCompleted {
+                CompactPublicKeyGenerationPoll::LookupInverseArithmeticStepCompleted {
                     processed_element_count,
                 } => {
                     assert!((1..=8_192).contains(&processed_element_count));
                     lookup_materialization_poll_count += 1;
                 }
-                CompactPublicKeyFamilyMaterializationPoll::StructuredRowSourceStepCompleted {
+                CompactPublicKeyGenerationPoll::StructuredRowSourceStepCompleted {
                     step,
                     completed_work_unit_count,
                 } => {
@@ -4456,15 +4417,22 @@ mod tests {
                     assert!((1..=maximum_work_unit_count).contains(&completed_work_unit_count));
                     row_source_preparation_poll_count += 1;
                 }
-                CompactPublicKeyFamilyMaterializationPoll::Complete => break,
+                CompactPublicKeyGenerationPoll::FamilyMaterializationComplete => break,
                 unexpected => panic!("unexpected family-materialization poll: {unexpected:?}"),
             }
         }
         assert_eq!(lookup_materialization_poll_count, 233);
         assert_eq!(row_source_preparation_poll_count, 760);
-        let family_material = family_materialization_state
+        let mut prepared_main_epoch = generation_state
             .finish()
-            .expect("the compact public-key family material is ready");
+            .expect("the compact public-key main epoch is prepared");
+        assert_eq!(
+            prepared_main_epoch
+                .checkpoint_boundary()
+                .expect("the prepared main epoch retains the source checkpoint"),
+            &pre_challenge_checkpoint
+        );
+        let family_material = prepared_main_epoch.family_material();
         assert_eq!(
             family_material.public_input_bindings(),
             crate::bgv::proof_suite::compact_proof_wire::CompactPublicInputBindings::new(
@@ -4612,32 +4580,39 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let counting_row_source = CountingCompactCfwExternalRowSource {
-            source: row_source,
-            evaluated_row_count: Cell::new(0),
-        };
-        let mut external_prover = CompactCfwExternalProverState::prepare(
-            &counting_row_source,
-            compact_mask_material,
-            compact_challenge_from_production(
-                ProofChallengeExtensionElement::from_canonical_coordinates([31, 37, 41, 43, 47])
+        {
+            let counting_row_source = CountingCompactCfwExternalRowSource {
+                source: row_source,
+                evaluated_row_count: Cell::new(0),
+            };
+            let mut external_prover = CompactCfwExternalProverState::prepare(
+                &counting_row_source,
+                compact_mask_material,
+                compact_challenge_from_production(
+                    ProofChallengeExtensionElement::from_canonical_coordinates([
+                        31, 37, 41, 43, 47,
+                    ])
                     .expect("constraint challenge is canonical"),
-            ),
-            equality_point,
-        )
-        .expect("production row source connects to CFW");
-        let mut storage = TestStorage::default();
-        assert_eq!(
-            external_prover
-                .advance_round_polynomial(&counting_row_source, &mut storage)
-                .expect("one production CFW poll advances"),
-            None
-        );
-        assert_eq!(counting_row_source.evaluated_row_count.get(), 16_384);
+                ),
+                equality_point,
+            )
+            .expect("production row source connects to CFW");
+            let mut storage = TestStorage::default();
+            assert_eq!(
+                external_prover
+                    .advance_round_polynomial(&counting_row_source, &mut storage)
+                    .expect("one production CFW poll advances"),
+                None
+            );
+            assert_eq!(counting_row_source.evaluated_row_count.get(), 16_384);
+        }
         println!(
             "compact public-key focused owner phase complete: advance one compact CFW poll elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
+        prepared_main_epoch
+            .cancel_response_custody(&mut response_storage)
+            .expect("the prepared main epoch releases retained source-tree custody");
         println!(
             "compact public-key focused owner complete elapsed_milliseconds={}",
             execution_started_at.elapsed().as_millis()

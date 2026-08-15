@@ -28,6 +28,16 @@ const COMPACT_PRIVATE_LEAF_SALT_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/compact-proof/private-leaf-salt/v1";
 const COMPACT_FIAT_SHAMIR_ROUND_SALT_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/compact-proof/fiat-shamir-round-salt/v1";
+const COMPACT_GENERATION_RANDOMNESS_CURSOR_MAGIC: [u8; 8] = *b"SLCPRN01";
+const COMPACT_GENERATION_RANDOMNESS_CURSOR_VERSION: u16 = 1;
+pub(crate) const COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH: usize = 56;
+const COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH_U32: u32 = 56;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactGenerationRandomnessCursorError {
+    NonCanonicalCursor,
+    WrongLiveCursor,
+}
 
 pub(crate) struct CompactGenerationAttemptRandomness {
     proof_attempt_identifier: [u8; 32],
@@ -40,6 +50,7 @@ pub(crate) struct CompactWhirRandomSource {
     next_block_ordinal: u64,
     buffered_block: Zeroizing<[u8; COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH]>,
     next_buffered_byte_ordinal: usize,
+    consumed_byte_count: u64,
 }
 
 impl CompactGenerationAttemptRandomness {
@@ -113,6 +124,56 @@ impl CompactGenerationAttemptRandomness {
         );
         salt
     }
+
+    /// Encodes the attempt-bound construction cursor without serializing either
+    /// private seed. Restoration deterministically replays from the action root
+    /// and must arrive at this exact WHIR byte position.
+    pub(crate) fn canonical_checkpoint_cursor_bytes(
+        &self,
+    ) -> [u8; COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH] {
+        let mut canonical_bytes = [0_u8; COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH];
+        canonical_bytes[..8].copy_from_slice(&COMPACT_GENERATION_RANDOMNESS_CURSOR_MAGIC);
+        canonical_bytes[8..10]
+            .copy_from_slice(&COMPACT_GENERATION_RANDOMNESS_CURSOR_VERSION.to_le_bytes());
+        canonical_bytes[12..16]
+            .copy_from_slice(&COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH_U32.to_le_bytes());
+        canonical_bytes[16..48].copy_from_slice(&self.proof_attempt_identifier);
+        canonical_bytes[48..]
+            .copy_from_slice(&self.whir_random_source.consumed_byte_count().to_le_bytes());
+        canonical_bytes
+    }
+
+    /// Checks an authenticated cursor against the live replayed state. A
+    /// cursor cannot seek or reconstruct the private stream by itself.
+    pub(crate) fn validate_checkpoint_cursor_bytes(
+        &self,
+        canonical_cursor_bytes: &[u8],
+    ) -> Result<(), CompactGenerationRandomnessCursorError> {
+        if canonical_cursor_bytes.len() != COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH
+            || canonical_cursor_bytes[..8] != COMPACT_GENERATION_RANDOMNESS_CURSOR_MAGIC
+            || u16::from_le_bytes(
+                canonical_cursor_bytes[8..10]
+                    .try_into()
+                    .expect("the cursor length was checked"),
+            ) != COMPACT_GENERATION_RANDOMNESS_CURSOR_VERSION
+            || u16::from_le_bytes(
+                canonical_cursor_bytes[10..12]
+                    .try_into()
+                    .expect("the cursor length was checked"),
+            ) != 0
+            || u32::from_le_bytes(
+                canonical_cursor_bytes[12..16]
+                    .try_into()
+                    .expect("the cursor length was checked"),
+            ) != COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH_U32
+        {
+            return Err(CompactGenerationRandomnessCursorError::NonCanonicalCursor);
+        }
+        if canonical_cursor_bytes != self.canonical_checkpoint_cursor_bytes() {
+            return Err(CompactGenerationRandomnessCursorError::WrongLiveCursor);
+        }
+        Ok(())
+    }
 }
 
 impl CompactWhirRandomSource {
@@ -122,7 +183,12 @@ impl CompactWhirRandomSource {
             next_block_ordinal: 0,
             buffered_block: Zeroizing::new([0_u8; COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH]),
             next_buffered_byte_ordinal: COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH,
+            consumed_byte_count: 0,
         }
+    }
+
+    const fn consumed_byte_count(&self) -> u64 {
+        self.consumed_byte_count
     }
 
     fn refill(&mut self) {
@@ -153,6 +219,13 @@ impl CompactWhirRandomSource {
                 &self.buffered_block[self.next_buffered_byte_ordinal..buffered_end],
             );
             self.next_buffered_byte_ordinal = buffered_end;
+            self.consumed_byte_count = self
+                .consumed_byte_count
+                .checked_add(
+                    u64::try_from(copied_byte_count)
+                        .expect("one compact WHIR random block fits u64"),
+                )
+                .expect("the compact WHIR random stream cannot exceed u64 bytes");
             destination = &mut destination[copied_byte_count..];
         }
     }
@@ -288,6 +361,88 @@ mod tests {
         assert_ne!(
             first.fiat_shamir_round_salt(0),
             first.fiat_shamir_round_salt(1)
+        );
+    }
+
+    #[test]
+    fn checkpoint_cursor_is_canonical_attempt_bound_and_live() {
+        let mut first_coins = DeterministicPrivateCoins { next_value: 1 };
+        let mut replayed_coins = DeterministicPrivateCoins { next_value: 1 };
+        let mut changed_attempt_coins = DeterministicPrivateCoins { next_value: 1 };
+        let mut first =
+            CompactGenerationAttemptRandomness::from_private_coins(&mut first_coins, [0x31; 32])
+                .expect("the first compact attempt randomness derives");
+        let mut replayed =
+            CompactGenerationAttemptRandomness::from_private_coins(&mut replayed_coins, [0x31; 32])
+                .expect("the replayed compact attempt randomness derives");
+        let changed_attempt = CompactGenerationAttemptRandomness::from_private_coins(
+            &mut changed_attempt_coins,
+            [0x32; 32],
+        )
+        .expect("the changed compact attempt randomness derives");
+
+        let initial_cursor = first.canonical_checkpoint_cursor_bytes();
+        assert_eq!(initial_cursor, replayed.canonical_checkpoint_cursor_bytes());
+        assert_eq!(
+            u64::from_le_bytes(
+                initial_cursor[48..]
+                    .try_into()
+                    .expect("fixed cursor length")
+            ),
+            0
+        );
+        assert_ne!(
+            initial_cursor,
+            changed_attempt.canonical_checkpoint_cursor_bytes()
+        );
+        first
+            .validate_checkpoint_cursor_bytes(&initial_cursor)
+            .expect("the live initial cursor validates");
+
+        let mut random_bytes = [0_u8; COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH + 1];
+        first
+            .whir_random_source_mut()
+            .try_fill_bytes(&mut random_bytes)
+            .expect("the KMAC stream is infallible");
+        let advanced_cursor = first.canonical_checkpoint_cursor_bytes();
+        assert_ne!(advanced_cursor, initial_cursor);
+        assert_eq!(
+            u64::from_le_bytes(
+                advanced_cursor[48..]
+                    .try_into()
+                    .expect("fixed cursor length"),
+            ),
+            65
+        );
+        assert_eq!(
+            first.validate_checkpoint_cursor_bytes(&initial_cursor),
+            Err(CompactGenerationRandomnessCursorError::WrongLiveCursor)
+        );
+        replayed
+            .whir_random_source_mut()
+            .try_fill_bytes(&mut random_bytes)
+            .expect("the replayed KMAC stream is infallible");
+        replayed
+            .validate_checkpoint_cursor_bytes(&advanced_cursor)
+            .expect("the replayed cursor reaches the same live byte position");
+
+        for changed_byte_ordinal in [0_usize, 8, 10, 12, 16, 47, 48, 55] {
+            let mut changed = advanced_cursor;
+            changed[changed_byte_ordinal] ^= 1;
+            assert!(
+                first.validate_checkpoint_cursor_bytes(&changed).is_err(),
+                "changed cursor byte {changed_byte_ordinal} must fail closed"
+            );
+        }
+        assert_eq!(
+            first.validate_checkpoint_cursor_bytes(&advanced_cursor[..55]),
+            Err(CompactGenerationRandomnessCursorError::NonCanonicalCursor)
+        );
+        let mut extended = advanced_cursor.to_vec();
+        extended.push(0);
+        assert_eq!(
+            first.validate_checkpoint_cursor_bytes(&extended),
+            Err(CompactGenerationRandomnessCursorError::NonCanonicalCursor)
         );
     }
 
