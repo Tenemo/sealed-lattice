@@ -113,13 +113,14 @@ use crate::bgv::proof_suite::{
     CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialReplayIdentity,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceReplayIdentityCatalog,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ProofBaseFieldElement,
-    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofExternalMemory,
-    ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError, ProofExternalMemoryUsage,
-    ProofTreeCatalogEntry, ProofTreeValue, RelationApplicationChallengeAssignment,
-    RelationPlanCheckContext, RelationPlanVariant, RelationProofTreeInput,
-    ValidatedRelationPlanArtifact, build_relation_bound_public_tree_catalog_entries,
-    construct_opening_batch_mask, evaluate_extension_at, sample_relation_application_challenges,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
+    ProofExternalMemory, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
+    ProofExternalMemoryUsage, ProofTreeCatalogEntry, ProofTreeValue,
+    RelationApplicationChallengeAssignment, RelationPlanCheckContext, RelationPlanVariant,
+    RelationProofTreeInput, ValidatedRelationPlanArtifact,
+    build_relation_bound_public_tree_catalog_entries, construct_opening_batch_mask,
+    evaluate_extension_at, sample_relation_application_challenges,
     verified_application_statement_hash,
 };
 use crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT;
@@ -2920,6 +2921,51 @@ fn derive_generation_liveness_input(
         proof_transport_bridge_byte_length: u64::try_from(proof_transport_bridge_byte_length)
             .map_err(|_| CommonProofProverError::CountOverflow)?,
     })
+}
+
+fn copy_base_polynomial_chunk_with_implicit_zeros(
+    destination: &mut [ProofBaseFieldElement],
+    source: &[ProofBaseFieldElement],
+    source_start: usize,
+) {
+    destination.fill(ProofBaseFieldElement::ZERO);
+    let copied_value_count = source
+        .len()
+        .saturating_sub(source_start)
+        .min(destination.len());
+    if copied_value_count == 0 {
+        return;
+    }
+    let source_end = source_start + copied_value_count;
+    destination[..copied_value_count].copy_from_slice(&source[source_start..source_end]);
+}
+
+fn copy_extension_polynomial_coordinate_chunk_with_implicit_zeros(
+    destination: &mut [ProofBaseFieldElement],
+    source: &[ProofChallengeExtensionElement],
+    source_start: usize,
+    extension_coordinate_index: usize,
+) -> Result<(), CommonProofProverError> {
+    if extension_coordinate_index >= PROOF_CHALLENGE_EXTENSION_DEGREE {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    destination.fill(ProofBaseFieldElement::ZERO);
+    let copied_value_count = source
+        .len()
+        .saturating_sub(source_start)
+        .min(destination.len());
+    if copied_value_count == 0 {
+        return Ok(());
+    }
+    let source_end = source_start + copied_value_count;
+    for (destination_value, coefficient) in destination[..copied_value_count]
+        .iter_mut()
+        .zip(source[source_start..source_end].iter())
+    {
+        let coordinate = coefficient.canonical_coordinates()[extension_coordinate_index];
+        *destination_value = ProofBaseFieldElement::from_reduced(u128::from(coordinate));
+    }
+    Ok(())
 }
 
 /// The checked relation-plan state shared by every family as it migrates to
@@ -6791,30 +6837,17 @@ impl RowCodeWhirGenerationStateMachine {
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        if source_start >= coefficients.len() {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        let source_end = source_start
-            .checked_add(logical_polynomial_coefficient_count)
-            .map(|end| end.min(coefficients.len()))
-            .ok_or(CommonProofProverError::CountOverflow)?;
         let destination_start = logical_block_index
             .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        let copied_value_count = source_end - source_start;
         let destination_end = destination_start
-            .checked_add(copied_value_count)
+            .checked_add(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         let destination = self
             .phase_row_witness
             .get_mut(destination_start..destination_end)
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        for (destination_value, coefficient) in destination
-            .iter_mut()
-            .zip(coefficients[source_start..source_end].iter())
-        {
-            *destination_value = *coefficient;
-        }
+        copy_base_polynomial_chunk_with_implicit_zeros(destination, &coefficients, source_start);
         Ok(())
     }
 
@@ -7119,35 +7152,22 @@ impl RowCodeWhirGenerationStateMachine {
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        if source_start >= coefficients.len() {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        let source_end = source_start
-            .checked_add(logical_polynomial_coefficient_count)
-            .map(|end| end.min(coefficients.len()))
-            .ok_or(CommonProofProverError::CountOverflow)?;
         let destination_start = logical_block_index
             .checked_mul(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         let destination_end = destination_start
-            .checked_add(source_end - source_start)
+            .checked_add(logical_polynomial_coefficient_count)
             .ok_or(CommonProofProverError::CountOverflow)?;
         let destination = self
             .phase_row_witness
             .get_mut(destination_start..destination_end)
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        for (destination_value, coefficient) in destination
-            .iter_mut()
-            .zip(coefficients[source_start..source_end].iter())
-        {
-            let coordinate = coefficient
-                .canonical_coordinates()
-                .get(extension_coordinate_index)
-                .copied()
-                .ok_or(CommonProofProverError::InvalidColumn)?;
-            *destination_value = ProofBaseFieldElement::from_reduced(u128::from(coordinate));
-        }
-        Ok(())
+        copy_extension_polynomial_coordinate_chunk_with_implicit_zeros(
+            destination,
+            &coefficients,
+            source_start,
+            extension_coordinate_index,
+        )
     }
 
     fn poll_quotient_phase_commitment(
@@ -10574,6 +10594,66 @@ mod tests {
             evaluate_quotient_transform_in_place(transform_plan, &mut wrong_representation),
             Err(CommonProofProverError::InvalidColumn),
         );
+    }
+
+    #[test]
+    fn phase_chunk_copy_restores_implicit_trailing_zero_coefficients() {
+        let base_value = |canonical| {
+            ProofBaseFieldElement::from_canonical(canonical)
+                .expect("the bounded test value is canonical")
+        };
+        let source = [base_value(3), base_value(5), base_value(7)];
+        let mut destination = [base_value(97); 4];
+        copy_base_polynomial_chunk_with_implicit_zeros(&mut destination, &source, 2);
+        assert_eq!(
+            destination,
+            [
+                base_value(7),
+                ProofBaseFieldElement::ZERO,
+                ProofBaseFieldElement::ZERO,
+                ProofBaseFieldElement::ZERO,
+            ],
+        );
+
+        destination.fill(base_value(89));
+        copy_base_polynomial_chunk_with_implicit_zeros(&mut destination, &source, usize::MAX);
+        assert_eq!(destination, [ProofBaseFieldElement::ZERO; 4]);
+
+        let extension_source = [
+            ProofChallengeExtensionElement::from_canonical_coordinates([11, 13, 17, 19, 23])
+                .expect("the first extension value is canonical"),
+            ProofChallengeExtensionElement::from_canonical_coordinates([29, 31, 37, 41, 43])
+                .expect("the second extension value is canonical"),
+        ];
+        destination.fill(base_value(83));
+        copy_extension_polynomial_coordinate_chunk_with_implicit_zeros(
+            &mut destination,
+            &extension_source,
+            1,
+            2,
+        )
+        .expect("the partial extension chunk copies");
+        assert_eq!(
+            destination,
+            [
+                base_value(37),
+                ProofBaseFieldElement::ZERO,
+                ProofBaseFieldElement::ZERO,
+                ProofBaseFieldElement::ZERO,
+            ],
+        );
+
+        destination.fill(base_value(79));
+        assert_eq!(
+            copy_extension_polynomial_coordinate_chunk_with_implicit_zeros(
+                &mut destination,
+                &extension_source,
+                0,
+                PROOF_CHALLENGE_EXTENSION_DEGREE,
+            ),
+            Err(CommonProofProverError::InvalidColumn),
+        );
+        assert_eq!(destination, [base_value(79); 4]);
     }
 
     #[test]
