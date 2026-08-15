@@ -63,7 +63,7 @@ package, Node, 1,218-entry ordinary Rust, and Chromium lane. Its scalar WASM and
 SDK bytes reproduced, and all 35 retained theorem-registry members passed under
 the serialized guard. That graph's artifact is superseded. The current scalar
 release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-`9f7a6cb8d4182cffb5c4a62052d499d7f3892e1530f23526a87288c2511b84a8`.
+`3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
 This is release-build and byte-copy development evidence only, not proof or
 physical-phone qualification. The retained results validate only that recorded
 dirty state. They predate the later
@@ -80,10 +80,15 @@ The compact typed version-three factor-one contract decoder and its statement,
 relation, transcript-domain, CFW, WHIR, proof-wire, response-Merkle, fixed-
 message, and checkpoint geometry and schema owners are compiled in the default
 kernel. Proof and public-input encoding and decoding, fixed verifier-message
-decoding and derivation, Fiat-Shamir transcript execution, salted-Merkle writing
-and opening verification, response-checkpoint execution, semantic and CFW/WHIR
-execution, Merkle privacy, masking, emitted-coordinate measurement, fixed-tape
-and Appendix arithmetic, and transport verification are test-only. The
+decoding and derivation, Fiat-Shamir transcript execution, salted-opening
+transport verification, scalar CFW, the bounded external-memory CFW driver,
+authenticated assignment loading, bounded lookup-inverse materialization, and
+the owned structured-row and transpose path are ordinary release code. The row
+source owns reference-counted relation and secret-assignment material rather
+than borrowing worker-lifetime state. Salted-Merkle writing,
+response-checkpoint execution, semantic and complete CFW/WHIR execution,
+Merkle privacy, masking, emitted-coordinate measurement, fixed-tape and
+Appendix arithmetic remain test-only or incomplete. The
 contract validates the exact target; statement-schema identifier, field count, and layout
 digest; the 128-draw per-output Fiat-Shamir ceiling; both canonical wire magics;
 the ordered suite, statement, manifest, and relation-plan public-input roles;
@@ -201,9 +206,12 @@ default-compiled internal primitives. The Merkle privacy-certificate owner,
 strict transport validator, proof and public-input decoders, transcript
 execution, verifier-message derivation, and salted-opening verification are
 ordinary release code. The Rust/WebAssembly ABI and TypeScript worker caller
-consume that boundary. The scalar CFW prover/verifier algebra and bounded
-external-memory transaction driver are ordinary release code but have no
-compact generation-state caller. The transport validator checks canonical
+consume that boundary. The scalar CFW prover/verifier algebra, bounded
+external-memory transaction driver, authenticated assignment loader, bounded
+lookup-inverse materializer, and owned structured-row and transpose path are
+ordinary release code but have no compact generation-state caller. The row
+source owns reference-counted relation and secret-assignment material rather
+than borrowing worker-lifetime state. The transport validator checks canonical
 bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
 bindings, and gates every verifier-derived schedule and all 82 response openings
@@ -341,16 +349,19 @@ the snapshot is the newest state.
   checkpoint, runtime, and package evidence is not one reconciled exact-ten
   authority.
 - `SEC-019`: The current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-  `9f7a6cb8d4182cffb5c4a62052d499d7f3892e1530f23526a87288c2511b84a8`.
+  `3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
   This is release-build and byte-copy development evidence only, and the
   retained ordinary desktop-browser graph remains historical. The release build
-  still omits compact proof generation and verification, so this is not
+  contains compact relation materialization but still omits compact proof
+  generation and verification, so this is not
   selected-size compact-proof browser or physical-phone qualification. Compact
   checkpoint publication remains reduced kernel
   groundwork, not browser-custody or selected-size durable resume.
-- `SEC-020`: Pollable source preparation, transpose, Merkle, codec, and reduced
-  CFW/WHIR lifecycle owners provide development evidence only. Selected-size
-  production authority, response values, unified transcript, authenticated
+- `SEC-020`: Authenticated assignment loading, bounded lookup materialization,
+  owned structured-row preparation and transpose, the codec, transport gate,
+  and scalar CFW compile into release bytes. Merkle writing and reduced CFW/WHIR
+  lifecycle owners still provide development evidence only. Selected-size
+  production execution, response values, unified transcript, authenticated
   restart, CFW-to-WHIR invocation, resource reconciliation, and browser
   execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile

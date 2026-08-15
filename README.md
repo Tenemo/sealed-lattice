@@ -93,11 +93,14 @@ statuses:
   fixed-message derivation, transcript execution, Merkle-privacy derivation,
   salted-opening verification, and the compact transport validator are
   ordinary release code exposed through a Rust/WebAssembly boundary and its
-  TypeScript worker caller. The scalar CFW prover/verifier algebra and bounded
-  external-memory transaction driver are also ordinary release code, but no
-  compact generation state consumes them. Merkle writing, checkpoint execution,
-  semantic and complete CFW/WHIR execution, emitted-coordinate measurement,
-  masking, fixed-tape and Appendix arithmetic remain test-only. The release
+  TypeScript worker caller. The scalar CFW prover/verifier algebra, bounded
+  external-memory transaction driver, authenticated assignment loader, bounded
+  lookup-inverse materializer, and owned structured-row and transpose path are
+  also ordinary release code. The owned row source contains no borrowed
+  worker-lifetime state, but no compact generation state consumes it yet.
+  Merkle writing, checkpoint execution, semantic and complete CFW/WHIR
+  execution, emitted-coordinate measurement, masking, fixed-tape and Appendix
+  arithmetic remain test-only. The release
   transport validator derives the exact
   161-component, 45-construction-binding certificate, then gates verifier-
   derived schedules and all 82 response openings through it. It does not check
@@ -159,9 +162,10 @@ The canonical release-WebAssembly producer is scalar-capable again. Its
 ordinary Cargo build carries no target-feature override, rejects inherited
 encoded Rust flags, and has focused tests for its feature-free argument list.
 The ordinary scalar kernel and SDK bytes now reproduce with normalized loader
-SHA-256 `b3e6dac4f1531abb8e1e930223280711697c64f65e662fc6b7fc89266a0c4d95`.
-Those release bytes contain the unconnected scalar CFW implementation but omit
-connected compact proof generation and complete verification.
+SHA-256 `3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
+Those release bytes contain the compact transport validator, scalar CFW, and
+owned relation-materialization path but omit connected compact proof generation
+and complete verification.
 Reproducible compact release bytes and compact-proof browser measurements remain
 required before runtime qualification; any future SIMD path must remain
 optional, feature-detected, and byte-equivalent.
@@ -1215,9 +1219,11 @@ Works today, at component scope:
   derivation, salted-opening verification, and the transport validator are
   ordinary release code. A Rust/WebAssembly ABI and TypeScript worker caller
   consume that validator.
-  The scalar CFW prover/verifier algebra and bounded external-memory transaction
-  driver are ordinary release code but have no compact generation-state caller
-  yet.
+  The scalar CFW prover/verifier algebra, bounded external-memory transaction
+  driver, authenticated assignment loader, bounded lookup-inverse materializer,
+  and owned structured-row and transpose path are ordinary release code but
+  have no compact generation-state caller yet. The row source owns its relation
+  and secret assignment rather than borrowing worker-lifetime state.
   It checks canonical bytes and gates verifier-derived schedules and 82
   response openings through the exact 161-component,
   45-construction-binding certificate, but checks no CFW or WHIR equation or
@@ -1850,7 +1856,7 @@ Not yet:
   subsequent reproducibility gate rebuilt the scalar kernel and SDK twice and
   matched every package byte. That historical artifact is superseded. The
   current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-  `b3e6dac4f1531abb8e1e930223280711697c64f65e662fc6b7fc89266a0c4d95`.
+  `3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
   This is release-build and byte-copy development evidence only, not compact-
   proof or physical-phone qualification.
 - The latest retained complete theorem-registry result is

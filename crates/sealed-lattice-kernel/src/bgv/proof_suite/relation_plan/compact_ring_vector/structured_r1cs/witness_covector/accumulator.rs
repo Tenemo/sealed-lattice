@@ -20,10 +20,11 @@ use crate::bgv::proof_suite::{
     prover::CommonProofProverError,
 };
 
+#[cfg(test)]
+use super::super::CompactPublicKeyAssignment;
 use super::super::{
-    CompactPublicKeyAssignment, CompactStructuredAssignmentSource, CompactStructuredLinearForm,
-    CompactStructuredMatrixTerm, CompactStructuredR1csCatalog, CompactStructuredR1csRowSource,
-    base_element_from_signed_integer,
+    CompactStructuredAssignmentSource, CompactStructuredLinearForm, CompactStructuredMatrixTerm,
+    CompactStructuredR1csCatalog, CompactStructuredR1csRowSource, base_element_from_signed_integer,
 };
 use super::CompactStructuredWitnessCovectorGeometry;
 use crate::bgv::proof_suite::relation_plan::compact_ring_vector::{
@@ -399,8 +400,8 @@ where
     }
 }
 
-impl<Assignment: CompactStructuredAssignmentSource + ?Sized> StructuredTransposeValueSource
-    for CompactStructuredR1csRowSource<'_, Assignment>
+impl<Assignment: CompactStructuredAssignmentSource> StructuredTransposeValueSource
+    for CompactStructuredR1csRowSource<Assignment>
 {
     fn lookup_challenge(&self) -> ProofChallengeExtensionElement {
         self.assignment.lookup_challenge()
@@ -1687,23 +1688,19 @@ where
     }
 }
 
-impl<'handoff, 'material, Assignment>
-    CompactStructuredWitnessCovectorHandoff<
-        'handoff,
-        CompactStructuredR1csRowSource<'material, Assignment>,
-    >
+impl<'handoff, Assignment>
+    CompactStructuredWitnessCovectorHandoff<'handoff, CompactStructuredR1csRowSource<Assignment>>
 where
-    'material: 'handoff,
-    Assignment: CompactStructuredAssignmentSource + ?Sized,
+    Assignment: CompactStructuredAssignmentSource,
 {
     pub(crate) fn from_production_row_source(
-        source: &'handoff CompactStructuredR1csRowSource<'material, Assignment>,
+        source: &'handoff CompactStructuredR1csRowSource<Assignment>,
         combination: CompactCfwMatrixClaimCombination,
     ) -> Result<Self, CompactStructuredWitnessCovectorHandoffError> {
         let workload =
-            CompactStructuredWitnessCovectorGeometry::derive(source.relation, &source.matrices)?;
+            CompactStructuredWitnessCovectorGeometry::derive(&source.relation, &source.matrices)?;
         let plan =
-            StructuredTransposePlan::from_production(source.relation, &source.matrices, workload)?;
+            StructuredTransposePlan::from_production(&source.relation, &source.matrices, workload)?;
         let (continuation, destination) = combination.into_parts();
         if u64::try_from(destination.len()).map_err(|_| CommonProofProverError::CountOverflow)?
             != source.witness_length()
@@ -1904,7 +1901,7 @@ mod tests {
     #[test]
     fn production_row_source_handoff_is_type_checked_without_selected_execution() {
         type ProductionRowSource =
-            CompactStructuredR1csRowSource<'static, CompactPublicKeyAssignment>;
+            CompactStructuredR1csRowSource<std::rc::Rc<CompactPublicKeyAssignment>>;
 
         let production_constructor = CompactStructuredWitnessCovectorHandoff::<
             'static,

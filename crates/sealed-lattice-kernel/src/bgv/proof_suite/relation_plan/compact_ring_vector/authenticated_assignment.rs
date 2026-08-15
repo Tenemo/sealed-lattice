@@ -7,10 +7,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-#[cfg(test)]
 use zeroize::Zeroizing;
 
-#[cfg(test)]
 use crate::bgv::proof_suite::{
     ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
     prover::{
@@ -23,17 +21,14 @@ use crate::bgv::proof_suite::{
     prover::requested_pre_challenge_source_column_ordinals,
     relation_plan::{RelationColumnOrigin, RelationColumnValueType, RelationPlanVariant},
 };
-#[cfg(test)]
 use crate::hashing::StreamingHash512;
 
-#[cfg(test)]
 use super::super::key_relation::MODULAR_QUOTIENT_ENCODING_OFFSET;
 use super::{
     CompactPublicKeyRelationCatalog, CompactRingVectorReference, CompactSmallVectorKind,
     CompactStructuredLinearTerm, CompactWitnessSegmentKind, RelationPlanError,
 };
 
-#[cfg(test)]
 const COMPACT_AUTHENTICATED_ASSIGNMENT_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-ring-vector/authenticated-assignment-binding/v1";
 
@@ -72,37 +67,30 @@ pub(crate) struct CompactAuthenticatedSourceHalf {
 }
 
 impl CompactAuthenticatedSourceHalf {
-    #[cfg(test)]
     const fn source_column_ordinal(self) -> u32 {
         self.source_column_ordinal
     }
 
-    #[cfg(test)]
     const fn source_degree_bound_exclusive(self) -> u64 {
         self.source_degree_bound_exclusive
     }
 
-    #[cfg(test)]
     const fn source_origin(self) -> CompactAuthenticatedSourceOrigin {
         self.source_origin
     }
 
-    #[cfg(test)]
     const fn role(self) -> CompactAuthenticatedSourceRole {
         self.role
     }
 
-    #[cfg(test)]
     const fn destination_storage(self) -> CompactAssignmentStorage {
         self.destination_storage
     }
 
-    #[cfg(test)]
     const fn destination_first_element(self) -> u64 {
         self.destination_first_element
     }
 
-    #[cfg(test)]
     const fn element_count(self) -> u64 {
         self.element_count
     }
@@ -115,7 +103,6 @@ enum CompactAuthenticatedSourceOrigin {
     Prover,
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug)]
 pub(crate) struct CompactAuthenticatedAssignmentCatalog {
     relation_plan_hash: [u8; 64],
@@ -125,16 +112,10 @@ pub(crate) struct CompactAuthenticatedAssignmentCatalog {
     ordered_source_halves: Vec<CompactAuthenticatedSourceHalf>,
 }
 
-#[cfg(test)]
-type CompactAuthenticatedAssignmentDerivation = CompactAuthenticatedAssignmentCatalog;
-
-#[cfg(not(test))]
-type CompactAuthenticatedAssignmentDerivation = ();
-
 fn derive_compact_authenticated_assignment(
     relation: &CompactPublicKeyRelationCatalog,
     relation_plan_variant: &RelationPlanVariant,
-) -> Result<CompactAuthenticatedAssignmentDerivation, RelationPlanError> {
+) -> Result<CompactAuthenticatedAssignmentCatalog, RelationPlanError> {
     let relation_plan_hash = relation_plan_variant.canonical_hash()?;
     let trace_domain_size = relation_plan_variant.trace_domain_size();
     if relation.relation_plan_variant_hash != relation_plan_hash
@@ -271,7 +252,6 @@ fn derive_compact_authenticated_assignment(
         relation.padded_public_input_element_count,
         relation.padded_witness_element_count,
     )?;
-    #[cfg(test)]
     let mut ordered_source_halves = {
         let mut source_halves = Vec::new();
         source_halves
@@ -279,38 +259,28 @@ fn derive_compact_authenticated_assignment(
             .map_err(|_| RelationPlanError::CountOverflow)?;
         source_halves
     };
-    #[cfg(test)]
     for column_ordinal in &requested_source_columns {
         if let Some(source_half) = source_halves_by_column.remove(column_ordinal) {
             ordered_source_halves.push(source_half);
         }
     }
-    #[cfg(not(test))]
-    source_halves_by_column
-        .retain(|column_ordinal, _| !requested_source_column_set.contains(column_ordinal));
     if !source_halves_by_column.is_empty() {
         return Err(RelationPlanError::InvalidConstraint);
     }
-    #[cfg(test)]
-    {
-        let requested_source_column_count = u64::try_from(requested_source_columns.len())
-            .map_err(|_| RelationPlanError::CountOverflow)?;
-        let used_source_column_count = u64::try_from(ordered_source_halves.len())
-            .map_err(|_| RelationPlanError::CountOverflow)?;
-        let ignored_source_column_count = requested_source_column_count
-            .checked_sub(used_source_column_count)
-            .ok_or(RelationPlanError::CountOverflow)?;
-        Ok(CompactAuthenticatedAssignmentCatalog {
-            relation_plan_hash,
-            trace_domain_size,
-            requested_source_column_count,
-            ignored_source_column_count,
-            ordered_source_halves,
-        })
-    }
-
-    #[cfg(not(test))]
-    Ok(())
+    let requested_source_column_count = u64::try_from(requested_source_columns.len())
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+    let used_source_column_count =
+        u64::try_from(ordered_source_halves.len()).map_err(|_| RelationPlanError::CountOverflow)?;
+    let ignored_source_column_count = requested_source_column_count
+        .checked_sub(used_source_column_count)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    Ok(CompactAuthenticatedAssignmentCatalog {
+        relation_plan_hash,
+        trace_domain_size,
+        requested_source_column_count,
+        ignored_source_column_count,
+        ordered_source_halves,
+    })
 }
 
 pub(super) fn validate_compact_authenticated_assignment(
@@ -321,7 +291,6 @@ pub(super) fn validate_compact_authenticated_assignment(
     Ok(())
 }
 
-#[cfg(test)]
 impl CompactAuthenticatedAssignmentCatalog {
     pub(crate) fn derive(
         relation: &CompactPublicKeyRelationCatalog,
@@ -350,7 +319,6 @@ impl CompactAuthenticatedAssignmentCatalog {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactAuthenticatedAssignmentMemoryGeometry {
     public_input_prefix_element_count: u64,
@@ -360,7 +328,6 @@ pub(crate) struct CompactAuthenticatedAssignmentMemoryGeometry {
     padded_witness_element_count: u64,
 }
 
-#[cfg(test)]
 impl CompactAuthenticatedAssignmentMemoryGeometry {
     fn derive(relation: &CompactPublicKeyRelationCatalog) -> Result<Self, CommonProofProverError> {
         let public_input_prefix_element_count = relation
@@ -411,13 +378,11 @@ impl CompactAuthenticatedAssignmentMemoryGeometry {
     }
 }
 
-#[cfg(test)]
 struct CompactBaseAssignmentBuffers {
     public_input_prefix: Zeroizing<Vec<ProofBaseFieldElement>>,
     base_witness_prefix: Zeroizing<Vec<ProofBaseFieldElement>>,
 }
 
-#[cfg(test)]
 impl CompactBaseAssignmentBuffers {
     fn new(
         geometry: CompactAuthenticatedAssignmentMemoryGeometry,
@@ -434,14 +399,12 @@ impl CompactBaseAssignmentBuffers {
     }
 }
 
-#[cfg(test)]
 pub(crate) enum CompactAuthenticatedAssignmentPoll {
     AuthenticatedSourceReadRequired,
     SourceLoaded { column_ordinal: u32 },
     Complete,
 }
 
-#[cfg(test)]
 pub(crate) struct CompactAuthenticatedAssignmentCursor {
     catalog: CompactAuthenticatedAssignmentCatalog,
     geometry: CompactAuthenticatedAssignmentMemoryGeometry,
@@ -453,7 +416,6 @@ pub(crate) struct CompactAuthenticatedAssignmentCursor {
     completed_assignment: Option<CompactPublicKeyBaseAssignment>,
 }
 
-#[cfg(test)]
 impl CompactAuthenticatedAssignmentCursor {
     pub(crate) fn new(
         relation: &CompactPublicKeyRelationCatalog,
@@ -617,7 +579,6 @@ impl CompactAuthenticatedAssignmentCursor {
     }
 }
 
-#[cfg(test)]
 pub(crate) struct CompactPublicKeyBaseAssignment {
     geometry: CompactAuthenticatedAssignmentMemoryGeometry,
     source_replay_binding: [u8; 64],
@@ -625,7 +586,6 @@ pub(crate) struct CompactPublicKeyBaseAssignment {
     base_witness_prefix: Zeroizing<Vec<ProofBaseFieldElement>>,
 }
 
-#[cfg(test)]
 impl CompactPublicKeyBaseAssignment {
     pub(crate) const fn memory_geometry(&self) -> CompactAuthenticatedAssignmentMemoryGeometry {
         self.geometry
@@ -686,7 +646,6 @@ impl CompactPublicKeyBaseAssignment {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactLookupInverseMaterializationPhase {
     Forward {
@@ -703,14 +662,12 @@ enum CompactLookupInverseMaterializationPhase {
     Complete,
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactLookupInverseMaterializationPoll {
     ArithmeticStepCompleted { processed_element_count: u64 },
     Complete,
 }
 
-#[cfg(test)]
 pub(crate) struct CompactLookupInverseMaterializer {
     base_assignment: Option<CompactPublicKeyBaseAssignment>,
     lookup_challenge: ProofChallengeExtensionElement,
@@ -718,7 +675,6 @@ pub(crate) struct CompactLookupInverseMaterializer {
     phase: CompactLookupInverseMaterializationPhase,
 }
 
-#[cfg(test)]
 impl CompactLookupInverseMaterializer {
     pub(crate) fn advance(
         &mut self,
@@ -874,14 +830,12 @@ impl CompactLookupInverseMaterializer {
     }
 }
 
-#[cfg(test)]
 pub(crate) struct CompactPublicKeyAssignment {
     base_assignment: CompactPublicKeyBaseAssignment,
     lookup_challenge: ProofChallengeExtensionElement,
     lookup_inverses: Zeroizing<Vec<ProofChallengeExtensionElement>>,
 }
 
-#[cfg(test)]
 impl CompactPublicKeyAssignment {
     pub(crate) const fn memory_geometry(&self) -> CompactAuthenticatedAssignmentMemoryGeometry {
         self.base_assignment.geometry
@@ -958,7 +912,6 @@ impl CompactPublicKeyAssignment {
     }
 }
 
-#[cfg(test)]
 fn descriptor_origin(origin: &RelationColumnOrigin) -> CompactAuthenticatedSourceOrigin {
     match origin {
         RelationColumnOrigin::VerifierSequence { .. } => {
@@ -969,7 +922,6 @@ fn descriptor_origin(origin: &RelationColumnOrigin) -> CompactAuthenticatedSourc
     }
 }
 
-#[cfg(test)]
 fn witness_segment(
     relation: &CompactPublicKeyRelationCatalog,
     kind: CompactWitnessSegmentKind,
@@ -982,7 +934,6 @@ fn witness_segment(
         .ok_or(CommonProofProverError::InvalidColumn)
 }
 
-#[cfg(test)]
 fn fallible_zero_base_vector(
     element_count: u64,
 ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommonProofProverError> {
@@ -996,7 +947,6 @@ fn fallible_zero_base_vector(
     Ok(Zeroizing::new(values))
 }
 
-#[cfg(test)]
 fn value_from_base_prefix(
     prefix: &[ProofBaseFieldElement],
     padded_element_count: u64,
@@ -1015,7 +965,6 @@ fn value_from_base_prefix(
     Err(CommonProofProverError::InvalidColumn)
 }
 
-#[cfg(test)]
 fn store_source_rows(
     relation: &CompactPublicKeyRelationCatalog,
     source_half: CompactAuthenticatedSourceHalf,
@@ -1050,7 +999,6 @@ fn store_source_rows(
     Ok(())
 }
 
-#[cfg(test)]
 fn store_modular_quotient_rows(
     relation: &CompactPublicKeyRelationCatalog,
     source_half: CompactAuthenticatedSourceHalf,
@@ -1091,7 +1039,6 @@ fn store_modular_quotient_rows(
     Ok(())
 }
 
-#[cfg(test)]
 fn store_shifted_small_rows(
     relation: &CompactPublicKeyRelationCatalog,
     source_half: CompactAuthenticatedSourceHalf,
@@ -1113,7 +1060,14 @@ fn store_shifted_small_rows(
     let coefficient_offset = u64::from(half_ordinal)
         .checked_mul(source_half.element_count())
         .ok_or(CommonProofProverError::CountOverflow)?;
-    let ternary_vector_count = relation.shifted_ternary_vector_count();
+    let ternary_vector_count = u64::try_from(
+        relation
+            .ordered_private_small_vectors
+            .iter()
+            .filter(|descriptor| descriptor.kind == CompactSmallVectorKind::ShiftedTernary)
+            .count(),
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)?;
     for (local_ordinal, value) in trace_rows.iter().copied().enumerate() {
         let canonical_value = value.canonical();
         let maximum_value = match kind {
@@ -1184,7 +1138,6 @@ fn store_shifted_small_rows(
     Ok(())
 }
 
-#[cfg(test)]
 fn store_small_product(
     relation: &CompactPublicKeyRelationCatalog,
     product_segment_first_element: u64,
@@ -1208,7 +1161,6 @@ fn store_small_product(
     Ok(())
 }
 
-#[cfg(test)]
 fn validate_lookup_challenge(
     lookup_challenge: ProofChallengeExtensionElement,
 ) -> Result<(), CommonProofProverError> {
@@ -1221,7 +1173,6 @@ fn validate_lookup_challenge(
     Ok(())
 }
 
-#[cfg(test)]
 fn lookup_denominator(
     base_assignment: &CompactPublicKeyBaseAssignment,
     lookup_challenge: ProofChallengeExtensionElement,

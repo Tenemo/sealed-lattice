@@ -76,9 +76,11 @@ salts. Merkle verification streams already-canonical opened-value slices and
 parent coordinates into canonical-tuple SHAKE256 hashing with byte-identical
 output, without per-query field-vector re-encoding or tuple materialization.
 The transport validator is exported by the release WASM artifact. The scalar
-CFW prover/verifier algebra and bounded external-memory transaction driver also
-compile into the release artifact but have no compact generation-state caller.
-The semantic
+CFW prover/verifier algebra, bounded external-memory transaction driver,
+authenticated assignment loader, bounded lookup-inverse materializer, and owned
+structured-row and transpose path also compile into the release artifact but
+have no compact generation-state caller. The owned row source contains no
+borrowed worker-lifetime state. The semantic
 authority, complete CFW/WHIR verification, reduced execution fixtures, the
 response-tree executor, and
 the retained end-to-end workbench remain test-only. No compact prover exists. The
@@ -91,7 +93,7 @@ compact-proof browser run, or physical-phone evidence. Its separate byte and
 work facts are not contract fields, release-WASM evidence, or
 browser evidence. The current scalar release kernel and SDK byte copy are
 byte-identical and have normalized loader SHA-256
-`9f7a6cb8d4182cffb5c4a62052d499d7f3892e1530f23526a87288c2511b84a8`.
+`3bb4223a211be1bdcadcd6d6365b542533453062f67bf744873a47db04a43a8c`.
 This is release-build and byte-copy development evidence only, not compact-
 proof browser or physical-phone qualification. The release bytes still omit the
 compact proof path.

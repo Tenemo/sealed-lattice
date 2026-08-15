@@ -8,7 +8,6 @@
 //! through both the matrix description and an independent relation
 //! interpreter.
 
-#[cfg(test)]
 mod witness_covector;
 
 #[cfg(test)]
@@ -25,15 +24,14 @@ pub(crate) use witness_covector::{
     StructuredTransposeValueSource,
 };
 
+use std::rc::Rc;
+
 #[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
 
-#[cfg(test)]
 use p3_field::PrimeCharacteristicRing;
-#[cfg(test)]
 use zeroize::Zeroizing;
 
-#[cfg(test)]
 use crate::bgv::proof_suite::{
     PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
     ProofEvaluationDomain,
@@ -46,7 +44,6 @@ use crate::bgv::proof_suite::{
 };
 
 use super::super::key_relation::MODULAR_QUOTIENT_ENCODING_OFFSET;
-#[cfg(test)]
 use super::authenticated_assignment::CompactPublicKeyAssignment;
 use super::{
     CompactPublicKeyRelationCatalog, CompactR1csConstraintKind, CompactRingVectorReference,
@@ -138,20 +135,17 @@ struct CompactNegacyclicProductAddress {
     centered_offset: u64,
 }
 
-#[cfg(test)]
 type PreparedCompactNegacyclicProduct = (
     CompactNegacyclicProductAddress,
     Zeroizing<Vec<ProofBaseFieldElement>>,
 );
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct CompactCenteredPrivateVectorAddress {
     private_vector_first_column_ordinal: u64,
     centered_offset: u64,
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct CompactStructuredR1csRowEvaluation {
     pub(super) left: ProofChallengeExtensionElement,
@@ -159,7 +153,6 @@ pub(super) struct CompactStructuredR1csRowEvaluation {
     pub(super) output: ProofChallengeExtensionElement,
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactStructuredR1csRowSourceGeometry {
     ring_degree: u64,
@@ -176,7 +169,6 @@ pub(crate) struct CompactStructuredR1csRowSourceGeometry {
     lookup_table_batch_extension_multiplication_count: u64,
 }
 
-#[cfg(test)]
 impl CompactStructuredR1csRowSourceGeometry {
     fn derive(
         relation: &CompactPublicKeyRelationCatalog,
@@ -302,7 +294,6 @@ impl CompactStructuredR1csRowSourceGeometry {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn compact_structured_r1cs_row_source_geometry(
     relation: &CompactPublicKeyRelationCatalog,
 ) -> Result<CompactStructuredR1csRowSourceGeometry, CommonProofProverError> {
@@ -1121,7 +1112,6 @@ impl CompactStructuredR1csCatalog {
     }
 }
 
-#[cfg(test)]
 pub(super) trait CompactStructuredAssignmentSource {
     fn padded_public_input_element_count(&self) -> u64;
 
@@ -1154,7 +1144,6 @@ pub(super) trait CompactStructuredAssignmentSource {
     }
 }
 
-#[cfg(test)]
 impl CompactStructuredAssignmentSource for CompactPublicKeyAssignment {
     fn padded_public_input_element_count(&self) -> u64 {
         self.memory_geometry().padded_public_input_element_count()
@@ -1197,7 +1186,50 @@ impl CompactStructuredAssignmentSource for CompactPublicKeyAssignment {
     }
 }
 
-#[cfg(test)]
+impl<Assignment: CompactStructuredAssignmentSource + ?Sized> CompactStructuredAssignmentSource
+    for Rc<Assignment>
+{
+    fn padded_public_input_element_count(&self) -> u64 {
+        Assignment::padded_public_input_element_count(self)
+    }
+
+    fn padded_witness_element_count(&self) -> u64 {
+        Assignment::padded_witness_element_count(self)
+    }
+
+    fn lookup_challenge(&self) -> ProofChallengeExtensionElement {
+        Assignment::lookup_challenge(self)
+    }
+
+    fn public_input_value(
+        &self,
+        element_ordinal: u64,
+    ) -> Result<ProofChallengeExtensionElement, CommonProofProverError> {
+        Assignment::public_input_value(self, element_ordinal)
+    }
+
+    fn witness_value(
+        &self,
+        element_ordinal: u64,
+    ) -> Result<ProofChallengeExtensionElement, CommonProofProverError> {
+        Assignment::witness_value(self, element_ordinal)
+    }
+
+    fn public_input_base_value(
+        &self,
+        element_ordinal: u64,
+    ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
+        Assignment::public_input_base_value(self, element_ordinal)
+    }
+
+    fn base_witness_value(
+        &self,
+        element_ordinal: u64,
+    ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
+        Assignment::base_witness_value(self, element_ordinal)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CompactLookupLogDerivativeEvaluationCache {
     inverse_first_column_ordinal: u64,
@@ -1208,7 +1240,6 @@ struct CompactLookupLogDerivativeEvaluationCache {
     negated_weighted_table_reciprocal_sum: ProofChallengeExtensionElement,
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum CompactStructuredR1csRowSourcePreparationStep {
     LookupInverseSum,
@@ -1224,19 +1255,17 @@ pub(super) enum CompactStructuredR1csRowSourcePreparationStep {
     NegacyclicProductFold,
 }
 
-#[cfg(test)]
-pub(super) enum CompactStructuredR1csRowSourcePreparationPoll<
-    'source,
-    Assignment: CompactStructuredAssignmentSource + ?Sized,
-> {
+pub(super) enum CompactStructuredR1csRowSourcePreparationPoll<Assignment>
+where
+    Assignment: CompactStructuredAssignmentSource + Clone,
+{
     StepCompleted {
         step: CompactStructuredR1csRowSourcePreparationStep,
         completed_work_unit_count: u64,
     },
-    Complete(Box<CompactStructuredR1csRowSource<'source, Assignment>>),
+    Complete(Box<CompactStructuredR1csRowSource<Assignment>>),
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactLookupLogDerivativePreparationPhase {
     InverseSum {
@@ -1258,7 +1287,6 @@ enum CompactLookupLogDerivativePreparationPhase {
     Complete,
 }
 
-#[cfg(test)]
 struct CompactLookupLogDerivativeEvaluationCachePreparation {
     inverse_first_column_ordinal: u64,
     inverse_first_witness_element: u64,
@@ -1273,7 +1301,6 @@ struct CompactLookupLogDerivativeEvaluationCachePreparation {
     phase: CompactLookupLogDerivativePreparationPhase,
 }
 
-#[cfg(test)]
 impl CompactLookupLogDerivativeEvaluationCachePreparation {
     fn new<Assignment: CompactStructuredAssignmentSource + ?Sized>(
         relation: &CompactPublicKeyRelationCatalog,
@@ -1526,7 +1553,6 @@ impl CompactLookupLogDerivativeEvaluationCachePreparation {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactNegacyclicProductPreparationPhase {
     FillPrivatePolynomial { next_coefficient_ordinal: u64 },
@@ -1539,14 +1565,12 @@ enum CompactNegacyclicProductPreparationPhase {
     Complete,
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CompactNegacyclicProductPreparationGroup {
     private_address: CompactCenteredPrivateVectorAddress,
     ordered_product_addresses: Vec<CompactNegacyclicProductAddress>,
 }
 
-#[cfg(test)]
 struct CompactNegacyclicProductPreparation {
     ordered_groups: Vec<CompactNegacyclicProductPreparationGroup>,
     next_group_ordinal: usize,
@@ -1558,7 +1582,6 @@ struct CompactNegacyclicProductPreparation {
     phase: CompactNegacyclicProductPreparationPhase,
 }
 
-#[cfg(test)]
 impl CompactNegacyclicProductPreparation {
     fn new(
         relation: &CompactPublicKeyRelationCatalog,
@@ -1988,7 +2011,6 @@ impl CompactNegacyclicProductPreparation {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactStructuredR1csRowSourcePreparationPhase {
     LookupLogDerivative,
@@ -1996,14 +2018,13 @@ enum CompactStructuredR1csRowSourcePreparationPhase {
     Complete,
 }
 
-#[cfg(test)]
-pub(super) struct CompactStructuredR1csRowSourcePreparation<
-    'source,
-    Assignment: CompactStructuredAssignmentSource + ?Sized,
-> {
-    relation: &'source CompactPublicKeyRelationCatalog,
+pub(super) struct CompactStructuredR1csRowSourcePreparation<Assignment>
+where
+    Assignment: CompactStructuredAssignmentSource + Clone,
+{
+    relation: Rc<CompactPublicKeyRelationCatalog>,
     matrices: CompactStructuredR1csCatalog,
-    assignment: &'source Assignment,
+    assignment: Assignment,
     ordered_product_addresses: Vec<CompactNegacyclicProductAddress>,
     geometry: CompactStructuredR1csRowSourceGeometry,
     lookup_preparation: Option<CompactLookupLogDerivativeEvaluationCachePreparation>,
@@ -2013,28 +2034,30 @@ pub(super) struct CompactStructuredR1csRowSourcePreparation<
     phase: CompactStructuredR1csRowSourcePreparationPhase,
 }
 
-#[cfg(test)]
-impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
-    CompactStructuredR1csRowSourcePreparation<'source, Assignment>
+impl<Assignment> CompactStructuredR1csRowSourcePreparation<Assignment>
+where
+    Assignment: CompactStructuredAssignmentSource + Clone,
 {
     pub(super) fn new(
-        relation: &'source CompactPublicKeyRelationCatalog,
-        assignment: &'source Assignment,
+        relation: Rc<CompactPublicKeyRelationCatalog>,
+        assignment: Assignment,
     ) -> Result<Self, CommonProofProverError> {
-        let matrices = CompactStructuredR1csCatalog::derive(relation)?;
+        let matrices = CompactStructuredR1csCatalog::derive(&relation)?;
         if assignment.padded_public_input_element_count() != matrices.public_input_length
             || assignment.padded_witness_element_count() != matrices.witness_length
         {
             return Err(CommonProofProverError::InvalidInput);
         }
-        let ordered_product_addresses = matrices.ordered_negacyclic_product_addresses(relation)?;
+        let ordered_product_addresses = matrices.ordered_negacyclic_product_addresses(&relation)?;
         let geometry =
-            CompactStructuredR1csRowSourceGeometry::derive(relation, &ordered_product_addresses)?;
+            CompactStructuredR1csRowSourceGeometry::derive(&relation, &ordered_product_addresses)?;
         let lookup_preparation = Some(CompactLookupLogDerivativeEvaluationCachePreparation::new(
-            relation, &matrices, assignment,
+            &relation,
+            &matrices,
+            &assignment,
         )?);
         let product_preparation = Some(CompactNegacyclicProductPreparation::new(
-            relation,
+            &relation,
             &ordered_product_addresses,
         )?);
         Ok(Self {
@@ -2054,10 +2077,8 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
     pub(super) fn advance(
         &mut self,
         maximum_element_count: u64,
-    ) -> Result<
-        CompactStructuredR1csRowSourcePreparationPoll<'source, Assignment>,
-        CommonProofProverError,
-    > {
+    ) -> Result<CompactStructuredR1csRowSourcePreparationPoll<Assignment>, CommonProofProverError>
+    {
         if maximum_element_count == 0 {
             return Err(CommonProofProverError::InvalidInput);
         }
@@ -2082,7 +2103,7 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
                         continue;
                     }
                     let (step, completed_work_unit_count) =
-                        lookup_preparation.advance(self.assignment, maximum_element_count)?;
+                        lookup_preparation.advance(&self.assignment, maximum_element_count)?;
                     return Ok(
                         CompactStructuredR1csRowSourcePreparationPoll::StepCompleted {
                             step,
@@ -2096,9 +2117,9 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
                         .as_mut()
                         .ok_or(CommonProofProverError::InvalidInput)?;
                     let Some((step, completed_work_unit_count)) = product_preparation.advance(
-                        self.relation,
+                        &self.relation,
                         &self.matrices,
-                        self.assignment,
+                        &self.assignment,
                         maximum_element_count,
                     )?
                     else {
@@ -2134,9 +2155,9 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
                     }
                     return Ok(CompactStructuredR1csRowSourcePreparationPoll::Complete(
                         Box::new(CompactStructuredR1csRowSource {
-                            relation: self.relation,
+                            relation: Rc::clone(&self.relation),
                             matrices: self.matrices.clone(),
-                            assignment: self.assignment,
+                            assignment: self.assignment.clone(),
                             negacyclic_products,
                             lookup_log_derivative_cache: self
                                 .lookup_log_derivative_cache
@@ -2150,22 +2171,21 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
     }
 }
 
-#[cfg(test)]
-pub(super) struct CompactStructuredR1csRowSource<
-    'source,
-    Assignment: CompactStructuredAssignmentSource + ?Sized,
-> {
-    relation: &'source CompactPublicKeyRelationCatalog,
+pub(super) struct CompactStructuredR1csRowSource<Assignment>
+where
+    Assignment: CompactStructuredAssignmentSource,
+{
+    relation: Rc<CompactPublicKeyRelationCatalog>,
     matrices: CompactStructuredR1csCatalog,
-    assignment: &'source Assignment,
+    assignment: Assignment,
     negacyclic_products: Vec<PreparedCompactNegacyclicProduct>,
     lookup_log_derivative_cache: CompactLookupLogDerivativeEvaluationCache,
     geometry: CompactStructuredR1csRowSourceGeometry,
 }
 
-#[cfg(test)]
-impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
-    CompactStructuredR1csRowSource<'source, Assignment>
+impl<Assignment> CompactStructuredR1csRowSource<Assignment>
+where
+    Assignment: CompactStructuredAssignmentSource,
 {
     pub(super) const fn geometry(&self) -> CompactStructuredR1csRowSourceGeometry {
         self.geometry
@@ -2183,7 +2203,7 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
         &self,
         row_ordinal: u64,
     ) -> Result<CompactStructuredR1csRowEvaluation, CommonProofProverError> {
-        let row = self.matrices.row(self.relation, row_ordinal)?;
+        let row = self.matrices.row(&self.relation, row_ordinal)?;
         Ok(CompactStructuredR1csRowEvaluation {
             left: self.evaluate_form(&row.left)?,
             right: self.evaluate_form(&row.right)?,
@@ -2331,9 +2351,8 @@ impl<'source, Assignment: CompactStructuredAssignmentSource + ?Sized>
 /// CFW caller. This distinction is load-bearing for knowledge extraction: a
 /// candidate witness must be checked against the production matrices rather
 /// than against the assignment that happened to prepare the row source.
-#[cfg(test)]
-pub(crate) struct CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_input> {
-    row_source: &'source CompactStructuredR1csRowSource<'assignment, CompactPublicKeyAssignment>,
+pub(crate) struct CompactPublicKeyCfwMatrices<'source, 'public_input> {
+    row_source: &'source CompactStructuredR1csRowSource<Rc<CompactPublicKeyAssignment>>,
     canonical_public_input: &'public_input [CompactChallengeField],
     witness_length: usize,
     row_count: usize,
@@ -2341,15 +2360,9 @@ pub(crate) struct CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_inpu
     lookup_challenge: CompactChallengeField,
 }
 
-#[cfg(test)]
-impl<'source, 'assignment, 'public_input>
-    CompactPublicKeyCfwMatrices<'source, 'assignment, 'public_input>
-{
+impl<'source, 'public_input> CompactPublicKeyCfwMatrices<'source, 'public_input> {
     pub(crate) fn new(
-        row_source: &'source CompactStructuredR1csRowSource<
-            'assignment,
-            CompactPublicKeyAssignment,
-        >,
+        row_source: &'source CompactStructuredR1csRowSource<Rc<CompactPublicKeyAssignment>>,
         canonical_public_input: &'public_input [CompactChallengeField],
     ) -> Result<Self, CompactCfwError> {
         let witness_length = usize::try_from(row_source.witness_length())
@@ -2867,8 +2880,7 @@ impl<'source, 'assignment, 'public_input>
     }
 }
 
-#[cfg(test)]
-impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
+impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_> {
     fn witness_length(&self) -> usize {
         self.witness_length
     }
@@ -2891,7 +2903,7 @@ impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
                 .row_source
                 .matrices
                 .row(
-                    self.row_source.relation,
+                    &self.row_source.relation,
                     u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
                 )
                 .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
@@ -2920,7 +2932,7 @@ impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
                 .row_source
                 .matrices
                 .row(
-                    self.row_source.relation,
+                    &self.row_source.relation,
                     u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
                 )
                 .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
@@ -2955,7 +2967,7 @@ impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
                 .row_source
                 .matrices
                 .row(
-                    self.row_source.relation,
+                    &self.row_source.relation,
                     u64::try_from(row_ordinal).map_err(|_| CompactCfwError::CountOverflow)?,
                 )
                 .map_err(|_| CompactCfwError::InvalidMatrixSource)?;
@@ -2976,7 +2988,6 @@ impl CompactCfwR1csMatrices for CompactPublicKeyCfwMatrices<'_, '_, '_> {
     }
 }
 
-#[cfg(test)]
 fn compact_signed_integer(value: i128) -> Result<CompactChallengeField, CompactCfwError> {
     base_element_from_signed_integer(value)
         .map(ProofChallengeExtensionElement::from_base)
@@ -2984,7 +2995,6 @@ fn compact_signed_integer(value: i128) -> Result<CompactChallengeField, CompactC
         .map_err(|_| CompactCfwError::InvalidMatrixSource)
 }
 
-#[cfg(test)]
 fn add_compact_witness_covector_entry(
     destination: &mut [CompactChallengeField],
     public_input_length: u64,
@@ -3003,9 +3013,8 @@ fn add_compact_witness_covector_entry(
     Ok(())
 }
 
-#[cfg(test)]
-impl<Assignment: CompactStructuredAssignmentSource + ?Sized> CompactCfwExternalRowSource
-    for CompactStructuredR1csRowSource<'_, Assignment>
+impl<Assignment: CompactStructuredAssignmentSource> CompactCfwExternalRowSource
+    for CompactStructuredR1csRowSource<Assignment>
 {
     fn witness_length(&self) -> Result<usize, CompactCfwError> {
         usize::try_from(CompactStructuredR1csRowSource::witness_length(self))
@@ -3035,7 +3044,6 @@ impl<Assignment: CompactStructuredAssignmentSource + ?Sized> CompactCfwExternalR
     }
 }
 
-#[cfg(test)]
 fn extension_base_value(
     value: ProofChallengeExtensionElement,
 ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
@@ -3046,7 +3054,6 @@ fn extension_base_value(
     ProofBaseFieldElement::from_canonical(coordinates[0]).map_err(Into::into)
 }
 
-#[cfg(test)]
 fn base_element_from_signed_integer(
     value: i128,
 ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
@@ -3055,7 +3062,6 @@ fn base_element_from_signed_integer(
     ProofBaseFieldElement::from_canonical(canonical_value).map_err(Into::into)
 }
 
-#[cfg(test)]
 fn fallible_base_vector(
     capacity: u64,
 ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommonProofProverError> {
@@ -3068,7 +3074,6 @@ fn fallible_base_vector(
     Ok(Zeroizing::new(values))
 }
 
-#[cfg(test)]
 fn fallible_extension_vector(
     capacity: u64,
 ) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
@@ -4191,6 +4196,7 @@ mod tests {
         } = prepared_sources
             .finish_source_loading()
             .expect("completed compact source loading releases its authority");
+        let relation = Rc::new(relation);
         assert_ne!(base_assignment.source_replay_binding(), [0_u8; 64]);
         println!(
             "compact public-key focused owner phase complete: load 202 authenticated columns elapsed_milliseconds={}",
@@ -4216,9 +4222,11 @@ mod tests {
             lookup_materialization_poll_count += 1;
         }
         assert_eq!(lookup_materialization_poll_count, 233);
-        let assignment = lookup_materializer
-            .finish()
-            .expect("bounded lookup materialization finishes");
+        let assignment = Rc::new(
+            lookup_materializer
+                .finish()
+                .expect("bounded lookup materialization finishes"),
+        );
         println!(
             "compact public-key focused owner phase complete: materialize lookup inverses elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
@@ -4226,9 +4234,11 @@ mod tests {
 
         let phase_started_at = Instant::now();
         println!("compact public-key focused owner phase: prepare structured row source");
-        let mut row_source_preparation =
-            CompactStructuredR1csRowSourcePreparation::new(&relation, &assignment)
-                .expect("production assignment starts structured row preparation");
+        let mut row_source_preparation = CompactStructuredR1csRowSourcePreparation::new(
+            Rc::clone(&relation),
+            Rc::clone(&assignment),
+        )
+        .expect("production assignment starts structured row preparation");
         let mut row_source_preparation_poll_count = 0_u64;
         let row_source = loop {
             match row_source_preparation
@@ -4253,6 +4263,9 @@ mod tests {
                 }
             }
         };
+        drop(row_source_preparation);
+        assert_eq!(Rc::strong_count(&relation), 2);
+        assert_eq!(Rc::strong_count(&assignment), 2);
         assert_eq!(row_source_preparation_poll_count, 760);
         println!(
             "compact public-key focused owner phase complete: prepare structured row source elapsed_milliseconds={}",
@@ -4372,14 +4385,18 @@ mod tests {
 
     #[test]
     fn compact_structured_row_source_uses_exact_bounded_transform_products() {
-        let relation = super::super::selected_compact_public_key_relation_catalog()
-            .expect("selected compact public-key relation");
+        let relation = Rc::new(
+            super::super::selected_compact_public_key_relation_catalog()
+                .expect("selected compact public-key relation"),
+        );
         let matrices = CompactStructuredR1csCatalog::derive(&relation)
             .expect("complete structured R1CS matrices");
-        let assignment = DeterministicR1csAssignment::new(&relation, &matrices);
-        let mut preparation =
-            CompactStructuredR1csRowSourcePreparation::new(&relation, &assignment)
-                .expect("bounded structured row-source preparation");
+        let assignment = Rc::new(DeterministicR1csAssignment::new(&relation, &matrices));
+        let mut preparation = CompactStructuredR1csRowSourcePreparation::new(
+            Rc::clone(&relation),
+            Rc::clone(&assignment),
+        )
+        .expect("bounded structured row-source preparation");
         let mut preparation_step_counts = BTreeMap::new();
         let mut preparation_work_unit_counts = BTreeMap::new();
         let mut row_source = loop {
@@ -4400,6 +4417,9 @@ mod tests {
                 }
             }
         };
+        drop(preparation);
+        assert_eq!(Rc::strong_count(&relation), 2);
+        assert_eq!(Rc::strong_count(&assignment), 2);
         let geometry = row_source.geometry();
 
         assert_eq!(preparation_step_counts.values().sum::<u64>(), 760);

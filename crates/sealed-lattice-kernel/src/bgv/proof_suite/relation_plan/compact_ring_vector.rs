@@ -71,7 +71,21 @@ const PRIVATE_SMALL_VECTOR_RECORD_TAG: u16 = 0x0401;
 const WITNESS_SEGMENT_RECORD_TAG: u16 = 0x0501;
 const CONSTRAINT_SEGMENT_RECORD_TAG: u16 = 0x0601;
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes the release assignment loader at the next integration boundary"
+    )
+)]
 mod authenticated_assignment;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes the owned release row source at the next integration boundary"
+    )
+)]
 mod structured_r1cs;
 
 #[cfg(test)]

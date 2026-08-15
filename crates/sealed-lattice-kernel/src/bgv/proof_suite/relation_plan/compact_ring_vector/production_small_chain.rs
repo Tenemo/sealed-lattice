@@ -2424,6 +2424,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         assignment_catalog,
         ..
     } = fixture;
+    let relation = Rc::new(relation);
     assert_eq!(relation.ring_degree(), SMALL_CHAIN_RING_DEGREE);
     assert_eq!(relation.public_key_share_relation_count(), 23);
     assert_eq!(relation.ordinary_anchor_relation_count(), 3);
@@ -2738,16 +2739,21 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     {
         assert!((1..=8_192).contains(&processed_element_count));
     }
-    let assignment = lookup_materializer
-        .finish()
-        .expect("lookup inverse materialization finishes");
+    let assignment = Rc::new(
+        lookup_materializer
+            .finish()
+            .expect("lookup inverse materialization finishes"),
+    );
     assert_eq!(
         assignment.memory_geometry().padded_witness_element_count(),
         524_288
     );
 
-    let mut preparation = CompactStructuredR1csRowSourcePreparation::new(&relation, &assignment)
-        .expect("structured row-source preparation starts");
+    let mut preparation = CompactStructuredR1csRowSourcePreparation::new(
+        Rc::clone(&relation),
+        Rc::clone(&assignment),
+    )
+    .expect("structured row-source preparation starts");
     let row_source = loop {
         match preparation
             .advance(8_192)
@@ -2762,6 +2768,9 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
             }
         }
     };
+    drop(preparation);
+    assert_eq!(Rc::strong_count(&relation), 2);
+    assert_eq!(Rc::strong_count(&assignment), 2);
     assert_eq!(row_source.witness_length(), 524_288);
     assert_eq!(row_source.row_count(), 1_048_576);
     for row_ordinal in [
@@ -2808,7 +2817,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         .expect("resident matrix view binds the structured row source");
     let first_row = row_source
         .matrices
-        .row(row_source.relation, 0)
+        .row(&row_source.relation, 0)
         .expect("the first structured row exists");
     assert!(first_row.left.ordered_terms.iter().any(|term| matches!(
         term,
