@@ -1,4 +1,4 @@
-//! Test-only CFW reduction algebra for the compact extension-field R1CS path.
+//! CFW reduction algebra for the compact extension-field R1CS path.
 //!
 //! This module owns the exact mask normalization, masked sumcheck, final
 //! consistency check, and generalized linear-claim ordering needed by the
@@ -11,12 +11,13 @@ use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64};
 use p3_goldilocks::Goldilocks;
 
 #[cfg(test)]
-pub(crate) use super::compact_cfw_geometry::COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT;
+pub(crate) use super::compact_cfw_geometry::COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT;
 #[cfg(test)]
+pub(crate) use super::compact_cfw_geometry::COMPACT_CFW_LAST_ROUND_EXCLUDED_ELEMENT_COUNT;
 pub(crate) use super::compact_cfw_geometry::{
-    COMPACT_CFW_INNER_ENDPOINT_CLAIM_COUNT, COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER,
-    COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_MATRIX_COUNT,
-    COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwGeometry, CompactCfwGeometryError,
+    COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER, COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH,
+    COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwGeometry,
+    CompactCfwGeometryError,
 };
 use super::field::{PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement};
 

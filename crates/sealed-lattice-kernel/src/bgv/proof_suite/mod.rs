@@ -14,11 +14,29 @@ mod collective_public_key_runtime;
 mod committed_material;
 #[cfg(test)]
 mod compact_cdhz_theorem;
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes this release module in the next integration boundary"
+    )
+)]
 mod compact_cfw;
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes this release module in the next integration boundary"
+    )
+)]
 mod compact_cfw_external;
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact generation state consumes this release module in the next integration boundary"
+    )
+)]
 mod compact_cfw_external_prover;
 mod compact_cfw_geometry;
 #[cfg(test)]

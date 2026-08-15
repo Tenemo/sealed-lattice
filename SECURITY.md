@@ -201,7 +201,10 @@ default-compiled internal primitives. The Merkle privacy-certificate owner,
 strict transport validator, proof and public-input decoders, transcript
 execution, verifier-message derivation, and salted-opening verification are
 ordinary release code. The Rust/WebAssembly ABI and TypeScript worker caller
-consume that boundary. It checks canonical bytes, derives the selected-geometry
+consume that boundary. The scalar CFW prover/verifier algebra and bounded
+external-memory transaction driver are ordinary release code but have no
+compact generation-state caller. The transport validator checks canonical
+bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
 bindings, and gates every verifier-derived schedule and all 82 response openings
 through it, including the two query consumers of the one shared cross-epoch

@@ -75,7 +75,10 @@ canonical proof buffer: `317,240` bytes rather than `10,151,680` bytes of copied
 salts. Merkle verification streams already-canonical opened-value slices and
 parent coordinates into canonical-tuple SHAKE256 hashing with byte-identical
 output, without per-query field-vector re-encoding or tuple materialization.
-The transport validator is exported by the release WASM artifact. The semantic
+The transport validator is exported by the release WASM artifact. The scalar
+CFW prover/verifier algebra and bounded external-memory transaction driver also
+compile into the release artifact but have no compact generation-state caller.
+The semantic
 authority, complete CFW/WHIR verification, reduced execution fixtures, the
 response-tree executor, and
 the retained end-to-end workbench remain test-only. No compact prover exists. The
