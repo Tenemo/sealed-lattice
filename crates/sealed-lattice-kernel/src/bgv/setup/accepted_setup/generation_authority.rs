@@ -4068,6 +4068,11 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         [u8; Hash512::BYTE_LENGTH]
     );
     setup_generation_key_relation_authority_copy_field!(
+        manifest_hash,
+        manifest_hash,
+        [u8; Hash512::BYTE_LENGTH]
+    );
+    setup_generation_key_relation_authority_copy_field!(
         roster_hash,
         roster_hash,
         [u8; Hash512::BYTE_LENGTH]
@@ -4220,6 +4225,10 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
 
     pub(crate) fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.authority.suite_identifier()
+    }
+
+    pub(crate) fn manifest_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.manifest_hash()
     }
 
     pub(crate) fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {

@@ -91,9 +91,17 @@ coordination, and the authenticated response-checkpoint boundary are release
 code with owned retained inputs. A release-owned compact response state now
 drives those response components with verifier-selected leaf replay, exact
 transaction yielding, cancellation, authenticated cursor restoration, and
-byte-identical genesis replay. The complete production-shaped small chain uses
-that state, but the family material provider and production worker adapter
-remain absent. Semantic and complete CFW/WHIR execution,
+byte-identical genesis replay.
+A release-owned public-key family adapter now joins the frozen factor-one
+contract to the retained setup authority, polls the exact 202 authenticated
+source columns, and derives canonical public-input bytes from verifier-minted
+suite, application-statement, manifest, and relation bindings before
+independently decoding them. Guarded selected-size evidence carries that
+handoff through bounded lookup materialization, owned structured-row
+preparation, and one CFW poll. The complete production-shaped small chain
+uses the compact response state, but the later CFW and WHIR family material
+provider and production worker adapter remain incomplete.
+Semantic and complete CFW/WHIR execution,
 Merkle privacy, masking, emitted-coordinate measurement, fixed-tape and
 Appendix arithmetic remain test-only or incomplete. The
 contract validates the exact target; statement-schema identifier, field count, and layout
@@ -224,9 +232,17 @@ coordination, and the authenticated response-checkpoint boundary are release
 code with owned retained inputs. A release-owned compact response state now
 drives those response components with verifier-selected leaf replay, exact
 transaction yielding, cancellation, authenticated cursor restoration, and
-byte-identical genesis replay. The complete production-shaped small chain uses
-that state, but the family material provider and production worker adapter
-remain absent. The transport validator checks canonical
+byte-identical genesis replay.
+A release-owned public-key family adapter now joins the frozen factor-one
+contract to the retained setup authority, polls the exact 202 authenticated
+source columns, and derives canonical public-input bytes from verifier-minted
+suite, application-statement, manifest, and relation bindings before
+independently decoding them. Guarded selected-size evidence carries that
+handoff through bounded lookup materialization, owned structured-row
+preparation, and one CFW poll. The complete production-shaped small chain
+uses the compact response state, but the later CFW and WHIR family material
+provider and production worker adapter remain incomplete.
+The transport validator checks canonical
 bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
 bindings, and gates every verifier-derived schedule and all 82 response openings

@@ -45,13 +45,6 @@ mod compact_emitted_cdhz;
 mod compact_factor_one_semantics;
 #[cfg(test)]
 mod compact_fixed_tape_uniformity;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the compact generation state consumes release checkpoint construction at the next integration boundary"
-    )
-)]
 mod compact_generation_checkpoint;
 mod compact_masking_coefficient_maps;
 #[cfg(test)]

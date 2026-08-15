@@ -9,13 +9,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
-use crate::foundation::ProofApplicationSlotCeilings;
+use crate::bgv::setup::{SetupGenerationKeyRelationSource, SetupKeyRelationProofFamily};
+use crate::foundation::{Hash512, ProofApplicationSlotCeilings};
 use crate::hashing::StreamingHash512;
 
-#[cfg(test)]
-use super::super::{CommonProofProverError, CommonProofRelationPlanCapability};
-#[cfg(test)]
-use crate::bgv::setup::{SetupGenerationKeyRelationSource, SetupKeyRelationProofFamily};
+use super::super::compact_proof_contract::selected_compact_public_key_proof_contract;
+use super::super::compact_proof_wire::{
+    CompactPublicInputBindings, CompactPublicInputWireGeometry, DecodedCompactPublicInput,
+    decode_compact_public_input, encode_compact_public_input,
+};
+use super::super::{
+    CommonProofProverError, CommonProofRelationPlanCapability, CommonProofSourcePolynomialProvider,
+    CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+};
 
 use super::key_relation::{
     MODULAR_QUOTIENT_ENCODING_OFFSET, MODULAR_QUOTIENT_VALUE_COUNT,
@@ -88,12 +94,12 @@ mod authenticated_assignment;
 )]
 mod structured_r1cs;
 
-#[cfg(test)]
 use super::setup_key_relation_adapter::SetupKeyRelationSourcePolynomialAdapter;
-use authenticated_assignment::validate_compact_authenticated_assignment;
 #[cfg(test)]
+use authenticated_assignment::CompactAuthenticatedAssignmentCatalog;
+use authenticated_assignment::validate_compact_authenticated_assignment;
 use authenticated_assignment::{
-    CompactAuthenticatedAssignmentCatalog, CompactAuthenticatedAssignmentCursor,
+    CompactAuthenticatedAssignmentCursor, CompactAuthenticatedAssignmentPoll,
     CompactPublicKeyBaseAssignment,
 };
 #[cfg(test)]
@@ -1092,27 +1098,71 @@ pub(crate) fn selected_compact_public_key_relation_catalog()
     Ok(catalog)
 }
 
-/// Authenticated production inputs for the compact public-key assignment.
+/// Pollable production owner for the compact public-key assignment.
 ///
-/// This is a pre-proof development boundary. It binds the compact relation and
-/// exact 202-column request to the retained setup authority, but it neither
-/// selects a packing factor nor authorizes or emits proof bytes.
-#[cfg(test)]
+/// The state binds the frozen factor-one contract and canonical public-input
+/// frame to the retained setup authority before it asks for the exact compact
+/// source sequence. It cannot accept an ordinal-keyed caller map or detached
+/// public-input bytes.
 pub(crate) struct PreparedCompactPublicKeyAssignmentSources {
-    pub(crate) relation_plan_variant: RelationPlanVariant,
-    pub(crate) relation: CompactPublicKeyRelationCatalog,
-    pub(crate) assignment_cursor: CompactAuthenticatedAssignmentCursor,
-    pub(crate) source_polynomials: SetupKeyRelationSourcePolynomialAdapter,
+    relation_plan_variant: RelationPlanVariant,
+    relation: CompactPublicKeyRelationCatalog,
+    assignment_cursor: CompactAuthenticatedAssignmentCursor,
+    source_polynomials: SetupKeyRelationSourcePolynomialAdapter,
+    public_input_bindings: CompactPublicInputBindings,
+    public_input_wire_geometry: CompactPublicInputWireGeometry,
+    compact_construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
+    checkpoint_schedule_digest: Hash512,
 }
 
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact common generation state consumes this release family handoff at the next integration boundary"
+    )
+)]
 pub(crate) struct PreparedCompactPublicKeyBaseAssignment {
     pub(crate) relation: CompactPublicKeyRelationCatalog,
     pub(crate) base_assignment: CompactPublicKeyBaseAssignment,
+    pub(crate) public_input_bindings: CompactPublicInputBindings,
+    pub(crate) canonical_public_input_bytes: Vec<u8>,
+    pub(crate) decoded_public_input: DecodedCompactPublicInput,
+    pub(crate) compact_construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) checkpoint_schedule_digest: Hash512,
 }
 
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact common generation state polls this release family adapter at the next integration boundary"
+    )
+)]
 impl PreparedCompactPublicKeyAssignmentSources {
+    pub(crate) fn poll_source_loading(
+        &mut self,
+    ) -> Result<CompactAuthenticatedAssignmentPoll, CommonProofProverError> {
+        self.assignment_cursor.next_source(
+            &self.relation,
+            &self.relation_plan_variant,
+            &mut self.source_polynomials,
+        )
+    }
+
+    pub(crate) fn source_request_context(
+        &self,
+    ) -> Result<CommonProofSourcePolynomialRequestContext, CommonProofProverError> {
+        self.source_polynomials
+            .compact_public_key_assignment_request_context()
+    }
+
+    pub(crate) fn source_provider_memory_accounting(
+        &self,
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        self.source_polynomials.memory_accounting()
+    }
+
     pub(crate) fn finish_source_loading(
         self,
     ) -> Result<PreparedCompactPublicKeyBaseAssignment, CommonProofProverError> {
@@ -1121,6 +1171,10 @@ impl PreparedCompactPublicKeyAssignmentSources {
             relation,
             assignment_cursor,
             source_polynomials,
+            public_input_bindings,
+            public_input_wire_geometry,
+            compact_construction_identity_hash,
+            checkpoint_schedule_digest,
         } = self;
         let (input, relation_context) = selected_input_and_context()?;
         let compiled =
@@ -1133,15 +1187,33 @@ impl PreparedCompactPublicKeyAssignmentSources {
         relation.check(&input, &relation_context, &relation_plan_variant)?;
         let base_assignment = assignment_cursor.finish(&relation, &relation_plan_variant)?;
         source_polynomials.finish_compact_public_key_assignment_sources()?;
+        let (canonical_public_input_bytes, decoded_public_input) =
+            encode_compact_public_key_assignment_public_input(
+                &relation,
+                &base_assignment,
+                public_input_wire_geometry,
+                public_input_bindings,
+            )?;
         drop((relation_plan_variant, relation_context));
         Ok(PreparedCompactPublicKeyBaseAssignment {
             relation,
             base_assignment,
+            public_input_bindings,
+            canonical_public_input_bytes,
+            decoded_public_input,
+            compact_construction_identity_hash,
+            checkpoint_schedule_digest,
         })
     }
 }
 
-#[cfg(test)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the compact common generation state calls this release family constructor at the next integration boundary"
+    )
+)]
 pub(crate) fn prepare_compact_public_key_assignment_sources(
     source: &SetupGenerationKeyRelationSource<'_, '_>,
     relation_plan: CommonProofRelationPlanCapability,
@@ -1166,6 +1238,36 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         &compiled.source_layout,
     )?;
     relation.check(&input, &relation_context, &relation_plan_variant)?;
+    let contract = selected_compact_public_key_proof_contract()
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let verifier_inputs = contract.verifier_inputs();
+    if verifier_inputs.statement_layout.schema_identifier()
+        != ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        || verifier_inputs.relation != &relation
+        || verifier_inputs.public_input_wire_geometry
+            != CompactPublicInputWireGeometry::new(
+                relation.public_input_ring_vector_count(),
+                relation.ring_degree(),
+            )
+            .map_err(|_| CommonProofProverError::InvalidInput)?
+    {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    let public_input_bindings = CompactPublicInputBindings::new(
+        Hash512::from_bytes(source.suite_identifier()),
+        source.prepared_attempt().application_statement_hash(),
+        Hash512::from_bytes(source.manifest_hash()),
+        Hash512::from_bytes(relation.relation_plan_variant_hash()),
+    );
+    let public_input_wire_geometry = verifier_inputs.public_input_wire_geometry;
+    let compact_construction_identity_hash = verifier_inputs
+        .canonical_source_hash()
+        .map_err(|_| CommonProofProverError::InvalidInput)?
+        .into_bytes();
+    let checkpoint_schedule_digest = verifier_inputs
+        .checkpoint_schedule
+        .checkpoint_schedule_digest();
+    drop(contract);
     let source_polynomials =
         SetupKeyRelationSourcePolynomialAdapter::new_compact_public_key_assignment(
             source,
@@ -1187,7 +1289,46 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         relation,
         assignment_cursor,
         source_polynomials,
+        public_input_bindings,
+        public_input_wire_geometry,
+        compact_construction_identity_hash,
+        checkpoint_schedule_digest,
     })
+}
+
+fn encode_compact_public_key_assignment_public_input(
+    relation: &CompactPublicKeyRelationCatalog,
+    base_assignment: &CompactPublicKeyBaseAssignment,
+    public_input_wire_geometry: CompactPublicInputWireGeometry,
+    public_input_bindings: CompactPublicInputBindings,
+) -> Result<(Vec<u8>, DecodedCompactPublicInput), CommonProofProverError> {
+    let field_element_count = relation
+        .public_input_ring_vector_count()
+        .checked_mul(relation.ring_degree())
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let mut field_elements = Vec::new();
+    field_elements
+        .try_reserve_exact(
+            usize::try_from(field_element_count)
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+    for element_ordinal in 1..=field_element_count {
+        field_elements.push(base_assignment.public_input_base_value(element_ordinal)?);
+    }
+    let canonical_public_input_bytes = encode_compact_public_input(
+        public_input_wire_geometry,
+        public_input_bindings,
+        &field_elements,
+    )
+    .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let decoded_public_input = decode_compact_public_input(
+        public_input_wire_geometry,
+        public_input_bindings,
+        &canonical_public_input_bytes,
+    )
+    .map_err(|_| CommonProofProverError::InvalidInput)?;
+    Ok((canonical_public_input_bytes, decoded_public_input))
 }
 
 #[cfg(test)]

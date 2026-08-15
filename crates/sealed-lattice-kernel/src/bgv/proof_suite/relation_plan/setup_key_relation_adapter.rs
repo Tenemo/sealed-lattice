@@ -1358,7 +1358,6 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         )
     }
 
-    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_compact_public_key_assignment(
         source: &SetupGenerationKeyRelationSource<'_, '_>,
@@ -1536,7 +1535,6 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         )
     }
 
-    #[cfg(test)]
     pub(crate) fn compact_public_key_assignment_request_context(
         &self,
     ) -> Result<CommonProofSourcePolynomialRequestContext, CommonProofProverError> {
@@ -1549,17 +1547,17 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         Ok(self.request_context)
     }
 
-    #[cfg(test)]
     pub(crate) fn finish_compact_public_key_assignment_sources(
         self,
     ) -> Result<(), CommonProofProverError> {
         let independently_expected_column_ordinals =
             self.independently_expected_requested_column_ordinals()?;
-        let authority_is_exclusively_owned = match &self.authority_access {
+        let authority_access_is_valid = match &self.authority_access {
+            #[cfg(test)]
             SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
                 Rc::strong_count(authority) == 1
             }
-            SetupKeyRelationAuthorityAccess::RetainedRegistry(_) => false,
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(_) => true,
         };
         if self.family != SetupKeyRelationProofFamily::PublicKeyShare
             || self.request_profile
@@ -1573,7 +1571,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             || self.next_leaf_salt_source_ordinal != 0
             || self.next_leaf_salt_index != 0
             || self.leaf_salts_finished
-            || !authority_is_exclusively_owned
+            || !authority_access_is_valid
         {
             return Err(CommonProofProverError::InvalidInput);
         }

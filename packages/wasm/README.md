@@ -89,7 +89,13 @@ code with owned retained inputs. A release-owned compact response state now
 drives those response components with verifier-selected leaf replay, exact
 transaction yielding, cancellation, authenticated cursor restoration, and
 byte-identical genesis replay in the complete production-shaped small chain.
-The production family and worker adapters remain incomplete. The semantic
+A release-owned public-key family adapter also binds the frozen contract to
+the retained setup authority, polls the exact 202 authenticated source
+columns, and constructs then independently decodes canonical public input
+from verifier-minted suite, statement, manifest, and relation bindings. That
+adapter has selected-size guarded Rust coverage but is not yet called by the
+WebAssembly common-proof worker. The later CFW and WHIR family material
+adapter and production worker adapter remain incomplete. The semantic
 authority, complete CFW/WHIR
 verification, reduced execution fixtures, and the retained end-to-end
 workbench remain test-only or incomplete. No compact prover exists. The

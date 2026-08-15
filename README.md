@@ -103,8 +103,16 @@ statuses:
   owned retained inputs. A release-owned compact response state now drives those
   response components with verifier-selected leaf replay, exact transaction
   yielding, cancellation, authenticated cursor restoration, and byte-identical
-  genesis replay. The complete production-shaped small chain uses that state,
-  but the family material provider and production worker adapter remain absent.
+  genesis replay.
+  A release-owned public-key family adapter now joins the frozen
+  factor-one contract to the retained setup authority, polls the exact 202
+  authenticated source columns, and derives canonical public-input bytes from
+  verifier-minted suite, application-statement, manifest, and relation bindings
+  before independently decoding them. Guarded selected-size evidence carries
+  that handoff through bounded lookup materialization, owned structured-row
+  preparation, and one CFW poll. The complete production-shaped small chain
+  uses the compact response state, but the later CFW and WHIR family material
+  provider and production worker adapter remain incomplete.
   Semantic and complete CFW/WHIR execution, emitted-
   coordinate measurement, masking, fixed-tape and Appendix arithmetic remain
   test-only. The release
@@ -1239,9 +1247,16 @@ Works today, at component scope:
   checkpoint boundary are release code with owned retained inputs. A release-
   owned compact response state now drives those response components with exact
   transaction replay, verifier-selected leaf reconstruction, cancellation,
-  authenticated cursor restoration, and byte-identical genesis replay. The
-  complete production-shaped small chain uses that state, but the family
-  material provider and production worker adapter remain absent.
+  authenticated cursor restoration, and byte-identical genesis replay.
+  A release-owned public-key family adapter now joins the frozen factor-one
+  contract to the retained setup authority, polls the exact 202 authenticated
+  source columns, and derives canonical public-input bytes from verifier-minted
+  suite, application-statement, manifest, and relation bindings before
+  independently decoding them. Guarded selected-size evidence carries that
+  handoff through bounded lookup materialization, owned structured-row
+  preparation, and one CFW poll. The complete production-shaped small chain
+  uses the compact response state, but the later CFW and WHIR family material
+  provider and production worker adapter remain incomplete.
   It checks canonical bytes and gates verifier-derived schedules and 82
   response openings through the exact 161-component,
   45-construction-binding certificate, but checks no CFW or WHIR equation or

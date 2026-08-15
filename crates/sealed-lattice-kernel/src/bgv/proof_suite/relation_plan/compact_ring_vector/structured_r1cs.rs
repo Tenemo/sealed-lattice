@@ -3168,8 +3168,7 @@ mod tests {
     use crate::{
         bgv::{
             proof_suite::{
-                CommonProofRelationPlanCapability, CommonProofSourcePolynomialProvider,
-                SelectedApplicationStatementContext,
+                CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
                 compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement, verified_application_statement_hash,
             },
@@ -4145,8 +4144,7 @@ mod tests {
             .expect("retained authority prepares compact public-key sources");
         assert_eq!(
             prepared_sources
-                .source_polynomials
-                .compact_public_key_assignment_request_context()
+                .source_request_context()
                 .expect("compact request context")
                 .relation_plan_variant_hash(),
             prepared_sources
@@ -4155,8 +4153,7 @@ mod tests {
                 .expect("compact variant hash")
         );
         let provider_memory_accounting = prepared_sources
-            .source_polynomials
-            .memory_accounting()
+            .source_provider_memory_accounting()
             .expect("compact retained-source accounting");
         println!(
             "compact public-key focused owner phase complete: prepare authenticated assignment elapsed_milliseconds={} loading_persistent_bytes={} post_source_finish_persistent_bytes={} loading_transient_bytes={} maximum_returned_source_polynomial_bytes={}",
@@ -4173,12 +4170,7 @@ mod tests {
         let mut loaded_column_ordinals = Vec::new();
         loop {
             match prepared_sources
-                .assignment_cursor
-                .next_source(
-                    &prepared_sources.relation,
-                    &prepared_sources.relation_plan_variant,
-                    &mut prepared_sources.source_polynomials,
-                )
+                .poll_source_loading()
                 .expect("retained compact source poll")
             {
                 CompactAuthenticatedAssignmentPoll::AuthenticatedSourceReadRequired => {
@@ -4199,9 +4191,50 @@ mod tests {
         let PreparedCompactPublicKeyBaseAssignment {
             relation,
             base_assignment,
+            public_input_bindings,
+            canonical_public_input_bytes,
+            decoded_public_input,
+            compact_construction_identity_hash,
+            checkpoint_schedule_digest,
         } = prepared_sources
             .finish_source_loading()
             .expect("completed compact source loading releases its authority");
+        assert_eq!(
+            public_input_bindings,
+            crate::bgv::proof_suite::compact_proof_wire::CompactPublicInputBindings::new(
+                Hash512::from_bytes(preparation_source.suite_identifier()),
+                application_statement_hash,
+                Hash512::from_bytes(preparation_source.manifest_hash()),
+                Hash512::from_bytes(relation.relation_plan_variant_hash()),
+            )
+        );
+        assert_eq!(
+            public_input_bindings.relation_plan_hash().into_bytes(),
+            relation.relation_plan_variant_hash()
+        );
+        assert_eq!(
+            decoded_public_input.canonical_byte_length(),
+            canonical_public_input_bytes.len()
+        );
+        assert!(!canonical_public_input_bytes.is_empty());
+        let selected_compact_contract =
+            crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
+                .expect("the frozen compact public-key contract decodes");
+        assert_eq!(
+            compact_construction_identity_hash,
+            selected_compact_contract
+                .verifier_inputs()
+                .canonical_source_hash()
+                .expect("the frozen compact contract identity derives")
+                .into_bytes()
+        );
+        assert_eq!(
+            checkpoint_schedule_digest,
+            selected_compact_contract
+                .verifier_inputs()
+                .checkpoint_schedule
+                .checkpoint_schedule_digest()
+        );
         let relation = Rc::new(relation);
         assert_ne!(base_assignment.source_replay_binding(), [0_u8; 64]);
         println!(
