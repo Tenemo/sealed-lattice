@@ -1,7 +1,9 @@
 //! Prover-side oracle state carried between phases.
 //!
 //! Local modification: extension-field source state supports the outer
-//! committed-relation handoff. See `../../../../UPSTREAM.md`.
+//! committed-relation handoff, and initial base-oracle encoding can be handed
+//! to an outer commitment owner before an MMCS is selected. See
+//! `../../../../UPSTREAM.md`.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -11,6 +13,26 @@ use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::dense::DenseMatrix;
 use p3_matrix::extension::FlatMatrixView;
 use p3_multilinear_util::poly::Poly;
+
+/// Exact base-field initial-oracle material before an MMCS commitment.
+///
+/// An outer protocol can commit the encoded rows with its own authenticated
+/// vector commitment while retaining the same message and hiding randomness
+/// for the subsequent WHIR reduction.
+pub struct HidingWhirEncodedBaseOracle<F, EF>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+{
+    /// Committed multilinear evaluations.
+    pub message: Poly<F>,
+    /// Limb-major ZK encoding randomness of the initial oracle.
+    pub randomness: Vec<F>,
+    /// Exact interleaved Reed-Solomon rows consumed by the commitment owner.
+    pub encoded: DenseMatrix<F>,
+    /// Marker tying the data to its extension field.
+    pub(crate) _marker: PhantomData<EF>,
+}
 
 /// Prover-side handoff between the commit and open phases.
 pub struct HidingWhirProverData<F, EF, MT>

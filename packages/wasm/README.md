@@ -98,14 +98,16 @@ from verifier-minted suite, statement, manifest, and relation bindings.
 Its materialization state accepts the lookup challenge only as a borrowed
 first-message authority minted by the compact response state for the same proof
 geometry and canonical public input, then owns bounded lookup inversion and
-structured-row preparation. Selected-size guarded Rust coverage uses
-deterministic test response values at the exact contract-derived geometry; it is
-not an emitted WHIR commitment and is not yet called by the WebAssembly
-common-proof worker. The later CFW and WHIR family material adapter and
-production worker adapter remain incomplete. The semantic
-authority, complete CFW/WHIR
-verification, reduced execution fixtures, and the retained end-to-end
-workbench remain test-only or incomplete. No compact prover exists. The
+structured-row preparation. Selected-size guarded Rust coverage now derives
+the exact first-epoch WHIR source from authenticated production values, drives
+its encoding and response salts from action-private coins, and streams the
+retained 131,072-row by 64-element encoding through the response state. The
+materialization state is not yet called by the WebAssembly common-proof worker
+and does not yet own response-tree restoration or a complete WHIR epoch. The
+later CFW and WHIR family material adapter and production worker adapter remain
+incomplete. The semantic authority, complete CFW/WHIR verification, reduced
+execution fixtures, and the retained end-to-end workbench remain test-only or
+incomplete. No compact prover exists. The
 measurement feature contains only bounded measurement owners
 and their ring-native arithmetic. Factor one is the sole current packing
 target, but foundation suite selection remains fail-closed and no compact
@@ -115,7 +117,7 @@ compact-proof browser run, or physical-phone evidence. Its separate byte and
 work facts are not contract fields, release-WASM evidence, or
 browser evidence. The current scalar release kernel and SDK byte copy are
 byte-identical and have normalized loader SHA-256
-`670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
+`712eb1fdf79b6cd7d32bf4e008ccfe3b17a46c799aa63cf50bb67eee9e220894`.
 This is release-build and byte-copy development evidence only, not compact-
 proof browser or physical-phone qualification. The release bytes still omit the
 compact proof path.

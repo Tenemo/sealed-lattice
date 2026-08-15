@@ -46,6 +46,7 @@ mod compact_factor_one_semantics;
 #[cfg(test)]
 mod compact_fixed_tape_uniformity;
 mod compact_generation_checkpoint;
+mod compact_generation_randomness;
 mod compact_masking_coefficient_maps;
 #[cfg(test)]
 mod compact_masking_entropy;
@@ -93,6 +94,7 @@ mod compact_response_tree_external;
     )
 )]
 mod compact_transcript;
+mod compact_whir;
 mod compact_whir_geometry;
 mod component_material_stream;
 mod component_public_polynomial_runtime;

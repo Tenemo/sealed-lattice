@@ -15,7 +15,9 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use data::ZkRoundData;
-pub use data::{HidingWhirExtensionProverData, HidingWhirProverData};
+pub use data::{
+    HidingWhirEncodedBaseOracle, HidingWhirExtensionProverData, HidingWhirProverData,
+};
 use masks::{ProverMasks, fold_limb_chunks};
 use p3_challenger::{CanObserve, CanSampleUniformBits, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
@@ -101,6 +103,30 @@ where
         challenger: &mut Challenger,
         rng: &mut R,
     ) -> (MT::Commitment, HidingWhirProverData<F, EF, MT>) {
+        let encoded_oracle = self.encode_base_initial_oracle(message, rng);
+        let (commitment, merkle) = self.mmcs.commit_matrix(encoded_oracle.encoded);
+        challenger.observe(commitment.clone());
+        (
+            commitment,
+            HidingWhirProverData {
+                message: encoded_oracle.message,
+                randomness: encoded_oracle.randomness,
+                merkle,
+                _marker: PhantomData,
+            },
+        )
+    }
+
+    /// Encodes the initial base-field oracle without choosing its commitment.
+    ///
+    /// This is the exact encoding half of [`Self::commit`]. It lets an outer
+    /// protocol commit the complete response vector through a different MMCS
+    /// while preserving WHIR's message layout and hiding distribution.
+    pub fn encode_base_initial_oracle<R: Rng>(
+        &self,
+        message: Poly<F>,
+        rng: &mut R,
+    ) -> HidingWhirEncodedBaseOracle<F, EF> {
         assert_eq!(message.num_variables(), self.config.num_variables);
         let folding = self.config.round_folding_factor(0);
         let randomness: Vec<F> = (0..(self.config.oracle_randomness[0] << folding))
@@ -111,17 +137,12 @@ where
             (1 << (message.num_variables() - folding)) << self.config.starting_log_inv_rate;
         let padded = zk_padded_matrix(message.as_slice(), &randomness, folding, height);
         let encoded = self.dft.dft_batch(padded).to_row_major_matrix();
-        let (commitment, merkle) = self.mmcs.commit_matrix(encoded);
-        challenger.observe(commitment.clone());
-        (
-            commitment,
-            HidingWhirProverData {
-                message,
-                randomness,
-                merkle,
-                _marker: PhantomData,
-            },
-        )
+        HidingWhirEncodedBaseOracle {
+            message,
+            randomness,
+            encoded,
+            _marker: PhantomData,
+        }
     }
 
     /// Commits an extension-field witness as an interleaved ZK

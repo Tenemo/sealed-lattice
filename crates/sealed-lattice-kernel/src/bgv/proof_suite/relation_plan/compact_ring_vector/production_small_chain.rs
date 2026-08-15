@@ -3,30 +3,23 @@ use std::{convert::Infallible, mem::size_of};
 #[cfg(test)]
 use std::rc::Rc;
 
-use p3_challenger::{CanObserve, HashChallenger, SerializingChallenger64};
-use p3_commit::{ExtensionMmcs, Mmcs};
+use p3_challenger::CanObserve;
+use p3_commit::Mmcs;
 #[cfg(test)]
 use p3_dft::Radix2DFTSmallBatch;
-use p3_field::{PrimeCharacteristicRing, PrimeField64};
+use p3_field::PrimeCharacteristicRing;
 use p3_goldilocks::Goldilocks;
-use p3_merkle_tree::MerkleTreeMmcs;
 use p3_multilinear_util::poly::Poly;
 use p3_sumcheck::zk::stack_codewords;
-use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher};
 #[cfg(test)]
 use p3_whir::pcs::zk::{
     CombinedRelationProverInput, HidingWhirProver, MaskCodeShape, PrecommittedMaskProverGroup,
 };
 use p3_whir::pcs::zk::{
-    CombinedRelationVerifierInput, HidingWhirVerifier, MaskGroupShape, MaskProverData,
-    PrecommittedMaskVerifierGroup, ZkVerifierError, ZkWhirConfig, ZkWhirProof,
+    CombinedRelationVerifierInput, HidingWhirVerifier, MaskGroupShape,
+    PrecommittedMaskVerifierGroup, ZkVerifierError,
 };
-use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameters};
 use rand::{TryCryptoRng, TryRng};
-use sha3::{
-    Shake256,
-    digest::{ExtendableOutput, Update, XofReader},
-};
 use tiny_keccak::Kmac;
 use zeroize::Zeroizing;
 
@@ -78,6 +71,17 @@ use crate::bgv::proof_suite::{
     compact_response_generation::CompactOwnedResponseLeaf,
     compact_response_merkle::CompactResponseMerkleError,
     compact_transcript::CompactTranscriptError,
+    compact_whir::{
+        COMPACT_WHIR_HASH_OUTPUT_WORD_LENGTH, COMPACT_WHIR_REPEATED_FOLDING_FACTOR,
+        COMPACT_WHIR_ROUND_LOG_INVERSE_RATES, CompactWhirChallenger as SmallChainChallenger,
+        CompactWhirCommitment as SmallChainCommitment,
+        CompactWhirCommitmentScheme as SmallChainCommitmentScheme,
+        CompactWhirConfiguration as SmallChainWhirConfiguration,
+        CompactWhirExtensionCommitmentScheme as SmallChainExtensionCommitmentScheme,
+        CompactWhirMaskProverData as SmallChainMaskProverData,
+        CompactWhirProof as SmallChainWhirProof,
+        compact_whir_challenger as small_chain_whir_challenger, compact_whir_configuration,
+    },
 };
 #[cfg(test)]
 use crate::bgv::proof_suite::{
@@ -107,6 +111,10 @@ use crate::bgv::proof_suite::{
     },
     compact_response_tree_external::CompactResponseTreeExternalMemoryGeometry,
     compact_transcript::derive_compact_fiat_shamir_verifier_message,
+    compact_whir::{
+        COMPACT_WHIR_MASK_LOG_INVERSE_RATE, COMPACT_WHIR_PROTOCOL_SECURITY_LEVEL,
+        compact_whir_commitment_scheme as small_chain_commitment_scheme,
+    },
     external_memory::{ProofExternalMemoryUsage, tests::TestStorage},
     fixed_uniform_verifier_message::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
@@ -152,13 +160,7 @@ use production_small_chain_canonical_transport::{
 };
 
 const SMALL_CHAIN_RING_DEGREE: u64 = 2_048;
-const SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH: usize = 64;
-const SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH: usize =
-    SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH / size_of::<u64>();
-const SMALL_CHAIN_WHIR_SECURITY_LEVEL: usize = 267;
-const SMALL_CHAIN_WHIR_MAIN_LOG_INVERSE_RATE: usize = 2;
-const SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE: usize = 2;
-const SMALL_CHAIN_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH: usize = 3;
+const SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH: usize = COMPACT_WHIR_HASH_OUTPUT_WORD_LENGTH;
 const SMALL_CHAIN_DIGEST_BASE_FIELD_ELEMENT_COUNT: usize = Hash512::BYTE_LENGTH / size_of::<u32>();
 const SMALL_CHAIN_PRE_CHALLENGE_COMMITMENT_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-small-chain/pre-challenge-commitment-binding/v1";
@@ -183,135 +185,29 @@ const SMALL_CHAIN_PRIVATE_COIN_STATEMENT_DOMAIN: &str =
 const SMALL_CHAIN_PRIVATE_RANDOMNESS_CURSOR_MAGIC: [u8; 8] = *b"SLCPRND1";
 const SMALL_CHAIN_PRIVATE_RANDOMNESS_CURSOR_VERSION: u16 = 1;
 
-#[derive(Clone, Copy, Debug)]
-struct SmallChainByteHasher;
-
-#[derive(Clone, Copy, Debug)]
-struct SmallChainGoldilocksLeafHasher;
-
-#[derive(Clone, Copy, Debug)]
-struct SmallChainWordHasher;
-
-type SmallChainInnerChallenger =
-    HashChallenger<u8, SmallChainByteHasher, SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH>;
-type SmallChainChallenger = SerializingChallenger64<Goldilocks, SmallChainInnerChallenger>;
-type SmallChainNodeCompressor =
-    CompressionFunctionFromHasher<SmallChainWordHasher, 2, SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH>;
-type SmallChainCommitmentScheme = MerkleTreeMmcs<
-    Goldilocks,
-    u64,
-    SmallChainGoldilocksLeafHasher,
-    SmallChainNodeCompressor,
-    2,
-    SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH,
->;
-type SmallChainExtensionCommitmentScheme =
-    ExtensionMmcs<Goldilocks, CompactChallengeField, SmallChainCommitmentScheme>;
-type SmallChainCommitment = <SmallChainCommitmentScheme as Mmcs<Goldilocks>>::Commitment;
-type SmallChainMaskProverData =
-    MaskProverData<Goldilocks, CompactChallengeField, SmallChainCommitmentScheme>;
-type SmallChainWhirProof =
-    ZkWhirProof<Goldilocks, CompactChallengeField, SmallChainCommitmentScheme>;
-type SmallChainWhirConfiguration =
-    ZkWhirConfig<CompactChallengeField, Goldilocks, SmallChainChallenger>;
-
-fn initialized_small_chain_hash(domain: &[u8]) -> Shake256 {
-    let mut state = Shake256::default();
-    state.update(b"sealed-lattice/test/production-small-chain-whir/v1");
-    state.update(&(domain.len() as u64).to_le_bytes());
-    state.update(domain);
-    state
-}
-
-fn finish_small_chain_hash(state: Shake256) -> [u8; SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH] {
-    let mut output = [0_u8; SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH];
-    state.finalize_xof().read(&mut output);
-    output
-}
-
-fn small_chain_digest_words(
-    bytes: [u8; SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH],
-) -> [u64; SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH] {
-    core::array::from_fn(|word_ordinal| {
-        let first_byte = word_ordinal * size_of::<u64>();
-        u64::from_le_bytes(
-            bytes[first_byte..first_byte + size_of::<u64>()]
-                .try_into()
-                .expect("one small-chain digest word has eight bytes"),
-        )
-    })
-}
-
-impl CryptographicHasher<u8, [u8; SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH]> for SmallChainByteHasher {
-    fn hash_iter<Input>(&self, input: Input) -> [u8; SMALL_CHAIN_HASH_OUTPUT_BYTE_LENGTH]
-    where
-        Input: IntoIterator<Item = u8>,
-    {
-        let mut state = initialized_small_chain_hash(b"challenger");
-        for byte in input {
-            state.update(&[byte]);
-        }
-        finish_small_chain_hash(state)
-    }
-}
-
-impl CryptographicHasher<Goldilocks, [u64; SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH]>
-    for SmallChainGoldilocksLeafHasher
-{
-    fn hash_iter<Input>(&self, input: Input) -> [u64; SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH]
-    where
-        Input: IntoIterator<Item = Goldilocks>,
-    {
-        let mut state = initialized_small_chain_hash(b"leaf");
-        for value in input {
-            state.update(&value.as_canonical_u64().to_le_bytes());
-        }
-        small_chain_digest_words(finish_small_chain_hash(state))
-    }
-}
-
-impl CryptographicHasher<u64, [u64; SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH]> for SmallChainWordHasher {
-    fn hash_iter<Input>(&self, input: Input) -> [u64; SMALL_CHAIN_HASH_OUTPUT_WORD_LENGTH]
-    where
-        Input: IntoIterator<Item = u64>,
-    {
-        let mut state = initialized_small_chain_hash(b"node");
-        for value in input {
-            state.update(&value.to_le_bytes());
-        }
-        small_chain_digest_words(finish_small_chain_hash(state))
-    }
-}
-
 fn small_chain_whir_configuration(
     variable_count: usize,
     first_folding_factor: usize,
 ) -> SmallChainWhirConfiguration {
-    ZkWhirConfig::new(
-        variable_count,
-        ProtocolParameters {
-            starting_log_inv_rate: SMALL_CHAIN_WHIR_MAIN_LOG_INVERSE_RATE,
-            round_log_inv_rates: vec![2, 4, 8],
-            folding_factor: FoldingFactor::PerRound(vec![first_folding_factor, 4, 4, 4]),
-            soundness_type: SecurityAssumption::UniqueDecoding,
-            security_level: SMALL_CHAIN_WHIR_SECURITY_LEVEL,
-            pow_bits: 0,
-        },
-        ZkParameters {
-            ell_zk: SMALL_CHAIN_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH,
-            mask_log_inv_rate: SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
-        },
+    let final_variable_count = variable_count
+        .checked_sub(
+            first_folding_factor
+                + 3 * usize::try_from(COMPACT_WHIR_REPEATED_FOLDING_FACTOR)
+                    .expect("the repeated folding factor fits usize"),
+        )
+        .expect("the reduced folding schedule leaves a final polynomial");
+    compact_whir_configuration(
+        u32::try_from(variable_count).expect("the reduced variable count fits u32"),
+        [
+            u32::try_from(first_folding_factor).expect("the first folding factor fits u32"),
+            COMPACT_WHIR_REPEATED_FOLDING_FACTOR,
+            COMPACT_WHIR_REPEATED_FOLDING_FACTOR,
+            COMPACT_WHIR_REPEATED_FOLDING_FACTOR,
+        ],
+        u32::try_from(final_variable_count).expect("the final variable count fits u32"),
+        COMPACT_WHIR_ROUND_LOG_INVERSE_RATES,
     )
     .expect("the reduced production-family WHIR geometry is valid")
-}
-
-fn small_chain_whir_challenger(
-    transcript_binding: [u8; Hash512::BYTE_LENGTH],
-) -> SmallChainChallenger {
-    SmallChainChallenger::new(SmallChainInnerChallenger::new(
-        transcript_binding.to_vec(),
-        SmallChainByteHasher,
-    ))
 }
 
 fn fill_small_chain_kmac(
@@ -562,14 +458,6 @@ fn sample_small_chain_private_seed(
         SMALL_CHAIN_PRIVATE_RANDOM_SEED_BASE_ELEMENT_COUNT
     );
     Ok(seed)
-}
-
-fn small_chain_commitment_scheme() -> SmallChainCommitmentScheme {
-    SmallChainCommitmentScheme::new(
-        SmallChainGoldilocksLeafHasher,
-        SmallChainNodeCompressor::new(SmallChainWordHasher),
-        0,
-    )
 }
 
 struct SmallChainCommittedMaskGroup {
@@ -2619,11 +2507,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     );
     assert_eq!(
         pre_challenge_whir_configuration.params.security_level,
-        SMALL_CHAIN_WHIR_SECURITY_LEVEL
+        COMPACT_WHIR_PROTOCOL_SECURITY_LEVEL
     );
     assert_eq!(
         main_whir_configuration.params.security_level,
-        SMALL_CHAIN_WHIR_SECURITY_LEVEL
+        COMPACT_WHIR_PROTOCOL_SECURITY_LEVEL
     );
     let whir_commitment_scheme = small_chain_commitment_scheme();
     let whir_extension_commitment_scheme =
@@ -2947,7 +2835,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         shape: MaskCodeShape::new(
             4,
             main_whir_configuration.mask_queries,
-            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
+            COMPACT_WHIR_MASK_LOG_INVERSE_RATE,
         ),
         width: whir_mask_material.inner_masks().len(),
     };
@@ -2978,7 +2866,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
         shape: MaskCodeShape::new(
             8,
             main_whir_configuration.mask_queries,
-            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
+            COMPACT_WHIR_MASK_LOG_INVERSE_RATE,
         ),
         width: whir_mask_material.outer_masks().len(),
     };
@@ -3016,7 +2904,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 .mask_queries
                 .checked_add(main_whir_configuration.mask_queries)
                 .expect("combined mask query count fits usize"),
-            SMALL_CHAIN_WHIR_MASK_LOG_INVERSE_RATE,
+            COMPACT_WHIR_MASK_LOG_INVERSE_RATE,
         ),
         width: 2,
     };

@@ -82,7 +82,10 @@ pub use committer::FoldedRsCode;
 pub use config::{SourceCodeShape, ZkConfigError, ZkParameters, ZkWhirConfig};
 pub use mask::{MaskCodeShape, MaskGroupShape};
 pub use proof::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, ZkRoundProof, ZkWhirProof};
-pub use prover::{HidingWhirExtensionProverData, HidingWhirProver, HidingWhirProverData};
+pub use prover::{
+    HidingWhirEncodedBaseOracle, HidingWhirExtensionProverData, HidingWhirProver,
+    HidingWhirProverData,
+};
 pub use relation::{
     CombinedRelationProverInput, CombinedRelationVerifierInput, HidingWhirRelationInputError,
     PrecommittedMaskProverGroup, PrecommittedMaskVerifierGroup,

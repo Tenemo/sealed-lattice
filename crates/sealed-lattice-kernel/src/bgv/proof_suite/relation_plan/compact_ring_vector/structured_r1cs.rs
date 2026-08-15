@@ -3167,15 +3167,18 @@ mod tests {
     use crate::{
         bgv::{
             proof_suite::{
-                COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofRelationPlanCapability,
-                SelectedApplicationStatementContext,
+                CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
                 compact_response_generation::{
-                    CompactOwnedResponseLeaf, CompactResponseGenerationPoll,
-                    CompactResponseGenerationState,
+                    CompactResponseGenerationPoll, CompactResponseGenerationState,
                 },
                 compact_response_merkle::CompactResponseLeafValueKind,
                 compile_public_key_share_relation_with_source_layout,
-                decode_selected_public_key_share_statement, verified_application_statement_hash,
+                decode_selected_public_key_share_statement,
+                prover::{
+                    CommonProofPrivateCoinCoordinateCapacity,
+                    PrivateRandomnessCommonProofCoinSource,
+                },
+                verified_application_statement_hash,
             },
             setup::{
                 SetupGenerationKeyRelationApplication, SetupKeyRelationGenerationPreparationError,
@@ -3185,8 +3188,10 @@ mod tests {
                 with_exclusive_setup_generation_compact_public_key_development_relation,
             },
         },
-        foundation::{Hash512, ProofApplicationSlot, prepare_exact_same_secret_evidence_attempt},
-        hashing::hash_framed_parts_512,
+        foundation::{
+            Hash512, PersistentProofCoinInput, ProofApplicationSlot,
+            prepare_exact_same_secret_evidence_attempt,
+        },
     };
 
     struct CountingCompactCfwExternalRowSource<'source, Source> {
@@ -4053,62 +4058,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    fn digest_base_field_elements(
-        digest: [u8; Hash512::BYTE_LENGTH],
-    ) -> Vec<ProofBaseFieldElement> {
-        digest
-            .chunks_exact(4)
-            .map(|chunk| {
-                ProofBaseFieldElement::from_canonical(u64::from(u32::from_le_bytes(
-                    chunk.try_into().expect("digest chunk has four bytes"),
-                )))
-                .expect("a 32-bit digest limb is a canonical base-field element")
-            })
-            .collect()
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn deterministic_test_source_response_leaf(
-        base_values: &[ProofBaseFieldElement],
-        source_replay_binding: &[u8; Hash512::BYTE_LENGTH],
-        test_pre_challenge_commitment_binding: &[u8; Hash512::BYTE_LENGTH],
-        leaf_ordinal: u64,
-    ) -> (
-        CompactOwnedResponseLeaf,
-        [u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
-    ) {
-        let ordinal_offset = ProofBaseFieldElement::from_canonical(leaf_ordinal)
-            .expect("the selected source-response leaf ordinal is canonical");
-        let values = base_values
-            .iter()
-            .map(|value| value.add(ordinal_offset))
-            .collect();
-        let leaf_ordinal_bytes = leaf_ordinal.to_le_bytes();
-        let first_leaf_salt_block = hash_framed_parts_512(
-            "sealed-lattice/test/compact-public-key-source-response-leaf-salt/v1",
-            &[
-                source_replay_binding,
-                test_pre_challenge_commitment_binding,
-                &leaf_ordinal_bytes,
-                &[0],
-            ],
-        );
-        let second_leaf_salt_block = hash_framed_parts_512(
-            "sealed-lattice/test/compact-public-key-source-response-leaf-salt/v1",
-            &[
-                source_replay_binding,
-                test_pre_challenge_commitment_binding,
-                &leaf_ordinal_bytes,
-                &[1],
-            ],
-        );
-        let mut leaf_salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
-        leaf_salt[..Hash512::BYTE_LENGTH].copy_from_slice(&first_leaf_salt_block);
-        leaf_salt[Hash512::BYTE_LENGTH..].copy_from_slice(&second_leaf_salt_block);
-        (CompactOwnedResponseLeaf::base_field(values), leaf_salt)
-    }
-
     #[test]
     #[ignore = "manual retained compact public-key assignment gate"]
     fn heavy_rust_kernel_retained_public_key_authority_drives_one_compact_cfw_poll() {
@@ -4155,6 +4104,13 @@ mod tests {
             statement_schema_identifier,
             preparation_source.canonical_application_statement_bytes(),
         ));
+        let proof_coin_input =
+            PersistentProofCoinInput::new(application_slot, application_statement_hash)
+                .expect("the public-key proof coin input is canonical");
+        let private_randomness_attempt_identifier = action_private_randomness
+            .persistent_proof_preparation_identifier(&proof_coin_input)
+            .expect("the public-key private-randomness attempt derives");
+        let proof_attempt_identifier = *private_randomness_attempt_identifier.as_bytes();
         let prepared_attempt = prepare_exact_same_secret_evidence_attempt(
             &action_private_randomness,
             application_slot,
@@ -4232,6 +4188,11 @@ mod tests {
             .relation_plan_variant
             .canonical_hash()
             .expect("compact variant hash");
+        let private_coin_coordinate_capacity =
+            CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(
+                &prepared_sources.relation_plan_variant,
+            )
+            .expect("compact private-coin coordinate capacity derives");
         let mut family_materialization_state =
             CompactPublicKeyFamilyMaterializationState::new(prepared_sources);
         let mut loaded_column_ordinals = Vec::new();
@@ -4259,21 +4220,18 @@ mod tests {
         assert_eq!(
             family_materialization_state
                 .poll(8_192)
-                .expect("the compact family waits for its transcript lookup message"),
-            CompactPublicKeyFamilyMaterializationPoll::LookupVerifierMessageRequired
+                .expect("the compact family waits for its pre-challenge encoding"),
+            CompactPublicKeyFamilyMaterializationPoll::PreChallengeEncodingRequired
         );
         let selected_compact_contract =
             crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
                 .expect("the frozen compact public-key contract decodes");
         let (
             mut response_generation_state,
-            source_response_base_values,
-            source_response_leaf_count,
-            source_response_round_salt,
-            test_pre_challenge_commitment_binding,
             compact_construction_identity_hash,
             checkpoint_schedule_digest,
             source_replay_binding,
+            private_coin_derivation_binding_hash,
         ) = {
             let pre_lookup_material = family_materialization_state
                 .pre_lookup_material()
@@ -4355,41 +4313,8 @@ mod tests {
                 source_response_component.value_kind(),
                 CompactResponseLeafValueKind::BaseField
             );
-            let test_pre_challenge_commitment_binding = hash_framed_parts_512(
-                "sealed-lattice/test/compact-public-key-pre-challenge-commitment/v1",
-                &[&compact_construction_identity_hash, &source_replay_binding],
-            );
-            let source_response_element_count =
-                usize::try_from(source_response_component.field_element_count_per_leaf())
-                    .expect("the selected source-response width fits usize");
-            let mut source_response_values = Vec::with_capacity(source_response_element_count);
-            let mut source_response_block_ordinal = 0_u64;
-            while source_response_values.len() < source_response_element_count {
-                source_response_values.extend(digest_base_field_elements(hash_framed_parts_512(
-                    "sealed-lattice/test/compact-public-key-source-response-values/v1",
-                    &[
-                        &source_replay_binding,
-                        &test_pre_challenge_commitment_binding,
-                        &source_response_block_ordinal.to_le_bytes(),
-                    ],
-                )));
-                source_response_block_ordinal = source_response_block_ordinal
-                    .checked_add(1)
-                    .expect("the selected source-response block count fits u64");
-            }
-            source_response_values.truncate(source_response_element_count);
-            assert_eq!(
-                u64::try_from(source_response_values.len())
-                    .expect("source response element count fits u64"),
-                source_response_component.field_element_count_per_leaf()
-            );
-            let source_response_round_salt = hash_framed_parts_512(
-                "sealed-lattice/test/compact-public-key-source-response-round-salt/v1",
-                &[
-                    &source_replay_binding,
-                    &test_pre_challenge_commitment_binding,
-                ],
-            );
+            assert_eq!(source_response_component.leaf_count(), 131_072);
+            assert_eq!(source_response_component.field_element_count_per_leaf(), 64);
             let response_generation_state = CompactResponseGenerationState::new(
                 pre_lookup_material.proof_wire_geometry(),
                 pre_lookup_material.response_merkle_geometries(),
@@ -4399,17 +4324,52 @@ mod tests {
             .expect("the selected compact response state starts");
             (
                 response_generation_state,
-                source_response_values,
-                source_response_component.leaf_count(),
-                source_response_round_salt,
-                test_pre_challenge_commitment_binding,
                 compact_construction_identity_hash,
                 checkpoint_schedule_digest,
                 source_replay_binding,
+                pre_lookup_material.private_coin_derivation_binding_hash(),
             )
         };
         println!(
             "compact public-key focused owner phase complete: load 202 authenticated columns elapsed_milliseconds={}",
+            phase_started_at.elapsed().as_millis()
+        );
+
+        let phase_started_at = Instant::now();
+        println!("compact public-key focused owner phase: encode pre-challenge source");
+        let mut private_coins = PrivateRandomnessCommonProofCoinSource::new(
+            Rc::clone(&action_private_randomness),
+            statement_schema_identifier,
+            private_coin_derivation_binding_hash,
+            private_randomness_attempt_identifier,
+            private_coin_coordinate_capacity,
+        )
+        .expect("the compact production-private coin source starts");
+        family_materialization_state
+            .encode_pre_challenge_source(&mut private_coins, proof_attempt_identifier)
+            .expect("the authenticated pre-challenge source encodes through production WHIR");
+        assert_eq!(
+            family_materialization_state
+                .poll(8_192)
+                .expect("the compact family waits for its transcript lookup message"),
+            CompactPublicKeyFamilyMaterializationPoll::LookupVerifierMessageRequired
+        );
+        let pre_challenge_material = family_materialization_state
+            .pre_challenge_material()
+            .expect("the encoded pre-challenge oracle remains in production custody");
+        assert_eq!(pre_challenge_material.response_leaf_count(), 131_072);
+        assert_eq!(
+            pre_challenge_material.response_field_element_count_per_leaf(),
+            64
+        );
+        assert_eq!(
+            pre_challenge_material.proof_attempt_identifier(),
+            proof_attempt_identifier
+        );
+        let source_response_leaf_count = pre_challenge_material.response_leaf_count();
+        let source_response_round_salt = pre_challenge_material.fiat_shamir_round_salt();
+        println!(
+            "compact public-key focused owner phase complete: encode pre-challenge source elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
 
@@ -4431,12 +4391,17 @@ mod tests {
                     leaf_ordinal,
                 } => {
                     assert!(leaf_ordinal < source_response_leaf_count);
-                    let (source_response_leaf, leaf_salt) = deterministic_test_source_response_leaf(
-                        &source_response_base_values,
-                        &source_replay_binding,
-                        &test_pre_challenge_commitment_binding,
-                        leaf_ordinal,
-                    );
+                    let (source_response_leaf, leaf_salt) = {
+                        let pre_challenge_material = family_materialization_state
+                            .pre_challenge_material()
+                            .expect("the exact encoded source remains in custody");
+                        let source_response_leaf = pre_challenge_material
+                            .response_leaf(leaf_ordinal)
+                            .expect("the exact encoded source row is available");
+                        let leaf_salt = pre_challenge_material
+                            .response_leaf_salt(leaf_ordinal, &source_response_leaf);
+                        (source_response_leaf, leaf_salt)
+                    };
                     response_generation_state
                         .supply_next_response_leaf(&source_response_leaf, &leaf_salt)
                         .expect("the source response leaf is supplied");
@@ -4538,6 +4503,12 @@ mod tests {
         assert_eq!(
             family_material.source_replay_binding(),
             source_replay_binding
+        );
+        assert_eq!(
+            family_material
+                .pre_challenge_material()
+                .proof_attempt_identifier(),
+            proof_attempt_identifier
         );
         assert_eq!(
             family_material.witness_length(),

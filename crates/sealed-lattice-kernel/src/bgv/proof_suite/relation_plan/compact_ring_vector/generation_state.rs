@@ -1,25 +1,37 @@
 //! Pollable production materialization for the compact public-key family.
 //!
-//! This state owns the authenticated assignment loader, accepts the lookup
-//! challenge only through the exact compact transcript authority, performs the
-//! bounded batch inversion, and prepares the production structured-row source.
-//! It does not yet execute CFW or either WHIR epoch and therefore cannot emit a
-//! proof or mint a workflow capability.
+//! This state owns the authenticated assignment loader, encodes and retains the
+//! pre-challenge source before the lookup challenge, accepts that challenge
+//! only through the exact compact transcript authority, performs the bounded
+//! batch inversion, and prepares the production structured-row source. It does
+//! not yet execute CFW or either complete WHIR epoch and therefore cannot emit
+//! a proof or mint a workflow capability.
 
 use std::rc::Rc;
 
+use p3_field::{PrimeCharacteristicRing, PrimeField64};
+use p3_goldilocks::Goldilocks;
+use p3_matrix::Matrix;
+
 use crate::bgv::proof_suite::{
+    ProofBaseFieldElement,
+    compact_generation_randomness::CompactGenerationAttemptRandomness,
+    compact_proof_contract::selected_compact_public_key_proof_contract,
     compact_proof_wire::{
         CompactProofWireGeometry, CompactPublicInputBindings, DecodedCompactPublicInput,
     },
-    compact_response_generation::CompactVerifierMessageAuthority,
-    compact_response_merkle::CompactResponseMerkleGeometry,
+    compact_response_generation::{CompactOwnedResponseLeaf, CompactVerifierMessageAuthority},
+    compact_response_merkle::{CompactResponseLeafValueKind, CompactResponseMerkleGeometry},
+    compact_whir::{
+        CompactWhirEncodedInitialOracle, CompactWhirError, compact_whir_configuration_from_contract,
+    },
     fixed_uniform_verifier_message::{
         DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageGeometry,
     },
-    prover::CommonProofProverError,
+    prover::{CommonProofPrivateCoinSource, CommonProofProverError},
 };
 use crate::foundation::Hash512;
+use crate::hashing::hash_framed_parts_512;
 
 use super::{
     CompactPublicKeyRelationCatalog, PreparedCompactPublicKeyAssignmentSources,
@@ -42,17 +54,59 @@ type SelectedCompactPublicKeyRowSource =
 type SelectedCompactPublicKeyRowSourcePreparation =
     CompactStructuredR1csRowSourcePreparation<SelectedCompactPublicKeyAssignment>;
 
+const COMPACT_PUBLIC_KEY_PRIVATE_COIN_BINDING_DOMAIN: &str =
+    "sealed-lattice/compact-public-key/private-coin-binding/v1";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactPublicKeyFamilyMaterializationError {
     WrongPhase,
     InvalidWorkBudget,
     InvalidVerifierMessage,
+    InvalidPreChallengeSource,
+    AllocationLimitExceeded,
+    Whir(CompactWhirError),
     Prover(CommonProofProverError),
 }
 
 impl From<CommonProofProverError> for CompactPublicKeyFamilyMaterializationError {
     fn from(error: CommonProofProverError) -> Self {
         Self::Prover(error)
+    }
+}
+
+impl From<CompactWhirError> for CompactPublicKeyFamilyMaterializationError {
+    fn from(error: CompactWhirError) -> Self {
+        Self::Whir(error)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CompactPublicKeyPreChallengeEncodingError<PrivateCoinError> {
+    Materialization(CompactPublicKeyFamilyMaterializationError),
+    PrivateCoin(PrivateCoinError),
+}
+
+impl<PrivateCoinError> From<CompactPublicKeyFamilyMaterializationError>
+    for CompactPublicKeyPreChallengeEncodingError<PrivateCoinError>
+{
+    fn from(error: CompactPublicKeyFamilyMaterializationError) -> Self {
+        Self::Materialization(error)
+    }
+}
+
+impl<PrivateCoinError> From<CommonProofProverError>
+    for CompactPublicKeyPreChallengeEncodingError<PrivateCoinError>
+{
+    fn from(error: CommonProofProverError) -> Self {
+        Self::Materialization(error.into())
+    }
+}
+
+impl<PrivateCoinError> From<CompactWhirError>
+    for CompactPublicKeyPreChallengeEncodingError<PrivateCoinError>
+{
+    fn from(error: CompactWhirError) -> Self {
+        Self::Materialization(error.into())
     }
 }
 
@@ -63,6 +117,7 @@ pub(crate) enum CompactPublicKeyFamilyMaterializationPoll {
         column_ordinal: u32,
     },
     SourcesComplete,
+    PreChallengeEncodingRequired,
     LookupVerifierMessageRequired,
     LookupInverseArithmeticStepCompleted {
         processed_element_count: u64,
@@ -84,11 +139,13 @@ struct CompactPublicKeyFamilyMetadata {
     compact_construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
     checkpoint_schedule_digest: Hash512,
     source_replay_binding: [u8; Hash512::BYTE_LENGTH],
+    pre_challenge: CompactPublicKeyPreChallengeMaterial,
 }
 
 impl CompactPublicKeyFamilyMetadata {
     fn from_prepared_assignment(
         prepared: PreparedCompactPublicKeyBaseAssignment,
+        pre_challenge: CompactPublicKeyPreChallengeMaterial,
     ) -> (Self, CompactPublicKeyBaseAssignment) {
         let PreparedCompactPublicKeyBaseAssignment {
             relation,
@@ -113,6 +170,7 @@ impl CompactPublicKeyFamilyMetadata {
                 compact_construction_identity_hash,
                 checkpoint_schedule_digest,
                 source_replay_binding,
+                pre_challenge,
             },
             base_assignment,
         )
@@ -121,7 +179,11 @@ impl CompactPublicKeyFamilyMetadata {
 
 enum CompactPublicKeyFamilyMaterializationPhase {
     LoadingSources(Box<PreparedCompactPublicKeyAssignmentSources>),
-    AwaitingLookupVerifierMessage(PreparedCompactPublicKeyBaseAssignment),
+    AwaitingPreChallengeEncoding(PreparedCompactPublicKeyBaseAssignment),
+    AwaitingLookupVerifierMessage {
+        prepared: PreparedCompactPublicKeyBaseAssignment,
+        pre_challenge: CompactPublicKeyPreChallengeMaterial,
+    },
     MaterializingLookupInverses {
         metadata: CompactPublicKeyFamilyMetadata,
         materializer: CompactLookupInverseMaterializer,
@@ -156,6 +218,13 @@ pub(crate) struct CompactPublicKeyFamilyMaterial {
     row_source: SelectedCompactPublicKeyRowSource,
 }
 
+pub(crate) struct CompactPublicKeyPreChallengeMaterial {
+    encoded_oracle: CompactWhirEncodedInitialOracle,
+    randomness: CompactGenerationAttemptRandomness,
+    response_leaf_count: u64,
+    response_field_element_count_per_leaf: u64,
+}
+
 impl CompactPublicKeyFamilyMaterializationState {
     pub(crate) fn new(sources: PreparedCompactPublicKeyAssignmentSources) -> Self {
         Self {
@@ -164,10 +233,13 @@ impl CompactPublicKeyFamilyMaterializationState {
     }
 
     pub(crate) fn pre_lookup_material(&self) -> Option<CompactPublicKeyPreLookupMaterialView<'_>> {
-        let CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage(prepared) =
-            &self.phase
-        else {
-            return None;
+        let prepared = match &self.phase {
+            CompactPublicKeyFamilyMaterializationPhase::AwaitingPreChallengeEncoding(prepared)
+            | CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage {
+                prepared,
+                ..
+            } => prepared,
+            _ => return None,
         };
         Some(CompactPublicKeyPreLookupMaterialView {
             public_input_bindings: prepared.public_input_bindings,
@@ -181,14 +253,57 @@ impl CompactPublicKeyFamilyMaterializationState {
         })
     }
 
+    pub(crate) fn pre_challenge_material(&self) -> Option<&CompactPublicKeyPreChallengeMaterial> {
+        match &self.phase {
+            CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage {
+                pre_challenge,
+                ..
+            } => Some(pre_challenge),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn encode_pre_challenge_source<Coins: CommonProofPrivateCoinSource>(
+        &mut self,
+        private_coins: &mut Coins,
+        proof_attempt_identifier: [u8; 32],
+    ) -> Result<(), CompactPublicKeyPreChallengeEncodingError<Coins::Error>> {
+        let CompactPublicKeyFamilyMaterializationPhase::AwaitingPreChallengeEncoding(prepared) =
+            core::mem::replace(
+                &mut self.phase,
+                CompactPublicKeyFamilyMaterializationPhase::Transitioning,
+            )
+        else {
+            self.phase = CompactPublicKeyFamilyMaterializationPhase::Cancelled;
+            return Err(CompactPublicKeyFamilyMaterializationError::WrongPhase.into());
+        };
+        let result =
+            prepare_pre_challenge_material(&prepared, private_coins, proof_attempt_identifier);
+        match result {
+            Ok(pre_challenge) => {
+                self.phase =
+                    CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage {
+                        prepared,
+                        pre_challenge,
+                    };
+                Ok(())
+            }
+            Err(error) => {
+                self.phase = CompactPublicKeyFamilyMaterializationPhase::Cancelled;
+                Err(error)
+            }
+        }
+    }
+
     pub(crate) fn supply_lookup_verifier_message(
         &mut self,
         authority: CompactVerifierMessageAuthority<'_>,
     ) -> Result<(), CompactPublicKeyFamilyMaterializationError> {
         let prepared = match &self.phase {
-            CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage(prepared) => {
-                prepared
-            }
+            CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage {
+                prepared,
+                ..
+            } => prepared,
             _ => return Err(CompactPublicKeyFamilyMaterializationError::WrongPhase),
         };
         if authority.logical_verifier_move_ordinal() != 0
@@ -207,17 +322,19 @@ impl CompactPublicKeyFamilyMaterializationState {
         let lookup_challenge =
             lookup_challenge_from_verifier_message(lookup_message_geometry, authority.message())?;
 
-        let CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage(prepared) =
-            core::mem::replace(
-                &mut self.phase,
-                CompactPublicKeyFamilyMaterializationPhase::Transitioning,
-            )
+        let CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage {
+            prepared,
+            pre_challenge,
+        } = core::mem::replace(
+            &mut self.phase,
+            CompactPublicKeyFamilyMaterializationPhase::Transitioning,
+        )
         else {
             self.phase = CompactPublicKeyFamilyMaterializationPhase::Cancelled;
             return Err(CompactPublicKeyFamilyMaterializationError::WrongPhase);
         };
         let (metadata, base_assignment) =
-            CompactPublicKeyFamilyMetadata::from_prepared_assignment(prepared);
+            CompactPublicKeyFamilyMetadata::from_prepared_assignment(prepared, pre_challenge);
         let materializer =
             match base_assignment.begin_lookup_inverse_materialization(lookup_challenge) {
                 Ok(materializer) => materializer,
@@ -256,7 +373,10 @@ impl CompactPublicKeyFamilyMaterializationState {
                     }
                 }
             }
-            CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage(_) => {
+            CompactPublicKeyFamilyMaterializationPhase::AwaitingPreChallengeEncoding(_) => {
+                Ok(CompactPublicKeyFamilyMaterializationPoll::PreChallengeEncodingRequired)
+            }
+            CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage { .. } => {
                 Ok(CompactPublicKeyFamilyMaterializationPoll::LookupVerifierMessageRequired)
             }
             CompactPublicKeyFamilyMaterializationPhase::MaterializingLookupInverses {
@@ -327,7 +447,7 @@ impl CompactPublicKeyFamilyMaterializationState {
         match (*sources).finish_source_loading() {
             Ok(prepared) => {
                 self.phase =
-                    CompactPublicKeyFamilyMaterializationPhase::AwaitingLookupVerifierMessage(
+                    CompactPublicKeyFamilyMaterializationPhase::AwaitingPreChallengeEncoding(
                         prepared,
                     );
                 Ok(())
@@ -434,6 +554,17 @@ impl CompactPublicKeyPreLookupMaterialView<'_> {
     pub(crate) const fn source_replay_binding(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.source_replay_binding
     }
+
+    pub(crate) fn private_coin_derivation_binding_hash(&self) -> Hash512 {
+        Hash512::from_bytes(hash_framed_parts_512(
+            COMPACT_PUBLIC_KEY_PRIVATE_COIN_BINDING_DOMAIN,
+            &[
+                &self.compact_construction_identity_hash,
+                self.canonical_public_input_bytes,
+                &self.source_replay_binding,
+            ],
+        ))
+    }
 }
 
 impl CompactPublicKeyFamilyMaterial {
@@ -473,6 +604,10 @@ impl CompactPublicKeyFamilyMaterial {
         self.metadata.source_replay_binding
     }
 
+    pub(crate) const fn pre_challenge_material(&self) -> &CompactPublicKeyPreChallengeMaterial {
+        &self.metadata.pre_challenge
+    }
+
     pub(crate) const fn witness_length(&self) -> u64 {
         self.row_source.witness_length()
     }
@@ -484,6 +619,143 @@ impl CompactPublicKeyFamilyMaterial {
     pub(super) const fn row_source(&self) -> &SelectedCompactPublicKeyRowSource {
         &self.row_source
     }
+}
+
+impl CompactPublicKeyPreChallengeMaterial {
+    pub(crate) const fn response_leaf_count(&self) -> u64 {
+        self.response_leaf_count
+    }
+
+    pub(crate) const fn response_field_element_count_per_leaf(&self) -> u64 {
+        self.response_field_element_count_per_leaf
+    }
+
+    pub(crate) const fn proof_attempt_identifier(&self) -> [u8; 32] {
+        self.randomness.proof_attempt_identifier()
+    }
+
+    pub(crate) fn fiat_shamir_round_salt(
+        &self,
+    ) -> [u8; crate::bgv::proof_suite::compact_proof_wire::COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH]
+    {
+        self.randomness.fiat_shamir_round_salt(0)
+    }
+
+    pub(crate) fn response_leaf(
+        &self,
+        leaf_ordinal: u64,
+    ) -> Result<CompactOwnedResponseLeaf, CompactPublicKeyFamilyMaterializationError> {
+        if leaf_ordinal >= self.response_leaf_count {
+            return Err(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource);
+        }
+        let row = self
+            .encoded_oracle
+            .encoded_row(usize::try_from(leaf_ordinal).map_err(|_| {
+                CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource
+            })?)
+            .ok_or(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource)?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(row.len())
+            .map_err(|_| CompactPublicKeyFamilyMaterializationError::AllocationLimitExceeded)?;
+        values.extend(row.iter().map(|value| {
+            ProofBaseFieldElement::from_canonical(value.as_canonical_u64())
+                .expect("a Goldilocks value is a canonical production base-field value")
+        }));
+        Ok(CompactOwnedResponseLeaf::base_field(values))
+    }
+
+    pub(crate) fn response_leaf_salt(
+        &self,
+        leaf_ordinal: u64,
+        leaf: &CompactOwnedResponseLeaf,
+    ) -> [u8; crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH] {
+        self.randomness
+            .private_leaf_salt(0, self.response_leaf_count, leaf_ordinal, leaf)
+    }
+}
+
+fn prepare_pre_challenge_material<Coins: CommonProofPrivateCoinSource>(
+    prepared: &PreparedCompactPublicKeyBaseAssignment,
+    private_coins: &mut Coins,
+    proof_attempt_identifier: [u8; 32],
+) -> Result<
+    CompactPublicKeyPreChallengeMaterial,
+    CompactPublicKeyPreChallengeEncodingError<Coins::Error>,
+> {
+    let contract = selected_compact_public_key_proof_contract()
+        .map_err(|_| CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource)?;
+    let verifier_inputs = contract.verifier_inputs();
+    let [pre_challenge_epoch, _main_epoch] = verifier_inputs.whir_epochs else {
+        return Err(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource.into());
+    };
+    let configuration = compact_whir_configuration_from_contract(pre_challenge_epoch)?;
+    let cross_epoch_copy = prepared
+        .relation
+        .cross_epoch_copy_geometry()
+        .map_err(|_| CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource)?;
+    let copied_element_count = usize::try_from(cross_epoch_copy.copied_element_count())
+        .map_err(|_| CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource)?;
+    let message_element_count =
+        usize::try_from(cross_epoch_copy.pre_challenge_message_element_count())
+            .map_err(|_| CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource)?;
+    if !message_element_count.is_power_of_two()
+        || configuration.num_variables != message_element_count.ilog2() as usize
+        || copied_element_count == 0
+        || copied_element_count > message_element_count
+    {
+        return Err(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource.into());
+    }
+    let mut source = Vec::new();
+    source
+        .try_reserve_exact(message_element_count)
+        .map_err(|_| CompactPublicKeyFamilyMaterializationError::AllocationLimitExceeded)?;
+    for element_ordinal in 0..copied_element_count {
+        let value = prepared.base_assignment.witness_base_value(
+            u64::try_from(element_ordinal).map_err(|_| {
+                CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource
+            })?,
+        )?;
+        source.push(Goldilocks::from_u64(value.canonical()));
+    }
+    source.resize(message_element_count, Goldilocks::ZERO);
+
+    let [source_response_component] = prepared
+        .response_merkle_geometries
+        .first()
+        .ok_or(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource)?
+        .components()
+    else {
+        return Err(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource.into());
+    };
+    if source_response_component.value_kind() != CompactResponseLeafValueKind::BaseField {
+        return Err(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource.into());
+    }
+
+    let mut randomness = CompactGenerationAttemptRandomness::from_private_coins(
+        private_coins,
+        proof_attempt_identifier,
+    )
+    .map_err(CompactPublicKeyPreChallengeEncodingError::PrivateCoin)?;
+    let encoded_oracle = CompactWhirEncodedInitialOracle::encode(
+        &configuration,
+        source,
+        randomness.whir_random_source_mut(),
+    )?;
+    let matrix = encoded_oracle.encoded_matrix();
+    if u64::try_from(matrix.height()) != Ok(source_response_component.leaf_count())
+        || u64::try_from(matrix.width())
+            != Ok(source_response_component.field_element_count_per_leaf())
+    {
+        return Err(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource.into());
+    }
+    Ok(CompactPublicKeyPreChallengeMaterial {
+        encoded_oracle,
+        randomness,
+        response_leaf_count: source_response_component.leaf_count(),
+        response_field_element_count_per_leaf: source_response_component
+            .field_element_count_per_leaf(),
+    })
 }
 
 fn lookup_challenge_from_verifier_message(

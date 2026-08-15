@@ -63,7 +63,7 @@ package, Node, 1,218-entry ordinary Rust, and Chromium lane. Its scalar WASM and
 SDK bytes reproduced, and all 35 retained theorem-registry members passed under
 the serialized guard. That graph's artifact is superseded. The current scalar
 release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-`670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
+`712eb1fdf79b6cd7d32bf4e008ccfe3b17a46c799aa63cf50bb67eee9e220894`.
 This is release-build and byte-copy development evidence only, not proof or
 physical-phone qualification. The retained results validate only that recorded
 dirty state. They predate the later
@@ -100,13 +100,18 @@ independently decoding them. A release-owned public-key family
 materialization state accepts the lookup challenge only through a borrowed
 first-message authority minted by the compact response state for the same proof
 geometry and canonical public input, then owns bounded lookup inversion and
-structured-row preparation. The guarded owner streams the contract-derived
-131,072-leaf, 64-base-element response geometry with deterministic test values,
-completes 233 lookup polls and 760 structured-row polls, and advances one CFW
-poll. It does not yet bind an emitted production WHIR commitment to that first
-response. The complete production-shaped small chain uses the compact response
-state, but the later CFW and WHIR family material provider and production worker
-adapter remain incomplete.
+structured-row preparation. Before that lookup challenge exists, the
+production state derives the first WHIR epoch's exact 2,097,152-element source
+from authenticated quotient-and-multiplicity values plus canonical zero
+padding. Independent action-private coin seeds drive WHIR's rejection samplers
+and random-access response salts. The guarded owner retains WHIR's exact
+131,072-row by 64-element encoding, streams those values into the salted
+response tree, completes 233 lookup polls and 760 structured-row polls, and
+advances one CFW poll. The family state does not yet own response-tree
+restoration or carry the committed source into a complete emitted WHIR epoch.
+The complete production-shaped small chain uses the compact response state, but
+the later CFW and WHIR family material provider and production worker adapter
+remain incomplete.
 Semantic and complete CFW/WHIR execution,
 Merkle privacy, masking, emitted-coordinate measurement, fixed-tape and
 Appendix arithmetic remain test-only or incomplete. The
@@ -249,13 +254,18 @@ independently decoding them. A release-owned public-key family
 materialization state accepts the lookup challenge only through a borrowed
 first-message authority minted by the compact response state for the same proof
 geometry and canonical public input, then owns bounded lookup inversion and
-structured-row preparation. The guarded owner streams the contract-derived
-131,072-leaf, 64-base-element response geometry with deterministic test values,
-completes 233 lookup polls and 760 structured-row polls, and advances one CFW
-poll. It does not yet bind an emitted production WHIR commitment to that first
-response. The complete production-shaped small chain uses the compact response
-state, but the later CFW and WHIR family material provider and production worker
-adapter remain incomplete.
+structured-row preparation. Before that lookup challenge exists, the
+production state derives the first WHIR epoch's exact 2,097,152-element source
+from authenticated quotient-and-multiplicity values plus canonical zero
+padding. Independent action-private coin seeds drive WHIR's rejection samplers
+and random-access response salts. The guarded owner retains WHIR's exact
+131,072-row by 64-element encoding, streams those values into the salted
+response tree, completes 233 lookup polls and 760 structured-row polls, and
+advances one CFW poll. The family state does not yet own response-tree
+restoration or carry the committed source into a complete emitted WHIR epoch.
+The complete production-shaped small chain uses the compact response state, but
+the later CFW and WHIR family material provider and production worker adapter
+remain incomplete.
 The transport validator checks canonical
 bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
@@ -393,7 +403,7 @@ the snapshot is the newest state.
   checkpoint, runtime, and package evidence is not one reconciled exact-ten
   authority.
 - `SEC-019`: The current scalar release WASM and SDK byte copy are byte-identical and have normalized loader SHA-256
-  `670604d4836adea145dee04f1161027ae9565f225622bc9698a9416a6a3ffb41`.
+  `712eb1fdf79b6cd7d32bf4e008ccfe3b17a46c799aa63cf50bb67eee9e220894`.
   This is release-build and byte-copy development evidence only, and the
   retained ordinary desktop-browser graph remains historical. The release build
   contains compact relation materialization but still omits compact proof
@@ -406,10 +416,12 @@ the snapshot is the newest state.
   scalar CFW, incremental proof assembly, the prover transcript cursor, bounded
   response-tree custody, and authenticated response-checkpoint construction
   compile into release bytes. Selected-size compact source preparation now has
-  guarded native phase evidence through a transcript-minted lookup challenge,
-  bounded structured-row materialization, and one CFW poll. Actual WHIR response
-  values, complete proof execution, authenticated restart, full resource
-  reconciliation, and browser execution remain unresolved.
+  guarded native phase evidence for the exact initial WHIR encoding, action-
+  private WHIR and response-salt seeds, real response-tree values, a transcript-
+  minted lookup challenge, bounded structured-row materialization, and one CFW
+  poll. Response-tree restoration within the family state, complete proof
+  execution, full resource reconciliation, and browser execution remain
+  unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody. Persistence request and recheck, quota admission, eviction
   qualification, and externally anchored coherent-rollback detection are
