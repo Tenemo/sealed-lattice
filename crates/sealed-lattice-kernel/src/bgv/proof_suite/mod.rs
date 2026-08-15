@@ -28,7 +28,6 @@ mod compact_factor_one_semantics;
 #[cfg(test)]
 mod compact_fixed_tape_uniformity;
 mod compact_generation_checkpoint;
-#[cfg(test)]
 mod compact_masking_coefficient_maps;
 #[cfg(test)]
 mod compact_masking_entropy;
@@ -36,13 +35,11 @@ mod compact_masking_entropy;
 mod compact_masking_kmac;
 #[cfg(test)]
 mod compact_masking_simulator;
-#[cfg(test)]
 mod compact_merkle_privacy;
 mod compact_proof_contract;
 mod compact_proof_wire;
 #[cfg(test)]
 mod compact_public_key_static_catalog;
-#[cfg(test)]
 mod compact_public_key_verifier;
 #[cfg(test)]
 mod compact_reed_solomon;

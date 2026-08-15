@@ -4,31 +4,27 @@
 //! vector-commitment pair through `i`, and every independent round salt
 //! through `i`. The compact construction fixes commitment-oracle identifier
 //! `i + 1`, so the identifier is verifier-derived and is not transported.
-//! The release build retains the transcript domains and verifier-derived
-//! commitment identifier. Streaming prefix construction and checkpoint
-//! cursors remain test-only until a release compact verifier consumes them.
+//! Streaming prefix construction and verifier-message derivation are ordinary
+//! release code. Prover checkpoint cursors remain test-only until the compact
+//! generation state consumes them.
 //!
 //! The resulting 512-bit prefix digest feeds the fixed-width verifier-message
 //! seed and predecessor-linked block schedule. That concrete multi-call
 //! SHAKE256 graph still needs its separate emitted-byte QROM correspondence;
 //! this module does not equate the graph with one ideal variable-output call.
 
-#[cfg(test)]
 use std::mem::size_of;
 
 #[cfg(test)]
 use super::compact_proof_wire::decode_compact_proof_wire_prefix;
-#[cfg(test)]
 use super::compact_proof_wire::{
     COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, COMPACT_PACKING_FACTOR, CompactProofWireError,
     CompactProofWireGeometry, DecodedCompactProofWire, DecodedCompactPublicInput,
 };
-#[cfg(test)]
 use super::fixed_uniform_verifier_message::{
     DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageError,
     derive_fixed_uniform_verifier_message,
 };
-#[cfg(test)]
 use crate::foundation::{
     CanonicalItem, Hash512, StreamingFoundationHashError, StreamingFoundationTupleHash512,
 };
@@ -36,7 +32,6 @@ use crate::foundation::{
 pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN: &str =
     "sealed-lattice/proof/compact-fiat-shamir-prefix/v1";
 pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_VERSION: u16 = 1;
-#[cfg(test)]
 const COMMITMENT_PREFIX_ENTRY_BYTE_LENGTH: usize =
     size_of::<u32>() + Hash512::BYTE_LENGTH + COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
 #[cfg(test)]
@@ -76,7 +71,6 @@ pub(crate) const fn compact_transcript_binding_domains() -> [&'static str; 4] {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactTranscriptError {
-    #[cfg(test)]
     InvalidGeometry,
     LengthOverflow,
     #[cfg(test)]
@@ -87,29 +81,23 @@ pub(crate) enum CompactTranscriptError {
     WrongCheckpointCursor,
     #[cfg(test)]
     CheckpointCursorDigestMismatch,
-    #[cfg(test)]
     Wire(CompactProofWireError),
-    #[cfg(test)]
     FoundationHash(StreamingFoundationHashError),
-    #[cfg(test)]
     VerifierMessage(FixedUniformVerifierMessageError),
 }
 
-#[cfg(test)]
 impl From<CompactProofWireError> for CompactTranscriptError {
     fn from(error: CompactProofWireError) -> Self {
         Self::Wire(error)
     }
 }
 
-#[cfg(test)]
 impl From<StreamingFoundationHashError> for CompactTranscriptError {
     fn from(error: StreamingFoundationHashError) -> Self {
         Self::FoundationHash(error)
     }
 }
 
-#[cfg(test)]
 impl From<FixedUniformVerifierMessageError> for CompactTranscriptError {
     fn from(error: FixedUniformVerifierMessageError) -> Self {
         Self::VerifierMessage(error)
@@ -126,7 +114,6 @@ pub(crate) fn compact_vector_commitment_oracle_identifier(
 }
 
 /// Exact raw payload absorbed by the round-prefix hash.
-#[cfg(test)]
 pub(crate) fn compact_fiat_shamir_prefix_payload_byte_length(
     canonical_public_input_byte_length: usize,
     prefix_response_count: usize,
@@ -144,7 +131,6 @@ pub(crate) fn compact_fiat_shamir_prefix_payload_byte_length(
         .ok_or(CompactTranscriptError::LengthOverflow)
 }
 
-#[cfg(test)]
 pub(crate) fn compact_fiat_shamir_round_prefix_digest(
     geometry: &CompactProofWireGeometry,
     decoded_proof: &DecodedCompactProofWire,
@@ -189,14 +175,12 @@ pub(crate) fn compact_fiat_shamir_round_prefix_digest(
     )
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CompactTranscriptCommitmentEntry {
     root: [u8; Hash512::BYTE_LENGTH],
     fiat_shamir_round_salt: [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
 }
 
-#[cfg(test)]
 fn compact_fiat_shamir_prefix_digest_from_entries(
     geometry: &CompactProofWireGeometry,
     canonical_public_input_bytes: &[u8],
@@ -748,7 +732,6 @@ impl<'bytes> CompactTranscriptCheckpointCursorReader<'bytes> {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn derive_compact_fiat_shamir_verifier_message(
     geometry: &CompactProofWireGeometry,
     decoded_proof: &DecodedCompactProofWire,

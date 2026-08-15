@@ -6,31 +6,25 @@
 //! openings carry no coordinates: the verifier derives the unique minimal
 //! frontier from its sorted query indices before reconstructing the root.
 //!
-//! The release build retains the contract geometry and query-source registry.
-//! Canonical hashing, query materialization, postorder storage, and opening
-//! verification remain test-only until the release verifier consumes them.
+//! Contract geometry, verifier-derived query materialization, canonical
+//! hashing, and strict opening verification are ordinary release code.
+//! Postorder production and finite-oracle preimage adapters remain test-only
+//! until the compact generation state consumes them.
 
-#[cfg(test)]
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
 
 use super::compact_proof_wire::CompactProofResponseWireGeometry;
-#[cfg(test)]
 use super::compact_proof_wire::{CompactProofWireError, DecodedCompactProofResponse};
 use super::compact_transcript::compact_vector_commitment_oracle_identifier;
-#[cfg(test)]
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
 use super::merkle::maximum_minimal_frontier_node_count;
-#[cfg(test)]
 use super::merkle::minimal_frontier_coordinates;
+use super::{COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE};
 #[cfg(test)]
-use super::{
-    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE,
-    ProofBaseFieldElement, ProofChallengeExtensionElement,
-};
-#[cfg(test)]
+use super::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use crate::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItemType, Hash512,
 };
@@ -270,12 +264,10 @@ impl CompactResponseMerkleGeometry {
         self.response_ordinal
     }
 
-    #[cfg(test)]
     pub(crate) const fn vector_commitment_oracle_identifier(&self) -> u32 {
         self.response_ordinal + 1
     }
 
-    #[cfg(test)]
     pub(crate) const fn merkle_leaf_count(&self) -> u64 {
         self.merkle_leaf_count
     }
@@ -397,7 +389,6 @@ impl CompactResponseMerkleGeometry {
         Ok(())
     }
 
-    #[cfg(test)]
     fn leaf_descriptor(
         &self,
         leaf_ordinal: u64,
@@ -424,7 +415,6 @@ impl CompactResponseMerkleGeometry {
         Err(CompactResponseMerkleError::InvalidGeometry)
     }
 
-    #[cfg(test)]
     pub(crate) fn validate_query_leaf_ordinals(
         &self,
         query_leaf_ordinals: &[u64],
@@ -593,7 +583,6 @@ fn query_group_shape(
 /// every proper subset names its verifier move and distinct-query group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactResponseQuerySchedule {
-    #[cfg(test)]
     leaf_ordinals: Vec<u64>,
 }
 
@@ -694,7 +683,6 @@ impl CompactResponseQuerySchedule {
     /// message exists. The prefix must end at that move: accepting an earlier
     /// prefix would permit premature opening, while accepting a later prefix
     /// would delay last-use deletion and checkpoint publication.
-    #[cfg(test)]
     pub(crate) fn derive_at_last_query_boundary(
         merkle_geometry: &CompactResponseMerkleGeometry,
         wire_geometries: &[CompactProofResponseWireGeometry],
@@ -720,7 +708,6 @@ impl CompactResponseQuerySchedule {
         Self::derive_from_validated_messages(merkle_geometry, verifier_message_prefix)
     }
 
-    #[cfg(test)]
     fn derive_from_validated_messages(
         merkle_geometry: &CompactResponseMerkleGeometry,
         verifier_messages: &[DecodedFixedUniformVerifierMessage],
@@ -794,7 +781,6 @@ impl CompactResponseQuerySchedule {
         Ok(Self { leaf_ordinals })
     }
 
-    #[cfg(test)]
     pub(crate) fn as_slice(&self) -> &[u64] {
         &self.leaf_ordinals
     }
@@ -812,7 +798,6 @@ impl CompactResponseQuerySchedule {
     }
 }
 
-#[cfg(test)]
 fn validate_verifier_message_prefix(
     wire_geometries: &[CompactProofResponseWireGeometry],
     verifier_messages: &[DecodedFixedUniformVerifierMessage],
@@ -842,7 +827,6 @@ fn validate_verifier_message_prefix(
     Ok(())
 }
 
-#[cfg(test)]
 fn decoded_query_group(
     verifier_messages: &[DecodedFixedUniformVerifierMessage],
     logical_verifier_move_ordinal: u32,
@@ -859,7 +843,6 @@ fn decoded_query_group(
         .ok_or(CompactResponseMerkleError::InvalidOpeningIndices)
 }
 
-#[cfg(test)]
 fn append_component_query_group(
     leaf_ordinals: &mut Vec<u64>,
     component: &CompactResponseComponentGeometry,
@@ -885,7 +868,6 @@ fn append_component_query_group(
     Ok(())
 }
 
-#[cfg(test)]
 fn append_component_query_union(
     leaf_ordinals: &mut Vec<u64>,
     component: &CompactResponseComponentGeometry,
@@ -968,8 +950,8 @@ fn mark_query_group_referenced(
     Ok(())
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy)]
+#[cfg(test)]
 pub(crate) enum CompactResponseLeafValue<'value> {
     BaseField(&'value [ProofBaseFieldElement]),
     ExtensionField(&'value [ProofChallengeExtensionElement]),
@@ -1033,7 +1015,6 @@ impl CompactResponseLeafValue<'_> {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactResponseLeafDescriptor {
     component_ordinal: u32,
@@ -1047,25 +1028,17 @@ pub(crate) struct CompactResponseLeafDescriptor {
 pub(crate) enum CompactResponseMerkleError {
     InvalidGeometry,
     CountOverflow,
-    #[cfg(test)]
     CanonicalEncoding,
     WireGeometryMismatch,
     InvalidOpeningIndices,
     #[cfg(test)]
     WrongLeafValueKind,
-    #[cfg(test)]
     WrongLeafValueCount,
-    #[cfg(test)]
     WrongFrontierLength,
-    #[cfg(test)]
     IncompleteFrontier,
-    #[cfg(test)]
     RootMismatch,
-    #[cfg(test)]
     InvalidWireValue,
-    #[cfg(test)]
     ParentHashPending,
-    #[cfg(test)]
     ParentHashNotPending,
     #[cfg(test)]
     OutputChunkPending,
@@ -1495,14 +1468,12 @@ fn compact_response_leaf_hash_preimage(
     .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
 }
 
-#[cfg(test)]
 fn update_canonical_tuple_header(hasher: &mut Shake256, item_count: u32) {
     hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
     hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
     hasher.update(&item_count.to_le_bytes());
 }
 
-#[cfg(test)]
 fn update_canonical_item(
     hasher: &mut Shake256,
     item_type: CanonicalItemType,
@@ -1516,7 +1487,6 @@ fn update_canonical_item(
     Ok(())
 }
 
-#[cfg(test)]
 fn update_canonical_u16(
     hasher: &mut Shake256,
     value: u16,
@@ -1524,7 +1494,6 @@ fn update_canonical_u16(
     update_canonical_item(hasher, CanonicalItemType::Unsigned16, &value.to_le_bytes())
 }
 
-#[cfg(test)]
 fn update_canonical_u32(
     hasher: &mut Shake256,
     value: u32,
@@ -1532,7 +1501,6 @@ fn update_canonical_u32(
     update_canonical_item(hasher, CanonicalItemType::Unsigned32, &value.to_le_bytes())
 }
 
-#[cfg(test)]
 fn update_canonical_u64(
     hasher: &mut Shake256,
     value: u64,
@@ -1540,7 +1508,6 @@ fn update_canonical_u64(
     update_canonical_item(hasher, CanonicalItemType::Unsigned64, &value.to_le_bytes())
 }
 
-#[cfg(test)]
 fn update_canonical_hash512(
     hasher: &mut Shake256,
     value: &[u8; Hash512::BYTE_LENGTH],
@@ -1548,7 +1515,6 @@ fn update_canonical_hash512(
     update_canonical_item(hasher, CanonicalItemType::Hash512, value)
 }
 
-#[cfg(test)]
 fn update_canonical_fixed_bytes(
     hasher: &mut Shake256,
     value: &[u8],
@@ -1556,7 +1522,6 @@ fn update_canonical_fixed_bytes(
     update_canonical_item(hasher, CanonicalItemType::RawBytes, value)
 }
 
-#[cfg(test)]
 fn update_canonical_variable_bytes_header(
     hasher: &mut Shake256,
     value_byte_length: usize,
@@ -1575,7 +1540,6 @@ fn update_canonical_variable_bytes_header(
     Ok(())
 }
 
-#[cfg(test)]
 fn update_canonical_ascii(
     hasher: &mut Shake256,
     value: &str,
@@ -1598,7 +1562,6 @@ fn update_canonical_ascii(
     Ok(())
 }
 
-#[cfg(test)]
 fn finish_streamed_compact_response_hash(hasher: Shake256) -> [u8; Hash512::BYTE_LENGTH] {
     let mut reader = hasher.finalize_xof();
     let mut digest = [0_u8; Hash512::BYTE_LENGTH];
@@ -1606,7 +1569,6 @@ fn finish_streamed_compact_response_hash(hasher: Shake256) -> [u8; Hash512::BYTE
     digest
 }
 
-#[cfg(test)]
 fn compact_response_leaf_digest_from_canonical_value_bytes(
     geometry: &CompactResponseMerkleGeometry,
     descriptor: CompactResponseLeafDescriptor,
@@ -1637,7 +1599,6 @@ fn compact_response_leaf_digest_from_canonical_value_bytes(
     Ok(finish_streamed_compact_response_hash(hasher))
 }
 
-#[cfg(test)]
 fn begin_compact_response_leaf_hash(
     geometry: &CompactResponseMerkleGeometry,
     descriptor: CompactResponseLeafDescriptor,
@@ -1738,7 +1699,6 @@ pub(crate) fn compact_response_leaf_digest(
     Ok(finish_streamed_compact_response_hash(hasher))
 }
 
-#[cfg(test)]
 struct CompactResponseOpenedLeaf<'opening> {
     descriptor: CompactResponseLeafDescriptor,
     canonical_value_bytes: &'opening [u8],
@@ -1748,7 +1708,6 @@ struct CompactResponseOpenedLeaf<'opening> {
 /// Exact decoded opened-leaf traversal shared by fixed-SHAKE verification and
 /// the finite EPRO game. Values, salts, and leaf coordinates all come from one
 /// canonical decoded response and one verifier-derived query schedule.
-#[cfg(test)]
 pub(super) struct CompactResponseOpenedLeafHashCursor<'opening> {
     geometry: &'opening CompactResponseMerkleGeometry,
     decoded_response: &'opening DecodedCompactProofResponse,
@@ -1759,7 +1718,6 @@ pub(super) struct CompactResponseOpenedLeafHashCursor<'opening> {
     extension_field_value_offset: usize,
 }
 
-#[cfg(test)]
 impl<'opening> CompactResponseOpenedLeafHashCursor<'opening> {
     pub(super) fn new(
         geometry: &'opening CompactResponseMerkleGeometry,
@@ -1891,7 +1849,6 @@ impl<'opening> CompactResponseOpenedLeafHashCursor<'opening> {
     }
 }
 
-#[cfg(test)]
 fn validate_parent_coordinate(
     geometry: &CompactResponseMerkleGeometry,
     parent_level: u32,
@@ -1958,7 +1915,6 @@ pub(crate) fn compact_response_merkle_parent_digest(
     )
 }
 
-#[cfg(test)]
 fn compact_response_merkle_parent_digest_from_coordinates(
     response_ordinal: u32,
     vector_commitment_oracle_identifier: u32,
@@ -1989,7 +1945,6 @@ pub(crate) fn compact_response_hash_preimage(preimage: &[u8]) -> [u8; Hash512::B
     digest
 }
 
-#[cfg(test)]
 pub(crate) fn verify_decoded_compact_response_opening(
     merkle_geometry: &CompactResponseMerkleGeometry,
     wire_geometry: &CompactProofResponseWireGeometry,
@@ -2026,7 +1981,6 @@ pub(crate) fn verify_decoded_compact_response_opening_with_leaf_ordinals_for_tes
     )
 }
 
-#[cfg(test)]
 fn verify_decoded_compact_response_opening_with_schedule(
     merkle_geometry: &CompactResponseMerkleGeometry,
     wire_geometry: &CompactProofResponseWireGeometry,
@@ -2080,7 +2034,6 @@ fn verify_decoded_compact_response_opening_with_schedule(
     Ok(())
 }
 
-#[cfg(test)]
 pub(crate) fn reconstruct_compact_response_root(
     geometry: &CompactResponseMerkleGeometry,
     query_schedule: &CompactResponseQuerySchedule,
@@ -2104,7 +2057,6 @@ pub(crate) fn reconstruct_compact_response_root(
     }
 }
 
-#[cfg(test)]
 pub(super) struct CompactResponseParentHashRequest {
     response_ordinal: u32,
     vector_commitment_oracle_identifier: u32,
@@ -2112,10 +2064,10 @@ pub(super) struct CompactResponseParentHashRequest {
     left_child_ordinal: u64,
     left_child_digest: [u8; Hash512::BYTE_LENGTH],
     right_child_digest: [u8; Hash512::BYTE_LENGTH],
+    #[cfg(test)]
     is_root: bool,
 }
 
-#[cfg(test)]
 impl CompactResponseParentHashRequest {
     fn digest(&self) -> Result<[u8; Hash512::BYTE_LENGTH], CompactResponseMerkleError> {
         compact_response_merkle_parent_digest_from_coordinates(
@@ -2145,12 +2097,12 @@ impl CompactResponseParentHashRequest {
         .map_err(|_| CompactResponseMerkleError::CanonicalEncoding)
     }
 
+    #[cfg(test)]
     pub(super) const fn is_root(&self) -> bool {
         self.is_root
     }
 }
 
-#[cfg(test)]
 pub(super) enum CompactResponseRootReconstructionPoll {
     ParentHash(CompactResponseParentHashRequest),
     Complete([u8; Hash512::BYTE_LENGTH]),
@@ -2159,7 +2111,6 @@ pub(super) enum CompactResponseRootReconstructionPoll {
 /// Exact response-tree traversal shared by fixed-SHAKE verification and the
 /// finite EPRO test game. Production hashes retained coordinates directly;
 /// only the test adapter materializes their canonical preimages.
-#[cfg(test)]
 pub(super) struct CompactResponseRootReconstruction<'geometry> {
     geometry: &'geometry CompactResponseMerkleGeometry,
     frontier_coordinates: Vec<(u32, u64)>,
@@ -2172,7 +2123,6 @@ pub(super) struct CompactResponseRootReconstruction<'geometry> {
     pending_parent_ordinal: Option<u64>,
 }
 
-#[cfg(test)]
 impl<'geometry> CompactResponseRootReconstruction<'geometry> {
     pub(super) fn new(
         geometry: &'geometry CompactResponseMerkleGeometry,
@@ -2277,6 +2227,7 @@ impl<'geometry> CompactResponseRootReconstruction<'geometry> {
             let left_child_ordinal = parent_ordinal << 1;
             validate_parent_coordinate(self.geometry, parent_level, left_child_ordinal)?;
             self.pending_parent_ordinal = Some(parent_ordinal);
+            #[cfg(test)]
             let is_root = parent_level == self.geometry.merkle_leaf_count.trailing_zeros();
             return Ok(CompactResponseRootReconstructionPoll::ParentHash(
                 CompactResponseParentHashRequest {
@@ -2288,6 +2239,7 @@ impl<'geometry> CompactResponseRootReconstruction<'geometry> {
                     left_child_ordinal,
                     left_child_digest,
                     right_child_digest,
+                    #[cfg(test)]
                     is_root,
                 },
             ));
@@ -2307,7 +2259,6 @@ impl<'geometry> CompactResponseRootReconstruction<'geometry> {
     }
 }
 
-#[cfg(test)]
 fn map_wire_error(_: CompactProofWireError) -> CompactResponseMerkleError {
     CompactResponseMerkleError::InvalidWireValue
 }

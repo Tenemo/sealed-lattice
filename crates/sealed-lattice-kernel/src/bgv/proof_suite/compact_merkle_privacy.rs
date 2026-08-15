@@ -58,16 +58,27 @@ pub(crate) enum CompactMerklePrivacyError {
     Merkle(CompactResponseMerkleError),
     ArithmeticOverflow,
     InvalidConstructionEmbedding,
+    #[cfg(test)]
     WrongResponseOrder,
+    #[cfg(test)]
     WrongOpeningBoundary,
+    #[cfg(test)]
     MissingResponseRoot,
+    #[cfg(test)]
     DuplicateResponseRoot,
+    #[cfg(test)]
     RootMismatch,
+    #[cfg(test)]
     ConflictingOracleInput,
+    #[cfg(test)]
     OracleOutputCollision,
+    #[cfg(test)]
     RetiredOracleInput,
+    #[cfg(test)]
     RetiredOracleOutput,
+    #[cfg(test)]
     WrongCheckpoint,
+    #[cfg(test)]
     IncompleteAttempt,
 }
 
@@ -97,10 +108,12 @@ pub(crate) struct CompactMerkleProbabilityBound {
 }
 
 impl CompactMerkleProbabilityBound {
+    #[cfg(test)]
     pub(crate) const fn denominator_power(&self) -> u32 {
         self.denominator_power
     }
 
+    #[cfg(test)]
     pub(crate) fn numerator(&self) -> &BigUint {
         &self.numerator
     }
@@ -141,26 +154,31 @@ impl CompactMerklePrivacyCertificate {
         self.response_commitment_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn committed_leaf_count(&self) -> u64 {
         self.committed_leaf_count
     }
 
+    #[cfg(test)]
     pub(crate) fn construction_bindings(&self) -> &[CompactConstructionMerkleBinding] {
         &self.construction_bindings
     }
 
+    #[cfg(test)]
     pub(crate) fn response_component_embedding_count(&self) -> usize {
         self.response_component_embeddings.len()
     }
 
     /// BCS16 salted-Merkle statistical distance `sum_i n_i / 2^126`
     /// for a 512-bit random oracle and the exact 82 tree sizes.
+    #[cfg(test)]
     pub(crate) const fn bcs16_statistical_distance(&self) -> &CompactMerkleProbabilityBound {
         &self.bcs16_statistical_distance
     }
 
     /// Collision probability for all independently sampled 1024-bit leaf
     /// salts, union-bounded as `choose(total_leaf_count, 2) / 2^1024`.
+    #[cfg(test)]
     pub(crate) const fn leaf_salt_collision(&self) -> &CompactMerkleProbabilityBound {
         &self.leaf_salt_collision
     }

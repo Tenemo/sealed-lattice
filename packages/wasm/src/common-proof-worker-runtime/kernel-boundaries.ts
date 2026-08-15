@@ -24,6 +24,9 @@ import {
     type CommonProofDiscardExportName,
 } from './external-memory.js';
 export const hashByteLength = 64;
+const compactPublicKeyTransportBindingCount = 4;
+const compactPublicKeyTransportBindingsByteLength =
+    compactPublicKeyTransportBindingCount * hashByteLength;
 const localStorageRootCapabilityByteLength = 32;
 const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
 
@@ -152,6 +155,13 @@ export type ClosedWorkerCommonProofVerificationFamilyAdapterDescription =
     Readonly<{
         commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     }>;
+
+type CompactPublicKeyTransportBindings = Readonly<{
+    applicationStatementHash: Uint8Array;
+    manifestHash: Uint8Array;
+    relationPlanHash: Uint8Array;
+    suiteIdentifier: Uint8Array;
+}>;
 
 export type CommonProofAuthenticatedSourceRangeRequest = Readonly<{
     authenticationChunkIndex: number;
@@ -1713,6 +1723,112 @@ export class CommonProofVerificationKernelBoundary {
             createResourceError: resourceFailure,
             label: 'common-proof verifier worker',
         });
+    }
+
+    /**
+     * Checks canonical compact transport framing, transcript chronology, and
+     * salted Merkle openings only. Success is not CFW or WHIR proof validity
+     * and must not mint a proof or workflow capability.
+     */
+    public validateCompactPublicKeyTransport(
+        bindings: CompactPublicKeyTransportBindings,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+    ): void {
+        for (const [value, label] of [
+            [bindings.suiteIdentifier, 'The compact suite identifier'],
+            [
+                bindings.applicationStatementHash,
+                'The compact application-statement hash',
+            ],
+            [bindings.manifestHash, 'The compact manifest hash'],
+            [bindings.relationPlanHash, 'The compact relation-plan hash'],
+        ] as const) {
+            requireExactApplicationBytes(value, hashByteLength, label);
+        }
+        if (
+            !(proofBytes instanceof Uint8Array) ||
+            proofBytes.byteLength === 0 ||
+            proofBytes.byteLength > maximumCommonProofByteLength ||
+            !(publicInputBytes instanceof Uint8Array) ||
+            publicInputBytes.byteLength === 0 ||
+            publicInputBytes.byteLength > maximumCommonProofByteLength
+        ) {
+            throw resourceFailure(
+                'The compact transport bytes must be nonempty and remain within the accepted release boundary.',
+            );
+        }
+        this.#context.runExclusive(
+            'compact public-key transport validation',
+            () => {
+                const reportedBindingByteLength = requireUnsigned32(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_transport_bindings_byte_length',
+                    )(),
+                    'The compact transport binding byte length',
+                );
+                if (
+                    reportedBindingByteLength !==
+                    compactPublicKeyTransportBindingsByteLength
+                ) {
+                    throw kernelFailure(
+                        'The compact transport binding geometry disagrees with the worker.',
+                    );
+                }
+                const canonicalBindings = new Uint8Array(
+                    compactPublicKeyTransportBindingsByteLength,
+                );
+                canonicalBindings.set(bindings.suiteIdentifier, 0);
+                canonicalBindings.set(
+                    bindings.applicationStatementHash,
+                    hashByteLength,
+                );
+                canonicalBindings.set(
+                    bindings.manifestHash,
+                    2 * hashByteLength,
+                );
+                canonicalBindings.set(
+                    bindings.relationPlanHash,
+                    3 * hashByteLength,
+                );
+                const bindingsPointer =
+                    this.#memoryBoundary.copy(canonicalBindings);
+                const proofPointer = this.#memoryBoundary.copy(proofBytes);
+                const publicInputPointer =
+                    this.#memoryBoundary.copy(publicInputBytes);
+                try {
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_validate_transport',
+                        )(
+                            bindingsPointer,
+                            canonicalBindings.byteLength,
+                            proofPointer,
+                            proofBytes.byteLength,
+                            publicInputPointer,
+                            publicInputBytes.byteLength,
+                        ),
+                        'compact public-key transport validation',
+                    );
+                } finally {
+                    canonicalBindings.fill(0);
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        bindingsPointer,
+                        compactPublicKeyTransportBindingsByteLength,
+                    );
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        proofPointer,
+                        proofBytes.byteLength,
+                    );
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        publicInputPointer,
+                        publicInputBytes.byteLength,
+                    );
+                }
+            },
+        );
     }
 
     public begin(preparedVerificationHandle: number): number {

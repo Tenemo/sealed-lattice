@@ -1,10 +1,10 @@
-//! Test-only transport verification for the compact public-key proof.
+//! Release transport validation for the compact public-key proof.
 //!
-//! This fixture boundary owns the canonical byte pair, derives every
+//! This boundary owns the canonical byte pair, derives every
 //! Fiat-Shamir message and component-authorized response query schedule from
 //! those bytes, and verifies every salted response opening against the
-//! selected contract. It does not provide a release verifier or claim that the
-//! transported CFW or WHIR equations are valid.
+//! selected contract. It deliberately does not claim that the transported CFW
+//! or WHIR equations are valid and cannot mint a proof or workflow capability.
 
 use std::mem::size_of;
 
@@ -13,9 +13,9 @@ use super::compact_merkle_privacy::{
     derive_and_validate_compact_response_query_schedule,
     derive_selected_compact_merkle_privacy_certificate,
 };
-use super::compact_proof_contract::{
-    CompactProofContractError, CompactPublicKeyProofContract, CompactPublicKeyVerifierInputs,
-};
+#[cfg(test)]
+use super::compact_proof_contract::CompactPublicKeyVerifierInputs;
+use super::compact_proof_contract::{CompactProofContractError, CompactPublicKeyProofContract};
 use super::compact_proof_wire::{
     CompactProofWireError, CompactPublicInputBindings, DecodedCompactProofWire,
     DecodedCompactPublicInput, decode_compact_proof_wire, decode_compact_public_input,
@@ -28,7 +28,7 @@ use super::compact_transcript::{
     CompactTranscriptError, derive_compact_fiat_shamir_verifier_message,
 };
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
-use crate::foundation::Hash512;
+use crate::foundation::{Hash512, RefusalReason};
 use crate::hashing::{StreamingHash512, hash_framed_parts_512};
 
 const COMPACT_TRANSPORT_PROOF_DIGEST_DOMAIN: &str =
@@ -52,7 +52,9 @@ pub(crate) enum CompactPublicKeyTransportError {
     InvalidResponseRegistry,
     AllocationLimitExceeded,
     ArithmeticOverflow,
+    #[cfg(test)]
     CheckpointUnavailable,
+    #[cfg(test)]
     WrongCheckpoint,
     VerificationComplete,
 }
@@ -87,9 +89,33 @@ impl From<CompactMerklePrivacyError> for CompactPublicKeyTransportError {
     }
 }
 
-/// Test-owned terminal for one compact byte pair whose transcript schedule and
+impl CompactPublicKeyTransportError {
+    pub(crate) const fn refusal_reason(self) -> RefusalReason {
+        match self {
+            Self::Contract(_) | Self::MerklePrivacy(_) => RefusalReason::UnsupportedVersionOrSuite,
+            Self::Wire(CompactProofWireError::WrongPublicInputBinding)
+            | Self::InvalidResponseRegistry => RefusalReason::WrongContext,
+            #[cfg(test)]
+            Self::WrongCheckpoint => RefusalReason::WrongContext,
+            Self::Merkle(CompactResponseMerkleError::RootMismatch) => {
+                RefusalReason::WrongHashOrRoot
+            }
+            Self::Wire(_) | Self::Transcript(_) => RefusalReason::MalformedEncoding,
+            Self::Merkle(_) => RefusalReason::InvalidProof,
+            Self::AllocationLimitExceeded | Self::ArithmeticOverflow => {
+                RefusalReason::OutsideSupportedProfile
+            }
+            #[cfg(test)]
+            Self::CheckpointUnavailable => RefusalReason::ConsumedState,
+            Self::VerificationComplete => RefusalReason::ConsumedState,
+        }
+    }
+}
+
+/// Transport terminal for one compact byte pair whose transcript schedule and
 /// salted Merkle openings have all been verified. Algebraic proof validity is
 /// outside this type's guarantee.
+#[cfg(test)]
 pub(crate) struct VerifiedCompactPublicKeyTransport {
     canonical_proof_bytes: Box<[u8]>,
     decoded_proof: DecodedCompactProofWire,
@@ -99,6 +125,7 @@ pub(crate) struct VerifiedCompactPublicKeyTransport {
 
 /// Owning result of the one strict canonical public-input decode used by the
 /// compact transport and the semantic covector authority.
+#[cfg(test)]
 pub(crate) struct VerifiedCompactPublicInputTransport {
     contract: CompactPublicKeyProofContract,
     canonical_bytes: Box<[u8]>,
@@ -107,11 +134,13 @@ pub(crate) struct VerifiedCompactPublicInputTransport {
 }
 
 /// Borrowed proof bytes inseparably paired with their decoded range owner.
+#[cfg(test)]
 pub(crate) struct VerifiedCompactProofTransportView<'transport> {
     canonical_bytes: &'transport [u8],
     decoded: &'transport DecodedCompactProofWire,
 }
 
+#[cfg(test)]
 impl VerifiedCompactProofTransportView<'_> {
     pub(crate) const fn canonical_bytes(&self) -> &[u8] {
         self.canonical_bytes
@@ -125,12 +154,14 @@ impl VerifiedCompactProofTransportView<'_> {
 /// Borrowed public-input bytes inseparably paired with their decoded range
 /// owner.
 #[derive(Clone, Copy)]
+#[cfg(test)]
 pub(crate) struct VerifiedCompactPublicInputTransportView<'transport> {
     canonical_bytes: &'transport [u8],
     decoded: &'transport DecodedCompactPublicInput,
     binding: [u8; Hash512::BYTE_LENGTH],
 }
 
+#[cfg(test)]
 impl VerifiedCompactPublicInputTransportView<'_> {
     pub(crate) const fn canonical_bytes(&self) -> &[u8] {
         self.canonical_bytes
@@ -157,6 +188,7 @@ impl VerifiedCompactPublicInputTransportView<'_> {
     }
 }
 
+#[cfg(test)]
 impl VerifiedCompactPublicInputTransport {
     fn from_selected_decoded(
         contract: CompactPublicKeyProofContract,
@@ -197,6 +229,7 @@ impl VerifiedCompactPublicInputTransport {
     }
 }
 
+#[cfg(test)]
 impl VerifiedCompactPublicKeyTransport {
     pub(crate) fn verifier_inputs(&self) -> CompactPublicKeyVerifierInputs<'_> {
         self.public_input.verifier_inputs()
@@ -218,7 +251,8 @@ impl VerifiedCompactPublicKeyTransport {
     }
 }
 
-pub(crate) fn verify_selected_compact_public_input_transport_with_test_bindings(
+#[cfg(test)]
+pub(crate) fn validate_selected_compact_public_input_transport(
     public_input_bindings: CompactPublicInputBindings,
     canonical_public_input_bytes: Box<[u8]>,
 ) -> Result<VerifiedCompactPublicInputTransport, CompactPublicKeyTransportError> {
@@ -238,7 +272,8 @@ pub(crate) fn verify_selected_compact_public_input_transport_with_test_bindings(
 }
 
 /// In-memory response-boundary token used to exercise exact replay and
-/// substitution refusal in tests.
+/// substitution refusal without serializing opaque hash state.
+#[cfg(test)]
 struct CompactPublicKeyTransportCheckpoint {
     contract_source_hash: Hash512,
     public_input_bindings: CompactPublicInputBindings,
@@ -250,11 +285,56 @@ struct CompactPublicKeyTransportCheckpoint {
     progress_digest: Hash512,
 }
 
-pub(super) fn verify_selected_compact_public_key_transport_with_test_bindings(
+pub(crate) fn validate_selected_compact_public_key_transport(
+    public_input_bindings: CompactPublicInputBindings,
+    canonical_proof_bytes: &[u8],
+    canonical_public_input_bytes: &[u8],
+) -> Result<(), CompactPublicKeyTransportError> {
+    validate_selected_compact_public_key_transport_components(
+        public_input_bindings,
+        canonical_proof_bytes,
+        canonical_public_input_bytes,
+    )
+    .map(drop)
+}
+
+#[cfg(test)]
+pub(crate) fn verify_selected_compact_public_key_transport_for_test(
     public_input_bindings: CompactPublicInputBindings,
     canonical_proof_bytes: Box<[u8]>,
     canonical_public_input_bytes: Box<[u8]>,
 ) -> Result<VerifiedCompactPublicKeyTransport, CompactPublicKeyTransportError> {
+    let (decoded_proof, decoded_public_input, verifier_messages) =
+        validate_selected_compact_public_key_transport_components(
+            public_input_bindings,
+            &canonical_proof_bytes,
+            &canonical_public_input_bytes,
+        )?;
+    let contract = CompactPublicKeyProofContract::decode_selected()?;
+    Ok(VerifiedCompactPublicKeyTransport {
+        canonical_proof_bytes,
+        decoded_proof,
+        public_input: VerifiedCompactPublicInputTransport::from_selected_decoded(
+            contract,
+            public_input_bindings,
+            canonical_public_input_bytes,
+            decoded_public_input,
+        )?,
+        verifier_messages: verifier_messages.into_boxed_slice(),
+    })
+}
+
+type CompactPublicKeyTransportComponents = (
+    DecodedCompactProofWire,
+    DecodedCompactPublicInput,
+    Vec<DecodedFixedUniformVerifierMessage>,
+);
+
+fn validate_selected_compact_public_key_transport_components(
+    public_input_bindings: CompactPublicInputBindings,
+    canonical_proof_bytes: &[u8],
+    canonical_public_input_bytes: &[u8],
+) -> Result<CompactPublicKeyTransportComponents, CompactPublicKeyTransportError> {
     let contract = CompactPublicKeyProofContract::decode_selected()?;
     let verifier_inputs = contract.verifier_inputs();
     if public_input_bindings.relation_plan_hash().into_bytes()
@@ -263,13 +343,11 @@ pub(super) fn verify_selected_compact_public_key_transport_with_test_bindings(
         return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
     }
     let contract_source_hash = verifier_inputs.canonical_source_hash()?;
-    let proof_digest = transport_byte_digest(
-        COMPACT_TRANSPORT_PROOF_DIGEST_DOMAIN,
-        &canonical_proof_bytes,
-    );
+    let proof_digest =
+        transport_byte_digest(COMPACT_TRANSPORT_PROOF_DIGEST_DOMAIN, canonical_proof_bytes);
     let public_input_digest = transport_byte_digest(
         COMPACT_TRANSPORT_PUBLIC_INPUT_DIGEST_DOMAIN,
-        &canonical_public_input_bytes,
+        canonical_public_input_bytes,
     );
     let merkle_privacy_certificate = derive_selected_compact_merkle_privacy_certificate()?;
     if merkle_privacy_certificate.contract_source_hash() != contract_source_hash
@@ -291,8 +369,8 @@ pub(super) fn verify_selected_compact_public_key_transport_with_test_bindings(
     let mut state = begin_compact_public_key_transport_bytes(
         geometry,
         public_input_bindings,
-        &canonical_proof_bytes,
-        &canonical_public_input_bytes,
+        canonical_proof_bytes,
+        canonical_public_input_bytes,
         proof_digest,
         public_input_digest,
     )?;
@@ -300,23 +378,17 @@ pub(super) fn verify_selected_compact_public_key_transport_with_test_bindings(
         match poll_compact_public_key_transport_bytes(
             &mut state,
             geometry,
-            &canonical_proof_bytes,
-            &canonical_public_input_bytes,
+            canonical_proof_bytes,
+            canonical_public_input_bytes,
             Some(&merkle_privacy_certificate),
         )? {
             CompactPublicKeyTransportBytePoll::ResponseBoundary { .. } => {}
             CompactPublicKeyTransportBytePoll::Complete => {
-                return Ok(VerifiedCompactPublicKeyTransport {
-                    canonical_proof_bytes,
-                    decoded_proof: state.decoded_proof,
-                    public_input: VerifiedCompactPublicInputTransport::from_selected_decoded(
-                        contract,
-                        public_input_bindings,
-                        canonical_public_input_bytes,
-                        state.decoded_public_input,
-                    )?,
-                    verifier_messages: state.verifier_messages.into_boxed_slice(),
-                });
+                return Ok((
+                    state.decoded_proof,
+                    state.decoded_public_input,
+                    state.verifier_messages,
+                ));
             }
         }
     }
@@ -344,7 +416,9 @@ struct CompactPublicKeyTransportByteState {
 
 enum CompactPublicKeyTransportBytePoll {
     ResponseBoundary {
+        #[cfg(test)]
         completed_verifier_move_count: u32,
+        #[cfg(test)]
         verified_response_count: u32,
     },
     Complete,
@@ -360,6 +434,7 @@ struct CompactOpeningVerificationBoundary<'boundary> {
 }
 
 #[derive(Clone, Copy)]
+#[cfg(test)]
 struct CompactTransportRestoreContext<'context> {
     geometry: CompactPublicKeyTransportGeometry<'context>,
     canonical_proof_bytes: &'context [u8],
@@ -497,8 +572,10 @@ fn poll_compact_public_key_transport_bytes(
         Ok(CompactPublicKeyTransportBytePoll::Complete)
     } else {
         Ok(CompactPublicKeyTransportBytePoll::ResponseBoundary {
+            #[cfg(test)]
             completed_verifier_move_count: u32::try_from(completed_verifier_move_count)
                 .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?,
+            #[cfg(test)]
             verified_response_count: u32::try_from(expected_verified_response_count)
                 .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?,
         })
@@ -564,6 +641,7 @@ fn verify_compact_openings_through_boundary(
     Ok(())
 }
 
+#[cfg(test)]
 fn checkpoint_compact_public_key_transport_byte_state(
     state: &CompactPublicKeyTransportByteState,
     geometry: CompactPublicKeyTransportGeometry<'_>,
@@ -589,6 +667,7 @@ fn checkpoint_compact_public_key_transport_byte_state(
     })
 }
 
+#[cfg(test)]
 fn restore_compact_public_key_transport_byte_state(
     state: &mut CompactPublicKeyTransportByteState,
     context: CompactTransportRestoreContext<'_>,

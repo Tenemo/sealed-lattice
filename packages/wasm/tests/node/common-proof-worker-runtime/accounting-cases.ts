@@ -198,3 +198,172 @@ describe('Common-proof manual accounting boundaries', () => {
         ).toThrow(/malformed verification readback accounting length/u);
     });
 });
+
+describe('Compact public-key transport boundary', () => {
+    const bindings = Object.freeze({
+        suiteIdentifier: new Uint8Array(64).fill(0x11),
+        applicationStatementHash: new Uint8Array(64).fill(0x22),
+        manifestHash: new Uint8Array(64).fill(0x33),
+        relationPlanHash: new Uint8Array(64).fill(0x44),
+    });
+
+    it('passes the exact binding order and transported bytes to the release export', () => {
+        const proofBytes = Uint8Array.of(0x51, 0x52, 0x53);
+        const publicInputBytes = Uint8Array.of(0x61, 0x62);
+        const releasedRanges: Array<
+            Readonly<{ byteLength: number; pointer: number }>
+        > = [];
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_validate_transport: (
+                bindingsPointer,
+                bindingsByteLength,
+                proofPointer,
+                proofByteLength,
+                publicInputPointer,
+                publicInputByteLength,
+            ) => {
+                expect(bindingsByteLength).toBe(256);
+                expect(
+                    memoryBytes(memory, bindingsPointer, bindingsByteLength),
+                ).toEqual(
+                    new Uint8Array([
+                        ...bindings.suiteIdentifier,
+                        ...bindings.applicationStatementHash,
+                        ...bindings.manifestHash,
+                        ...bindings.relationPlanHash,
+                    ]),
+                );
+                expect(
+                    memoryBytes(memory, proofPointer, proofByteLength),
+                ).toEqual(proofBytes);
+                expect(
+                    memoryBytes(
+                        memory,
+                        publicInputPointer,
+                        publicInputByteLength,
+                    ),
+                ).toEqual(publicInputBytes);
+                releasedRanges.push(
+                    {
+                        pointer: bindingsPointer,
+                        byteLength: bindingsByteLength,
+                    },
+                    { pointer: proofPointer, byteLength: proofByteLength },
+                    {
+                        pointer: publicInputPointer,
+                        byteLength: publicInputByteLength,
+                    },
+                );
+                return 0;
+            },
+        }));
+
+        new CommonProofVerificationKernelBoundary(
+            runtime,
+        ).validateCompactPublicKeyTransport(
+            bindings,
+            proofBytes,
+            publicInputBytes,
+        );
+
+        for (const range of releasedRanges) {
+            expect(
+                memoryBytes(runtime.memory, range.pointer, range.byteLength),
+            ).toEqual(new Uint8Array(range.byteLength));
+        }
+    });
+
+    it('rejects malformed binding widths before invoking the kernel', () => {
+        let invocationCount = 0;
+        const runtime = createMockKernelRuntime(() => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_validate_transport: () => {
+                invocationCount += 1;
+                return 0;
+            },
+        }));
+
+        expect(() =>
+            new CommonProofVerificationKernelBoundary(
+                runtime,
+            ).validateCompactPublicKeyTransport(
+                {
+                    ...bindings,
+                    manifestHash: new Uint8Array(63),
+                },
+                Uint8Array.of(1),
+                Uint8Array.of(2),
+            ),
+        ).toThrow(/exactly 64 bytes/u);
+        expect(invocationCount).toBe(0);
+    });
+
+    it.each([
+        ['proof', new Uint8Array(), Uint8Array.of(2)],
+        ['public input', Uint8Array.of(1), new Uint8Array()],
+    ])(
+        'rejects an empty %s before invoking the kernel',
+        (_label, proofBytes, publicInputBytes) => {
+            let invocationCount = 0;
+            const runtime = createMockKernelRuntime(() => ({
+                sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                    () => 256,
+                sealed_lattice_compact_public_key_validate_transport: () => {
+                    invocationCount += 1;
+                    return 0;
+                },
+            }));
+
+            expect(() =>
+                new CommonProofVerificationKernelBoundary(
+                    runtime,
+                ).validateCompactPublicKeyTransport(
+                    bindings,
+                    proofBytes,
+                    publicInputBytes,
+                ),
+            ).toThrow(/must be nonempty/u);
+            expect(invocationCount).toBe(0);
+        },
+    );
+
+    it.each([255, 257])(
+        'rejects a kernel binding geometry of %i bytes',
+        (bindingByteLength) => {
+            const runtime = createMockKernelRuntime(() => ({
+                sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                    () => bindingByteLength,
+            }));
+            expect(() =>
+                new CommonProofVerificationKernelBoundary(
+                    runtime,
+                ).validateCompactPublicKeyTransport(
+                    bindings,
+                    Uint8Array.of(1),
+                    Uint8Array.of(2),
+                ),
+            ).toThrow(/binding geometry disagrees/u);
+        },
+    );
+
+    it('propagates a typed kernel refusal without treating it as acceptance', () => {
+        const runtime = createMockKernelRuntime(() => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_validate_transport: () => 0x0006,
+        }));
+
+        expect(() =>
+            new CommonProofVerificationKernelBoundary(
+                runtime,
+            ).validateCompactPublicKeyTransport(
+                bindings,
+                Uint8Array.of(1),
+                Uint8Array.of(2),
+            ),
+        ).toThrow(/status 6/u);
+    });
+});

@@ -1457,6 +1457,15 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         tagLength: number,
     ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_compact_public_key_transport_bindings_byte_length?: () => number;
+    sealed_lattice_compact_public_key_validate_transport?: (
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+    ) => number;
     sealed_lattice_common_proof_begin_generation?: (
         preparedGenerationHandle: number,
         statusPointer: number,

@@ -457,7 +457,6 @@ pub(crate) struct CompactPublicKeyRelationCatalog {
 }
 
 impl CompactPublicKeyRelationCatalog {
-    #[cfg(test)]
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
         self.relation_plan_variant_hash
     }

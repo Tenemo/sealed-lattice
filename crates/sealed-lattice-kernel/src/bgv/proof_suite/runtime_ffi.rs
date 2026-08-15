@@ -20,6 +20,8 @@ use crate::foundation::{
     resolve_browser_worker_authenticated_storage_transition_source, select_suite_record,
 };
 
+use super::compact_proof_wire::CompactPublicInputBindings;
+use super::compact_public_key_verifier::validate_selected_compact_public_key_transport;
 use super::runtime::{
     CommonProofVerificationReadbackAccounting, ExpectedCommonProofPackageBindings,
     common_proof_registry_entry_count, require_common_proof_worker_process_admission_capacity,
@@ -59,6 +61,9 @@ const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH: usize =
 const VERIFICATION_READBACK_ACCOUNTING_WORD_COUNT: usize = 4;
 const VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH: usize =
     VERIFICATION_READBACK_ACCOUNTING_WORD_COUNT * size_of::<u64>();
+const COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT: usize = 4;
+const COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH: usize =
+    COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT * Hash512::BYTE_LENGTH;
 
 fn write_diagnostic_u64(output: &mut [u8], word_index: usize, value: u64) {
     let offset = word_index * size_of::<u64>();
@@ -152,6 +157,70 @@ pub const extern "C" fn sealed_lattice_common_proof_generation_external_memory_a
 pub const extern "C" fn sealed_lattice_common_proof_verification_readback_accounting_byte_length()
 -> u32 {
     VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_transport_bindings_byte_length() -> u32 {
+    COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH as u32
+}
+
+fn decode_compact_public_key_transport_bindings(
+    canonical_bindings: &[u8],
+) -> Result<CompactPublicInputBindings, RefusalReason> {
+    if canonical_bindings.len() != COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let bindings: [[u8; Hash512::BYTE_LENGTH]; COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT] =
+        canonical_bindings
+            .chunks_exact(Hash512::BYTE_LENGTH)
+            .map(|binding| binding.try_into())
+            .collect::<Result<Vec<_>, _>>()
+            .ok()
+            .and_then(|bindings| bindings.try_into().ok())
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+    Ok(CompactPublicInputBindings::new(
+        Hash512::from_bytes(bindings[0]),
+        Hash512::from_bytes(bindings[1]),
+        Hash512::from_bytes(bindings[2]),
+        Hash512::from_bytes(bindings[3]),
+    ))
+}
+
+/// Validates the selected compact public-key transport without minting a
+/// proof or workflow capability.
+///
+/// This release boundary strictly decodes both byte streams, derives the full
+/// Fiat-Shamir query schedule, and verifies every salted Merkle opening. It
+/// does not verify the CFW or WHIR equations, so status zero is transport
+/// acceptance only and is never a cryptographic verification result.
+///
+/// The binding frame is the exact concatenation of suite identifier,
+/// application-statement hash, manifest hash, and relation-plan hash.
+///
+/// # Safety
+///
+/// Each pointer must either be null with a zero byte length or name its full
+/// readable byte range in WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_validate_transport(
+    bindings_pointer: *const u8,
+    bindings_byte_length: usize,
+    proof_pointer: *const u8,
+    proof_byte_length: usize,
+    public_input_pointer: *const u8,
+    public_input_byte_length: usize,
+) -> u32 {
+    let bindings = unsafe { input_bytes(bindings_pointer, bindings_byte_length) };
+    let proof = unsafe { input_bytes(proof_pointer, proof_byte_length) };
+    let public_input = unsafe { input_bytes(public_input_pointer, public_input_byte_length) };
+    let result = decode_compact_public_key_transport_bindings(bindings).and_then(|bindings| {
+        validate_selected_compact_public_key_transport(bindings, proof, public_input)
+            .map_err(|error| error.refusal_reason())
+    });
+    match result {
+        Ok(()) => 0,
+        Err(refusal_reason) => u32::from(refusal_reason.canonical_code()),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2700,6 +2769,79 @@ mod tests {
         );
         root[Hash512::BYTE_LENGTH - 1] = domain;
         root
+    }
+
+    #[test]
+    fn compact_public_key_transport_binding_frame_requires_four_exact_hashes_in_order() {
+        let selected_contract =
+            super::super::compact_proof_contract::CompactPublicKeyProofContract::decode_selected()
+                .expect("the selected compact proof contract is valid");
+        let ordered_bindings = [
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes(
+                selected_contract
+                    .verifier_inputs()
+                    .relation
+                    .relation_plan_variant_hash(),
+            ),
+        ];
+        let canonical_bindings = ordered_bindings
+            .iter()
+            .flat_map(|binding| binding.as_bytes().iter().copied())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            sealed_lattice_compact_public_key_transport_bindings_byte_length() as usize,
+            4 * Hash512::BYTE_LENGTH,
+        );
+        assert_eq!(
+            decode_compact_public_key_transport_bindings(&canonical_bindings),
+            Ok(CompactPublicInputBindings::new(
+                ordered_bindings[0],
+                ordered_bindings[1],
+                ordered_bindings[2],
+                ordered_bindings[3],
+            )),
+        );
+
+        for malformed_length in [canonical_bindings.len() - 1, canonical_bindings.len() + 1] {
+            let mut malformed = canonical_bindings.clone();
+            malformed.resize(malformed_length, 0xa5);
+            assert_eq!(
+                decode_compact_public_key_transport_bindings(&malformed),
+                Err(RefusalReason::WrongTypeOrLength),
+            );
+            assert_eq!(
+                unsafe {
+                    sealed_lattice_compact_public_key_validate_transport(
+                        malformed.as_ptr(),
+                        malformed.len(),
+                        core::ptr::null(),
+                        0,
+                        core::ptr::null(),
+                        0,
+                    )
+                },
+                refusal_status(RefusalReason::WrongTypeOrLength),
+            );
+        }
+
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_validate_transport(
+                    canonical_bindings.as_ptr(),
+                    canonical_bindings.len(),
+                    core::ptr::null(),
+                    0,
+                    core::ptr::null(),
+                    0,
+                )
+            },
+            refusal_status(RefusalReason::MalformedEncoding),
+            "an exact binding frame reaches strict proof decoding",
+        );
     }
 
     fn test_proof_stream_descriptor(proof_byte_length: usize) -> StreamDescriptor {

@@ -8,6 +8,7 @@ import {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import { CommonProofVerificationKernelBoundary } from '#packages/wasm/src/common-proof-worker-runtime/kernel-boundaries';
 import {
     loadFreshTranscriptCoreKernel,
     openFoundationCeremonyRuntime,
@@ -111,6 +112,23 @@ describe('foundation ceremony Rust/WASM boundary', () => {
             'sealed_lattice_common_proof_verification_readback_accounting_byte_length',
             'sealed_lattice_common_proof_verification_supply_readback_chunk',
         ]);
+        expect(
+            commandRuntime.wasmExports.sealed_lattice_compact_public_key_transport_bindings_byte_length?.(),
+        ).toBe(4 * 64);
+        expect(() =>
+            new CommonProofVerificationKernelBoundary(
+                commandRuntime,
+            ).validateCompactPublicKeyTransport(
+                {
+                    suiteIdentifier: new Uint8Array(64).fill(0x11),
+                    applicationStatementHash: new Uint8Array(64).fill(0x22),
+                    manifestHash: new Uint8Array(64).fill(0x33),
+                    relationPlanHash: new Uint8Array(64).fill(0x44),
+                },
+                Uint8Array.of(1),
+                Uint8Array.of(2),
+            ),
+        ).toThrow(/status 4/u);
         expect(
             commonProofExportNames.some((exportName) =>
                 permittedOpaqueBindingExports.has(exportName)

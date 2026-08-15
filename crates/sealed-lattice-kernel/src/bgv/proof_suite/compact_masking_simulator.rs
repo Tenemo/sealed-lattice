@@ -1662,7 +1662,7 @@ mod tests {
     };
     use super::super::compact_public_key_verifier::{
         CompactPublicKeyTransportError, VerifiedCompactPublicInputTransport,
-        verify_selected_compact_public_input_transport_with_test_bindings,
+        validate_selected_compact_public_input_transport,
     };
     use super::super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
     use super::super::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
@@ -1861,7 +1861,7 @@ mod tests {
             )
             .expect("wrong-relation public input remains canonically encoded");
             assert_eq!(
-                verify_selected_compact_public_input_transport_with_test_bindings(
+                validate_selected_compact_public_input_transport(
                     wrong_bindings,
                     wrong_bytes.into_boxed_slice(),
                 )
@@ -1876,7 +1876,7 @@ mod tests {
         )
         .expect("selected public input encodes");
         drop(field_elements);
-        verify_selected_compact_public_input_transport_with_test_bindings(
+        validate_selected_compact_public_input_transport(
             bindings,
             canonical_bytes.into_boxed_slice(),
         )

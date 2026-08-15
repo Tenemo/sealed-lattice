@@ -6,11 +6,10 @@
 //! no producer status, assurance, accounting, or section-length claims.
 //! Dictionary entries are strictly sorted and unique, every entry is
 //! referenced, and every response ordinal is fixed by the checked
-//! construction. The retained encoder and decoder are test-only until a
-//! release verifier consumes this transport; the release build keeps only the
-//! contract-owned geometry and its exact byte ceilings.
+//! construction. The encoder, incremental assembler, strict decoder, and
+//! public-input codec are ordinary release code consumed by the compact
+//! transport verifier.
 
-#[cfg(test)]
 use std::ops::Range;
 
 use super::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
@@ -20,7 +19,6 @@ use super::compact_proof_contract::CompactPublicKeyProofContract;
 #[cfg(test)]
 use super::field::PROOF_BASE_FIELD_MODULUS;
 use super::field::PROOF_CHALLENGE_EXTENSION_DEGREE;
-#[cfg(test)]
 use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
 use crate::foundation::Hash512;
@@ -287,7 +285,6 @@ impl CompactProofWireGeometry {
         self.maximum_canonical_byte_length
     }
 
-    #[cfg(test)]
     fn total_queried_leaf_count(&self) -> Result<usize, CompactProofWireError> {
         self.responses.iter().try_fold(0_usize, |count, response| {
             checked_usize(response.maximum_queried_leaf_count())
@@ -540,7 +537,6 @@ impl<'geometry> CompactProofWireAssembler<'geometry> {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedCompactProofResponse {
     canonical_bytes: Range<usize>,
@@ -559,7 +555,6 @@ pub(crate) struct DecodedCompactProofResponse {
     frontier_node_count: usize,
 }
 
-#[cfg(test)]
 impl DecodedCompactProofResponse {
     pub(crate) const fn ordinal(&self) -> u32 {
         self.ordinal
@@ -581,10 +576,12 @@ impl DecodedCompactProofResponse {
         self.queried_leaf_count
     }
 
+    #[cfg(test)]
     pub(crate) fn canonical_byte_length(&self) -> usize {
         self.canonical_bytes.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn answer_byte_length(&self) -> usize {
         self.base_field_value_bytes.len() + self.extension_field_value_bytes.len()
     }
@@ -592,6 +589,7 @@ impl DecodedCompactProofResponse {
     /// Exact transported Merkle opening length, excluding the opened answer
     /// values. This includes leaf salts, the two frontier counts, the sorted
     /// digest dictionary, and every dictionary reference.
+    #[cfg(test)]
     pub(crate) fn merkle_opening_byte_length(&self) -> usize {
         self.leaf_salt_bytes.len()
             + 2 * size_of::<u32>()
@@ -599,6 +597,7 @@ impl DecodedCompactProofResponse {
             + self.frontier_reference_bytes.len()
     }
 
+    #[cfg(test)]
     pub(crate) const fn frontier_dictionary_count(&self) -> usize {
         self.frontier_dictionary_count
     }
@@ -613,6 +612,7 @@ impl DecodedCompactProofResponse {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn base_field_value(
         &self,
         canonical_proof_bytes: &[u8],
@@ -645,6 +645,7 @@ impl DecodedCompactProofResponse {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn extension_field_value(
         &self,
         canonical_proof_bytes: &[u8],
@@ -723,14 +724,12 @@ impl DecodedCompactProofResponse {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedCompactProofWire {
     canonical_byte_length: usize,
     responses: Vec<DecodedCompactProofResponse>,
 }
 
-#[cfg(test)]
 impl DecodedCompactProofWire {
     pub(crate) const fn canonical_byte_length(&self) -> usize {
         self.canonical_byte_length
@@ -741,7 +740,6 @@ impl DecodedCompactProofWire {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactPublicInputBindings {
     suite_identifier: Hash512,
@@ -750,9 +748,7 @@ pub(crate) struct CompactPublicInputBindings {
     relation_plan_hash: Hash512,
 }
 
-#[cfg(test)]
 impl CompactPublicInputBindings {
-    #[cfg(test)]
     pub(crate) const fn new(
         suite_identifier: Hash512,
         application_statement_hash: Hash512,
@@ -831,7 +827,6 @@ impl CompactPublicInputWireGeometry {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DecodedCompactPublicInput {
     canonical_byte_length: usize,
@@ -839,12 +834,12 @@ pub(crate) struct DecodedCompactPublicInput {
     field_element_count: usize,
 }
 
-#[cfg(test)]
 impl DecodedCompactPublicInput {
     pub(crate) const fn canonical_byte_length(&self) -> usize {
         self.canonical_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) fn field_element(
         &self,
         canonical_public_input_bytes: &[u8],
@@ -855,6 +850,7 @@ impl DecodedCompactPublicInput {
             .map_err(|_| CompactProofWireError::NonCanonicalBaseFieldElement)
     }
 
+    #[cfg(test)]
     pub(crate) const fn field_element_count(&self) -> usize {
         self.field_element_count
     }
@@ -865,41 +861,23 @@ pub(crate) enum CompactProofWireError {
     InvalidGeometry,
     LengthOverflow,
     ProofByteCeilingExceeded,
-    #[cfg(test)]
     GeometryBoundExceeded,
-    #[cfg(test)]
     Truncated,
-    #[cfg(test)]
     TrailingBytes,
-    #[cfg(test)]
     WrongProofMagic,
-    #[cfg(test)]
     WrongPublicInputMagic,
-    #[cfg(test)]
     WrongPackingFactor,
-    #[cfg(test)]
     WrongResponseCount,
-    #[cfg(test)]
     WrongResponseOrdinal,
-    #[cfg(test)]
     WrongPublicInputBinding,
-    #[cfg(test)]
     WrongPublicInputCount,
-    #[cfg(test)]
     NonCanonicalBaseFieldElement,
-    #[cfg(test)]
     NonCanonicalExtensionFieldElement,
-    #[cfg(test)]
     DuplicateLeafSalt,
-    #[cfg(test)]
     OversizedFrontierDictionary,
-    #[cfg(test)]
     DuplicateOrUnsortedFrontierDictionary,
-    #[cfg(test)]
     OversizedFrontier,
-    #[cfg(test)]
     InvalidFrontierDictionaryReference,
-    #[cfg(test)]
     UnusedFrontierDictionaryEntry,
 }
 
@@ -933,7 +911,6 @@ pub(crate) fn encode_compact_proof_wire(
     assembler.finish()
 }
 
-#[cfg(test)]
 pub(crate) fn decode_compact_proof_wire(
     geometry: &CompactProofWireGeometry,
     canonical_proof_bytes: &[u8],
@@ -950,7 +927,6 @@ pub(crate) fn decode_compact_proof_wire(
     })
 }
 
-#[cfg(test)]
 fn enforce_compact_proof_byte_ceiling(
     canonical_proof_byte_length: usize,
 ) -> Result<(), CompactProofWireError> {
@@ -960,13 +936,12 @@ fn enforce_compact_proof_byte_ceiling(
     Ok(())
 }
 
-#[cfg(test)]
 struct DecodedCompactProofWirePrefix {
     responses: Vec<DecodedCompactProofResponse>,
+    #[cfg(test)]
     accepted_leaf_salt_offsets: Vec<u32>,
 }
 
-#[cfg(test)]
 pub(crate) fn decode_compact_proof_wire_prefix(
     geometry: &CompactProofWireGeometry,
     canonical_prefix_bytes: &[u8],
@@ -983,7 +958,6 @@ pub(crate) fn decode_compact_proof_wire_prefix(
     })
 }
 
-#[cfg(test)]
 fn decode_compact_proof_wire_prefix_with_leaf_salts(
     geometry: &CompactProofWireGeometry,
     canonical_prefix_bytes: &[u8],
@@ -1112,6 +1086,7 @@ fn decode_compact_proof_wire_prefix_with_leaf_salts(
     }
     Ok(DecodedCompactProofWirePrefix {
         responses: decoded_responses,
+        #[cfg(test)]
         accepted_leaf_salt_offsets,
     })
 }
@@ -1149,7 +1124,6 @@ pub(crate) fn encode_compact_public_input(
     Ok(canonical)
 }
 
-#[cfg(test)]
 pub(crate) fn decode_compact_public_input(
     geometry: CompactPublicInputWireGeometry,
     expected_bindings: CompactPublicInputBindings,
@@ -1209,7 +1183,6 @@ fn validate_response_input(
     Ok(())
 }
 
-#[cfg(test)]
 fn validate_response_counts(
     geometry: &CompactProofResponseWireGeometry,
     queried_base_field_element_count: usize,
@@ -1237,13 +1210,11 @@ fn validate_response_counts(
     Ok(())
 }
 
-#[cfg(test)]
 struct CompactWireReader<'bytes> {
     bytes: &'bytes [u8],
     offset: usize,
 }
 
-#[cfg(test)]
 impl<'bytes> CompactWireReader<'bytes> {
     const fn new(bytes: &'bytes [u8]) -> Self {
         Self { bytes, offset: 0 }
@@ -1369,7 +1340,6 @@ impl<'bytes> CompactWireReader<'bytes> {
     }
 }
 
-#[cfg(test)]
 fn leaf_salt_bytes_at_offset(canonical_proof_bytes: &[u8], offset: u32) -> &[u8] {
     // The reader mints an offset only after the complete salt range is in the
     // canonical proof, whose verifier-owned geometry is capped below u32::MAX.
@@ -1395,7 +1365,6 @@ fn checked_usize_product(values: &[usize]) -> Result<usize, CompactProofWireErro
     })
 }
 
-#[cfg(test)]
 fn indexed_offset(
     range: &Range<usize>,
     ordinal: usize,
@@ -1414,7 +1383,6 @@ fn indexed_offset(
     Ok(offset)
 }
 
-#[cfg(test)]
 fn canonical_value_bytes<'proof>(
     canonical_proof_bytes: &'proof [u8],
     response_value_range: &Range<usize>,
@@ -1440,7 +1408,6 @@ fn canonical_value_bytes<'proof>(
         .ok_or(CompactProofWireError::Truncated)
 }
 
-#[cfg(test)]
 fn read_array_at<const BYTE_LENGTH: usize>(
     bytes: &[u8],
     offset: usize,
@@ -1455,7 +1422,6 @@ fn read_array_at<const BYTE_LENGTH: usize>(
         .map_err(|_| CompactProofWireError::Truncated)
 }
 
-#[cfg(test)]
 fn read_u32_at(bytes: &[u8], offset: usize) -> Result<u32, CompactProofWireError> {
     Ok(u32::from_le_bytes(read_array_at(bytes, offset)?))
 }

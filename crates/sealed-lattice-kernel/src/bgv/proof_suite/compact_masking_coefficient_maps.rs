@@ -266,7 +266,9 @@ pub(crate) enum CompactMaskingCoefficientMapError {
     InvalidContract,
     InvalidProjection,
     MissingSemanticRole,
+    #[cfg(test)]
     InvalidConditionalImage,
+    #[cfg(test)]
     WrongConditionalImageRequest,
 }
 
@@ -368,10 +370,12 @@ impl CompactConditionalImageRequest {
 impl CompactMaskingCoefficientMapCertificate {
     /// Binding for the generated contract bytes from which every map row is
     /// deterministically recomputed.
+    #[cfg(test)]
     pub(crate) const fn certificate_digest(&self) -> [u8; 64] {
         self.contract_source_hash
     }
 
+    #[cfg(test)]
     pub(crate) fn maps(&self) -> &[CompactCoefficientToViewMap] {
         &self.maps
     }
