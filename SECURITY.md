@@ -105,6 +105,17 @@ before checking the outer evaluations against the verifier-derived affine
 hyperplane, while canonical bytes remain outer-first. Authenticated response
 checkpoints cover the cross-epoch response, every completed round, and the
 final response.
+After that checkpoint, the same state takes the retained first-epoch source,
+builds the exact verifier equality covector in bounded polls, and verifies the
+source claim and masked cross-epoch equalities before entering the selected
+initial WHIR sumcheck. It commits the canonical mask-oracle, auxiliary, and
+padding response, binds the transcript-derived combination challenge, and
+emits all six transcript-bound round responses. The auxiliary and every round
+wire pass independently compiled conditional-image gates before commitment;
+authenticated checkpoints precede every subsequent fold. Guarded selected-size
+coverage completes this batch with 4,108 response leaves, 12 verifier-selected
+openings, and a 32,768-element residual source and covector. This is one initial
+masked-sumcheck batch, not a complete WHIR epoch or proof.
 Guarded native coverage executes this path under the repository memory ceiling.
 The CFW phase reconciles 4,926 external-storage transactions, 1,006,632,840
 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes;
@@ -116,11 +127,11 @@ randomness. Focused parity and hostile lifecycle coverage exists, but the
 selected-size owner has not reached or measured that later opening move. This
 is native development evidence only.
 Selected-size opening replay, authenticated mid-stripe restart, cold
-restoration through the common worker,
-scalar-WASM execution, and a complete emitted WHIR epoch remain absent.
+restoration through the common worker, scalar-WASM execution, the remaining
+WHIR batches and folds, and a complete emitted WHIR epoch remain absent.
 The test-only production-shaped small-chain owner uses the response state, but
 the WHIR family material provider, production worker adapter, semantic
-composition, WHIR execution, complete masking path, emitted-coordinate
+composition, remaining WHIR execution, complete masking path, emitted-coordinate
 accounting, fixed-tape arithmetic, proof production, and complete algebraic
 proof verification remain test-only or incomplete. Before post-lookup masking
 material is drawn, release generation now independently re-decodes the canonical
@@ -137,8 +148,9 @@ emitted proof prefix plus the authenticated transcript cursor after the first
 two responses, replays those verifier moves, and verifies the real three-
 coordinate cross-epoch disclosure and CFW auxiliary scalar against the
 independently compiled rank-two and rank-one conditional images. The CFW prover
-cannot initialize unless that check passed. Every live CFW round and its joint
-final response now pass their conditional-image gates.
+cannot initialize unless that check passed. Every live CFW round, the initial
+pre-challenge WHIR auxiliary, and all six initial WHIR round disclosures now
+pass their conditional-image gates.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -163,12 +175,14 @@ to verified public input and the exact semantic prefix, and guarded coverage
 reaches the terminal 82-move lifecycle, including retry, restore, and nonempty-
 suffix rewind.
 
-The release path does not close masking: WHIR sequential conditional images,
+The release path does not close masking: the remaining WHIR sequential
+conditional images,
 both live role-18 prefix consumptions, whole-construction terminal simulator
 binding to the complete emitted proof, and the exact construction-level
 statistical-HVZK statement remain absent. The live CFW gates bind only the
-canonical prefix through the final CFW response; they are not a complete
-emitted-byte correspondence argument.
+canonical prefix through the final CFW response, and the live initial WHIR gates
+extend that binding through its first masked-sumcheck batch. They are not a
+complete emitted-byte correspondence argument.
 The live bridge accounts for three symbolic quantum-PRF replacements: action-
 root key expansion, proof-coin and coordinate-stream derivation, and compact-
 generation expansion keyed by the two seeds. It also retains exact action-root,
@@ -266,12 +280,18 @@ that a coherent snapshot is newest.
   mask material, the complete striped 262,144-leaf second response, its
   transcript-minted cross-epoch point and checkpoint, retained-tree overlap,
   all 23 conditional-image-gated CFW rounds, and the verifier-bound final CFW
-  response. Its CFW external-storage execution reconciles 4,926 transactions,
+  response. It also owns the initial pre-challenge WHIR masked-sumcheck batch:
+  bounded relation and equality-covector preparation, the canonical mask and
+  auxiliary response, six transcript-bound and conditional-image-gated round
+  responses, authenticated checkpoints, 4,108 response leaves, 12 openings,
+  and the 32,768-element residual relation. Its CFW external-storage execution
+  reconciles 4,926 transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   bytes. The production path owns verifier-derived opening recomputation, but
   selected-size opening replay, mid-stripe restart, cold common-worker
-  restoration, the first WHIR handoff, complete proof execution, browser
-  resource reconciliation, and browser execution remain unresolved.
+  restoration, the remaining first-epoch WHIR execution, complete proof
+  execution, browser resource reconciliation, and browser execution remain
+  unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

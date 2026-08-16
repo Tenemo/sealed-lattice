@@ -1130,6 +1130,118 @@ pub(crate) fn verify_selected_compact_cfw_finish_masking(
     )
 }
 
+/// Verifies the live auxiliary target of one compact WHIR masked-sumcheck
+/// batch against the independently compiled coefficient image at the exact
+/// authenticated transcript prefix that precedes the response.
+pub(crate) fn verify_selected_compact_whir_sumcheck_auxiliary_masking(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+    batch_ordinal: u8,
+    auxiliary_target: CompactChallengeField,
+) -> Result<(), CompactMaskingEntropyError> {
+    let mut authority = replay_selected_compact_masking_prefix(
+        inputs,
+        coefficient_maps,
+        identity,
+        completed_messages,
+    )?;
+    let steps = authority.authorize_next_response(None)?.to_vec();
+    let [auxiliary_step] = steps.as_slice() else {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    };
+    if auxiliary_step.kind()
+        != (CompactMaskingDisclosureKind::WhirSumcheckAuxiliary {
+            epoch,
+            batch_ordinal,
+        })
+        || auxiliary_step.output_coordinate_count() != 1
+        || auxiliary_step.conditional_rank() != 1
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    authority.verify_coefficient_image_output(auxiliary_step, &[], None, &[auxiliary_target])
+}
+
+/// Verifies one live compact WHIR masked-sumcheck wire after all preceding
+/// outputs from that mask group and the verifier challenges that condition it
+/// have entered the authenticated transcript.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_selected_compact_whir_sumcheck_round_masking(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+    batch_ordinal: u8,
+    round_ordinal: u32,
+    preceding_sumcheck_outputs: &[CompactChallengeField],
+    round_wire: &[CompactChallengeField],
+) -> Result<(), CompactMaskingEntropyError> {
+    let expected_preceding_output_count = usize::try_from(round_ordinal)
+        .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?
+        .checked_mul(2)
+        .and_then(|count| count.checked_add(1))
+        .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+    if preceding_sumcheck_outputs.len() != expected_preceding_output_count || round_wire.len() != 2
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let mut authority = replay_selected_compact_masking_prefix(
+        inputs,
+        coefficient_maps,
+        identity,
+        completed_messages,
+    )?;
+    let steps = authority.authorize_next_response(None)?.to_vec();
+    let [round_step] = steps.as_slice() else {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    };
+    if round_step.kind()
+        != (CompactMaskingDisclosureKind::WhirSumcheckRound {
+            epoch,
+            batch_ordinal,
+            round_ordinal,
+        })
+        || round_step.output_coordinate_count() != 2
+        || round_step.conditional_rank() != 2
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    authority.verify_coefficient_image_output(
+        round_step,
+        preceding_sumcheck_outputs,
+        None,
+        round_wire,
+    )
+}
+
+fn replay_selected_compact_masking_prefix<'contract>(
+    inputs: CompactPublicKeyVerifierInputs<'contract>,
+    coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingEntropyError> {
+    if completed_messages.is_empty() || completed_messages.len() >= inputs.verifier_moves.len() {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let mut authority = CompactMaskingEntropyAuthority::begin(inputs, coefficient_maps, identity)?;
+    for (move_index, message) in completed_messages.iter().enumerate() {
+        authority.authorize_next_response(None)?;
+        let move_ordinal = u32::try_from(move_index)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        if !authority
+            .ingest_verifier_message(move_ordinal, message)?
+            .is_empty()
+        {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+    }
+    Ok(authority)
+}
+
 fn replay_selected_compact_cfw_masking_prefix<'contract>(
     inputs: CompactPublicKeyVerifierInputs<'contract>,
     coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
@@ -4598,7 +4710,7 @@ mod tests {
     }
 
     #[test]
-    fn live_cfw_masking_gate_covers_every_round_and_the_final_views() {
+    fn live_masking_gate_covers_cfw_and_the_initial_whir_sumcheck() {
         let (contract, maps) = selected();
         let inputs = contract.verifier_inputs();
         let mut messages = vec![
@@ -4779,6 +4891,169 @@ mod tests {
             ),
             Err(CompactMaskingEntropyError::InvalidCoefficientMap),
         );
+
+        let final_cfw_message_ordinal = messages.len();
+        messages.push(selected_adversarial_message(
+            &inputs,
+            final_cfw_message_ordinal,
+        ));
+        authority
+            .ingest_verifier_message(
+                u32::try_from(final_cfw_message_ordinal).unwrap(),
+                messages.last().unwrap(),
+            )
+            .expect("the final CFW verifier message is accepted");
+
+        let auxiliary_steps = authority
+            .authorize_next_response(None)
+            .expect("the initial WHIR auxiliary response is authorized")
+            .to_vec();
+        let [auxiliary_step] = auxiliary_steps.as_slice() else {
+            panic!("the initial WHIR response has one auxiliary masking view")
+        };
+        let auxiliary_request = authority
+            .prepare_coefficient_image(auxiliary_step, &[], None)
+            .expect("the initial WHIR auxiliary image derives");
+        let auxiliary_independent_coordinates = (0..auxiliary_step.conditional_rank())
+            .map(|coordinate_ordinal| CompactChallengeField::from_u64(901 + coordinate_ordinal))
+            .collect::<Vec<_>>();
+        let [whir_auxiliary_target] = authority
+            .execute_coefficient_image(
+                auxiliary_step,
+                &auxiliary_request,
+                &auxiliary_independent_coordinates,
+            )
+            .expect("the initial WHIR auxiliary image executes")
+            .try_into()
+            .expect("the initial WHIR auxiliary view has one coordinate");
+        let [pre_challenge_epoch, _main_epoch] = inputs.whir_epochs else {
+            panic!("the selected compact contract has both WHIR epochs")
+        };
+        verify_selected_compact_whir_sumcheck_auxiliary_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &messages,
+            pre_challenge_epoch.epoch,
+            0,
+            whir_auxiliary_target,
+        )
+        .expect("the production gate accepts the compiler-derived WHIR auxiliary image");
+        assert_eq!(
+            verify_selected_compact_whir_sumcheck_auxiliary_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                pre_challenge_epoch.epoch + 1,
+                0,
+                whir_auxiliary_target,
+            ),
+            Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
+        );
+
+        let combination_message_ordinal = messages.len();
+        messages.push(selected_adversarial_message(
+            &inputs,
+            combination_message_ordinal,
+        ));
+        authority
+            .ingest_verifier_message(
+                u32::try_from(combination_message_ordinal).unwrap(),
+                messages.last().unwrap(),
+            )
+            .expect("the initial WHIR combination message is accepted");
+        let mut preceding_sumcheck_outputs = vec![whir_auxiliary_target];
+        let whir_round_count = usize::try_from(pre_challenge_epoch.folding_schedule[0]).unwrap();
+        for round_index in 0..whir_round_count {
+            let steps = authority
+                .authorize_next_response(None)
+                .expect("the next initial WHIR sumcheck round is authorized")
+                .to_vec();
+            let [round_step] = steps.as_slice() else {
+                panic!("one WHIR masking step must own each sumcheck round")
+            };
+            let request = authority
+                .prepare_coefficient_image(round_step, &preceding_sumcheck_outputs, None)
+                .expect("the WHIR round conditional image derives");
+            let independent_coordinates = (0..round_step.conditional_rank())
+                .map(|coordinate_ordinal| {
+                    CompactChallengeField::from_u64(
+                        1_001 + u64::try_from(round_index).unwrap() * 8 + coordinate_ordinal,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let round_wire: [CompactChallengeField; 2] = authority
+                .execute_coefficient_image(round_step, &request, &independent_coordinates)
+                .expect("the exact affine image produces one WHIR round wire")
+                .try_into()
+                .expect("the WHIR round wire has two coordinates");
+            verify_selected_compact_whir_sumcheck_round_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                pre_challenge_epoch.epoch,
+                0,
+                u32::try_from(round_index).unwrap(),
+                &preceding_sumcheck_outputs,
+                &round_wire,
+            )
+            .expect("the production gate accepts the compiler-derived WHIR round image");
+            if round_index == 0 {
+                assert_eq!(
+                    verify_selected_compact_whir_sumcheck_round_masking(
+                        contract.verifier_inputs(),
+                        &maps,
+                        identity,
+                        &messages,
+                        pre_challenge_epoch.epoch,
+                        1,
+                        0,
+                        &preceding_sumcheck_outputs,
+                        &round_wire,
+                    ),
+                    Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
+                );
+                assert_eq!(
+                    verify_selected_compact_whir_sumcheck_round_masking(
+                        contract.verifier_inputs(),
+                        &maps,
+                        identity,
+                        &messages,
+                        pre_challenge_epoch.epoch,
+                        0,
+                        0,
+                        &[],
+                        &round_wire,
+                    ),
+                    Err(CompactMaskingEntropyError::MissingTranscriptInput),
+                );
+                assert_eq!(
+                    verify_selected_compact_whir_sumcheck_round_masking(
+                        contract.verifier_inputs(),
+                        &maps,
+                        identity,
+                        &messages,
+                        pre_challenge_epoch.epoch,
+                        0,
+                        0,
+                        &preceding_sumcheck_outputs,
+                        &round_wire[..1],
+                    ),
+                    Err(CompactMaskingEntropyError::MissingTranscriptInput),
+                );
+            }
+            preceding_sumcheck_outputs.extend_from_slice(&round_wire);
+            let round_message_ordinal = messages.len();
+            messages.push(selected_adversarial_message(&inputs, round_message_ordinal));
+            authority
+                .ingest_verifier_message(
+                    u32::try_from(round_message_ordinal).unwrap(),
+                    messages.last().unwrap(),
+                )
+                .expect("the next WHIR round challenge is accepted");
+        }
     }
 
     #[test]

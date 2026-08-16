@@ -121,6 +121,19 @@ and target release remain incomplete or internal.
   response, every completed CFW round, and the final CFW response. The strict
   version-two 56-byte attempt-and-WHIR-position cursor remains bound into the
   response checkpoints; superseded version-one cursors refuse.
+  After the final CFW checkpoint, the same state takes custody of the retained
+  first-epoch source, expands the verifier-derived equality covector in bounded
+  polls, and positively checks the source claim and masked cross-epoch
+  equalities. It samples the selected initial WHIR sumcheck masks from the live
+  KMAC stream, commits the canonical mask-oracle, auxiliary, and padding
+  response, binds the exact transcript challenge, and emits all six round
+  responses. The auxiliary and every round disclosure pass their independently
+  compiled conditional-image gates before response construction, and every
+  response publishes an authenticated checkpoint before the next fold. The
+  guarded selected-size owner completes this batch with 4,108 response leaves,
+  12 verifier-selected openings, and a 32,768-element residual source and
+  covector. This is the first masked-sumcheck batch, not a complete WHIR epoch
+  or proof.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -129,14 +142,16 @@ and target release remain incomplete or internal.
   the eager canonical WHIR encoder across stripe boundaries and refuses
   duplicate, reordered, out-of-range, premature, and repeated replay requests.
   Guarded native development coverage exercises this selected-size path
-  through the final CFW response under the repository memory ceiling. The CFW
-  phase reconciles 4,926 external-storage transactions, 1,006,632,840 bytes
+  through the initial pre-challenge WHIR sumcheck batch under the repository
+  memory ceiling. Its CFW phase reconciles 4,926 external-storage transactions,
+  1,006,632,840 bytes
   written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes.
   These measurements remain in the owning run diagnostics and do not
-  constitute scalar-WASM or browser evidence. The
-  owner does not yet cover a selected-size opening replay, authenticated
+  constitute scalar-WASM or browser evidence. The owner does not yet cover a
+  selected-size opening replay, authenticated
   mid-stripe restart, cold restoration through the common worker, JavaScript
-  and browser-process overlap, a complete emitted WHIR epoch, or a proof. The
+  and browser-process overlap, the remaining WHIR batches and folds, a complete
+  emitted WHIR epoch, or a proof. The
   test-only production-shaped small-chain owner uses the response state, but
   the WHIR family material provider, production worker adapter, WHIR proof
   production, semantic execution, and complete masking path remain test-only
@@ -158,8 +173,9 @@ and target release remain incomplete or internal.
   against the compiler-derived rank-two image. It also
   checks the CFW auxiliary scalar against its independently derived rank-one
   image, and CFW initialization refuses unless this gate passed. Every live CFW
-  round and the joint final CFW response now pass their conditional-image
-  gates. The fixed KMAC256/SHAKE256 joint assumption remains external. WHIR
+  round, the initial pre-challenge WHIR auxiliary, and all six initial WHIR
+  round disclosures now pass their conditional-image gates. The fixed
+  KMAC256/SHAKE256 joint assumption remains external. The remaining WHIR
   sequential images, both live role-18 carried covectors, and the terminal
   whole-construction simulator are not connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
@@ -182,8 +198,9 @@ ceremony or supported-phone qualification.
   `VerificationResult`, or complete compact generation and verification ABI
   exists. The release transport ABI checks canonical structure, transcript
   chronology, query derivation, and Merkle openings only.
-- The compact successor still requires every sequential conditional-image check
-  after the initial cross-epoch and CFW-auxiliary gate, both live role-18
+- The compact successor still requires every remaining WHIR sequential
+  conditional-image check after the initial pre-challenge sumcheck batch, both
+  live role-18
   masking authorities, a construction-level statistical-HVZK argument bound to
   the complete emitted proof, composition of the live KMAC bridge with its
   explicit quantum-PRF and joint fixed-Keccak assumptions, and the applicable

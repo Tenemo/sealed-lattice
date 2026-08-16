@@ -13,7 +13,7 @@ use core::mem::size_of;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DFTSmallBatch;
-use p3_field::{PrimeCharacteristicRing, PrimeField64};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField64};
 use p3_goldilocks::Goldilocks;
 use p3_matrix::{Matrix, dense::DenseMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
@@ -24,8 +24,7 @@ use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher};
 #[cfg(test)]
 use p3_whir::pcs::zk::HidingWhirEncodedExtensionOracle;
 use p3_whir::pcs::zk::{
-    HidingWhirEncodedBaseOracle, HidingWhirProver, MaskCodeShape, MaskGroupShape, MaskProverData,
-    ZkWhirConfig, ZkWhirProof,
+    HidingWhirProver, MaskCodeShape, MaskGroupShape, MaskProverData, ZkWhirConfig, ZkWhirProof,
 };
 use p3_whir::{FoldingFactor, ProtocolParameters, SecurityAssumption, ZkParameters};
 use rand::{Rng, RngExt};
@@ -92,6 +91,7 @@ pub(crate) type CompactWhirConfiguration =
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactWhirError {
     CountOverflow,
+    AllocationLimitExceeded,
     InvalidConfiguration,
     FoldingScheduleMismatch,
     RoundRateMismatch,
@@ -99,10 +99,139 @@ pub(crate) enum CompactWhirError {
     InvalidProofOfWorkGeometry,
     InvalidMessage,
     InvalidEncodedMatrix,
+    InvalidRelation,
+    InvalidWorkBudget,
+    WrongProverPhase,
 }
 
 pub(crate) struct CompactWhirEncodedInitialOracle {
-    encoded_oracle: HidingWhirEncodedBaseOracle<Goldilocks, CompactChallengeField>,
+    source_message: Option<Vec<Goldilocks>>,
+    encoding_randomness: Vec<Goldilocks>,
+    encoded_matrix: DenseMatrix<Goldilocks>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirPreChallengeRelationPreparationStep {
+    ConvertSource,
+    BuildEqualityCovector,
+    VerifyRelation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirPreChallengeRelationPreparationPoll {
+    StepCompleted {
+        step: CompactWhirPreChallengeRelationPreparationStep,
+        processed_work_unit_count: u64,
+    },
+    Complete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompactWhirPreChallengeRelationPreparationPhase {
+    ConvertSource,
+    BuildEqualityCovector,
+    VerifyRelation,
+    Complete,
+}
+
+/// Pollable construction of the exact base-source relation entering the first
+/// WHIR epoch. The constructor owns the committed source message after its
+/// initial response has been retained, expands the verifier-derived equality
+/// covector in bounded chunks, and checks the masked cross-epoch claim before
+/// the relation can enter the sumcheck.
+pub(crate) struct CompactWhirPreChallengeRelationPreparation {
+    base_source: Option<Vec<Goldilocks>>,
+    source_evaluations: Vec<CompactChallengeField>,
+    equality_point: Vec<CompactChallengeField>,
+    source_covector: Vec<CompactChallengeField>,
+    next_source_element: usize,
+    completed_equality_coordinate_count: usize,
+    next_equality_parent_ordinal: usize,
+    next_relation_element: usize,
+    accumulated_source_claim: CompactChallengeField,
+    masked_pre_challenge_evaluation: CompactChallengeField,
+    masked_main_evaluation: CompactChallengeField,
+    mask_difference: CompactChallengeField,
+    pre_challenge_mask: CompactChallengeField,
+    main_mask: CompactChallengeField,
+    opening_batching_challenge: CompactChallengeField,
+    phase: CompactWhirPreChallengeRelationPreparationPhase,
+}
+
+/// Opaque, checked relation handed to the first masked WHIR sumcheck.
+pub(crate) struct CompactWhirPreChallengeRelation {
+    source_evaluations: Vec<CompactChallengeField>,
+    source_covector: Vec<CompactChallengeField>,
+    source_claim: CompactChallengeField,
+    masked_target: CompactChallengeField,
+    pre_challenge_mask: CompactChallengeField,
+    opening_batching_challenge: CompactChallengeField,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompactWhirInitialSumcheckPhase {
+    AwaitingCombinationChallenge,
+    ComputingRoundPolynomial {
+        next_pair_ordinal: usize,
+        constant_coefficient: CompactChallengeField,
+        leading_coefficient: CompactChallengeField,
+    },
+    RoundPolynomialReady {
+        constant_coefficient: CompactChallengeField,
+        leading_coefficient: CompactChallengeField,
+    },
+    FoldingRound {
+        challenge: CompactChallengeField,
+        next_pair_ordinal: usize,
+        constant_coefficient: CompactChallengeField,
+        leading_coefficient: CompactChallengeField,
+    },
+    ScalingWeights {
+        next_element_ordinal: usize,
+    },
+    Complete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirInitialSumcheckPoll {
+    RoundPolynomialStepCompleted {
+        round_ordinal: u32,
+        processed_work_unit_count: u64,
+        polynomial_ready: bool,
+    },
+    BoundRoundStepCompleted {
+        round_ordinal: u32,
+        processed_work_unit_count: u64,
+        round_complete: bool,
+    },
+    WeightScalingStepCompleted {
+        processed_work_unit_count: u64,
+        scaling_complete: bool,
+    },
+}
+
+/// Scalar, pollable Construction 6.3 sumcheck batch for the live compact
+/// prover. It emits the same auxiliary target and dropped-linear-coefficient
+/// round wire as the WHIR implementation while making every source scan and
+/// fold interruptible at an explicit work budget.
+pub(crate) struct CompactWhirInitialSumcheckState {
+    source_evaluations: Vec<CompactChallengeField>,
+    source_covector: Vec<CompactChallengeField>,
+    source_claim: CompactChallengeField,
+    masked_target: CompactChallengeField,
+    opening_batching_challenge: CompactChallengeField,
+    sumcheck_mask_messages: Vec<Vec<CompactChallengeField>>,
+    sumcheck_mask_encoding_randomness: Vec<Vec<CompactChallengeField>>,
+    sumcheck_mask_oracle: CompactWhirEncodedMaskGroup,
+    auxiliary_target: CompactChallengeField,
+    remaining_mask_endpoint_sum: CompactChallengeField,
+    preceding_mask_carry: CompactChallengeField,
+    combination_challenge: Option<CompactChallengeField>,
+    round_challenges: Vec<CompactChallengeField>,
+    past_mask_evaluations: Vec<CompactChallengeField>,
+    pending_round_wire: Option<Vec<CompactChallengeField>>,
+    round_wires: Vec<Vec<CompactChallengeField>>,
+    phase: CompactWhirInitialSumcheckPhase,
 }
 
 #[cfg(test)]
@@ -184,8 +313,11 @@ impl CompactWhirEncodedInitialOracle {
         let commitment_scheme = compact_whir_commitment_scheme();
         let transform = Radix2DFTSmallBatch::<Goldilocks>::default();
         let prover = HidingWhirProver::new(configuration, &transform, &commitment_scheme);
+        let encoded_oracle = prover.encode_base_initial_oracle(Poly::new(message), random_source);
         let encoded = Self {
-            encoded_oracle: prover.encode_base_initial_oracle(Poly::new(message), random_source),
+            source_message: Some(encoded_oracle.message.into_evals()),
+            encoding_randomness: encoded_oracle.randomness,
+            encoded_matrix: encoded_oracle.encoded,
         };
         let (expected_width, expected_height) = initial_oracle_dimensions(configuration)?;
         let matrix = encoded.encoded_matrix();
@@ -196,12 +328,722 @@ impl CompactWhirEncodedInitialOracle {
     }
 
     pub(crate) const fn encoded_matrix(&self) -> &DenseMatrix<Goldilocks> {
-        &self.encoded_oracle.encoded
+        &self.encoded_matrix
     }
 
     pub(crate) fn encoded_row(&self, row_ordinal: usize) -> Option<&[Goldilocks]> {
         self.encoded_matrix().row_slices().nth(row_ordinal)
     }
+
+    pub(crate) fn take_source_message(&mut self) -> Result<Vec<Goldilocks>, CompactWhirError> {
+        self.source_message
+            .take()
+            .ok_or(CompactWhirError::WrongProverPhase)
+    }
+
+    pub(crate) fn encoding_randomness(&self) -> &[Goldilocks] {
+        &self.encoding_randomness
+    }
+}
+
+impl Drop for CompactWhirEncodedInitialOracle {
+    fn drop(&mut self) {
+        if let Some(source_message) = self.source_message.as_mut() {
+            source_message.fill(Goldilocks::ZERO);
+        }
+        self.encoding_randomness.fill(Goldilocks::ZERO);
+    }
+}
+
+impl CompactWhirPreChallengeRelationPreparation {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        base_source: Vec<Goldilocks>,
+        equality_point: Vec<CompactChallengeField>,
+        masked_pre_challenge_evaluation: CompactChallengeField,
+        masked_main_evaluation: CompactChallengeField,
+        mask_difference: CompactChallengeField,
+        pre_challenge_mask: CompactChallengeField,
+        main_mask: CompactChallengeField,
+        opening_batching_challenge: CompactChallengeField,
+    ) -> Result<Self, CompactWhirError> {
+        if base_source.is_empty()
+            || !base_source.len().is_power_of_two()
+            || equality_point.len() != base_source.len().ilog2() as usize
+        {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+        let mut source_evaluations = Vec::new();
+        source_evaluations
+            .try_reserve_exact(base_source.len())
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        let mut source_covector = allocate_zero_extension_values(base_source.len())?;
+        source_covector[0] = CompactChallengeField::ONE;
+        Ok(Self {
+            base_source: Some(base_source),
+            source_evaluations,
+            equality_point,
+            source_covector,
+            next_source_element: 0,
+            completed_equality_coordinate_count: 0,
+            next_equality_parent_ordinal: 0,
+            next_relation_element: 0,
+            accumulated_source_claim: CompactChallengeField::ZERO,
+            masked_pre_challenge_evaluation,
+            masked_main_evaluation,
+            mask_difference,
+            pre_challenge_mask,
+            main_mask,
+            opening_batching_challenge,
+            phase: CompactWhirPreChallengeRelationPreparationPhase::ConvertSource,
+        })
+    }
+
+    pub(crate) fn poll(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactWhirPreChallengeRelationPreparationPoll, CompactWhirError> {
+        let maximum_work_unit_count = usize::try_from(maximum_work_unit_count)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        if maximum_work_unit_count == 0 {
+            return Err(CompactWhirError::InvalidWorkBudget);
+        }
+        match self.phase {
+            CompactWhirPreChallengeRelationPreparationPhase::ConvertSource => {
+                let base_source = self
+                    .base_source
+                    .as_ref()
+                    .ok_or(CompactWhirError::WrongProverPhase)?;
+                let end = self
+                    .next_source_element
+                    .saturating_add(maximum_work_unit_count)
+                    .min(base_source.len());
+                self.source_evaluations.extend(
+                    base_source[self.next_source_element..end]
+                        .iter()
+                        .copied()
+                        .map(CompactChallengeField::from),
+                );
+                let processed_work_unit_count = u64::try_from(end - self.next_source_element)
+                    .map_err(|_| CompactWhirError::CountOverflow)?;
+                self.next_source_element = end;
+                if end == base_source.len() {
+                    let mut base_source = self
+                        .base_source
+                        .take()
+                        .ok_or(CompactWhirError::WrongProverPhase)?;
+                    base_source.fill(Goldilocks::ZERO);
+                    self.phase =
+                        CompactWhirPreChallengeRelationPreparationPhase::BuildEqualityCovector;
+                }
+                Ok(
+                    CompactWhirPreChallengeRelationPreparationPoll::StepCompleted {
+                        step: CompactWhirPreChallengeRelationPreparationStep::ConvertSource,
+                        processed_work_unit_count,
+                    },
+                )
+            }
+            CompactWhirPreChallengeRelationPreparationPhase::BuildEqualityCovector => {
+                let coordinate_count = self.equality_point.len();
+                if self.completed_equality_coordinate_count >= coordinate_count {
+                    return Err(CompactWhirError::WrongProverPhase);
+                }
+                let parent_count = 1_usize
+                    .checked_shl(
+                        u32::try_from(self.completed_equality_coordinate_count)
+                            .map_err(|_| CompactWhirError::CountOverflow)?,
+                    )
+                    .ok_or(CompactWhirError::CountOverflow)?;
+                let end = self
+                    .next_equality_parent_ordinal
+                    .saturating_add(maximum_work_unit_count)
+                    .min(parent_count);
+                let coordinate = self.equality_point
+                    [coordinate_count - 1 - self.completed_equality_coordinate_count];
+                for parent_ordinal in self.next_equality_parent_ordinal..end {
+                    let parent = self.source_covector[parent_ordinal];
+                    let high = parent * coordinate;
+                    self.source_covector[parent_ordinal] = parent - high;
+                    self.source_covector[parent_count + parent_ordinal] = high;
+                }
+                let processed_work_unit_count =
+                    u64::try_from(end - self.next_equality_parent_ordinal)
+                        .map_err(|_| CompactWhirError::CountOverflow)?;
+                self.next_equality_parent_ordinal = end;
+                if end == parent_count {
+                    self.completed_equality_coordinate_count += 1;
+                    self.next_equality_parent_ordinal = 0;
+                    if self.completed_equality_coordinate_count == coordinate_count {
+                        self.phase =
+                            CompactWhirPreChallengeRelationPreparationPhase::VerifyRelation;
+                    }
+                }
+                Ok(
+                    CompactWhirPreChallengeRelationPreparationPoll::StepCompleted {
+                        step: CompactWhirPreChallengeRelationPreparationStep::BuildEqualityCovector,
+                        processed_work_unit_count,
+                    },
+                )
+            }
+            CompactWhirPreChallengeRelationPreparationPhase::VerifyRelation => {
+                if self.source_evaluations.len() != self.source_covector.len() {
+                    return Err(CompactWhirError::InvalidRelation);
+                }
+                let end = self
+                    .next_relation_element
+                    .saturating_add(maximum_work_unit_count)
+                    .min(self.source_evaluations.len());
+                for element_ordinal in self.next_relation_element..end {
+                    self.accumulated_source_claim += self.source_evaluations[element_ordinal]
+                        * self.source_covector[element_ordinal];
+                }
+                let processed_work_unit_count = u64::try_from(end - self.next_relation_element)
+                    .map_err(|_| CompactWhirError::CountOverflow)?;
+                self.next_relation_element = end;
+                if end == self.source_evaluations.len() {
+                    if self.masked_pre_challenge_evaluation
+                        - self.masked_main_evaluation
+                        - self.mask_difference
+                        != CompactChallengeField::ZERO
+                        || self.pre_challenge_mask - self.main_mask != self.mask_difference
+                        || self.accumulated_source_claim + self.pre_challenge_mask
+                            != self.masked_pre_challenge_evaluation
+                        || self.accumulated_source_claim + self.main_mask
+                            != self.masked_main_evaluation
+                    {
+                        return Err(CompactWhirError::InvalidRelation);
+                    }
+                    self.phase = CompactWhirPreChallengeRelationPreparationPhase::Complete;
+                }
+                Ok(
+                    CompactWhirPreChallengeRelationPreparationPoll::StepCompleted {
+                        step: CompactWhirPreChallengeRelationPreparationStep::VerifyRelation,
+                        processed_work_unit_count,
+                    },
+                )
+            }
+            CompactWhirPreChallengeRelationPreparationPhase::Complete => {
+                Ok(CompactWhirPreChallengeRelationPreparationPoll::Complete)
+            }
+        }
+    }
+
+    pub(crate) fn finish(mut self) -> Result<CompactWhirPreChallengeRelation, CompactWhirError> {
+        if self.phase != CompactWhirPreChallengeRelationPreparationPhase::Complete
+            || self.source_evaluations.len() != self.source_covector.len()
+        {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        Ok(CompactWhirPreChallengeRelation {
+            source_evaluations: core::mem::take(&mut self.source_evaluations),
+            source_covector: core::mem::take(&mut self.source_covector),
+            source_claim: self.accumulated_source_claim,
+            masked_target: self.masked_pre_challenge_evaluation,
+            pre_challenge_mask: self.pre_challenge_mask,
+            opening_batching_challenge: self.opening_batching_challenge,
+        })
+    }
+}
+
+impl Drop for CompactWhirPreChallengeRelationPreparation {
+    fn drop(&mut self) {
+        if let Some(base_source) = self.base_source.as_mut() {
+            base_source.fill(Goldilocks::ZERO);
+        }
+        self.source_evaluations.fill(CompactChallengeField::ZERO);
+        self.accumulated_source_claim = CompactChallengeField::ZERO;
+        self.pre_challenge_mask = CompactChallengeField::ZERO;
+        self.main_mask = CompactChallengeField::ZERO;
+    }
+}
+
+impl Drop for CompactWhirPreChallengeRelation {
+    fn drop(&mut self) {
+        self.source_evaluations.fill(CompactChallengeField::ZERO);
+        self.source_claim = CompactChallengeField::ZERO;
+        self.pre_challenge_mask = CompactChallengeField::ZERO;
+    }
+}
+
+impl CompactWhirInitialSumcheckState {
+    pub(crate) fn new<R: Rng>(
+        mut relation: CompactWhirPreChallengeRelation,
+        configuration: &CompactWhirConfiguration,
+        mask_group_contract: CompactWhirMaskGroupContract,
+        random_source: &mut R,
+    ) -> Result<Self, CompactWhirError> {
+        let folding_factor = configuration.round_folding_factor(0);
+        let mask_group_shape = compact_whir_mask_group_shape(mask_group_contract)?;
+        if relation.source_evaluations.len() != relation.source_covector.len()
+            || relation.source_evaluations.is_empty()
+            || !relation.source_evaluations.len().is_power_of_two()
+            || relation.source_evaluations.len().ilog2() as usize != configuration.num_variables
+            || folding_factor == 0
+            || folding_factor > configuration.num_variables
+            || mask_group_shape.width != folding_factor
+            || mask_group_shape.shape.message_len != COMPACT_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH
+        {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+        if relation.source_claim + relation.pre_challenge_mask != relation.masked_target {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+
+        let mut sumcheck_mask_messages = Vec::new();
+        sumcheck_mask_messages
+            .try_reserve_exact(folding_factor)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        for _round_ordinal in 0..folding_factor {
+            let mut message = Vec::new();
+            message
+                .try_reserve_exact(mask_group_shape.shape.message_len)
+                .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+            for _coefficient_ordinal in 0..mask_group_shape.shape.message_len {
+                message.push(random_source.random());
+            }
+            sumcheck_mask_messages.push(message);
+        }
+
+        let mut sumcheck_mask_encoding_randomness = Vec::new();
+        sumcheck_mask_encoding_randomness
+            .try_reserve_exact(folding_factor)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        for _round_ordinal in 0..folding_factor {
+            let mut randomness = Vec::new();
+            randomness
+                .try_reserve_exact(mask_group_shape.shape.randomness_len)
+                .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+            for _randomness_ordinal in 0..mask_group_shape.shape.randomness_len {
+                randomness.push(random_source.random());
+            }
+            sumcheck_mask_encoding_randomness.push(randomness);
+        }
+        let sumcheck_mask_oracle = CompactWhirEncodedMaskGroup::encode(
+            mask_group_shape,
+            &sumcheck_mask_messages,
+            &sumcheck_mask_encoding_randomness,
+        )?;
+        let remaining_mask_endpoint_sum = sumcheck_mask_messages
+            .iter()
+            .map(|message| mask_endpoint_sum(message))
+            .sum::<CompactChallengeField>();
+        let auxiliary_target = CompactChallengeField::TWO.exp_u64(
+            u64::try_from(folding_factor - 1).map_err(|_| CompactWhirError::CountOverflow)?,
+        ) * remaining_mask_endpoint_sum;
+
+        Ok(Self {
+            source_evaluations: core::mem::take(&mut relation.source_evaluations),
+            source_covector: core::mem::take(&mut relation.source_covector),
+            source_claim: relation.source_claim,
+            masked_target: relation.masked_target,
+            opening_batching_challenge: relation.opening_batching_challenge,
+            sumcheck_mask_messages,
+            sumcheck_mask_encoding_randomness,
+            sumcheck_mask_oracle,
+            auxiliary_target,
+            remaining_mask_endpoint_sum,
+            preceding_mask_carry: relation.pre_challenge_mask,
+            combination_challenge: None,
+            round_challenges: Vec::new(),
+            past_mask_evaluations: Vec::new(),
+            pending_round_wire: None,
+            round_wires: Vec::new(),
+            phase: CompactWhirInitialSumcheckPhase::AwaitingCombinationChallenge,
+        })
+    }
+
+    pub(crate) const fn auxiliary_target(&self) -> CompactChallengeField {
+        self.auxiliary_target
+    }
+
+    pub(crate) const fn mask_oracle(&self) -> &CompactWhirEncodedMaskGroup {
+        &self.sumcheck_mask_oracle
+    }
+
+    pub(crate) const fn opening_batching_challenge(&self) -> CompactChallengeField {
+        self.opening_batching_challenge
+    }
+
+    pub(crate) const fn masked_target(&self) -> CompactChallengeField {
+        self.masked_target
+    }
+
+    pub(crate) fn bind_combination_challenge(
+        &mut self,
+        challenge: CompactChallengeField,
+    ) -> Result<(), CompactWhirError> {
+        if self.phase != CompactWhirInitialSumcheckPhase::AwaitingCombinationChallenge
+            || self.combination_challenge.is_some()
+        {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        self.combination_challenge = Some(challenge);
+        self.begin_round_polynomial()
+    }
+
+    pub(crate) fn poll(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactWhirInitialSumcheckPoll, CompactWhirError> {
+        let maximum_work_unit_count = usize::try_from(maximum_work_unit_count)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        if maximum_work_unit_count == 0 {
+            return Err(CompactWhirError::InvalidWorkBudget);
+        }
+        match self.phase {
+            CompactWhirInitialSumcheckPhase::ComputingRoundPolynomial {
+                next_pair_ordinal,
+                mut constant_coefficient,
+                mut leading_coefficient,
+            } => {
+                let half = self
+                    .source_evaluations
+                    .len()
+                    .checked_div(2)
+                    .filter(|count| *count != 0)
+                    .ok_or(CompactWhirError::InvalidRelation)?;
+                let end = next_pair_ordinal
+                    .saturating_add(maximum_work_unit_count)
+                    .min(half);
+                for pair_ordinal in next_pair_ordinal..end {
+                    let evaluation_low = self.source_evaluations[pair_ordinal];
+                    let evaluation_high = self.source_evaluations[half + pair_ordinal];
+                    let weight_low = self.source_covector[pair_ordinal];
+                    let weight_high = self.source_covector[half + pair_ordinal];
+                    constant_coefficient += evaluation_low * weight_low;
+                    leading_coefficient +=
+                        (evaluation_high - evaluation_low) * (weight_high - weight_low);
+                }
+                let polynomial_ready = end == half;
+                if polynomial_ready {
+                    let wire =
+                        self.assemble_round_wire(constant_coefficient, leading_coefficient)?;
+                    self.round_wires.push(wire.clone());
+                    self.pending_round_wire = Some(wire);
+                    self.phase = CompactWhirInitialSumcheckPhase::RoundPolynomialReady {
+                        constant_coefficient,
+                        leading_coefficient,
+                    };
+                } else {
+                    self.phase = CompactWhirInitialSumcheckPhase::ComputingRoundPolynomial {
+                        next_pair_ordinal: end,
+                        constant_coefficient,
+                        leading_coefficient,
+                    };
+                }
+                Ok(
+                    CompactWhirInitialSumcheckPoll::RoundPolynomialStepCompleted {
+                        round_ordinal: self.current_round_ordinal()?,
+                        processed_work_unit_count: u64::try_from(end - next_pair_ordinal)
+                            .map_err(|_| CompactWhirError::CountOverflow)?,
+                        polynomial_ready,
+                    },
+                )
+            }
+            CompactWhirInitialSumcheckPhase::FoldingRound {
+                challenge,
+                next_pair_ordinal,
+                constant_coefficient,
+                leading_coefficient,
+            } => {
+                let half = self
+                    .source_evaluations
+                    .len()
+                    .checked_div(2)
+                    .filter(|count| *count != 0)
+                    .ok_or(CompactWhirError::InvalidRelation)?;
+                let end = next_pair_ordinal
+                    .saturating_add(maximum_work_unit_count)
+                    .min(half);
+                for pair_ordinal in next_pair_ordinal..end {
+                    let evaluation_low = self.source_evaluations[pair_ordinal];
+                    let evaluation_high = self.source_evaluations[half + pair_ordinal];
+                    self.source_evaluations[pair_ordinal] =
+                        evaluation_low + challenge * (evaluation_high - evaluation_low);
+                    let weight_low = self.source_covector[pair_ordinal];
+                    let weight_high = self.source_covector[half + pair_ordinal];
+                    self.source_covector[pair_ordinal] =
+                        weight_low + challenge * (weight_high - weight_low);
+                }
+                let round_complete = end == half;
+                if round_complete {
+                    self.source_evaluations.truncate(half);
+                    self.source_covector.truncate(half);
+                    self.source_claim = extrapolate_quadratic_from_boolean_sum(
+                        constant_coefficient,
+                        self.source_claim,
+                        leading_coefficient,
+                        challenge,
+                    );
+                    if self.round_challenges.len() == self.sumcheck_mask_messages.len() {
+                        self.phase = CompactWhirInitialSumcheckPhase::ScalingWeights {
+                            next_element_ordinal: 0,
+                        };
+                    } else {
+                        self.begin_round_polynomial()?;
+                    }
+                } else {
+                    self.phase = CompactWhirInitialSumcheckPhase::FoldingRound {
+                        challenge,
+                        next_pair_ordinal: end,
+                        constant_coefficient,
+                        leading_coefficient,
+                    };
+                }
+                Ok(CompactWhirInitialSumcheckPoll::BoundRoundStepCompleted {
+                    round_ordinal: u32::try_from(
+                        self.round_challenges
+                            .len()
+                            .checked_sub(1)
+                            .ok_or(CompactWhirError::WrongProverPhase)?,
+                    )
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
+                    processed_work_unit_count: u64::try_from(end - next_pair_ordinal)
+                        .map_err(|_| CompactWhirError::CountOverflow)?,
+                    round_complete,
+                })
+            }
+            CompactWhirInitialSumcheckPhase::ScalingWeights {
+                next_element_ordinal,
+            } => {
+                let combination_challenge = self
+                    .combination_challenge
+                    .ok_or(CompactWhirError::WrongProverPhase)?;
+                let end = next_element_ordinal
+                    .saturating_add(maximum_work_unit_count)
+                    .min(self.source_covector.len());
+                for weight in &mut self.source_covector[next_element_ordinal..end] {
+                    *weight *= combination_challenge;
+                }
+                let scaling_complete = end == self.source_covector.len();
+                if scaling_complete {
+                    self.source_claim *= combination_challenge;
+                    self.phase = CompactWhirInitialSumcheckPhase::Complete;
+                } else {
+                    self.phase = CompactWhirInitialSumcheckPhase::ScalingWeights {
+                        next_element_ordinal: end,
+                    };
+                }
+                Ok(CompactWhirInitialSumcheckPoll::WeightScalingStepCompleted {
+                    processed_work_unit_count: u64::try_from(end - next_element_ordinal)
+                        .map_err(|_| CompactWhirError::CountOverflow)?,
+                    scaling_complete,
+                })
+            }
+            CompactWhirInitialSumcheckPhase::AwaitingCombinationChallenge
+            | CompactWhirInitialSumcheckPhase::RoundPolynomialReady { .. }
+            | CompactWhirInitialSumcheckPhase::Complete => Err(CompactWhirError::WrongProverPhase),
+        }
+    }
+
+    pub(crate) fn pending_round_wire(&self) -> Result<&[CompactChallengeField], CompactWhirError> {
+        if !matches!(
+            self.phase,
+            CompactWhirInitialSumcheckPhase::RoundPolynomialReady { .. }
+        ) {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        self.pending_round_wire
+            .as_deref()
+            .ok_or(CompactWhirError::WrongProverPhase)
+    }
+
+    pub(crate) fn round_wire(&self, round_ordinal: usize) -> Option<&[CompactChallengeField]> {
+        self.round_wires.get(round_ordinal).map(Vec::as_slice)
+    }
+
+    pub(crate) fn bind_round_challenge(
+        &mut self,
+        challenge: CompactChallengeField,
+    ) -> Result<(), CompactWhirError> {
+        let CompactWhirInitialSumcheckPhase::RoundPolynomialReady {
+            constant_coefficient,
+            leading_coefficient,
+        } = self.phase
+        else {
+            return Err(CompactWhirError::WrongProverPhase);
+        };
+        let round_index = self.round_challenges.len();
+        let mask = self
+            .sumcheck_mask_messages
+            .get(round_index)
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        self.past_mask_evaluations
+            .push(evaluate_univariate(mask, challenge));
+        self.round_challenges.push(challenge);
+        self.pending_round_wire = None;
+        self.phase = CompactWhirInitialSumcheckPhase::FoldingRound {
+            challenge,
+            next_pair_ordinal: 0,
+            constant_coefficient,
+            leading_coefficient,
+        };
+        Ok(())
+    }
+
+    pub(crate) const fn is_complete(&self) -> bool {
+        matches!(self.phase, CompactWhirInitialSumcheckPhase::Complete)
+    }
+
+    pub(crate) fn residual_source(&self) -> Result<&[CompactChallengeField], CompactWhirError> {
+        if !self.is_complete() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        Ok(&self.source_evaluations)
+    }
+
+    pub(crate) fn residual_covector(&self) -> Result<&[CompactChallengeField], CompactWhirError> {
+        if !self.is_complete() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        Ok(&self.source_covector)
+    }
+
+    pub(crate) fn residual_source_claim(&self) -> Result<CompactChallengeField, CompactWhirError> {
+        if !self.is_complete() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        Ok(self.source_claim)
+    }
+
+    pub(crate) fn residual_preceding_mask_claim(
+        &self,
+    ) -> Result<CompactChallengeField, CompactWhirError> {
+        if !self.is_complete() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        let combination_challenge = self
+            .combination_challenge
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        Ok(combination_challenge * self.preceding_mask_carry)
+    }
+
+    pub(crate) fn round_challenges(&self) -> &[CompactChallengeField] {
+        &self.round_challenges
+    }
+
+    pub(crate) fn mask_messages(&self) -> &[Vec<CompactChallengeField>] {
+        &self.sumcheck_mask_messages
+    }
+
+    pub(crate) fn mask_encoding_randomness(&self) -> &[Vec<CompactChallengeField>] {
+        &self.sumcheck_mask_encoding_randomness
+    }
+
+    fn begin_round_polynomial(&mut self) -> Result<(), CompactWhirError> {
+        let round_index = self.round_challenges.len();
+        let mask = self
+            .sumcheck_mask_messages
+            .get(round_index)
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        self.remaining_mask_endpoint_sum -= mask_endpoint_sum(mask);
+        self.preceding_mask_carry *= CompactChallengeField::TWO.inverse();
+        self.phase = CompactWhirInitialSumcheckPhase::ComputingRoundPolynomial {
+            next_pair_ordinal: 0,
+            constant_coefficient: CompactChallengeField::ZERO,
+            leading_coefficient: CompactChallengeField::ZERO,
+        };
+        Ok(())
+    }
+
+    fn assemble_round_wire(
+        &self,
+        plain_constant_coefficient: CompactChallengeField,
+        plain_leading_coefficient: CompactChallengeField,
+    ) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
+        let round_index = self.round_challenges.len();
+        let round_number = round_index
+            .checked_add(1)
+            .ok_or(CompactWhirError::CountOverflow)?;
+        let mask = self
+            .sumcheck_mask_messages
+            .get(round_index)
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        let combination_challenge = self
+            .combination_challenge
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        let folding_factor = self.sumcheck_mask_messages.len();
+        let live_multiplier = CompactChallengeField::TWO.exp_u64(
+            u64::try_from(folding_factor - round_number)
+                .map_err(|_| CompactWhirError::CountOverflow)?,
+        );
+        let mut full_coefficients =
+            allocate_zero_extension_values(COMPACT_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH.max(3))?;
+        for (coefficient, mask_coefficient) in full_coefficients.iter_mut().zip(mask) {
+            *coefficient += live_multiplier * *mask_coefficient;
+        }
+        full_coefficients[0] += self
+            .past_mask_evaluations
+            .iter()
+            .copied()
+            .sum::<CompactChallengeField>()
+            * live_multiplier;
+        if round_number < folding_factor {
+            let future_multiplier = CompactChallengeField::TWO.exp_u64(
+                u64::try_from(folding_factor - round_number - 1)
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
+            );
+            full_coefficients[0] += future_multiplier * self.remaining_mask_endpoint_sum;
+        }
+        full_coefficients[0] +=
+            combination_challenge * (plain_constant_coefficient + self.preceding_mask_carry);
+        full_coefficients[2] += combination_challenge * plain_leading_coefficient;
+
+        let mut wire = Vec::new();
+        wire.try_reserve_exact(full_coefficients.len() - 1)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        wire.push(full_coefficients[0]);
+        wire.extend_from_slice(&full_coefficients[2..]);
+        Ok(wire)
+    }
+
+    fn current_round_ordinal(&self) -> Result<u32, CompactWhirError> {
+        u32::try_from(self.round_challenges.len()).map_err(|_| CompactWhirError::CountOverflow)
+    }
+}
+
+impl Drop for CompactWhirInitialSumcheckState {
+    fn drop(&mut self) {
+        self.source_evaluations.fill(CompactChallengeField::ZERO);
+        self.source_claim = CompactChallengeField::ZERO;
+        for mask_message in &mut self.sumcheck_mask_messages {
+            mask_message.fill(CompactChallengeField::ZERO);
+        }
+        for randomness in &mut self.sumcheck_mask_encoding_randomness {
+            randomness.fill(CompactChallengeField::ZERO);
+        }
+        self.remaining_mask_endpoint_sum = CompactChallengeField::ZERO;
+        self.preceding_mask_carry = CompactChallengeField::ZERO;
+        self.past_mask_evaluations.fill(CompactChallengeField::ZERO);
+    }
+}
+
+fn mask_endpoint_sum(message: &[CompactChallengeField]) -> CompactChallengeField {
+    message[0].double() + message[1..].iter().copied().sum::<CompactChallengeField>()
+}
+
+fn evaluate_univariate(
+    coefficients: &[CompactChallengeField],
+    point: CompactChallengeField,
+) -> CompactChallengeField {
+    coefficients
+        .iter()
+        .rev()
+        .copied()
+        .fold(CompactChallengeField::ZERO, |evaluation, coefficient| {
+            evaluation * point + coefficient
+        })
+}
+
+fn extrapolate_quadratic_from_boolean_sum(
+    constant_coefficient: CompactChallengeField,
+    boolean_sum: CompactChallengeField,
+    leading_coefficient: CompactChallengeField,
+    point: CompactChallengeField,
+) -> CompactChallengeField {
+    constant_coefficient
+        + (boolean_sum - constant_coefficient.double()) * point
+        + leading_coefficient * point * (point - CompactChallengeField::ONE)
 }
 
 #[cfg(test)]
@@ -994,6 +1836,7 @@ impl CryptographicHasher<u64, [u64; COMPACT_WHIR_HASH_OUTPUT_WORD_LENGTH]>
 mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::Matrix;
+    use p3_sumcheck::strategy::sumcheck_coefficients_prefix;
     use rand::{TryCryptoRng, TryRng};
 
     use super::*;
@@ -1024,6 +1867,80 @@ mod tests {
     }
 
     impl TryCryptoRng for CountingRandomSource {}
+
+    fn bounded_test_configuration() -> CompactWhirConfiguration {
+        ZkWhirConfig::new(
+            8,
+            ProtocolParameters {
+                starting_log_inv_rate: 2,
+                round_log_inv_rates: Vec::new(),
+                folding_factor: FoldingFactor::PerRound(vec![2]),
+                soundness_type: SecurityAssumption::UniqueDecoding,
+                security_level: 32,
+                pow_bits: 32,
+            },
+            ZkParameters {
+                ell_zk: COMPACT_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH,
+                mask_log_inv_rate: COMPACT_WHIR_MASK_LOG_INVERSE_RATE,
+            },
+        )
+        .expect("the bounded WHIR test geometry configures")
+    }
+
+    fn initial_sumcheck_mask_contract(
+        configuration: &CompactWhirConfiguration,
+    ) -> CompactWhirMaskGroupContract {
+        CompactWhirMaskGroupContract {
+            role_tag: 4,
+            coordinate: 0,
+            width: configuration.round_folding_factor(0) as u64,
+            message_length: configuration.sumcheck_mask.message_len as u64,
+            randomness_length: configuration.sumcheck_mask.randomness_len as u64,
+            domain_size: configuration.sumcheck_mask.domain_size as u64,
+            committed_encoding_source: 1,
+        }
+    }
+
+    fn prepared_test_relation(
+        source: Vec<Goldilocks>,
+        equality_point: Vec<CompactChallengeField>,
+        pre_challenge_mask: CompactChallengeField,
+        main_mask: CompactChallengeField,
+        opening_batching_challenge: CompactChallengeField,
+    ) -> CompactWhirPreChallengeRelation {
+        let equality_covector =
+            Poly::new_from_point(&equality_point, CompactChallengeField::ONE).into_evals();
+        let source_claim = source
+            .iter()
+            .copied()
+            .map(CompactChallengeField::from)
+            .zip(&equality_covector)
+            .map(|(source_value, weight)| source_value * *weight)
+            .sum::<CompactChallengeField>();
+        let mut preparation = CompactWhirPreChallengeRelationPreparation::new(
+            source,
+            equality_point,
+            source_claim + pre_challenge_mask,
+            source_claim + main_mask,
+            pre_challenge_mask - main_mask,
+            pre_challenge_mask,
+            main_mask,
+            opening_batching_challenge,
+        )
+        .expect("the test relation begins preparing");
+        let work_budgets = [1_u64, 3, 17, 5, 64];
+        let mut poll_ordinal = 0_usize;
+        loop {
+            let poll = preparation
+                .poll(work_budgets[poll_ordinal % work_budgets.len()])
+                .expect("the test relation advances");
+            poll_ordinal += 1;
+            if poll == CompactWhirPreChallengeRelationPreparationPoll::Complete {
+                break;
+            }
+        }
+        preparation.finish().expect("the test relation finishes")
+    }
 
     #[test]
     fn selected_contract_builds_the_same_initial_oracle_geometry() {
@@ -1093,7 +2010,7 @@ mod tests {
             .map(|ordinal| Goldilocks::from_u64((ordinal as u64).wrapping_mul(17)))
             .collect();
         let mut random_source = CountingRandomSource(0xA5);
-        let encoded_oracle =
+        let mut encoded_oracle =
             CompactWhirEncodedInitialOracle::encode(&configuration, message, &mut random_source)
                 .expect("the bounded initial oracle encodes");
         let matrix = encoded_oracle.encoded_matrix();
@@ -1104,6 +2021,350 @@ mod tests {
             Some(matrix.width())
         );
         assert!(encoded_oracle.encoded_row(matrix.height()).is_none());
+        assert_eq!(
+            encoded_oracle.encoding_randomness().len(),
+            configuration.oracle_randomness[0] << configuration.round_folding_factor(0)
+        );
+        assert_eq!(
+            encoded_oracle
+                .take_source_message()
+                .expect("the retained source transfers exactly")
+                .len(),
+            1 << configuration.num_variables
+        );
+        assert_eq!(
+            encoded_oracle.take_source_message(),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+    }
+
+    #[test]
+    fn pre_challenge_relation_preparation_matches_the_canonical_equality_covector() {
+        let source = (0..256)
+            .map(|ordinal| Goldilocks::from_u64((ordinal * 37 + 11) as u64))
+            .collect::<Vec<_>>();
+        let equality_point = (0..8)
+            .map(|coordinate_ordinal| {
+                CompactChallengeField::from_u64((coordinate_ordinal * 19 + 7) as u64)
+            })
+            .collect::<Vec<_>>();
+        let expected_source = source
+            .iter()
+            .copied()
+            .map(CompactChallengeField::from)
+            .collect::<Vec<_>>();
+        let expected_covector =
+            Poly::new_from_point(&equality_point, CompactChallengeField::ONE).into_evals();
+        let pre_challenge_mask = CompactChallengeField::from_u64(701);
+        let main_mask = CompactChallengeField::from_u64(809);
+        let relation = prepared_test_relation(
+            source,
+            equality_point,
+            pre_challenge_mask,
+            main_mask,
+            CompactChallengeField::from_u64(907),
+        );
+
+        assert_eq!(relation.source_evaluations, expected_source);
+        assert_eq!(relation.source_covector, expected_covector);
+        assert_eq!(
+            relation.source_claim + pre_challenge_mask,
+            relation.masked_target
+        );
+
+        let mut invalid_preparation = CompactWhirPreChallengeRelationPreparation::new(
+            vec![Goldilocks::ONE; 8],
+            vec![CompactChallengeField::ONE; 3],
+            CompactChallengeField::from_u64(13),
+            CompactChallengeField::from_u64(17),
+            CompactChallengeField::from_u64(23),
+            CompactChallengeField::from_u64(29),
+            CompactChallengeField::from_u64(31),
+            CompactChallengeField::from_u64(37),
+        )
+        .expect("the malformed relation has valid dimensions");
+        assert_eq!(
+            invalid_preparation.poll(0),
+            Err(CompactWhirError::InvalidWorkBudget)
+        );
+        loop {
+            match invalid_preparation.poll(64) {
+                Err(error) => {
+                    assert_eq!(error, CompactWhirError::InvalidRelation);
+                    break;
+                }
+                Ok(CompactWhirPreChallengeRelationPreparationPoll::Complete) => {
+                    panic!("an inconsistent masked relation must not complete")
+                }
+                Ok(CompactWhirPreChallengeRelationPreparationPoll::StepCompleted { .. }) => {}
+            }
+        }
+    }
+
+    #[test]
+    fn quadratic_extrapolation_uses_the_boolean_sum_as_its_carried_claim() {
+        let evaluation_at_zero = CompactChallengeField::from_u64(7);
+        let evaluation_at_one = CompactChallengeField::from_u64(13);
+        let leading_coefficient = CompactChallengeField::from_u64(3);
+        let boolean_sum = evaluation_at_zero + evaluation_at_one;
+        assert_eq!(
+            extrapolate_quadratic_from_boolean_sum(
+                evaluation_at_zero,
+                boolean_sum,
+                leading_coefficient,
+                CompactChallengeField::ZERO,
+            ),
+            evaluation_at_zero
+        );
+        assert_eq!(
+            extrapolate_quadratic_from_boolean_sum(
+                evaluation_at_zero,
+                boolean_sum,
+                leading_coefficient,
+                CompactChallengeField::ONE,
+            ),
+            evaluation_at_one
+        );
+        let point = CompactChallengeField::from_u64(5);
+        assert_eq!(
+            extrapolate_quadratic_from_boolean_sum(
+                evaluation_at_zero,
+                boolean_sum,
+                leading_coefficient,
+                point,
+            ),
+            evaluation_at_zero * (CompactChallengeField::ONE - point)
+                + evaluation_at_one * point
+                + leading_coefficient * point * (point - CompactChallengeField::ONE)
+        );
+    }
+
+    #[test]
+    fn pollable_initial_sumcheck_matches_the_scalar_prefix_reference() {
+        let configuration = bounded_test_configuration();
+        let source = (0..1_usize << configuration.num_variables)
+            .map(|ordinal| Goldilocks::from_u64((ordinal as u64).wrapping_mul(41) + 5))
+            .collect::<Vec<_>>();
+        let equality_point = (0..configuration.num_variables)
+            .map(|coordinate_ordinal| {
+                CompactChallengeField::from_u64((coordinate_ordinal as u64) * 43 + 13)
+            })
+            .collect::<Vec<_>>();
+        let pre_challenge_mask = CompactChallengeField::from_u64(1_009);
+        let main_mask = CompactChallengeField::from_u64(1_103);
+        let opening_batching_challenge = CompactChallengeField::from_u64(1_201);
+        let relation = prepared_test_relation(
+            source,
+            equality_point,
+            pre_challenge_mask,
+            main_mask,
+            opening_batching_challenge,
+        );
+        let mut random_source = CountingRandomSource(0xD7);
+        let mut state = CompactWhirInitialSumcheckState::new(
+            relation,
+            &configuration,
+            initial_sumcheck_mask_contract(&configuration),
+            &mut random_source,
+        )
+        .expect("the pollable initial sumcheck starts");
+
+        assert_eq!(state.poll(1), Err(CompactWhirError::WrongProverPhase));
+        assert_eq!(
+            state.bind_round_challenge(CompactChallengeField::ONE),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+        assert_eq!(
+            state.opening_batching_challenge(),
+            opening_batching_challenge
+        );
+        assert_eq!(
+            state.masked_target(),
+            state.source_claim + pre_challenge_mask
+        );
+        assert_eq!(
+            state.auxiliary_target(),
+            CompactChallengeField::TWO.exp_u64((configuration.round_folding_factor(0) - 1) as u64)
+                * state
+                    .mask_messages()
+                    .iter()
+                    .map(|message| mask_endpoint_sum(message))
+                    .sum::<CompactChallengeField>()
+        );
+        assert_eq!(
+            state.mask_oracle().encoded_matrix().width(),
+            configuration.round_folding_factor(0)
+        );
+        assert_eq!(
+            state.mask_encoding_randomness().len(),
+            configuration.round_folding_factor(0)
+        );
+
+        let combination_challenge = CompactChallengeField::from_u64(1_303);
+        state
+            .bind_combination_challenge(combination_challenge)
+            .expect("the exact combination challenge binds");
+        assert_eq!(
+            state.bind_combination_challenge(combination_challenge),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+        assert_eq!(state.poll(0), Err(CompactWhirError::InvalidWorkBudget));
+
+        let mut reference_source = state.source_evaluations.clone();
+        let mut reference_covector = state.source_covector.clone();
+        let mut reference_claim = state.source_claim;
+        let mut reference_future_endpoints = state
+            .mask_messages()
+            .iter()
+            .map(|message| mask_endpoint_sum(message))
+            .sum::<CompactChallengeField>();
+        let mut reference_mask_carry = pre_challenge_mask;
+        let mut reference_past_mask_evaluations = Vec::new();
+        let folding_factor = configuration.round_folding_factor(0);
+        let challenges = [
+            CompactChallengeField::from_u64(1_409),
+            CompactChallengeField::from_u64(1_501),
+        ];
+        let work_budgets = [1_u64, 7, 31, 3];
+        let mut poll_ordinal = 0_usize;
+
+        for (round_index, challenge) in challenges.into_iter().enumerate() {
+            let mask = state.mask_messages()[round_index].clone();
+            reference_future_endpoints -= mask_endpoint_sum(&mask);
+            reference_mask_carry *= CompactChallengeField::TWO.inverse();
+            let (plain_constant, plain_leading) =
+                sumcheck_coefficients_prefix(&reference_source, &reference_covector);
+            let round_number = round_index + 1;
+            let live_multiplier =
+                CompactChallengeField::TWO.exp_u64((folding_factor - round_number) as u64);
+            let mut full = vec![CompactChallengeField::ZERO; 3];
+            for (coefficient, mask_coefficient) in full.iter_mut().zip(&mask) {
+                *coefficient += live_multiplier * *mask_coefficient;
+            }
+            full[0] += reference_past_mask_evaluations
+                .iter()
+                .copied()
+                .sum::<CompactChallengeField>()
+                * live_multiplier;
+            if round_number < folding_factor {
+                full[0] += CompactChallengeField::TWO
+                    .exp_u64((folding_factor - round_number - 1) as u64)
+                    * reference_future_endpoints;
+            }
+            full[0] += combination_challenge * (plain_constant + reference_mask_carry);
+            full[2] += combination_challenge * plain_leading;
+            let expected_wire = vec![full[0], full[2]];
+
+            loop {
+                let poll = state
+                    .poll(work_budgets[poll_ordinal % work_budgets.len()])
+                    .expect("the round polynomial advances");
+                poll_ordinal += 1;
+                if matches!(
+                    poll,
+                    CompactWhirInitialSumcheckPoll::RoundPolynomialStepCompleted {
+                        polynomial_ready: true,
+                        ..
+                    }
+                ) {
+                    break;
+                }
+            }
+            assert_eq!(state.pending_round_wire().unwrap(), expected_wire);
+            assert_eq!(
+                state.round_wire(round_index),
+                Some(expected_wire.as_slice())
+            );
+            state
+                .bind_round_challenge(challenge)
+                .expect("the round challenge binds");
+            reference_past_mask_evaluations.push(evaluate_univariate(&mask, challenge));
+            reference_claim = extrapolate_quadratic_from_boolean_sum(
+                plain_constant,
+                reference_claim,
+                plain_leading,
+                challenge,
+            );
+            let half = reference_source.len() / 2;
+            for pair_ordinal in 0..half {
+                let source_low = reference_source[pair_ordinal];
+                let source_high = reference_source[half + pair_ordinal];
+                reference_source[pair_ordinal] =
+                    source_low + challenge * (source_high - source_low);
+                let weight_low = reference_covector[pair_ordinal];
+                let weight_high = reference_covector[half + pair_ordinal];
+                reference_covector[pair_ordinal] =
+                    weight_low + challenge * (weight_high - weight_low);
+            }
+            reference_source.truncate(half);
+            reference_covector.truncate(half);
+            assert_eq!(
+                reference_claim,
+                reference_source
+                    .iter()
+                    .copied()
+                    .zip(&reference_covector)
+                    .map(|(source_value, weight)| source_value * *weight)
+                    .sum::<CompactChallengeField>()
+            );
+            loop {
+                let poll = state
+                    .poll(work_budgets[poll_ordinal % work_budgets.len()])
+                    .expect("the bound round advances");
+                poll_ordinal += 1;
+                if matches!(
+                    poll,
+                    CompactWhirInitialSumcheckPoll::BoundRoundStepCompleted {
+                        round_complete: true,
+                        ..
+                    }
+                ) {
+                    break;
+                }
+            }
+        }
+
+        loop {
+            let poll = state
+                .poll(work_budgets[poll_ordinal % work_budgets.len()])
+                .expect("residual scaling advances");
+            poll_ordinal += 1;
+            if matches!(
+                poll,
+                CompactWhirInitialSumcheckPoll::WeightScalingStepCompleted {
+                    scaling_complete: true,
+                    ..
+                }
+            ) {
+                break;
+            }
+        }
+        for weight in &mut reference_covector {
+            *weight *= combination_challenge;
+        }
+        reference_claim *= combination_challenge;
+
+        assert!(state.is_complete());
+        assert_eq!(state.residual_source().unwrap(), reference_source);
+        assert_eq!(state.residual_covector().unwrap(), reference_covector);
+        assert_eq!(state.residual_source_claim().unwrap(), reference_claim);
+        assert_eq!(
+            state.residual_source_claim().unwrap(),
+            state
+                .residual_source()
+                .unwrap()
+                .iter()
+                .copied()
+                .zip(state.residual_covector().unwrap())
+                .map(|(source_value, weight)| source_value * *weight)
+                .sum::<CompactChallengeField>()
+        );
+        assert_eq!(
+            state.residual_preceding_mask_claim().unwrap(),
+            combination_challenge * reference_mask_carry
+        );
+        assert_eq!(state.round_challenges(), challenges);
+        assert_eq!(state.poll(1), Err(CompactWhirError::WrongProverPhase));
     }
 
     #[test]
