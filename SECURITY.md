@@ -124,8 +124,17 @@ challenge, one base-field challenge, and 396 distinct source queries. Before
 any opening is released, all 25,344 query-major source coordinates pass the
 compiler-derived full-rank conditional-image gate for that authenticated
 message prefix. The state then opens 396 original-source leaves, binds the
-challenge and query set once, and authenticates the response checkpoint. This
-is the first code-switch boundary, not a complete WHIR epoch or proof.
+challenge and query set once, and authenticates the response checkpoint. It
+then constructs the exact code-switch output relation in bounded polls and
+requires the accumulated source and preceding-mask claims to equal the
+accumulated folded-opening target. The next masked sumcheck consumes role
+nine through its exact one-extension, one-base-field, one-query-group shape,
+binds that extension challenge, and gates its auxiliary and four round wires
+against independently compiled conditional images before commitment.
+Authenticated checkpoints cover every response. Guarded selected-size coverage
+finishes this batch with 4,104 response leaves, eight compiler-required round-
+wire openings, and a 2,048-element residual source and covector. This is two
+masked-sumcheck batches and one code switch, not a complete WHIR epoch or proof.
 Guarded native coverage executes this path under the repository memory ceiling.
 The CFW phase reconciles 4,926 external-storage transactions, 1,006,632,840
 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes;
@@ -138,7 +147,7 @@ selected-size owner has not reached or measured that later opening move. This
 is native development evidence only.
 Selected-size main-source stripe opening replay, authenticated mid-stripe
 restart, cold restoration through the common worker, scalar-WASM execution,
-the remaining three pre-challenge masked-sumcheck batches and two code switches,
+the remaining two pre-challenge masked-sumcheck batches and two code switches,
 the base opening, and a complete emitted WHIR epoch remain absent.
 The test-only production-shaped small-chain owner uses the response state, but
 the WHIR family material provider, production worker adapter, semantic
@@ -163,7 +172,8 @@ cannot initialize unless that check passed. Every live CFW round, the initial
 pre-challenge WHIR auxiliary, and all six initial WHIR round disclosures now
 pass their conditional-image gates. The first source-query disclosure also
 passes its full-rank conditional-image gate before generation releases any
-opening.
+opening. The second masked-sumcheck batch replays that exact disclosure prefix
+and gates its auxiliary and four round wires before commitment.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -193,9 +203,9 @@ conditional images, both live role-18 prefix consumptions, whole-construction
 terminal simulator binding to the complete emitted proof, and the exact
 construction-level statistical-HVZK statement remain absent. The live CFW gates
 bind only the canonical prefix through the final CFW response, and the live
-initial WHIR gates extend that binding through its first masked-sumcheck batch
-and source-query disclosure. They are not a complete emitted-byte correspondence
-argument.
+WHIR gates extend that binding through the first code-switch disclosure and the
+second masked-sumcheck batch. They are not a complete emitted-byte
+correspondence argument.
 The live bridge accounts for three symbolic quantum-PRF replacements: action-
 root key expansion, proof-coin and coordinate-stream derivation, and compact-
 generation expansion keyed by the two seeds. It also retains exact action-root,
@@ -301,7 +311,12 @@ that a coherent snapshot is newest.
   the six-challenge fold of 25,344 base-field randomness coordinates, the
   8,192-row extension source and 4,096-row mask commitment, the live full-rank
   conditional-image gate, 396 original-source openings, one-shot verifier-move
-  binding, and the authenticated response checkpoint. Its CFW external-storage
+  binding, and the authenticated response checkpoint. It then constructs the
+  exact verifier-bound output relation in bounded polls and completes the
+  second masked-sumcheck batch through the role-nine mixed-output challenge,
+  four conditional-image-gated rounds, authenticated response checkpoints,
+  4,104 response leaves, eight round-wire openings, and a 2,048-element
+  residual relation. Its CFW external-storage
   execution reconciles 4,926 transactions, 1,006,632,840 bytes written,
   2,013,265,440 bytes read, and 587,202,560 peak bytes. The production path owns
   verifier-derived opening recomputation, but

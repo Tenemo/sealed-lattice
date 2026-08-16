@@ -4070,7 +4070,7 @@ mod tests {
 
     #[test]
     #[ignore = "manual retained compact public-key assignment gate"]
-    fn heavy_rust_kernel_retained_public_key_authority_drives_first_compact_whir_code_switch() {
+    fn heavy_rust_kernel_retained_public_key_authority_completes_second_compact_whir_sumcheck() {
         let authority = populate_compact_public_key_development_evidence_authority(0x43)
             .expect("standalone production-derived public-key authority populates");
         let action_private_randomness = authority.action_private_randomness;
@@ -4628,7 +4628,7 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::CfwRoundResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::CfwFinalResponseCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRelationStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckPrepared
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckPrepared { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundPolynomialStepCompleted {
                     ..
                 }
@@ -4638,15 +4638,18 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirWeightScalingStepCompleted {
                     ..
                 }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady {
+                    ..
+                }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundResponseCheckpointReady {
                     ..
                 }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckComplete
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRandomnessStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchPrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchSourceStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRelationStepCompleted { .. } => {
                     panic!("cross-epoch work cannot precede the post-lookup checkpoint")
                 }
             }
@@ -4771,7 +4774,7 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::CfwRoundResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::CfwFinalResponseCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRelationStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckPrepared
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckPrepared { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundPolynomialStepCompleted {
                     ..
                 }
@@ -4781,15 +4784,18 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirWeightScalingStepCompleted {
                     ..
                 }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady {
+                    ..
+                }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundResponseCheckpointReady {
                     ..
                 }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckComplete
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRandomnessStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchPrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchSourceStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRelationStepCompleted { .. } => {
                     panic!("post-lookup work cannot recur during the cross-epoch response")
                 }
             }
@@ -4934,7 +4940,7 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady
                 | CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRelationStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckPrepared
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckPrepared { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundPolynomialStepCompleted {
                     ..
                 }
@@ -4944,15 +4950,18 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirWeightScalingStepCompleted {
                     ..
                 }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady {
+                    ..
+                }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundResponseCheckpointReady {
                     ..
                 }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckComplete
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRandomnessStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchPrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchSourceStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRelationStepCompleted { .. } => {
                     panic!("pre-CFW work cannot recur during the complete CFW reduction")
                 }
             }
@@ -5051,7 +5060,7 @@ mod tests {
         let mut completed_whir_round_count = 0_usize;
         loop {
             let poll = prepared_main_epoch
-                .poll_pre_challenge_whir_initial_sumcheck(8_192, &mut response_storage)
+                .poll_pre_challenge_whir_sumcheck(8_192, &mut response_storage)
                 .unwrap_or_else(|error| {
                     let completed_response_count = prepared_main_epoch
                         .checkpoint_boundary()
@@ -5072,13 +5081,18 @@ mod tests {
                     assert!((1..=8_192).contains(&processed_work_unit_count));
                     whir_relation_poll_count += 1;
                 }
-                CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckPrepared => {
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckPrepared {
+                    batch_ordinal,
+                } => {
+                    assert_eq!(batch_ordinal, 0);
                     prepared_whir_sumcheck_count += 1;
                 }
                 CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundPolynomialStepCompleted {
+                    batch_ordinal,
                     round_ordinal,
                     ..
                 } => {
+                    assert_eq!(batch_ordinal, 0);
                     assert_eq!(
                         usize::try_from(round_ordinal).unwrap(),
                         completed_whir_round_count
@@ -5086,9 +5100,11 @@ mod tests {
                     whir_round_polynomial_poll_count += 1;
                 }
                 CompactPublicKeyMainEpochPoll::PreChallengeWhirBoundRoundStepCompleted {
+                    batch_ordinal,
                     round_ordinal,
                     ..
                 } => {
+                    assert_eq!(batch_ordinal, 0);
                     assert_eq!(
                         usize::try_from(round_ordinal).unwrap() + 1,
                         completed_whir_round_count
@@ -5096,8 +5112,10 @@ mod tests {
                     whir_bound_round_poll_count += 1;
                 }
                 CompactPublicKeyMainEpochPoll::PreChallengeWhirWeightScalingStepCompleted {
+                    batch_ordinal,
                     ..
                 } => {
+                    assert_eq!(batch_ordinal, 0);
                     whir_weight_scaling_poll_count += 1;
                 }
                 CompactPublicKeyMainEpochPoll::ResponseLeafSupplied { leaf_ordinal } => {
@@ -5122,7 +5140,10 @@ mod tests {
                 }
                 CompactPublicKeyMainEpochPoll::ResponseArithmeticStepCompleted
                 | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
-                CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady => {
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady {
+                    batch_ordinal,
+                } => {
+                    assert_eq!(batch_ordinal, 0);
                     assert_eq!(current_whir_response_ordinal, initial_whir_response_ordinal);
                     let response_geometry = &selected_compact_contract
                         .verifier_inputs()
@@ -5136,8 +5157,10 @@ mod tests {
                     current_whir_response_leaf_ordinal = 0;
                 }
                 CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundResponseCheckpointReady {
+                    batch_ordinal,
                     round_ordinal,
                 } => {
+                    assert_eq!(batch_ordinal, 0);
                     assert_eq!(
                         usize::try_from(round_ordinal).unwrap(),
                         completed_whir_round_count
@@ -5161,7 +5184,9 @@ mod tests {
                         current_whir_response_ordinal
                     );
                 }
-                CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckComplete => break,
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete {
+                    batch_ordinal: 0,
+                } => break,
                 CompactPublicKeyMainEpochPoll::MainSourceArithmeticStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::CrossEpochEvaluationStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::CfwRoundPolynomialStepCompleted { .. }
@@ -5173,7 +5198,9 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRandomnessStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchPrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchSourceStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRelationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete { .. } => {
                     panic!("earlier generation work cannot recur during the initial WHIR sumcheck")
                 }
             }
@@ -5191,13 +5218,13 @@ mod tests {
         assert!(whir_round_polynomial_poll_count > 0);
         assert!(whir_bound_round_poll_count > 0);
         assert!(whir_weight_scaling_poll_count > 0);
-        assert!(prepared_main_epoch.pre_challenge_whir_initial_sumcheck_complete());
+        assert!(prepared_main_epoch.pre_challenge_whir_sumcheck_complete(0));
         assert_eq!(
-            prepared_main_epoch.pre_challenge_whir_sumcheck_output_count(),
+            prepared_main_epoch.pre_challenge_whir_sumcheck_output_count(0),
             Some(1 + 2 * expected_whir_round_count)
         );
         assert_eq!(
-            prepared_main_epoch.pre_challenge_whir_residual_length(),
+            prepared_main_epoch.pre_challenge_whir_residual_length(0),
             Some(expected_whir_residual_length)
         );
         let final_whir_checkpoint = prepared_main_epoch
@@ -5301,15 +5328,16 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::CfwRoundResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::CfwFinalResponseCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRelationStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckPrepared
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckPrepared { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundPolynomialStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBoundRoundStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirWeightScalingStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundResponseCheckpointReady { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirInitialSumcheckComplete
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete { .. }
                 | CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady
-                | CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRelationStepCompleted { .. } => {
                     panic!("earlier generation work cannot recur during the first WHIR code switch")
                 }
             }
@@ -5331,8 +5359,10 @@ mod tests {
         let first_code_switch_checkpoint = prepared_main_epoch
             .checkpoint_boundary()
             .expect("the first code-switch response exposes an authenticated checkpoint");
+        let first_code_switch_safe_boundary_ordinal =
+            first_code_switch_checkpoint.safe_boundary_ordinal();
         assert_eq!(
-            first_code_switch_checkpoint.safe_boundary_ordinal(),
+            first_code_switch_safe_boundary_ordinal,
             final_whir_safe_boundary_ordinal + 1
         );
         assert_eq!(
@@ -5350,6 +5380,341 @@ mod tests {
             code_switch_source_poll_count,
             code_switch_response_leaf_count,
             code_switch_opened_leaf_count,
+        );
+
+        let phase_started_at = Instant::now();
+        println!("compact public-key focused owner phase: first code-switch relation");
+        let previous_source_contract = selected_compact_contract
+            .verifier_inputs()
+            .whir_folds
+            .iter()
+            .find(|fold| fold.epoch == pre_challenge_whir_epoch.epoch && fold.batch_ordinal == 0)
+            .expect("the first pre-challenge source contract exists");
+        let next_source_contract = selected_compact_contract
+            .verifier_inputs()
+            .whir_folds
+            .iter()
+            .find(|fold| fold.epoch == pre_challenge_whir_epoch.epoch && fold.batch_ordinal == 1)
+            .expect("the second pre-challenge source contract exists");
+        let expected_relation_work_unit_count = expected_first_code_switch_opened_leaf_count
+            .checked_mul(
+                next_source_contract
+                    .message_length
+                    .checked_mul(next_source_contract.oracle_width)
+                    .and_then(|source_count| {
+                        source_count.checked_add(previous_source_contract.hiding_randomness_length)
+                    })
+                    .expect("the code-switch relation width fits u64"),
+            )
+            .expect("the code-switch relation work count fits u64");
+        prepared_main_epoch
+            .prepare_pre_challenge_whir_second_sumcheck()
+            .expect("the bound first code switch starts its output relation");
+        let mut relation_poll_count = 0_u64;
+        let mut relation_work_unit_count = 0_u64;
+        loop {
+            match prepared_main_epoch
+                .poll_pre_challenge_whir_second_sumcheck_preparation(8_192)
+                .expect("the first code-switch relation advances")
+            {
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRelationStepCompleted {
+                    processed_work_unit_count,
+                    ..
+                } => {
+                    assert!((1..=8_192).contains(&processed_work_unit_count));
+                    relation_poll_count += 1;
+                    relation_work_unit_count += processed_work_unit_count;
+                }
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckPrepared {
+                    batch_ordinal: 1,
+                } => break,
+                unexpected => {
+                    panic!("unexpected poll while preparing the second WHIR sumcheck: {unexpected:?}")
+                }
+            }
+        }
+        assert!(relation_poll_count > 1);
+        assert_eq!(relation_work_unit_count, expected_relation_work_unit_count);
+        assert_eq!(
+            prepared_main_epoch.pre_challenge_whir_sumcheck_output_count(1),
+            Some(1)
+        );
+        println!(
+            "compact public-key focused owner phase complete: first code-switch relation elapsed_milliseconds={} poll_count={} work_unit_count={}",
+            phase_started_at.elapsed().as_millis(),
+            relation_poll_count,
+            relation_work_unit_count,
+        );
+
+        let phase_started_at = Instant::now();
+        println!(
+            "compact public-key focused owner phase: complete second pre-challenge WHIR sumcheck"
+        );
+        let second_whir_batch_ordinal = 1_u8;
+        let second_whir_round_count = usize::try_from(
+            pre_challenge_whir_epoch.folding_schedule[usize::from(second_whir_batch_ordinal)],
+        )
+        .expect("second selected WHIR folding factor fits usize");
+        let second_whir_source_length = usize::try_from(
+            next_source_contract
+                .message_length
+                .checked_mul(next_source_contract.oracle_width)
+                .expect("second selected WHIR source length fits u64"),
+        )
+        .expect("second selected WHIR source length fits usize");
+        let expected_second_whir_residual_length = second_whir_source_length
+            .checked_shr(u32::try_from(second_whir_round_count).unwrap())
+            .expect("second selected WHIR residual length exists");
+        let second_whir_maximum_work_unit_count = 8_192_u64;
+        let expected_second_whir_weight_scaling_poll_count =
+            u64::try_from(expected_second_whir_residual_length.saturating_sub(1))
+                .expect("the second WHIR residual length fits u64")
+                / second_whir_maximum_work_unit_count;
+        let second_whir_initial_response_ordinal = selected_compact_contract
+            .verifier_inputs()
+            .response_component_roles
+            .iter()
+            .position(|roles| {
+                roles.iter().any(|role| {
+                    (
+                        role.role_tag,
+                        role.epoch,
+                        role.batch_ordinal,
+                        role.round_ordinal,
+                    ) == (
+                        11,
+                        pre_challenge_whir_epoch.epoch,
+                        second_whir_batch_ordinal,
+                        0,
+                    )
+                })
+            })
+            .and_then(|response_index| u32::try_from(response_index).ok())
+            .expect("the second selected WHIR batch has one mask response");
+        assert_eq!(
+            second_whir_initial_response_ordinal,
+            first_code_switch_response_ordinal + 1
+        );
+        let expected_second_whir_response_count = second_whir_round_count + 1;
+        let second_whir_first_round_response_index =
+            usize::try_from(second_whir_initial_response_ordinal + 1).unwrap();
+        let second_whir_round_response_geometries = &selected_compact_contract
+            .verifier_inputs()
+            .response_merkle_geometries[second_whir_first_round_response_index
+            ..second_whir_first_round_response_index + second_whir_round_count];
+        assert!(
+            second_whir_round_response_geometries
+                .iter()
+                .all(|geometry| {
+                    geometry.minimum_queried_leaf_count() == geometry.maximum_queried_leaf_count()
+                })
+        );
+        let expected_second_whir_opened_leaf_count = second_whir_round_response_geometries
+            .iter()
+            .map(|geometry| geometry.minimum_queried_leaf_count())
+            .sum::<u64>();
+        let expected_second_whir_response_leaf_count = selected_compact_contract
+            .verifier_inputs()
+            .response_merkle_geometries[usize::try_from(
+            second_whir_initial_response_ordinal,
+        )
+        .unwrap()
+            ..usize::try_from(second_whir_initial_response_ordinal).unwrap()
+                + expected_second_whir_response_count]
+            .iter()
+            .map(|geometry| geometry.merkle_leaf_count())
+            .sum::<u64>();
+        let mut second_whir_response_ordinal = second_whir_initial_response_ordinal;
+        let mut second_whir_response_leaf_ordinal = 0_u64;
+        let mut second_whir_round_polynomial_poll_count = 0_u64;
+        let mut second_whir_bound_round_poll_count = 0_u64;
+        let mut second_whir_weight_scaling_poll_count = 0_u64;
+        let mut second_whir_response_leaf_count = 0_u64;
+        let mut second_whir_opened_leaf_count = 0_u64;
+        let mut second_whir_opened_leaf_counts_by_round = vec![0_u64; second_whir_round_count];
+        let mut completed_second_whir_round_count = 0_usize;
+        loop {
+            let poll = prepared_main_epoch
+                .poll_pre_challenge_whir_sumcheck(
+                    second_whir_maximum_work_unit_count,
+                    &mut response_storage,
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "the second pre-challenge WHIR sumcheck failed: error={error:?} current_response_ordinal={second_whir_response_ordinal} current_response_leaf_ordinal={second_whir_response_leaf_ordinal} response_leaf_count={second_whir_response_leaf_count} opened_leaf_count={second_whir_opened_leaf_count} round_polynomial_polls={second_whir_round_polynomial_poll_count} bound_round_polls={second_whir_bound_round_poll_count} weight_scaling_polls={second_whir_weight_scaling_poll_count} completed_round_count={completed_second_whir_round_count}"
+                    )
+                });
+            match poll {
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundPolynomialStepCompleted {
+                    batch_ordinal,
+                    round_ordinal,
+                    ..
+                } => {
+                    assert_eq!(batch_ordinal, second_whir_batch_ordinal);
+                    assert_eq!(
+                        usize::try_from(round_ordinal).unwrap(),
+                        completed_second_whir_round_count
+                    );
+                    second_whir_round_polynomial_poll_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirBoundRoundStepCompleted {
+                    batch_ordinal,
+                    round_ordinal,
+                    ..
+                } => {
+                    assert_eq!(batch_ordinal, second_whir_batch_ordinal);
+                    assert_eq!(
+                        usize::try_from(round_ordinal).unwrap() + 1,
+                        completed_second_whir_round_count
+                    );
+                    second_whir_bound_round_poll_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirWeightScalingStepCompleted {
+                    batch_ordinal,
+                    ..
+                } => {
+                    assert_eq!(batch_ordinal, second_whir_batch_ordinal);
+                    second_whir_weight_scaling_poll_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseLeafSupplied { leaf_ordinal } => {
+                    assert_eq!(leaf_ordinal, second_whir_response_leaf_ordinal);
+                    let response_geometry = &selected_compact_contract
+                        .verifier_inputs()
+                        .response_merkle_geometries
+                        [usize::try_from(second_whir_response_ordinal).unwrap()];
+                    assert!(leaf_ordinal < response_geometry.merkle_leaf_count());
+                    second_whir_response_leaf_ordinal += 1;
+                    second_whir_response_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::OpenedResponseLeafSupplied {
+                    response_ordinal,
+                    leaf_ordinal,
+                } => {
+                    let round_index = usize::try_from(
+                        response_ordinal
+                            .checked_sub(second_whir_initial_response_ordinal + 1)
+                            .expect("only second-batch round responses are opened"),
+                    )
+                    .expect("the round response index fits usize");
+                    let opened_leaf_count = second_whir_opened_leaf_counts_by_round
+                        .get_mut(round_index)
+                        .expect("the opened response belongs to a second-batch round");
+                    let response_geometry = &selected_compact_contract
+                        .verifier_inputs()
+                        .response_merkle_geometries[usize::try_from(response_ordinal).unwrap()];
+                    assert!(leaf_ordinal < response_geometry.merkle_leaf_count());
+                    *opened_leaf_count += 1;
+                    second_whir_opened_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseArithmeticStepCompleted
+                | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirAuxiliaryResponseCheckpointReady {
+                    batch_ordinal,
+                } => {
+                    assert_eq!(batch_ordinal, second_whir_batch_ordinal);
+                    assert_eq!(
+                        second_whir_response_ordinal,
+                        second_whir_initial_response_ordinal
+                    );
+                    let response_geometry = &selected_compact_contract
+                        .verifier_inputs()
+                        .response_merkle_geometries
+                        [usize::try_from(second_whir_response_ordinal).unwrap()];
+                    assert_eq!(
+                        second_whir_response_leaf_ordinal,
+                        response_geometry.merkle_leaf_count()
+                    );
+                    second_whir_response_ordinal += 1;
+                    second_whir_response_leaf_ordinal = 0;
+                }
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirRoundResponseCheckpointReady {
+                    batch_ordinal,
+                    round_ordinal,
+                } => {
+                    assert_eq!(batch_ordinal, second_whir_batch_ordinal);
+                    assert_eq!(
+                        usize::try_from(round_ordinal).unwrap(),
+                        completed_second_whir_round_count
+                    );
+                    let response_geometry = &selected_compact_contract
+                        .verifier_inputs()
+                        .response_merkle_geometries
+                        [usize::try_from(second_whir_response_ordinal).unwrap()];
+                    assert_eq!(
+                        second_whir_response_leaf_ordinal,
+                        response_geometry.merkle_leaf_count()
+                    );
+                    completed_second_whir_round_count += 1;
+                    second_whir_response_ordinal += 1;
+                    second_whir_response_leaf_ordinal = 0;
+                }
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete {
+                    batch_ordinal,
+                } if batch_ordinal == second_whir_batch_ordinal => break,
+                unexpected => {
+                    panic!("unexpected poll during the second WHIR sumcheck: {unexpected:?}")
+                }
+            }
+        }
+        assert_eq!(completed_second_whir_round_count, second_whir_round_count);
+        assert_eq!(
+            second_whir_response_ordinal,
+            second_whir_initial_response_ordinal
+                + u32::try_from(expected_second_whir_response_count).unwrap()
+        );
+        assert_eq!(second_whir_response_leaf_ordinal, 0);
+        assert_eq!(
+            second_whir_response_leaf_count,
+            expected_second_whir_response_leaf_count
+        );
+        assert_eq!(
+            second_whir_opened_leaf_count,
+            expected_second_whir_opened_leaf_count
+        );
+        for (opened_leaf_count, response_geometry) in second_whir_opened_leaf_counts_by_round
+            .iter()
+            .zip(second_whir_round_response_geometries)
+        {
+            assert_eq!(
+                *opened_leaf_count,
+                response_geometry.minimum_queried_leaf_count()
+            );
+        }
+        assert!(second_whir_round_polynomial_poll_count > 0);
+        assert!(second_whir_bound_round_poll_count > 0);
+        assert_eq!(
+            second_whir_weight_scaling_poll_count,
+            expected_second_whir_weight_scaling_poll_count
+        );
+        assert!(
+            prepared_main_epoch.pre_challenge_whir_sumcheck_complete(second_whir_batch_ordinal)
+        );
+        assert_eq!(
+            prepared_main_epoch.pre_challenge_whir_sumcheck_output_count(second_whir_batch_ordinal),
+            Some(1 + 2 * second_whir_round_count)
+        );
+        assert_eq!(
+            prepared_main_epoch.pre_challenge_whir_residual_length(second_whir_batch_ordinal),
+            Some(expected_second_whir_residual_length)
+        );
+        let final_second_whir_checkpoint = prepared_main_epoch
+            .checkpoint_boundary()
+            .expect("the second WHIR sumcheck retains its final checkpoint");
+        assert_eq!(
+            final_second_whir_checkpoint.safe_boundary_ordinal(),
+            first_code_switch_safe_boundary_ordinal
+                + u32::try_from(expected_second_whir_response_count).unwrap()
+        );
+        println!(
+            "compact public-key focused owner phase complete: second pre-challenge WHIR sumcheck elapsed_milliseconds={} round_count={} residual_length={} round_polynomial_poll_count={} bound_round_poll_count={} weight_scaling_poll_count={} response_leaf_count={} opened_leaf_count={}",
+            phase_started_at.elapsed().as_millis(),
+            second_whir_round_count,
+            expected_second_whir_residual_length,
+            second_whir_round_polynomial_poll_count,
+            second_whir_bound_round_poll_count,
+            second_whir_weight_scaling_poll_count,
+            second_whir_response_leaf_count,
+            second_whir_opened_leaf_count,
         );
         prepared_main_epoch
             .cancel_response_custody(&mut response_storage)

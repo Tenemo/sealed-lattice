@@ -1234,21 +1234,21 @@ pub(crate) fn verify_selected_compact_whir_source_query_masking(
     if completed_messages.is_empty() || completed_messages.len() >= inputs.verifier_moves.len() {
         return Err(CompactMaskingEntropyError::MissingTranscriptInput);
     }
-    let mut authority = CompactMaskingEntropyAuthority::begin(inputs, coefficient_maps, identity)?;
-    let mut selected_steps = Vec::new();
-    for (move_index, message) in completed_messages.iter().enumerate() {
-        authority.authorize_next_response(None)?;
-        let move_ordinal = u32::try_from(move_index)
-            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
-        let steps = authority
-            .ingest_verifier_message(move_ordinal, message)?
-            .to_vec();
-        if move_index + 1 == completed_messages.len() {
-            selected_steps = steps;
-        } else if !steps.is_empty() {
-            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
-        }
-    }
+    let selected_message_index = completed_messages.len() - 1;
+    let mut authority = replay_selected_compact_masking_prefix(
+        inputs,
+        coefficient_maps,
+        identity,
+        &completed_messages[..selected_message_index],
+    )?;
+    authority.authorize_next_response(None)?;
+    let selected_steps = authority
+        .ingest_verifier_message(
+            u32::try_from(selected_message_index)
+                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?,
+            &completed_messages[selected_message_index],
+        )?
+        .to_vec();
 
     let [source_query_step] = selected_steps.as_slice() else {
         return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
@@ -1281,11 +1281,21 @@ fn replay_selected_compact_masking_prefix<'contract>(
         authority.authorize_next_response(None)?;
         let move_ordinal = u32::try_from(move_index)
             .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
-        if !authority
+        let steps = authority
             .ingest_verifier_message(move_ordinal, message)?
-            .is_empty()
-        {
-            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+            .to_vec();
+        match steps.as_slice() {
+            [] => {}
+            // Source-query values were already bound to the retained oracle by
+            // their live opening gate. Their masking image has full row rank,
+            // so no value can constrain a later disclosure during replay.
+            [source_query_step]
+                if matches!(
+                    source_query_step.kind(),
+                    CompactMaskingDisclosureKind::SourceQueries { .. }
+                ) && source_query_step.conditional_rank()
+                    == source_query_step.output_coordinate_count() => {}
+            _ => return Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
         }
     }
     Ok(authority)
@@ -4759,7 +4769,7 @@ mod tests {
     }
 
     #[test]
-    fn live_masking_gate_covers_cfw_initial_whir_and_first_source_queries() {
+    fn live_masking_gate_replays_first_source_queries_before_the_second_whir_batch() {
         let (contract, maps) = selected();
         let inputs = contract.verifier_inputs();
         let mut messages = vec![
@@ -5191,6 +5201,47 @@ mod tests {
             ),
             Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
         );
+
+        let second_auxiliary_steps = authority
+            .authorize_next_response(None)
+            .expect("the second WHIR auxiliary response is authorized")
+            .to_vec();
+        let [second_auxiliary_step] = second_auxiliary_steps.as_slice() else {
+            panic!("the second WHIR response has one auxiliary masking view")
+        };
+        assert_eq!(
+            second_auxiliary_step.kind(),
+            CompactMaskingDisclosureKind::WhirSumcheckAuxiliary {
+                epoch: pre_challenge_epoch.epoch,
+                batch_ordinal: 1,
+            }
+        );
+        let second_auxiliary_request = authority
+            .prepare_coefficient_image(second_auxiliary_step, &[], None)
+            .expect("the second WHIR auxiliary image derives");
+        let second_auxiliary_independent_coordinates = (0..second_auxiliary_step
+            .conditional_rank())
+            .map(|coordinate_ordinal| CompactChallengeField::from_u64(1_201 + coordinate_ordinal))
+            .collect::<Vec<_>>();
+        let [second_whir_auxiliary_target] = authority
+            .execute_coefficient_image(
+                second_auxiliary_step,
+                &second_auxiliary_request,
+                &second_auxiliary_independent_coordinates,
+            )
+            .expect("the second WHIR auxiliary image executes")
+            .try_into()
+            .expect("the second WHIR auxiliary view has one coordinate");
+        verify_selected_compact_whir_sumcheck_auxiliary_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &messages,
+            pre_challenge_epoch.epoch,
+            1,
+            second_whir_auxiliary_target,
+        )
+        .expect("the second auxiliary gate replays the full-rank source-query disclosure");
     }
 
     #[test]

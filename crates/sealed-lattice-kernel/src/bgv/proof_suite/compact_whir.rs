@@ -13,7 +13,7 @@ use core::mem::size_of;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DFTSmallBatch;
-use p3_field::{Field, PrimeCharacteristicRing, PrimeField64};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField};
 use p3_goldilocks::Goldilocks;
 use p3_matrix::{Matrix, dense::DenseMatrix};
 use p3_merkle_tree::MerkleTreeMmcs;
@@ -160,14 +160,14 @@ pub(crate) struct CompactWhirPreChallengeRelationPreparation {
     phase: CompactWhirPreChallengeRelationPreparationPhase,
 }
 
-/// Opaque, checked relation handed to the first masked WHIR sumcheck.
-pub(crate) struct CompactWhirPreChallengeRelation {
+/// Opaque, checked relation handed to one masked WHIR sumcheck batch.
+pub(crate) struct CompactWhirMaskedSumcheckRelation {
     source_evaluations: Vec<CompactChallengeField>,
     source_covector: Vec<CompactChallengeField>,
     source_claim: CompactChallengeField,
-    masked_target: CompactChallengeField,
-    pre_challenge_mask: CompactChallengeField,
-    opening_batching_challenge: CompactChallengeField,
+    target: CompactChallengeField,
+    preceding_mask_claim: CompactChallengeField,
+    input_binding_challenge: CompactChallengeField,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -268,7 +268,55 @@ pub(crate) struct CompactWhirCodeSwitchState {
     expected_query_count: usize,
     query_positions: Option<Vec<usize>>,
     combination_challenge: Option<CompactChallengeField>,
+    folded_source_openings: Option<Vec<CompactChallengeField>>,
     phase: CompactWhirCodeSwitchPhase,
+}
+
+pub(crate) struct CompactWhirBoundCodeSwitchInputs {
+    source_evaluations: Vec<CompactChallengeField>,
+    switch_mask_message: Vec<CompactChallengeField>,
+    query_positions: Vec<usize>,
+    folded_source_openings: Vec<CompactChallengeField>,
+    combination_challenge: CompactChallengeField,
+    previous_source_height: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompactWhirCodeSwitchRelationPreparationPhase {
+    AccumulatingQueryRelations,
+    Complete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirCodeSwitchRelationPreparationPoll {
+    QueryRelationStepCompleted {
+        processed_work_unit_count: u64,
+        relation_complete: bool,
+    },
+    Complete,
+}
+
+/// Pollable construction of the exact relation produced by one code switch.
+/// Every query contributes the same canonical Reed–Solomon power run to the
+/// source covector, switch-mask covector, and public target. Completion checks
+/// the resulting witness identity before exposing the next sumcheck relation.
+pub(crate) struct CompactWhirCodeSwitchRelationPreparation {
+    source_evaluations: Vec<CompactChallengeField>,
+    source_covector: Vec<CompactChallengeField>,
+    source_claim: CompactChallengeField,
+    preceding_mask_claim: CompactChallengeField,
+    target: CompactChallengeField,
+    switch_mask_message: Vec<CompactChallengeField>,
+    query_positions: Vec<usize>,
+    folded_source_openings: Vec<CompactChallengeField>,
+    combination_challenge: CompactChallengeField,
+    domain_generator: CompactChallengeField,
+    query_ordinal: usize,
+    next_query_coordinate_ordinal: usize,
+    query_coefficient: CompactChallengeField,
+    query_point: CompactChallengeField,
+    query_power: CompactChallengeField,
+    phase: CompactWhirCodeSwitchRelationPreparationPhase,
 }
 
 #[cfg(test)]
@@ -572,19 +620,19 @@ impl CompactWhirPreChallengeRelationPreparation {
         }
     }
 
-    pub(crate) fn finish(mut self) -> Result<CompactWhirPreChallengeRelation, CompactWhirError> {
+    pub(crate) fn finish(mut self) -> Result<CompactWhirMaskedSumcheckRelation, CompactWhirError> {
         if self.phase != CompactWhirPreChallengeRelationPreparationPhase::Complete
             || self.source_evaluations.len() != self.source_covector.len()
         {
             return Err(CompactWhirError::WrongProverPhase);
         }
-        Ok(CompactWhirPreChallengeRelation {
+        Ok(CompactWhirMaskedSumcheckRelation {
             source_evaluations: core::mem::take(&mut self.source_evaluations),
             source_covector: core::mem::take(&mut self.source_covector),
             source_claim: self.accumulated_source_claim,
-            masked_target: self.masked_pre_challenge_evaluation,
-            pre_challenge_mask: self.pre_challenge_mask,
-            opening_batching_challenge: self.opening_batching_challenge,
+            target: self.masked_pre_challenge_evaluation,
+            preceding_mask_claim: self.pre_challenge_mask,
+            input_binding_challenge: self.opening_batching_challenge,
         })
     }
 }
@@ -601,35 +649,44 @@ impl Drop for CompactWhirPreChallengeRelationPreparation {
     }
 }
 
-impl Drop for CompactWhirPreChallengeRelation {
+impl Drop for CompactWhirMaskedSumcheckRelation {
     fn drop(&mut self) {
         self.source_evaluations.fill(CompactChallengeField::ZERO);
         self.source_claim = CompactChallengeField::ZERO;
-        self.pre_challenge_mask = CompactChallengeField::ZERO;
+        self.preceding_mask_claim = CompactChallengeField::ZERO;
     }
 }
 
 impl CompactWhirInitialSumcheckState {
     pub(crate) fn new<R: Rng>(
-        mut relation: CompactWhirPreChallengeRelation,
+        relation: CompactWhirMaskedSumcheckRelation,
         configuration: &CompactWhirConfiguration,
+        batch_ordinal: usize,
         mask_group_contract: CompactWhirMaskGroupContract,
         random_source: &mut R,
     ) -> Result<Self, CompactWhirError> {
-        let folding_factor = configuration.round_folding_factor(0);
+        let folding_factor = configuration.round_folding_factor(batch_ordinal);
+        Self::new_with_folding_factor(relation, folding_factor, mask_group_contract, random_source)
+    }
+
+    fn new_with_folding_factor<R: Rng>(
+        mut relation: CompactWhirMaskedSumcheckRelation,
+        folding_factor: usize,
+        mask_group_contract: CompactWhirMaskGroupContract,
+        random_source: &mut R,
+    ) -> Result<Self, CompactWhirError> {
         let mask_group_shape = compact_whir_mask_group_shape(mask_group_contract)?;
         if relation.source_evaluations.len() != relation.source_covector.len()
             || relation.source_evaluations.is_empty()
             || !relation.source_evaluations.len().is_power_of_two()
-            || relation.source_evaluations.len().ilog2() as usize != configuration.num_variables
             || folding_factor == 0
-            || folding_factor > configuration.num_variables
+            || folding_factor > relation.source_evaluations.len().ilog2() as usize
             || mask_group_shape.width != folding_factor
             || mask_group_shape.shape.message_len != COMPACT_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH
         {
             return Err(CompactWhirError::InvalidRelation);
         }
-        if relation.source_claim + relation.pre_challenge_mask != relation.masked_target {
+        if relation.source_claim + relation.preceding_mask_claim != relation.target {
             return Err(CompactWhirError::InvalidRelation);
         }
 
@@ -679,14 +736,14 @@ impl CompactWhirInitialSumcheckState {
             source_evaluations: core::mem::take(&mut relation.source_evaluations),
             source_covector: core::mem::take(&mut relation.source_covector),
             source_claim: relation.source_claim,
-            masked_target: relation.masked_target,
-            opening_batching_challenge: relation.opening_batching_challenge,
+            masked_target: relation.target,
+            opening_batching_challenge: relation.input_binding_challenge,
             sumcheck_mask_messages,
             sumcheck_mask_encoding_randomness,
             sumcheck_mask_oracle,
             auxiliary_target,
             remaining_mask_endpoint_sum,
-            preceding_mask_carry: relation.pre_challenge_mask,
+            preceding_mask_carry: relation.preceding_mask_claim,
             combination_challenge: None,
             round_challenges: Vec::new(),
             past_mask_evaluations: Vec::new(),
@@ -952,6 +1009,15 @@ impl CompactWhirInitialSumcheckState {
         Ok(&self.source_covector)
     }
 
+    pub(crate) fn take_residual_covector(
+        &mut self,
+    ) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
+        if !self.is_complete() || self.source_covector.is_empty() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        Ok(core::mem::take(&mut self.source_covector))
+    }
+
     pub(crate) fn residual_source_claim(&self) -> Result<CompactChallengeField, CompactWhirError> {
         if !self.is_complete() {
             return Err(CompactWhirError::WrongProverPhase);
@@ -969,6 +1035,19 @@ impl CompactWhirInitialSumcheckState {
             .combination_challenge
             .ok_or(CompactWhirError::WrongProverPhase)?;
         Ok(combination_challenge * self.preceding_mask_carry)
+    }
+
+    pub(crate) fn residual_mask_claim(&self) -> Result<CompactChallengeField, CompactWhirError> {
+        Ok(self.residual_preceding_mask_claim()?
+            + self
+                .past_mask_evaluations
+                .iter()
+                .copied()
+                .sum::<CompactChallengeField>())
+    }
+
+    pub(crate) fn residual_target(&self) -> Result<CompactChallengeField, CompactWhirError> {
+        Ok(self.residual_source_claim()? + self.residual_mask_claim()?)
     }
 
     pub(crate) fn round_challenges(&self) -> &[CompactChallengeField] {
@@ -1157,6 +1236,7 @@ impl CompactWhirCodeSwitchState {
             expected_query_count,
             query_positions: None,
             combination_challenge: None,
+            folded_source_openings: None,
             phase: CompactWhirCodeSwitchPhase::FoldingPreviousRandomness,
         })
     }
@@ -1270,16 +1350,16 @@ impl CompactWhirCodeSwitchState {
             .ok_or(CompactWhirError::WrongProverPhase)
     }
 
-    pub(crate) fn folded_previous_randomness(
-        &self,
-    ) -> Result<&[CompactChallengeField], CompactWhirError> {
+    #[cfg(test)]
+    fn folded_previous_randomness(&self) -> Result<&[CompactChallengeField], CompactWhirError> {
         if self.phase != CompactWhirCodeSwitchPhase::Ready {
             return Err(CompactWhirError::WrongProverPhase);
         }
         Ok(&self.folded_previous_randomness)
     }
 
-    pub(crate) fn switch_mask_encoding_randomness(&self) -> &[CompactChallengeField] {
+    #[cfg(test)]
+    fn switch_mask_encoding_randomness(&self) -> &[CompactChallengeField] {
         &self.switch_mask_encoding_randomness
     }
 
@@ -1287,11 +1367,14 @@ impl CompactWhirCodeSwitchState {
         &mut self,
         query_positions: &[u64],
         combination_challenge: CompactChallengeField,
+        folded_source_openings: Vec<CompactChallengeField>,
     ) -> Result<(), CompactWhirError> {
         if self.phase != CompactWhirCodeSwitchPhase::Ready
             || self.query_positions.is_some()
             || self.combination_challenge.is_some()
+            || self.folded_source_openings.is_some()
             || query_positions.len() != self.expected_query_count
+            || folded_source_openings.len() != self.expected_query_count
             || query_positions.windows(2).any(|pair| pair[0] >= pair[1])
             || query_positions.last().is_none_or(|position| {
                 usize::try_from(*position)
@@ -1310,11 +1393,206 @@ impl CompactWhirCodeSwitchState {
         }
         self.query_positions = Some(positions);
         self.combination_challenge = Some(combination_challenge);
+        self.folded_source_openings = Some(folded_source_openings);
         Ok(())
     }
 
     pub(crate) fn verifier_move_is_bound(&self) -> bool {
-        self.query_positions.is_some() && self.combination_challenge.is_some()
+        self.query_positions.is_some()
+            && self.combination_challenge.is_some()
+            && self.folded_source_openings.is_some()
+    }
+
+    pub(crate) fn take_relation_inputs(
+        &mut self,
+    ) -> Result<CompactWhirBoundCodeSwitchInputs, CompactWhirError> {
+        if !self.verifier_move_is_bound() || self.source_evaluations.is_empty() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        Ok(CompactWhirBoundCodeSwitchInputs {
+            source_evaluations: core::mem::take(&mut self.source_evaluations),
+            switch_mask_message: self.folded_previous_randomness.clone(),
+            query_positions: self
+                .query_positions
+                .clone()
+                .ok_or(CompactWhirError::WrongProverPhase)?,
+            folded_source_openings: self
+                .folded_source_openings
+                .take()
+                .ok_or(CompactWhirError::WrongProverPhase)?,
+            combination_challenge: self
+                .combination_challenge
+                .ok_or(CompactWhirError::WrongProverPhase)?,
+            previous_source_height: self.previous_source_height,
+        })
+    }
+}
+
+impl Drop for CompactWhirBoundCodeSwitchInputs {
+    fn drop(&mut self) {
+        self.source_evaluations.fill(CompactChallengeField::ZERO);
+        self.switch_mask_message.fill(CompactChallengeField::ZERO);
+        self.folded_source_openings
+            .fill(CompactChallengeField::ZERO);
+        self.combination_challenge = CompactChallengeField::ZERO;
+    }
+}
+
+impl CompactWhirCodeSwitchRelationPreparation {
+    pub(crate) fn new(
+        mut code_switch: CompactWhirBoundCodeSwitchInputs,
+        source_covector: Vec<CompactChallengeField>,
+        source_claim: CompactChallengeField,
+        preceding_mask_claim: CompactChallengeField,
+        target: CompactChallengeField,
+    ) -> Result<Self, CompactWhirError> {
+        if code_switch.source_evaluations.is_empty()
+            || code_switch.source_evaluations.len() != source_covector.len()
+            || code_switch.switch_mask_message.is_empty()
+            || code_switch.query_positions.is_empty()
+            || code_switch.query_positions.len() != code_switch.folded_source_openings.len()
+            || code_switch.previous_source_height == 0
+            || !code_switch.previous_source_height.is_power_of_two()
+            || code_switch
+                .query_positions
+                .windows(2)
+                .any(|positions| positions[0] >= positions[1])
+            || code_switch
+                .query_positions
+                .last()
+                .is_none_or(|position| *position >= code_switch.previous_source_height)
+            || source_claim + preceding_mask_claim != target
+        {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+        let log_domain_size = usize::try_from(code_switch.previous_source_height.ilog2())
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        let domain_generator =
+            CompactChallengeField::from(Goldilocks::two_adic_generator(log_domain_size));
+        let first_query_position = u64::try_from(code_switch.query_positions[0])
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        let query_point = domain_generator.exp_u64(first_query_position);
+        let combination_challenge = code_switch.combination_challenge;
+        Ok(Self {
+            source_evaluations: core::mem::take(&mut code_switch.source_evaluations),
+            source_covector,
+            source_claim,
+            preceding_mask_claim,
+            target,
+            switch_mask_message: core::mem::take(&mut code_switch.switch_mask_message),
+            query_positions: core::mem::take(&mut code_switch.query_positions),
+            folded_source_openings: core::mem::take(&mut code_switch.folded_source_openings),
+            combination_challenge,
+            domain_generator,
+            query_ordinal: 0,
+            next_query_coordinate_ordinal: 0,
+            query_coefficient: combination_challenge,
+            query_point,
+            query_power: CompactChallengeField::ONE,
+            phase: CompactWhirCodeSwitchRelationPreparationPhase::AccumulatingQueryRelations,
+        })
+    }
+
+    pub(crate) fn poll(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactWhirCodeSwitchRelationPreparationPoll, CompactWhirError> {
+        let maximum_work_unit_count = usize::try_from(maximum_work_unit_count)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        if maximum_work_unit_count == 0 {
+            return Err(CompactWhirError::InvalidWorkBudget);
+        }
+        if self.phase == CompactWhirCodeSwitchRelationPreparationPhase::Complete {
+            return Ok(CompactWhirCodeSwitchRelationPreparationPoll::Complete);
+        }
+        let coordinate_count_per_query = self
+            .source_evaluations
+            .len()
+            .checked_add(self.switch_mask_message.len())
+            .ok_or(CompactWhirError::CountOverflow)?;
+        let mut processed_work_unit_count = 0_usize;
+        while processed_work_unit_count < maximum_work_unit_count
+            && self.query_ordinal < self.query_positions.len()
+        {
+            let coordinate_ordinal = self.next_query_coordinate_ordinal;
+            let weighted_power = self.query_coefficient * self.query_power;
+            if coordinate_ordinal < self.source_evaluations.len() {
+                self.source_covector[coordinate_ordinal] += weighted_power;
+                self.source_claim += weighted_power * self.source_evaluations[coordinate_ordinal];
+            } else {
+                let mask_coordinate_ordinal = coordinate_ordinal - self.source_evaluations.len();
+                self.preceding_mask_claim +=
+                    weighted_power * self.switch_mask_message[mask_coordinate_ordinal];
+            }
+            self.query_power *= self.query_point;
+            self.next_query_coordinate_ordinal += 1;
+            processed_work_unit_count += 1;
+
+            if self.next_query_coordinate_ordinal == coordinate_count_per_query {
+                self.target +=
+                    self.query_coefficient * self.folded_source_openings[self.query_ordinal];
+                self.query_ordinal += 1;
+                self.next_query_coordinate_ordinal = 0;
+                self.query_coefficient *= self.combination_challenge;
+                self.query_power = CompactChallengeField::ONE;
+                if self.query_ordinal < self.query_positions.len() {
+                    self.query_point = self.domain_generator.exp_u64(
+                        u64::try_from(self.query_positions[self.query_ordinal])
+                            .map_err(|_| CompactWhirError::CountOverflow)?,
+                    );
+                }
+            }
+        }
+        let relation_complete = self.query_ordinal == self.query_positions.len();
+        if relation_complete {
+            if self.next_query_coordinate_ordinal != 0
+                || self.source_claim + self.preceding_mask_claim != self.target
+            {
+                return Err(CompactWhirError::InvalidRelation);
+            }
+            self.phase = CompactWhirCodeSwitchRelationPreparationPhase::Complete;
+        }
+        Ok(
+            CompactWhirCodeSwitchRelationPreparationPoll::QueryRelationStepCompleted {
+                processed_work_unit_count: u64::try_from(processed_work_unit_count)
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
+                relation_complete,
+            },
+        )
+    }
+
+    pub(crate) fn finish(mut self) -> Result<CompactWhirMaskedSumcheckRelation, CompactWhirError> {
+        if self.phase != CompactWhirCodeSwitchRelationPreparationPhase::Complete
+            || self.source_evaluations.len() != self.source_covector.len()
+            || self.source_claim + self.preceding_mask_claim != self.target
+        {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        Ok(CompactWhirMaskedSumcheckRelation {
+            source_evaluations: core::mem::take(&mut self.source_evaluations),
+            source_covector: core::mem::take(&mut self.source_covector),
+            source_claim: self.source_claim,
+            target: self.target,
+            preceding_mask_claim: self.preceding_mask_claim,
+            input_binding_challenge: self.combination_challenge,
+        })
+    }
+}
+
+impl Drop for CompactWhirCodeSwitchRelationPreparation {
+    fn drop(&mut self) {
+        self.source_evaluations.fill(CompactChallengeField::ZERO);
+        self.source_covector.fill(CompactChallengeField::ZERO);
+        self.source_claim = CompactChallengeField::ZERO;
+        self.preceding_mask_claim = CompactChallengeField::ZERO;
+        self.target = CompactChallengeField::ZERO;
+        self.switch_mask_message.fill(CompactChallengeField::ZERO);
+        self.folded_source_openings
+            .fill(CompactChallengeField::ZERO);
+        self.combination_challenge = CompactChallengeField::ZERO;
+        self.query_coefficient = CompactChallengeField::ZERO;
+        self.query_point = CompactChallengeField::ZERO;
+        self.query_power = CompactChallengeField::ZERO;
     }
 }
 
@@ -1328,6 +1606,46 @@ impl Drop for CompactWhirCodeSwitchState {
         self.switch_mask_encoding_randomness
             .fill(CompactChallengeField::ZERO);
     }
+}
+
+pub(crate) fn fold_compact_whir_query_major_source_openings(
+    query_outputs: &[CompactChallengeField],
+    query_count: usize,
+    folding_challenges: &[CompactChallengeField],
+) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
+    let opening_width = 1_usize
+        .checked_shl(
+            u32::try_from(folding_challenges.len()).map_err(|_| CompactWhirError::CountOverflow)?,
+        )
+        .ok_or(CompactWhirError::CountOverflow)?;
+    if query_count == 0
+        || opening_width == 0
+        || query_outputs.len()
+            != query_count
+                .checked_mul(opening_width)
+                .ok_or(CompactWhirError::CountOverflow)?
+    {
+        return Err(CompactWhirError::InvalidRelation);
+    }
+    let folding_weights =
+        Poly::new_from_point(folding_challenges, CompactChallengeField::ONE).into_evals();
+    if folding_weights.len() != opening_width {
+        return Err(CompactWhirError::InvalidRelation);
+    }
+    let mut folded_openings = Vec::new();
+    folded_openings
+        .try_reserve_exact(query_count)
+        .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+    for row in query_outputs.chunks_exact(opening_width) {
+        folded_openings.push(
+            row.iter()
+                .copied()
+                .zip(&folding_weights)
+                .map(|(value, weight)| value * *weight)
+                .sum(),
+        );
+    }
+    Ok(folded_openings)
 }
 
 fn mask_endpoint_sum(message: &[CompactChallengeField]) -> CompactChallengeField {
@@ -2271,7 +2589,7 @@ mod tests {
         pre_challenge_mask: CompactChallengeField,
         main_mask: CompactChallengeField,
         opening_batching_challenge: CompactChallengeField,
-    ) -> CompactWhirPreChallengeRelation {
+    ) -> CompactWhirMaskedSumcheckRelation {
         let equality_covector =
             Poly::new_from_point(&equality_point, CompactChallengeField::ONE).into_evals();
         let source_claim = source
@@ -2431,10 +2749,7 @@ mod tests {
 
         assert_eq!(relation.source_evaluations, expected_source);
         assert_eq!(relation.source_covector, expected_covector);
-        assert_eq!(
-            relation.source_claim + pre_challenge_mask,
-            relation.masked_target
-        );
+        assert_eq!(relation.source_claim + pre_challenge_mask, relation.target);
 
         let mut invalid_preparation = CompactWhirPreChallengeRelationPreparation::new(
             vec![Goldilocks::ONE; 8],
@@ -2528,6 +2843,7 @@ mod tests {
         let mut state = CompactWhirInitialSumcheckState::new(
             relation,
             &configuration,
+            0,
             initial_sumcheck_mask_contract(&configuration),
             &mut random_source,
         )
@@ -3093,13 +3409,18 @@ mod tests {
         );
         assert_eq!(state.switch_mask_encoding_randomness().len(), 399);
         assert_eq!(
-            state.bind_verifier_move(&[0; 396], CompactChallengeField::from_u64(31)),
+            state.bind_verifier_move(
+                &[0; 396],
+                CompactChallengeField::from_u64(31),
+                vec![CompactChallengeField::ZERO; 396],
+            ),
             Err(CompactWhirError::InvalidRelation)
         );
         assert_eq!(
             state.bind_verifier_move(
                 &(0..395_u64).collect::<Vec<_>>(),
                 CompactChallengeField::from_u64(33),
+                vec![CompactChallengeField::ZERO; 395],
             ),
             Err(CompactWhirError::InvalidRelation)
         );
@@ -3109,6 +3430,7 @@ mod tests {
             state.bind_verifier_move(
                 &out_of_range_query_positions,
                 CompactChallengeField::from_u64(35),
+                vec![CompactChallengeField::ZERO; 396],
             ),
             Err(CompactWhirError::InvalidRelation)
         );
@@ -3116,11 +3438,166 @@ mod tests {
             .map(|ordinal| ordinal * 331)
             .collect::<Vec<_>>();
         state
-            .bind_verifier_move(&query_positions, CompactChallengeField::from_u64(37))
+            .bind_verifier_move(
+                &query_positions,
+                CompactChallengeField::from_u64(37),
+                vec![CompactChallengeField::ZERO; 396],
+            )
             .expect("the exact distinct query set and combination challenge bind");
         assert!(state.verifier_move_is_bound());
         assert_eq!(
-            state.bind_verifier_move(&query_positions, CompactChallengeField::from_u64(41)),
+            state.bind_verifier_move(
+                &query_positions,
+                CompactChallengeField::from_u64(41),
+                vec![CompactChallengeField::ZERO; 396],
+            ),
+            Err(CompactWhirError::InvalidRelation)
+        );
+    }
+
+    #[test]
+    fn code_switch_relation_preparation_matches_query_and_mask_power_runs() {
+        let source_evaluations = [3_u64, 5, 7, 11]
+            .into_iter()
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let initial_source_covector = [2_u64, 4, 6, 8]
+            .into_iter()
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let switch_mask_message = [13_u64, 17]
+            .into_iter()
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let source_claim = source_evaluations
+            .iter()
+            .copied()
+            .zip(&initial_source_covector)
+            .map(|(source, weight)| source * *weight)
+            .sum::<CompactChallengeField>();
+        let preceding_mask_claim = CompactChallengeField::from_u64(19);
+        let input_target = source_claim + preceding_mask_claim;
+        let query_positions = vec![1_usize, 5];
+        let domain_generator = CompactChallengeField::from(Goldilocks::two_adic_generator(3));
+        let query_points = query_positions
+            .iter()
+            .map(|position| domain_generator.exp_u64(*position as u64))
+            .collect::<Vec<_>>();
+        let folded_source_openings = query_points
+            .iter()
+            .map(|point| {
+                let mut power = CompactChallengeField::ONE;
+                let mut evaluation = CompactChallengeField::ZERO;
+                for source in &source_evaluations {
+                    evaluation += *source * power;
+                    power *= *point;
+                }
+                for mask in &switch_mask_message {
+                    evaluation += *mask * power;
+                    power *= *point;
+                }
+                evaluation
+            })
+            .collect::<Vec<_>>();
+        let combination_challenge = CompactChallengeField::from_u64(23);
+        let inputs = CompactWhirBoundCodeSwitchInputs {
+            source_evaluations: source_evaluations.clone(),
+            switch_mask_message: switch_mask_message.clone(),
+            query_positions: query_positions.clone(),
+            folded_source_openings: folded_source_openings.clone(),
+            combination_challenge,
+            previous_source_height: 8,
+        };
+        let mut preparation = CompactWhirCodeSwitchRelationPreparation::new(
+            inputs,
+            initial_source_covector.clone(),
+            source_claim,
+            preceding_mask_claim,
+            input_target,
+        )
+        .expect("the code-switch output relation starts");
+        assert_eq!(
+            preparation.poll(0),
+            Err(CompactWhirError::InvalidWorkBudget)
+        );
+        let work_budgets = [1_u64, 3, 7];
+        let mut poll_ordinal = 0_usize;
+        let mut processed_work_unit_count = 0_u64;
+        loop {
+            match preparation
+                .poll(work_budgets[poll_ordinal % work_budgets.len()])
+                .expect("the code-switch output relation advances")
+            {
+                CompactWhirCodeSwitchRelationPreparationPoll::QueryRelationStepCompleted {
+                    processed_work_unit_count: processed,
+                    ..
+                } => {
+                    assert!(processed > 0);
+                    processed_work_unit_count += processed;
+                }
+                CompactWhirCodeSwitchRelationPreparationPoll::Complete => break,
+            }
+            poll_ordinal += 1;
+        }
+        assert_eq!(processed_work_unit_count, 12);
+        let relation = preparation
+            .finish()
+            .expect("the exact code-switch output relation finishes");
+
+        let mut expected_source_covector = initial_source_covector;
+        let mut expected_source_claim = source_claim;
+        let mut expected_mask_claim = preceding_mask_claim;
+        let mut expected_target = input_target;
+        let mut query_coefficient = combination_challenge;
+        for (point, folded_opening) in query_points.iter().zip(&folded_source_openings) {
+            let mut power = CompactChallengeField::ONE;
+            for (source, destination) in
+                source_evaluations.iter().zip(&mut expected_source_covector)
+            {
+                let weighted_power = query_coefficient * power;
+                *destination += weighted_power;
+                expected_source_claim += weighted_power * *source;
+                power *= *point;
+            }
+            for mask in &switch_mask_message {
+                expected_mask_claim += query_coefficient * power * *mask;
+                power *= *point;
+            }
+            expected_target += query_coefficient * *folded_opening;
+            query_coefficient *= combination_challenge;
+        }
+        assert_eq!(relation.source_covector, expected_source_covector);
+        assert_eq!(relation.source_claim, expected_source_claim);
+        assert_eq!(relation.preceding_mask_claim, expected_mask_claim);
+        assert_eq!(relation.target, expected_target);
+        assert_eq!(
+            relation.source_claim + relation.preceding_mask_claim,
+            relation.target
+        );
+
+        let mut wrong_openings = folded_source_openings;
+        wrong_openings[1] += CompactChallengeField::ONE;
+        let hostile_inputs = CompactWhirBoundCodeSwitchInputs {
+            source_evaluations,
+            switch_mask_message,
+            query_positions,
+            folded_source_openings: wrong_openings,
+            combination_challenge,
+            previous_source_height: 8,
+        };
+        let mut hostile = CompactWhirCodeSwitchRelationPreparation::new(
+            hostile_inputs,
+            [2_u64, 4, 6, 8]
+                .into_iter()
+                .map(CompactChallengeField::from_u64)
+                .collect(),
+            source_claim,
+            preceding_mask_claim,
+            input_target,
+        )
+        .expect("the hostile opening has valid public geometry");
+        assert_eq!(
+            hostile.poll(u64::MAX),
             Err(CompactWhirError::InvalidRelation)
         );
     }

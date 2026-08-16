@@ -142,9 +142,20 @@ and target release remain incomplete or internal.
   generation routes all 25,344 query-major source coordinates through the
   independently compiled full-rank conditional-image gate. It then supplies
   the 396 original-source leaves, binds the query set and combination challenge
-  once, and publishes the authenticated response checkpoint. This is the first
-  masked-sumcheck batch
-  and first code-switch boundary, not a complete WHIR epoch or proof.
+  once, and publishes the authenticated response checkpoint. The owner then
+  constructs the exact code-switch output relation in bounded polls from the
+  retained next-source values, residual covector and claims, switch-mask
+  message, 396 verifier-selected positions, and folded source openings. It
+  requires the accumulated source and preceding-mask claims to equal the
+  accumulated opening target before starting the next batch. The role-nine
+  verifier move is consumed through its exact mixed-output shape: one extension
+  challenge, one base-field challenge, and one distinct-query group. The second
+  masked sumcheck binds that extension challenge, enforces the independently
+  compiled conditional-image gate for its auxiliary and all four round wires,
+  publishes an authenticated checkpoint for every response, and finishes with
+  4,104 response leaves, eight compiler-required round-wire openings, and a
+  2,048-element residual source and covector. This is two masked-sumcheck
+  batches and one code switch, not a complete WHIR epoch or proof.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -153,7 +164,7 @@ and target release remain incomplete or internal.
   the eager canonical WHIR encoder across stripe boundaries and refuses
   duplicate, reordered, out-of-range, premature, and repeated replay requests.
   Guarded native development coverage exercises this selected-size path
-  through the first pre-challenge WHIR code switch under the repository
+  through the second pre-challenge masked-sumcheck batch under the repository
   memory ceiling. Its CFW phase reconciles 4,926 external-storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   CFW storage bytes.
@@ -161,7 +172,7 @@ and target release remain incomplete or internal.
   constitute scalar-WASM or browser evidence. The owner does not yet cover a
   selected-size main-source stripe opening replay, authenticated mid-stripe
   restart, cold restoration through the common worker, JavaScript and browser-
-  process overlap, the remaining three pre-challenge masked-sumcheck batches
+  process overlap, the remaining two pre-challenge masked-sumcheck batches
   and two code switches, the base opening, a complete emitted WHIR epoch, or a
   proof. The test-only production-shaped small-chain owner uses the response
   state, but the WHIR family material provider, production worker adapter, WHIR
@@ -187,8 +198,10 @@ and target release remain incomplete or internal.
   round, the initial pre-challenge WHIR auxiliary, and all six initial WHIR
   round disclosures now pass their conditional-image gates. The first source-
   query disclosure also passes its verifier-prefix-derived full-rank image gate
-  before any leaf is released. The fixed KMAC256/SHAKE256 joint assumption
-  remains external. The subsequent WHIR sequential images, both live role-18
+  before any leaf is released. The second batch replays that exact full-rank
+  disclosure prefix before enforcing its auxiliary and four round-wire image
+  gates. The fixed KMAC256/SHAKE256 joint assumption remains external. The
+  subsequent WHIR sequential images, both live role-18
   carried covectors, and the terminal whole-construction simulator are not
   connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
@@ -212,8 +225,8 @@ ceremony or supported-phone qualification.
   exists. The release transport ABI checks canonical structure, transcript
   chronology, query derivation, and Merkle openings only.
 - The compact successor still requires every remaining WHIR sequential
-  conditional-image check after the first pre-challenge code switch, both live
-  role-18 masking authorities, a construction-level statistical-HVZK argument
+  conditional-image check after the second pre-challenge masked-sumcheck batch,
+  both live role-18 masking authorities, a construction-level statistical-HVZK argument
   bound to the complete emitted proof, composition of the live KMAC bridge with
   its explicit quantum-PRF and joint fixed-Keccak assumptions, and the
   applicable SHAKE256 fixed-tape and QROM theorem chain.
