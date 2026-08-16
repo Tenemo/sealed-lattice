@@ -4574,8 +4574,7 @@ mod tests {
         .expect("production row source has compact CFW geometry");
         let compact_mask_material = prepared_main_epoch
             .cfw_mask_material()
-            .expect("the post-lookup response retains its CFW masks")
-            .clone();
+            .expect("the post-lookup response retains its CFW masks");
         assert_eq!(
             compact_mask_material
                 .auxiliary_target(compact_geometry)
@@ -4620,6 +4619,10 @@ mod tests {
                 CompactPublicKeyMainEpochPoll::ResponseArithmeticStepCompleted
                 | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
                 CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady => break,
+                CompactPublicKeyMainEpochPoll::CrossEpochEvaluationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady => {
+                    panic!("cross-epoch work cannot precede the post-lookup checkpoint")
+                }
             }
         }
         assert_eq!(
@@ -4632,8 +4635,9 @@ mod tests {
         let post_lookup_checkpoint = prepared_main_epoch
             .checkpoint_boundary()
             .expect("the post-lookup response exposes its authenticated checkpoint boundary");
+        let post_lookup_safe_boundary_ordinal = post_lookup_checkpoint.safe_boundary_ordinal();
         assert_eq!(
-            post_lookup_checkpoint.safe_boundary_ordinal(),
+            post_lookup_safe_boundary_ordinal,
             pre_challenge_checkpoint.safe_boundary_ordinal() + 1
         );
         let completed_transcript_response_count =
@@ -4687,52 +4691,127 @@ mod tests {
         );
 
         let phase_started_at = Instant::now();
-        println!("compact public-key focused owner phase: advance one compact CFW poll");
-        let row_source = prepared_main_epoch.family_material().row_source();
-        let equality_point = (0..compact_geometry.sumcheck_round_count())
-            .map(|round_ordinal| {
-                let round_ordinal =
-                    u64::try_from(round_ordinal).expect("CFW round ordinal fits u64");
-                compact_challenge_from_production(
-                    ProofChallengeExtensionElement::from_canonical_coordinates([
-                        20_000 + round_ordinal,
-                        21_000 + round_ordinal,
-                        22_000 + round_ordinal,
-                        23_000 + round_ordinal,
-                        24_000 + round_ordinal,
-                    ])
-                    .expect("equality coordinate is canonical"),
-                )
-            })
-            .collect::<Vec<_>>();
-        {
-            let counting_row_source = CountingCompactCfwExternalRowSource {
-                source: row_source,
-                evaluated_row_count: Cell::new(0),
-            };
-            let mut external_prover = CompactCfwExternalProverState::prepare(
-                &counting_row_source,
-                compact_mask_material,
-                compact_challenge_from_production(
-                    ProofChallengeExtensionElement::from_canonical_coordinates([
-                        31, 37, 41, 43, 47,
-                    ])
-                    .expect("constraint challenge is canonical"),
-                ),
-                equality_point,
-            )
-            .expect("production row source connects to CFW");
-            let mut storage = TestStorage::default();
-            assert_eq!(
-                external_prover
-                    .advance_round_polynomial(&counting_row_source, &mut storage)
-                    .expect("one production CFW poll advances"),
-                None
-            );
-            assert_eq!(counting_row_source.evaluated_row_count.get(), 16_384);
+        println!("compact public-key focused owner phase: commit cross-epoch response");
+        let cross_epoch_response_geometry = &selected_compact_contract
+            .verifier_inputs()
+            .response_merkle_geometries[2];
+        assert_eq!(cross_epoch_response_geometry.response_ordinal(), 2);
+        let expected_cross_epoch_response_leaf_count =
+            cross_epoch_response_geometry.merkle_leaf_count();
+        let mut supplied_cross_epoch_response_leaf_count = 0_u64;
+        let mut supplied_cross_epoch_opened_leaf_count = 0_u64;
+        let mut cross_epoch_evaluation_poll_count = 0_u64;
+        let mut evaluated_cross_epoch_source_element_count = 0_u64;
+        loop {
+            match prepared_main_epoch
+                .poll_post_lookup_response(8_192, &mut response_storage)
+                .expect("the owned cross-epoch response advances")
+            {
+                CompactPublicKeyMainEpochPoll::CrossEpochEvaluationStepCompleted {
+                    processed_work_unit_count,
+                    evaluated_source_element_count,
+                } => {
+                    assert!((1..=8_192).contains(&processed_work_unit_count));
+                    assert!(evaluated_source_element_count <= processed_work_unit_count);
+                    cross_epoch_evaluation_poll_count += 1;
+                    evaluated_cross_epoch_source_element_count += evaluated_source_element_count;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseLeafSupplied { leaf_ordinal } => {
+                    assert_eq!(leaf_ordinal, supplied_cross_epoch_response_leaf_count);
+                    supplied_cross_epoch_response_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::OpenedResponseLeafSupplied {
+                    response_ordinal,
+                    leaf_ordinal,
+                } => {
+                    assert!(response_ordinal <= 2);
+                    assert!(
+                        leaf_ordinal
+                            < selected_compact_contract
+                                .verifier_inputs()
+                                .response_merkle_geometries[usize::try_from(response_ordinal)
+                                .expect("response ordinal fits usize")]
+                            .merkle_leaf_count()
+                    );
+                    supplied_cross_epoch_opened_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseArithmeticStepCompleted
+                | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
+                CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady => break,
+                CompactPublicKeyMainEpochPoll::MainSourceArithmeticStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady => {
+                    panic!("post-lookup work cannot recur during the cross-epoch response")
+                }
+            }
         }
+        assert_eq!(
+            supplied_cross_epoch_response_leaf_count,
+            expected_cross_epoch_response_leaf_count
+        );
+        assert_eq!(
+            supplied_cross_epoch_opened_leaf_count,
+            expected_cross_epoch_response_leaf_count
+        );
+        assert!(cross_epoch_evaluation_poll_count > 0);
+        assert_eq!(
+            evaluated_cross_epoch_source_element_count,
+            prepared_main_epoch
+                .family_material()
+                .relation()
+                .cross_epoch_copy_geometry()
+                .expect("cross-epoch copy geometry derives")
+                .copied_element_count()
+        );
+        let [masked_pre_challenge, masked_main, mask_difference] = prepared_main_epoch
+            .cross_epoch_disclosed_values()
+            .expect("the exact masked cross-epoch response is retained");
+        assert_eq!(
+            masked_pre_challenge - masked_main - mask_difference,
+            CompactChallengeField::ZERO
+        );
+        assert_eq!(
+            prepared_main_epoch
+                .cfw_prover_auxiliary_target()
+                .expect("the verifier-derived CFW prover is initialized"),
+            prepared_main_epoch
+                .cfw_auxiliary_target()
+                .expect("the committed CFW auxiliary target is retained")
+        );
+        let cross_epoch_checkpoint = prepared_main_epoch
+            .checkpoint_boundary()
+            .expect("the cross-epoch response exposes its authenticated checkpoint boundary");
+        assert_eq!(
+            cross_epoch_checkpoint.safe_boundary_ordinal(),
+            post_lookup_safe_boundary_ordinal + 1
+        );
+        assert_eq!(
+            u32::from_le_bytes(cross_epoch_checkpoint.position()[8..12].try_into().unwrap()),
+            3
+        );
         println!(
-            "compact public-key focused owner phase complete: advance one compact CFW poll elapsed_milliseconds={}",
+            "compact public-key focused owner phase complete: commit cross-epoch response elapsed_milliseconds={} response_leaf_count={} evaluation_poll_count={} evaluated_source_element_count={} maximum_external_storage_bytes={} retained_external_storage_bytes={} retained_secret_object_count={}",
+            phase_started_at.elapsed().as_millis(),
+            supplied_cross_epoch_response_leaf_count,
+            cross_epoch_evaluation_poll_count,
+            evaluated_cross_epoch_source_element_count,
+            response_storage.maximum_declared_byte_length(),
+            response_storage.committed_declared_byte_length(),
+            response_storage.retained_secret_object_count(),
+        );
+
+        let phase_started_at = Instant::now();
+        println!(
+            "compact public-key focused owner phase: advance one verifier-bound compact CFW poll"
+        );
+        let mut cfw_storage = TestStorage::default();
+        assert_eq!(
+            prepared_main_epoch
+                .advance_current_cfw_round_polynomial(&mut cfw_storage)
+                .expect("one verifier-bound production CFW poll advances"),
+            None
+        );
+        println!(
+            "compact public-key focused owner phase complete: advance one verifier-bound compact CFW poll elapsed_milliseconds={}",
             phase_started_at.elapsed().as_millis()
         );
         prepared_main_epoch

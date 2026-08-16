@@ -1064,6 +1064,214 @@ impl CompactCfwMaskedCrossEpochClaims {
             mask_difference,
         }
     }
+
+    pub(crate) fn from_copied_source_evaluation(
+        point: Vec<CompactChallengeField>,
+        copied_main_source_element_count: usize,
+        copied_source_evaluation: CompactChallengeField,
+        pre_challenge_mask: CompactChallengeField,
+        main_mask: CompactChallengeField,
+    ) -> Result<Self, CompactCfwError> {
+        if point.is_empty() || copied_main_source_element_count == 0 {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        Ok(Self::new(
+            point,
+            copied_main_source_element_count,
+            copied_source_evaluation + pre_challenge_mask,
+            copied_source_evaluation + main_mask,
+            pre_challenge_mask - main_mask,
+        ))
+    }
+
+    pub(crate) const fn disclosed_values(&self) -> [CompactChallengeField; 3] {
+        [
+            self.masked_pre_challenge_evaluation,
+            self.masked_main_evaluation,
+            self.mask_difference,
+        ]
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CompactCfwPrefixEvaluationNode {
+    coordinate_ordinal: usize,
+    first_leaf_ordinal: usize,
+    accumulated_weight: CompactChallengeField,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCfwPrefixEvaluationProgress {
+    processed_work_unit_count: u64,
+    evaluated_source_element_count: u64,
+}
+
+impl CompactCfwPrefixEvaluationProgress {
+    pub(crate) const fn processed_work_unit_count(self) -> u64 {
+        self.processed_work_unit_count
+    }
+
+    pub(crate) const fn evaluated_source_element_count(self) -> u64 {
+        self.evaluated_source_element_count
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CompactCfwPrefixEvaluationError<SourceError> {
+    Cfw(CompactCfwError),
+    Source(SourceError),
+}
+
+impl<SourceError> From<CompactCfwError> for CompactCfwPrefixEvaluationError<SourceError> {
+    fn from(error: CompactCfwError) -> Self {
+        Self::Cfw(error)
+    }
+}
+
+/// Bounded-memory evaluation of the multilinear equality covector over the
+/// copied prefix shared by the pre-challenge and main sources.
+///
+/// The depth-first traversal follows the same most-significant-coordinate
+/// ordering as the CFW verifier coefficient map. Subtrees beyond the exact
+/// copied prefix are skipped without materializing the full covector.
+pub(crate) struct CompactCfwPrefixEvaluationState {
+    point: Box<[CompactChallengeField]>,
+    copied_source_element_count: usize,
+    pending_nodes: Vec<CompactCfwPrefixEvaluationNode>,
+    accumulated_evaluation: CompactChallengeField,
+    evaluated_source_element_count: usize,
+    complete: bool,
+}
+
+impl CompactCfwPrefixEvaluationState {
+    pub(crate) fn new(
+        point: &[CompactChallengeField],
+        copied_source_element_count: usize,
+    ) -> Result<Self, CompactCfwError> {
+        let point_domain_length = 1_usize
+            .checked_shl(u32::try_from(point.len()).map_err(|_| CompactCfwError::CountOverflow)?)
+            .ok_or(CompactCfwError::CountOverflow)?;
+        if point.is_empty()
+            || copied_source_element_count == 0
+            || copied_source_element_count > point_domain_length
+        {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        let maximum_pending_node_count = point
+            .len()
+            .checked_add(1)
+            .ok_or(CompactCfwError::CountOverflow)?;
+        let mut pending_nodes = Vec::new();
+        pending_nodes
+            .try_reserve_exact(maximum_pending_node_count)
+            .map_err(|_| CompactCfwError::AllocationLimitExceeded)?;
+        pending_nodes.push(CompactCfwPrefixEvaluationNode {
+            coordinate_ordinal: 0,
+            first_leaf_ordinal: 0,
+            accumulated_weight: CompactChallengeField::ONE,
+        });
+        Ok(Self {
+            point: point.into(),
+            copied_source_element_count,
+            pending_nodes,
+            accumulated_evaluation: CompactChallengeField::ZERO,
+            evaluated_source_element_count: 0,
+            complete: false,
+        })
+    }
+
+    pub(crate) fn poll<SourceError>(
+        &mut self,
+        maximum_work_unit_count: u64,
+        mut source_value: impl FnMut(u64) -> Result<CompactChallengeField, SourceError>,
+    ) -> Result<CompactCfwPrefixEvaluationProgress, CompactCfwPrefixEvaluationError<SourceError>>
+    {
+        let maximum_work_unit_count =
+            usize::try_from(maximum_work_unit_count).map_err(|_| CompactCfwError::CountOverflow)?;
+        if maximum_work_unit_count == 0 || self.complete || self.pending_nodes.is_empty() {
+            return Err(CompactCfwError::WrongProverPhase.into());
+        }
+        let mut processed_work_unit_count = 0_usize;
+        let initial_evaluated_source_element_count = self.evaluated_source_element_count;
+        while processed_work_unit_count < maximum_work_unit_count {
+            let Some(node) = self.pending_nodes.pop() else {
+                break;
+            };
+            processed_work_unit_count += 1;
+            if node.coordinate_ordinal == self.point.len() {
+                let value = source_value(
+                    u64::try_from(node.first_leaf_ordinal)
+                        .map_err(|_| CompactCfwError::CountOverflow)?,
+                )
+                .map_err(CompactCfwPrefixEvaluationError::Source)?;
+                self.accumulated_evaluation += node.accumulated_weight * value;
+                self.evaluated_source_element_count = self
+                    .evaluated_source_element_count
+                    .checked_add(1)
+                    .ok_or(CompactCfwError::CountOverflow)?;
+                continue;
+            }
+
+            let remaining_coordinate_count = self
+                .point
+                .len()
+                .checked_sub(node.coordinate_ordinal + 1)
+                .ok_or(CompactCfwError::CountOverflow)?;
+            let right_first_leaf_ordinal = node
+                .first_leaf_ordinal
+                .checked_add(
+                    1_usize
+                        .checked_shl(
+                            u32::try_from(remaining_coordinate_count)
+                                .map_err(|_| CompactCfwError::CountOverflow)?,
+                        )
+                        .ok_or(CompactCfwError::CountOverflow)?,
+                )
+                .ok_or(CompactCfwError::CountOverflow)?;
+            let coordinate = self.point[node.coordinate_ordinal];
+            let next_coordinate_ordinal = node
+                .coordinate_ordinal
+                .checked_add(1)
+                .ok_or(CompactCfwError::CountOverflow)?;
+            if right_first_leaf_ordinal < self.copied_source_element_count {
+                self.pending_nodes.push(CompactCfwPrefixEvaluationNode {
+                    coordinate_ordinal: next_coordinate_ordinal,
+                    first_leaf_ordinal: right_first_leaf_ordinal,
+                    accumulated_weight: node.accumulated_weight * coordinate,
+                });
+            }
+            self.pending_nodes.push(CompactCfwPrefixEvaluationNode {
+                coordinate_ordinal: next_coordinate_ordinal,
+                first_leaf_ordinal: node.first_leaf_ordinal,
+                accumulated_weight: node.accumulated_weight
+                    * (CompactChallengeField::ONE - coordinate),
+            });
+        }
+        if self.pending_nodes.is_empty() {
+            if self.evaluated_source_element_count != self.copied_source_element_count {
+                return Err(CompactCfwError::InvalidClaimInput.into());
+            }
+            self.complete = true;
+        }
+        Ok(CompactCfwPrefixEvaluationProgress {
+            processed_work_unit_count: u64::try_from(processed_work_unit_count)
+                .map_err(|_| CompactCfwError::CountOverflow)?,
+            evaluated_source_element_count: u64::try_from(
+                self.evaluated_source_element_count - initial_evaluated_source_element_count,
+            )
+            .map_err(|_| CompactCfwError::CountOverflow)?,
+        })
+    }
+
+    pub(crate) const fn is_complete(&self) -> bool {
+        self.complete
+    }
+
+    pub(crate) fn evaluation(&self) -> Result<CompactChallengeField, CompactCfwError> {
+        self.complete
+            .then_some(self.accumulated_evaluation)
+            .ok_or(CompactCfwError::WrongProverPhase)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2150,6 +2358,110 @@ mod tests {
     use crate::bgv::proof_suite::field::PROOF_BASE_FIELD_MODULUS;
     use p3_field::{BasedVectorSpace, Field};
     use p3_multilinear_util::poly::Poly;
+
+    #[test]
+    fn bounded_cross_epoch_prefix_evaluation_matches_dense_covectors() {
+        let points = [
+            vec![CompactChallengeField::ZERO],
+            vec![CompactChallengeField::ONE],
+            [3_u64, 5, 7, 11, 13]
+                .map(CompactChallengeField::from_u64)
+                .to_vec(),
+        ];
+        for point in points {
+            let dense_covector = Poly::new_from_point(&point, CompactChallengeField::ONE)
+                .as_slice()
+                .to_vec();
+            let source = (0..dense_covector.len())
+                .map(|source_ordinal| {
+                    CompactChallengeField::from_u64(
+                        u64::try_from(source_ordinal * 17 + 9).expect("small source value"),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let copied_element_counts = [1, dense_covector.len() / 2 + 1, dense_covector.len()];
+            for copied_source_element_count in copied_element_counts {
+                let expected = dense_covector
+                    .iter()
+                    .copied()
+                    .zip(source.iter().copied())
+                    .take(copied_source_element_count)
+                    .map(|(coefficient, value)| coefficient * value)
+                    .sum::<CompactChallengeField>();
+                for maximum_work_unit_count in [1_u64, 2, 7, 64] {
+                    let mut state =
+                        CompactCfwPrefixEvaluationState::new(&point, copied_source_element_count)
+                            .expect("valid copied prefix");
+                    let mut visited_source_ordinals = Vec::new();
+                    let mut processed_work_unit_count = 0_u64;
+                    let mut evaluated_source_element_count = 0_u64;
+                    while !state.is_complete() {
+                        let progress = state
+                            .poll(maximum_work_unit_count, |source_ordinal| {
+                                visited_source_ordinals.push(source_ordinal);
+                                Ok::<_, ()>(
+                                    source[usize::try_from(source_ordinal)
+                                        .expect("small source ordinal")],
+                                )
+                            })
+                            .expect("bounded evaluation advances");
+                        assert!(
+                            (1..=maximum_work_unit_count)
+                                .contains(&progress.processed_work_unit_count())
+                        );
+                        processed_work_unit_count += progress.processed_work_unit_count();
+                        evaluated_source_element_count += progress.evaluated_source_element_count();
+                    }
+                    assert!(processed_work_unit_count >= evaluated_source_element_count);
+                    assert_eq!(
+                        evaluated_source_element_count,
+                        u64::try_from(copied_source_element_count).unwrap()
+                    );
+                    assert_eq!(
+                        visited_source_ordinals,
+                        (0..u64::try_from(copied_source_element_count).unwrap())
+                            .collect::<Vec<_>>()
+                    );
+                    assert_eq!(state.evaluation().unwrap(), expected);
+                    assert_eq!(
+                        state.poll(1, |_| Ok::<_, ()>(CompactChallengeField::ZERO)),
+                        Err(CompactCfwPrefixEvaluationError::Cfw(
+                            CompactCfwError::WrongProverPhase
+                        ))
+                    );
+
+                    let claims = CompactCfwMaskedCrossEpochClaims::from_copied_source_evaluation(
+                        point.clone(),
+                        copied_source_element_count,
+                        expected,
+                        CompactChallengeField::from_u64(19),
+                        CompactChallengeField::from_u64(23),
+                    )
+                    .expect("masked claims derive");
+                    let [masked_pre_challenge, masked_main, mask_difference] =
+                        claims.disclosed_values();
+                    assert_eq!(
+                        masked_pre_challenge - masked_main - mask_difference,
+                        CompactChallengeField::ZERO
+                    );
+                }
+            }
+        }
+
+        assert!(CompactCfwPrefixEvaluationState::new(&[], 1).is_err());
+        assert!(CompactCfwPrefixEvaluationState::new(&[CompactChallengeField::ONE], 0).is_err());
+        assert!(CompactCfwPrefixEvaluationState::new(&[CompactChallengeField::ONE], 3).is_err());
+        assert!(
+            CompactCfwMaskedCrossEpochClaims::from_copied_source_evaluation(
+                Vec::new(),
+                1,
+                CompactChallengeField::ZERO,
+                CompactChallengeField::ZERO,
+                CompactChallengeField::ZERO,
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn projected_public_prefix_matches_dense_first_whir_fold() {
