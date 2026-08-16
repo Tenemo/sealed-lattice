@@ -133,6 +133,8 @@ impl CompactBaseFreshClaimCoefficients {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactMaskingEntropyTranscript {
+    cfw_constraint_combining_challenge: Option<CompactChallengeField>,
+    cfw_equality_point: Vec<CompactChallengeField>,
     cfw_round_challenges: Vec<CompactChallengeField>,
     sumcheck_challenges: Vec<CompactMaskingSumcheckChallenges>,
     query_sets: Vec<CompactMaskingQuerySet>,
@@ -142,12 +144,16 @@ pub(crate) struct CompactMaskingEntropyTranscript {
 impl CompactMaskingEntropyTranscript {
     #[cfg(test)]
     pub(crate) fn new(
+        cfw_constraint_combining_challenge: Option<CompactChallengeField>,
+        cfw_equality_point: Vec<CompactChallengeField>,
         cfw_round_challenges: Vec<CompactChallengeField>,
         sumcheck_challenges: Vec<CompactMaskingSumcheckChallenges>,
         query_sets: Vec<CompactMaskingQuerySet>,
         base_fresh_claims: Vec<CompactBaseFreshClaimCoefficients>,
     ) -> Self {
         Self {
+            cfw_constraint_combining_challenge,
+            cfw_equality_point,
             cfw_round_challenges,
             sumcheck_challenges,
             query_sets,
@@ -521,6 +527,8 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
             next_move_ordinal: 0,
             phase: CompactMaskingEntropyAuthorityPhase::AwaitingResponse,
             transcript: CompactMaskingEntropyTranscript {
+                cfw_constraint_combining_challenge: None,
+                cfw_equality_point: Vec::new(),
                 cfw_round_challenges: Vec::new(),
                 sumcheck_challenges: Vec::new(),
                 query_sets: Vec::new(),
@@ -598,11 +606,13 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
                 CompactConditionalImageRuntime::CrossEpochExplicitPoint
             }
             CompactMaskingDisclosureKind::CfwOuterAuxiliary
-            | CompactMaskingDisclosureKind::CfwOuterRound { .. }
-            | CompactMaskingDisclosureKind::CfwOuterEvaluations => {
+            | CompactMaskingDisclosureKind::CfwOuterRound { .. } => {
                 CompactConditionalImageRuntime::CfwOuter {
                     round_challenges: &self.transcript.cfw_round_challenges,
                 }
+            }
+            CompactMaskingDisclosureKind::CfwOuterEvaluations => {
+                return Err(CompactMaskingEntropyError::InvalidCoefficientMap);
             }
             CompactMaskingDisclosureKind::CfwInnerTerminal => {
                 CompactConditionalImageRuntime::CfwInnerTerminal {
@@ -659,6 +669,60 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
             .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientMap)
     }
 
+    /// Derives the final outer-evaluation image after the terminal matrix
+    /// values have been sampled. Both components belong to one atomic prover
+    /// response, so simulator order is terminal values first and outer
+    /// evaluations second even though canonical wire order is the reverse.
+    pub(crate) fn prepare_cfw_final_outer_image(
+        &self,
+        step: &CompactMaskingEntropyStep,
+        preceding_output_values: &[CompactChallengeField],
+        terminal_values: &[CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+    ) -> Result<CompactConditionalImageRequest, CompactMaskingEntropyError> {
+        let request = self.ideal_image_request(step)?;
+        let CompactMaskingDisclosureImage::CoefficientMapImage {
+            map_ordinal,
+            first_output_coordinate,
+        } = request.image
+        else {
+            return Err(CompactMaskingEntropyError::InvalidCoefficientMap);
+        };
+        if step.kind != CompactMaskingDisclosureKind::CfwOuterEvaluations {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+        let constraint_combining_challenge = self
+            .transcript
+            .cfw_constraint_combining_challenge
+            .ok_or(CompactMaskingEntropyError::MissingTranscriptInput)?;
+        let round_count = self
+            .inputs
+            .cfw_configuration
+            .geometry()
+            .sumcheck_round_count();
+        if self.transcript.cfw_equality_point.len() != round_count
+            || self.transcript.cfw_round_challenges.len() != round_count
+        {
+            return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+        }
+        self.coefficient_maps
+            .prepare_conditional_image(
+                map_ordinal,
+                step.ordinal,
+                first_output_coordinate,
+                step.output_coordinate_count,
+                request.independent_coordinate_count,
+                request.transcript_prefix_binding,
+                preceding_output_values,
+                CompactConditionalImageRuntime::CfwFinalOuterEvaluations {
+                    constraint_combining_challenge,
+                    equality_point: &self.transcript.cfw_equality_point,
+                    round_challenges: &self.transcript.cfw_round_challenges,
+                    terminal_values,
+                },
+            )
+            .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientMap)
+    }
+
     #[cfg(test)]
     pub(crate) fn execute_coefficient_image(
         &self,
@@ -692,6 +756,26 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
             preceding_output_values,
             retained_mirror_coefficients,
         )?;
+        self.coefficient_maps
+            .verify_conditional_image_output(
+                &coefficient_request,
+                step.ordinal,
+                image_request.transcript_prefix_binding,
+                candidate_output,
+            )
+            .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientMap)
+    }
+
+    pub(crate) fn verify_cfw_final_outer_output(
+        &self,
+        step: &CompactMaskingEntropyStep,
+        preceding_output_values: &[CompactChallengeField],
+        terminal_values: &[CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+        candidate_output: &[CompactChallengeField],
+    ) -> Result<(), CompactMaskingEntropyError> {
+        let image_request = self.ideal_image_request(step)?;
+        let coefficient_request =
+            self.prepare_cfw_final_outer_image(step, preceding_output_values, terminal_values)?;
         self.coefficient_maps
             .verify_conditional_image_output(
                 &coefficient_request,
@@ -876,7 +960,7 @@ pub(crate) fn verify_selected_compact_cross_epoch_masking_prefix(
     completed_messages: &[DecodedFixedUniformVerifierMessage],
     cross_epoch_disclosures: [CompactChallengeField; 3],
     cfw_auxiliary_disclosure: CompactChallengeField,
-) -> Result<(), CompactMaskingEntropyError> {
+) -> Result<CompactMaskingAttemptIdentity, CompactMaskingEntropyError> {
     if canonical_public_input_bytes.is_empty()
         || canonical_exposed_proof_prefix.is_empty()
         || canonical_transcript_cursor_bytes.is_empty()
@@ -936,7 +1020,163 @@ pub(crate) fn verify_selected_compact_cross_epoch_masking_prefix(
         None,
         &[cfw_auxiliary_disclosure],
     )?;
-    Ok(())
+    Ok(identity)
+}
+
+/// Verifies one live CFW round polynomial against the exact affine image left
+/// by the auxiliary target and all preceding round polynomials.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_selected_compact_cfw_round_masking(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    preceding_outer_outputs: &[CompactChallengeField],
+    round_ordinal: u32,
+    round_polynomial: &[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH],
+) -> Result<(), CompactMaskingEntropyError> {
+    let round_index = usize::try_from(round_ordinal)
+        .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+    let expected_message_count = round_index
+        .checked_add(3)
+        .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+    let expected_preceding_output_count = round_index
+        .checked_mul(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+        .and_then(|count| count.checked_add(1))
+        .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+    if completed_messages.len() != expected_message_count
+        || preceding_outer_outputs.len() != expected_preceding_output_count
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let mut authority = replay_selected_compact_cfw_masking_prefix(
+        inputs,
+        coefficient_maps,
+        identity,
+        completed_messages,
+    )?;
+    let steps = authority.authorize_next_response(None)?.to_vec();
+    let [round_step] = steps.as_slice() else {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    };
+    if round_step.kind() != (CompactMaskingDisclosureKind::CfwOuterRound { round_ordinal })
+        || round_step.output_coordinate_count()
+            != u64::try_from(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    authority.verify_coefficient_image_output(
+        round_step,
+        preceding_outer_outputs,
+        None,
+        round_polynomial,
+    )
+}
+
+/// Verifies the final live CFW masking response after every round challenge is
+/// fixed. The terminal matrix values are a full-rank translation of the
+/// compiled inner-mask image. Conditioned on those values, the verifier's
+/// final CFW equation translates the rank-`round_count - 1` outer-mask image.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_selected_compact_cfw_finish_masking(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    preceding_outer_outputs: &[CompactChallengeField],
+    outer_evaluations: &[CompactChallengeField],
+    final_values: &[CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+) -> Result<(), CompactMaskingEntropyError> {
+    let cfw_round_count = inputs.cfw_configuration.geometry().sumcheck_round_count();
+    let expected_message_count = cfw_round_count
+        .checked_add(3)
+        .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+    let expected_preceding_output_count = cfw_round_count
+        .checked_mul(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+        .and_then(|count| count.checked_add(1))
+        .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+    if completed_messages.len() != expected_message_count
+        || preceding_outer_outputs.len() != expected_preceding_output_count
+        || outer_evaluations.len() != cfw_round_count
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let mut authority = replay_selected_compact_cfw_masking_prefix(
+        inputs,
+        coefficient_maps,
+        identity,
+        completed_messages,
+    )?;
+    let steps = authority.authorize_next_response(None)?.to_vec();
+    let [terminal_step, outer_step] = steps.as_slice() else {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    };
+    if outer_step.kind() != CompactMaskingDisclosureKind::CfwOuterEvaluations
+        || outer_step.output_coordinate_count()
+            != u64::try_from(cfw_round_count)
+                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?
+        || terminal_step.kind() != CompactMaskingDisclosureKind::CfwInnerTerminal
+        || terminal_step.output_coordinate_count() != COMPACT_CFW_MATRIX_COUNT as u64
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    authority.verify_coefficient_image_output(terminal_step, &[], None, final_values)?;
+    authority.verify_cfw_final_outer_output(
+        outer_step,
+        preceding_outer_outputs,
+        final_values,
+        outer_evaluations,
+    )
+}
+
+fn replay_selected_compact_cfw_masking_prefix<'contract>(
+    inputs: CompactPublicKeyVerifierInputs<'contract>,
+    coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingEntropyError> {
+    let cfw_round_count = inputs.cfw_configuration.geometry().sumcheck_round_count();
+    if !(3..=cfw_round_count.saturating_add(3)).contains(&completed_messages.len()) {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let mut authority = CompactMaskingEntropyAuthority::begin(inputs, coefficient_maps, identity)?;
+    for (move_index, message) in completed_messages.iter().enumerate() {
+        let steps = authority.authorize_next_response(None)?;
+        let valid_response = match move_index {
+            0 | 1 => steps.is_empty(),
+            2 => matches!(
+                steps,
+                [cross_epoch_step, auxiliary_step]
+                    if cross_epoch_step.kind()
+                        == CompactMaskingDisclosureKind::CrossEpochExplicitPoint
+                        && auxiliary_step.kind()
+                            == CompactMaskingDisclosureKind::CfwOuterAuxiliary
+            ),
+            _ => {
+                let round_ordinal = u32::try_from(move_index - 3)
+                    .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+                matches!(
+                    steps,
+                    [round_step]
+                        if round_step.kind()
+                            == CompactMaskingDisclosureKind::CfwOuterRound { round_ordinal }
+                )
+            }
+        };
+        if !valid_response {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+        let move_ordinal = u32::try_from(move_index)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        if !authority
+            .ingest_verifier_message(move_ordinal, message)?
+            .is_empty()
+        {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+    }
+    Ok(authority)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1091,7 +1331,9 @@ fn validate_transcript_inputs(
     transcript: &CompactMaskingEntropyTranscript,
 ) -> Result<(), CompactMaskingEntropyError> {
     let cfw_round_count = inputs.cfw_configuration.geometry().sumcheck_round_count();
-    if transcript.cfw_round_challenges.len() != cfw_round_count
+    if transcript.cfw_constraint_combining_challenge.is_none()
+        || transcript.cfw_equality_point.len() != cfw_round_count
+        || transcript.cfw_round_challenges.len() != cfw_round_count
         || transcript.cfw_round_challenges.is_empty()
         || !compact_cfw_final_challenge_is_allowed(
             *transcript
@@ -1376,8 +1618,11 @@ fn derive_scalar_steps(
             ) {
                 continue;
             }
-            let intra = u32::try_from(component_index)
-                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+            let intra = simulator_intra_move_ordinal(
+                u32::try_from(component_index)
+                    .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?,
+                role.role_tag,
+            )?;
             match role.role_tag {
                 6 => {
                     require_component(component, 3, 1)?;
@@ -1626,8 +1871,11 @@ fn derive_available_scalar_steps(
         ) {
             continue;
         }
-        let intra = u32::try_from(component_index)
-            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        let intra = simulator_intra_move_ordinal(
+            u32::try_from(component_index)
+                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?,
+            role.role_tag,
+        )?;
         match role.role_tag {
             6 => {
                 require_component(component, 3, 1)?;
@@ -1861,6 +2109,7 @@ fn derive_available_scalar_steps(
             .epoch;
         append_base_reveal_steps_for_epoch(inputs, transcript, epoch, &mut steps)?;
     }
+    steps.sort_by_key(|step| step.intra_move_ordinal);
     Ok(steps)
 }
 
@@ -2180,6 +2429,22 @@ fn append_message_to_transcript(
             .map(compact_challenge_from_production)
             .collect::<Vec<_>>();
         match role.role_tag {
+            3 => {
+                let (constraint_combining_challenge, equality_point) = challenges
+                    .split_first()
+                    .ok_or(CompactMaskingEntropyError::MissingTranscriptInput)?;
+                if transcript.cfw_constraint_combining_challenge.is_some()
+                    || !transcript.cfw_equality_point.is_empty()
+                    || equality_point.is_empty()
+                {
+                    return Err(CompactMaskingEntropyError::DuplicateTranscriptInput);
+                }
+                transcript.cfw_constraint_combining_challenge =
+                    Some(*constraint_combining_challenge);
+                transcript
+                    .cfw_equality_point
+                    .extend_from_slice(equality_point);
+            }
             4 => transcript.cfw_round_challenges.extend(challenges),
             8 => {
                 if let Some(record) = transcript.sumcheck_challenges.iter_mut().find(|record| {
@@ -3414,6 +3679,24 @@ fn checked_add(left: u64, right: u64) -> Result<u64, CompactMaskingEntropyError>
         .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)
 }
 
+/// The final CFW response is atomic. Sampling its full-rank terminal values
+/// before its translated outer-evaluation hyperplane gives the exact joint
+/// distribution while preserving the canonical outer-first wire encoding.
+fn simulator_intra_move_ordinal(
+    canonical_component_ordinal: u32,
+    role_tag: u8,
+) -> Result<u32, CompactMaskingEntropyError> {
+    match role_tag {
+        9 => canonical_component_ordinal
+            .checked_add(1)
+            .ok_or(CompactMaskingEntropyError::ArithmeticOverflow),
+        10 => canonical_component_ordinal
+            .checked_sub(1)
+            .ok_or(CompactMaskingEntropyError::InvalidContract),
+        _ => Ok(canonical_component_ordinal),
+    }
+}
+
 fn checked_product(values: &[u64]) -> Result<u64, CompactMaskingEntropyError> {
     values.iter().try_fold(1_u64, |product, value| {
         product
@@ -3493,6 +3776,28 @@ fn hash_transcript_prefix(
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&identity.binding_bytes());
     bytes.extend_from_slice(&(next_move_ordinal as u64).to_le_bytes());
+    bytes.push(u8::from(
+        transcript.cfw_constraint_combining_challenge.is_some(),
+    ));
+    if let Some(challenge) = transcript.cfw_constraint_combining_challenge {
+        for coordinate in
+            <CompactChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(
+                &challenge,
+            )
+        {
+            bytes.extend_from_slice(&coordinate.as_canonical_u64().to_le_bytes());
+        }
+    }
+    bytes.extend_from_slice(&(transcript.cfw_equality_point.len() as u64).to_le_bytes());
+    for coordinate_value in &transcript.cfw_equality_point {
+        for coordinate in
+            <CompactChallengeField as BasedVectorSpace<Goldilocks>>::as_basis_coefficients_slice(
+                coordinate_value,
+            )
+        {
+            bytes.extend_from_slice(&coordinate.as_canonical_u64().to_le_bytes());
+        }
+    }
     bytes.extend_from_slice(&(transcript.cfw_round_challenges.len() as u64).to_le_bytes());
     for challenge in &transcript.cfw_round_challenges {
         for coordinate in
@@ -3541,7 +3846,7 @@ fn hash_transcript_prefix(
         }
     }
     hash_framed_parts_512(
-        "sealed-lattice/proof/compact-masking-entropy-prefix/v1",
+        "sealed-lattice/proof/compact-masking-entropy-prefix/v2",
         &[&coefficient_map_binding, &bytes],
     )
 }
@@ -3617,6 +3922,14 @@ fn selected_test_transcript(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
 ) -> Result<CompactMaskingEntropyTranscript, CompactMaskingEntropyError> {
     let cfw_round_count = inputs.cfw_configuration.geometry().sumcheck_round_count();
+    let cfw_constraint_combining_challenge = CompactChallengeField::from_u64(2_001);
+    let cfw_equality_point = (0..cfw_round_count)
+        .map(|ordinal| {
+            u64::try_from(ordinal)
+                .map(|ordinal| CompactChallengeField::from_u64(2_101 + ordinal))
+                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let cfw_round_challenges = (0..cfw_round_count)
         .map(|ordinal| {
             Ok(CompactChallengeField::from_u64(
@@ -3708,6 +4021,8 @@ fn selected_test_transcript(
         ));
     }
     Ok(CompactMaskingEntropyTranscript::new(
+        Some(cfw_constraint_combining_challenge),
+        cfw_equality_point,
         cfw_round_challenges,
         sumcheck_challenges,
         query_sets,
@@ -3890,6 +4205,8 @@ mod tests {
             .indices = retained_first_indices.clone();
         let transcript_through = |move_ordinal| {
             CompactMaskingEntropyTranscript::new(
+                None,
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 full_transcript
@@ -4277,6 +4594,190 @@ mod tests {
                 auxiliary,
             ),
             Err(CompactMaskingEntropyError::MissingTranscriptInput),
+        );
+    }
+
+    #[test]
+    fn live_cfw_masking_gate_covers_every_round_and_the_final_views() {
+        let (contract, maps) = selected();
+        let inputs = contract.verifier_inputs();
+        let mut messages = vec![
+            selected_adversarial_message(&inputs, 0),
+            selected_adversarial_message(&inputs, 1),
+        ];
+        let first_cross_epoch_value = CompactChallengeField::from_u64(17);
+        let second_cross_epoch_value = CompactChallengeField::from_u64(29);
+        let auxiliary_target = CompactChallengeField::from_u64(41);
+        let identity = verify_selected_compact_cross_epoch_masking_prefix(
+            contract.verifier_inputs(),
+            &maps,
+            [0x61; 32],
+            &[0x71],
+            &[0x81],
+            &[0x91],
+            &messages,
+            [
+                first_cross_epoch_value,
+                second_cross_epoch_value,
+                first_cross_epoch_value - second_cross_epoch_value,
+            ],
+            auxiliary_target,
+        )
+        .expect("the initial live masking prefix mints one attempt identity");
+
+        let mut authority =
+            CompactMaskingEntropyAuthority::begin(contract.verifier_inputs(), &maps, identity)
+                .expect("the selected streaming authority begins");
+        for (move_ordinal, message) in messages.iter().enumerate() {
+            authority
+                .authorize_next_response(None)
+                .expect("the response prefix is ordered");
+            authority
+                .ingest_verifier_message(move_ordinal as u32, message)
+                .expect("the verifier prefix is ordered");
+        }
+        let initial_steps = authority
+            .authorize_next_response(None)
+            .expect("the cross-epoch response is authorized");
+        assert_eq!(initial_steps.len(), 2);
+        messages.push(selected_adversarial_message(&inputs, 2));
+        authority
+            .ingest_verifier_message(2, &messages[2])
+            .expect("the initial CFW message is accepted");
+
+        let round_count = inputs.cfw_configuration.geometry().sumcheck_round_count();
+        let mut preceding_outer_outputs = vec![auxiliary_target];
+        for round_index in 0..round_count {
+            let steps = authority
+                .authorize_next_response(None)
+                .expect("the next CFW round is authorized")
+                .to_vec();
+            let [round_step] = steps.as_slice() else {
+                panic!("one CFW masking step must own each round")
+            };
+            let request = authority
+                .prepare_coefficient_image(round_step, &preceding_outer_outputs, None)
+                .expect("the round conditional image derives");
+            let independent_coordinates = (0..round_step.conditional_rank())
+                .map(|coordinate_ordinal| {
+                    CompactChallengeField::from_u64(
+                        101 + u64::try_from(round_index).unwrap() * 16 + coordinate_ordinal,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let round_polynomial: [CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH] =
+                authority
+                    .execute_coefficient_image(round_step, &request, &independent_coordinates)
+                    .expect("the exact affine image produces one round polynomial")
+                    .try_into()
+                    .expect("the CFW round polynomial has eight coordinates");
+            verify_selected_compact_cfw_round_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                &preceding_outer_outputs,
+                u32::try_from(round_index).unwrap(),
+                &round_polynomial,
+            )
+            .expect("the production gate accepts the compiler-derived round image");
+            if round_index == 0 {
+                let mut hostile_polynomial = round_polynomial;
+                hostile_polynomial[0] += CompactChallengeField::ONE;
+                assert_eq!(
+                    verify_selected_compact_cfw_round_masking(
+                        contract.verifier_inputs(),
+                        &maps,
+                        identity,
+                        &messages,
+                        &preceding_outer_outputs,
+                        0,
+                        &hostile_polynomial,
+                    ),
+                    Err(CompactMaskingEntropyError::InvalidCoefficientMap),
+                );
+            }
+            preceding_outer_outputs.extend_from_slice(&round_polynomial);
+            let move_index = round_index + 3;
+            messages.push(selected_adversarial_message(&inputs, move_index));
+            authority
+                .ingest_verifier_message(
+                    u32::try_from(move_index).unwrap(),
+                    messages.last().unwrap(),
+                )
+                .expect("the next CFW challenge is accepted");
+        }
+
+        let final_steps = authority
+            .authorize_next_response(None)
+            .expect("the final CFW response is authorized")
+            .to_vec();
+        let [terminal_step, outer_step] = final_steps.as_slice() else {
+            panic!("the final CFW response has terminal and outer masking views")
+        };
+        let terminal_request = authority
+            .prepare_coefficient_image(terminal_step, &[], None)
+            .expect("the terminal inner conditional image derives");
+        let terminal_independent_coordinates = (0..terminal_step.conditional_rank())
+            .map(|coordinate_ordinal| CompactChallengeField::from_u64(801 + coordinate_ordinal))
+            .collect::<Vec<_>>();
+        let final_values: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT] = authority
+            .execute_coefficient_image(
+                terminal_step,
+                &terminal_request,
+                &terminal_independent_coordinates,
+            )
+            .expect("the terminal inner image executes")
+            .try_into()
+            .expect("the terminal view has three coordinates");
+        let outer_request = authority
+            .prepare_cfw_final_outer_image(outer_step, &preceding_outer_outputs, &final_values)
+            .expect("the verifier-translated final outer image derives");
+        let outer_independent_coordinates = (0..outer_step.conditional_rank())
+            .map(|coordinate_ordinal| CompactChallengeField::from_u64(701 + coordinate_ordinal))
+            .collect::<Vec<_>>();
+        let outer_evaluations = authority
+            .execute_coefficient_image(outer_step, &outer_request, &outer_independent_coordinates)
+            .expect("the final outer image executes");
+        verify_selected_compact_cfw_finish_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &messages,
+            &preceding_outer_outputs,
+            &outer_evaluations,
+            &final_values,
+        )
+        .expect("the production gate accepts both final CFW images");
+
+        let mut hostile_outer_evaluations = outer_evaluations.clone();
+        hostile_outer_evaluations[0] += CompactChallengeField::ONE;
+        assert_eq!(
+            verify_selected_compact_cfw_finish_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                &preceding_outer_outputs,
+                &hostile_outer_evaluations,
+                &final_values,
+            ),
+            Err(CompactMaskingEntropyError::InvalidCoefficientMap),
+        );
+
+        let mut hostile_final_values = final_values;
+        hostile_final_values[0] += CompactChallengeField::ONE;
+        assert_eq!(
+            verify_selected_compact_cfw_finish_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                &preceding_outer_outputs,
+                &outer_evaluations,
+                &hostile_final_values,
+            ),
+            Err(CompactMaskingEntropyError::InvalidCoefficientMap),
         );
     }
 

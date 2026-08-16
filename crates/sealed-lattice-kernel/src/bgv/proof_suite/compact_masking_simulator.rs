@@ -6,7 +6,7 @@
 //! against the verifier messages actually chosen so far. Concrete KMAC coins,
 //! salted-Merkle roots, and EPRO programming are separate replacement games.
 
-use super::compact_cfw::CompactChallengeField;
+use super::compact_cfw::{COMPACT_CFW_MATRIX_COUNT, CompactChallengeField};
 use super::compact_masking_coefficient_maps::{
     CompactCommitmentQuerySource, CompactConstructionCommitmentEmbedding,
     CompactConstructionCommitmentOwnership, CompactMaskingCoefficientMapCertificate,
@@ -995,17 +995,42 @@ fn sample_disclosures(
                     context.current_response_disclosures,
                     &disclosures,
                 )?;
-                let retained_mirror_coefficients = retained_mirror_coefficients(
-                    step.kind(),
-                    context.prior_moves,
-                    context.current_response_disclosures,
-                    &disclosures,
-                )?;
-                let coefficient_request = context.authority.prepare_coefficient_image(
-                    step,
-                    &preceding_output_values,
-                    retained_mirror_coefficients.as_deref(),
-                )?;
+                let coefficient_request =
+                    if step.kind() == CompactMaskingDisclosureKind::CfwOuterEvaluations {
+                        let mut terminal_disclosures = disclosures.iter().filter(|disclosure| {
+                            disclosure.entropy_step.kind()
+                                == CompactMaskingDisclosureKind::CfwInnerTerminal
+                        });
+                        let terminal_disclosure = terminal_disclosures
+                            .next()
+                            .ok_or(CompactMaskingSimulatorError::WrongTranscript)?;
+                        if terminal_disclosures.next().is_some() {
+                            return Err(CompactMaskingSimulatorError::WrongTranscript);
+                        }
+                        let terminal_values: &[CompactChallengeField; COMPACT_CFW_MATRIX_COUNT] =
+                            terminal_disclosure
+                                .field_values
+                                .as_slice()
+                                .try_into()
+                                .map_err(|_| CompactMaskingSimulatorError::WrongTranscript)?;
+                        context.authority.prepare_cfw_final_outer_image(
+                            step,
+                            &preceding_output_values,
+                            terminal_values,
+                        )?
+                    } else {
+                        let retained_mirror_coefficients = retained_mirror_coefficients(
+                            step.kind(),
+                            context.prior_moves,
+                            context.current_response_disclosures,
+                            &disclosures,
+                        )?;
+                        context.authority.prepare_coefficient_image(
+                            step,
+                            &preceding_output_values,
+                            retained_mirror_coefficients.as_deref(),
+                        )?
+                    };
                 if coefficient_request.output_coordinate_count()
                     != request.output_coordinate_count()
                     || coefficient_request.independent_coordinate_count()

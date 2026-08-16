@@ -4070,7 +4070,7 @@ mod tests {
 
     #[test]
     #[ignore = "manual retained compact public-key assignment gate"]
-    fn heavy_rust_kernel_retained_public_key_authority_drives_one_compact_cfw_poll() {
+    fn heavy_rust_kernel_retained_public_key_authority_drives_complete_compact_cfw() {
         let authority = populate_compact_public_key_development_evidence_authority(0x43)
             .expect("standalone production-derived public-key authority populates");
         let action_private_randomness = authority.action_private_randomness;
@@ -4622,7 +4622,11 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
                 CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady => break,
                 CompactPublicKeyMainEpochPoll::CrossEpochEvaluationStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady
+                | CompactPublicKeyMainEpochPoll::CfwRoundPolynomialStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::CfwBoundRoundStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::CfwRoundResponseCheckpointReady { .. }
+                | CompactPublicKeyMainEpochPoll::CfwFinalResponseCheckpointReady => {
                     panic!("cross-epoch work cannot precede the post-lookup checkpoint")
                 }
             }
@@ -4741,7 +4745,11 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
                 CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady => break,
                 CompactPublicKeyMainEpochPoll::MainSourceArithmeticStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady
+                | CompactPublicKeyMainEpochPoll::CfwRoundPolynomialStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::CfwBoundRoundStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::CfwRoundResponseCheckpointReady { .. }
+                | CompactPublicKeyMainEpochPoll::CfwFinalResponseCheckpointReady => {
                     panic!("post-lookup work cannot recur during the cross-epoch response")
                 }
             }
@@ -4786,8 +4794,9 @@ mod tests {
         let cross_epoch_checkpoint = prepared_main_epoch
             .checkpoint_boundary()
             .expect("the cross-epoch response exposes its authenticated checkpoint boundary");
+        let cross_epoch_safe_boundary_ordinal = cross_epoch_checkpoint.safe_boundary_ordinal();
         assert_eq!(
-            cross_epoch_checkpoint.safe_boundary_ordinal(),
+            cross_epoch_safe_boundary_ordinal,
             post_lookup_safe_boundary_ordinal + 1
         );
         assert_eq!(
@@ -4806,19 +4815,131 @@ mod tests {
         );
 
         let phase_started_at = Instant::now();
-        println!(
-            "compact public-key focused owner phase: advance one verifier-bound compact CFW poll"
-        );
-        let mut cfw_storage = TestStorage::default();
+        println!("compact public-key focused owner phase: complete verifier-bound compact CFW");
+        let mut cfw_storage =
+            FileBackedTestStorage::new().expect("selected compact CFW scratch opens");
+        let expected_cfw_round_count = compact_geometry.sumcheck_round_count();
+        let mut cfw_round_polynomial_poll_count = 0_u64;
+        let mut cfw_bound_round_poll_count = 0_u64;
+        let mut cfw_response_leaf_count = 0_u64;
+        let mut cfw_opened_leaf_count = 0_u64;
+        let mut completed_cfw_round_count = 0_usize;
+        loop {
+            match prepared_main_epoch
+                .poll_cfw(&mut response_storage, &mut cfw_storage)
+                .expect("the complete verifier-bound production CFW advances")
+            {
+                CompactPublicKeyMainEpochPoll::CfwRoundPolynomialStepCompleted {
+                    round_ordinal,
+                    ..
+                } => {
+                    assert_eq!(
+                        usize::try_from(round_ordinal).unwrap(),
+                        completed_cfw_round_count
+                    );
+                    cfw_round_polynomial_poll_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::CfwBoundRoundStepCompleted {
+                    round_ordinal, ..
+                } => {
+                    assert_eq!(
+                        usize::try_from(round_ordinal).unwrap() + 1,
+                        completed_cfw_round_count
+                    );
+                    cfw_bound_round_poll_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseLeafSupplied { leaf_ordinal } => {
+                    let response_ordinal = u32::try_from(completed_cfw_round_count + 3).unwrap();
+                    let response_geometry = &selected_compact_contract
+                        .verifier_inputs()
+                        .response_merkle_geometries[usize::try_from(response_ordinal).unwrap()];
+                    assert!(leaf_ordinal < response_geometry.merkle_leaf_count());
+                    cfw_response_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::OpenedResponseLeafSupplied {
+                    response_ordinal,
+                    leaf_ordinal,
+                } => {
+                    let response_geometry = &selected_compact_contract
+                        .verifier_inputs()
+                        .response_merkle_geometries[usize::try_from(response_ordinal).unwrap()];
+                    assert!(leaf_ordinal < response_geometry.merkle_leaf_count());
+                    cfw_opened_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseArithmeticStepCompleted
+                | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
+                CompactPublicKeyMainEpochPoll::CfwRoundResponseCheckpointReady {
+                    round_ordinal,
+                } => {
+                    assert_eq!(
+                        usize::try_from(round_ordinal).unwrap(),
+                        completed_cfw_round_count
+                    );
+                    completed_cfw_round_count += 1;
+                    assert_eq!(
+                        prepared_main_epoch.completed_cfw_round_count(),
+                        Some(completed_cfw_round_count)
+                    );
+                    let checkpoint = prepared_main_epoch
+                        .checkpoint_boundary()
+                        .expect("each CFW round exposes an authenticated response checkpoint");
+                    assert_eq!(
+                        u32::from_le_bytes(checkpoint.position()[8..12].try_into().unwrap()),
+                        u32::try_from(completed_cfw_round_count + 3).unwrap()
+                    );
+                }
+                CompactPublicKeyMainEpochPoll::CfwFinalResponseCheckpointReady => break,
+                CompactPublicKeyMainEpochPoll::MainSourceArithmeticStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::CrossEpochEvaluationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady
+                | CompactPublicKeyMainEpochPoll::CrossEpochCheckpointReady => {
+                    panic!("pre-CFW work cannot recur during the complete CFW reduction")
+                }
+            }
+        }
+        assert_eq!(completed_cfw_round_count, expected_cfw_round_count);
         assert_eq!(
-            prepared_main_epoch
-                .advance_current_cfw_round_polynomial(&mut cfw_storage)
-                .expect("one verifier-bound production CFW poll advances"),
-            None
+            prepared_main_epoch.completed_cfw_round_count(),
+            Some(expected_cfw_round_count)
+        );
+        assert!(prepared_main_epoch.cfw_finish_masking_verified());
+        assert!(cfw_round_polynomial_poll_count > 0);
+        assert!(cfw_bound_round_poll_count > 0);
+        assert!(cfw_response_leaf_count > 0);
+        assert!(cfw_opened_leaf_count > 0);
+        let cfw_usage = prepared_main_epoch
+            .cfw_external_memory_usage()
+            .expect("complete CFW retains its exact external-memory usage");
+        assert_eq!(cfw_usage.transaction_count(), 4_926);
+        assert_eq!(cfw_usage.total_written_byte_length(), 1_006_632_840);
+        assert_eq!(cfw_usage.total_read_byte_length(), 2_013_265_440);
+        assert_eq!(cfw_usage.peak_stored_byte_length(), 587_202_560);
+        assert_eq!(cfw_storage.committed_declared_byte_length(), 0);
+        let final_cfw_checkpoint = prepared_main_epoch
+            .checkpoint_boundary()
+            .expect("the final CFW response exposes an authenticated response checkpoint");
+        assert_eq!(
+            final_cfw_checkpoint.safe_boundary_ordinal(),
+            cross_epoch_safe_boundary_ordinal
+                + u32::try_from(expected_cfw_round_count).unwrap()
+                + 1
+        );
+        assert_eq!(
+            u32::from_le_bytes(final_cfw_checkpoint.position()[8..12].try_into().unwrap()),
+            u32::try_from(expected_cfw_round_count + 4).unwrap()
         );
         println!(
-            "compact public-key focused owner phase complete: advance one verifier-bound compact CFW poll elapsed_milliseconds={}",
-            phase_started_at.elapsed().as_millis()
+            "compact public-key focused owner phase complete: complete verifier-bound compact CFW elapsed_milliseconds={} round_count={} round_polynomial_poll_count={} bound_round_poll_count={} response_leaf_count={} opened_leaf_count={} external_transaction_count={} external_written_bytes={} external_read_bytes={} peak_external_storage_bytes={}",
+            phase_started_at.elapsed().as_millis(),
+            expected_cfw_round_count,
+            cfw_round_polynomial_poll_count,
+            cfw_bound_round_poll_count,
+            cfw_response_leaf_count,
+            cfw_opened_leaf_count,
+            cfw_usage.transaction_count(),
+            cfw_usage.total_written_byte_length(),
+            cfw_usage.total_read_byte_length(),
+            cfw_usage.peak_stored_byte_length(),
         );
         prepared_main_epoch
             .cancel_response_custody(&mut response_storage)

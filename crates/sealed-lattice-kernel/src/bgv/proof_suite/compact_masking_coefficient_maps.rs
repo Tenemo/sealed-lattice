@@ -288,6 +288,16 @@ pub(crate) enum CompactConditionalImageRuntime<'a> {
     CfwOuter {
         round_challenges: &'a [CompactChallengeField],
     },
+    /// Final outer-mask evaluations conditioned on the already sampled
+    /// terminal matrix values. The verifier's final CFW equation supplies
+    /// the affine translation; the compiler-derived outer-mask map supplies the
+    /// rank-`round_count - 1` direction space.
+    CfwFinalOuterEvaluations {
+        constraint_combining_challenge: CompactChallengeField,
+        equality_point: &'a [CompactChallengeField],
+        round_challenges: &'a [CompactChallengeField],
+        terminal_values: &'a [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+    },
     CrossEpochExplicitPoint,
     CfwInnerTerminal {
         round_challenges: &'a [CompactChallengeField],
@@ -1729,17 +1739,8 @@ fn prepare_projection_conditional_image(
             independent_coordinate_count,
             preceding_output_values,
             |private| {
-                let masks = private
-                    .chunks_exact(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
-                    .map(|mask| {
-                        let mut values =
-                            [CompactChallengeField::ZERO; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH];
-                        values.copy_from_slice(mask);
-                        values
-                    })
-                    .collect::<Vec<_>>();
-                apply_cfw_outer_mask_prefix(
-                    &masks,
+                apply_cfw_outer_mask_prefix_from_private_coordinates(
+                    private,
                     round_challenges,
                     usize::try_from(
                         first_output_coordinate
@@ -1749,6 +1750,26 @@ fn prepare_projection_conditional_image(
                     .map_err(|_| CompactMaskingCoefficientMapError::ArithmeticOverflow)?,
                 )
             },
+        ),
+        (
+            CompactCoefficientProjection::CfwOuterTranscript { round_count },
+            CompactConditionalImageRuntime::CfwFinalOuterEvaluations {
+                constraint_combining_challenge,
+                equality_point,
+                round_challenges,
+                terminal_values,
+            },
+        ) => prepare_cfw_final_outer_evaluation_image(
+            map,
+            *round_count,
+            first_output_coordinate,
+            output_coordinate_count,
+            independent_coordinate_count,
+            preceding_output_values,
+            constraint_combining_challenge,
+            equality_point,
+            round_challenges,
+            terminal_values,
         ),
         (
             CompactCoefficientProjection::CrossEpochExplicitPoint {
@@ -2202,6 +2223,142 @@ fn prepare_dense_conditional_image_with_dimensions(
         normalize_affine_offset(current_offset, &basis, &pivot_output_coordinates)?;
     Ok(CompactConditionalImageExpansion::Dense {
         offset: normalized_offset,
+        basis,
+        pivot_output_coordinates,
+    })
+}
+
+fn apply_cfw_outer_mask_prefix_from_private_coordinates(
+    private_coordinates: &[CompactChallengeField],
+    round_challenges: &[CompactChallengeField],
+    output_end: usize,
+) -> Result<Vec<CompactChallengeField>, CompactMaskingCoefficientMapError> {
+    let masks = private_coordinates
+        .chunks_exact(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+        .map(|mask| {
+            let mut values = [CompactChallengeField::ZERO; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH];
+            values.copy_from_slice(mask);
+            values
+        })
+        .collect::<Vec<_>>();
+    apply_cfw_outer_mask_prefix(&masks, round_challenges, output_end)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_cfw_final_outer_evaluation_image(
+    map: &CompactCoefficientToViewMap,
+    round_count: u64,
+    first_output_coordinate: u64,
+    output_coordinate_count: u64,
+    independent_coordinate_count: u64,
+    preceding_output_values: &[CompactChallengeField],
+    constraint_combining_challenge: CompactChallengeField,
+    equality_point: &[CompactChallengeField],
+    round_challenges: &[CompactChallengeField],
+    terminal_values: &[CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+) -> Result<CompactConditionalImageExpansion, CompactMaskingCoefficientMapError> {
+    let round_count_usize = usize::try_from(round_count)
+        .map_err(|_| CompactMaskingCoefficientMapError::ArithmeticOverflow)?;
+    let round_polynomial_coordinate_count = round_count_usize
+        .checked_mul(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+        .ok_or(CompactMaskingCoefficientMapError::ArithmeticOverflow)?;
+    let expected_first_output_coordinate = round_polynomial_coordinate_count
+        .checked_add(1)
+        .ok_or(CompactMaskingCoefficientMapError::ArithmeticOverflow)?;
+    let expected_view_coordinate_count = expected_first_output_coordinate
+        .checked_add(round_count_usize)
+        .ok_or(CompactMaskingCoefficientMapError::ArithmeticOverflow)?;
+    let expected_independent_coordinate_count = round_count
+        .checked_sub(1)
+        .ok_or(CompactMaskingCoefficientMapError::InvalidConditionalImage)?;
+    if map.view_coordinate_count
+        != u64::try_from(expected_view_coordinate_count)
+            .map_err(|_| CompactMaskingCoefficientMapError::ArithmeticOverflow)?
+        || first_output_coordinate
+            != u64::try_from(expected_first_output_coordinate)
+                .map_err(|_| CompactMaskingCoefficientMapError::ArithmeticOverflow)?
+        || output_coordinate_count != round_count
+        || independent_coordinate_count != expected_independent_coordinate_count
+        || preceding_output_values.len() != expected_first_output_coordinate
+        || equality_point.len() != round_count_usize
+        || round_challenges.len() != round_count_usize
+    {
+        return Err(CompactMaskingCoefficientMapError::InvalidConditionalImage);
+    }
+
+    // Recompute the conditional direction space from the compiler-owned map.
+    // A zero prefix is a valid mask-only transcript and yields the same kernel
+    // image as any affine prefix. Rank `round_count - 1` plus zero coordinate
+    // sum proves that this image is exactly the verifier's final hyperplane.
+    let zero_prefix = vec![CompactChallengeField::ZERO; expected_first_output_coordinate];
+    let CompactConditionalImageExpansion::Dense {
+        basis,
+        pivot_output_coordinates,
+        ..
+    } = prepare_dense_conditional_image(
+        map,
+        first_output_coordinate,
+        output_coordinate_count,
+        independent_coordinate_count,
+        &zero_prefix,
+        |private_coordinates| {
+            apply_cfw_outer_mask_prefix_from_private_coordinates(
+                private_coordinates,
+                round_challenges,
+                expected_view_coordinate_count,
+            )
+        },
+    )?
+    else {
+        return Err(CompactMaskingCoefficientMapError::InvalidConditionalImage);
+    };
+    if basis.iter().any(|basis_vector| {
+        basis_vector.iter().copied().sum::<CompactChallengeField>() != CompactChallengeField::ZERO
+    }) {
+        return Err(CompactMaskingCoefficientMapError::InvalidConditionalImage);
+    }
+
+    let final_round_polynomial_start = expected_first_output_coordinate
+        .checked_sub(COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH)
+        .ok_or(CompactMaskingCoefficientMapError::InvalidConditionalImage)?;
+    let final_round_claim = evaluate_polynomial(
+        &preceding_output_values[final_round_polynomial_start..expected_first_output_coordinate],
+        *round_challenges
+            .last()
+            .ok_or(CompactMaskingCoefficientMapError::InvalidConditionalImage)?,
+    );
+    let equality_evaluation = equality_point
+        .iter()
+        .copied()
+        .zip(round_challenges.iter().copied())
+        .fold(
+            CompactChallengeField::ONE,
+            |accumulated_evaluation, (equality_coordinate, round_challenge)| {
+                accumulated_evaluation
+                    * ((CompactChallengeField::ONE - equality_coordinate)
+                        + round_challenge
+                            * (CompactChallengeField::TWO * equality_coordinate
+                                - CompactChallengeField::ONE))
+            },
+        );
+    let [
+        terminal_left_value,
+        terminal_right_value,
+        terminal_product_value,
+    ] = *terminal_values;
+    let required_outer_evaluation_sum = final_round_claim
+        - constraint_combining_challenge
+            * (terminal_left_value * terminal_right_value - terminal_product_value)
+            * equality_evaluation;
+
+    let mut offset = vec![CompactChallengeField::ZERO; round_count_usize];
+    let final_output_coordinate = round_count_usize
+        .checked_sub(1)
+        .ok_or(CompactMaskingCoefficientMapError::InvalidConditionalImage)?;
+    offset[final_output_coordinate] = required_outer_evaluation_sum;
+    let offset = normalize_affine_offset(offset, &basis, &pivot_output_coordinates)?;
+    Ok(CompactConditionalImageExpansion::Dense {
+        offset,
         basis,
         pivot_output_coordinates,
     })

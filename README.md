@@ -90,7 +90,8 @@ and target release remain incomplete or internal.
   public-input bytes from verifier-minted suite, application-statement,
   manifest, and relation bindings before independently decoding them. A
   release-owned public-key generation state now owns that family
-  materialization and its first two compact responses together. It accepts the
+  materialization, its first three compact responses, and the complete CFW
+  response sequence together. It accepts the
   lookup challenge only through a borrowed first-message authority minted by
   its retained compact response state for the same proof geometry and
   canonical public input, then owns bounded lookup inversion and structured-row
@@ -108,9 +109,18 @@ and target release remain incomplete or internal.
   retaining one 5,242,880-byte encoded column. It streams the complete
   262,144-leaf second response into external storage, derives the second
   verifier message and its 21-coordinate cross-epoch point, and publishes the
-  next authenticated response checkpoint before one CFW poll. The strict
-  version-two 56-byte attempt-and-WHIR-position cursor remains bound into both
-  checkpoints; superseded version-one cursors refuse.
+  next authenticated response checkpoint. It then commits the four-leaf
+  cross-epoch response and executes all 23 rounds of the production
+  external-memory CFW prover. Before any round response begins, generation
+  checks the real polynomial against the compiler-derived rank-seven
+  conditional image; each transcript challenge is bound once before the next
+  fold. The final atomic response checks the translated full-rank terminal
+  values first, then checks the outer evaluations against the independently
+  recomputed verifier hyperplane, while retaining the canonical outer-first
+  wire order. Authenticated response checkpoints cover the cross-epoch
+  response, every completed CFW round, and the final CFW response. The strict
+  version-two 56-byte attempt-and-WHIR-position cursor remains bound into the
+  response checkpoints; superseded version-one cursors refuse.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -118,16 +128,19 @@ and target release remain incomplete or internal.
   encoding randomness. Focused coverage matches nonconsecutive replayed rows to
   the eager canonical WHIR encoder across stripe boundaries and refuses
   duplicate, reordered, out-of-range, premature, and repeated replay requests.
-  Guarded native development coverage exercises this selected-size prefix
-  under the repository memory ceiling. Its measurements remain in the owning
-  run diagnostics and do not constitute scalar-WASM or browser evidence. The
+  Guarded native development coverage exercises this selected-size path
+  through the final CFW response under the repository memory ceiling. The CFW
+  phase reconciles 4,926 external-storage transactions, 1,006,632,840 bytes
+  written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes.
+  These measurements remain in the owning run diagnostics and do not
+  constitute scalar-WASM or browser evidence. The
   owner does not yet cover a selected-size opening replay, authenticated
   mid-stripe restart, cold restoration through the common worker, JavaScript
   and browser-process overlap, a complete emitted WHIR epoch, or a proof. The
   test-only production-shaped small-chain owner uses the response state, but
-  the later CFW and WHIR family material provider, production worker adapter,
-  WHIR proof production, semantic execution, and complete masking path remain
-  test-only or incomplete. Before the second response's masking material is
+  the WHIR family material provider, production worker adapter, WHIR proof
+  production, semantic execution, and complete masking path remain test-only
+  or incomplete. Before the second response's masking material is
   drawn, release generation now re-decodes its canonical public input through
   the selected verifier contract, independently derives and checks every
   coefficient-to-view map, and constructs the compiler/verifier-derived public-
@@ -144,10 +157,11 @@ and target release remain incomplete or internal.
   those responses, and checks the real three-coordinate cross-epoch disclosure
   against the compiler-derived rank-two image. It also
   checks the CFW auxiliary scalar against its independently derived rank-one
-  image, and CFW initialization refuses unless this gate passed. The fixed
-  KMAC256/SHAKE256 joint assumption remains external. Later sequential images,
-  both live role-18 carried covectors, and the terminal simulator are not
-  connected yet.
+  image, and CFW initialization refuses unless this gate passed. Every live CFW
+  round and the joint final CFW response now pass their conditional-image
+  gates. The fixed KMAC256/SHAKE256 joint assumption remains external. WHIR
+  sequential images, both live role-18 carried covectors, and the terminal
+  whole-construction simulator are not connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
   schedule. Its one-shot carried-covector lifecycle is bound to verified public
   input and the exact transcript prefix, and guarded coverage reaches the

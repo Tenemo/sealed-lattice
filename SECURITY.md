@@ -75,7 +75,8 @@ the frozen factor-one contract to the retained setup authority, polls the exact
 from verifier-minted suite, application-statement, manifest, and relation
 bindings before independently decoding them. The guarded selected-size owner
 now exercises a release-owned public-key generation state that owns family
-materialization and its first two compact responses together. That state accepts the
+materialization, its first three compact responses, and the complete CFW
+response sequence together. That state accepts the
 lookup challenge only through a borrowed first-message authority minted by its
 retained compact response state for the same proof geometry and canonical
 public input, then owns bounded lookup inversion and structured-row preparation.
@@ -95,21 +96,31 @@ production structured-row source. It never retains that 671,088,640-byte
 matrix whole. Eight deterministic 16,384-row stripes keep one 83,886,080-byte
 stripe and one 5,242,880-byte encoded column live while the state commits all
 262,144 second-response leaves, derives the second verifier message and its
-21-coordinate cross-epoch point, publishes the next authenticated response
-checkpoint, and advances one CFW poll. Guarded native coverage executes this
-prefix under the repository memory ceiling; measurements remain in its run
-diagnostics. At a later opening boundary, the response state exposes only its
-verifier-derived query schedule; the production owner filters the exact
-main-source rows and performs one-shot replay of each touched canonical stripe
-from retained source authority and encoding randomness. Focused parity and
-hostile lifecycle coverage exists, but the selected-size owner has not reached
-or measured that later opening move. This is native development evidence only.
+21-coordinate cross-epoch point, and publishes the next authenticated response
+checkpoint. It then commits the four-leaf cross-epoch response and executes all
+23 CFW rounds through the final response. Each round polynomial must pass its
+compiler-derived rank-seven conditional image before response construction.
+The final atomic response samples its translated full-rank terminal values
+before checking the outer evaluations against the verifier-derived affine
+hyperplane, while canonical bytes remain outer-first. Authenticated response
+checkpoints cover the cross-epoch response, every completed round, and the
+final response.
+Guarded native coverage executes this path under the repository memory ceiling.
+The CFW phase reconciles 4,926 external-storage transactions, 1,006,632,840
+bytes written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes;
+measurements remain in its run diagnostics. At a later opening boundary, the
+response state exposes only its verifier-derived query schedule; the production
+owner filters the exact main-source rows and performs one-shot replay of each
+touched canonical stripe from retained source authority and encoding
+randomness. Focused parity and hostile lifecycle coverage exists, but the
+selected-size owner has not reached or measured that later opening move. This
+is native development evidence only.
 Selected-size opening replay, authenticated mid-stripe restart, cold
 restoration through the common worker,
 scalar-WASM execution, and a complete emitted WHIR epoch remain absent.
 The test-only production-shaped small-chain owner uses the response state, but
-the later CFW and WHIR family material provider, production worker adapter,
-semantic composition, WHIR execution, complete masking path, emitted-coordinate
+the WHIR family material provider, production worker adapter, semantic
+composition, WHIR execution, complete masking path, emitted-coordinate
 accounting, fixed-tape arithmetic, proof production, and complete algebraic
 proof verification remain test-only or incomplete. Before post-lookup masking
 material is drawn, release generation now independently re-decodes the canonical
@@ -126,7 +137,8 @@ emitted proof prefix plus the authenticated transcript cursor after the first
 two responses, replays those verifier moves, and verifies the real three-
 coordinate cross-epoch disclosure and CFW auxiliary scalar against the
 independently compiled rank-two and rank-one conditional images. The CFW prover
-cannot initialize unless that check passed.
+cannot initialize unless that check passed. Every live CFW round and its joint
+final response now pass their conditional-image gates.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -151,12 +163,12 @@ to verified public input and the exact semantic prefix, and guarded coverage
 reaches the terminal 82-move lifecycle, including retry, restore, and nonempty-
 suffix rewind.
 
-The release path does not close masking: later sequential conditional images,
-both live role-18 prefix consumptions, terminal simulator binding to the
-complete emitted proof, and the exact construction-level statistical-HVZK
-statement remain absent. The initial live gate binds only the canonical prefix
-through the first two completed responses; it is not a complete emitted-byte
-correspondence argument.
+The release path does not close masking: WHIR sequential conditional images,
+both live role-18 prefix consumptions, whole-construction terminal simulator
+binding to the complete emitted proof, and the exact construction-level
+statistical-HVZK statement remain absent. The live CFW gates bind only the
+canonical prefix through the final CFW response; they are not a complete
+emitted-byte correspondence argument.
 The live bridge accounts for three symbolic quantum-PRF replacements: action-
 root key expansion, proof-coin and coordinate-stream derivation, and compact-
 generation expansion keyed by the two seeds. It also retains exact action-root,
@@ -253,11 +265,13 @@ that a coherent snapshot is newest.
   challenge, bounded structured-row materialization, production CFW and WHIR
   mask material, the complete striped 262,144-leaf second response, its
   transcript-minted cross-epoch point and checkpoint, retained-tree overlap,
-  and one CFW poll. The guarded job stays below the automatic and hard memory
-  targets. The production path owns verifier-derived opening recomputation, but
+  all 23 conditional-image-gated CFW rounds, and the verifier-bound final CFW
+  response. Its CFW external-storage execution reconciles 4,926 transactions,
+  1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
+  bytes. The production path owns verifier-derived opening recomputation, but
   selected-size opening replay, mid-stripe restart, cold common-worker
-  restoration, complete proof execution, full resource reconciliation, and
-  browser execution remain unresolved.
+  restoration, the first WHIR handoff, complete proof execution, browser
+  resource reconciliation, and browser execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.
