@@ -1218,6 +1218,55 @@ pub(crate) fn verify_selected_compact_whir_sumcheck_round_masking(
     )
 }
 
+/// Verifies the live encoded-source openings selected by one compact WHIR
+/// code-switch message. The verifier prefix determines the distinct query
+/// positions; callers provide only the emitted query-major leaf values.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_selected_compact_whir_source_query_masking(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+    source_ordinal: u8,
+    query_outputs: &[CompactChallengeField],
+) -> Result<(), CompactMaskingEntropyError> {
+    if completed_messages.is_empty() || completed_messages.len() >= inputs.verifier_moves.len() {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let mut authority = CompactMaskingEntropyAuthority::begin(inputs, coefficient_maps, identity)?;
+    let mut selected_steps = Vec::new();
+    for (move_index, message) in completed_messages.iter().enumerate() {
+        authority.authorize_next_response(None)?;
+        let move_ordinal = u32::try_from(move_index)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        let steps = authority
+            .ingest_verifier_message(move_ordinal, message)?
+            .to_vec();
+        if move_index + 1 == completed_messages.len() {
+            selected_steps = steps;
+        } else if !steps.is_empty() {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+    }
+
+    let [source_query_step] = selected_steps.as_slice() else {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    };
+    if source_query_step.kind()
+        != (CompactMaskingDisclosureKind::SourceQueries {
+            epoch,
+            source_ordinal,
+        })
+        || usize::try_from(source_query_step.output_coordinate_count()).ok()
+            != Some(query_outputs.len())
+        || source_query_step.conditional_rank() != source_query_step.output_coordinate_count()
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    authority.verify_coefficient_image_output(source_query_step, &[], None, query_outputs)
+}
+
 fn replay_selected_compact_masking_prefix<'contract>(
     inputs: CompactPublicKeyVerifierInputs<'contract>,
     coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
@@ -4710,7 +4759,7 @@ mod tests {
     }
 
     #[test]
-    fn live_masking_gate_covers_cfw_and_the_initial_whir_sumcheck() {
+    fn live_masking_gate_covers_cfw_initial_whir_and_first_source_queries() {
         let (contract, maps) = selected();
         let inputs = contract.verifier_inputs();
         let mut messages = vec![
@@ -5054,6 +5103,94 @@ mod tests {
                 )
                 .expect("the next WHIR round challenge is accepted");
         }
+
+        assert!(
+            authority
+                .authorize_next_response(None)
+                .expect("the first code-switch response is authorized")
+                .is_empty()
+        );
+        let code_switch_message_ordinal = messages.len();
+        messages.push(selected_adversarial_message(
+            &inputs,
+            code_switch_message_ordinal,
+        ));
+        let source_query_steps = authority
+            .ingest_verifier_message(
+                u32::try_from(code_switch_message_ordinal).unwrap(),
+                messages.last().unwrap(),
+            )
+            .expect("the first code-switch query message is accepted")
+            .to_vec();
+        let [source_query_step] = source_query_steps.as_slice() else {
+            panic!("the first code-switch message selects one source-query view")
+        };
+        assert_eq!(
+            source_query_step.kind(),
+            CompactMaskingDisclosureKind::SourceQueries {
+                epoch: pre_challenge_epoch.epoch,
+                source_ordinal: 0,
+            }
+        );
+        let source_query_request = authority
+            .prepare_coefficient_image(source_query_step, &[], None)
+            .expect("the first source-query conditional image derives");
+        let independent_query_coordinates = (0..source_query_step.conditional_rank())
+            .map(|coordinate_ordinal| CompactChallengeField::from_u64(1_101 + coordinate_ordinal))
+            .collect::<Vec<_>>();
+        let query_outputs = authority
+            .execute_coefficient_image(
+                source_query_step,
+                &source_query_request,
+                &independent_query_coordinates,
+            )
+            .expect("the query-major source image executes");
+        verify_selected_compact_whir_source_query_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &messages,
+            pre_challenge_epoch.epoch,
+            0,
+            &query_outputs,
+        )
+        .expect("the live gate accepts the exact source-query conditional image");
+        assert_eq!(
+            verify_selected_compact_whir_source_query_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                pre_challenge_epoch.epoch,
+                1,
+                &query_outputs,
+            ),
+            Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
+        );
+        assert_eq!(
+            verify_selected_compact_whir_source_query_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                pre_challenge_epoch.epoch,
+                0,
+                &query_outputs[..query_outputs.len() - 1],
+            ),
+            Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
+        );
+        assert_eq!(
+            verify_selected_compact_whir_source_query_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages[..messages.len() - 1],
+                pre_challenge_epoch.epoch,
+                0,
+                &query_outputs,
+            ),
+            Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
+        );
     }
 
     #[test]

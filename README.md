@@ -132,8 +132,19 @@ and target release remain incomplete or internal.
   response publishes an authenticated checkpoint before the next fold. The
   guarded selected-size owner completes this batch with 4,108 response leaves,
   12 verifier-selected openings, and a 32,768-element residual source and
-  covector. This is the first masked-sumcheck batch, not a complete WHIR epoch
-  or proof.
+  covector. It then folds the original source's 25,344 base-field encoding-
+  randomness coordinates at those six challenges into 396 extension-field
+  coordinates. The first code switch samples contract-sized next-source and
+  switch-mask randomness from the live KMAC stream, streams the exact 8,192-row
+  by 16-element source and 4,096-row by one-element mask into a 16,384-leaf
+  response, and consumes the verifier's one extension challenge, one base-field
+  challenge, and 396 distinct source queries. Before releasing any opening,
+  generation routes all 25,344 query-major source coordinates through the
+  independently compiled full-rank conditional-image gate. It then supplies
+  the 396 original-source leaves, binds the query set and combination challenge
+  once, and publishes the authenticated response checkpoint. This is the first
+  masked-sumcheck batch
+  and first code-switch boundary, not a complete WHIR epoch or proof.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -142,20 +153,20 @@ and target release remain incomplete or internal.
   the eager canonical WHIR encoder across stripe boundaries and refuses
   duplicate, reordered, out-of-range, premature, and repeated replay requests.
   Guarded native development coverage exercises this selected-size path
-  through the initial pre-challenge WHIR sumcheck batch under the repository
+  through the first pre-challenge WHIR code switch under the repository
   memory ceiling. Its CFW phase reconciles 4,926 external-storage transactions,
-  1,006,632,840 bytes
-  written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes.
+  1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
+  CFW storage bytes.
   These measurements remain in the owning run diagnostics and do not
   constitute scalar-WASM or browser evidence. The owner does not yet cover a
-  selected-size opening replay, authenticated
-  mid-stripe restart, cold restoration through the common worker, JavaScript
-  and browser-process overlap, the remaining WHIR batches and folds, a complete
-  emitted WHIR epoch, or a proof. The
-  test-only production-shaped small-chain owner uses the response state, but
-  the WHIR family material provider, production worker adapter, WHIR proof
-  production, semantic execution, and complete masking path remain test-only
-  or incomplete. Before the second response's masking material is
+  selected-size main-source stripe opening replay, authenticated mid-stripe
+  restart, cold restoration through the common worker, JavaScript and browser-
+  process overlap, the remaining three pre-challenge masked-sumcheck batches
+  and two code switches, the base opening, a complete emitted WHIR epoch, or a
+  proof. The test-only production-shaped small-chain owner uses the response
+  state, but the WHIR family material provider, production worker adapter, WHIR
+  proof production, semantic execution, and complete masking path remain
+  test-only or incomplete. Before the second response's masking material is
   drawn, release generation now re-decodes its canonical public input through
   the selected verifier contract, independently derives and checks every
   coefficient-to-view map, and constructs the compiler/verifier-derived public-
@@ -174,10 +185,12 @@ and target release remain incomplete or internal.
   checks the CFW auxiliary scalar against its independently derived rank-one
   image, and CFW initialization refuses unless this gate passed. Every live CFW
   round, the initial pre-challenge WHIR auxiliary, and all six initial WHIR
-  round disclosures now pass their conditional-image gates. The fixed
-  KMAC256/SHAKE256 joint assumption remains external. The remaining WHIR
-  sequential images, both live role-18 carried covectors, and the terminal
-  whole-construction simulator are not connected yet.
+  round disclosures now pass their conditional-image gates. The first source-
+  query disclosure also passes its verifier-prefix-derived full-rank image gate
+  before any leaf is released. The fixed KMAC256/SHAKE256 joint assumption
+  remains external. The subsequent WHIR sequential images, both live role-18
+  carried covectors, and the terminal whole-construction simulator are not
+  connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
   schedule. Its one-shot carried-covector lifecycle is bound to verified public
   input and the exact transcript prefix, and guarded coverage reaches the
@@ -199,12 +212,11 @@ ceremony or supported-phone qualification.
   exists. The release transport ABI checks canonical structure, transcript
   chronology, query derivation, and Merkle openings only.
 - The compact successor still requires every remaining WHIR sequential
-  conditional-image check after the initial pre-challenge sumcheck batch, both
-  live role-18
-  masking authorities, a construction-level statistical-HVZK argument bound to
-  the complete emitted proof, composition of the live KMAC bridge with its
-  explicit quantum-PRF and joint fixed-Keccak assumptions, and the applicable
-  SHAKE256 fixed-tape and QROM theorem chain.
+  conditional-image check after the first pre-challenge code switch, both live
+  role-18 masking authorities, a construction-level statistical-HVZK argument
+  bound to the complete emitted proof, composition of the live KMAC bridge with
+  its explicit quantum-PRF and joint fixed-Keccak assumptions, and the
+  applicable SHAKE256 fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
 - Browser custody does not yet provide complete proactive authenticated
