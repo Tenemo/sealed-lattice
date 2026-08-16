@@ -403,6 +403,21 @@ impl CompactResponseGenerationState {
         self.completed_openings.pop_front()
     }
 
+    /// Returns the complete verifier-derived query schedule only while that
+    /// response is being opened. Construction adapters use this authority to
+    /// batch deterministic source recomputation without accepting caller-
+    /// supplied coordinates.
+    pub(crate) fn current_opening_query_leaf_ordinals(
+        &self,
+        response_ordinal: u32,
+    ) -> Option<&[u64]> {
+        let CompactResponseGenerationPhase::OpeningResponse(opening) = &self.phase else {
+            return None;
+        };
+        (opening.output.response_ordinal() == response_ordinal)
+            .then(|| opening.query_schedule.as_slice())
+    }
+
     pub(crate) fn begin_response(
         &mut self,
         fiat_shamir_round_salt: [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
@@ -1240,6 +1255,24 @@ mod tests {
                     response_ordinal,
                     leaf_ordinal,
                 } => {
+                    {
+                        let opening_query_leaf_ordinals = state
+                            .current_opening_query_leaf_ordinals(response_ordinal)
+                            .expect("the current opening exposes its verifier-derived schedule");
+                        assert!(opening_query_leaf_ordinals.contains(&leaf_ordinal));
+                        assert!(
+                            opening_query_leaf_ordinals
+                                .windows(2)
+                                .all(|pair| pair[0] < pair[1])
+                        );
+                        assert!(
+                            state
+                                .current_opening_query_leaf_ordinals(
+                                    response_ordinal.wrapping_add(1),
+                                )
+                                .is_none()
+                        );
+                    }
                     let response_index = usize::try_from(response_ordinal)
                         .map_err(|_| CompactResponseGenerationError::InvalidGeometry)?;
                     let leaf_index = usize::try_from(leaf_ordinal)

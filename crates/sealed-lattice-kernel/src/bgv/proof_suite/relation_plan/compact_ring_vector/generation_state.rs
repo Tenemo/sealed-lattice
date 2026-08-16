@@ -1236,9 +1236,31 @@ impl PreparedCompactPublicKeyMainEpoch {
                         (leaf, leaf_salt)
                     }
                     1 => {
-                        let leaf = post_lookup_material
-                            .response_leaf(leaf_ordinal)
-                            .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+                        let opening_query_leaf_ordinals = response_generation_state
+                            .current_opening_query_leaf_ordinals(response_ordinal)
+                            .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+                                CompactPublicKeyMainEpochPreparationError::WrongPhase,
+                            ))?;
+                        let leaf = match post_lookup_material
+                            .poll_opened_response_leaf(
+                                leaf_ordinal,
+                                maximum_work_unit_count,
+                                &family_material.row_source,
+                                opening_query_leaf_ordinals,
+                            )
+                            .map_err(CompactPublicKeyMainEpochPollError::Preparation)?
+                        {
+                            CompactPublicKeyPostLookupResponseLeafPoll::ArithmeticStepCompleted {
+                                processed_work_unit_count,
+                            } => {
+                                return Ok(
+                                    CompactPublicKeyMainEpochPoll::MainSourceArithmeticStepCompleted {
+                                        processed_work_unit_count,
+                                    },
+                                );
+                            }
+                            CompactPublicKeyPostLookupResponseLeafPoll::LeafReady(leaf) => leaf,
+                        };
                         let leaf_salt = family_material
                             .metadata
                             .pre_challenge
@@ -1260,6 +1282,11 @@ impl PreparedCompactPublicKeyMainEpoch {
                 response_generation_state
                     .supply_next_opened_leaf(&leaf, leaf_salt)
                     .map_err(CompactPublicKeyMainEpochPollError::ResponseGeneration)?;
+                if response_ordinal == 1 {
+                    post_lookup_material
+                        .mark_response_leaf_supplied(leaf_ordinal)
+                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+                }
                 Ok(CompactPublicKeyMainEpochPoll::OpenedResponseLeafSupplied {
                     response_ordinal,
                     leaf_ordinal,
@@ -1457,6 +1484,69 @@ impl CompactPublicKeyPostLookupMaterial {
         Ok(())
     }
 
+    fn poll_opened_response_leaf(
+        &mut self,
+        leaf_ordinal: u64,
+        maximum_work_unit_count: u64,
+        row_source: &SelectedCompactPublicKeyRowSource,
+        opening_query_leaf_ordinals: &[u64],
+    ) -> Result<CompactPublicKeyPostLookupResponseLeafPoll, CompactPublicKeyMainEpochPreparationError>
+    {
+        let [inner_mask_end, main_source_end, ..] = self.component_leaf_boundaries()?;
+        if !(inner_mask_end..main_source_end).contains(&leaf_ordinal) {
+            return Ok(CompactPublicKeyPostLookupResponseLeafPoll::LeafReady(
+                self.response_leaf(leaf_ordinal)?,
+            ));
+        }
+        let main_source_row = usize::try_from(leaf_ordinal - inner_mask_end)
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        if self.main_source_oracle.can_begin_opening_replay() {
+            let opening_rows = main_source_opening_rows_from_query_schedule(
+                inner_mask_end,
+                main_source_end,
+                opening_query_leaf_ordinals,
+            )?;
+            if opening_rows.first().copied() != Some(main_source_row) {
+                return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+            }
+            self.main_source_oracle
+                .begin_opening_replay(&opening_rows)
+                .map_err(CompactPublicKeyMainEpochPreparationError::Whir)?;
+        }
+        match self
+            .main_source_oracle
+            .poll(maximum_work_unit_count, |source_ordinal| {
+                row_source
+                    .witness_value(source_ordinal)
+                    .map(compact_challenge_from_production)
+            })
+            .map_err(|error| match error {
+                CompactWhirRecomputableExtensionError::Whir(error) => {
+                    CompactPublicKeyMainEpochPreparationError::Whir(error)
+                }
+                CompactWhirRecomputableExtensionError::Source(error) => {
+                    CompactPublicKeyMainEpochPreparationError::Prover(error)
+                }
+            })? {
+            CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted {
+                processed_work_unit_count,
+            } => Ok(
+                CompactPublicKeyPostLookupResponseLeafPoll::ArithmeticStepCompleted {
+                    processed_work_unit_count,
+                },
+            ),
+            CompactWhirRecomputableExtensionPoll::StripeReady { .. } => {
+                let row = self
+                    .main_source_oracle
+                    .response_row(main_source_row)
+                    .map_err(CompactPublicKeyMainEpochPreparationError::Whir)?;
+                Ok(CompactPublicKeyPostLookupResponseLeafPoll::LeafReady(
+                    encoded_extension_values_response_leaf(Some(row))?,
+                ))
+            }
+        }
+    }
+
     fn response_leaf(
         &self,
         leaf_ordinal: u64,
@@ -1497,6 +1587,37 @@ impl CompactPublicKeyPostLookupMaterial {
         }
         Ok(CompactOwnedResponseLeaf::padding())
     }
+}
+
+fn main_source_opening_rows_from_query_schedule(
+    main_source_first_leaf_ordinal: u64,
+    main_source_end_leaf_ordinal: u64,
+    query_leaf_ordinals: &[u64],
+) -> Result<Vec<usize>, CompactPublicKeyMainEpochPreparationError> {
+    if main_source_first_leaf_ordinal >= main_source_end_leaf_ordinal
+        || query_leaf_ordinals.is_empty()
+        || query_leaf_ordinals
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+    }
+    let mut opening_rows = Vec::new();
+    opening_rows
+        .try_reserve_exact(query_leaf_ordinals.len())
+        .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
+    for leaf_ordinal in query_leaf_ordinals.iter().copied() {
+        if (main_source_first_leaf_ordinal..main_source_end_leaf_ordinal).contains(&leaf_ordinal) {
+            opening_rows.push(
+                usize::try_from(leaf_ordinal - main_source_first_leaf_ordinal)
+                    .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
+            );
+        }
+    }
+    if opening_rows.is_empty() {
+        return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+    }
+    Ok(opening_rows)
 }
 
 fn prepare_post_lookup_material(
@@ -2026,5 +2147,29 @@ mod tests {
                 Err(CompactPublicKeyFamilyMaterializationError::InvalidVerifierMessage)
             );
         }
+    }
+
+    #[test]
+    fn verifier_derived_opening_schedule_selects_exact_main_source_rows() {
+        assert_eq!(
+            main_source_opening_rows_from_query_schedule(4, 12, &[1, 4, 7, 11, 12, 20])
+                .expect("the canonical schedule selects its main-source coordinates"),
+            vec![0, 3, 7]
+        );
+        for invalid_schedule in [
+            Vec::new(),
+            vec![1, 4, 4, 11],
+            vec![7, 4],
+            vec![0, 1, 12, 13],
+        ] {
+            assert_eq!(
+                main_source_opening_rows_from_query_schedule(4, 12, &invalid_schedule),
+                Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)
+            );
+        }
+        assert_eq!(
+            main_source_opening_rows_from_query_schedule(12, 12, &[12]),
+            Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)
+        );
     }
 }

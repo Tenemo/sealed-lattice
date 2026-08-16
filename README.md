@@ -122,16 +122,22 @@ statuses:
   second verifier message and 21-coordinate cross-epoch point, publishes the
   next authenticated response checkpoint, and advances one CFW poll. The
   strict 56-byte attempt-and-WHIR-position cursor remains bound into both
-  checkpoints. The latest guarded native owner passed in 218.82 seconds; its
-  focused retained-authority portion took 49.355 seconds, including 28.614
+  checkpoints. At a later opening boundary, the response state exposes the
+  complete verifier-derived query schedule only during that opening. The
+  production owner filters the exact main-source rows and replays each touched
+  canonical stripe once from retained source authority and action-private
+  encoding randomness. Focused coverage matches nonconsecutive replayed rows
+  to the eager canonical WHIR encoder across stripe boundaries and refuses
+  invalid lifecycle requests. The latest guarded native owner passed in
+  218.82 seconds; its focused retained-authority portion took 49.355 seconds, including 28.614
   seconds for the striped second response. Its two retained response trees used
   50,331,520 external bytes. Observed peak process-tree RSS was 380,194,816
   bytes, peak guarded-job memory was 465,428,480 bytes, and peak process memory
   was 454,737,920 bytes. The guarded-job peak is 15.6 percent above the
   402,653,184-byte nominal planning target but below the 603,979,776-byte
   automatic target and 671,088,640-byte hard ceiling. These are guarded native
-  development measurements, not scalar-WASM or browser evidence. Later main-
-  response openings, authenticated mid-stripe restart, cold common-worker
+  development measurements, not scalar-WASM or browser evidence. Selected-
+  size opening replay, authenticated mid-stripe restart, cold common-worker
   restoration, complete WHIR execution, scalar-WASM execution, and an emitted
   compact proof remain absent. The later CFW and WHIR family material provider
   and production worker adapter remain incomplete.
@@ -1290,16 +1296,22 @@ Works today, at component scope:
   second verifier message and 21-coordinate cross-epoch point, publishes the
   next authenticated response checkpoint, and advances one CFW poll. The
   strict 56-byte attempt-and-WHIR-position cursor remains bound into both
-  checkpoints. The latest guarded native owner passed in 218.82 seconds; its
-  focused retained-authority portion took 49.355 seconds, including 28.614
+  checkpoints. At a later opening boundary, the response state exposes the
+  complete verifier-derived query schedule only during that opening. The
+  production owner filters the exact main-source rows and replays each touched
+  canonical stripe once from retained source authority and action-private
+  encoding randomness. Focused coverage matches nonconsecutive replayed rows
+  to the eager canonical WHIR encoder across stripe boundaries and refuses
+  invalid lifecycle requests. The latest guarded native owner passed in
+  218.82 seconds; its focused retained-authority portion took 49.355 seconds, including 28.614
   seconds for the striped second response. Its two retained response trees used
   50,331,520 external bytes. Observed peak process-tree RSS was 380,194,816
   bytes, peak guarded-job memory was 465,428,480 bytes, and peak process memory
   was 454,737,920 bytes. The guarded-job peak is 15.6 percent above the
   402,653,184-byte nominal planning target but below the 603,979,776-byte
   automatic target and 671,088,640-byte hard ceiling. These are guarded native
-  development measurements, not scalar-WASM or browser evidence. Later main-
-  response openings, authenticated mid-stripe restart, cold common-worker
+  development measurements, not scalar-WASM or browser evidence. Selected-
+  size opening replay, authenticated mid-stripe restart, cold common-worker
   restoration, complete WHIR execution, scalar-WASM execution, and an emitted
   compact proof remain absent. The later CFW and WHIR family material provider
   and production worker adapter remain incomplete.

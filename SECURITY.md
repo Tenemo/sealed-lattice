@@ -108,12 +108,17 @@ canonical 16,384-row stripes keep one 83,886,080-byte stripe and one
 262,144-leaf second response, derives the second verifier message and its
 21-coordinate cross-epoch point, publishes the next authenticated response
 checkpoint, and advances one CFW poll. The exact 56-byte attempt-and-WHIR-
-position cursor remains bound into both checkpoints. Guarded native evidence
-measured 465,428,480 peak job bytes, 454,737,920 peak process bytes, 380,194,816
+position cursor remains bound into both checkpoints. At a later opening
+boundary, the response state exposes only its verifier-derived query schedule;
+the production owner filters the exact main-source rows and performs one-shot
+replay of each touched canonical stripe from retained source authority and
+encoding randomness. Focused parity and hostile lifecycle coverage exists, but
+the selected-size owner has not reached or measured that later opening move.
+Guarded native evidence measured 465,428,480 peak job bytes, 454,737,920 peak process bytes, 380,194,816
 peak process-tree RSS bytes, and 50,331,520 retained external bytes. The job
 peak is 15.6 percent above the nominal planning target but below the automatic
-and hard ceilings. This is native development evidence only. Later main-
-response openings, authenticated mid-stripe restart, cold common-worker
+and hard ceilings. This is native development evidence only. Selected-size
+opening replay, authenticated mid-stripe restart, cold common-worker
 restoration, complete WHIR execution, scalar-WASM execution, and an emitted
 compact proof remain absent. The later CFW and WHIR family material adapter and
 production worker adapter remain incomplete.
@@ -267,12 +272,17 @@ canonical 16,384-row stripes keep one 83,886,080-byte stripe and one
 262,144-leaf second response, derives the second verifier message and its
 21-coordinate cross-epoch point, publishes the next authenticated response
 checkpoint, and advances one CFW poll. The exact 56-byte attempt-and-WHIR-
-position cursor remains bound into both checkpoints. Guarded native evidence
-measured 465,428,480 peak job bytes, 454,737,920 peak process bytes, 380,194,816
+position cursor remains bound into both checkpoints. At a later opening
+boundary, the response state exposes only its verifier-derived query schedule;
+the production owner filters the exact main-source rows and performs one-shot
+replay of each touched canonical stripe from retained source authority and
+encoding randomness. Focused parity and hostile lifecycle coverage exists, but
+the selected-size owner has not reached or measured that later opening move.
+Guarded native evidence measured 465,428,480 peak job bytes, 454,737,920 peak process bytes, 380,194,816
 peak process-tree RSS bytes, and 50,331,520 retained external bytes. The job
 peak is 15.6 percent above the nominal planning target but below the automatic
-and hard ceilings. This is native development evidence only. Later main-
-response openings, authenticated mid-stripe restart, cold common-worker
+and hard ceilings. This is native development evidence only. Selected-size
+opening replay, authenticated mid-stripe restart, cold common-worker
 restoration, complete WHIR execution, scalar-WASM execution, and an emitted
 compact proof remain absent. The later CFW and WHIR family material adapter and
 production worker adapter remain incomplete.
@@ -430,8 +440,9 @@ the snapshot is the newest state.
   262,144-leaf second response, its transcript-minted cross-epoch point and
   checkpoint, retained-tree overlap, and one CFW poll. Peak guarded-job memory
   is 465,428,480 bytes: 15.6 percent above the nominal planning target but below
-  the automatic and hard ceilings. Later opening recomputation, authenticated
-  mid-stripe restart, cold common-worker restoration, complete proof execution,
+  the automatic and hard ceilings. The production path owns verifier-derived
+  opening recomputation, but selected-size opening replay, authenticated mid-
+  stripe restart, cold common-worker restoration, complete proof execution,
   full resource reconciliation, and browser execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody. Persistence request and recheck, quota admission, eviction

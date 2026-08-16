@@ -104,11 +104,14 @@ stripes instead of retaining it, commits the complete 262,144-leaf second
 response, derives its verifier message and 21-coordinate cross-epoch point,
 publishes the next authenticated response checkpoint, and advances one CFW
 poll. Guarded native evidence measured 465,428,480 peak job bytes and
-50,331,520 retained external bytes. This is not WebAssembly or browser
-evidence. Later main-response openings, authenticated mid-stripe restart, cold
-common-worker restoration, complete WHIR execution, scalar-WASM execution, and
-an emitted compact proof remain absent. The later CFW and WHIR family material
-adapter and production worker adapter remain incomplete.
+50,331,520 retained external bytes. At a future opening boundary, the
+production owner accepts only the response state's verifier-derived schedule,
+filters the exact main-source rows, and replays each touched canonical stripe
+once. Focused parity and hostile lifecycle coverage exists, but selected-size
+opening replay has not yet run. This is not WebAssembly or browser evidence.
+Authenticated mid-stripe restart, cold common-worker restoration, complete
+WHIR execution, scalar-WASM execution, and an emitted compact proof remain
+absent. The later CFW and WHIR family material adapter and production worker adapter remain incomplete.
 The semantic authority, complete CFW/WHIR verification, reduced
 execution fixtures, and the retained end-to-end workbench remain test-only or
 incomplete. No compact prover exists. The
