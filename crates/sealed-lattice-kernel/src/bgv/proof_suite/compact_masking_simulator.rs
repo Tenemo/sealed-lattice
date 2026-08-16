@@ -7,18 +7,18 @@
 //! salted-Merkle roots, and EPRO programming are separate replacement games.
 
 use super::compact_cfw::CompactChallengeField;
-use super::compact_factor_one_semantics::{
-    CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorAuthority,
-    CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorError,
-};
 use super::compact_masking_coefficient_maps::{
     CompactCommitmentQuerySource, CompactConstructionCommitmentEmbedding,
     CompactConstructionCommitmentOwnership, CompactMaskingCoefficientMapCertificate,
 };
 use super::compact_masking_entropy::{
-    CompactBaseFreshClaimCoefficients, CompactMaskingAttemptIdentity,
-    CompactMaskingDisclosureImage, CompactMaskingDisclosureKind, CompactMaskingEntropyAuthority,
-    CompactMaskingEntropyError, CompactMaskingEntropyStep,
+    CompactBaseFreshClaimCoefficients, CompactMaskingDisclosureImage, CompactMaskingDisclosureKind,
+    CompactMaskingEntropyAuthority, CompactMaskingEntropyError, CompactMaskingEntropyStep,
+};
+use super::compact_masking_prefix::{CompactMaskingAttemptIdentity, CompactMaskingSemanticPrefix};
+use super::compact_masking_public_covector::{
+    CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorAuthority,
+    CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorError,
 };
 use super::compact_proof_contract::{
     CompactProofContractError, CompactPublicKeyVerifierInputs, CompactVerifierMoveContract,
@@ -110,45 +110,6 @@ pub(crate) struct CompactIdealMaskingMoveRecord {
     conditioned_view: CompactIdealConditionedView,
     verifier_message: DecodedFixedUniformVerifierMessage,
     post_message_disclosures: Vec<CompactIdealDisclosure>,
-}
-
-/// Opaque exact simulator-prefix capability. Only the simulator can mint one;
-/// semantic replay may inspect it but cannot substitute proof-transport
-/// messages or caller-provided bytes for this owned adaptive-game history.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct CompactMaskingSemanticPrefix {
-    attempt_identity: CompactMaskingAttemptIdentity,
-    verifier_move_ordinal: u32,
-    epoch: u8,
-    contract_source_hash: [u8; 64],
-    canonical_exposed_move_prefix: Box<[u8]>,
-    completed_messages: Box<[DecodedFixedUniformVerifierMessage]>,
-}
-
-impl CompactMaskingSemanticPrefix {
-    pub(crate) const fn attempt_identity(&self) -> CompactMaskingAttemptIdentity {
-        self.attempt_identity
-    }
-
-    pub(crate) const fn verifier_move_ordinal(&self) -> u32 {
-        self.verifier_move_ordinal
-    }
-
-    pub(crate) const fn epoch(&self) -> u8 {
-        self.epoch
-    }
-
-    pub(crate) const fn contract_source_hash(&self) -> [u8; 64] {
-        self.contract_source_hash
-    }
-
-    pub(crate) fn canonical_exposed_move_prefix(&self) -> &[u8] {
-        &self.canonical_exposed_move_prefix
-    }
-
-    pub(crate) fn completed_messages(&self) -> &[DecodedFixedUniformVerifierMessage] {
-        &self.completed_messages
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -810,20 +771,20 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
         {
             return Err(CompactMaskingSimulatorError::WrongTranscript);
         }
-        Ok(CompactMaskingSemanticPrefix {
-            attempt_identity: self.attempt_identity(),
-            verifier_move_ordinal: next_move.ordinal,
-            epoch: role.epoch,
-            contract_source_hash: self.contract_source_hash.into_bytes(),
-            canonical_exposed_move_prefix: encode_moves(&self.attempt.moves)?.into_boxed_slice(),
-            completed_messages: self
-                .attempt
+        CompactMaskingSemanticPrefix::from_validated_transcript(
+            self.attempt_identity(),
+            next_move.ordinal,
+            role.epoch,
+            self.contract_source_hash.into_bytes(),
+            encode_moves(&self.attempt.moves)?.into_boxed_slice(),
+            self.attempt
                 .moves
                 .iter()
                 .map(|record| record.verifier_message.clone())
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
-        })
+        )
+        .map_err(|_| CompactMaskingSimulatorError::WrongTranscript)
     }
 
     fn program_new_commitments(
@@ -1653,9 +1614,9 @@ fn copy_verifier_inputs<'contract>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::compact_factor_one_semantics::CompactFactorOnePublicCovectorPoll;
     use super::super::compact_masking_coefficient_maps::derive_compact_masking_coefficient_map_certificate;
     use super::super::compact_masking_entropy::selected_test_compact_masking_entropy_certificate;
+    use super::super::compact_masking_public_covector::CompactFactorOnePublicCovectorPoll;
     use super::super::compact_proof_contract::selected_compact_public_key_proof_contract;
     use super::super::compact_proof_wire::{
         CompactPublicInputBindings, encode_compact_public_input,

@@ -20,6 +20,7 @@ use super::compact_masking_coefficient_maps::{
     CompactMaskingViewRole, CompactSurjectivityWitness, apply_cfw_inner_terminal_view,
     apply_cfw_outer_mask_view, apply_whir_sumcheck_mask_view, reed_solomon_query_coefficient,
 };
+use super::compact_masking_prefix::CompactMaskingAttemptIdentity;
 use super::compact_proof_contract::{
     CompactPublicKeyVerifierInputs, CompactResponseComponentRoleContract,
     CompactVerifierMoveContract, CompactWhirEpochContract, CompactWhirFoldContract,
@@ -104,8 +105,9 @@ impl CompactBaseFreshClaimCoefficients {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn from_carried_covector(
-        covector: &super::compact_factor_one_semantics::CompactFactorOneCarriedCovector,
+        covector: &super::compact_masking_public_covector::CompactFactorOneCarriedCovector,
     ) -> Result<Self, CompactMaskingEntropyError> {
         let epoch = covector
             .epoch()
@@ -143,37 +145,6 @@ impl CompactMaskingEntropyTranscript {
             query_sets,
             base_fresh_claims,
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CompactMaskingAttemptIdentity {
-    attempt_identifier: [u8; 32],
-    reset_ordinal: u32,
-    transcript_prefix_binding: [u8; 64],
-}
-
-impl CompactMaskingAttemptIdentity {
-    #[cfg(test)]
-    pub(crate) const fn new(
-        attempt_identifier: [u8; 32],
-        reset_ordinal: u32,
-        transcript_prefix_binding: [u8; 64],
-    ) -> Self {
-        Self {
-            attempt_identifier,
-            reset_ordinal,
-            transcript_prefix_binding,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn binding_bytes(self) -> [u8; 100] {
-        let mut bytes = [0_u8; 100];
-        bytes[..32].copy_from_slice(&self.attempt_identifier);
-        bytes[32..36].copy_from_slice(&self.reset_ordinal.to_le_bytes());
-        bytes[36..].copy_from_slice(&self.transcript_prefix_binding);
-        bytes
     }
 }
 

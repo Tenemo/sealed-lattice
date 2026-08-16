@@ -23,11 +23,13 @@ mod production_small_chain;
 #[cfg(test)]
 pub(crate) use witness_covector::compact_structured_witness_covector_geometry;
 
-#[cfg(test)]
 pub(crate) use witness_covector::{
     CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
-    CompactStructuredWitnessCovectorHandoff, CompactStructuredWitnessCovectorHandoffPoll,
     StructuredTransposeValueSource,
+};
+#[cfg(test)]
+pub(crate) use witness_covector::{
+    CompactStructuredWitnessCovectorHandoff, CompactStructuredWitnessCovectorHandoffPoll,
 };
 
 use std::rc::Rc;

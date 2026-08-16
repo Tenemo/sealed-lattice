@@ -29,13 +29,6 @@ use super::relation_plan::CompactPublicKeyRelationCatalog;
 use super::{PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE};
 
 mod executable;
-mod public_covector;
-
-pub(crate) use public_covector::{
-    CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorAuthority,
-    CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorError,
-    CompactFactorOnePublicCovectorPoll,
-};
 
 pub(super) const SELECTED_FACTOR_ONE_VERIFIER_MOVE_COUNT: usize = 82;
 const SELECTED_WHIR_EPOCH_COUNT: usize = 2;

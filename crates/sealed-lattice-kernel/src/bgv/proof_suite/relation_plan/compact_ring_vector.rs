@@ -111,11 +111,13 @@ use authenticated_assignment::{
     CompactAuthenticatedAssignmentCursor, CompactAuthenticatedAssignmentPoll,
     CompactPublicKeyBaseAssignment,
 };
-#[cfg(test)]
 pub(crate) use structured_r1cs::{
     CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
-    StructuredTransposeValueSource, compact_structured_r1cs_row_source_geometry,
-    compact_structured_witness_covector_geometry,
+    StructuredTransposeValueSource,
+};
+#[cfg(test)]
+pub(crate) use structured_r1cs::{
+    compact_structured_r1cs_row_source_geometry, compact_structured_witness_covector_geometry,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -512,7 +514,6 @@ impl CompactPublicKeyRelationCatalog {
         self.padded_witness_element_count
     }
 
-    #[cfg(test)]
     pub(crate) const fn padded_public_input_element_count(&self) -> u64 {
         self.padded_public_input_element_count
     }

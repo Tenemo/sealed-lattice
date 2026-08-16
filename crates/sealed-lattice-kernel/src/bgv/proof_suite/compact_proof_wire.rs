@@ -832,7 +832,6 @@ impl DecodedCompactPublicInput {
         self.canonical_byte_length
     }
 
-    #[cfg(test)]
     pub(crate) fn field_element(
         &self,
         canonical_public_input_bytes: &[u8],
@@ -843,7 +842,6 @@ impl DecodedCompactPublicInput {
             .map_err(|_| CompactProofWireError::NonCanonicalBaseFieldElement)
     }
 
-    #[cfg(test)]
     pub(crate) const fn field_element_count(&self) -> usize {
         self.field_element_count
     }
@@ -1415,7 +1413,6 @@ fn read_u32_at(bytes: &[u8], offset: usize) -> Result<u32, CompactProofWireError
     Ok(u32::from_le_bytes(read_array_at(bytes, offset)?))
 }
 
-#[cfg(test)]
 fn read_u64_at(bytes: &[u8], offset: usize) -> Result<u64, CompactProofWireError> {
     Ok(u64::from_le_bytes(read_array_at(bytes, offset)?))
 }

@@ -53,6 +53,22 @@ mod compact_masking_coefficient_maps;
 mod compact_masking_entropy;
 #[cfg(test)]
 mod compact_masking_kmac;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the masking prefix is the next live consumer after release canonical-input validation"
+    )
+)]
+mod compact_masking_prefix;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "release generation constructs this authority before masking; live role-18 derivation remains incomplete"
+    )
+)]
+mod compact_masking_public_covector;
 #[cfg(test)]
 mod compact_masking_simulator;
 mod compact_merkle_privacy;
@@ -70,6 +86,7 @@ mod compact_public_key_static_catalog;
 mod compact_public_key_verifier;
 #[cfg(test)]
 mod compact_reed_solomon;
+mod compact_reed_solomon_domain;
 #[cfg_attr(
     not(test),
     expect(

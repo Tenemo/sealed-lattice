@@ -8,28 +8,30 @@
 
 use p3_field::{Field, PrimeCharacteristicRing};
 
-use super::super::compact_cfw::{
+use super::compact_cfw::{
     CompactCfwError, CompactCfwPublicMainCovectorCombination,
     CompactCfwPublicMainCovectorContinuation, CompactCfwPublicMainCovectors, CompactChallengeField,
     compact_challenge_from_production,
 };
-use super::super::compact_masking_simulator::CompactMaskingSemanticPrefix;
-use super::super::compact_proof_contract::{
+use super::compact_masking_prefix::CompactMaskingSemanticPrefix;
+use super::compact_proof_contract::{
     CompactProofContractError, CompactPublicKeyVerifierInputs, CompactVerifierMoveContract,
     CompactVerifierRoleCoordinate, CompactWhirEpochContract, CompactWhirFoldContract,
 };
-use super::super::compact_proof_wire::CompactProofWireError;
-use super::super::compact_public_key_verifier::{
-    VerifiedCompactPublicInputTransport, VerifiedCompactPublicInputTransportView,
+use super::compact_proof_wire::CompactProofWireError;
+use super::compact_proof_wire::{
+    CompactPublicInputBindings, DecodedCompactPublicInput, decode_compact_public_input,
 };
-use super::super::compact_reed_solomon::{
-    CanonicalReedSolomonError, CanonicalReedSolomonGeometry,
-    canonical_reed_solomon_evaluation_points,
+#[cfg(test)]
+use super::compact_public_key_verifier::VerifiedCompactPublicInputTransport;
+use super::compact_public_key_verifier::compact_public_input_transport_binding;
+use super::compact_reed_solomon_domain::{
+    CompactReedSolomonDomainError, canonical_reed_solomon_domain_evaluation_points,
 };
-use super::super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
-use super::super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
-use super::super::prover::CommonProofProverError;
-use super::super::relation_plan::{
+use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
+use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
+use super::prover::CommonProofProverError;
+use super::relation_plan::{
     CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
     StructuredTransposeValueSource,
 };
@@ -47,7 +49,7 @@ pub(crate) enum CompactFactorOnePublicCovectorError {
     InvalidCovector,
     Cfw(CompactCfwError),
     Transpose(CommonProofProverError),
-    ReedSolomon(CanonicalReedSolomonError),
+    ReedSolomonDomain(CompactReedSolomonDomainError),
 }
 
 impl From<CompactCfwError> for CompactFactorOnePublicCovectorError {
@@ -62,9 +64,9 @@ impl From<CommonProofProverError> for CompactFactorOnePublicCovectorError {
     }
 }
 
-impl From<CanonicalReedSolomonError> for CompactFactorOnePublicCovectorError {
-    fn from(error: CanonicalReedSolomonError) -> Self {
-        Self::ReedSolomon(error)
+impl From<CompactReedSolomonDomainError> for CompactFactorOnePublicCovectorError {
+    fn from(error: CompactReedSolomonDomainError) -> Self {
+        Self::ReedSolomonDomain(error)
     }
 }
 
@@ -139,16 +141,87 @@ struct CompactFactorOneBoundCarriedCovector {
 /// ranges owned by one verified transport.
 pub(crate) struct CompactFactorOnePublicCovectorAuthority<'transport> {
     verifier_inputs: CompactPublicKeyVerifierInputs<'transport>,
-    public_input: VerifiedCompactPublicInputTransportView<'transport>,
+    public_input: CompactFactorOnePublicInputView<'transport>,
     contract_source_hash: [u8; 64],
 }
 
+#[derive(Clone, Copy)]
+struct CompactFactorOnePublicInputView<'transport> {
+    canonical_bytes: &'transport [u8],
+    decoded: &'transport DecodedCompactPublicInput,
+    binding: [u8; 64],
+}
+
+impl CompactFactorOnePublicInputView<'_> {
+    const fn field_element_count(self) -> usize {
+        self.decoded.field_element_count()
+    }
+
+    fn field_element(
+        self,
+        element_ordinal: usize,
+    ) -> Result<ProofBaseFieldElement, CompactProofWireError> {
+        self.decoded
+            .field_element(self.canonical_bytes, element_ordinal)
+    }
+
+    const fn binding(self) -> [u8; 64] {
+        self.binding
+    }
+}
+
 impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
+    #[cfg(test)]
     pub(crate) fn from_verified_public_input(
         public_input: &'transport VerifiedCompactPublicInputTransport,
     ) -> Result<Self, CompactFactorOnePublicCovectorError> {
         let verifier_inputs = public_input.verifier_inputs();
-        let public_input = public_input.view();
+        let view = public_input.view();
+        let authority = Self::from_canonical_public_input(
+            verifier_inputs,
+            public_input.bindings(),
+            view.canonical_bytes(),
+            view.decoded(),
+        )?;
+        if authority.public_input_binding() != view.binding() {
+            return Err(CompactFactorOnePublicCovectorError::InvalidPublicInput);
+        }
+        Ok(authority)
+    }
+
+    pub(crate) fn from_canonical_public_input(
+        verifier_inputs: CompactPublicKeyVerifierInputs<'transport>,
+        public_input_bindings: CompactPublicInputBindings,
+        canonical_public_input_bytes: &'transport [u8],
+        decoded_public_input: &'transport DecodedCompactPublicInput,
+    ) -> Result<Self, CompactFactorOnePublicCovectorError> {
+        if public_input_bindings.relation_plan_hash().into_bytes()
+            != verifier_inputs.relation.relation_plan_variant_hash()
+        {
+            return Err(CompactFactorOnePublicCovectorError::InvalidPublicInput);
+        }
+        let independently_decoded = decode_compact_public_input(
+            verifier_inputs.public_input_wire_geometry,
+            public_input_bindings,
+            canonical_public_input_bytes,
+        )?;
+        if independently_decoded != *decoded_public_input {
+            return Err(CompactFactorOnePublicCovectorError::InvalidPublicInput);
+        }
+        Self::new(
+            verifier_inputs,
+            CompactFactorOnePublicInputView {
+                canonical_bytes: canonical_public_input_bytes,
+                decoded: decoded_public_input,
+                binding: compact_public_input_transport_binding(canonical_public_input_bytes),
+            },
+        )
+    }
+
+    fn new(
+        verifier_inputs: CompactPublicKeyVerifierInputs<'transport>,
+        public_input: CompactFactorOnePublicInputView<'transport>,
+    ) -> Result<Self, CompactFactorOnePublicCovectorError> {
         let contract_source_hash = verifier_inputs.canonical_source_hash()?.into_bytes();
         let explicit_public_input_element_count = u64::try_from(public_input.field_element_count())
             .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
@@ -309,7 +382,7 @@ struct CompactFactorOneMainTransposeState<'authority, 'transport> {
 }
 
 struct CompactFactorOnePublicTransposeSource<'transport> {
-    public_input: VerifiedCompactPublicInputTransportView<'transport>,
+    public_input: CompactFactorOnePublicInputView<'transport>,
     padded_public_input_element_count: u64,
     lookup_challenge: ProofChallengeExtensionElement,
 }
@@ -703,7 +776,7 @@ fn apply_code_switch(
     if u64::try_from(logical_message_length).ok() != Some(input_fold.message_length) {
         return Err(CompactFactorOnePublicCovectorError::InvalidContract);
     }
-    let geometry = CanonicalReedSolomonGeometry::new(
+    let evaluation_points = canonical_reed_solomon_domain_evaluation_points(
         logical_message_length,
         usize::try_from(input_fold.hiding_randomness_length)
             .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?,
@@ -711,7 +784,6 @@ fn apply_code_switch(
             .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?,
         1,
     )?;
-    let evaluation_points = canonical_reed_solomon_evaluation_points(geometry)?;
     let switch_message_length = usize::try_from(input_fold.hiding_randomness_length)
         .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
     if output_fold

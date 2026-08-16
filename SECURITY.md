@@ -108,9 +108,13 @@ restoration through the common worker,
 scalar-WASM execution, and a complete emitted WHIR epoch remain absent.
 The test-only production-shaped small-chain owner uses the response state, but
 the later CFW and WHIR family material provider, production worker adapter,
-semantic composition, WHIR execution, masking, emitted-coordinate accounting,
-fixed-tape arithmetic, proof production, and complete algebraic proof
-verification remain test-only or incomplete.
+semantic composition, WHIR execution, complete masking path, emitted-coordinate
+accounting, fixed-tape arithmetic, proof production, and complete algebraic
+proof verification remain test-only or incomplete. Before post-lookup masking
+material is drawn, release generation now independently re-decodes the canonical
+public input through the selected verifier contract, derives and checks every
+coefficient-to-view map, and constructs the compiler/verifier-derived public-
+covector authority for those bytes.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -128,17 +132,18 @@ proof or security argument.
 
 ### Masking and zero-knowledge boundary
 
-The test-only masking workbench derives coefficient-to-view maps and exercises
-a transactional adaptive simulator. Its one-shot carried-covector authority is
-bound to verified public input and the exact semantic prefix, and guarded
-coverage reaches the terminal 82-move lifecycle, including retry, restore, and
-nonempty-suffix rewind.
+The test-only masking workbench exercises conditional images and a transactional
+adaptive simulator over the same coefficient maps and public-covector replay
+now compiled into release code. Its one-shot carried-covector lifecycle is bound
+to verified public input and the exact semantic prefix, and guarded coverage
+reaches the terminal 82-move lifecycle, including retry, restore, and nonempty-
+suffix rewind.
 
-That closes only the source-level lifecycle gap. Production-derived masking
-authority, canonical emitted-byte binding, and the exact construction-level
-statistical-HVZK statement remain absent. Deployment uses browser-CSPRNG-rooted
-KMAC256 streams, so the deployed masking claim also requires the explicit
-computational quantum-PRF hybrid.
+The release input gate does not close masking: live role-18 prefix consumption,
+sequential conditional-image enforcement, canonical emitted-byte binding, and
+the exact construction-level statistical-HVZK statement remain absent.
+Deployment uses browser-CSPRNG-rooted KMAC256 streams, so the deployed masking
+claim also requires the explicit computational quantum-PRF hybrid.
 
 KMAC256 and SHAKE256 share fixed Keccak-f. Domain separation is required but
 does not by itself establish an independent qPRF and ideal-QRO model. The

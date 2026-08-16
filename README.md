@@ -125,10 +125,15 @@ and target release remain incomplete or internal.
   and browser-process overlap, a complete emitted WHIR epoch, or a proof. The
   test-only production-shaped small-chain owner uses the response state, but
   the later CFW and WHIR family material provider, production worker adapter,
-  WHIR proof production, semantic execution, and masking remain test-only or
-  incomplete.
+  WHIR proof production, semantic execution, and complete masking path remain
+  test-only or incomplete. Before the second response's masking material is
+  drawn, release generation now re-decodes its canonical public input through
+  the selected verifier contract, independently derives and checks every
+  coefficient-to-view map, and constructs the compiler/verifier-derived public-
+  covector authority for those bytes. The live role-18 prefix, carried-covector,
+  conditional-entropy, and simulator consumers are not connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
-  schedule. Its one-shot carried-covector authority is bound to verified public
+  schedule. Its one-shot carried-covector lifecycle is bound to verified public
   input and the exact transcript prefix, and guarded coverage reaches the
   terminal ideal simulator lifecycle.
 - The WebAssembly producer and SDK copy have a byte-for-byte reproducibility
@@ -147,10 +152,10 @@ ceremony or supported-phone qualification.
   `VerificationResult`, or complete compact generation and verification ABI
   exists. The release transport ABI checks canonical structure, transcript
   chronology, query derivation, and Merkle openings only.
-- The compact successor still requires production-derived masking authority,
-  a construction-level statistical-HVZK argument bound to emitted bytes, the
-  browser-CSPRNG/KMAC hybrid, and the applicable SHAKE256 fixed-tape and QROM
-  theorem chain.
+- The compact successor still requires the live role-18 masking authority and
+  conditional-image checks, a construction-level statistical-HVZK argument
+  bound to emitted bytes, the browser-CSPRNG/KMAC hybrid, and the applicable
+  SHAKE256 fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
 - Browser custody does not yet provide complete proactive authenticated

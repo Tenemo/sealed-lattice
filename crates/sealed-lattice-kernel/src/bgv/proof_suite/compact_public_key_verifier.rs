@@ -128,6 +128,7 @@ pub(crate) struct VerifiedCompactPublicKeyTransport {
 #[cfg(test)]
 pub(crate) struct VerifiedCompactPublicInputTransport {
     contract: CompactPublicKeyProofContract,
+    bindings: CompactPublicInputBindings,
     canonical_bytes: Box<[u8]>,
     decoded: DecodedCompactPublicInput,
     binding: [u8; Hash512::BYTE_LENGTH],
@@ -162,25 +163,13 @@ pub(crate) struct VerifiedCompactPublicInputTransportView<'transport> {
 }
 
 #[cfg(test)]
-impl VerifiedCompactPublicInputTransportView<'_> {
-    pub(crate) const fn canonical_bytes(&self) -> &[u8] {
+impl<'transport> VerifiedCompactPublicInputTransportView<'transport> {
+    pub(crate) const fn canonical_bytes(&self) -> &'transport [u8] {
         self.canonical_bytes
     }
 
-    pub(crate) const fn decoded(&self) -> &DecodedCompactPublicInput {
+    pub(crate) const fn decoded(&self) -> &'transport DecodedCompactPublicInput {
         self.decoded
-    }
-
-    pub(crate) const fn field_element_count(&self) -> usize {
-        self.decoded.field_element_count()
-    }
-
-    pub(crate) fn field_element(
-        &self,
-        element_ordinal: usize,
-    ) -> Result<super::ProofBaseFieldElement, CompactProofWireError> {
-        self.decoded
-            .field_element(self.canonical_bytes, element_ordinal)
     }
 
     pub(crate) const fn binding(&self) -> [u8; Hash512::BYTE_LENGTH] {
@@ -210,6 +199,7 @@ impl VerifiedCompactPublicInputTransport {
         .into_bytes();
         Ok(Self {
             contract,
+            bindings,
             canonical_bytes,
             decoded,
             binding,
@@ -218,6 +208,10 @@ impl VerifiedCompactPublicInputTransport {
 
     pub(crate) fn verifier_inputs(&self) -> CompactPublicKeyVerifierInputs<'_> {
         self.contract.verifier_inputs()
+    }
+
+    pub(crate) const fn bindings(&self) -> CompactPublicInputBindings {
+        self.bindings
     }
 
     pub(crate) fn view(&self) -> VerifiedCompactPublicInputTransportView<'_> {
@@ -748,6 +742,10 @@ fn transport_byte_digest(domain: &str, bytes: &[u8]) -> Hash512 {
     let mut hasher = StreamingHash512::new(domain, 1);
     hasher.absorb_part(bytes);
     Hash512::from_bytes(hasher.finalize())
+}
+
+pub(crate) fn compact_public_input_transport_binding(bytes: &[u8]) -> [u8; Hash512::BYTE_LENGTH] {
+    transport_byte_digest(COMPACT_TRANSPORT_PUBLIC_INPUT_DIGEST_DOMAIN, bytes).into_bytes()
 }
 
 fn compact_transport_progress_genesis(

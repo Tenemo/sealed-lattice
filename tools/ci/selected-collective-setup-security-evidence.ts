@@ -708,7 +708,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
         requiredClosurePredicate: 'completeConstructionMaskingCorrespondence',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The test-only compact coefficient, streaming-entropy, adaptive-simulator, finite-Merkle, and KMAC census owners are partial evidence. The simulator completes the selected 82-move lifecycle with verified-public-input- and prefix-bound one-shot carried-covector authorization, retry, restore, and nonempty-suffix rewind. No production compact proof emission drives the finite Merkle game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
+            'Release generation derives and checks the coefficient-to-view maps and constructs the canonical-input public-covector authority before post-lookup mask draws. Live role-18 prefix consumption, sequential conditional-image enforcement, finite-Merkle proof emission, and the joint KMAC256/SHAKE256 privacy reduction remain absent; the terminal adaptive simulator remains test-only evidence.',
     },
 ];
 
@@ -975,7 +975,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['shakeQuantumOracle'],
         advantageExpression: 'unresolved_common_construction_privacy_error',
         statement:
-            'The test-only compact coefficient maps, streaming entropy authority, adaptive simulator, finite-Merkle game, and KMAC census are partial evidence. The simulator completes the selected 82-move lifecycle with verified-public-input- and prefix-bound one-shot carried-covector authorization, retry, restore, and nonempty-suffix rewind. No production compact proof emission drives the finite game, and no joint KMAC256/SHAKE256 privacy reduction exists.',
+            'Release generation derives checked coefficient maps and the canonical-input public-covector authority. The adaptive simulator, conditional-entropy lifecycle, finite-Merkle game, and KMAC census remain test-only, with no live role-18 consumer, production proof emission, or joint KMAC256/SHAKE256 privacy reduction.',
     },
     {
         identifier: 'setupFamilySimulationComposition',

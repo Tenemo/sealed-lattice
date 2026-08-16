@@ -1,5 +1,5 @@
-//! Test-only deterministic Reed-Solomon correction for the compact semantic
-//! extractor.
+//! Canonical deterministic Reed-Solomon evaluation and correction for compact
+//! proof replay.
 //!
 //! The compact CFW and hiding-WHIR theorem uses the complete
 //! `message || hiding randomness` coefficient dimension. This owner evaluates
@@ -7,8 +7,14 @@
 //! fixed Berlekamp-Welch decoder. It is deliberately independent of the prover
 //! commitment implementation: the extractor consumes field-valued oracle
 //! rows, reconstructs every interleaved coefficient column, re-encodes it, and
-//! checks the shared row-error radius before returning a witness.
+//! checks the shared row-error radius before returning a witness. Release
+//! masking replay uses the same canonical domain and coefficient geometry as
+//! semantic extraction, without accepting a caller-selected code layout.
 
+use crate::bgv::proof_suite::compact_reed_solomon_domain::{
+    CompactReedSolomonDomainError, canonical_reed_solomon_domain_evaluation_points,
+    validate_canonical_reed_solomon_domain_geometry,
+};
 use crate::bgv::proof_suite::field::{
     PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, ProofBaseFieldElement,
     ProofChallengeExtensionElement,
@@ -26,6 +32,15 @@ pub(super) enum CanonicalReedSolomonError {
     OutsideDecodingRadius,
 }
 
+impl From<CompactReedSolomonDomainError> for CanonicalReedSolomonError {
+    fn from(error: CompactReedSolomonDomainError) -> Self {
+        match error {
+            CompactReedSolomonDomainError::ArithmeticOverflow => Self::ArithmeticOverflow,
+            CompactReedSolomonDomainError::InvalidGeometry => Self::InvalidGeometry,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct CanonicalReedSolomonGeometry {
     message_length: usize,
@@ -41,21 +56,13 @@ impl CanonicalReedSolomonGeometry {
         block_length: usize,
         interleaving_width: usize,
     ) -> Result<Self, CanonicalReedSolomonError> {
-        let dimension = message_length
-            .checked_add(hiding_randomness_length)
-            .ok_or(CanonicalReedSolomonError::ArithmeticOverflow)?;
-        let block_length_exceeds_field_two_adicity = u64::try_from(block_length)
-            .map(|length| length > (1_u64 << GOLDILOCKS_TWO_ADICITY))
-            .unwrap_or(true);
-        if message_length == 0
-            || hiding_randomness_length == 0
-            || interleaving_width == 0
-            || !block_length.is_power_of_two()
-            || block_length_exceeds_field_two_adicity
-            || dimension >= block_length
-        {
-            return Err(CanonicalReedSolomonError::InvalidGeometry);
-        }
+        validate_canonical_reed_solomon_domain_geometry(
+            message_length,
+            hiding_randomness_length,
+            block_length,
+            interleaving_width,
+        )
+        .map_err(CanonicalReedSolomonError::from)?;
         Ok(Self {
             message_length,
             hiding_randomness_length,
@@ -561,7 +568,13 @@ pub(super) fn correct_canonical_interleaved_reed_solomon_erasures(
 pub(super) fn canonical_reed_solomon_evaluation_points(
     geometry: CanonicalReedSolomonGeometry,
 ) -> Result<Vec<ProofChallengeExtensionElement>, CanonicalReedSolomonError> {
-    canonical_evaluation_points(geometry, &mut FieldOperationCounter::default())
+    canonical_reed_solomon_domain_evaluation_points(
+        geometry.message_length(),
+        geometry.hiding_randomness_length(),
+        geometry.block_length(),
+        geometry.interleaving_width(),
+    )
+    .map_err(CanonicalReedSolomonError::from)
 }
 
 fn canonical_evaluation_points(
@@ -933,6 +946,18 @@ mod tests {
                 <= geometry()
                     .decoding_field_operation_bound()
                     .expect("the decoder operation bound derives")
+        );
+    }
+
+    #[test]
+    fn release_and_counted_domain_derivations_are_identical() {
+        let expected =
+            canonical_evaluation_points(geometry(), &mut FieldOperationCounter::default())
+                .expect("the counted canonical domain derives");
+        assert_eq!(
+            canonical_reed_solomon_evaluation_points(geometry())
+                .expect("the release canonical domain derives"),
+            expected,
         );
     }
 

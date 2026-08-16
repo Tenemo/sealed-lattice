@@ -30,6 +30,12 @@ use crate::bgv::proof_suite::{
         COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH, CompactGenerationAttemptRandomness,
         CompactGenerationRandomnessCursorError,
     },
+    compact_masking_coefficient_maps::{
+        CompactMaskingCoefficientMapError, derive_compact_masking_coefficient_map_certificate,
+    },
+    compact_masking_public_covector::{
+        CompactFactorOnePublicCovectorAuthority, CompactFactorOnePublicCovectorError,
+    },
     compact_proof_contract::{
         CompactProofContractError, CompactWhirEpochContract, CompactWhirMaskGroupContract,
         selected_compact_public_key_proof_contract,
@@ -210,6 +216,8 @@ pub(crate) enum CompactPublicKeyMainEpochPreparationError {
     Contract(CompactProofContractError),
     Cfw(CompactCfwError),
     CfwProverSetup(CompactCfwExternalProverSetupError),
+    MaskingCoefficientMap(CompactMaskingCoefficientMapError),
+    MaskingPublicCovector(CompactFactorOnePublicCovectorError),
     Whir(CompactWhirError),
     Prover(CommonProofProverError),
 }
@@ -237,6 +245,18 @@ impl From<CompactCfwError> for CompactPublicKeyMainEpochPreparationError {
 impl From<CompactCfwExternalProverSetupError> for CompactPublicKeyMainEpochPreparationError {
     fn from(error: CompactCfwExternalProverSetupError) -> Self {
         Self::CfwProverSetup(error)
+    }
+}
+
+impl From<CompactMaskingCoefficientMapError> for CompactPublicKeyMainEpochPreparationError {
+    fn from(error: CompactMaskingCoefficientMapError) -> Self {
+        Self::MaskingCoefficientMap(error)
+    }
+}
+
+impl From<CompactFactorOnePublicCovectorError> for CompactPublicKeyMainEpochPreparationError {
+    fn from(error: CompactFactorOnePublicCovectorError) -> Self {
+        Self::MaskingPublicCovector(error)
     }
 }
 
@@ -1171,6 +1191,7 @@ impl PreparedCompactPublicKeyMainEpoch {
         if self.post_lookup_material.is_some() {
             return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
         }
+        validate_production_masking_inputs(&self.family_material)?;
         self.post_lookup_material = Some(prepare_post_lookup_material(&mut self.family_material)?);
         Ok(())
     }
@@ -1531,6 +1552,30 @@ impl PreparedCompactPublicKeyMainEpoch {
     ) -> Result<(), CompactResponseGenerationPollError<Storage::Error>> {
         self.response_generation_state.cancel(storage)
     }
+}
+
+fn validate_production_masking_inputs(
+    family_material: &CompactPublicKeyFamilyMaterial,
+) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
+    let contract = selected_compact_public_key_proof_contract()?;
+    let verifier_inputs = contract.verifier_inputs();
+    let contract_source_hash = verifier_inputs.canonical_source_hash()?.into_bytes();
+    if verifier_inputs.relation != family_material.relation()
+        || contract_source_hash != family_material.compact_construction_identity_hash()
+    {
+        return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+    }
+    drop(derive_compact_masking_coefficient_map_certificate(
+        contract.verifier_inputs(),
+    )?);
+    let _public_covector_authority =
+        CompactFactorOnePublicCovectorAuthority::from_canonical_public_input(
+            contract.verifier_inputs(),
+            family_material.public_input_bindings(),
+            family_material.canonical_public_input_bytes(),
+            family_material.decoded_public_input(),
+        )?;
+    Ok(())
 }
 
 impl CompactPublicKeyPostLookupMaterial {

@@ -167,12 +167,15 @@ pub(crate) use committed_material_adapter::fused_vss_radix_51_source_provider_me
 pub(crate) use committed_material_adapter::selected_vss_source_provider_memory_accounting;
 #[cfg(test)]
 pub(crate) use compact_ring_vector::{
-    CompactLookupRelationGeometry, CompactStructuredWitnessCovectorAccumulator,
-    CompactStructuredWitnessCovectorAccumulatorPoll, StructuredTransposeValueSource,
-    compact_structured_r1cs_row_source_geometry, compact_structured_witness_covector_geometry,
+    CompactLookupRelationGeometry, compact_structured_r1cs_row_source_geometry,
+    compact_structured_witness_covector_geometry,
 };
 pub(crate) use compact_ring_vector::{
     CompactPublicKeyRelationCatalog, selected_compact_public_key_relation_catalog,
+};
+pub(crate) use compact_ring_vector::{
+    CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
+    StructuredTransposeValueSource,
 };
 pub(crate) use galois_key_share_adapter::{
     GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
