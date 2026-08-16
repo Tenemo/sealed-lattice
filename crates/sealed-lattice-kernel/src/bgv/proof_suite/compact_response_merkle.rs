@@ -274,12 +274,10 @@ impl CompactResponseMerkleGeometry {
         self.maximum_queried_leaf_count
     }
 
-    #[cfg(test)]
     pub(crate) const fn minimum_queried_leaf_count(&self) -> u64 {
         self.minimum_queried_leaf_count
     }
 
-    #[cfg(test)]
     pub(crate) const fn maximum_queried_leaf_count(&self) -> u64 {
         self.maximum_queried_leaf_count
     }

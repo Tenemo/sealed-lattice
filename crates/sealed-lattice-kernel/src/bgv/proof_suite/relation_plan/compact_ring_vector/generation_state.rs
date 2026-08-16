@@ -28,11 +28,12 @@ use crate::bgv::proof_suite::{
     },
     compact_generation_randomness::{
         COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH, CompactGenerationAttemptRandomness,
-        CompactGenerationRandomnessCursorError,
+        CompactGenerationRandomnessCursorError, CompactGenerationRandomnessError,
     },
     compact_masking_coefficient_maps::{
         CompactMaskingCoefficientMapError, derive_compact_masking_coefficient_map_certificate,
     },
+    compact_masking_kmac::{CompactMaskingKmacError, derive_selected_compact_masking_kmac_bridge},
     compact_masking_public_covector::{
         CompactFactorOnePublicCovectorAuthority, CompactFactorOnePublicCovectorError,
     },
@@ -121,6 +122,7 @@ impl From<CompactWhirError> for CompactPublicKeyFamilyMaterializationError {
 pub(crate) enum CompactPublicKeyPreChallengeEncodingError<PrivateCoinError> {
     Materialization(CompactPublicKeyFamilyMaterializationError),
     PrivateCoin(PrivateCoinError),
+    Randomness(CompactGenerationRandomnessError),
 }
 
 impl<PrivateCoinError> From<CompactPublicKeyFamilyMaterializationError>
@@ -144,6 +146,14 @@ impl<PrivateCoinError> From<CompactWhirError>
 {
     fn from(error: CompactWhirError) -> Self {
         Self::Materialization(error.into())
+    }
+}
+
+impl<PrivateCoinError> From<CompactGenerationRandomnessError>
+    for CompactPublicKeyPreChallengeEncodingError<PrivateCoinError>
+{
+    fn from(error: CompactGenerationRandomnessError) -> Self {
+        Self::Randomness(error)
     }
 }
 
@@ -217,7 +227,9 @@ pub(crate) enum CompactPublicKeyMainEpochPreparationError {
     Cfw(CompactCfwError),
     CfwProverSetup(CompactCfwExternalProverSetupError),
     MaskingCoefficientMap(CompactMaskingCoefficientMapError),
+    MaskingKmac(CompactMaskingKmacError),
     MaskingPublicCovector(CompactFactorOnePublicCovectorError),
+    Randomness(CompactGenerationRandomnessError),
     Whir(CompactWhirError),
     Prover(CommonProofProverError),
 }
@@ -254,9 +266,21 @@ impl From<CompactMaskingCoefficientMapError> for CompactPublicKeyMainEpochPrepar
     }
 }
 
+impl From<CompactMaskingKmacError> for CompactPublicKeyMainEpochPreparationError {
+    fn from(error: CompactMaskingKmacError) -> Self {
+        Self::MaskingKmac(error)
+    }
+}
+
 impl From<CompactFactorOnePublicCovectorError> for CompactPublicKeyMainEpochPreparationError {
     fn from(error: CompactFactorOnePublicCovectorError) -> Self {
         Self::MaskingPublicCovector(error)
+    }
+}
+
+impl From<CompactGenerationRandomnessError> for CompactPublicKeyMainEpochPreparationError {
+    fn from(error: CompactGenerationRandomnessError) -> Self {
+        Self::Randomness(error)
     }
 }
 
@@ -1565,6 +1589,9 @@ fn validate_production_masking_inputs(
     {
         return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
     }
+    if derive_selected_compact_masking_kmac_bridge()?.into_bytes() != contract_source_hash {
+        return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+    }
     drop(derive_compact_masking_coefficient_map_certificate(
         contract.verifier_inputs(),
     )?);
@@ -2000,6 +2027,7 @@ fn prepare_post_lookup_material(
         let random_source = randomness.whir_random_source_mut();
         CompactCfwMaskMaterial::sample(cfw_geometry, || random_source.random())?
     };
+    randomness.ensure_field_sampling_valid()?;
     let cfw_auxiliary_target = cfw_mask_material.auxiliary_target(cfw_geometry)?;
     let inner_mask_messages = copy_mask_messages(cfw_mask_material.inner_masks())?;
     let inner_mask_encoding_randomness = sample_mask_encoding_randomness(
@@ -2007,6 +2035,7 @@ fn prepare_post_lookup_material(
         inner_mask_shape.width,
         inner_mask_shape.shape.randomness_len,
     )?;
+    randomness.ensure_field_sampling_valid()?;
     let inner_mask_oracle = CompactWhirEncodedMaskGroup::encode(
         inner_mask_shape,
         &inner_mask_messages,
@@ -2016,6 +2045,7 @@ fn prepare_post_lookup_material(
         &main_configuration,
         randomness.whir_random_source_mut(),
     )?;
+    randomness.ensure_field_sampling_valid()?;
     if main_source_oracle.source_element_count() != witness_length {
         return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
     }
@@ -2025,21 +2055,24 @@ fn prepare_post_lookup_material(
         outer_mask_shape.width,
         outer_mask_shape.shape.randomness_len,
     )?;
+    randomness.ensure_field_sampling_valid()?;
     let outer_mask_oracle = CompactWhirEncodedMaskGroup::encode(
         outer_mask_shape,
         &outer_mask_messages,
         &outer_mask_encoding_randomness,
     )?;
-    let cross_epoch_masks = [
-        randomness.whir_random_source_mut().random(),
-        randomness.whir_random_source_mut().random(),
-    ];
+    let cross_epoch_masks = {
+        let random_source = randomness.whir_random_source_mut();
+        [random_source.random(), random_source.random()]
+    };
+    randomness.ensure_field_sampling_valid()?;
     let cross_epoch_mask_messages = vec![vec![cross_epoch_masks[0]], vec![cross_epoch_masks[1]]];
     let cross_epoch_mask_encoding_randomness = sample_mask_encoding_randomness(
         randomness.whir_random_source_mut(),
         cross_epoch_mask_shape.width,
         cross_epoch_mask_shape.shape.randomness_len,
     )?;
+    randomness.ensure_field_sampling_valid()?;
     let cross_epoch_mask_oracle = CompactWhirEncodedMaskGroup::encode(
         cross_epoch_mask_shape,
         &cross_epoch_mask_messages,
@@ -2515,6 +2548,7 @@ fn prepare_pre_challenge_material<Coins: CommonProofPrivateCoinSource>(
         source,
         randomness.whir_random_source_mut(),
     )?;
+    randomness.ensure_field_sampling_valid()?;
     let matrix = encoded_oracle.encoded_matrix();
     if u64::try_from(matrix.height()) != Ok(source_response_component.leaf_count())
         || u64::try_from(matrix.width())

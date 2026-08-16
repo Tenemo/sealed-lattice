@@ -708,7 +708,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
         requiredClosurePredicate: 'completeConstructionMaskingCorrespondence',
         observedStatus: 'unresolved',
         missingEvidence:
-            'Release generation derives and checks the coefficient-to-view maps and constructs the canonical-input public-covector authority before post-lookup mask draws. Live role-18 prefix consumption, sequential conditional-image enforcement, finite-Merkle proof emission, and the joint KMAC256/SHAKE256 privacy reduction remain absent; the terminal adaptive simulator remains test-only evidence.',
+            'Release generation derives and checks the coefficient-to-view maps, constructs the canonical-input public-covector authority, and gates the production-derived single-proof KMAC census and symbolic quantum-PRF hops before post-lookup mask draws. Live role-18 prefix consumption, sequential conditional-image enforcement, finite-Merkle proof emission, and the joint fixed-KMAC256/fixed-SHAKE256 privacy reduction remain absent; the terminal adaptive simulator remains test-only evidence.',
     },
 ];
 

@@ -2,37 +2,41 @@
 //!
 //! The frozen compact-proof contract is the only geometry input. This module
 //! derives every construction-hiding field sample and secret Merkle-leaf salt
-//! from that contract, maps them to the two production private-coin streams,
-//! and accounts for the exact KMAC call domains. The resulting conditional
-//! accounting keeps computational KMAC advantages symbolic while calculating
-//! every statistical or information-theoretic term as an exact rational number.
+//! from that contract, maps the two 512-bit seeds to their production private-
+//! coin coordinates, and accounts for both the root stream and compact-
+//! generation KMAC domains. The resulting conditional accounting keeps
+//! computational KMAC advantages symbolic while calculating every statistical
+//! or information-theoretic term as an exact rational number.
 
 use num_bigint::BigUint;
 use num_traits::One;
 
 use super::compact_cfw_geometry::CompactCfwVerifierConfiguration;
+use super::compact_generation_randomness::{
+    COMPACT_FIAT_SHAMIR_ROUND_SALT_CUSTOMIZATION, COMPACT_GENERATION_PRIVATE_SEED_COORDINATES,
+    COMPACT_PRIVATE_LEAF_SALT_CUSTOMIZATION, COMPACT_PRIVATE_SEED_BYTE_LENGTH,
+    COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH, COMPACT_WHIR_RANDOM_CUSTOMIZATION,
+};
 use super::compact_proof_contract::{
     CompactProofContractError, CompactPublicKeyProofContract, CompactWhirEpochContract,
     CompactWhirFoldContract,
 };
+#[cfg(test)]
 use super::prover::{
-    COMMON_PROOF_PRIVATE_COIN_COORDINATE_HASH_DOMAIN, CommonProofPrivateCoinCoordinate,
-    common_proof_private_coin_coordinate_derivation_context_hash,
+    CommonProofPrivateCoinCoordinate, common_proof_private_coin_coordinate_derivation_context_hash,
 };
 use super::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE,
+    compact_proof_wire::COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH,
 };
 use crate::foundation::{
     ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION, ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH,
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, DECLARED_ADVERSARIAL_QUERY_BUDGET, Hash512,
-    ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION, PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
     PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION, PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION,
-    PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER, PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION,
     PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH, PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION,
     PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH, PROOF_COIN_KEY_BYTE_LENGTH,
     ProofApplicationSlotCeilings, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-    SETUP_ATTEMPT_CUSTOMIZATION, TARGET_RELEASE_ATTEMPT_CUSTOMIZATION,
 };
 
 const PRIVATE_SAMPLER_CANDIDATE_BYTE_LENGTH: u64 = size_of::<u64>() as u64;
@@ -58,9 +62,10 @@ impl From<CompactProofContractError> for CompactMaskingKmacError {
     }
 }
 
-/// The only union multiplicities for which the selected compact-proof
-/// arithmetic is retained. The multi-proof cases are union bounds only; they
-/// do not establish shared-oracle, resettable, or family simulation.
+/// Test-only union multiplicities for the selected compact-proof arithmetic.
+/// The multi-proof cases are union bounds only; they do not establish shared-
+/// oracle, resettable, or family simulation.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactMaskingKmacUnionScope {
     /// The single-proof masking statement.
@@ -73,45 +78,14 @@ pub(crate) enum CompactMaskingKmacUnionScope {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CompactMaskingPrivateCoinOperation {
-    ModuloSamples {
-        modulus: u64,
-        output_count: u64,
-        maximum_candidate_draws_per_output: u32,
-    },
-    RawBytes {
-        byte_count: u64,
-    },
-}
-
-/// One complete private-coin stream coordinate and its canonical block range.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CompactMaskingKmacCoordinateRow {
-    coordinate: CommonProofPrivateCoinCoordinate,
-    operation: CompactMaskingPrivateCoinOperation,
-    /// Distinct canonical block frames on every non-aborting execution.
-    minimum_distinct_block_frame_count: u64,
-    /// Distinct canonical block frames if every modular output consumes its
-    /// complete rejection-sampling allowance.
-    maximum_distinct_block_frame_count: u64,
-}
-
-impl CompactMaskingKmacCoordinateRow {
-    const fn purpose_class(self) -> u16 {
-        self.coordinate.purpose_class()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactMaskingKmacCallFamily {
     ActionKeyHierarchy,
-    SetupAttempt,
     PersistentProofPreparation,
     PersistentWitnessAttempt,
-    OrdinaryProofAttempt,
-    TargetReleaseAttempt,
-    ConstructionMaskBlocks,
-    SecretLeafSaltBlocks,
+    PrivateSeedBlocks,
+    CompactWhirRandomBlocks,
+    SecretLeafSalts,
+    FiatShamirRoundSalts,
 }
 
 /// One fixed KMAC customization/output domain and its per-proof call interval.
@@ -123,104 +97,6 @@ struct CompactMaskingKmacCallRow {
     output_bit_length: u32,
     minimum_call_count: u64,
     maximum_call_count: u64,
-}
-
-/// The ten typed fields in the operative canonical block-input tuple.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CompactMaskingBlockFrameField {
-    ProtocolVersionU16,
-    SuiteIdentifierHash512,
-    CeremonyContextHash512,
-    ActionContextHash512,
-    ParticipantIdentity,
-    ProofFamilyU16,
-    PurposeClassU16,
-    CoordinateContextHash512,
-    AttemptIdentifierBytes32,
-    BlockCounterU64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CompactMaskingProofAttemptAuthority {
-    PersistentResetSafeCanonicalWitness,
-}
-
-/// Full framing chain from the selected proof application to a KMAC block.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CompactMaskingKmacFraming {
-    proof_family_schema_identifier: u16,
-    attempt_authority: CompactMaskingProofAttemptAuthority,
-    persistent_input_schema_identifier: u16,
-    preparation_customization: &'static [u8],
-    witness_attempt_customization: &'static [u8],
-    witness_part_length_prefix_byte_length: u8,
-    coordinate_context_hash_domain: &'static str,
-    coordinate_context_parts: [CompactMaskingCoordinateContextPart; 3],
-    /// Hiding and salt are the two fixed context inputs per application.
-    distinct_coordinate_context_input_count_per_application: u32,
-    /// One canonical-witness attempt identifier enters block frames.
-    /// Authenticated resets repeat that input; a changed witness requires a
-    /// fresh action root and is counted as another application.
-    distinct_stream_attempt_input_count_per_application: u32,
-    block_customization: &'static [u8],
-    block_input_schema_identifier: u16,
-    block_input_schema_version: u16,
-    block_input_fields: [CompactMaskingBlockFrameField; 10],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CompactMaskingCoordinateContextPart {
-    DerivationBindingHash512,
-    PurposeClassU16LittleEndian,
-    OrdinalU32LittleEndian,
-}
-
-impl CompactMaskingKmacFraming {
-    fn selected() -> Self {
-        Self {
-            proof_family_schema_identifier:
-                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-            attempt_authority:
-                CompactMaskingProofAttemptAuthority::PersistentResetSafeCanonicalWitness,
-            persistent_input_schema_identifier: PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
-            preparation_customization: PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION,
-            witness_attempt_customization: PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION,
-            witness_part_length_prefix_byte_length: 8,
-            coordinate_context_hash_domain: COMMON_PROOF_PRIVATE_COIN_COORDINATE_HASH_DOMAIN,
-            coordinate_context_parts: [
-                CompactMaskingCoordinateContextPart::DerivationBindingHash512,
-                CompactMaskingCoordinateContextPart::PurposeClassU16LittleEndian,
-                CompactMaskingCoordinateContextPart::OrdinalU32LittleEndian,
-            ],
-            distinct_coordinate_context_input_count_per_application: 2,
-            distinct_stream_attempt_input_count_per_application: 1,
-            block_customization: PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION,
-            block_input_schema_identifier: PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
-            block_input_schema_version: PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION,
-            block_input_fields: [
-                CompactMaskingBlockFrameField::ProtocolVersionU16,
-                CompactMaskingBlockFrameField::SuiteIdentifierHash512,
-                CompactMaskingBlockFrameField::CeremonyContextHash512,
-                CompactMaskingBlockFrameField::ActionContextHash512,
-                CompactMaskingBlockFrameField::ParticipantIdentity,
-                CompactMaskingBlockFrameField::ProofFamilyU16,
-                CompactMaskingBlockFrameField::PurposeClassU16,
-                CompactMaskingBlockFrameField::CoordinateContextHash512,
-                CompactMaskingBlockFrameField::AttemptIdentifierBytes32,
-                CompactMaskingBlockFrameField::BlockCounterU64,
-            ],
-        }
-    }
-
-    fn validate(self) -> Result<(), CompactMaskingKmacError> {
-        if self != Self::selected()
-            || !ProofApplicationSlotCeilings::SECRET_BEARING_FAMILY_SCHEMA_IDENTIFIERS
-                .contains(&self.proof_family_schema_identifier)
-        {
-            return Err(CompactMaskingKmacError::InvalidCensus);
-        }
-        Ok(())
-    }
 }
 
 /// An exact, deliberately unreduced nonnegative rational upper bound.
@@ -264,6 +140,7 @@ impl ExactProbabilityUpperBound {
 enum CompactMaskingKmacQprfHop {
     ActionKeyHierarchy,
     DerivedKeyGraph,
+    CompactGenerationExpansion,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,6 +148,8 @@ enum CompactMaskingKmacKeyRole {
     ActionRoot,
     PrivateRandomnessStream,
     ProofCoin,
+    CompactWhirSeed,
+    CompactResponseSaltSeed,
 }
 
 /// One symbolic term
@@ -286,7 +165,7 @@ struct CompactMaskingKmacQprfKeyTerm {
     reduction_query_bound_per_key: BigUint,
 }
 
-/// One of the two actual KMAC qPRF replacements. The loss remains symbolic
+/// One of the three actual KMAC qPRF replacements. The loss remains symbolic
 /// because assigning a numeric advantage to fixed KMAC256 would be invented.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CompactMaskingKmacQprfHopLoss {
@@ -294,7 +173,7 @@ struct CompactMaskingKmacQprfHopLoss {
     key_terms: Vec<CompactMaskingKmacQprfKeyTerm>,
 }
 
-/// Exact known terms plus the two symbolic quantum-PRF replacements for one of
+/// Exact known terms plus the three symbolic quantum-PRF replacements for one of
 /// the authority-derived application multiplicities.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CompactMaskingKmacQuantumHybridLoss {
@@ -317,43 +196,44 @@ struct CompactMaskingKmacQuantumHybridLoss {
     /// Canonical block-tuple collision after the context and attempt outputs
     /// above are fixed and distinct.
     canonical_block_frame_collision: ExactProbabilityUpperBound,
+    /// Collision among the coordinate-separated hiding and salt outputs after
+    /// the private-randomness PRF is replaced by ideal outputs.
+    compact_seed_collision: ExactProbabilityUpperBound,
     /// Rejection sampling is exactly uniform conditioned on non-exhaustion.
     sampler_exhaustion: ExactProbabilityUpperBound,
     leaf_salt_collision: ExactProbabilityUpperBound,
+    fiat_shamir_round_salt_collision: ExactProbabilityUpperBound,
     known_loss_sum: ExactProbabilityUpperBound,
-    qprf_hops: [CompactMaskingKmacQprfHopLoss; 2],
+    qprf_hops: [CompactMaskingKmacQprfHopLoss; 3],
 }
 
 /// Conditional accounting for the selected compact masking hybrid.
 ///
 /// Derivation recomputes the selected contract hash, KMAC census,
 /// authority-derived union multiplicity, exact quantum-query terms, and the
-/// 256-bit known-loss floor. The two KMAC quantum-PRF advantages remain
+/// 256-bit known-loss floor. The three KMAC quantum-PRF advantages remain
 /// symbolic. Joint security of the fixed KMAC256 and SHAKE256 interfaces over
 /// Keccak-f is an external unproved assumption; this accounting neither
 /// instantiates that assumption nor grants proof-acceptance authority.
+#[cfg(test)]
 pub(crate) struct CompactMaskingKmacConditionalHybridAccounting {
     selected_contract_source_hash: Hash512,
-    scope: CompactMaskingKmacUnionScope,
     hybrid_loss: CompactMaskingKmacQuantumHybridLoss,
 }
 
 /// Production-derived census for one compact public-key-share proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct CompactMaskingKmacCertificate {
+struct CompactMaskingKmacCensus {
     private_extension_element_count: u64,
     private_base_field_sample_count: u64,
     response_committed_leaf_salt_count: u64,
     minimum_transported_leaf_salt_count: u64,
     maximum_transported_leaf_salt_count: u64,
     response_commitment_count: u32,
-    committed_leaf_salt_count: u64,
-    coordinate_rows: [CompactMaskingKmacCoordinateRow; 2],
-    call_rows: [CompactMaskingKmacCallRow; 8],
-    framing: CompactMaskingKmacFraming,
+    call_rows: [CompactMaskingKmacCallRow; 7],
 }
 
-impl CompactMaskingKmacCertificate {
+impl CompactMaskingKmacCensus {
     fn quantum_hybrid_loss(
         &self,
         application_multiplicity: u64,
@@ -373,27 +253,30 @@ impl CompactMaskingKmacCertificate {
             choose_two(application_multiplicity),
             action_root_space,
         )?;
-        let coordinate_context_collision_pair_count = choose_two(u64::from(
-            self.framing
-                .distinct_coordinate_context_input_count_per_application,
-        )) * BigUint::from(application_multiplicity);
+        let coordinate_context_collision_pair_count = choose_two(
+            u64::try_from(COMPACT_GENERATION_PRIVATE_SEED_COORDINATES.len())
+                .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?,
+        ) * BigUint::from(application_multiplicity);
         let coordinate_context_collision = ExactProbabilityUpperBound::new(
             coordinate_context_collision_pair_count,
             BigUint::one() << SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH,
         )?;
-        let attempt_identifier_collision_pair_count = choose_two(u64::from(
-            self.framing
-                .distinct_stream_attempt_input_count_per_application,
-        )) * BigUint::from(application_multiplicity);
-        let attempt_identifier_collision = ExactProbabilityUpperBound::new(
-            attempt_identifier_collision_pair_count,
-            BigUint::one() << KMAC256_ATTEMPT_IDENTIFIER_OUTPUT_BIT_LENGTH,
-        )?;
+        // One canonical-witness attempt identifier enters the selected proof's
+        // block frames. Authenticated resets repeat it; a changed witness needs
+        // a fresh action root and counts as another application.
+        let attempt_identifier_collision = ExactProbabilityUpperBound::zero();
         let canonical_block_frame_collision = ExactProbabilityUpperBound::zero();
+        let total_compact_seed_count = application_multiplicity
+            .checked_mul(2)
+            .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?;
+        let compact_seed_collision = ExactProbabilityUpperBound::new(
+            choose_two(total_compact_seed_count),
+            BigUint::one() << bit_length(COMPACT_PRIVATE_SEED_BYTE_LENGTH)?,
+        )?;
 
         let sampler_exhaustion = self.sampler_exhaustion(application_multiplicity)?;
         let total_salt_count = self
-            .committed_leaf_salt_count
+            .response_committed_leaf_salt_count
             .checked_mul(application_multiplicity)
             .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?;
         let leaf_salt_collision = ExactProbabilityUpperBound::new(
@@ -403,62 +286,74 @@ impl CompactMaskingKmacCertificate {
                     .checked_mul(8)
                     .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?),
         )?;
+        let total_round_salt_count = u64::from(self.response_commitment_count)
+            .checked_mul(application_multiplicity)
+            .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?;
+        let fiat_shamir_round_salt_collision = ExactProbabilityUpperBound::new(
+            choose_two(total_round_salt_count),
+            BigUint::one()
+                << (COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH
+                    .checked_mul(8)
+                    .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?),
+        )?;
         let known_loss_sum = action_root_search
             .add(&action_root_collision)
             .add(&coordinate_context_collision)
             .add(&attempt_identifier_collision)
             .add(&canonical_block_frame_collision)
+            .add(&compact_seed_collision)
             .add(&sampler_exhaustion)
-            .add(&leaf_salt_collision);
+            .add(&leaf_salt_collision)
+            .add(&fiat_shamir_round_salt_collision);
 
         let hierarchy_calls = self.call_row(CompactMaskingKmacCallFamily::ActionKeyHierarchy)?;
         let preparation_calls =
             self.call_row(CompactMaskingKmacCallFamily::PersistentProofPreparation)?;
         let witness_calls =
             self.call_row(CompactMaskingKmacCallFamily::PersistentWitnessAttempt)?;
-        let construction_calls =
-            self.call_row(CompactMaskingKmacCallFamily::ConstructionMaskBlocks)?;
-        let salt_calls = self.call_row(CompactMaskingKmacCallFamily::SecretLeafSaltBlocks)?;
-        let maximum_stream_calls = construction_calls
-            .maximum_call_count
-            .checked_add(salt_calls.maximum_call_count)
-            .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?;
-        let proof_coin_calls = preparation_calls
-            .maximum_call_count
-            .checked_add(witness_calls.maximum_call_count)
-            .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?;
+        let private_seed_calls = self.call_row(CompactMaskingKmacCallFamily::PrivateSeedBlocks)?;
+        let whir_random_calls =
+            self.call_row(CompactMaskingKmacCallFamily::CompactWhirRandomBlocks)?;
+        let leaf_salt_calls = self.call_row(CompactMaskingKmacCallFamily::SecretLeafSalts)?;
+        let round_salt_calls = self.call_row(CompactMaskingKmacCallFamily::FiatShamirRoundSalts)?;
 
         let qprf_hops = [
             CompactMaskingKmacQprfHopLoss {
                 hop: CompactMaskingKmacQprfHop::ActionKeyHierarchy,
-                key_terms: vec![qprf_key_term(
+                key_terms: vec![qprf_key_term_from_call_rows(
                     CompactMaskingKmacKeyRole::ActionRoot,
-                    hierarchy_calls.key_bit_length,
-                    1,
-                    vec![hierarchy_calls.output_bit_length],
                     application_multiplicity,
-                    hierarchy_calls.maximum_call_count,
-                )],
+                    &[hierarchy_calls],
+                )?],
             },
             CompactMaskingKmacQprfHopLoss {
                 hop: CompactMaskingKmacQprfHop::DerivedKeyGraph,
                 key_terms: vec![
-                    qprf_key_term(
+                    qprf_key_term_from_call_rows(
                         CompactMaskingKmacKeyRole::PrivateRandomnessStream,
-                        construction_calls.key_bit_length,
-                        1,
-                        vec![construction_calls.output_bit_length],
                         application_multiplicity,
-                        maximum_stream_calls,
-                    ),
-                    qprf_key_term(
+                        &[private_seed_calls],
+                    )?,
+                    qprf_key_term_from_call_rows(
                         CompactMaskingKmacKeyRole::ProofCoin,
-                        preparation_calls.key_bit_length,
-                        2,
-                        vec![preparation_calls.output_bit_length],
                         application_multiplicity,
-                        proof_coin_calls,
-                    ),
+                        &[preparation_calls, witness_calls],
+                    )?,
+                ],
+            },
+            CompactMaskingKmacQprfHopLoss {
+                hop: CompactMaskingKmacQprfHop::CompactGenerationExpansion,
+                key_terms: vec![
+                    qprf_key_term_from_call_rows(
+                        CompactMaskingKmacKeyRole::CompactWhirSeed,
+                        application_multiplicity,
+                        &[whir_random_calls],
+                    )?,
+                    qprf_key_term_from_call_rows(
+                        CompactMaskingKmacKeyRole::CompactResponseSaltSeed,
+                        application_multiplicity,
+                        &[leaf_salt_calls, round_salt_calls],
+                    )?,
                 ],
             },
         ];
@@ -470,8 +365,10 @@ impl CompactMaskingKmacCertificate {
             coordinate_context_collision,
             attempt_identifier_collision,
             canonical_block_frame_collision,
+            compact_seed_collision,
             sampler_exhaustion,
             leaf_salt_collision,
+            fiat_shamir_round_salt_collision,
             known_loss_sum,
             qprf_hops,
         })
@@ -504,134 +401,55 @@ impl CompactMaskingKmacCertificate {
             .find(|row| row.family == family)
             .ok_or(CompactMaskingKmacError::InvalidCensus)
     }
-
-    fn validate(&self) -> Result<(), CompactMaskingKmacError> {
-        self.framing.validate()?;
-        if self.private_extension_element_count == 0
-            || self.private_base_field_sample_count
-                != self
-                    .private_extension_element_count
-                    .checked_mul(
-                        u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
-                            .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?,
-                    )
-                    .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?
-            || self.committed_leaf_salt_count == 0
-            || self.committed_leaf_salt_count != self.response_committed_leaf_salt_count
-            || self.minimum_transported_leaf_salt_count == 0
-            || self.minimum_transported_leaf_salt_count > self.maximum_transported_leaf_salt_count
-            || self.maximum_transported_leaf_salt_count > self.committed_leaf_salt_count
-            || self.response_commitment_count == 0
-            || self.coordinate_rows[0].coordinate
-                != CommonProofPrivateCoinCoordinate::hiding_argument()
-            || self.coordinate_rows[1].coordinate != CommonProofPrivateCoinCoordinate::proof_salt()
-            || self.coordinate_rows[0].coordinate.purpose_class()
-                == self.coordinate_rows[1].coordinate.purpose_class()
-            || self.coordinate_rows.iter().any(|row| {
-                row.minimum_distinct_block_frame_count == 0
-                    || row.minimum_distinct_block_frame_count
-                        > row.maximum_distinct_block_frame_count
-            })
-        {
-            return Err(CompactMaskingKmacError::InvalidCensus);
-        }
-
-        for row in self.coordinate_rows {
-            let domain = crate::foundation::PrivateRandomnessDomain::reset_safe_proof(
-                self.framing.proof_family_schema_identifier,
-                row.purpose_class(),
-            )
-            .map_err(|_| CompactMaskingKmacError::InvalidCensus)?;
-            if domain.family() != self.framing.proof_family_schema_identifier
-                || domain.purpose() != row.purpose_class()
-            {
-                return Err(CompactMaskingKmacError::InvalidCensus);
-            }
-        }
-
-        let expected_call_families = [
-            CompactMaskingKmacCallFamily::ActionKeyHierarchy,
-            CompactMaskingKmacCallFamily::SetupAttempt,
-            CompactMaskingKmacCallFamily::PersistentProofPreparation,
-            CompactMaskingKmacCallFamily::PersistentWitnessAttempt,
-            CompactMaskingKmacCallFamily::OrdinaryProofAttempt,
-            CompactMaskingKmacCallFamily::TargetReleaseAttempt,
-            CompactMaskingKmacCallFamily::ConstructionMaskBlocks,
-            CompactMaskingKmacCallFamily::SecretLeafSaltBlocks,
-        ];
-        if self.call_rows.map(|row| row.family) != expected_call_families
-            || self.call_rows.iter().any(|row| {
-                row.customization.is_empty()
-                    || row.key_bit_length != 512
-                    || row.output_bit_length == 0
-                    || row.minimum_call_count > row.maximum_call_count
-            })
-            || self.call_rows[0].customization != ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION
-            || self.call_rows[1].customization != SETUP_ATTEMPT_CUSTOMIZATION
-            || self.call_rows[2].customization != PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION
-            || self.call_rows[3].customization != PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION
-            || self.call_rows[4].customization != ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION
-            || self.call_rows[5].customization != TARGET_RELEASE_ATTEMPT_CUSTOMIZATION
-            || self.call_rows[6].customization != PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION
-            || self.call_rows[7].customization != PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION
-            || self.call_rows[0].minimum_call_count != 1
-            || self.call_rows[1].maximum_call_count != 0
-            || self.call_rows[2].minimum_call_count != 1
-            || self.call_rows[3].minimum_call_count != 1
-            || self.call_rows[4].maximum_call_count != 0
-            || self.call_rows[5].maximum_call_count != 0
-            || self.call_rows[6].minimum_call_count == 0
-            || self.call_rows[7].minimum_call_count == 0
-        {
-            return Err(CompactMaskingKmacError::InvalidCensus);
-        }
-
-        // The coordinate-domain hash is not used as an injectivity claim. The
-        // selected streams also carry their distinct purpose classes directly
-        // in the canonical block tuple; this check merely ensures the operative
-        // context derivation consumes the two different coordinates.
-        let zero_binding = Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]);
-        if common_proof_private_coin_coordinate_derivation_context_hash(
-            zero_binding,
-            self.coordinate_rows[0].coordinate,
-        ) == common_proof_private_coin_coordinate_derivation_context_hash(
-            zero_binding,
-            self.coordinate_rows[1].coordinate,
-        ) {
-            return Err(CompactMaskingKmacError::InvalidCensus);
-        }
-        Ok(())
-    }
 }
 
-/// Derives conditional quantum-hybrid accounting for one closed selected
-/// multiplicity. This arithmetic leaves the external joint KMAC256/SHAKE256
-/// security assumption unproved and does not mint an authority for it.
+#[cfg(test)]
 pub(crate) fn derive_selected_compact_masking_kmac_conditional_hybrid_accounting(
     scope: CompactMaskingKmacUnionScope,
 ) -> Result<CompactMaskingKmacConditionalHybridAccounting, CompactMaskingKmacError> {
-    let contract = CompactPublicKeyProofContract::decode_selected()?;
-    let selected_contract_source_hash = contract.verifier_inputs().canonical_source_hash()?;
-    let certificate = derive_compact_masking_kmac_certificate(&contract)?;
-    let application_multiplicity = selected_application_multiplicity(scope)?;
-    let hybrid_loss = certificate.quantum_hybrid_loss(application_multiplicity)?;
-    enforce_selected_known_loss_floor(&hybrid_loss.known_loss_sum)?;
+    let (selected_contract_source_hash, hybrid_loss) =
+        derive_selected_compact_masking_kmac_components(selected_application_multiplicity(scope)?)?;
     Ok(CompactMaskingKmacConditionalHybridAccounting {
         selected_contract_source_hash,
-        scope,
         hybrid_loss,
     })
 }
 
-fn derive_selected_compact_masking_kmac_certificate()
--> Result<CompactMaskingKmacCertificate, CompactMaskingKmacError> {
+/// Derives conditional quantum-hybrid accounting for one selected
+/// multiplicity. This arithmetic leaves the external joint KMAC256/SHAKE256
+/// security assumption unproved and does not mint an authority for it.
+fn derive_selected_compact_masking_kmac_components(
+    application_multiplicity: u64,
+) -> Result<(Hash512, CompactMaskingKmacQuantumHybridLoss), CompactMaskingKmacError> {
     let contract = CompactPublicKeyProofContract::decode_selected()?;
-    derive_compact_masking_kmac_certificate(&contract)
+    let selected_contract_source_hash = contract.verifier_inputs().canonical_source_hash()?;
+    let census = derive_compact_masking_kmac_census(&contract)?;
+    let hybrid_loss = census.quantum_hybrid_loss(application_multiplicity)?;
+    enforce_selected_known_loss_floor(&hybrid_loss.known_loss_sum)?;
+    Ok((selected_contract_source_hash, hybrid_loss))
 }
 
-fn derive_compact_masking_kmac_certificate(
+/// Re-derives the live single-proof KMAC bridge from the selected contract and
+/// returns its contract hash after deriving the exact call census, known-loss
+/// terms, and symbolic quantum-PRF hops. The fixed KMAC256/SHAKE256 joint
+/// assumption remains external.
+pub(crate) fn derive_selected_compact_masking_kmac_bridge()
+-> Result<Hash512, CompactMaskingKmacError> {
+    let (selected_contract_source_hash, _hybrid_loss) =
+        derive_selected_compact_masking_kmac_components(1)?;
+    Ok(selected_contract_source_hash)
+}
+
+#[cfg(test)]
+fn derive_selected_compact_masking_kmac_census()
+-> Result<CompactMaskingKmacCensus, CompactMaskingKmacError> {
+    let contract = CompactPublicKeyProofContract::decode_selected()?;
+    derive_compact_masking_kmac_census(&contract)
+}
+
+fn derive_compact_masking_kmac_census(
     contract: &CompactPublicKeyProofContract,
-) -> Result<CompactMaskingKmacCertificate, CompactMaskingKmacError> {
+) -> Result<CompactMaskingKmacCensus, CompactMaskingKmacError> {
     let inputs = contract.verifier_inputs();
     if inputs.statement_layout.schema_identifier()
         != ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
@@ -675,8 +493,6 @@ fn derive_compact_masking_kmac_certificate(
         private_extension_element_count =
             checked_add(private_extension_element_count, epoch_randomness)?;
     }
-    let committed_leaf_salt_count = response_committed_leaf_salt_count;
-
     let private_base_field_sample_count = checked_product(
         private_extension_element_count,
         u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
@@ -690,38 +506,31 @@ fn derive_compact_masking_kmac_certificate(
         minimum_construction_bytes,
         u64::from(SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT),
     )?;
-    let leaf_salt_bytes = checked_product(
-        committed_leaf_salt_count,
-        u64::try_from(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH)
-            .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?,
-    )?;
-    let block_byte_length = u64::try_from(PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH)
+    let private_block_byte_length = u64::try_from(PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH)
         .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?;
-    let minimum_construction_blocks = minimum_construction_bytes.div_ceil(block_byte_length);
-    let maximum_construction_blocks = maximum_construction_bytes.div_ceil(block_byte_length);
-    let leaf_salt_blocks = leaf_salt_bytes.div_ceil(block_byte_length);
+    let private_seed_byte_length = u64::try_from(COMPACT_PRIVATE_SEED_BYTE_LENGTH)
+        .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?;
+    let private_seed_blocks = private_seed_byte_length.div_ceil(private_block_byte_length);
+    let private_seed_call_count = checked_product(
+        u64::try_from(COMPACT_GENERATION_PRIVATE_SEED_COORDINATES.len())
+            .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?,
+        private_seed_blocks,
+    )?;
+    let compact_random_block_byte_length = u64::try_from(COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH)
+        .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?;
+    let minimum_compact_random_blocks =
+        minimum_construction_bytes.div_ceil(compact_random_block_byte_length);
+    let maximum_compact_random_blocks =
+        maximum_construction_bytes.div_ceil(compact_random_block_byte_length);
+    let minimum_leaf_salt_calls = checked_add(
+        response_committed_leaf_salt_count,
+        minimum_transported_leaf_salt_count,
+    )?;
+    let maximum_leaf_salt_calls = checked_add(
+        response_committed_leaf_salt_count,
+        maximum_transported_leaf_salt_count,
+    )?;
 
-    let coordinate_rows = [
-        CompactMaskingKmacCoordinateRow {
-            coordinate: CommonProofPrivateCoinCoordinate::hiding_argument(),
-            operation: CompactMaskingPrivateCoinOperation::ModuloSamples {
-                modulus: PROOF_BASE_FIELD_MODULUS,
-                output_count: private_base_field_sample_count,
-                maximum_candidate_draws_per_output:
-                    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-            },
-            minimum_distinct_block_frame_count: minimum_construction_blocks,
-            maximum_distinct_block_frame_count: maximum_construction_blocks,
-        },
-        CompactMaskingKmacCoordinateRow {
-            coordinate: CommonProofPrivateCoinCoordinate::proof_salt(),
-            operation: CompactMaskingPrivateCoinOperation::RawBytes {
-                byte_count: leaf_salt_bytes,
-            },
-            minimum_distinct_block_frame_count: leaf_salt_blocks,
-            maximum_distinct_block_frame_count: leaf_salt_blocks,
-        },
-    ];
     let key_bit_length = bit_length(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH)?;
     let stream_key_bit_length = bit_length(PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH)?;
     let proof_coin_key_bit_length = bit_length(PROOF_COIN_KEY_BYTE_LENGTH)?;
@@ -733,14 +542,6 @@ fn derive_compact_masking_kmac_certificate(
             output_bit_length: bit_length(ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH)?,
             minimum_call_count: 1,
             maximum_call_count: 1,
-        },
-        CompactMaskingKmacCallRow {
-            family: CompactMaskingKmacCallFamily::SetupAttempt,
-            customization: SETUP_ATTEMPT_CUSTOMIZATION,
-            key_bit_length: stream_key_bit_length,
-            output_bit_length: KMAC256_ATTEMPT_IDENTIFIER_OUTPUT_BIT_LENGTH,
-            minimum_call_count: 0,
-            maximum_call_count: 0,
         },
         CompactMaskingKmacCallRow {
             family: CompactMaskingKmacCallFamily::PersistentProofPreparation,
@@ -759,52 +560,48 @@ fn derive_compact_masking_kmac_certificate(
             maximum_call_count: 1,
         },
         CompactMaskingKmacCallRow {
-            family: CompactMaskingKmacCallFamily::OrdinaryProofAttempt,
-            customization: ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION,
-            key_bit_length: proof_coin_key_bit_length,
-            output_bit_length: KMAC256_ATTEMPT_IDENTIFIER_OUTPUT_BIT_LENGTH,
-            minimum_call_count: 0,
-            maximum_call_count: 0,
-        },
-        CompactMaskingKmacCallRow {
-            family: CompactMaskingKmacCallFamily::TargetReleaseAttempt,
-            customization: TARGET_RELEASE_ATTEMPT_CUSTOMIZATION,
-            key_bit_length: stream_key_bit_length,
-            output_bit_length: KMAC256_ATTEMPT_IDENTIFIER_OUTPUT_BIT_LENGTH,
-            minimum_call_count: 0,
-            maximum_call_count: 0,
-        },
-        CompactMaskingKmacCallRow {
-            family: CompactMaskingKmacCallFamily::ConstructionMaskBlocks,
+            family: CompactMaskingKmacCallFamily::PrivateSeedBlocks,
             customization: PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION,
             key_bit_length: stream_key_bit_length,
             output_bit_length: KMAC256_BLOCK_OUTPUT_BIT_LENGTH,
-            minimum_call_count: minimum_construction_blocks,
-            maximum_call_count: maximum_construction_blocks,
+            minimum_call_count: private_seed_call_count,
+            maximum_call_count: private_seed_call_count,
         },
         CompactMaskingKmacCallRow {
-            family: CompactMaskingKmacCallFamily::SecretLeafSaltBlocks,
-            customization: PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION,
-            key_bit_length: stream_key_bit_length,
-            output_bit_length: KMAC256_BLOCK_OUTPUT_BIT_LENGTH,
-            minimum_call_count: leaf_salt_blocks,
-            maximum_call_count: leaf_salt_blocks,
+            family: CompactMaskingKmacCallFamily::CompactWhirRandomBlocks,
+            customization: COMPACT_WHIR_RANDOM_CUSTOMIZATION,
+            key_bit_length: bit_length(COMPACT_PRIVATE_SEED_BYTE_LENGTH)?,
+            output_bit_length: bit_length(COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH)?,
+            minimum_call_count: minimum_compact_random_blocks,
+            maximum_call_count: maximum_compact_random_blocks,
+        },
+        CompactMaskingKmacCallRow {
+            family: CompactMaskingKmacCallFamily::SecretLeafSalts,
+            customization: COMPACT_PRIVATE_LEAF_SALT_CUSTOMIZATION,
+            key_bit_length: bit_length(COMPACT_PRIVATE_SEED_BYTE_LENGTH)?,
+            output_bit_length: bit_length(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH)?,
+            minimum_call_count: minimum_leaf_salt_calls,
+            maximum_call_count: maximum_leaf_salt_calls,
+        },
+        CompactMaskingKmacCallRow {
+            family: CompactMaskingKmacCallFamily::FiatShamirRoundSalts,
+            customization: COMPACT_FIAT_SHAMIR_ROUND_SALT_CUSTOMIZATION,
+            key_bit_length: bit_length(COMPACT_PRIVATE_SEED_BYTE_LENGTH)?,
+            output_bit_length: bit_length(COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH)?,
+            minimum_call_count: u64::from(response_commitment_count),
+            maximum_call_count: u64::from(response_commitment_count),
         },
     ];
-    let certificate = CompactMaskingKmacCertificate {
+    let census = CompactMaskingKmacCensus {
         private_extension_element_count,
         private_base_field_sample_count,
         response_committed_leaf_salt_count,
         minimum_transported_leaf_salt_count,
         maximum_transported_leaf_salt_count,
         response_commitment_count,
-        committed_leaf_salt_count,
-        coordinate_rows,
         call_rows,
-        framing: CompactMaskingKmacFraming::selected(),
     };
-    certificate.validate()?;
-    Ok(certificate)
+    Ok(census)
 }
 
 fn derive_epoch_census(
@@ -919,32 +716,42 @@ fn derive_epoch_census(
     Ok(private_extension_elements)
 }
 
+#[cfg(test)]
 fn selected_application_multiplicity(
     scope: CompactMaskingKmacUnionScope,
 ) -> Result<u64, CompactMaskingKmacError> {
-    if scope == CompactMaskingKmacUnionScope::SinglePublicKeyShareProof {
-        return Ok(1);
+    match scope {
+        CompactMaskingKmacUnionScope::SinglePublicKeyShareProof => Ok(1),
+        CompactMaskingKmacUnionScope::SelectedPublicKeyShareRosterUnion => {
+            let inventory =
+                super::selected_accounting::derive_selected_proof_family_application_inventory()
+                    .map_err(|_| CompactMaskingKmacError::InvalidCensus)?;
+            let count = inventory
+                .family_entry(
+                    ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                )
+                .ok_or(CompactMaskingKmacError::InvalidCensus)?
+                .physical_proof_application_count();
+            if count == 0 {
+                Err(CompactMaskingKmacError::InvalidCensus)
+            } else {
+                Ok(u64::from(count))
+            }
+        }
+        CompactMaskingKmacUnionScope::CompletePhysicalProofInventoryMultiplicity => {
+            let inventory =
+                super::selected_accounting::derive_selected_proof_family_application_inventory()
+                    .map_err(|_| CompactMaskingKmacError::InvalidCensus)?;
+            let count = inventory
+                .total_physical_proof_application_count()
+                .map_err(|_| CompactMaskingKmacError::InvalidCensus)?;
+            if count == 0 {
+                Err(CompactMaskingKmacError::InvalidCensus)
+            } else {
+                Ok(u64::from(count))
+            }
+        }
     }
-
-    let inventory =
-        super::selected_accounting::derive_selected_proof_family_application_inventory()
-            .map_err(|_| CompactMaskingKmacError::InvalidCensus)?;
-    let count = match scope {
-        CompactMaskingKmacUnionScope::SinglePublicKeyShareProof => 1,
-        CompactMaskingKmacUnionScope::SelectedPublicKeyShareRosterUnion => inventory
-            .family_entry(
-                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-            )
-            .ok_or(CompactMaskingKmacError::InvalidCensus)?
-            .physical_proof_application_count(),
-        CompactMaskingKmacUnionScope::CompletePhysicalProofInventoryMultiplicity => inventory
-            .total_physical_proof_application_count()
-            .map_err(|_| CompactMaskingKmacError::InvalidCensus)?,
-    };
-    if count == 0 {
-        return Err(CompactMaskingKmacError::InvalidCensus);
-    }
-    Ok(u64::from(count))
 }
 
 fn enforce_selected_known_loss_floor(
@@ -956,24 +763,48 @@ fn enforce_selected_known_loss_floor(
     Ok(())
 }
 
-fn qprf_key_term(
+fn qprf_key_term_from_call_rows(
     key_role: CompactMaskingKmacKeyRole,
-    key_bit_length: u32,
-    fixed_customization_domain_count: u32,
-    output_bit_lengths: Vec<u32>,
     key_instance_multiplicity: u64,
-    honest_query_count_per_key: u64,
-) -> CompactMaskingKmacQprfKeyTerm {
-    CompactMaskingKmacQprfKeyTerm {
+    call_rows: &[CompactMaskingKmacCallRow],
+) -> Result<CompactMaskingKmacQprfKeyTerm, CompactMaskingKmacError> {
+    let first_row = call_rows
+        .first()
+        .ok_or(CompactMaskingKmacError::InvalidCensus)?;
+    if key_instance_multiplicity == 0 {
+        return Err(CompactMaskingKmacError::InvalidCensus);
+    }
+    let mut honest_query_count_per_key = 0_u64;
+    let mut output_bit_lengths = Vec::new();
+    for (row_index, row) in call_rows.iter().enumerate() {
+        if row.customization.is_empty()
+            || row.key_bit_length != first_row.key_bit_length
+            || row.output_bit_length == 0
+            || row.minimum_call_count == 0
+            || row.minimum_call_count > row.maximum_call_count
+            || call_rows[..row_index]
+                .iter()
+                .any(|previous| previous.customization == row.customization)
+        {
+            return Err(CompactMaskingKmacError::InvalidCensus);
+        }
+        honest_query_count_per_key =
+            checked_add(honest_query_count_per_key, row.maximum_call_count)?;
+        if !output_bit_lengths.contains(&row.output_bit_length) {
+            output_bit_lengths.push(row.output_bit_length);
+        }
+    }
+    Ok(CompactMaskingKmacQprfKeyTerm {
         key_role,
-        key_bit_length,
-        fixed_customization_domain_count,
+        key_bit_length: first_row.key_bit_length,
+        fixed_customization_domain_count: u32::try_from(call_rows.len())
+            .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?,
         output_bit_lengths,
         key_instance_multiplicity,
         honest_query_count_per_key,
         reduction_query_bound_per_key: BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET)
             + BigUint::from(honest_query_count_per_key),
-    }
+    })
 }
 
 fn checked_add(left: u64, right: u64) -> Result<u64, CompactMaskingKmacError> {
@@ -1012,9 +843,10 @@ mod tests {
     use super::*;
     use crate::foundation::{
         ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,
-        CanonicalDecodeLimits, CanonicalItemType, CanonicalTuple, ParticipantIdentity,
-        PersistentProofCoinInput, PrivateRandomBlockInput, PrivateRandomnessDomain,
-        ProofApplicationSlot, ProofApplicationSlotCeilings,
+        CanonicalDecodeLimits, CanonicalItemType, CanonicalTuple,
+        PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER, PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION,
+        ParticipantIdentity, PersistentProofCoinInput, PrivateRandomBlockInput,
+        PrivateRandomnessDomain, ProofApplicationSlot, ProofApplicationSlotCeilings,
     };
 
     fn hash(fill: u8) -> Hash512 {
@@ -1091,118 +923,50 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(epoch_randomness, vec![65_870, 164_618]);
 
-        let certificate = derive_selected_compact_masking_kmac_certificate()
-            .expect("selected compact masking KMAC certificate");
-        assert_eq!(certificate.private_extension_element_count, 230_488);
-        assert_eq!(certificate.private_base_field_sample_count, 1_152_440);
-        assert_eq!(certificate.committed_leaf_salt_count, 639_270);
-        assert_eq!(certificate.response_committed_leaf_salt_count, 639_270);
+        let census = derive_selected_compact_masking_kmac_census()
+            .expect("selected compact masking KMAC census");
+        assert_eq!(census.private_extension_element_count, 230_488);
+        assert_eq!(census.private_base_field_sample_count, 1_152_440);
+        assert_eq!(census.response_committed_leaf_salt_count, 639_270);
         assert!(
-            certificate.minimum_transported_leaf_salt_count
-                < certificate.maximum_transported_leaf_salt_count
+            census.minimum_transported_leaf_salt_count < census.maximum_transported_leaf_salt_count
         );
-        assert_eq!(certificate.maximum_transported_leaf_salt_count, 79_310);
+        assert_eq!(census.maximum_transported_leaf_salt_count, 79_310);
         assert!(
-            certificate.maximum_transported_leaf_salt_count
-                < certificate.response_committed_leaf_salt_count
+            census.maximum_transported_leaf_salt_count < census.response_committed_leaf_salt_count
         );
-        assert_eq!(certificate.response_commitment_count, 82);
+        assert_eq!(census.response_commitment_count, 82);
         assert_eq!(
-            certificate.coordinate_rows,
+            COMPACT_GENERATION_PRIVATE_SEED_COORDINATES,
             [
-                CompactMaskingKmacCoordinateRow {
-                    coordinate: CommonProofPrivateCoinCoordinate::hiding_argument(),
-                    operation: CompactMaskingPrivateCoinOperation::ModuloSamples {
-                        modulus: PROOF_BASE_FIELD_MODULUS,
-                        output_count: 1_152_440,
-                        maximum_candidate_draws_per_output: 64,
-                    },
-                    minimum_distinct_block_frame_count: 144_055,
-                    maximum_distinct_block_frame_count: 9_219_520,
-                },
-                CompactMaskingKmacCoordinateRow {
-                    coordinate: CommonProofPrivateCoinCoordinate::proof_salt(),
-                    operation: CompactMaskingPrivateCoinOperation::RawBytes {
-                        byte_count: 81_826_560,
-                    },
-                    minimum_distinct_block_frame_count: 1_278_540,
-                    maximum_distinct_block_frame_count: 1_278_540,
-                },
+                CommonProofPrivateCoinCoordinate::hiding_argument(),
+                CommonProofPrivateCoinCoordinate::proof_salt(),
             ],
         );
-        assert!(matches!(
-            certificate.coordinate_rows[0].operation,
-            CompactMaskingPrivateCoinOperation::ModuloSamples { .. },
-        ));
-        assert!(matches!(
-            certificate.coordinate_rows[1].operation,
-            CompactMaskingPrivateCoinOperation::RawBytes { .. },
-        ));
-        assert_eq!(certificate.call_rows[0].output_bit_length, 1_536);
-        assert_eq!(certificate.call_rows[1].maximum_call_count, 0);
-        assert_eq!(certificate.call_rows[2].maximum_call_count, 1);
-        assert_eq!(certificate.call_rows[3].maximum_call_count, 1);
-        assert_eq!(certificate.call_rows[4].maximum_call_count, 0);
-        assert_eq!(certificate.call_rows[5].maximum_call_count, 0);
-        assert_eq!(certificate.call_rows[6].maximum_call_count, 9_219_520);
-        assert_eq!(certificate.call_rows[7].maximum_call_count, 1_278_540);
-        assert_eq!(certificate.framing, CompactMaskingKmacFraming::selected());
-        let framing = certificate.framing;
         assert_eq!(
-            (
-                framing.proof_family_schema_identifier,
-                framing.attempt_authority,
-                framing.persistent_input_schema_identifier,
-                framing.preparation_customization,
-                framing.witness_attempt_customization,
-                framing.witness_part_length_prefix_byte_length,
-                framing.coordinate_context_hash_domain,
-                framing.coordinate_context_parts,
-            ),
-            (
-                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-                CompactMaskingProofAttemptAuthority::PersistentResetSafeCanonicalWitness,
-                PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
-                PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION,
-                PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION,
-                8,
-                COMMON_PROOF_PRIVATE_COIN_COORDINATE_HASH_DOMAIN,
-                [
-                    CompactMaskingCoordinateContextPart::DerivationBindingHash512,
-                    CompactMaskingCoordinateContextPart::PurposeClassU16LittleEndian,
-                    CompactMaskingCoordinateContextPart::OrdinalU32LittleEndian,
-                ],
-            ),
+            census.call_rows.map(|row| row.family),
+            [
+                CompactMaskingKmacCallFamily::ActionKeyHierarchy,
+                CompactMaskingKmacCallFamily::PersistentProofPreparation,
+                CompactMaskingKmacCallFamily::PersistentWitnessAttempt,
+                CompactMaskingKmacCallFamily::PrivateSeedBlocks,
+                CompactMaskingKmacCallFamily::CompactWhirRandomBlocks,
+                CompactMaskingKmacCallFamily::SecretLeafSalts,
+                CompactMaskingKmacCallFamily::FiatShamirRoundSalts,
+            ],
         );
+        assert_eq!(census.call_rows[0].output_bit_length, 1_536);
+        assert_eq!(census.call_rows[1].maximum_call_count, 1);
+        assert_eq!(census.call_rows[2].maximum_call_count, 1);
+        assert_eq!(census.call_rows[3].maximum_call_count, 2);
+        assert_eq!(census.call_rows[4].minimum_call_count, 144_055);
+        assert_eq!(census.call_rows[4].maximum_call_count, 9_219_520);
         assert_eq!(
-            (
-                framing.distinct_coordinate_context_input_count_per_application,
-                framing.distinct_stream_attempt_input_count_per_application,
-                framing.block_customization,
-                framing.block_input_schema_identifier,
-                framing.block_input_schema_version,
-                framing.block_input_fields,
-            ),
-            (
-                2,
-                1,
-                PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION,
-                PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
-                PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION,
-                [
-                    CompactMaskingBlockFrameField::ProtocolVersionU16,
-                    CompactMaskingBlockFrameField::SuiteIdentifierHash512,
-                    CompactMaskingBlockFrameField::CeremonyContextHash512,
-                    CompactMaskingBlockFrameField::ActionContextHash512,
-                    CompactMaskingBlockFrameField::ParticipantIdentity,
-                    CompactMaskingBlockFrameField::ProofFamilyU16,
-                    CompactMaskingBlockFrameField::PurposeClassU16,
-                    CompactMaskingBlockFrameField::CoordinateContextHash512,
-                    CompactMaskingBlockFrameField::AttemptIdentifierBytes32,
-                    CompactMaskingBlockFrameField::BlockCounterU64,
-                ],
-            ),
+            census.call_rows[5].minimum_call_count,
+            census.response_committed_leaf_salt_count + census.minimum_transported_leaf_salt_count,
         );
+        assert_eq!(census.call_rows[5].maximum_call_count, 718_580);
+        assert_eq!(census.call_rows[6].maximum_call_count, 82);
     }
 
     #[test]
@@ -1234,7 +998,6 @@ mod tests {
                 accounting.selected_contract_source_hash,
                 selected_contract_hash
             );
-            assert_eq!(accounting.scope, scope);
             assert_eq!(
                 accounting.hybrid_loss.application_multiplicity,
                 expected_multiplicity,
@@ -1249,9 +1012,9 @@ mod tests {
     }
 
     #[test]
-    fn quantum_hybrid_charges_both_symbolic_qprf_hops() {
-        let certificate = derive_selected_compact_masking_kmac_certificate()
-            .expect("selected compact masking KMAC certificate");
+    fn quantum_hybrid_charges_all_three_symbolic_qprf_hops() {
+        let census = derive_selected_compact_masking_kmac_census()
+            .expect("selected compact masking KMAC census");
         let accounting = derive_selected_compact_masking_kmac_conditional_hybrid_accounting(
             CompactMaskingKmacUnionScope::SelectedPublicKeyShareRosterUnion,
         )
@@ -1280,9 +1043,14 @@ mod tests {
             quantum.canonical_block_frame_collision,
             ExactProbabilityUpperBound::zero(),
         );
+        assert_eq!(quantum.compact_seed_collision.numerator, choose_two(20),);
         assert_eq!(
             quantum.leaf_salt_collision.numerator,
-            choose_two(10 * certificate.committed_leaf_salt_count),
+            choose_two(10 * census.response_committed_leaf_salt_count),
+        );
+        assert_eq!(
+            quantum.fiat_shamir_round_salt_collision.numerator,
+            choose_two(10 * u64::from(census.response_commitment_count)),
         );
         assert_eq!(
             quantum
@@ -1293,10 +1061,12 @@ mod tests {
             vec![
                 CompactMaskingKmacQprfHop::ActionKeyHierarchy,
                 CompactMaskingKmacQprfHop::DerivedKeyGraph,
+                CompactMaskingKmacQprfHop::CompactGenerationExpansion,
             ],
         );
         assert_eq!(quantum.qprf_hops[0].key_terms.len(), 1);
         assert_eq!(quantum.qprf_hops[1].key_terms.len(), 2);
+        assert_eq!(quantum.qprf_hops[2].key_terms.len(), 2);
         let hierarchy = &quantum.qprf_hops[0].key_terms[0];
         assert_eq!(hierarchy.key_role, CompactMaskingKmacKeyRole::ActionRoot);
         assert_eq!(hierarchy.key_bit_length, 512);
@@ -1323,10 +1093,10 @@ mod tests {
         assert_eq!(stream.key_bit_length, 512);
         assert_eq!(stream.fixed_customization_domain_count, 1);
         assert_eq!(stream.output_bit_lengths, vec![512]);
-        assert_eq!(stream.honest_query_count_per_key, 10_498_060,);
+        assert_eq!(stream.honest_query_count_per_key, 2);
         assert_eq!(
             stream.reduction_query_bound_per_key,
-            BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET) + BigUint::from(10_498_060_u64),
+            BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET) + BigUint::from(2_u8),
         );
         let proof_coin = &quantum.qprf_hops[1].key_terms[1];
         assert_eq!(proof_coin.key_bit_length, 512);
@@ -1337,6 +1107,22 @@ mod tests {
             proof_coin.reduction_query_bound_per_key,
             BigUint::from(DECLARED_ADVERSARIAL_QUERY_BUDGET) + BigUint::from(2_u8),
         );
+        let compact_whir = &quantum.qprf_hops[2].key_terms[0];
+        assert_eq!(
+            compact_whir.key_role,
+            CompactMaskingKmacKeyRole::CompactWhirSeed,
+        );
+        assert_eq!(compact_whir.fixed_customization_domain_count, 1);
+        assert_eq!(compact_whir.output_bit_lengths, vec![512]);
+        assert_eq!(compact_whir.honest_query_count_per_key, 9_219_520);
+        let response_salts = &quantum.qprf_hops[2].key_terms[1];
+        assert_eq!(
+            response_salts.key_role,
+            CompactMaskingKmacKeyRole::CompactResponseSaltSeed,
+        );
+        assert_eq!(response_salts.fixed_customization_domain_count, 2);
+        assert_eq!(response_salts.output_bit_lengths, vec![1_024, 512]);
+        assert_eq!(response_salts.honest_query_count_per_key, 718_662);
         assert!(
             quantum
                 .sampler_exhaustion

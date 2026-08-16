@@ -51,7 +51,6 @@ mod compact_generation_randomness;
 mod compact_masking_coefficient_maps;
 #[cfg(test)]
 mod compact_masking_entropy;
-#[cfg(test)]
 mod compact_masking_kmac;
 #[cfg_attr(
     not(test),

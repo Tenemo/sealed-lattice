@@ -109,7 +109,8 @@ and target release remain incomplete or internal.
   262,144-leaf second response into external storage, derives the second
   verifier message and its 21-coordinate cross-epoch point, and publishes the
   next authenticated response checkpoint before one CFW poll. The strict
-  56-byte attempt-and-WHIR-position cursor remains bound into both checkpoints.
+  version-two 56-byte attempt-and-WHIR-position cursor remains bound into both
+  checkpoints; superseded version-one cursors refuse.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -130,8 +131,16 @@ and target release remain incomplete or internal.
   drawn, release generation now re-decodes its canonical public input through
   the selected verifier contract, independently derives and checks every
   coefficient-to-view map, and constructs the compiler/verifier-derived public-
-  covector authority for those bytes. The live role-18 prefix, carried-covector,
-  conditional-entropy, and simulator consumers are not connected yet.
+  covector authority for those bytes. That release gate also rederives the
+  single-proof KMAC census and its three symbolic quantum-PRF replacements from
+  the selected contract. Live generation draws coordinate-separated 512-bit
+  WHIR and response-salt seeds from the hiding and proof-salt coordinates,
+  respectively, expands them under separate KMAC256 customizations, bounds
+  every Goldilocks rejection sample to 64 candidates, and refuses an exhausted
+  sampler or an unaccounted random-access interface before accepting a sampled
+  batch. The fixed KMAC256/SHAKE256 joint assumption remains external, and the
+  live role-18 prefix, carried-covector, conditional-entropy, and simulator
+  consumers are not connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
   schedule. Its one-shot carried-covector lifecycle is bound to verified public
   input and the exact transcript prefix, and guarded coverage reaches the
@@ -154,8 +163,9 @@ ceremony or supported-phone qualification.
   chronology, query derivation, and Merkle openings only.
 - The compact successor still requires the live role-18 masking authority and
   conditional-image checks, a construction-level statistical-HVZK argument
-  bound to emitted bytes, the browser-CSPRNG/KMAC hybrid, and the applicable
-  SHAKE256 fixed-tape and QROM theorem chain.
+  bound to emitted bytes, composition of the live KMAC bridge with its explicit
+  quantum-PRF and joint fixed-Keccak assumptions, and the applicable SHAKE256
+  fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
 - Browser custody does not yet provide complete proactive authenticated

@@ -81,12 +81,13 @@ retained compact response state for the same proof geometry and canonical
 public input, then owns bounded lookup inversion and structured-row preparation.
 Before that lookup challenge exists, the production state derives
 the first WHIR epoch's exact 2,097,152-element source from authenticated
-quotient-and-multiplicity values plus canonical zero padding. Independent
-action-private coin seeds drive WHIR's rejection samplers and random-access
-response salts. The guarded owner retains WHIR's exact 131,072-row by
+quotient-and-multiplicity values plus canonical zero padding. Distinct action-
+private hiding and proof-salt coordinates supply coordinate-separated WHIR and
+response-salt seeds. The guarded owner retains WHIR's exact 131,072-row by
 64-element encoding, streams those values into the salted response tree, binds
-a strict 56-byte attempt-and-WHIR-position cursor into the authenticated
-response checkpoint, and retains the tree through 233 lookup polls, 760
+a strict version-two 56-byte attempt-and-WHIR-position cursor into the
+authenticated response checkpoint, refuses superseded version-one cursors, and
+retains the tree through 233 lookup polls, 760
 structured-row polls. The same release state samples the production CFW masks
 and the inner, outer, and shared cross-epoch WHIR mask encodings, then derives
 the main epoch's logical 131,072-row by 128-element extension encoding from the
@@ -114,7 +115,12 @@ proof verification remain test-only or incomplete. Before post-lookup masking
 material is drawn, release generation now independently re-decodes the canonical
 public input through the selected verifier contract, derives and checks every
 coefficient-to-view map, and constructs the compiler/verifier-derived public-
-covector authority for those bytes.
+covector authority for those bytes. The same release gate rederives the exact
+single-proof KMAC coordinate and call census from that contract. Production
+uses separate KMAC256 domains for WHIR field candidates, private leaf salts,
+and Fiat-Shamir round salts, bounds every Goldilocks rejection sample to 64
+candidates, and refuses exhaustion or an unaccounted random-access call before
+accepting a sampled batch.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -142,8 +148,12 @@ suffix rewind.
 The release input gate does not close masking: live role-18 prefix consumption,
 sequential conditional-image enforcement, canonical emitted-byte binding, and
 the exact construction-level statistical-HVZK statement remain absent.
-Deployment uses browser-CSPRNG-rooted KMAC256 streams, so the deployed masking
-claim also requires the explicit computational quantum-PRF hybrid.
+The live bridge accounts for three symbolic quantum-PRF replacements: action-
+root key expansion, proof-coin and coordinate-stream derivation, and compact-
+generation expansion keyed by the two seeds. It also retains exact action-root,
+context, seed, sampler, leaf-salt, and round-salt collision terms. It assigns no
+numeric advantage to fixed KMAC256 and does not establish the masking claim
+without the missing sequential Real/Ideal and emitted-byte work.
 
 KMAC256 and SHAKE256 share fixed Keccak-f. Domain separation is required but
 does not by itself establish an independent qPRF and ideal-QRO model. The
