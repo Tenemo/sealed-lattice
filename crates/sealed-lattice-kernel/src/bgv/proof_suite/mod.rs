@@ -10,6 +10,7 @@ mod aggregate_threshold_share_runtime;
 mod application_statement;
 mod ballot_validity_runtime;
 mod body;
+mod bounded_radix2_dft;
 mod collective_public_key_runtime;
 mod committed_material;
 #[cfg(test)]

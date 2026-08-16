@@ -34,6 +34,26 @@ where
     pub(crate) _marker: PhantomData<EF>,
 }
 
+/// Exact extension-field initial-oracle material before an MMCS commitment.
+///
+/// An outer protocol can commit the encoded rows with its own authenticated
+/// vector commitment while retaining the same message and hiding randomness
+/// for the subsequent WHIR reduction.
+pub struct HidingWhirEncodedExtensionOracle<F, EF>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+{
+    /// Committed multilinear evaluations.
+    pub message: Poly<EF>,
+    /// Limb-major ZK encoding randomness of the initial oracle.
+    pub randomness: Vec<EF>,
+    /// Exact interleaved Reed-Solomon rows consumed by the commitment owner.
+    pub encoded: DenseMatrix<EF>,
+    /// Marker tying the extension encoding to its base field.
+    pub(crate) _marker: PhantomData<F>,
+}
+
 /// Prover-side handoff between the commit and open phases.
 pub struct HidingWhirProverData<F, EF, MT>
 where

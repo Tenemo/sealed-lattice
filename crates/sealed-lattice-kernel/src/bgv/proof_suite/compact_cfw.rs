@@ -189,6 +189,13 @@ impl CompactCfwMaskMaterial {
         &self.outer_masks
     }
 
+    pub(crate) fn auxiliary_target(
+        &self,
+        geometry: CompactCfwGeometry,
+    ) -> Result<CompactChallengeField, CompactCfwError> {
+        auxiliary_target(geometry, self)
+    }
+
     fn inner_mask(
         &self,
         round_ordinal: usize,

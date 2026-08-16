@@ -92,29 +92,31 @@ code with owned retained inputs. A release-owned compact response state now
 drives those response components with verifier-selected leaf replay, exact
 transaction yielding, cancellation, authenticated cursor restoration, and
 byte-identical genesis replay.
-A release-owned public-key generation state now joins the frozen factor-one
-contract to the retained setup authority, polls the exact 202 authenticated
-source columns, and derives canonical public-input bytes from verifier-minted
-suite, application-statement, manifest, and relation bindings before
-independently decoding them. It owns family materialization and its first
-compact response together. It accepts the lookup challenge only through a
-borrowed first-message authority minted by its retained compact response state
-for the same proof geometry and canonical public input, then owns bounded
-lookup inversion and structured-row preparation. Before that lookup challenge
-exists, the production state derives the first WHIR epoch's exact
-2,097,152-element source from authenticated quotient-and-multiplicity values
-plus canonical zero padding. Independent action-private coin seeds drive WHIR's
-rejection samplers and random-access response salts. The guarded owner retains
-WHIR's exact 131,072-row by 64-element encoding, streams those values into the
-salted response tree, binds a strict 56-byte attempt-and-WHIR-position cursor
-into the authenticated response checkpoint, and retains the tree through 233
-lookup polls, 760 structured-row polls, and one CFW poll. The selected-size path
-validates the checkpoint transcript cursor in the live state, but cold
-restoration through the common worker and a complete emitted WHIR epoch remain
-absent.
-The complete production-shaped small chain uses the compact response state, but
-the later CFW and WHIR family material provider and production worker adapter
-remain incomplete.
+A release-owned public-key generation state now owns the frozen contract and
+the retained setup authority, polls the exact 202 authenticated source columns,
+and independently decodes canonical public input derived from verifier-minted
+suite, statement, manifest, and relation bindings. It owns family
+materialization and its first two compact responses together. Selected-size
+guarded Rust coverage derives the exact first-epoch WHIR source from
+authenticated production values and drives its encoding and response salts
+from action-private coins. The same state samples the production CFW masks and
+the inner, outer, and shared cross-epoch WHIR masks, then derives the main
+epoch's logical 131,072-row by 128-element, 671,088,640-byte extension encoding
+from the production row source. It never retains that matrix whole. Eight
+canonical 16,384-row stripes keep one 83,886,080-byte stripe and one
+5,242,880-byte encoded column live while the state commits the complete
+262,144-leaf second response, derives the second verifier message and its
+21-coordinate cross-epoch point, publishes the next authenticated response
+checkpoint, and advances one CFW poll. The exact 56-byte attempt-and-WHIR-
+position cursor remains bound into both checkpoints. Guarded native evidence
+measured 465,428,480 peak job bytes, 454,737,920 peak process bytes, 380,194,816
+peak process-tree RSS bytes, and 50,331,520 retained external bytes. The job
+peak is 15.6 percent above the nominal planning target but below the automatic
+and hard ceilings. This is native development evidence only. Later main-
+response openings, authenticated mid-stripe restart, cold common-worker
+restoration, complete WHIR execution, scalar-WASM execution, and an emitted
+compact proof remain absent. The later CFW and WHIR family material adapter and
+production worker adapter remain incomplete.
 Semantic and complete CFW/WHIR execution,
 Merkle privacy, masking, emitted-coordinate measurement, fixed-tape and
 Appendix arithmetic remain test-only or incomplete. The
@@ -249,29 +251,31 @@ code with owned retained inputs. A release-owned compact response state now
 drives those response components with verifier-selected leaf replay, exact
 transaction yielding, cancellation, authenticated cursor restoration, and
 byte-identical genesis replay.
-A release-owned public-key generation state now joins the frozen factor-one
-contract to the retained setup authority, polls the exact 202 authenticated
-source columns, and derives canonical public-input bytes from verifier-minted
-suite, application-statement, manifest, and relation bindings before
-independently decoding them. It owns family materialization and its first
-compact response together. It accepts the lookup challenge only through a
-borrowed first-message authority minted by its retained compact response state
-for the same proof geometry and canonical public input, then owns bounded
-lookup inversion and structured-row preparation. Before that lookup challenge
-exists, the production state derives the first WHIR epoch's exact
-2,097,152-element source from authenticated quotient-and-multiplicity values
-plus canonical zero padding. Independent action-private coin seeds drive WHIR's
-rejection samplers and random-access response salts. The guarded owner retains
-WHIR's exact 131,072-row by 64-element encoding, streams those values into the
-salted response tree, binds a strict 56-byte attempt-and-WHIR-position cursor
-into the authenticated response checkpoint, and retains the tree through 233
-lookup polls, 760 structured-row polls, and one CFW poll. The selected-size path
-validates the checkpoint transcript cursor in the live state, but cold
-restoration through the common worker and a complete emitted WHIR epoch remain
-absent.
-The complete production-shaped small chain uses the compact response state, but
-the later CFW and WHIR family material provider and production worker adapter
-remain incomplete.
+A release-owned public-key generation state now owns the frozen contract and
+the retained setup authority, polls the exact 202 authenticated source columns,
+and independently decodes canonical public input derived from verifier-minted
+suite, statement, manifest, and relation bindings. It owns family
+materialization and its first two compact responses together. Selected-size
+guarded Rust coverage derives the exact first-epoch WHIR source from
+authenticated production values and drives its encoding and response salts
+from action-private coins. The same state samples the production CFW masks and
+the inner, outer, and shared cross-epoch WHIR masks, then derives the main
+epoch's logical 131,072-row by 128-element, 671,088,640-byte extension encoding
+from the production row source. It never retains that matrix whole. Eight
+canonical 16,384-row stripes keep one 83,886,080-byte stripe and one
+5,242,880-byte encoded column live while the state commits the complete
+262,144-leaf second response, derives the second verifier message and its
+21-coordinate cross-epoch point, publishes the next authenticated response
+checkpoint, and advances one CFW poll. The exact 56-byte attempt-and-WHIR-
+position cursor remains bound into both checkpoints. Guarded native evidence
+measured 465,428,480 peak job bytes, 454,737,920 peak process bytes, 380,194,816
+peak process-tree RSS bytes, and 50,331,520 retained external bytes. The job
+peak is 15.6 percent above the nominal planning target but below the automatic
+and hard ceilings. This is native development evidence only. Later main-
+response openings, authenticated mid-stripe restart, cold common-worker
+restoration, complete WHIR execution, scalar-WASM execution, and an emitted
+compact proof remain absent. The later CFW and WHIR family material adapter and
+production worker adapter remain incomplete.
 The transport validator checks canonical
 bytes, derives the selected-geometry
 certificate with 161 response-component embeddings and 45 construction
@@ -417,18 +421,18 @@ the snapshot is the newest state.
   selected-size compact-proof browser or physical-phone qualification. Compact
   checkpoint publication remains reduced kernel
   groundwork, not browser-custody or selected-size durable resume.
-- `SEC-020`: Authenticated assignment loading, bounded lookup materialization,
-  owned structured-row preparation and transpose, the codec, transport gate,
-  scalar CFW, incremental proof assembly, the prover transcript cursor, bounded
-  response-tree custody, and authenticated response-checkpoint construction
-  compile into release code. Selected-size compact source preparation has
-  guarded native phase evidence for the exact initial WHIR encoding, action-
-  private WHIR and response-salt seeds, real response-tree values, an attempt-
-  bound construction cursor and authenticated response checkpoint, a
-  transcript-minted lookup challenge, bounded structured-row materialization,
-  retained-tree overlap, and one CFW poll. Cold common-worker restoration,
-  complete proof execution, full resource reconciliation, and browser execution
-  remain unresolved.
+- `SEC-020`: Authenticated assignment loading, bounded lookup
+  materialization, structured-row preparation and transpose, the codec,
+  transport gate, scalar CFW, incremental proof assembly, transcript custody,
+  bounded response-tree custody, and authenticated response checkpoints compile
+  into release code. Selected-size guarded native phase evidence covers the
+  exact initial WHIR encoding, production CFW and WHIR masks, the striped
+  262,144-leaf second response, its transcript-minted cross-epoch point and
+  checkpoint, retained-tree overlap, and one CFW poll. Peak guarded-job memory
+  is 465,428,480 bytes: 15.6 percent above the nominal planning target but below
+  the automatic and hard ceilings. Later opening recomputation, authenticated
+  mid-stripe restart, cold common-worker restoration, complete proof execution,
+  full resource reconciliation, and browser execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody. Persistence request and recheck, quota admission, eviction
   qualification, and externally anchored coherent-rollback detection are

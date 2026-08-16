@@ -74,11 +74,12 @@ groups.
 The compact response-vector commitment is also the protocol's initial WHIR
 oracle commitment; constructing an additional dependency-private Merkle tree
 would retain a redundant tree and bind the wrong root into Fiat-Shamir. The
-local prover therefore exposes the exact base initial-oracle encoding before
-MMCS commitment. The ordinary `commit` adapter consumes that same encoded
-matrix and behaves as before, while sealed-lattice can hand the matrix to its
-salted response-vector commitment owner and retain the message and hiding
-randomness for subsequent WHIR phases.
+local prover therefore exposes the exact base- and extension-field initial-
+oracle encodings before MMCS commitment. The ordinary `commit` and
+`commit_extension` adapters consume those same encoded matrices and behave as
+before, while sealed-lattice can hand each matrix to its salted response-vector
+commitment owner and retain the message and hiding randomness for subsequent
+WHIR phases.
 
 The hiding configuration also derives unique-decoding source queries from the
 physical Reed-Solomon dimension `message length + hiding randomness length`.

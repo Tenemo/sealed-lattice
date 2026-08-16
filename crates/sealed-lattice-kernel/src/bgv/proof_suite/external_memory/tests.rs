@@ -1,4 +1,13 @@
 use super::*;
+use std::{
+    collections::BTreeSet,
+    fs::{self, File, OpenOptions},
+    io::{Read, Seek, SeekFrom, Write},
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+static NEXT_FILE_BACKED_TEST_STORAGE_IDENTIFIER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TestStorageError {
@@ -6,6 +15,7 @@ pub(crate) enum TestStorageError {
     Duplicate,
     Missing,
     WrongLength,
+    Io,
 }
 
 #[derive(Clone)]
@@ -161,6 +171,389 @@ impl ProofExternalMemory for TestStorage {
     }
 }
 
+#[derive(Clone)]
+struct FileBackedTestObject {
+    path: PathBuf,
+    exact_byte_length: u64,
+    current_byte_length: u64,
+    sealed: bool,
+    protection: ProofExternalMemoryProtection,
+}
+
+struct FileBackedTestTransaction {
+    objects: BTreeMap<ProofExternalMemoryObject, FileBackedTestObject>,
+    created_paths: BTreeSet<PathBuf>,
+    declared_byte_length: u64,
+}
+
+/// Native evidence storage that keeps external-memory bytes outside the test
+/// process while preserving copy-on-write transaction behavior. This is test
+/// custody only; browser production uses the transaction recorder and its
+/// IndexedDB runtime.
+pub(crate) struct FileBackedTestStorage {
+    directory: PathBuf,
+    committed: BTreeMap<ProofExternalMemoryObject, FileBackedTestObject>,
+    transaction: Option<FileBackedTestTransaction>,
+    known_paths: BTreeSet<PathBuf>,
+    next_file_identifier: u64,
+    maximum_declared_byte_length: u64,
+}
+
+impl FileBackedTestStorage {
+    pub(crate) fn new() -> Result<Self, TestStorageError> {
+        let repository_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .ok_or(TestStorageError::Io)?
+            .to_path_buf();
+        let parent = repository_root.join("temp").join("test-external-memory");
+        fs::create_dir_all(&parent).map_err(|_| TestStorageError::Io)?;
+        let directory = loop {
+            let identifier =
+                NEXT_FILE_BACKED_TEST_STORAGE_IDENTIFIER.fetch_add(1, Ordering::Relaxed);
+            let candidate =
+                parent.join(format!("proof-storage-{}-{identifier}", std::process::id()));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return Err(TestStorageError::Io),
+            }
+        };
+        Ok(Self {
+            directory,
+            committed: BTreeMap::new(),
+            transaction: None,
+            known_paths: BTreeSet::new(),
+            next_file_identifier: 0,
+            maximum_declared_byte_length: 0,
+        })
+    }
+
+    pub(crate) const fn maximum_declared_byte_length(&self) -> u64 {
+        self.maximum_declared_byte_length
+    }
+
+    pub(crate) fn committed_declared_byte_length(&self) -> u64 {
+        self.committed
+            .values()
+            .map(|object| object.exact_byte_length)
+            .sum()
+    }
+
+    pub(crate) fn retained_secret_object_count(&self) -> usize {
+        self.committed
+            .values()
+            .filter(|object| {
+                object.protection == ProofExternalMemoryProtection::SecretAuthenticatedEncryption
+            })
+            .count()
+    }
+
+    fn next_object_path(
+        &mut self,
+        object: ProofExternalMemoryObject,
+    ) -> Result<PathBuf, TestStorageError> {
+        let file_identifier = self.next_file_identifier;
+        self.next_file_identifier = self
+            .next_file_identifier
+            .checked_add(1)
+            .ok_or(TestStorageError::WrongLength)?;
+        Ok(self
+            .directory
+            .join(format!("object-{}-{file_identifier}.bin", object.ordinal())))
+    }
+
+    fn copy_object_for_transaction(
+        &mut self,
+        object: ProofExternalMemoryObject,
+    ) -> Result<(), TestStorageError> {
+        let transaction_path = self
+            .transaction
+            .as_ref()
+            .ok_or(TestStorageError::NoTransaction)?
+            .objects
+            .get(&object)
+            .ok_or(TestStorageError::Missing)?
+            .path
+            .clone();
+        let Some(committed) = self.committed.get(&object) else {
+            return Ok(());
+        };
+        if transaction_path != committed.path {
+            return Ok(());
+        }
+        let copied_path = self.next_object_path(object)?;
+        let mut source = File::open(&transaction_path).map_err(|_| TestStorageError::Io)?;
+        let mut destination = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&copied_path)
+            .map_err(|_| TestStorageError::Io)?;
+        self.known_paths.insert(copied_path.clone());
+        self.transaction
+            .as_mut()
+            .ok_or(TestStorageError::NoTransaction)?
+            .created_paths
+            .insert(copied_path.clone());
+        std::io::copy(&mut source, &mut destination).map_err(|_| TestStorageError::Io)?;
+        destination.flush().map_err(|_| TestStorageError::Io)?;
+        let transaction = self
+            .transaction
+            .as_mut()
+            .ok_or(TestStorageError::NoTransaction)?;
+        transaction
+            .objects
+            .get_mut(&object)
+            .ok_or(TestStorageError::Missing)?
+            .path = copied_path;
+        Ok(())
+    }
+
+    fn remove_known_file(&mut self, path: &PathBuf) -> Result<(), TestStorageError> {
+        fs::remove_file(path).map_err(|_| TestStorageError::Io)?;
+        self.known_paths.remove(path);
+        Ok(())
+    }
+}
+
+impl ProofExternalMemory for FileBackedTestStorage {
+    type Error = TestStorageError;
+
+    fn begin_transaction(&mut self, _: u64, _: u32) -> Result<(), Self::Error> {
+        if self.transaction.is_some() {
+            return Err(TestStorageError::Duplicate);
+        }
+        self.transaction = Some(FileBackedTestTransaction {
+            objects: self.committed.clone(),
+            created_paths: BTreeSet::new(),
+            declared_byte_length: self.committed_declared_byte_length(),
+        });
+        Ok(())
+    }
+
+    fn create_object(
+        &mut self,
+        object: ProofExternalMemoryObject,
+        protection: ProofExternalMemoryProtection,
+        exact_byte_length: u64,
+    ) -> Result<(), Self::Error> {
+        if self
+            .transaction
+            .as_ref()
+            .ok_or(TestStorageError::NoTransaction)?
+            .objects
+            .contains_key(&object)
+        {
+            return Err(TestStorageError::Duplicate);
+        }
+        let path = self.next_object_path(object)?;
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|_| TestStorageError::Io)?;
+        self.known_paths.insert(path.clone());
+        let transaction = self
+            .transaction
+            .as_mut()
+            .ok_or(TestStorageError::NoTransaction)?;
+        transaction.declared_byte_length = transaction
+            .declared_byte_length
+            .checked_add(exact_byte_length)
+            .ok_or(TestStorageError::WrongLength)?;
+        self.maximum_declared_byte_length = self
+            .maximum_declared_byte_length
+            .max(transaction.declared_byte_length);
+        transaction.created_paths.insert(path.clone());
+        transaction.objects.insert(
+            object,
+            FileBackedTestObject {
+                path,
+                exact_byte_length,
+                current_byte_length: 0,
+                sealed: false,
+                protection,
+            },
+        );
+        Ok(())
+    }
+
+    fn append_object_bytes(
+        &mut self,
+        object: ProofExternalMemoryObject,
+        expected_offset: u64,
+        bytes: &[u8],
+    ) -> Result<(), Self::Error> {
+        let byte_length = u64::try_from(bytes.len()).map_err(|_| TestStorageError::WrongLength)?;
+        let stored = self
+            .transaction
+            .as_ref()
+            .ok_or(TestStorageError::NoTransaction)?
+            .objects
+            .get(&object)
+            .ok_or(TestStorageError::Missing)?;
+        let following_byte_length = expected_offset
+            .checked_add(byte_length)
+            .ok_or(TestStorageError::WrongLength)?;
+        if stored.sealed
+            || stored.current_byte_length != expected_offset
+            || following_byte_length > stored.exact_byte_length
+        {
+            return Err(TestStorageError::WrongLength);
+        }
+        self.copy_object_for_transaction(object)?;
+        let path = self
+            .transaction
+            .as_ref()
+            .ok_or(TestStorageError::NoTransaction)?
+            .objects
+            .get(&object)
+            .ok_or(TestStorageError::Missing)?
+            .path
+            .clone();
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(path)
+            .map_err(|_| TestStorageError::Io)?;
+        file.write_all(bytes).map_err(|_| TestStorageError::Io)?;
+        self.transaction
+            .as_mut()
+            .ok_or(TestStorageError::NoTransaction)?
+            .objects
+            .get_mut(&object)
+            .ok_or(TestStorageError::Missing)?
+            .current_byte_length = following_byte_length;
+        Ok(())
+    }
+
+    fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
+        let stored = self
+            .transaction
+            .as_mut()
+            .ok_or(TestStorageError::NoTransaction)?
+            .objects
+            .get_mut(&object)
+            .ok_or(TestStorageError::Missing)?;
+        if stored.sealed || stored.current_byte_length != stored.exact_byte_length {
+            return Err(TestStorageError::WrongLength);
+        }
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&stored.path)
+            .and_then(|file| file.sync_all())
+            .map_err(|_| TestStorageError::Io)?;
+        stored.sealed = true;
+        Ok(())
+    }
+
+    fn read_object_bytes(
+        &mut self,
+        object: ProofExternalMemoryObject,
+        offset: u64,
+        destination: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        let stored = self
+            .transaction
+            .as_ref()
+            .ok_or(TestStorageError::NoTransaction)?
+            .objects
+            .get(&object)
+            .ok_or(TestStorageError::Missing)?;
+        let end = offset
+            .checked_add(
+                u64::try_from(destination.len()).map_err(|_| TestStorageError::WrongLength)?,
+            )
+            .ok_or(TestStorageError::WrongLength)?;
+        if end > stored.current_byte_length {
+            return Err(TestStorageError::WrongLength);
+        }
+        let mut file = File::open(&stored.path).map_err(|_| TestStorageError::Io)?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|_| TestStorageError::Io)?;
+        file.read_exact(destination)
+            .map_err(|_| TestStorageError::Io)
+    }
+
+    fn delete_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
+        let transaction = self
+            .transaction
+            .as_mut()
+            .ok_or(TestStorageError::NoTransaction)?;
+        let removed = transaction
+            .objects
+            .remove(&object)
+            .ok_or(TestStorageError::Missing)?;
+        transaction.declared_byte_length = transaction
+            .declared_byte_length
+            .checked_sub(removed.exact_byte_length)
+            .ok_or(TestStorageError::WrongLength)?;
+        Ok(())
+    }
+
+    fn commit_transaction(&mut self) -> Result<(), Self::Error> {
+        let transaction = self
+            .transaction
+            .take()
+            .ok_or(TestStorageError::NoTransaction)?;
+        let retained_paths = transaction
+            .objects
+            .values()
+            .map(|object| object.path.clone())
+            .collect::<BTreeSet<_>>();
+        let stale_committed_paths = self
+            .committed
+            .values()
+            .map(|object| object.path.clone())
+            .filter(|path| !retained_paths.contains(path))
+            .collect::<Vec<_>>();
+        let discarded_created_paths = transaction
+            .created_paths
+            .iter()
+            .filter(|path| !retained_paths.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        for path in stale_committed_paths
+            .iter()
+            .chain(discarded_created_paths.iter())
+        {
+            self.remove_known_file(path)?;
+        }
+        self.committed = transaction.objects;
+        Ok(())
+    }
+
+    fn abort_transaction(&mut self) -> Result<(), Self::Error> {
+        let transaction = self
+            .transaction
+            .take()
+            .ok_or(TestStorageError::NoTransaction)?;
+        for path in &transaction.created_paths {
+            self.remove_known_file(path)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for FileBackedTestStorage {
+    fn drop(&mut self) {
+        if let Some(transaction) = self.transaction.take() {
+            for path in transaction.created_paths {
+                let _ = fs::remove_file(&path);
+                self.known_paths.remove(&path);
+            }
+        }
+        for path in core::mem::take(&mut self.known_paths) {
+            let _ = fs::remove_file(path);
+        }
+        let parent = self.directory.parent().map(PathBuf::from);
+        let _ = fs::remove_dir(&self.directory);
+        if let Some(parent) = parent {
+            let _ = fs::remove_dir(parent);
+        }
+    }
+}
+
 fn plan() -> ProofExternalMemoryPlan {
     ProofExternalMemoryPlan::new(
         3,
@@ -220,6 +613,80 @@ fn single_object_write_plan(
         )],
     )
     .expect("the single-object write plan is valid")
+}
+
+#[test]
+fn file_backed_test_storage_commits_and_aborts_copy_on_write_transactions() {
+    let first = ProofExternalMemoryObject::new(41);
+    let aborted_second = ProofExternalMemoryObject::new(42);
+    let mut storage = FileBackedTestStorage::new().expect("file-backed test storage opens");
+    let directory = storage.directory.clone();
+
+    storage.begin_transaction(32, 4).unwrap();
+    storage
+        .create_object(
+            first,
+            ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+            6,
+        )
+        .unwrap();
+    storage.append_object_bytes(first, 0, &[1, 2, 3]).unwrap();
+    storage.commit_transaction().unwrap();
+    assert_eq!(storage.committed_declared_byte_length(), 6);
+    assert_eq!(storage.retained_secret_object_count(), 1);
+
+    storage.begin_transaction(32, 4).unwrap();
+    storage.append_object_bytes(first, 3, &[4, 5, 6]).unwrap();
+    storage.seal_object(first).unwrap();
+    storage
+        .create_object(
+            aborted_second,
+            ProofExternalMemoryProtection::PublicIntegrity,
+            4,
+        )
+        .unwrap();
+    storage
+        .append_object_bytes(aborted_second, 0, &[9, 8, 7, 6])
+        .unwrap();
+    assert_eq!(storage.maximum_declared_byte_length(), 10);
+    storage.abort_transaction().unwrap();
+
+    storage.begin_transaction(32, 4).unwrap();
+    let mut committed_prefix = [0_u8; 3];
+    storage
+        .read_object_bytes(first, 0, &mut committed_prefix)
+        .unwrap();
+    assert_eq!(committed_prefix, [1, 2, 3]);
+    assert_eq!(
+        storage.read_object_bytes(first, 3, &mut [0_u8; 1]),
+        Err(TestStorageError::WrongLength),
+        "an aborted copy-on-write append must remain invisible"
+    );
+    assert_eq!(
+        storage.read_object_bytes(aborted_second, 0, &mut [0_u8; 1]),
+        Err(TestStorageError::Missing),
+        "an object created in an aborted transaction must not survive"
+    );
+    storage.abort_transaction().unwrap();
+
+    storage.begin_transaction(32, 2).unwrap();
+    storage.append_object_bytes(first, 3, &[4, 5, 6]).unwrap();
+    storage.seal_object(first).unwrap();
+    storage.commit_transaction().unwrap();
+    storage.begin_transaction(32, 2).unwrap();
+    let mut completed = [0_u8; 6];
+    storage.read_object_bytes(first, 0, &mut completed).unwrap();
+    assert_eq!(completed, [1, 2, 3, 4, 5, 6]);
+    storage.delete_object(first).unwrap();
+    storage.commit_transaction().unwrap();
+    assert_eq!(storage.committed_declared_byte_length(), 0);
+    assert_eq!(storage.retained_secret_object_count(), 0);
+
+    drop(storage);
+    assert!(
+        !directory.exists(),
+        "scratch custody must be removed on drop"
+    );
 }
 
 #[test]

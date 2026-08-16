@@ -83,8 +83,8 @@ pub use config::{SourceCodeShape, ZkConfigError, ZkParameters, ZkWhirConfig};
 pub use mask::{MaskCodeShape, MaskGroupShape};
 pub use proof::{BaseCaseZkProof, BlindedMask, MaskOpeningPair, ZkRoundProof, ZkWhirProof};
 pub use prover::{
-    HidingWhirEncodedBaseOracle, HidingWhirExtensionProverData, HidingWhirProver,
-    HidingWhirProverData,
+    HidingWhirEncodedBaseOracle, HidingWhirEncodedExtensionOracle,
+    HidingWhirExtensionProverData, HidingWhirProver, HidingWhirProverData,
 };
 pub use relation::{
     CombinedRelationProverInput, CombinedRelationVerifierInput, HidingWhirRelationInputError,

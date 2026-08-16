@@ -104,37 +104,37 @@ statuses:
   response components with verifier-selected leaf replay, exact transaction
   yielding, cancellation, authenticated cursor restoration, and byte-identical
   genesis replay.
-  A release-owned public-key generation state now joins the frozen
-  factor-one contract to the retained setup authority, polls the exact 202
+  A release-owned public-key generation state now owns the frozen
+  factor-one contract and retained setup authority, polls the exact 202
   authenticated source columns, and derives canonical public-input bytes from
   verifier-minted suite, application-statement, manifest, and relation bindings
   before independently decoding them. It owns family materialization and its
-  first compact response together, accepts the lookup challenge only through a
-  borrowed first-message authority minted by its retained compact response
-  state for the same proof geometry and canonical public input, then owns
-  bounded lookup inversion and structured-row preparation. Its guarded
-  selected-size owner derives the first WHIR epoch's exact 2,097,152-element
-  source from authenticated quotient-and-multiplicity values plus canonical
-  zero padding, draws independent WHIR and response-salt seeds from action-
-  private coins, retains WHIR's exact 131,072-row by 64-element encoding, and
-  streams those values into the contract-derived salted response tree. The same
-  state binds a strict 56-byte attempt-and-WHIR-position cursor into the
-  authenticated response checkpoint, derives the lookup message from that
-  transcript, and retains the response tree through 233 lookup polls, 760
-  structured-row polls, and one CFW poll before cancellation. The latest
-  guarded native test body completed in 163.56 seconds; its focused retained-
-  authority-preparation-through-CFW portion took 17.160 seconds, including 572
-  milliseconds for WHIR encoding and 671 milliseconds for response streaming,
-  tree commitment, checkpoint validation, and transcript-message derivation.
-  Observed peak process-tree RSS was 143,798,272 bytes, peak guarded-job memory
-  was 317,530,112 bytes, and peak process memory was 306,438,144 bytes. Those
-  measurements include native development setup and the overlapping encoded
-  source, retained response tree, structured rows, and first CFW state, not a
-  complete emitted WHIR epoch or proof, cold restoration through the common
-  worker, JavaScript/WASM memory, or browser-process memory. The complete
-  production-shaped small chain uses the compact response state, but the later
-  CFW and WHIR family material provider and production worker adapter remain
-  incomplete.
+  first two compact responses together. The first epoch derives the exact
+  2,097,152-element source from authenticated quotient-and-multiplicity values
+  plus canonical zero padding, retains the 131,072-row by 64-element encoding,
+  and streams it into the contract-derived salted response tree. The same state
+  samples the production CFW masks and the inner, outer, and shared cross-epoch
+  WHIR masks, then derives the main epoch's logical 131,072-row by 128-element,
+  671,088,640-byte extension encoding from the production row source. It never
+  retains that matrix whole: eight canonical 16,384-row stripes keep one
+  83,886,080-byte stripe and one 5,242,880-byte encoded column live while the
+  state commits the complete 262,144-leaf second response. It derives the
+  second verifier message and 21-coordinate cross-epoch point, publishes the
+  next authenticated response checkpoint, and advances one CFW poll. The
+  strict 56-byte attempt-and-WHIR-position cursor remains bound into both
+  checkpoints. The latest guarded native owner passed in 218.82 seconds; its
+  focused retained-authority portion took 49.355 seconds, including 28.614
+  seconds for the striped second response. Its two retained response trees used
+  50,331,520 external bytes. Observed peak process-tree RSS was 380,194,816
+  bytes, peak guarded-job memory was 465,428,480 bytes, and peak process memory
+  was 454,737,920 bytes. The guarded-job peak is 15.6 percent above the
+  402,653,184-byte nominal planning target but below the 603,979,776-byte
+  automatic target and 671,088,640-byte hard ceiling. These are guarded native
+  development measurements, not scalar-WASM or browser evidence. Later main-
+  response openings, authenticated mid-stripe restart, cold common-worker
+  restoration, complete WHIR execution, scalar-WASM execution, and an emitted
+  compact proof remain absent. The later CFW and WHIR family material provider
+  and production worker adapter remain incomplete.
   Semantic and complete CFW/WHIR execution, emitted-
   coordinate measurement, masking, fixed-tape and Appendix arithmetic remain
   test-only. The release
@@ -1272,37 +1272,37 @@ Works today, at component scope:
   owned compact response state now drives those response components with exact
   transaction replay, verifier-selected leaf reconstruction, cancellation,
   authenticated cursor restoration, and byte-identical genesis replay.
-  A release-owned public-key generation state now joins the frozen
-  factor-one contract to the retained setup authority, polls the exact 202
+  A release-owned public-key generation state now owns the frozen
+  factor-one contract and retained setup authority, polls the exact 202
   authenticated source columns, and derives canonical public-input bytes from
   verifier-minted suite, application-statement, manifest, and relation bindings
   before independently decoding them. It owns family materialization and its
-  first compact response together, accepts the lookup challenge only through a
-  borrowed first-message authority minted by its retained compact response
-  state for the same proof geometry and canonical public input, then owns
-  bounded lookup inversion and structured-row preparation. Its guarded
-  selected-size owner derives the first WHIR epoch's exact 2,097,152-element
-  source from authenticated quotient-and-multiplicity values plus canonical
-  zero padding, draws independent WHIR and response-salt seeds from action-
-  private coins, retains WHIR's exact 131,072-row by 64-element encoding, and
-  streams those values into the contract-derived salted response tree. The same
-  state binds a strict 56-byte attempt-and-WHIR-position cursor into the
-  authenticated response checkpoint, derives the lookup message from that
-  transcript, and retains the response tree through 233 lookup polls, 760
-  structured-row polls, and one CFW poll before cancellation. The latest
-  guarded native test body completed in 163.56 seconds; its focused retained-
-  authority-preparation-through-CFW portion took 17.160 seconds, including 572
-  milliseconds for WHIR encoding and 671 milliseconds for response streaming,
-  tree commitment, checkpoint validation, and transcript-message derivation.
-  Observed peak process-tree RSS was 143,798,272 bytes, peak guarded-job memory
-  was 317,530,112 bytes, and peak process memory was 306,438,144 bytes. Those
-  measurements include native development setup and the overlapping encoded
-  source, retained response tree, structured rows, and first CFW state, not a
-  complete emitted WHIR epoch or proof, cold restoration through the common
-  worker, JavaScript/WASM memory, or browser-process memory. The complete
-  production-shaped small chain uses the compact response state, but the later
-  CFW and WHIR family material provider and production worker adapter remain
-  incomplete.
+  first two compact responses together. The first epoch derives the exact
+  2,097,152-element source from authenticated quotient-and-multiplicity values
+  plus canonical zero padding, retains the 131,072-row by 64-element encoding,
+  and streams it into the contract-derived salted response tree. The same state
+  samples the production CFW masks and the inner, outer, and shared cross-epoch
+  WHIR masks, then derives the main epoch's logical 131,072-row by 128-element,
+  671,088,640-byte extension encoding from the production row source. It never
+  retains that matrix whole: eight canonical 16,384-row stripes keep one
+  83,886,080-byte stripe and one 5,242,880-byte encoded column live while the
+  state commits the complete 262,144-leaf second response. It derives the
+  second verifier message and 21-coordinate cross-epoch point, publishes the
+  next authenticated response checkpoint, and advances one CFW poll. The
+  strict 56-byte attempt-and-WHIR-position cursor remains bound into both
+  checkpoints. The latest guarded native owner passed in 218.82 seconds; its
+  focused retained-authority portion took 49.355 seconds, including 28.614
+  seconds for the striped second response. Its two retained response trees used
+  50,331,520 external bytes. Observed peak process-tree RSS was 380,194,816
+  bytes, peak guarded-job memory was 465,428,480 bytes, and peak process memory
+  was 454,737,920 bytes. The guarded-job peak is 15.6 percent above the
+  402,653,184-byte nominal planning target but below the 603,979,776-byte
+  automatic target and 671,088,640-byte hard ceiling. These are guarded native
+  development measurements, not scalar-WASM or browser evidence. Later main-
+  response openings, authenticated mid-stripe restart, cold common-worker
+  restoration, complete WHIR execution, scalar-WASM execution, and an emitted
+  compact proof remain absent. The later CFW and WHIR family material provider
+  and production worker adapter remain incomplete.
   It checks canonical bytes and gates verifier-derived schedules and 82
   response openings through the exact 161-component,
   45-construction-binding certificate, but checks no CFW or WHIR equation or

@@ -91,23 +91,24 @@ code with owned retained inputs. A release-owned compact response state now
 drives those response components with verifier-selected leaf replay, exact
 transaction yielding, cancellation, authenticated cursor restoration, and
 byte-identical genesis replay in the complete production-shaped small chain.
-A release-owned public-key generation state also binds the frozen contract to
-the retained setup authority, polls the exact 202 authenticated source columns,
-and constructs then independently decodes canonical public input from verifier-
-minted suite, statement, manifest, and relation bindings. It owns family
-materialization and its first compact response together, accepts the lookup
-challenge only as a borrowed first-message authority minted by its retained
-compact response state for the same proof geometry and canonical public input,
-then owns bounded lookup inversion and structured-row preparation. Selected-
-size guarded Rust coverage derives the exact first-epoch WHIR source from
-authenticated production values, drives its encoding and response salts from
-action-private coins, streams the retained 131,072-row by 64-element encoding
-through the response state, binds a strict 56-byte attempt-and-WHIR-position
-cursor into the authenticated response checkpoint, and retains the tree through
-lookup, row preparation, and one CFW poll. The generation state is not yet
-called by the WebAssembly common-proof worker and does not yet support cold
-common-worker restoration or a complete WHIR epoch. The later CFW and WHIR
-family material adapter and production worker adapter remain incomplete.
+A release-owned public-key generation state now joins the frozen factor-one
+contract to the retained setup authority, polls the exact 202 authenticated
+source columns, and independently decodes canonical public input derived from
+verifier-minted suite, statement, manifest, and relation bindings. It owns
+family materialization and its first two compact responses together. The first
+epoch retains the exact 131,072-row by 64-element encoding. The same state
+samples production CFW and WHIR masks and derives the main epoch's logical
+131,072-row by 128-element, 671,088,640-byte extension encoding from the
+production row source. It recomputes that matrix as eight canonical 16,384-row
+stripes instead of retaining it, commits the complete 262,144-leaf second
+response, derives its verifier message and 21-coordinate cross-epoch point,
+publishes the next authenticated response checkpoint, and advances one CFW
+poll. Guarded native evidence measured 465,428,480 peak job bytes and
+50,331,520 retained external bytes. This is not WebAssembly or browser
+evidence. Later main-response openings, authenticated mid-stripe restart, cold
+common-worker restoration, complete WHIR execution, scalar-WASM execution, and
+an emitted compact proof remain absent. The later CFW and WHIR family material
+adapter and production worker adapter remain incomplete.
 The semantic authority, complete CFW/WHIR verification, reduced
 execution fixtures, and the retained end-to-end workbench remain test-only or
 incomplete. No compact prover exists. The

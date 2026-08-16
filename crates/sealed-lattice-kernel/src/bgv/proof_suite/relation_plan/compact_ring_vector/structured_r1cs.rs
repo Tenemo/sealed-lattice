@@ -2205,6 +2205,16 @@ where
         self.matrices.row_count
     }
 
+    pub(super) fn witness_value(
+        &self,
+        element_ordinal: u64,
+    ) -> Result<ProofChallengeExtensionElement, CommonProofProverError> {
+        if element_ordinal >= self.matrices.witness_length {
+            return Err(RelationPlanError::InvalidConstraint.into());
+        }
+        self.assignment.witness_value(element_ordinal)
+    }
+
     pub(super) fn evaluate_row(
         &self,
         row_ordinal: u64,
@@ -3146,18 +3156,21 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     use super::super::{
-        generation_state::{CompactPublicKeyGenerationPoll, CompactPublicKeyGenerationState},
+        generation_state::{
+            CompactPublicKeyGenerationPoll, CompactPublicKeyGenerationState,
+            CompactPublicKeyMainEpochPoll,
+        },
         prepare_compact_public_key_assignment_sources,
     };
     use super::*;
     use crate::bgv::proof_suite::compact_cfw::{
         COMPACT_CFW_MATRIX_COUNT, CompactCfwGeometry, CompactCfwMaskMaterial,
-        compact_challenge_from_production,
+        compact_challenge_from_production, compact_challenge_to_production,
     };
     use crate::bgv::proof_suite::compact_cfw_external_prover::{
         CompactCfwExternalProverState, CompactCfwExternalRowSource,
     };
-    use crate::bgv::proof_suite::external_memory::tests::TestStorage;
+    use crate::bgv::proof_suite::external_memory::tests::{FileBackedTestStorage, TestStorage};
     use crate::bgv::proof_suite::field::{
         PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
     };
@@ -4325,7 +4338,8 @@ mod tests {
             private_coin_coordinate_capacity,
         )
         .expect("the compact production-private coin source starts");
-        let mut response_storage = TestStorage::default();
+        let mut response_storage =
+            FileBackedTestStorage::new().expect("selected compact response scratch opens");
         assert_eq!(
             generation_state
                 .poll(8_192, &mut private_coins, &mut response_storage)
@@ -4543,27 +4557,138 @@ mod tests {
         );
 
         let phase_started_at = Instant::now();
-        println!("compact public-key focused owner phase: advance one compact CFW poll");
+        println!("compact public-key focused owner phase: prepare and commit post-lookup response");
+        let post_lookup_response_geometry = &selected_compact_contract
+            .verifier_inputs()
+            .response_merkle_geometries[1];
+        assert_eq!(post_lookup_response_geometry.response_ordinal(), 1);
+        let expected_post_lookup_response_leaf_count =
+            post_lookup_response_geometry.merkle_leaf_count();
+        prepared_main_epoch
+            .prepare_post_lookup_response()
+            .expect("production CFW masks and main WHIR source encode");
         let compact_geometry = CompactCfwGeometry::derive(
-            CompactCfwExternalRowSource::witness_length(row_source)
+            usize::try_from(prepared_main_epoch.family_material().witness_length())
                 .expect("production witness length fits CFW"),
         )
         .expect("production row source has compact CFW geometry");
-        let mut mask_coordinate = 10_000_u64;
-        let compact_mask_material = CompactCfwMaskMaterial::sample(compact_geometry, || {
-            mask_coordinate += 5;
-            compact_challenge_from_production(
-                ProofChallengeExtensionElement::from_canonical_coordinates([
-                    mask_coordinate,
-                    mask_coordinate + 1,
-                    mask_coordinate + 2,
-                    mask_coordinate + 3,
-                    mask_coordinate + 4,
-                ])
-                .expect("compact mask coordinate is canonical"),
-            )
-        })
-        .expect("compact masks derive");
+        let compact_mask_material = prepared_main_epoch
+            .cfw_mask_material()
+            .expect("the post-lookup response retains its CFW masks")
+            .clone();
+        assert_eq!(
+            compact_mask_material
+                .auxiliary_target(compact_geometry)
+                .expect("the retained masks determine the CFW auxiliary target"),
+            prepared_main_epoch
+                .cfw_auxiliary_target()
+                .expect("the post-lookup response retains the CFW auxiliary target")
+        );
+        let mut supplied_post_lookup_response_leaf_count = 0_u64;
+        let mut supplied_opened_response_leaf_count = 0_u64;
+        let mut main_source_arithmetic_poll_count = 0_u64;
+        loop {
+            match prepared_main_epoch
+                .poll_post_lookup_response(8_192, &mut response_storage)
+                .expect("the owned post-lookup response advances")
+            {
+                CompactPublicKeyMainEpochPoll::MainSourceArithmeticStepCompleted {
+                    processed_work_unit_count,
+                } => {
+                    assert!((1..=8_192).contains(&processed_work_unit_count));
+                    main_source_arithmetic_poll_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseLeafSupplied { leaf_ordinal } => {
+                    assert_eq!(leaf_ordinal, supplied_post_lookup_response_leaf_count);
+                    supplied_post_lookup_response_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::OpenedResponseLeafSupplied {
+                    response_ordinal,
+                    leaf_ordinal,
+                } => {
+                    assert!(response_ordinal <= 1);
+                    assert!(
+                        leaf_ordinal
+                            < selected_compact_contract
+                                .verifier_inputs()
+                                .response_merkle_geometries[usize::try_from(response_ordinal)
+                                .expect("response ordinal fits usize")]
+                            .merkle_leaf_count()
+                    );
+                    supplied_opened_response_leaf_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::ResponseArithmeticStepCompleted
+                | CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted => {}
+                CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady => break,
+            }
+        }
+        assert_eq!(
+            supplied_post_lookup_response_leaf_count,
+            expected_post_lookup_response_leaf_count
+        );
+        assert_eq!(supplied_opened_response_leaf_count, 0);
+        assert!(main_source_arithmetic_poll_count > 0);
+        assert!(prepared_main_epoch.main_source_encoding_complete());
+        let post_lookup_checkpoint = prepared_main_epoch
+            .checkpoint_boundary()
+            .expect("the post-lookup response exposes its authenticated checkpoint boundary");
+        assert_eq!(
+            post_lookup_checkpoint.safe_boundary_ordinal(),
+            pre_challenge_checkpoint.safe_boundary_ordinal() + 1
+        );
+        let completed_transcript_response_count =
+            u32::from_le_bytes(post_lookup_checkpoint.position()[8..12].try_into().unwrap());
+        assert_eq!(completed_transcript_response_count, 2);
+        let completed_proof_response_count = u32::from_le_bytes(
+            post_lookup_checkpoint.position()[12..16]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(
+            usize::try_from(completed_proof_response_count).unwrap(),
+            selected_compact_contract
+                .verifier_inputs()
+                .checkpoint_schedule
+                .completed_proof_response_count(
+                    usize::try_from(completed_transcript_response_count).unwrap()
+                )
+                .expect("the selected checkpoint schedule owns this transcript boundary")
+        );
+        assert_eq!(
+            completed_proof_response_count, 0,
+            "the first two commitments remain behind their later opening boundary"
+        );
+        let post_lookup_randomness_cursor =
+            prepared_main_epoch.canonical_randomness_checkpoint_cursor_bytes();
+        prepared_main_epoch
+            .validate_authenticated_randomness_checkpoint_cursor(&post_lookup_randomness_cursor)
+            .expect("the prepared main epoch accepts its authenticated randomness cursor");
+        assert_ne!(post_lookup_randomness_cursor, randomness_cursor);
+        let cross_epoch_point = prepared_main_epoch
+            .cross_epoch_point()
+            .expect("the second transcript message mints the cross-epoch point");
+        assert_eq!(cross_epoch_point.len(), 21);
+        assert!(cross_epoch_point.iter().any(|coordinate| {
+            compact_challenge_to_production(*coordinate)
+                .expect("transcript point coordinate is canonical")
+                .canonical_coordinates()[1..]
+                .iter()
+                .any(|value| *value != 0)
+        }));
+        println!(
+            "compact public-key focused owner phase complete: prepare and commit post-lookup response elapsed_milliseconds={} response_leaf_count={} opened_leaf_count={} main_source_arithmetic_poll_count={} maximum_external_storage_bytes={} retained_external_storage_bytes={} retained_secret_object_count={}",
+            phase_started_at.elapsed().as_millis(),
+            supplied_post_lookup_response_leaf_count,
+            supplied_opened_response_leaf_count,
+            main_source_arithmetic_poll_count,
+            response_storage.maximum_declared_byte_length(),
+            response_storage.committed_declared_byte_length(),
+            response_storage.retained_secret_object_count(),
+        );
+
+        let phase_started_at = Instant::now();
+        println!("compact public-key focused owner phase: advance one compact CFW poll");
+        let row_source = prepared_main_epoch.family_material().row_source();
         let equality_point = (0..compact_geometry.sumcheck_round_count())
             .map(|round_ordinal| {
                 let round_ordinal =

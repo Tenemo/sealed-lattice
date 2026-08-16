@@ -16,7 +16,8 @@ use core::marker::PhantomData;
 
 use data::ZkRoundData;
 pub use data::{
-    HidingWhirEncodedBaseOracle, HidingWhirExtensionProverData, HidingWhirProverData,
+    HidingWhirEncodedBaseOracle, HidingWhirEncodedExtensionOracle,
+    HidingWhirExtensionProverData, HidingWhirProverData,
 };
 use masks::{ProverMasks, fold_limb_chunks};
 use p3_challenger::{CanObserve, CanSampleUniformBits, FieldChallenger, GrindingChallenger};
@@ -156,6 +157,31 @@ where
         challenger: &mut Challenger,
         rng: &mut R,
     ) -> (MT::Commitment, HidingWhirExtensionProverData<F, EF, MT>) {
+        let encoded_oracle = self.encode_extension_initial_oracle(message, rng);
+        let (commitment, merkle) = self.extension_mmcs.commit_matrix(encoded_oracle.encoded);
+        challenger.observe(commitment.clone());
+        (
+            commitment,
+            HidingWhirExtensionProverData {
+                message: encoded_oracle.message,
+                randomness: encoded_oracle.randomness,
+                merkle,
+            },
+        )
+    }
+
+    /// Encodes the initial extension-field oracle without choosing its
+    /// commitment.
+    ///
+    /// This is the exact encoding half of [`Self::commit_extension`]. It lets
+    /// an outer protocol commit the complete response vector through a
+    /// different MMCS while preserving WHIR's message layout and hiding
+    /// distribution.
+    pub fn encode_extension_initial_oracle<R: Rng>(
+        &self,
+        message: Poly<EF>,
+        rng: &mut R,
+    ) -> HidingWhirEncodedExtensionOracle<F, EF> {
         assert_eq!(message.num_variables(), self.config.num_variables);
         let folding = self.config.round_folding_factor(0);
         let randomness: Vec<EF> = (0..(self.config.oracle_randomness[0] << folding))
@@ -165,16 +191,12 @@ where
             (1 << (message.num_variables() - folding)) << self.config.starting_log_inv_rate;
         let padded = zk_padded_matrix(message.as_slice(), &randomness, folding, height);
         let encoded = self.dft.dft_algebra_batch(padded);
-        let (commitment, merkle) = self.extension_mmcs.commit_matrix(encoded);
-        challenger.observe(commitment.clone());
-        (
-            commitment,
-            HidingWhirExtensionProverData {
-                message,
-                randomness,
-                merkle,
-            },
-        )
+        HidingWhirEncodedExtensionOracle {
+            message,
+            randomness,
+            encoded,
+            _marker: PhantomData,
+        }
     }
 
     /// Runs the full HVZK opening protocol for evaluation claims
