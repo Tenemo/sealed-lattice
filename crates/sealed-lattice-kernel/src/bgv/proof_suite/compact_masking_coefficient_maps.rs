@@ -5,12 +5,9 @@
 //! own proof owner; this module exports only the internal-commitment embedding
 //! that connects those commitments to outer response components.
 
-#[cfg(test)]
 use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 
-#[cfg(test)]
 use super::compact_cfw::CompactChallengeField;
-#[cfg(test)]
 use super::compact_cfw_geometry::COMPACT_CFW_INNER_MASK_APPLICATION_MULTIPLIER;
 use super::compact_cfw_geometry::{
     COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH,
@@ -266,15 +263,12 @@ pub(crate) enum CompactMaskingCoefficientMapError {
     InvalidContract,
     InvalidProjection,
     MissingSemanticRole,
-    #[cfg(test)]
     InvalidConditionalImage,
-    #[cfg(test)]
     WrongConditionalImageRequest,
 }
 
 /// Runtime coordinates that specialize one certified projection without
 /// letting the caller supply output rows or a claimed image basis.
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactConditionalImageRuntime<'a> {
     ReedSolomonQueries {
@@ -300,7 +294,6 @@ pub(crate) enum CompactConditionalImageRuntime<'a> {
     },
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum CompactConditionalImageExpansion {
     Dense {
@@ -314,10 +307,9 @@ enum CompactConditionalImageExpansion {
     },
 }
 
-#[cfg(test)]
 impl CompactConditionalImageExpansion {
-    fn into_independent_coordinates(
-        self,
+    fn independent_coordinates(
+        &self,
         output: &[CompactChallengeField],
     ) -> Vec<CompactChallengeField> {
         let coordinates = match self {
@@ -331,8 +323,8 @@ impl CompactConditionalImageExpansion {
             } => independent_output_coordinates,
         };
         coordinates
-            .into_iter()
-            .map(|pivot| output[pivot as usize])
+            .iter()
+            .map(|pivot| output[*pivot as usize])
             .collect()
     }
 }
@@ -340,9 +332,8 @@ impl CompactConditionalImageExpansion {
 /// Opaque, certificate-minted affine-image request for one transcript step.
 ///
 /// The retained prefix values are consumed while this request is minted and
-/// are not exposed to the ideal sampler. The request contains only the
-/// resulting canonical affine coset and its exact right-inverse coordinates.
-#[cfg(test)]
+/// are not exposed through the request. It contains only the resulting
+/// canonical affine coset and its exact right-inverse coordinates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactConditionalImageRequest {
     certificate_digest: [u8; 64],
@@ -356,12 +347,13 @@ pub(crate) struct CompactConditionalImageRequest {
     expansion: CompactConditionalImageExpansion,
 }
 
-#[cfg(test)]
 impl CompactConditionalImageRequest {
+    #[cfg(test)]
     pub(crate) const fn output_coordinate_count(&self) -> u64 {
         self.output_coordinate_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn independent_coordinate_count(&self) -> u64 {
         self.independent_coordinate_count
     }
@@ -370,12 +362,10 @@ impl CompactConditionalImageRequest {
 impl CompactMaskingCoefficientMapCertificate {
     /// Binding for the generated contract bytes from which every map row is
     /// deterministically recomputed.
-    #[cfg(test)]
     pub(crate) const fn certificate_digest(&self) -> [u8; 64] {
         self.contract_source_hash
     }
 
-    #[cfg(test)]
     pub(crate) fn maps(&self) -> &[CompactCoefficientToViewMap] {
         &self.maps
     }
@@ -538,7 +528,6 @@ impl CompactMaskingCoefficientMapCertificate {
     /// prefix for this same map. Dense constrained families solve that prefix
     /// against the certified coefficient map and derive the next affine coset;
     /// no caller-provided output row or basis is accepted.
-    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare_conditional_image(
         &self,
@@ -587,7 +576,6 @@ impl CompactMaskingCoefficientMapCertificate {
     /// coordinates into the certified affine image for the bound transcript
     /// step. The expected step and prefix binding make request replay across a
     /// different adaptive transcript fail closed.
-    #[cfg(test)]
     pub(crate) fn execute_conditional_image(
         &self,
         request: &CompactConditionalImageRequest,
@@ -646,6 +634,32 @@ impl CompactMaskingCoefficientMapCertificate {
             }
         };
         Ok(output)
+    }
+
+    /// Reconstructs the independently parameterized affine image from the
+    /// candidate's canonical pivot coordinates and refuses a value outside
+    /// that image. The caller never supplies a claimed basis or rank.
+    pub(crate) fn verify_conditional_image_output(
+        &self,
+        request: &CompactConditionalImageRequest,
+        expected_step_ordinal: u32,
+        expected_transcript_prefix_binding: [u8; 64],
+        candidate_output: &[CompactChallengeField],
+    ) -> Result<(), CompactMaskingCoefficientMapError> {
+        if u64::try_from(candidate_output.len()).ok() != Some(request.output_coordinate_count) {
+            return Err(CompactMaskingCoefficientMapError::WrongConditionalImageRequest);
+        }
+        let independent_coordinates = request.expansion.independent_coordinates(candidate_output);
+        let reconstructed = self.execute_conditional_image(
+            request,
+            expected_step_ordinal,
+            expected_transcript_prefix_binding,
+            &independent_coordinates,
+        )?;
+        if reconstructed != candidate_output {
+            return Err(CompactMaskingCoefficientMapError::InvalidConditionalImage);
+        }
+        Ok(())
     }
 }
 
@@ -1607,7 +1621,6 @@ fn cfw_outer_view_count(round_count: u64) -> Result<u64, CompactMaskingCoefficie
     .ok_or(CompactMaskingCoefficientMapError::ArithmeticOverflow)
 }
 
-#[cfg(test)]
 struct ProjectionConditionalImageInput<'a> {
     maps: &'a [CompactCoefficientToViewMap],
     map_ordinal: usize,
@@ -1619,7 +1632,6 @@ struct ProjectionConditionalImageInput<'a> {
     runtime: CompactConditionalImageRuntime<'a>,
 }
 
-#[cfg(test)]
 fn prepare_projection_conditional_image(
     input: ProjectionConditionalImageInput<'_>,
 ) -> Result<CompactConditionalImageExpansion, CompactMaskingCoefficientMapError> {
@@ -1797,7 +1809,6 @@ fn prepare_projection_conditional_image(
     }
 }
 
-#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn prepare_affine_mirror_query_image(
     maps: &[CompactCoefficientToViewMap],
@@ -1925,7 +1936,6 @@ fn prepare_affine_mirror_query_image(
     })
 }
 
-#[cfg(test)]
 fn prepare_reed_solomon_conditional_image(
     map: &CompactCoefficientToViewMap,
     preceding_query_positions: &[u64],
@@ -2081,7 +2091,6 @@ fn prepare_reed_solomon_conditional_image(
     })
 }
 
-#[cfg(test)]
 fn prepare_dense_conditional_image(
     map: &CompactCoefficientToViewMap,
     first_output_coordinate: u64,
@@ -2122,7 +2131,6 @@ fn prepare_dense_conditional_image(
     })
 }
 
-#[cfg(test)]
 fn prepare_dense_conditional_image_with_dimensions(
     private_coordinate_count: usize,
     view_coordinate_count: usize,
@@ -2199,7 +2207,6 @@ fn prepare_dense_conditional_image_with_dimensions(
     })
 }
 
-#[cfg(test)]
 fn validate_conditional_expansion(
     output_coordinate_count: u64,
     independent_coordinate_count: u64,
@@ -2262,7 +2269,6 @@ fn validate_conditional_expansion(
     Ok(())
 }
 
-#[cfg(test)]
 fn solve_linear_system(
     rows: &[Vec<CompactChallengeField>],
     target: &[CompactChallengeField],
@@ -2296,7 +2302,6 @@ fn solve_linear_system(
     Ok(solution)
 }
 
-#[cfg(test)]
 fn nullspace_basis(
     rows: &[Vec<CompactChallengeField>],
     column_count: usize,
@@ -2327,7 +2332,6 @@ fn nullspace_basis(
     Ok(basis)
 }
 
-#[cfg(test)]
 fn row_reduce(
     rows: &mut [Vec<CompactChallengeField>],
     coefficient_column_count: usize,
@@ -2367,7 +2371,6 @@ fn row_reduce(
     Ok(pivots)
 }
 
-#[cfg(test)]
 fn canonical_image_basis(
     generators: Vec<Vec<CompactChallengeField>>,
 ) -> Result<(Vec<Vec<CompactChallengeField>>, Vec<u64>), CompactMaskingCoefficientMapError> {
@@ -2415,7 +2418,6 @@ fn canonical_image_basis(
     Ok((basis, pivots))
 }
 
-#[cfg(test)]
 fn normalize_affine_offset(
     mut offset: Vec<CompactChallengeField>,
     basis: &[Vec<CompactChallengeField>],
@@ -2434,7 +2436,6 @@ fn normalize_affine_offset(
     Ok(offset)
 }
 
-#[cfg(test)]
 fn dot(left: &[CompactChallengeField], right: &[CompactChallengeField]) -> CompactChallengeField {
     left.iter()
         .zip(right)
@@ -2443,7 +2444,6 @@ fn dot(left: &[CompactChallengeField], right: &[CompactChallengeField]) -> Compa
 }
 
 /// Coefficient of one private lane coordinate in one Reed-Solomon query.
-#[cfg(test)]
 pub(crate) fn reed_solomon_query_coefficient(
     domain_generator: CompactChallengeField,
     position: u64,
@@ -2454,7 +2454,6 @@ pub(crate) fn reed_solomon_query_coefficient(
         .exp_u64(coefficient_ordinal)
 }
 
-#[cfg(test)]
 pub(crate) fn apply_reed_solomon_query(
     domain_generator: CompactChallengeField,
     position: u64,
@@ -2613,7 +2612,6 @@ pub(crate) fn apply_whir_sumcheck_mask_view(
     Ok(view)
 }
 
-#[cfg(test)]
 fn apply_whir_sumcheck_mask_prefix(
     masks: &[Vec<CompactChallengeField>],
     preceding_round_challenges: &[CompactChallengeField],
@@ -2681,7 +2679,6 @@ fn apply_whir_sumcheck_mask_prefix(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg(test)]
 pub(crate) struct CompactCfwOuterMaskView {
     pub(crate) auxiliary_target: CompactChallengeField,
     pub(crate) round_polynomials:
@@ -2690,7 +2687,6 @@ pub(crate) struct CompactCfwOuterMaskView {
 }
 
 /// Applies the independently derived complete compact-CFW outer-mask map.
-#[cfg(test)]
 pub(crate) fn apply_cfw_outer_mask_view(
     masks: &[[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]],
     round_challenges: &[CompactChallengeField],
@@ -2744,7 +2740,6 @@ pub(crate) fn apply_cfw_outer_mask_view(
     })
 }
 
-#[cfg(test)]
 fn apply_cfw_outer_mask_prefix(
     masks: &[[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]],
     preceding_round_challenges: &[CompactChallengeField],
@@ -2819,7 +2814,6 @@ fn apply_cfw_outer_mask_prefix(
 /// Applies the complete compact-CFW inner-mask projection to the three
 /// terminal values. Input order is round-major, then matrix-major, with the
 /// two independent coefficients `(a,b)` of `[0,a,b,-a-b]`.
-#[cfg(test)]
 pub(crate) fn apply_cfw_inner_terminal_view(
     independent_coefficients: &[[CompactChallengeField; 2]],
     round_challenges: &[CompactChallengeField],
@@ -2872,7 +2866,6 @@ pub(crate) fn apply_cross_epoch_explicit_point_view(
     ])
 }
 
-#[cfg(test)]
 fn evaluate_polynomial(
     coefficients: &[CompactChallengeField],
     point: CompactChallengeField,
@@ -3512,8 +3505,7 @@ mod tests {
                 .expect("the exact conditional CFW image derives");
             let independent = request
                 .expansion
-                .clone()
-                .into_independent_coordinates(&view[first..first + output_count]);
+                .independent_coordinates(&view[first..first + output_count]);
             let expanded = certificate
                 .execute_conditional_image(
                     &request,
@@ -3786,6 +3778,36 @@ mod tests {
                 .execute_conditional_image(&request, 7, [0x31; 64], &[first, second],)
                 .expect("the canonical rank-two coordinates expand"),
             vec![first, second, first - second],
+        );
+        certificate
+            .verify_conditional_image_output(
+                &request,
+                7,
+                [0x31; 64],
+                &[first, second, first - second],
+            )
+            .expect("the real rank-two disclosure belongs to the compiled image");
+        assert_eq!(
+            certificate.verify_conditional_image_output(
+                &request,
+                7,
+                [0x31; 64],
+                &[first, second, first - second + CompactChallengeField::ONE],
+            ),
+            Err(CompactMaskingCoefficientMapError::InvalidConditionalImage),
+        );
+        assert_eq!(
+            certificate.verify_conditional_image_output(&request, 7, [0x31; 64], &[first, second],),
+            Err(CompactMaskingCoefficientMapError::WrongConditionalImageRequest),
+        );
+        assert_eq!(
+            certificate.verify_conditional_image_output(
+                &request,
+                7,
+                [0x32; 64],
+                &[first, second, first - second],
+            ),
+            Err(CompactMaskingCoefficientMapError::WrongConditionalImageRequest),
         );
         assert_eq!(
             certificate.execute_conditional_image(

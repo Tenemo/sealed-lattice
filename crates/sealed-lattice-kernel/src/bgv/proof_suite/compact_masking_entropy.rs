@@ -14,11 +14,14 @@ use super::compact_cfw::{
     compact_cfw_final_challenge_is_allowed, compact_challenge_from_production,
 };
 use super::compact_masking_coefficient_maps::{
-    CompactCoefficientProjection, CompactCoefficientToViewMap, CompactCommitmentQuerySource,
-    CompactConditionalImageRequest, CompactConditionalImageRuntime,
-    CompactConstructionCommitmentOwnership, CompactMaskingCoefficientMapCertificate,
-    CompactMaskingViewRole, CompactSurjectivityWitness, apply_cfw_inner_terminal_view,
-    apply_cfw_outer_mask_view, apply_whir_sumcheck_mask_view, reed_solomon_query_coefficient,
+    CompactCoefficientProjection, CompactCommitmentQuerySource, CompactConditionalImageRequest,
+    CompactConditionalImageRuntime, CompactConstructionCommitmentOwnership,
+    CompactMaskingCoefficientMapCertificate, CompactMaskingViewRole, CompactSurjectivityWitness,
+    apply_cfw_outer_mask_view, reed_solomon_query_coefficient,
+};
+#[cfg(test)]
+use super::compact_masking_coefficient_maps::{
+    CompactCoefficientToViewMap, apply_cfw_inner_terminal_view, apply_whir_sumcheck_mask_view,
 };
 use super::compact_masking_prefix::CompactMaskingAttemptIdentity;
 use super::compact_proof_contract::{
@@ -32,9 +35,12 @@ use super::compact_response_merkle::{
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
 use crate::hashing::hash_framed_parts_512;
 
+#[cfg(test)]
 const DISCLOSURE_DIGEST_DOMAIN: &str =
     "sealed-lattice/proof/compact-masking-entropy-disclosures/v1";
+#[cfg(test)]
 const CONTRACT_BINDING_DOMAIN: &str = "sealed-lattice/proof/compact-masking-entropy-contract/v1";
+const LIVE_PREFIX_BINDING_DOMAIN: &str = "sealed-lattice/proof/compact-masking-live-prefix/v1";
 const WHIR_FOLD_COUNT_PER_EPOCH: usize = 4;
 const CFW_OUTER_MASK_MESSAGE_LENGTH_U64: u64 = COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH as u64;
 
@@ -89,10 +95,12 @@ pub(crate) struct CompactBaseFreshClaimCoefficients {
 }
 
 impl CompactBaseFreshClaimCoefficients {
+    #[cfg(test)]
     pub(crate) const fn epoch(&self) -> u8 {
         self.epoch
     }
 
+    #[cfg(test)]
     pub(crate) fn coefficients(&self) -> &[CompactChallengeField] {
         &self.coefficients
     }
@@ -240,7 +248,6 @@ pub(crate) enum CompactMaskingDisclosureImage {
 /// Opaque, authority-minted request for sampling one checked conditional
 /// image. The ideal oracle receives no private row ledger or mutable map; it
 /// can only answer the exact step and transcript prefix named here.
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactMaskingIdealImageRequest {
     attempt_identity: CompactMaskingAttemptIdentity,
@@ -252,38 +259,45 @@ pub(crate) struct CompactMaskingIdealImageRequest {
     transcript_prefix_binding: [u8; 64],
 }
 
-#[cfg(test)]
 impl CompactMaskingIdealImageRequest {
+    #[cfg(test)]
     pub(crate) const fn attempt_identity(&self) -> CompactMaskingAttemptIdentity {
         self.attempt_identity
     }
 
+    #[cfg(test)]
     pub(crate) const fn step_ordinal(&self) -> u32 {
         self.step_ordinal
     }
 
+    #[cfg(test)]
     pub(crate) const fn verifier_move_ordinal(&self) -> u32 {
         self.verifier_move_ordinal
     }
 
+    #[cfg(test)]
     pub(crate) const fn output_coordinate_count(&self) -> u64 {
         self.output_coordinate_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn independent_coordinate_count(&self) -> u64 {
         self.independent_coordinate_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn image(&self) -> CompactMaskingDisclosureImage {
         self.image
     }
 }
 
 impl CompactMaskingEntropyStep {
+    #[cfg(test)]
     pub(crate) const fn ordinal(&self) -> u32 {
         self.ordinal
     }
 
+    #[cfg(test)]
     pub(crate) const fn verifier_move_ordinal(&self) -> u32 {
         self.verifier_move_ordinal
     }
@@ -296,6 +310,7 @@ impl CompactMaskingEntropyStep {
         self.output_coordinate_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn image(&self) -> CompactMaskingDisclosureImage {
         self.image
     }
@@ -305,6 +320,7 @@ impl CompactMaskingEntropyStep {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactMaskingEntropyCertificate {
     steps: Vec<CompactMaskingEntropyStep>,
@@ -317,6 +333,7 @@ pub(crate) struct CompactMaskingEntropyCertificate {
     coefficient_map_binding: [u8; 64],
 }
 
+#[cfg(test)]
 impl CompactMaskingEntropyCertificate {
     pub(crate) fn steps(&self) -> &[CompactMaskingEntropyStep] {
         &self.steps
@@ -404,6 +421,7 @@ impl CompactMaskingEntropyCertificate {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactMaskingEntropyCursor {
     identity: CompactMaskingAttemptIdentity,
@@ -413,6 +431,7 @@ pub(crate) struct CompactMaskingEntropyCursor {
     cumulative_rank: u64,
 }
 
+#[cfg(test)]
 impl CompactMaskingEntropyCursor {
     pub(crate) fn finish(
         self,
@@ -443,10 +462,12 @@ pub(crate) struct CompactBaseFreshClaimRequirement {
 }
 
 impl CompactBaseFreshClaimRequirement {
+    #[cfg(test)]
     pub(crate) const fn epoch(self) -> u8 {
         self.epoch
     }
 
+    #[cfg(test)]
     pub(crate) const fn coefficient_count(self) -> u64 {
         self.coefficient_count
     }
@@ -512,7 +533,6 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn ideal_image_request(
         &self,
         step: &CompactMaskingEntropyStep,
@@ -558,7 +578,6 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
     /// authenticated outputs and the actual decoded verifier-message prefix.
     /// The caller cannot provide query positions, challenges, output rows, or
     /// an image basis.
-    #[cfg(test)]
     pub(crate) fn prepare_coefficient_image(
         &self,
         step: &CompactMaskingEntropyStep,
@@ -654,6 +673,31 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
                 step.ordinal,
                 image_request.transcript_prefix_binding,
                 independent_coordinates,
+            )
+            .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientMap)
+    }
+
+    /// Checks a real emitted disclosure against the independently derived
+    /// conditional image for the current authenticated transcript prefix.
+    pub(crate) fn verify_coefficient_image_output(
+        &self,
+        step: &CompactMaskingEntropyStep,
+        preceding_output_values: &[CompactChallengeField],
+        retained_mirror_coefficients: Option<&[CompactChallengeField]>,
+        candidate_output: &[CompactChallengeField],
+    ) -> Result<(), CompactMaskingEntropyError> {
+        let image_request = self.ideal_image_request(step)?;
+        let coefficient_request = self.prepare_coefficient_image(
+            step,
+            preceding_output_values,
+            retained_mirror_coefficients,
+        )?;
+        self.coefficient_maps
+            .verify_conditional_image_output(
+                &coefficient_request,
+                step.ordinal,
+                image_request.transcript_prefix_binding,
+                candidate_output,
             )
             .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientMap)
     }
@@ -766,6 +810,7 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
         Ok(&self.steps[self.message_range.clone()])
     }
 
+    #[cfg(test)]
     pub(crate) fn finish(
         self,
     ) -> Result<CompactMaskingEntropyCertificate, CompactMaskingEntropyError> {
@@ -815,6 +860,85 @@ impl<'contract> CompactMaskingEntropyAuthority<'contract> {
     }
 }
 
+/// Verifies the first live constrained disclosures against the independently
+/// compiled coefficient maps, canonical proof prefix, and authenticated
+/// transcript cursor that precede them. This is a production generation gate,
+/// not the ideal simulator: it accepts only values generated by the real prover
+/// state.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_selected_compact_cross_epoch_masking_prefix(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    proof_attempt_identifier: [u8; 32],
+    canonical_public_input_bytes: &[u8],
+    canonical_exposed_proof_prefix: &[u8],
+    canonical_transcript_cursor_bytes: &[u8],
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    cross_epoch_disclosures: [CompactChallengeField; 3],
+    cfw_auxiliary_disclosure: CompactChallengeField,
+) -> Result<(), CompactMaskingEntropyError> {
+    if canonical_public_input_bytes.is_empty()
+        || canonical_exposed_proof_prefix.is_empty()
+        || canonical_transcript_cursor_bytes.is_empty()
+        || completed_messages.len() != 2
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let live_prefix_binding = hash_framed_parts_512(
+        LIVE_PREFIX_BINDING_DOMAIN,
+        &[
+            &coefficient_maps.certificate_digest(),
+            canonical_public_input_bytes,
+            canonical_exposed_proof_prefix,
+            canonical_transcript_cursor_bytes,
+        ],
+    );
+    let identity =
+        CompactMaskingAttemptIdentity::new(proof_attempt_identifier, 0, live_prefix_binding);
+    let mut authority = CompactMaskingEntropyAuthority::begin(inputs, coefficient_maps, identity)?;
+
+    for (move_ordinal, message) in completed_messages.iter().enumerate() {
+        if !authority.authorize_next_response(None)?.is_empty() {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+        let move_ordinal = u32::try_from(move_ordinal)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        if !authority
+            .ingest_verifier_message(move_ordinal, message)?
+            .is_empty()
+        {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+    }
+
+    let steps = authority.authorize_next_response(None)?.to_vec();
+    let [cross_epoch_step, cfw_auxiliary_step] = steps.as_slice() else {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    };
+    if cross_epoch_step.kind() != CompactMaskingDisclosureKind::CrossEpochExplicitPoint
+        || cross_epoch_step.output_coordinate_count() != 3
+        || cross_epoch_step.conditional_rank() != 2
+        || cfw_auxiliary_step.kind() != CompactMaskingDisclosureKind::CfwOuterAuxiliary
+        || cfw_auxiliary_step.output_coordinate_count() != 1
+        || cfw_auxiliary_step.conditional_rank() != 1
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    authority.verify_coefficient_image_output(
+        cross_epoch_step,
+        &[],
+        None,
+        &cross_epoch_disclosures,
+    )?;
+    authority.verify_coefficient_image_output(
+        cfw_auxiliary_step,
+        &[],
+        None,
+        &[cfw_auxiliary_disclosure],
+    )?;
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactMaskingEntropyError {
     ArithmeticOverflow,
@@ -827,7 +951,9 @@ pub(crate) enum CompactMaskingEntropyError {
     InvalidCoefficientVector,
     RankFailure,
     DisclosureOutOfOrder,
+    #[cfg(test)]
     AttemptIdentityMismatch,
+    #[cfg(test)]
     CertificateMismatch,
     WrongAuthorityPhase,
 }
@@ -866,6 +992,7 @@ struct PendingStep {
     image: CompactMaskingDisclosureImage,
 }
 
+#[cfg(test)]
 pub(crate) fn certify_compact_masking_entropy(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
@@ -875,6 +1002,7 @@ pub(crate) fn certify_compact_masking_entropy(
         .map(|(certificate, _)| certificate)
 }
 
+#[cfg(test)]
 fn certify_compact_masking_entropy_with_sources(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
@@ -957,6 +1085,7 @@ fn certify_compact_masking_entropy_with_sources(
     ))
 }
 
+#[cfg(test)]
 fn validate_transcript_inputs(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     transcript: &CompactMaskingEntropyTranscript,
@@ -1214,6 +1343,7 @@ fn derive_private_sources(
     Ok(sources)
 }
 
+#[cfg(test)]
 fn derive_scalar_steps(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
@@ -1798,6 +1928,7 @@ fn coefficient_map_image(
     })
 }
 
+#[cfg(test)]
 fn append_query_steps(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
@@ -2270,6 +2401,7 @@ fn append_carried_mask_query_steps(
     Ok(())
 }
 
+#[cfg(test)]
 fn append_base_reveal_steps(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     transcript: &CompactMaskingEntropyTranscript,
@@ -2616,6 +2748,7 @@ fn cfw_outer_incremental_ranks(
     incremental_group_ranks(row_groups, columns)
 }
 
+#[cfg(test)]
 fn cfw_inner_terminal_rank(
     certificate: &CompactMaskingCoefficientMapCertificate,
     challenges: &[CompactChallengeField],
@@ -2648,6 +2781,7 @@ fn cfw_inner_terminal_rank(
     u64::try_from(rank).map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)
 }
 
+#[cfg(test)]
 fn cross_epoch_rank(
     certificate: &CompactMaskingCoefficientMapCertificate,
     inputs: &CompactPublicKeyVerifierInputs<'_>,
@@ -2665,6 +2799,7 @@ fn cross_epoch_rank(
     )
 }
 
+#[cfg(test)]
 fn validated_cross_epoch_rank(
     map: &CompactCoefficientToViewMap,
     copied_element_count: u64,
@@ -2696,6 +2831,7 @@ fn validated_cross_epoch_rank(
     Ok(2)
 }
 
+#[cfg(test)]
 fn sumcheck_incremental_ranks(
     certificate: &CompactMaskingCoefficientMapCertificate,
     role: &CompactResponseComponentRoleContract,
@@ -2866,13 +3002,11 @@ fn unique_query_set(
     Ok(value)
 }
 
-#[cfg(test)]
 struct CompactStepQueryPositions<'transcript> {
     preceding: &'transcript [u64],
     current: &'transcript [u64],
 }
 
-#[cfg(test)]
 fn query_positions_for_disclosure<'transcript>(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     transcript: &'transcript CompactMaskingEntropyTranscript,
@@ -2943,7 +3077,6 @@ fn query_positions_for_disclosure<'transcript>(
     Ok(CompactStepQueryPositions { preceding, current })
 }
 
-#[cfg(test)]
 fn sumcheck_challenges_for_prefix(
     transcript: &CompactMaskingEntropyTranscript,
     epoch: u8,
@@ -3035,6 +3168,7 @@ fn linear_claim_output_covector(
     Err(CompactMaskingEntropyError::InvalidCoefficientVector)
 }
 
+#[cfg(test)]
 fn unique_sumcheck_challenges(
     transcript: &CompactMaskingEntropyTranscript,
     epoch: u8,
@@ -3156,6 +3290,7 @@ fn source_coordinate_for_role(
     }
 }
 
+#[cfg(test)]
 fn shared_cross_query_overlap(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     transcript: &CompactMaskingEntropyTranscript,
@@ -3287,6 +3422,7 @@ fn checked_product(values: &[u64]) -> Result<u64, CompactMaskingEntropyError> {
     })
 }
 
+#[cfg(test)]
 fn hash_steps(steps: &[CompactMaskingEntropyStep]) -> [u8; 64] {
     let mut bytes = Vec::with_capacity(steps.len() * 48);
     bytes.extend_from_slice(&(steps.len() as u64).to_le_bytes());
@@ -3303,6 +3439,7 @@ fn hash_steps(steps: &[CompactMaskingEntropyStep]) -> [u8; 64] {
     hash_framed_parts_512(DISCLOSURE_DIGEST_DOMAIN, &[&bytes])
 }
 
+#[cfg(test)]
 fn encode_image(output: &mut Vec<u8>, image: CompactMaskingDisclosureImage) {
     match image {
         CompactMaskingDisclosureImage::FullCoordinateSpace => output.push(1),
@@ -3323,6 +3460,7 @@ fn encode_image(output: &mut Vec<u8>, image: CompactMaskingDisclosureImage) {
     }
 }
 
+#[cfg(test)]
 fn hash_contract_binding(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     maps: &CompactMaskingCoefficientMapCertificate,
@@ -3346,7 +3484,6 @@ fn hash_contract_binding(
     ))
 }
 
-#[cfg(test)]
 fn hash_transcript_prefix(
     coefficient_map_binding: [u8; 64],
     identity: CompactMaskingAttemptIdentity,
@@ -3409,6 +3546,7 @@ fn hash_transcript_prefix(
     )
 }
 
+#[cfg(test)]
 fn encode_kind(output: &mut Vec<u8>, kind: CompactMaskingDisclosureKind) {
     match kind {
         CompactMaskingDisclosureKind::CrossEpochExplicitPoint => output.push(1),
@@ -3582,6 +3720,7 @@ mod tests {
     use super::*;
     use crate::bgv::proof_suite::compact_masking_coefficient_maps::derive_compact_masking_coefficient_map_certificate;
     use crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract;
+    use crate::bgv::proof_suite::field::ProofBaseFieldElement;
 
     fn selected() -> (
         super::super::compact_proof_contract::CompactPublicKeyProofContract,
@@ -3591,6 +3730,39 @@ mod tests {
         let maps = derive_compact_masking_coefficient_map_certificate(contract.verifier_inputs())
             .expect("selected coefficient maps");
         (contract, maps)
+    }
+
+    fn selected_adversarial_message(
+        inputs: &CompactPublicKeyVerifierInputs<'_>,
+        move_ordinal: usize,
+    ) -> DecodedFixedUniformVerifierMessage {
+        let geometry = &inputs.verifier_moves[move_ordinal].message_geometry;
+        let extension_elements = (0..geometry.extension_output_count())
+            .map(|coordinate_ordinal| {
+                crate::bgv::proof_suite::field::ProofChallengeExtensionElement::from_canonical_coordinates(
+                    [1 + coordinate_ordinal, 1, 0, 0, 0],
+                )
+                .expect("small extension value is canonical")
+            })
+            .collect();
+        let base_field_elements = (0..geometry.base_field_output_count())
+            .map(|coordinate_ordinal| {
+                ProofBaseFieldElement::from_canonical(3 + coordinate_ordinal)
+                    .expect("small base-field value is canonical")
+            })
+            .collect();
+        let distinct_query_groups = geometry
+            .distinct_query_groups()
+            .iter()
+            .map(|group| (0..group.query_count()).collect())
+            .collect();
+        DecodedFixedUniformVerifierMessage::from_adversarial_values(
+            geometry,
+            extension_elements,
+            base_field_elements,
+            distinct_query_groups,
+        )
+        .expect("typed malicious-verifier message matches the selected geometry")
     }
 
     #[test]
@@ -4051,6 +4223,60 @@ mod tests {
         assert_ne!(
             hash_transcript_prefix(maps.certificate_digest(), identity, &transcript, 5),
             hash_transcript_prefix(maps.certificate_digest(), reset_identity, &transcript, 5),
+        );
+    }
+
+    #[test]
+    fn live_cross_epoch_prefix_accepts_only_the_compiled_rank_two_relation() {
+        let (contract, maps) = selected();
+        let inputs = contract.verifier_inputs();
+        let messages = [
+            selected_adversarial_message(&inputs, 0),
+            selected_adversarial_message(&inputs, 1),
+        ];
+        let first = CompactChallengeField::from_u64(17);
+        let second = CompactChallengeField::from_u64(29);
+        let auxiliary = CompactChallengeField::from_u64(41);
+
+        verify_selected_compact_cross_epoch_masking_prefix(
+            contract.verifier_inputs(),
+            &maps,
+            [0x21; 32],
+            &[0x31],
+            &[0x41],
+            &[0x51],
+            &messages,
+            [first, second, first - second],
+            auxiliary,
+        )
+        .expect("the real cross-epoch disclosure belongs to the compiled conditional image");
+        assert_eq!(
+            verify_selected_compact_cross_epoch_masking_prefix(
+                contract.verifier_inputs(),
+                &maps,
+                [0x21; 32],
+                &[0x31],
+                &[0x41],
+                &[0x51],
+                &messages,
+                [first, second, first - second + CompactChallengeField::ONE],
+                auxiliary,
+            ),
+            Err(CompactMaskingEntropyError::InvalidCoefficientMap),
+        );
+        assert_eq!(
+            verify_selected_compact_cross_epoch_masking_prefix(
+                contract.verifier_inputs(),
+                &maps,
+                [0x21; 32],
+                &[0x31],
+                &[0x41],
+                &[0x51],
+                &messages[..1],
+                [first, second, first - second],
+                auxiliary,
+            ),
+            Err(CompactMaskingEntropyError::MissingTranscriptInput),
         );
     }
 

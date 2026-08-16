@@ -31,7 +31,11 @@ use crate::bgv::proof_suite::{
         CompactGenerationRandomnessCursorError, CompactGenerationRandomnessError,
     },
     compact_masking_coefficient_maps::{
-        CompactMaskingCoefficientMapError, derive_compact_masking_coefficient_map_certificate,
+        CompactMaskingCoefficientMapCertificate, CompactMaskingCoefficientMapError,
+        derive_compact_masking_coefficient_map_certificate,
+    },
+    compact_masking_entropy::{
+        CompactMaskingEntropyError, verify_selected_compact_cross_epoch_masking_prefix,
     },
     compact_masking_kmac::{CompactMaskingKmacError, derive_selected_compact_masking_kmac_bridge},
     compact_masking_public_covector::{
@@ -227,6 +231,7 @@ pub(crate) enum CompactPublicKeyMainEpochPreparationError {
     Cfw(CompactCfwError),
     CfwProverSetup(CompactCfwExternalProverSetupError),
     MaskingCoefficientMap(CompactMaskingCoefficientMapError),
+    MaskingEntropy(CompactMaskingEntropyError),
     MaskingKmac(CompactMaskingKmacError),
     MaskingPublicCovector(CompactFactorOnePublicCovectorError),
     Randomness(CompactGenerationRandomnessError),
@@ -263,6 +268,12 @@ impl From<CompactCfwExternalProverSetupError> for CompactPublicKeyMainEpochPrepa
 impl From<CompactMaskingCoefficientMapError> for CompactPublicKeyMainEpochPreparationError {
     fn from(error: CompactMaskingCoefficientMapError) -> Self {
         Self::MaskingCoefficientMap(error)
+    }
+}
+
+impl From<CompactMaskingEntropyError> for CompactPublicKeyMainEpochPreparationError {
+    fn from(error: CompactMaskingEntropyError) -> Self {
+        Self::MaskingEntropy(error)
     }
 }
 
@@ -436,6 +447,8 @@ pub(crate) struct PreparedCompactPublicKeyMainEpoch {
 }
 
 struct CompactPublicKeyPostLookupMaterial {
+    masking_coefficient_maps: CompactMaskingCoefficientMapCertificate,
+    cross_epoch_masking_prefix_verified: bool,
     cfw_geometry: CompactCfwGeometry,
     cfw_mask_material: CompactCfwMaskMaterial,
     cfw_auxiliary_target: CompactChallengeField,
@@ -448,6 +461,7 @@ struct CompactPublicKeyPostLookupMaterial {
     cross_epoch_mask_encoding_randomness: Vec<Vec<CompactChallengeField>>,
     cross_epoch_mask_oracle: CompactWhirEncodedMaskGroup,
     response_leaf_count: u64,
+    cross_epoch_masking_transcript_cursor: Option<Box<[u8]>>,
     cross_epoch_point: Option<Vec<CompactChallengeField>>,
     cross_epoch_evaluation_state: Option<CompactCfwPrefixEvaluationState>,
     cross_epoch_claims: Option<CompactCfwMaskedCrossEpochClaims>,
@@ -1215,8 +1229,11 @@ impl PreparedCompactPublicKeyMainEpoch {
         if self.post_lookup_material.is_some() {
             return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
         }
-        validate_production_masking_inputs(&self.family_material)?;
-        self.post_lookup_material = Some(prepare_post_lookup_material(&mut self.family_material)?);
+        let masking_coefficient_maps = validate_production_masking_inputs(&self.family_material)?;
+        self.post_lookup_material = Some(prepare_post_lookup_material(
+            &mut self.family_material,
+            masking_coefficient_maps,
+        )?);
         Ok(())
     }
 
@@ -1320,6 +1337,19 @@ impl PreparedCompactPublicKeyMainEpoch {
                     }
                     CompactPublicKeyCrossEpochResponseLeafPoll::LeafReady(leaf) => leaf,
                 };
+                if leaf_ordinal == 0 {
+                    post_lookup_material
+                        .verify_cross_epoch_masking_prefix(
+                            family_material,
+                            response_generation_state.verifier_messages(),
+                            response_generation_state.canonical_proof_prefix_bytes(),
+                        )
+                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+                } else if !post_lookup_material.cross_epoch_masking_prefix_verified {
+                    return Err(CompactPublicKeyMainEpochPollError::Preparation(
+                        CompactPublicKeyMainEpochPreparationError::WrongPhase,
+                    ));
+                }
                 let leaf_salt = family_material
                     .metadata
                     .pre_challenge
@@ -1333,6 +1363,9 @@ impl PreparedCompactPublicKeyMainEpoch {
                 response_generation_state
                     .supply_next_response_leaf(&leaf, &leaf_salt)
                     .map_err(CompactPublicKeyMainEpochPollError::ResponseGeneration)?;
+                if leaf_ordinal == 0 {
+                    post_lookup_material.cross_epoch_masking_prefix_verified = true;
+                }
                 Ok(CompactPublicKeyMainEpochPoll::ResponseLeafSupplied { leaf_ordinal })
             }
             CompactResponseGenerationPoll::OpenedLeafRequired {
@@ -1462,8 +1495,18 @@ impl PreparedCompactPublicKeyMainEpoch {
                         authority.message(),
                     )
                     .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+                    let canonical_transcript_cursor_bytes = response_generation_state
+                        .checkpoint_boundary()
+                        .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+                            CompactPublicKeyMainEpochPreparationError::WrongPhase,
+                        ))?
+                        .canonical_transcript_cursor_bytes();
                     post_lookup_material
-                        .prepare_cross_epoch_evaluation(family_material, cross_epoch_point)
+                        .prepare_cross_epoch_evaluation(
+                            family_material,
+                            cross_epoch_point,
+                            canonical_transcript_cursor_bytes,
+                        )
                         .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
                     Ok(CompactPublicKeyMainEpochPoll::PostLookupCheckpointReady)
                 }
@@ -1505,6 +1548,13 @@ impl PreparedCompactPublicKeyMainEpoch {
                 .as_ref()?
                 .disclosed_values(),
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cross_epoch_masking_prefix_verified(&self) -> bool {
+        self.post_lookup_material
+            .as_ref()
+            .is_some_and(|material| material.cross_epoch_masking_prefix_verified)
     }
 
     #[cfg(test)]
@@ -1580,7 +1630,7 @@ impl PreparedCompactPublicKeyMainEpoch {
 
 fn validate_production_masking_inputs(
     family_material: &CompactPublicKeyFamilyMaterial,
-) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
+) -> Result<CompactMaskingCoefficientMapCertificate, CompactPublicKeyMainEpochPreparationError> {
     let contract = selected_compact_public_key_proof_contract()?;
     let verifier_inputs = contract.verifier_inputs();
     let contract_source_hash = verifier_inputs.canonical_source_hash()?.into_bytes();
@@ -1592,9 +1642,8 @@ fn validate_production_masking_inputs(
     if derive_selected_compact_masking_kmac_bridge()?.into_bytes() != contract_source_hash {
         return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
     }
-    drop(derive_compact_masking_coefficient_map_certificate(
-        contract.verifier_inputs(),
-    )?);
+    let coefficient_maps =
+        derive_compact_masking_coefficient_map_certificate(contract.verifier_inputs())?;
     let _public_covector_authority =
         CompactFactorOnePublicCovectorAuthority::from_canonical_public_input(
             contract.verifier_inputs(),
@@ -1602,16 +1651,51 @@ fn validate_production_masking_inputs(
             family_material.canonical_public_input_bytes(),
             family_material.decoded_public_input(),
         )?;
-    Ok(())
+    Ok(coefficient_maps)
 }
 
 impl CompactPublicKeyPostLookupMaterial {
+    fn verify_cross_epoch_masking_prefix(
+        &self,
+        family_material: &CompactPublicKeyFamilyMaterial,
+        completed_messages: &[DecodedFixedUniformVerifierMessage],
+        canonical_exposed_proof_prefix: &[u8],
+    ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
+        if self.cross_epoch_masking_prefix_verified {
+            return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+        }
+        let cross_epoch_disclosures = self
+            .cross_epoch_claims
+            .as_ref()
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
+            .disclosed_values();
+        let contract = selected_compact_public_key_proof_contract()?;
+        verify_selected_compact_cross_epoch_masking_prefix(
+            contract.verifier_inputs(),
+            &self.masking_coefficient_maps,
+            family_material
+                .pre_challenge_material()
+                .proof_attempt_identifier(),
+            family_material.canonical_public_input_bytes(),
+            canonical_exposed_proof_prefix,
+            self.cross_epoch_masking_transcript_cursor
+                .as_deref()
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
+            completed_messages,
+            cross_epoch_disclosures,
+            self.cfw_auxiliary_target,
+        )?;
+        Ok(())
+    }
+
     fn prepare_cross_epoch_evaluation(
         &mut self,
         family_material: &CompactPublicKeyFamilyMaterial,
         point: Vec<CompactChallengeField>,
+        canonical_transcript_cursor_bytes: &[u8],
     ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
         if self.cross_epoch_point.is_some()
+            || self.cross_epoch_masking_transcript_cursor.is_some()
             || self.cross_epoch_evaluation_state.is_some()
             || self.cross_epoch_claims.is_some()
             || self.cfw_external_prover.is_some()
@@ -1632,8 +1716,18 @@ impl CompactPublicKeyPostLookupMaterial {
         {
             return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
         }
+        if canonical_transcript_cursor_bytes.is_empty() {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        }
+        let mut retained_transcript_cursor = Vec::new();
+        retained_transcript_cursor
+            .try_reserve_exact(canonical_transcript_cursor_bytes.len())
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
+        retained_transcript_cursor.extend_from_slice(canonical_transcript_cursor_bytes);
         let evaluation_state =
             CompactCfwPrefixEvaluationState::new(&point, copied_source_element_count)?;
+        self.cross_epoch_masking_transcript_cursor =
+            Some(retained_transcript_cursor.into_boxed_slice());
         self.cross_epoch_point = Some(point);
         self.cross_epoch_evaluation_state = Some(evaluation_state);
         Ok(())
@@ -1730,7 +1824,8 @@ impl CompactPublicKeyPostLookupMaterial {
         family_material: &CompactPublicKeyFamilyMaterial,
         message: &DecodedFixedUniformVerifierMessage,
     ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
-        if self.cfw_external_prover.is_some()
+        if !self.cross_epoch_masking_prefix_verified
+            || self.cfw_external_prover.is_some()
             || self.cross_epoch_claims.is_none()
             || self
                 .cross_epoch_evaluation_state
@@ -1993,6 +2088,7 @@ fn main_source_opening_rows_from_query_schedule(
 
 fn prepare_post_lookup_material(
     family_material: &mut CompactPublicKeyFamilyMaterial,
+    masking_coefficient_maps: CompactMaskingCoefficientMapCertificate,
 ) -> Result<CompactPublicKeyPostLookupMaterial, CompactPublicKeyMainEpochPreparationError> {
     let contract = selected_compact_public_key_proof_contract()?;
     let verifier_inputs = contract.verifier_inputs();
@@ -2112,6 +2208,8 @@ fn prepare_post_lookup_material(
         verifier_inputs.cfw_configuration.auxiliary_target_count(),
     )?;
     let material = CompactPublicKeyPostLookupMaterial {
+        masking_coefficient_maps,
+        cross_epoch_masking_prefix_verified: false,
         cfw_geometry,
         cfw_mask_material,
         cfw_auxiliary_target,
@@ -2124,6 +2222,7 @@ fn prepare_post_lookup_material(
         cross_epoch_mask_encoding_randomness,
         cross_epoch_mask_oracle,
         response_leaf_count: response_geometry.merkle_leaf_count(),
+        cross_epoch_masking_transcript_cursor: None,
         cross_epoch_point: None,
         cross_epoch_evaluation_state: None,
         cross_epoch_claims: None,
@@ -2352,6 +2451,8 @@ fn validate_retained_post_lookup_material(
             .iter()
             .any(|values| values.len() != cross_epoch_mask_shape.shape.randomness_len)
         || material.cross_epoch_response_leaf_count != 4
+        || material.cross_epoch_masking_prefix_verified
+        || material.cross_epoch_masking_transcript_cursor.is_some()
         || material.cross_epoch_point.is_some()
         || material.cross_epoch_evaluation_state.is_some()
         || material.cross_epoch_claims.is_some()

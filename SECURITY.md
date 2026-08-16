@@ -120,7 +120,13 @@ single-proof KMAC coordinate and call census from that contract. Production
 uses separate KMAC256 domains for WHIR field candidates, private leaf salts,
 and Fiat-Shamir round salts, bounds every Goldilocks rejection sample to 64
 candidates, and refuses exhaustion or an unaccounted random-access call before
-accepting a sampled batch.
+accepting a sampled batch. Before committing the third response, release
+generation binds the masking attempt to its exact canonical public input and
+emitted proof prefix plus the authenticated transcript cursor after the first
+two responses, replays those verifier moves, and verifies the real three-
+coordinate cross-epoch disclosure and CFW auxiliary scalar against the
+independently compiled rank-two and rank-one conditional images. The CFW prover
+cannot initialize unless that check passed.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -145,9 +151,12 @@ to verified public input and the exact semantic prefix, and guarded coverage
 reaches the terminal 82-move lifecycle, including retry, restore, and nonempty-
 suffix rewind.
 
-The release input gate does not close masking: live role-18 prefix consumption,
-sequential conditional-image enforcement, canonical emitted-byte binding, and
-the exact construction-level statistical-HVZK statement remain absent.
+The release path does not close masking: later sequential conditional images,
+both live role-18 prefix consumptions, terminal simulator binding to the
+complete emitted proof, and the exact construction-level statistical-HVZK
+statement remain absent. The initial live gate binds only the canonical prefix
+through the first two completed responses; it is not a complete emitted-byte
+correspondence argument.
 The live bridge accounts for three symbolic quantum-PRF replacements: action-
 root key expansion, proof-coin and coordinate-stream derivation, and compact-
 generation expansion keyed by the two seeds. It also retains exact action-root,

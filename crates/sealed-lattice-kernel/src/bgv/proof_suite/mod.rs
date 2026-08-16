@@ -49,7 +49,6 @@ mod compact_fixed_tape_uniformity;
 mod compact_generation_checkpoint;
 mod compact_generation_randomness;
 mod compact_masking_coefficient_maps;
-#[cfg(test)]
 mod compact_masking_entropy;
 mod compact_masking_kmac;
 #[cfg_attr(

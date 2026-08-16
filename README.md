@@ -138,9 +138,16 @@ and target release remain incomplete or internal.
   respectively, expands them under separate KMAC256 customizations, bounds
   every Goldilocks rejection sample to 64 candidates, and refuses an exhausted
   sampler or an unaccounted random-access interface before accepting a sampled
-  batch. The fixed KMAC256/SHAKE256 joint assumption remains external, and the
-  live role-18 prefix, carried-covector, conditional-entropy, and simulator
-  consumers are not connected yet.
+  batch. Before the third response is committed, release generation now replays
+  the first two verifier moves, binds the masking attempt to the canonical
+  public input, emitted proof prefix, and authenticated transcript cursor after
+  those responses, and checks the real three-coordinate cross-epoch disclosure
+  against the compiler-derived rank-two image. It also
+  checks the CFW auxiliary scalar against its independently derived rank-one
+  image, and CFW initialization refuses unless this gate passed. The fixed
+  KMAC256/SHAKE256 joint assumption remains external. Later sequential images,
+  both live role-18 carried covectors, and the terminal simulator are not
+  connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
   schedule. Its one-shot carried-covector lifecycle is bound to verified public
   input and the exact transcript prefix, and guarded coverage reaches the
@@ -161,11 +168,12 @@ ceremony or supported-phone qualification.
   `VerificationResult`, or complete compact generation and verification ABI
   exists. The release transport ABI checks canonical structure, transcript
   chronology, query derivation, and Merkle openings only.
-- The compact successor still requires the live role-18 masking authority and
-  conditional-image checks, a construction-level statistical-HVZK argument
-  bound to emitted bytes, composition of the live KMAC bridge with its explicit
-  quantum-PRF and joint fixed-Keccak assumptions, and the applicable SHAKE256
-  fixed-tape and QROM theorem chain.
+- The compact successor still requires every sequential conditional-image check
+  after the initial cross-epoch and CFW-auxiliary gate, both live role-18
+  masking authorities, a construction-level statistical-HVZK argument bound to
+  the complete emitted proof, composition of the live KMAC bridge with its
+  explicit quantum-PRF and joint fixed-Keccak assumptions, and the applicable
+  SHAKE256 fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
 - Browser custody does not yet provide complete proactive authenticated

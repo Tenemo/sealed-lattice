@@ -4767,6 +4767,10 @@ mod tests {
         let [masked_pre_challenge, masked_main, mask_difference] = prepared_main_epoch
             .cross_epoch_disclosed_values()
             .expect("the exact masked cross-epoch response is retained");
+        assert!(
+            prepared_main_epoch.cross_epoch_masking_prefix_verified(),
+            "the real response values must pass the compiler-derived conditional-image gate"
+        );
         assert_eq!(
             masked_pre_challenge - masked_main - mask_difference,
             CompactChallengeField::ZERO
