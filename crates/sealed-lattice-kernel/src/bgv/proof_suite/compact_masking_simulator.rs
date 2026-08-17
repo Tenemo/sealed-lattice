@@ -530,8 +530,7 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
 
     pub(crate) fn begin_role18_covector_derivation(
         &self,
-    ) -> Result<CompactFactorOnePublicCovectorDerivation<'_, 'contract>, CompactMaskingSimulatorError>
-    {
+    ) -> Result<CompactFactorOnePublicCovectorDerivation, CompactMaskingSimulatorError> {
         let prefix = self.mint_semantic_prefix()?;
         self.public_covector_authority
             .as_ref()
@@ -1895,9 +1894,9 @@ mod tests {
                 .expect("bounded role-18 semantic work advances")
             {
                 CompactFactorOnePublicCovectorPoll::WorkCompleted {
-                    completed_element_count,
+                    completed_work_unit_count,
                 } => {
-                    assert!(completed_element_count > 0);
+                    assert!(completed_work_unit_count > 0);
                     work_boundary_count += 1;
                 }
                 CompactFactorOnePublicCovectorPoll::Complete(authorization) => {

@@ -42,6 +42,7 @@ const WHIR_BATCH_COUNT: usize = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CompactFactorOnePublicCovectorError {
+    AllocationLimitExceeded,
     ArithmeticOverflow,
     InvalidContract,
     InvalidPublicInput,
@@ -157,14 +158,6 @@ impl CompactFactorOnePublicInputView<'_> {
         self.decoded.field_element_count()
     }
 
-    fn field_element(
-        self,
-        element_ordinal: usize,
-    ) -> Result<ProofBaseFieldElement, CompactProofWireError> {
-        self.decoded
-            .field_element(self.canonical_bytes, element_ordinal)
-    }
-
     const fn binding(self) -> [u8; 64] {
         self.binding
     }
@@ -247,13 +240,10 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
         self.public_input.binding()
     }
 
-    pub(crate) fn begin_prefix_derivation<'authority>(
-        &'authority self,
+    pub(crate) fn begin_prefix_derivation(
+        &self,
         prefix: CompactMaskingSemanticPrefix,
-    ) -> Result<
-        CompactFactorOnePublicCovectorDerivation<'authority, 'transport>,
-        CompactFactorOnePublicCovectorError,
-    > {
+    ) -> Result<CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorError> {
         if prefix.contract_source_hash() != self.contract_source_hash {
             return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
         }
@@ -268,10 +258,13 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
         }
         let parsed =
             ParsedVerifierPrefix::parse(&self.verifier_inputs, prefix.completed_messages(), epoch)?;
+        let epoch_contract = epoch_contract(&self.verifier_inputs, epoch)?.clone();
+        let fold_contracts = *epoch_folds(&self.verifier_inputs, epoch)?;
         if epoch == 1 {
-            let initial = pre_challenge_initial_covectors(&self.verifier_inputs, &parsed)?;
+            let initial = pre_challenge_initial_covectors(&epoch_contract, &parsed)?;
             let output = reduce_whir_epoch(
-                &self.verifier_inputs,
+                &epoch_contract,
+                &fold_contracts,
                 parsed,
                 initial,
                 0,
@@ -326,14 +319,13 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
                 first_fold_challenges,
             )?;
         let (continuation, destination) = combination.into_parts();
-        let transpose_source = CompactFactorOnePublicTransposeSource {
-            public_input: self.public_input,
-            padded_public_input_element_count: self
-                .verifier_inputs
+        let transpose_source = CompactFactorOnePublicTransposeSource::new(
+            self.public_input,
+            self.verifier_inputs
                 .relation
                 .padded_public_input_element_count(),
-            lookup_challenge: parsed.lookup_challenge,
-        };
+            parsed.lookup_challenge,
+        )?;
         let accumulator =
             CompactStructuredWitnessCovectorAccumulator::from_projected_public_relation(
                 transpose_source,
@@ -346,11 +338,13 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
         Ok(CompactFactorOnePublicCovectorDerivation {
             state: CompactFactorOnePublicCovectorDerivationState::MainTranspose(Box::new(
                 CompactFactorOneMainTransposeState {
-                    authority: self,
                     prefix: Some(prefix),
                     parsed: Some(parsed),
                     accumulator,
                     continuation: Some(continuation),
+                    epoch_contract,
+                    fold_contracts,
+                    public_input_binding: self.public_input.binding(),
                 },
             )),
         })
@@ -358,36 +352,57 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
 }
 
 pub(crate) enum CompactFactorOnePublicCovectorPoll {
-    WorkCompleted { completed_element_count: u64 },
+    WorkCompleted { completed_work_unit_count: u64 },
     Complete(Box<CompactFactorOneCarriedCovector>),
 }
 
-pub(crate) struct CompactFactorOnePublicCovectorDerivation<'authority, 'transport> {
-    state: CompactFactorOnePublicCovectorDerivationState<'authority, 'transport>,
+pub(crate) struct CompactFactorOnePublicCovectorDerivation {
+    state: CompactFactorOnePublicCovectorDerivationState,
 }
 
-enum CompactFactorOnePublicCovectorDerivationState<'authority, 'transport> {
+enum CompactFactorOnePublicCovectorDerivationState {
     Complete(Option<Box<CompactFactorOneCarriedCovector>>),
-    MainTranspose(Box<CompactFactorOneMainTransposeState<'authority, 'transport>>),
+    MainTranspose(Box<CompactFactorOneMainTransposeState>),
 }
 
-struct CompactFactorOneMainTransposeState<'authority, 'transport> {
-    authority: &'authority CompactFactorOnePublicCovectorAuthority<'transport>,
+struct CompactFactorOneMainTransposeState {
     prefix: Option<CompactMaskingSemanticPrefix>,
     parsed: Option<ParsedVerifierPrefix>,
-    accumulator: CompactStructuredWitnessCovectorAccumulator<
-        CompactFactorOnePublicTransposeSource<'transport>,
-    >,
+    accumulator: CompactStructuredWitnessCovectorAccumulator<CompactFactorOnePublicTransposeSource>,
     continuation: Option<CompactCfwPublicMainCovectorContinuation>,
+    epoch_contract: CompactWhirEpochContract,
+    fold_contracts: [CompactWhirFoldContract; WHIR_BATCH_COUNT],
+    public_input_binding: [u8; 64],
 }
 
-struct CompactFactorOnePublicTransposeSource<'transport> {
-    public_input: CompactFactorOnePublicInputView<'transport>,
+struct CompactFactorOnePublicTransposeSource {
+    canonical_public_input_bytes: Box<[u8]>,
+    decoded_public_input: DecodedCompactPublicInput,
     padded_public_input_element_count: u64,
     lookup_challenge: ProofChallengeExtensionElement,
 }
 
-impl StructuredTransposeValueSource for CompactFactorOnePublicTransposeSource<'_> {
+impl CompactFactorOnePublicTransposeSource {
+    fn new(
+        public_input: CompactFactorOnePublicInputView<'_>,
+        padded_public_input_element_count: u64,
+        lookup_challenge: ProofChallengeExtensionElement,
+    ) -> Result<Self, CompactFactorOnePublicCovectorError> {
+        let mut canonical_public_input_bytes = Vec::new();
+        canonical_public_input_bytes
+            .try_reserve_exact(public_input.canonical_bytes.len())
+            .map_err(|_| CompactFactorOnePublicCovectorError::AllocationLimitExceeded)?;
+        canonical_public_input_bytes.extend_from_slice(public_input.canonical_bytes);
+        Ok(Self {
+            canonical_public_input_bytes: canonical_public_input_bytes.into_boxed_slice(),
+            decoded_public_input: public_input.decoded.clone(),
+            padded_public_input_element_count,
+            lookup_challenge,
+        })
+    }
+}
+
+impl StructuredTransposeValueSource for CompactFactorOnePublicTransposeSource {
     fn lookup_challenge(&self) -> ProofChallengeExtensionElement {
         self.lookup_challenge
     }
@@ -404,17 +419,17 @@ impl StructuredTransposeValueSource for CompactFactorOnePublicTransposeSource<'_
         }
         let explicit_ordinal = usize::try_from(element_ordinal - 1)
             .map_err(|_| CommonProofProverError::CountOverflow)?;
-        if explicit_ordinal < self.public_input.field_element_count() {
+        if explicit_ordinal < self.decoded_public_input.field_element_count() {
             return self
-                .public_input
-                .field_element(explicit_ordinal)
+                .decoded_public_input
+                .field_element(&self.canonical_public_input_bytes, explicit_ordinal)
                 .map_err(|_| CommonProofProverError::CanonicalEncoding);
         }
         Ok(ProofBaseFieldElement::ZERO)
     }
 }
 
-impl CompactFactorOnePublicCovectorDerivation<'_, '_> {
+impl CompactFactorOnePublicCovectorDerivation {
     pub(crate) fn advance(
         &mut self,
         maximum_element_count: u64,
@@ -430,7 +445,7 @@ impl CompactFactorOnePublicCovectorDerivation<'_, '_> {
                         completed_work_unit_count,
                         ..
                     } => Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
-                        completed_element_count: completed_work_unit_count,
+                        completed_work_unit_count,
                     }),
                     CompactStructuredWitnessCovectorAccumulatorPoll::Complete(source_covector) => {
                         let public_main = state
@@ -448,12 +463,13 @@ impl CompactFactorOnePublicCovectorDerivation<'_, '_> {
                             .take()
                             .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
                         let output = reduce_whir_epoch(
-                            &state.authority.verifier_inputs,
+                            &state.epoch_contract,
+                            &state.fold_contracts,
                             parsed,
                             initial,
                             1,
                             prefix,
-                            state.authority.public_input.binding(),
+                            state.public_input_binding,
                         )?;
                         Ok(CompactFactorOnePublicCovectorPoll::Complete(Box::new(
                             output,
@@ -628,10 +644,9 @@ struct PublicCovectorState {
 }
 
 fn pre_challenge_initial_covectors(
-    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    epoch: &CompactWhirEpochContract,
     parsed: &ParsedVerifierPrefix,
 ) -> Result<PublicCovectorState, CompactFactorOnePublicCovectorError> {
-    let epoch = epoch_contract(inputs, 1)?;
     let source_length = 1_usize
         .checked_shl(epoch.polynomial_variable_count)
         .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
@@ -661,15 +676,21 @@ fn main_initial_covectors(public_main: CompactCfwPublicMainCovectors) -> PublicC
 }
 
 fn reduce_whir_epoch(
-    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    epoch: &CompactWhirEpochContract,
+    folds: &[CompactWhirFoldContract; WHIR_BATCH_COUNT],
     parsed: ParsedVerifierPrefix,
     mut state: PublicCovectorState,
     already_folded_batch_count: usize,
     prefix: CompactMaskingSemanticPrefix,
     public_input_binding: [u8; 64],
 ) -> Result<CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorError> {
-    let epoch = epoch_contract(inputs, parsed.epoch)?;
-    let folds = epoch_folds(inputs, parsed.epoch)?;
+    if epoch.epoch != parsed.epoch
+        || folds.iter().enumerate().any(|(batch_ordinal, fold)| {
+            fold.epoch != parsed.epoch || usize::from(fold.batch_ordinal) != batch_ordinal
+        })
+    {
+        return Err(CompactFactorOnePublicCovectorError::InvalidContract);
+    }
     if parsed.whir_batches.len() != WHIR_BATCH_COUNT {
         return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
     }

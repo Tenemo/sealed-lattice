@@ -25,7 +25,8 @@ use super::compact_masking_coefficient_maps::{
 };
 use super::compact_masking_prefix::{CompactMaskingAttemptIdentity, CompactMaskingSemanticPrefix};
 use super::compact_masking_public_covector::{
-    CompactFactorOnePublicCovectorAuthority, CompactFactorOnePublicCovectorPoll,
+    CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorAuthority,
+    CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorPoll,
 };
 use super::compact_proof_contract::{
     CompactPublicKeyVerifierInputs, CompactResponseComponentRoleContract,
@@ -109,9 +110,9 @@ pub(crate) struct CompactVerifiedBaseMaskingPrefix {
     completed_messages: Box<[DecodedFixedUniformVerifierMessage]>,
 }
 
-/// Public covectors independently replayed for the selected pre-challenge
-/// Construction 7.2 claim at its exact authenticated transcript prefix.
-pub(crate) struct CompactVerifiedPreChallengeBaseCovector {
+/// Public covectors independently replayed for a selected WHIR base claim at
+/// its exact authenticated transcript prefix.
+pub(crate) struct CompactVerifiedWhirBaseCovector {
     source: Vec<CompactChallengeField>,
     mask_groups: Vec<Vec<Vec<CompactChallengeField>>>,
 }
@@ -153,7 +154,7 @@ impl CompactMaskingQueryLeaf {
     }
 }
 
-impl CompactVerifiedPreChallengeBaseCovector {
+impl CompactVerifiedWhirBaseCovector {
     pub(crate) fn into_parts(
         self,
     ) -> (
@@ -1369,10 +1370,10 @@ pub(crate) fn verify_selected_compact_whir_source_query_masking(
     authority.verify_coefficient_image_output(source_query_step, &[], None, query_outputs)
 }
 
-/// Replays the selected pre-challenge relation covectors from canonical public
-/// input and the exact authenticated verifier prefix, then authorizes the one
-/// fresh base-case claim against the production conditional-entropy owner.
-#[allow(clippy::too_many_arguments)]
+/// Replays the selected first-epoch relation covectors from canonical public
+/// input and the exact authenticated verifier prefix, then authorizes its fresh
+/// base-case claim against the production conditional-entropy owner. The main
+/// epoch uses the bounded begin/finish API below.
 pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
     inputs: CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
@@ -1380,45 +1381,19 @@ pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
     public_covector_authority: &CompactFactorOnePublicCovectorAuthority<'_>,
     canonical_exposed_proof_prefix: &[u8],
     completed_messages: &[DecodedFixedUniformVerifierMessage],
-) -> Result<CompactVerifiedPreChallengeBaseCovector, CompactMaskingEntropyError> {
-    if canonical_exposed_proof_prefix.is_empty()
-        || completed_messages.is_empty()
-        || completed_messages.len() >= inputs.verifier_moves.len()
-    {
-        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
-    }
-    let next_move = inputs
-        .verifier_moves
-        .get(completed_messages.len())
-        .ok_or(CompactMaskingEntropyError::MissingTranscriptInput)?;
-    let [role] = next_move.role_coordinates.as_slice() else {
+) -> Result<CompactVerifiedWhirBaseCovector, CompactMaskingEntropyError> {
+    let [pre_challenge_epoch, _main_epoch] = inputs.whir_epochs else {
         return Err(CompactMaskingEntropyError::InvalidContract);
     };
-    if role.role_tag != 10
-        || role.epoch != 1
-        || role.batch_ordinal != 0
-        || role.round_ordinal != 0
-        || usize::try_from(next_move.ordinal).ok() != Some(completed_messages.len())
-        || public_covector_authority.contract_source_hash()
-            != inputs
-                .canonical_source_hash()
-                .map_err(|_| CompactMaskingEntropyError::InvalidContract)?
-                .into_bytes()
-    {
-        return Err(CompactMaskingEntropyError::InvalidContract);
-    }
-    let prefix = CompactMaskingSemanticPrefix::from_validated_transcript(
+    let epoch = pre_challenge_epoch.epoch;
+    let mut derivation = begin_selected_compact_whir_base_covector_derivation(
+        &inputs,
         identity,
-        next_move.ordinal,
-        role.epoch,
-        public_covector_authority.contract_source_hash(),
-        canonical_exposed_proof_prefix.to_vec().into_boxed_slice(),
-        completed_messages.to_vec().into_boxed_slice(),
-    )
-    .map_err(|_| CompactMaskingEntropyError::MissingTranscriptInput)?;
-    let mut derivation = public_covector_authority
-        .begin_prefix_derivation(prefix)
-        .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientVector)?;
+        public_covector_authority,
+        canonical_exposed_proof_prefix,
+        completed_messages,
+        epoch,
+    )?;
     let authorization = match derivation
         .advance(1)
         .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientVector)?
@@ -1428,32 +1403,91 @@ pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
             return Err(CompactMaskingEntropyError::InvalidCoefficientVector);
         }
     };
-    if authorization.epoch() != Some(role.epoch) {
+    finish_selected_compact_whir_base_covector_derivation(
+        inputs,
+        coefficient_maps,
+        identity,
+        public_covector_authority,
+        canonical_exposed_proof_prefix,
+        completed_messages,
+        None,
+        epoch,
+        authorization,
+    )
+}
+
+pub(crate) fn begin_selected_compact_whir_base_covector_derivation(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    identity: CompactMaskingAttemptIdentity,
+    public_covector_authority: &CompactFactorOnePublicCovectorAuthority<'_>,
+    canonical_exposed_proof_prefix: &[u8],
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+) -> Result<CompactFactorOnePublicCovectorDerivation, CompactMaskingEntropyError> {
+    let prefix = selected_compact_whir_base_semantic_prefix(
+        inputs,
+        identity,
+        public_covector_authority,
+        canonical_exposed_proof_prefix,
+        completed_messages,
+        epoch,
+    )?;
+    public_covector_authority
+        .begin_prefix_derivation(prefix)
+        .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientVector)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn finish_selected_compact_whir_base_covector_derivation(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    public_covector_authority: &CompactFactorOnePublicCovectorAuthority<'_>,
+    canonical_exposed_proof_prefix: &[u8],
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_previous_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
+    epoch: u8,
+    mut authorization: Box<CompactFactorOneCarriedCovector>,
+) -> Result<CompactVerifiedWhirBaseCovector, CompactMaskingEntropyError> {
+    let prefix = selected_compact_whir_base_semantic_prefix(
+        &inputs,
+        identity,
+        public_covector_authority,
+        canonical_exposed_proof_prefix,
+        completed_messages,
+        epoch,
+    )?;
+    if authorization.epoch() != Some(epoch)
+        || !authorization.authorizes(&prefix, public_covector_authority.public_input_binding())
+    {
         return Err(CompactMaskingEntropyError::InvalidCoefficientVector);
     }
     let coefficients = authorization
         .coefficients()
         .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?
         .to_vec();
+    authorization
+        .consume(&prefix, public_covector_authority.public_input_binding())
+        .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientVector)?;
     let claim = CompactBaseFreshClaimCoefficients {
-        epoch: role.epoch,
+        epoch,
         coefficients: coefficients.clone(),
     };
-    let epoch = inputs
+    let epoch_contract = inputs
         .whir_epochs
         .iter()
-        .find(|epoch| epoch.epoch == role.epoch)
+        .find(|epoch_contract| epoch_contract.epoch == epoch)
         .ok_or(CompactMaskingEntropyError::InvalidContract)?;
-    let mask_contracts = epoch
+    let mask_contracts = epoch_contract
         .external_mask_groups
         .iter()
-        .chain(&epoch.internal_mask_groups)
+        .chain(&epoch_contract.internal_mask_groups)
         .copied()
         .collect::<Vec<_>>();
     let final_fold = inputs
         .whir_folds
         .iter()
-        .find(|fold| fold.epoch == role.epoch && fold.batch_ordinal == 3)
+        .find(|fold| fold.epoch == epoch && fold.batch_ordinal == 3)
         .ok_or(CompactMaskingEntropyError::InvalidContract)?;
     let source_length = usize::try_from(final_fold.message_length)
         .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
@@ -1462,7 +1496,7 @@ pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
         coefficient_maps,
         identity,
         completed_messages,
-        None,
+        verified_previous_base_prefix,
     )?;
     let steps = masking_authority
         .authorize_next_response(Some(&claim))?
@@ -1470,7 +1504,7 @@ pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
     let [claim_step] = steps.as_slice() else {
         return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
     };
-    if claim_step.kind() != (CompactMaskingDisclosureKind::BaseFreshClaim { epoch: role.epoch })
+    if claim_step.kind() != (CompactMaskingDisclosureKind::BaseFreshClaim { epoch })
         || claim_step.output_coordinate_count() != 1
         || claim_step.conditional_rank() != 1
         || claim_step.image != CompactMaskingDisclosureImage::FullCoordinateSpace
@@ -1510,21 +1544,68 @@ pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
     if coefficient_offset != coefficients.len() {
         return Err(CompactMaskingEntropyError::InvalidCoefficientVector);
     }
-    Ok(CompactVerifiedPreChallengeBaseCovector {
+    Ok(CompactVerifiedWhirBaseCovector {
         source,
         mask_groups,
     })
+}
+
+fn selected_compact_whir_base_semantic_prefix(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    identity: CompactMaskingAttemptIdentity,
+    public_covector_authority: &CompactFactorOnePublicCovectorAuthority<'_>,
+    canonical_exposed_proof_prefix: &[u8],
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+) -> Result<CompactMaskingSemanticPrefix, CompactMaskingEntropyError> {
+    if canonical_exposed_proof_prefix.is_empty()
+        || completed_messages.is_empty()
+        || completed_messages.len() >= inputs.verifier_moves.len()
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let next_move = inputs
+        .verifier_moves
+        .get(completed_messages.len())
+        .ok_or(CompactMaskingEntropyError::MissingTranscriptInput)?;
+    let [role] = next_move.role_coordinates.as_slice() else {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    };
+    if role.role_tag != 10
+        || role.epoch != epoch
+        || role.batch_ordinal != 0
+        || role.round_ordinal != 0
+        || usize::try_from(next_move.ordinal).ok() != Some(completed_messages.len())
+        || public_covector_authority.contract_source_hash()
+            != inputs
+                .canonical_source_hash()
+                .map_err(|_| CompactMaskingEntropyError::InvalidContract)?
+                .into_bytes()
+    {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    }
+    let prefix = CompactMaskingSemanticPrefix::from_validated_transcript(
+        identity,
+        next_move.ordinal,
+        role.epoch,
+        public_covector_authority.contract_source_hash(),
+        canonical_exposed_proof_prefix.to_vec().into_boxed_slice(),
+        completed_messages.to_vec().into_boxed_slice(),
+    )
+    .map_err(|_| CompactMaskingEntropyError::MissingTranscriptInput)?;
+    Ok(prefix)
 }
 
 /// Checks the live Construction 7.2 reveal response at the exact role-10
 /// transcript prefix. The entropy authority owns the one lost claim
 /// coordinate; the prover state separately checks that the emitted affine
 /// reveal satisfies that same claim equation.
-pub(crate) fn verify_selected_compact_pre_challenge_base_reveal_masking(
+pub(crate) fn verify_selected_compact_whir_base_reveal_masking(
     inputs: CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_previous_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
     epoch: u8,
     claim_coefficients: &[CompactChallengeField],
 ) -> Result<CompactVerifiedBaseRevealMasking, CompactMaskingEntropyError> {
@@ -1534,6 +1615,7 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_reveal_masking(
             coefficient_maps,
             identity,
             completed_messages,
+            verified_previous_base_prefix,
             epoch,
             claim_coefficients,
         )?;
@@ -1562,11 +1644,12 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_reveal_masking(
 /// their response components and query positions from the decoded contract
 /// and authenticated verifier messages before checking each conditional image.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
+pub(crate) fn verify_selected_compact_whir_base_final_query_masking(
     inputs: CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_previous_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
     epoch: u8,
     verified_reveal: &CompactVerifiedBaseRevealMasking,
     fresh_source_mirror_coefficients: &[CompactChallengeField],
@@ -1585,6 +1668,7 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
             coefficient_maps,
             identity,
             completed_messages,
+            verified_previous_base_prefix,
             epoch,
             &verified_reveal.claim.coefficients,
         )?;
@@ -1627,16 +1711,67 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
     for step in &final_query_steps {
         let positions =
             query_positions_for_disclosure(&authority.inputs, &authority.transcript, step.kind())?;
-        if !positions.preceding.is_empty() {
-            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
-        }
-        let candidate_output = query_leaf_values_for_step(
-            &authority.inputs,
-            step.kind(),
-            positions.current,
-            &sorted_query_leaves,
-            &mut consumed_query_leaves,
-        )?;
+        let (preceding_output, candidate_output) = if positions.preceding.is_empty() {
+            (
+                Vec::new(),
+                query_leaf_values_for_step(
+                    &authority.inputs,
+                    step.kind(),
+                    positions.current,
+                    &sorted_query_leaves,
+                    &mut consumed_query_leaves,
+                )?,
+            )
+        } else {
+            if !matches!(
+                step.kind(),
+                CompactMaskingDisclosureKind::CarriedMaskQueries {
+                    epoch: 2,
+                    contract_role_tag: 1,
+                    ..
+                }
+            ) {
+                return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+            }
+            let mut temporary_consumption = vec![false; sorted_query_leaves.len()];
+            let preceding_output = query_leaf_values_for_step(
+                &authority.inputs,
+                step.kind(),
+                positions.preceding,
+                &sorted_query_leaves,
+                &mut temporary_consumption,
+            )?;
+            temporary_consumption.fill(false);
+            let candidate_output = query_leaf_values_for_step(
+                &authority.inputs,
+                step.kind(),
+                positions.current,
+                &sorted_query_leaves,
+                &mut temporary_consumption,
+            )?;
+            let mut union_positions = Vec::new();
+            union_positions
+                .try_reserve_exact(
+                    positions
+                        .preceding
+                        .len()
+                        .checked_add(positions.current.len())
+                        .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?,
+                )
+                .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+            union_positions.extend_from_slice(positions.preceding);
+            union_positions.extend_from_slice(positions.current);
+            union_positions.sort_unstable();
+            union_positions.dedup();
+            query_leaf_values_for_step(
+                &authority.inputs,
+                step.kind(),
+                &union_positions,
+                &sorted_query_leaves,
+                &mut consumed_query_leaves,
+            )?;
+            (preceding_output, candidate_output)
+        };
         match step.kind() {
             CompactMaskingDisclosureKind::SourceQueries {
                 epoch: step_epoch,
@@ -1645,7 +1780,12 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
             | CompactMaskingDisclosureKind::CarriedMaskQueries {
                 epoch: step_epoch, ..
             } if step_epoch == epoch => {
-                authority.verify_coefficient_image_output(step, &[], None, &candidate_output)?;
+                authority.verify_coefficient_image_output(
+                    step,
+                    &preceding_output,
+                    None,
+                    &candidate_output,
+                )?;
             }
             CompactMaskingDisclosureKind::FreshSourceQueries { epoch: step_epoch }
                 if step_epoch == epoch =>
@@ -1690,6 +1830,7 @@ fn replay_selected_compact_masking_prefix_with_base_claim<'contract>(
     coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_previous_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
     epoch: u8,
     claim_coefficients: &[CompactChallengeField],
 ) -> Result<
@@ -1700,7 +1841,12 @@ fn replay_selected_compact_masking_prefix_with_base_claim<'contract>(
     ),
     CompactMaskingEntropyError,
 > {
-    if completed_messages.is_empty() || completed_messages.len() >= inputs.verifier_moves.len() {
+    if completed_messages.is_empty() || completed_messages.len() > inputs.verifier_moves.len() {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    if verified_previous_base_prefix
+        .is_some_and(|prefix| !prefix.authorizes_replay(identity, completed_messages))
+    {
         return Err(CompactMaskingEntropyError::MissingTranscriptInput);
     }
     let claim = CompactBaseFreshClaimCoefficients {
@@ -1711,8 +1857,16 @@ fn replay_selected_compact_masking_prefix_with_base_claim<'contract>(
     let mut last_response_steps = Vec::new();
     let mut last_message_steps = Vec::new();
     for (move_index, message) in completed_messages.iter().enumerate() {
-        let response_steps = if authority.next_base_claim_requirement()?.is_some() {
-            authority.authorize_next_response(Some(&claim))?
+        let response_steps = if let Some(requirement) = authority.next_base_claim_requirement()? {
+            let required_claim = if requirement.epoch == claim.epoch {
+                &claim
+            } else {
+                verified_previous_base_prefix
+                    .map(|prefix| &prefix.claim)
+                    .filter(|previous_claim| previous_claim.epoch == requirement.epoch)
+                    .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?
+            };
+            authority.authorize_next_response(Some(required_claim))?
         } else {
             authority.authorize_next_response(None)?
         };
@@ -5387,11 +5541,12 @@ mod tests {
             })
             .expect("first-epoch base-combination move")
             .ordinal;
-        let verified_reveal = verify_selected_compact_pre_challenge_base_reveal_masking(
+        let verified_reveal = verify_selected_compact_whir_base_reveal_masking(
             contract.verifier_inputs(),
             &maps,
             identity,
             &messages[..=usize::try_from(base_combination_move_ordinal).unwrap()],
+            None,
             pre_challenge_epoch.epoch,
             &claim_coefficients,
         )
@@ -5402,6 +5557,7 @@ mod tests {
                 &maps,
                 identity,
                 &messages,
+                None,
                 pre_challenge_epoch.epoch,
                 &claim_coefficients,
             )
@@ -5460,11 +5616,12 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let verify_query_leaves = |query_leaves: &[CompactMaskingQueryLeaf]| {
-            verify_selected_compact_pre_challenge_base_final_query_masking(
+            verify_selected_compact_whir_base_final_query_masking(
                 contract.verifier_inputs(),
                 &maps,
                 identity,
                 &messages,
+                None,
                 pre_challenge_epoch.epoch,
                 &verified_reveal,
                 &fresh_source_mirror_coefficients,
@@ -5558,6 +5715,138 @@ mod tests {
             main_auxiliary_target,
         )
         .expect("the production gate accepts main WHIR only after the verified base prefix");
+
+        let main_final_query_move_ordinal = inputs
+            .verifier_moves
+            .iter()
+            .find(|verifier_move| {
+                verifier_move
+                    .role_coordinates
+                    .iter()
+                    .any(|role| role.role_tag == 11 && role.epoch == main_epoch.epoch)
+            })
+            .expect("main-epoch final-query move")
+            .ordinal;
+        let main_messages = (0..=usize::try_from(main_final_query_move_ordinal).unwrap())
+            .map(|move_index| selected_adversarial_message(&inputs, move_index))
+            .collect::<Vec<_>>();
+        let mut main_claim_coefficients = vec![
+            CompactChallengeField::ZERO;
+            usize::try_from(
+                base_fresh_message_dimension(&main_epoch).expect("main base message dimension"),
+            )
+            .unwrap()
+        ];
+        main_claim_coefficients[0] = CompactChallengeField::ONE;
+        let main_base_combination_move_ordinal = inputs
+            .verifier_moves
+            .iter()
+            .find(|verifier_move| {
+                verifier_move
+                    .role_coordinates
+                    .iter()
+                    .any(|role| role.role_tag == 10 && role.epoch == main_epoch.epoch)
+            })
+            .expect("main-epoch base-combination move")
+            .ordinal;
+        let verified_main_reveal = verify_selected_compact_whir_base_reveal_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &main_messages[..=usize::try_from(main_base_combination_move_ordinal).unwrap()],
+            Some(&verified_base_prefix),
+            main_epoch.epoch,
+            &main_claim_coefficients,
+        )
+        .expect("the main base reveal masking replays from the verified first-epoch prefix");
+        let (main_authority, _main_reveal_steps, main_final_query_steps) =
+            replay_selected_compact_masking_prefix_with_base_claim(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &main_messages,
+                Some(&verified_base_prefix),
+                main_epoch.epoch,
+                &main_claim_coefficients,
+            )
+            .expect("the main final-query prefix replays");
+        let mut main_query_leaves = Vec::new();
+        let mut main_shared_arm_count = 0_u64;
+        for step in &main_final_query_steps {
+            let positions = query_positions_for_disclosure(
+                &main_authority.inputs,
+                &main_authority.transcript,
+                step.kind(),
+            )
+            .expect("main final-query positions");
+            let (geometry, component) =
+                query_component_for_disclosure(&main_authority.inputs, step.kind())
+                    .expect("main final-query component");
+            let mut union_positions = positions.preceding.to_vec();
+            union_positions.extend_from_slice(positions.current);
+            union_positions.sort_unstable();
+            union_positions.dedup();
+            if !positions.preceding.is_empty() {
+                assert!(matches!(
+                    step.kind(),
+                    CompactMaskingDisclosureKind::CarriedMaskQueries {
+                        epoch: 2,
+                        contract_role_tag: 1,
+                        ..
+                    }
+                ));
+                main_shared_arm_count += 1;
+            }
+            let value_count = usize::try_from(component.field_element_count_per_leaf()).unwrap();
+            for query_position in union_positions {
+                main_query_leaves.push(
+                    CompactMaskingQueryLeaf::new(
+                        geometry.response_ordinal(),
+                        component.first_leaf_ordinal() + query_position,
+                        vec![CompactChallengeField::ZERO; value_count],
+                    )
+                    .expect("canonical zero main query leaf"),
+                );
+            }
+        }
+        assert_eq!(main_shared_arm_count, 1);
+        let main_final_fold = inputs
+            .whir_folds
+            .iter()
+            .find(|fold| fold.epoch == main_epoch.epoch && fold.batch_ordinal == 3)
+            .expect("final main fold");
+        let main_fresh_source_mirror_coefficients = vec![
+            CompactChallengeField::ZERO;
+            usize::try_from(
+                main_final_fold.message_length + main_final_fold.hiding_randomness_length,
+            )
+            .unwrap()
+        ];
+        let main_fresh_mask_mirror_coefficients = main_epoch
+            .external_mask_groups
+            .iter()
+            .chain(&main_epoch.internal_mask_groups)
+            .map(|group| {
+                vec![
+                    CompactChallengeField::ZERO;
+                    usize::try_from(group.width * (group.message_length + group.randomness_length),)
+                        .unwrap()
+                ]
+            })
+            .collect::<Vec<_>>();
+        verify_selected_compact_whir_base_final_query_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &main_messages,
+            Some(&verified_base_prefix),
+            main_epoch.epoch,
+            &verified_main_reveal,
+            &main_fresh_source_mirror_coefficients,
+            &main_fresh_mask_mirror_coefficients,
+            &main_query_leaves,
+        )
+        .expect("the main final query accepts the conditioned shared-root second arm");
 
         let duplicate_response_ordinal = query_leaves[0].response_ordinal;
         let duplicate_leaf_ordinal = query_leaves[0].leaf_ordinal;
