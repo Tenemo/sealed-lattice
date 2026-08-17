@@ -91,8 +91,8 @@ and target release remain incomplete or internal.
   manifest, and relation bindings before independently decoding them. A
   release-owned public-key generation state now owns that family
   materialization, the complete CFW and pre-challenge WHIR response sequence,
-  and the first two main-epoch masked-sumcheck batches with their intervening
-  code switch. It accepts the
+  and all four main-epoch masked-sumcheck batches with their three intervening
+  code switches. It accepts the
   lookup challenge only through a borrowed first-message authority minted by
   its retained compact response state for the same proof geometry and
   canonical public input, then owns bounded lookup inversion and structured-row
@@ -209,7 +209,15 @@ and target release remain incomplete or internal.
   opening. Its exact 13,132,944-work-unit output relation feeds the next
   four-round masked sumcheck, which commits 4,104 leaves, supplies eight round-
   wire openings, and finishes with a 2,048-element residual source and
-  covector. Focused coverage matches nonconsecutive replayed rows to the eager
+  covector. The next two main code switches derive 432- and 400-position query
+  schedules from their authenticated verifier messages, retain their selected
+  rows in one column-major pass over each preceding source, and verify the
+  complete query images under the same first-epoch masking prefix. Their
+  8,192-leaf responses emit no premature openings. The exact 1,071,360- and
+  211,200-work-unit output relations feed two more four-round batches; each
+  commits 4,104 leaves and supplies eight round-wire openings, reducing the
+  residual source and covector to 128 and then eight elements. Focused coverage
+  matches nonconsecutive replayed rows to the eager
   canonical WHIR encoder, proves that delayed replay reads each source element
   once regardless of query dispersion, and refuses duplicate, reordered, out-
   of-range, premature, and repeated replay requests.
@@ -218,18 +226,18 @@ and target release remain incomplete or internal.
   switches under the repository memory ceiling. Its CFW phase reconciles 4,926
   external-storage transactions, 1,006,632,840 bytes written, 2,013,265,440
   bytes read, and 587,202,560 peak CFW storage bytes.
-  In the same guarded native run, the first main code switch completes in
-  5,160 milliseconds with 21,037 source polls; the complete guarded job peaks
-  at 938,106,880 bytes and its test process peaks at 926,597,120 bytes. These
-  measurements remain in the owning run diagnostics and do not constitute
-  scalar-WASM, browser, or phone evidence. The owner does not yet cover an
+  In the same guarded native run, all three main code switches and all four
+  masked-sumcheck batches complete through the eight-element residual relation.
+  Timings and process-memory samples remain in the owning run diagnostics and
+  do not constitute scalar-WASM, browser, or phone evidence. The owner does not
+  yet cover an
   authenticated interruption inside the column-major replay, cold restoration
   through the common worker, JavaScript and browser-process overlap, the
-  remaining two main-epoch code switches and batches, the main base case, a
-  complete emitted proof, or algebraic verification of that proof. The test-
+  main base case, a complete emitted proof, or algebraic verification of that
+  proof. The test-
   only production-shaped small-chain owner uses the response state, but the
-  remaining main-epoch response execution, terminal semantic composition, and
-  the whole-construction masking simulator remain test-only or incomplete.
+  main base response execution, terminal semantic composition, and the whole-
+  construction masking simulator remain test-only or incomplete.
   Before the second response's masking material is drawn, release generation now re-
   decodes its canonical public input through
   the selected verifier contract, independently derives and checks every
@@ -257,15 +265,14 @@ and target release remain incomplete or internal.
   and every round wire pass their live conditional-image gates. The verified
   first-epoch base prefix also authorizes the exact initial main-epoch replay;
   its sampled auxiliary target and all seven round wires pass their live
-  conditional-image gates. The first main code-switch source-query image and
-  the following auxiliary and four round wires pass the same sequential live
-  gate under that verified prefix. The fixed KMAC256/SHAKE256 joint assumption
-  remains external. The live pre-challenge
+  conditional-image gates. All three main code-switch source-query images and
+  every auxiliary and round wire in the following three batches pass the same
+  sequential live gate under that verified prefix. The fixed KMAC256/SHAKE256
+  joint assumption remains external. The live pre-challenge
   role-18 carried covector, role-10 blinded reveal, and role-11 final-query
   images are now connected to canonical generated values and the exact
-  authenticated prefix. The main-epoch role-18 authority, the remaining two
-  code switches and batches, the base-case images, and the terminal whole-
-  construction simulator are not connected yet.
+  authenticated prefix. The main-epoch role-18 authority, the base-case images,
+  and the terminal whole-construction simulator are not connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
   schedule. Its one-shot carried-covector lifecycle is bound to verified public
   input and the exact transcript prefix, and guarded coverage reaches the
@@ -286,7 +293,7 @@ ceremony or supported-phone qualification.
   `VerificationResult`, or complete compact generation and verification ABI
   exists. The release transport ABI checks canonical structure, transcript
   chronology, query derivation, and Merkle openings only.
-- The compact successor still requires the remaining main-epoch WHIR sequential
+- The compact successor still requires the main-epoch WHIR base-case
   conditional-image checks, its live role-18 masking authority, a
   construction-level statistical-HVZK argument
   bound to the complete emitted proof, composition of the live KMAC bridge with

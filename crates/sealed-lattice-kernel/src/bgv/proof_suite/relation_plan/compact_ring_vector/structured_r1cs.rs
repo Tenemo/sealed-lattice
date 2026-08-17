@@ -7206,9 +7206,48 @@ mod tests {
             completed_main_whir_phase.next_response_ordinal,
             completed_main_whir_phase.safe_boundary_ordinal,
         );
+        for round_ordinal in 1_u8..=2 {
+            let phase_started_at = Instant::now();
+            println!(
+                "compact public-key focused owner phase: main WHIR code switch round_ordinal={round_ordinal}"
+            );
+            completed_main_whir_phase = complete_selected_whir_code_switch(
+                &mut prepared_main_epoch,
+                &mut response_storage,
+                &selected_compact_contract,
+                main_whir_epoch,
+                SelectedWhirEpochOwner::Main,
+                round_ordinal,
+                completed_main_whir_phase.next_response_ordinal,
+                completed_main_whir_phase.safe_boundary_ordinal,
+            );
+            println!(
+                "compact public-key focused owner phase elapsed_milliseconds={} round_ordinal={round_ordinal}",
+                phase_started_at.elapsed().as_millis(),
+            );
+
+            prepare_selected_whir_sumcheck_after_code_switch(
+                &mut prepared_main_epoch,
+                &selected_compact_contract,
+                main_whir_epoch,
+                SelectedWhirEpochOwner::Main,
+                round_ordinal,
+            );
+            completed_main_whir_phase = complete_selected_whir_sumcheck_batch(
+                &mut prepared_main_epoch,
+                &mut response_storage,
+                &selected_compact_contract,
+                main_whir_epoch,
+                SelectedWhirEpochOwner::Main,
+                round_ordinal + 1,
+                completed_main_whir_phase.next_response_ordinal,
+                completed_main_whir_phase.safe_boundary_ordinal,
+            );
+        }
+        assert_eq!(prepared_main_epoch.main_whir_residual_length(3), Some(8));
         prepared_main_epoch
             .cancel_response_custody(&mut response_storage)
-            .expect("the completed initial main-WHIR batch releases retained response custody");
+            .expect("the completed main-WHIR sumcheck batches release retained response custody");
         println!(
             "compact public-key focused owner complete elapsed_milliseconds={}",
             execution_started_at.elapsed().as_millis()
