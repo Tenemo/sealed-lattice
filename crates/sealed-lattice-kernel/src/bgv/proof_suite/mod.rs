@@ -51,13 +51,6 @@ mod compact_generation_randomness;
 mod compact_masking_coefficient_maps;
 mod compact_masking_entropy;
 mod compact_masking_kmac;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the masking prefix is the next live consumer after release canonical-input validation"
-    )
-)]
 mod compact_masking_prefix;
 #[cfg_attr(
     not(test),

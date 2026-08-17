@@ -380,6 +380,42 @@ pub(crate) struct CompactWhirEncodedMaskGroup {
     encoded_matrix: DenseMatrix<CompactChallengeField>,
 }
 
+/// One carried mask group entering the terminal WHIR base case. The group
+/// owns the exact committed message and encoding randomness together with the
+/// independently replayed public covectors that consume those coordinates.
+pub(crate) struct CompactWhirBaseMaskInput {
+    contract: CompactWhirMaskGroupContract,
+    messages: Vec<Vec<CompactChallengeField>>,
+    randomness: Vec<Vec<CompactChallengeField>>,
+    covectors: Vec<Vec<CompactChallengeField>>,
+}
+
+struct CompactWhirBaseMaskState {
+    carried_messages: Vec<Vec<CompactChallengeField>>,
+    carried_randomness: Vec<Vec<CompactChallengeField>>,
+    covectors: Vec<Vec<CompactChallengeField>>,
+    fresh_messages: Vec<Vec<CompactChallengeField>>,
+    fresh_randomness: Vec<Vec<CompactChallengeField>>,
+    fresh_oracle: CompactWhirEncodedMaskGroup,
+}
+
+/// Production Construction 7.2 state after the last masked sumcheck. It folds
+/// the last interleaved source randomness into the width-one base code,
+/// samples every fresh pad, checks the carried relation, and emits the fresh
+/// claim before accepting the combination challenge.
+pub(crate) struct CompactWhirBaseCaseState {
+    source_message: Vec<CompactChallengeField>,
+    source_randomness: Vec<CompactChallengeField>,
+    source_covector: Vec<CompactChallengeField>,
+    target: CompactChallengeField,
+    fresh_source_message: Vec<CompactChallengeField>,
+    fresh_source_oracle: CompactWhirRecomputableExtensionInitialOracle,
+    mask_groups: Vec<CompactWhirBaseMaskState>,
+    fresh_claim: CompactChallengeField,
+    combination_challenge: Option<CompactChallengeField>,
+    blinded_response_values: Option<Vec<CompactChallengeField>>,
+}
+
 impl CompactWhirEncodedInitialOracle {
     pub(crate) fn encode<R: Rng>(
         configuration: &CompactWhirConfiguration,
@@ -1409,16 +1445,16 @@ impl CompactWhirCodeSwitchState {
             .ok_or(CompactWhirError::WrongProverPhase)
     }
 
-    #[cfg(test)]
-    fn folded_previous_randomness(&self) -> Result<&[CompactChallengeField], CompactWhirError> {
+    pub(crate) fn folded_previous_randomness(
+        &self,
+    ) -> Result<&[CompactChallengeField], CompactWhirError> {
         if self.phase != CompactWhirCodeSwitchPhase::Ready {
             return Err(CompactWhirError::WrongProverPhase);
         }
         Ok(&self.folded_previous_randomness)
     }
 
-    #[cfg(test)]
-    fn switch_mask_encoding_randomness(&self) -> &[CompactChallengeField] {
+    pub(crate) fn switch_mask_encoding_randomness(&self) -> &[CompactChallengeField] {
         &self.switch_mask_encoding_randomness
     }
 
@@ -1673,6 +1709,542 @@ impl Drop for CompactWhirCodeSwitchState {
     }
 }
 
+impl CompactWhirBaseMaskInput {
+    pub(crate) fn new(
+        contract: CompactWhirMaskGroupContract,
+        messages: Vec<Vec<CompactChallengeField>>,
+        randomness: Vec<Vec<CompactChallengeField>>,
+        covectors: Vec<Vec<CompactChallengeField>>,
+    ) -> Result<Self, CompactWhirError> {
+        let width = usize::try_from(contract.width).map_err(|_| CompactWhirError::CountOverflow)?;
+        let message_length = usize::try_from(contract.message_length)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        let randomness_length = usize::try_from(contract.randomness_length)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        if width == 0
+            || messages.len() != width
+            || randomness.len() != width
+            || covectors.len() != width
+            || messages
+                .iter()
+                .any(|message| message.len() != message_length)
+            || randomness
+                .iter()
+                .any(|values| values.len() != randomness_length)
+            || covectors
+                .iter()
+                .any(|covector| covector.len() != message_length)
+        {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+        compact_whir_mask_group_shape(contract)?;
+        Ok(Self {
+            contract,
+            messages,
+            randomness,
+            covectors,
+        })
+    }
+}
+
+impl CompactWhirBaseCaseState {
+    pub(crate) fn new<R: Rng>(
+        source_message: Vec<CompactChallengeField>,
+        previous_source_randomness: &[CompactChallengeField],
+        source_covector: Vec<CompactChallengeField>,
+        target: CompactChallengeField,
+        final_fold_contract: CompactWhirFoldContract,
+        final_folding_challenges: &[CompactChallengeField],
+        mask_inputs: Vec<CompactWhirBaseMaskInput>,
+        random_source: &mut R,
+    ) -> Result<Self, CompactWhirError> {
+        let source_message_length = usize::try_from(final_fold_contract.message_length)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        let final_randomness_length = usize::try_from(final_fold_contract.hiding_randomness_length)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        let expected_width = 1_usize
+            .checked_shl(
+                u32::try_from(final_folding_challenges.len())
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
+            )
+            .ok_or(CompactWhirError::CountOverflow)?;
+        if source_message_length == 0
+            || source_message.len() != source_message_length
+            || source_covector.len() != source_message_length
+            || usize::try_from(final_fold_contract.oracle_width).ok() != Some(expected_width)
+            || previous_source_randomness.len()
+                != final_randomness_length
+                    .checked_mul(expected_width)
+                    .ok_or(CompactWhirError::CountOverflow)?
+            || final_fold_contract.query_count != final_fold_contract.hiding_randomness_length
+            || final_fold_contract.batch_ordinal != 3
+            || mask_inputs.is_empty()
+        {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+
+        let source_randomness = fold_compact_whir_limb_major_values(
+            previous_source_randomness,
+            final_randomness_length,
+            final_folding_challenges,
+        )?;
+        let mut carried_claim = compact_whir_dot_product(&source_message, &source_covector)?;
+        for input in &mask_inputs {
+            for (message, covector) in input.messages.iter().zip(&input.covectors) {
+                carried_claim += compact_whir_dot_product(message, covector)?;
+            }
+        }
+        if carried_claim != target {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+
+        let mut fresh_source_message = Vec::new();
+        fresh_source_message
+            .try_reserve_exact(source_message_length)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        for _coordinate_ordinal in 0..source_message_length {
+            fresh_source_message.push(random_source.random());
+        }
+        let fresh_source_oracle =
+            CompactWhirRecomputableExtensionInitialOracle::sample_for_base_case_contract(
+                final_fold_contract,
+                random_source,
+            )?;
+
+        let mut fresh_claim = compact_whir_dot_product(&fresh_source_message, &source_covector)?;
+        let mut mask_groups = Vec::new();
+        mask_groups
+            .try_reserve_exact(mask_inputs.len())
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        for mut input in mask_inputs {
+            let shape = compact_whir_mask_group_shape(input.contract)?;
+            let mut fresh_messages = Vec::new();
+            let mut fresh_randomness = Vec::new();
+            fresh_messages
+                .try_reserve_exact(shape.width)
+                .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+            fresh_randomness
+                .try_reserve_exact(shape.width)
+                .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+            for _lane_ordinal in 0..shape.width {
+                let mut message = Vec::new();
+                message
+                    .try_reserve_exact(shape.shape.message_len)
+                    .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+                for _coordinate_ordinal in 0..shape.shape.message_len {
+                    message.push(random_source.random());
+                }
+                let mut randomness = Vec::new();
+                randomness
+                    .try_reserve_exact(shape.shape.randomness_len)
+                    .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+                for _coordinate_ordinal in 0..shape.shape.randomness_len {
+                    randomness.push(random_source.random());
+                }
+                fresh_messages.push(message);
+                fresh_randomness.push(randomness);
+            }
+            for (message, covector) in fresh_messages.iter().zip(&input.covectors) {
+                fresh_claim += compact_whir_dot_product(message, covector)?;
+            }
+            let fresh_oracle =
+                CompactWhirEncodedMaskGroup::encode(shape, &fresh_messages, &fresh_randomness)?;
+            mask_groups.push(CompactWhirBaseMaskState {
+                carried_messages: core::mem::take(&mut input.messages),
+                carried_randomness: core::mem::take(&mut input.randomness),
+                covectors: core::mem::take(&mut input.covectors),
+                fresh_messages,
+                fresh_randomness,
+                fresh_oracle,
+            });
+        }
+
+        Ok(Self {
+            source_message,
+            source_randomness,
+            source_covector,
+            target,
+            fresh_source_message,
+            fresh_source_oracle,
+            mask_groups,
+            fresh_claim,
+            combination_challenge: None,
+            blinded_response_values: None,
+        })
+    }
+
+    pub(crate) const fn fresh_claim(&self) -> CompactChallengeField {
+        self.fresh_claim
+    }
+
+    pub(crate) const fn fresh_source_oracle(
+        &self,
+    ) -> &CompactWhirRecomputableExtensionInitialOracle {
+        &self.fresh_source_oracle
+    }
+
+    pub(crate) fn fresh_mask_oracle(
+        &self,
+        group_ordinal: usize,
+    ) -> Option<&CompactWhirEncodedMaskGroup> {
+        self.mask_groups
+            .get(group_ordinal)
+            .map(|group| &group.fresh_oracle)
+    }
+
+    pub(crate) const fn fresh_mask_group_count(&self) -> usize {
+        self.mask_groups.len()
+    }
+
+    pub(crate) fn poll_fresh_source_oracle(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactWhirRecomputableExtensionPoll, CompactWhirError> {
+        let source = &self.fresh_source_message;
+        self.fresh_source_oracle
+            .poll(maximum_work_unit_count, |source_ordinal| {
+                source
+                    .get(
+                        usize::try_from(source_ordinal)
+                            .map_err(|_| CompactWhirError::CountOverflow)?,
+                    )
+                    .copied()
+                    .ok_or(CompactWhirError::InvalidMessage)
+            })
+            .map_err(|error| match error {
+                CompactWhirRecomputableExtensionError::Whir(error)
+                | CompactWhirRecomputableExtensionError::Source(error) => error,
+            })
+    }
+
+    pub(crate) fn fresh_source_row(
+        &self,
+        row_ordinal: usize,
+    ) -> Result<&[CompactChallengeField], CompactWhirError> {
+        self.fresh_source_oracle.response_row(row_ordinal)
+    }
+
+    pub(crate) fn mark_fresh_source_row_supplied(
+        &mut self,
+        row_ordinal: usize,
+    ) -> Result<(), CompactWhirError> {
+        self.fresh_source_oracle
+            .mark_response_row_supplied(row_ordinal)
+    }
+
+    pub(crate) fn begin_fresh_source_opening_replay(
+        &mut self,
+        row_ordinals: &[usize],
+    ) -> Result<(), CompactWhirError> {
+        self.fresh_source_oracle.begin_opening_replay(row_ordinals)
+    }
+
+    pub(crate) const fn fresh_source_opening_replay_complete(&self) -> bool {
+        self.fresh_source_oracle.opening_replay_complete()
+    }
+
+    pub(crate) fn bind_combination_challenge(
+        &mut self,
+        challenge: CompactChallengeField,
+    ) -> Result<(), CompactWhirError> {
+        if self.combination_challenge.is_some()
+            || self.blinded_response_values.is_some()
+            || !self.fresh_source_oracle.can_begin_opening_replay()
+        {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        let total_mask_reveal_count =
+            self.mask_groups.iter().try_fold(0_usize, |count, group| {
+                group
+                    .fresh_messages
+                    .iter()
+                    .zip(&group.fresh_randomness)
+                    .try_fold(count, |count, (message, randomness)| {
+                        count
+                            .checked_add(message.len())
+                            .and_then(|count| count.checked_add(randomness.len()))
+                            .ok_or(CompactWhirError::CountOverflow)
+                    })
+            })?;
+        let total_reveal_count = self
+            .source_message
+            .len()
+            .checked_add(self.source_randomness.len())
+            .and_then(|count| count.checked_add(total_mask_reveal_count))
+            .ok_or(CompactWhirError::CountOverflow)?;
+        let mut blinded = Vec::new();
+        blinded
+            .try_reserve_exact(total_reveal_count)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+
+        let mut combined_claim = CompactChallengeField::ZERO;
+        for ((fresh, carried), coefficient) in self
+            .fresh_source_message
+            .iter()
+            .zip(&self.source_message)
+            .zip(&self.source_covector)
+        {
+            let value = *fresh + challenge * *carried;
+            blinded.push(value);
+            combined_claim += value * *coefficient;
+        }
+        for (fresh, carried) in self
+            .fresh_source_oracle
+            .encoding_randomness()
+            .iter()
+            .zip(&self.source_randomness)
+        {
+            blinded.push(*fresh + challenge * *carried);
+        }
+        for group in &self.mask_groups {
+            for (
+                ((fresh_message, fresh_randomness), carried_message),
+                (carried_randomness, covector),
+            ) in group
+                .fresh_messages
+                .iter()
+                .zip(&group.fresh_randomness)
+                .zip(&group.carried_messages)
+                .zip(group.carried_randomness.iter().zip(&group.covectors))
+            {
+                for ((fresh, carried), coefficient) in
+                    fresh_message.iter().zip(carried_message).zip(covector)
+                {
+                    let value = *fresh + challenge * *carried;
+                    blinded.push(value);
+                    combined_claim += value * *coefficient;
+                }
+                blinded.extend(
+                    fresh_randomness
+                        .iter()
+                        .zip(carried_randomness)
+                        .map(|(fresh, carried)| *fresh + challenge * *carried),
+                );
+            }
+        }
+        if blinded.len() != total_reveal_count
+            || combined_claim != self.fresh_claim + challenge * self.target
+        {
+            blinded.fill(CompactChallengeField::ZERO);
+            return Err(CompactWhirError::InvalidRelation);
+        }
+
+        self.source_message.fill(CompactChallengeField::ZERO);
+        self.source_message.clear();
+        self.source_randomness.fill(CompactChallengeField::ZERO);
+        self.source_randomness.clear();
+        self.target = CompactChallengeField::ZERO;
+        for group in &mut self.mask_groups {
+            for values in &mut group.carried_messages {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            group.carried_messages.clear();
+            for values in &mut group.carried_randomness {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            group.carried_randomness.clear();
+        }
+        self.combination_challenge = Some(challenge);
+        self.blinded_response_values = Some(blinded);
+        Ok(())
+    }
+
+    pub(crate) fn blinded_response_values(
+        &self,
+    ) -> Result<&[CompactChallengeField], CompactWhirError> {
+        self.blinded_response_values
+            .as_deref()
+            .ok_or(CompactWhirError::WrongProverPhase)
+    }
+
+    pub(crate) fn base_claim_coefficients(
+        &self,
+    ) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
+        if self.source_covector.is_empty() || self.mask_groups.is_empty() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        let coefficient_count =
+            self.mask_groups
+                .iter()
+                .try_fold(self.source_covector.len(), |count, group| {
+                    group.covectors.iter().try_fold(count, |count, covector| {
+                        count
+                            .checked_add(covector.len())
+                            .ok_or(CompactWhirError::CountOverflow)
+                    })
+                })?;
+        let mut coefficients = Vec::new();
+        coefficients
+            .try_reserve_exact(coefficient_count)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        coefficients.extend_from_slice(&self.source_covector);
+        for group in &self.mask_groups {
+            for covector in &group.covectors {
+                coefficients.extend_from_slice(covector);
+            }
+        }
+        Ok(coefficients)
+    }
+
+    pub(crate) fn fresh_source_mirror_coefficients(
+        &self,
+    ) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
+        if self.combination_challenge.is_none() || self.fresh_source_message.is_empty() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        let coefficient_count = self
+            .fresh_source_message
+            .len()
+            .checked_add(self.fresh_source_oracle.encoding_randomness().len())
+            .ok_or(CompactWhirError::CountOverflow)?;
+        let mut coefficients = Vec::new();
+        coefficients
+            .try_reserve_exact(coefficient_count)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        coefficients.extend_from_slice(&self.fresh_source_message);
+        coefficients.extend_from_slice(self.fresh_source_oracle.encoding_randomness());
+        Ok(coefficients)
+    }
+
+    pub(crate) fn fresh_mask_mirror_coefficients(
+        &self,
+        group_ordinal: usize,
+    ) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
+        if self.combination_challenge.is_none() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        let group = self
+            .mask_groups
+            .get(group_ordinal)
+            .ok_or(CompactWhirError::InvalidRelation)?;
+        let coefficient_count = group
+            .fresh_messages
+            .iter()
+            .zip(&group.fresh_randomness)
+            .try_fold(0_usize, |count, (message, randomness)| {
+                count
+                    .checked_add(message.len())
+                    .and_then(|count| count.checked_add(randomness.len()))
+                    .ok_or(CompactWhirError::CountOverflow)
+            })?;
+        let mut coefficients = Vec::new();
+        coefficients
+            .try_reserve_exact(coefficient_count)
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        for (message, randomness) in group.fresh_messages.iter().zip(&group.fresh_randomness) {
+            coefficients.extend_from_slice(message);
+            coefficients.extend_from_slice(randomness);
+        }
+        Ok(coefficients)
+    }
+
+    pub(crate) fn finish_final_query_opening_replay(&mut self) -> Result<(), CompactWhirError> {
+        if !self.fresh_source_oracle.opening_replay_complete()
+            || self.combination_challenge.is_none()
+            || self.blinded_response_values.is_none()
+        {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        self.fresh_source_oracle.finish_opening_replay()?;
+        self.fresh_source_message.fill(CompactChallengeField::ZERO);
+        self.fresh_source_message.clear();
+        self.source_covector.fill(CompactChallengeField::ZERO);
+        self.source_covector.clear();
+        for group in &mut self.mask_groups {
+            for values in &mut group.covectors {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            group.covectors.clear();
+            for values in &mut group.fresh_messages {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            group.fresh_messages.clear();
+            for values in &mut group.fresh_randomness {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            group.fresh_randomness.clear();
+        }
+        Ok(())
+    }
+}
+
+impl Drop for CompactWhirBaseCaseState {
+    fn drop(&mut self) {
+        self.source_message.fill(CompactChallengeField::ZERO);
+        self.source_randomness.fill(CompactChallengeField::ZERO);
+        self.source_covector.fill(CompactChallengeField::ZERO);
+        self.target = CompactChallengeField::ZERO;
+        self.fresh_source_message.fill(CompactChallengeField::ZERO);
+        for group in &mut self.mask_groups {
+            for values in &mut group.carried_messages {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            for values in &mut group.carried_randomness {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            for values in &mut group.covectors {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            for values in &mut group.fresh_messages {
+                values.fill(CompactChallengeField::ZERO);
+            }
+            for values in &mut group.fresh_randomness {
+                values.fill(CompactChallengeField::ZERO);
+            }
+        }
+        if let Some(values) = self.blinded_response_values.as_mut() {
+            values.fill(CompactChallengeField::ZERO);
+        }
+        self.fresh_claim = CompactChallengeField::ZERO;
+        self.combination_challenge = None;
+    }
+}
+
+pub(crate) fn fold_compact_whir_limb_major_values(
+    values: &[CompactChallengeField],
+    folded_length: usize,
+    folding_challenges: &[CompactChallengeField],
+) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
+    let limb_count = 1_usize
+        .checked_shl(
+            u32::try_from(folding_challenges.len()).map_err(|_| CompactWhirError::CountOverflow)?,
+        )
+        .ok_or(CompactWhirError::CountOverflow)?;
+    if folded_length == 0
+        || values.len()
+            != folded_length
+                .checked_mul(limb_count)
+                .ok_or(CompactWhirError::CountOverflow)?
+    {
+        return Err(CompactWhirError::InvalidRelation);
+    }
+    let weights = Poly::new_from_point(folding_challenges, CompactChallengeField::ONE).into_evals();
+    if weights.len() != limb_count {
+        return Err(CompactWhirError::InvalidRelation);
+    }
+    let mut folded = allocate_zero_extension_values(folded_length)?;
+    for (limb, weight) in values.chunks_exact(folded_length).zip(weights) {
+        for (destination, source) in folded.iter_mut().zip(limb) {
+            *destination += weight * *source;
+        }
+    }
+    Ok(folded)
+}
+
+fn compact_whir_dot_product(
+    left: &[CompactChallengeField],
+    right: &[CompactChallengeField],
+) -> Result<CompactChallengeField, CompactWhirError> {
+    if left.len() != right.len() {
+        return Err(CompactWhirError::InvalidRelation);
+    }
+    Ok(left
+        .iter()
+        .zip(right)
+        .map(|(left, right)| *left * *right)
+        .sum())
+}
+
 pub(crate) fn fold_compact_whir_query_major_source_openings(
     query_outputs: &[CompactChallengeField],
     query_count: usize,
@@ -1810,6 +2382,26 @@ impl CompactWhirRecomputableExtensionInitialOracle {
             source_height,
             encoded_height,
             width,
+            randomness_rows,
+            random_source,
+            COMPACT_WHIR_EXTENSION_RESPONSE_STRIPE_ROW_COUNT.min(encoded_height),
+        )
+    }
+
+    pub(crate) fn sample_for_base_case_contract<R: Rng>(
+        contract: CompactWhirFoldContract,
+        random_source: &mut R,
+    ) -> Result<Self, CompactWhirError> {
+        let source_height = usize::try_from(contract.message_length)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        let encoded_height =
+            usize::try_from(contract.block_length).map_err(|_| CompactWhirError::CountOverflow)?;
+        let randomness_rows = usize::try_from(contract.hiding_randomness_length)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        Self::sample_with_dimensions(
+            source_height,
+            encoded_height,
+            1,
             randomness_rows,
             random_source,
             COMPACT_WHIR_EXTENSION_RESPONSE_STRIPE_ROW_COUNT.min(encoded_height),
@@ -2670,6 +3262,29 @@ mod tests {
         }
     }
 
+    fn bounded_base_mask_contract(
+        role_tag: u8,
+        coordinate: u8,
+        width: u64,
+        message_length: u64,
+        randomness_length: u64,
+    ) -> CompactWhirMaskGroupContract {
+        let shape = MaskCodeShape::new(
+            usize::try_from(message_length).unwrap(),
+            usize::try_from(randomness_length).unwrap(),
+            COMPACT_WHIR_MASK_LOG_INVERSE_RATE,
+        );
+        CompactWhirMaskGroupContract {
+            role_tag,
+            coordinate,
+            width,
+            message_length,
+            randomness_length,
+            domain_size: u64::try_from(shape.domain_size).unwrap(),
+            committed_encoding_source: 1,
+        }
+    }
+
     fn prepared_test_relation(
         source: Vec<Goldilocks>,
         equality_point: Vec<CompactChallengeField>,
@@ -2709,6 +3324,274 @@ mod tests {
             }
         }
         preparation.finish().expect("the test relation finishes")
+    }
+
+    #[test]
+    fn base_case_folds_carried_randomness_and_binds_the_exact_blinded_reveal() {
+        let final_fold_contract = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 3,
+            message_length: 4,
+            hiding_randomness_length: 4,
+            block_length: 32,
+            oracle_width: 4,
+            query_count: 4,
+            unique_decoding_radius: 11,
+        };
+        let folding_challenges = [
+            CompactChallengeField::from_u64(5),
+            CompactChallengeField::from_u64(7),
+        ];
+        let source_message = (1_u64..=4)
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let source_covector = (11_u64..=14)
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let previous_source_randomness = (21_u64..=36)
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let first_mask_messages = vec![
+            vec![
+                CompactChallengeField::from_u64(41),
+                CompactChallengeField::from_u64(42),
+                CompactChallengeField::from_u64(43),
+            ],
+            vec![
+                CompactChallengeField::from_u64(44),
+                CompactChallengeField::from_u64(45),
+                CompactChallengeField::from_u64(46),
+            ],
+        ];
+        let first_mask_randomness = vec![
+            vec![
+                CompactChallengeField::from_u64(47),
+                CompactChallengeField::from_u64(48),
+            ],
+            vec![
+                CompactChallengeField::from_u64(49),
+                CompactChallengeField::from_u64(50),
+            ],
+        ];
+        let first_mask_covectors = vec![
+            vec![
+                CompactChallengeField::from_u64(51),
+                CompactChallengeField::from_u64(52),
+                CompactChallengeField::from_u64(53),
+            ],
+            vec![
+                CompactChallengeField::from_u64(54),
+                CompactChallengeField::from_u64(55),
+                CompactChallengeField::from_u64(56),
+            ],
+        ];
+        let second_mask_messages = vec![vec![
+            CompactChallengeField::from_u64(61),
+            CompactChallengeField::from_u64(62),
+        ]];
+        let second_mask_randomness = vec![vec![
+            CompactChallengeField::from_u64(63),
+            CompactChallengeField::from_u64(64),
+            CompactChallengeField::from_u64(65),
+        ]];
+        let second_mask_covectors = vec![vec![
+            CompactChallengeField::from_u64(66),
+            CompactChallengeField::from_u64(67),
+        ]];
+        let target = compact_whir_dot_product(&source_message, &source_covector).unwrap()
+            + first_mask_messages
+                .iter()
+                .zip(&first_mask_covectors)
+                .map(|(message, covector)| compact_whir_dot_product(message, covector).unwrap())
+                .sum::<CompactChallengeField>()
+            + second_mask_messages
+                .iter()
+                .zip(&second_mask_covectors)
+                .map(|(message, covector)| compact_whir_dot_product(message, covector).unwrap())
+                .sum::<CompactChallengeField>();
+        let mask_inputs = vec![
+            CompactWhirBaseMaskInput::new(
+                bounded_base_mask_contract(1, 0, 2, 3, 2),
+                first_mask_messages.clone(),
+                first_mask_randomness.clone(),
+                first_mask_covectors,
+            )
+            .unwrap(),
+            CompactWhirBaseMaskInput::new(
+                bounded_base_mask_contract(4, 0, 1, 2, 3),
+                second_mask_messages.clone(),
+                second_mask_randomness.clone(),
+                second_mask_covectors,
+            )
+            .unwrap(),
+        ];
+
+        let folded_source_randomness = fold_compact_whir_limb_major_values(
+            &previous_source_randomness,
+            4,
+            &folding_challenges,
+        )
+        .unwrap();
+        let expected_weights = [
+            (CompactChallengeField::ONE - folding_challenges[0])
+                * (CompactChallengeField::ONE - folding_challenges[1]),
+            (CompactChallengeField::ONE - folding_challenges[0]) * folding_challenges[1],
+            folding_challenges[0] * (CompactChallengeField::ONE - folding_challenges[1]),
+            folding_challenges[0] * folding_challenges[1],
+        ];
+        for coordinate_ordinal in 0..4 {
+            let expected = expected_weights
+                .iter()
+                .enumerate()
+                .map(|(limb_ordinal, weight)| {
+                    *weight * previous_source_randomness[limb_ordinal * 4 + coordinate_ordinal]
+                })
+                .sum::<CompactChallengeField>();
+            assert_eq!(folded_source_randomness[coordinate_ordinal], expected);
+        }
+
+        let mut random_source = CountingRandomSource(0xB5);
+        let mut state = CompactWhirBaseCaseState::new(
+            source_message.clone(),
+            &previous_source_randomness,
+            source_covector,
+            target,
+            final_fold_contract,
+            &folding_challenges,
+            mask_inputs,
+            &mut random_source,
+        )
+        .expect("the exact carried base relation prepares");
+        assert_eq!(state.source_randomness, folded_source_randomness);
+        assert_eq!(state.fresh_source_oracle().width(), 1);
+        assert_eq!(state.fresh_source_oracle().encoded_height(), 32);
+        assert_eq!(state.fresh_mask_group_count(), 2);
+        assert_eq!(
+            state.bind_combination_challenge(CompactChallengeField::from_u64(71)),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+
+        let work_budgets = [1_u64, 3, 11, 2, 19];
+        let mut poll_ordinal = 0_usize;
+        let mut next_row = 0_usize;
+        while next_row < state.fresh_source_oracle().encoded_height() {
+            match state
+                .poll_fresh_source_oracle(work_budgets[poll_ordinal % work_budgets.len()])
+                .expect("the fresh base source encoding advances")
+            {
+                CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted {
+                    processed_work_unit_count,
+                } => assert!((1..=19).contains(&processed_work_unit_count)),
+                CompactWhirRecomputableExtensionPoll::StripeReady {
+                    first_row,
+                    row_count,
+                } => {
+                    assert!(
+                        (first_row..first_row + row_count)
+                            .contains(&u64::try_from(next_row).unwrap())
+                    );
+                    assert_eq!(state.fresh_source_row(next_row).unwrap().len(), 1);
+                    state.mark_fresh_source_row_supplied(next_row).unwrap();
+                    next_row += 1;
+                }
+            }
+            poll_ordinal += 1;
+        }
+
+        let fresh_source_message = state.fresh_source_message.clone();
+        let fresh_source_randomness = state.fresh_source_oracle.encoding_randomness().to_vec();
+        let fresh_mask_messages = state
+            .mask_groups
+            .iter()
+            .map(|group| group.fresh_messages.clone())
+            .collect::<Vec<_>>();
+        let fresh_mask_randomness = state
+            .mask_groups
+            .iter()
+            .map(|group| group.fresh_randomness.clone())
+            .collect::<Vec<_>>();
+        let combination_challenge = CompactChallengeField::from_u64(73);
+        state
+            .bind_combination_challenge(combination_challenge)
+            .expect("the transcript combination challenge binds once");
+        let mut expected_blinded_values = fresh_source_message
+            .iter()
+            .zip(&source_message)
+            .map(|(fresh, carried)| *fresh + combination_challenge * *carried)
+            .collect::<Vec<_>>();
+        expected_blinded_values.extend(
+            fresh_source_randomness
+                .iter()
+                .zip(&folded_source_randomness)
+                .map(|(fresh, carried)| *fresh + combination_challenge * *carried),
+        );
+        for (((fresh_messages, fresh_randomness), carried_messages), carried_randomness) in
+            fresh_mask_messages
+                .iter()
+                .zip(&fresh_mask_randomness)
+                .zip([&first_mask_messages, &second_mask_messages])
+                .zip([&first_mask_randomness, &second_mask_randomness])
+        {
+            for (((fresh_message, fresh_randomness), carried_message), carried_randomness) in
+                fresh_messages
+                    .iter()
+                    .zip(fresh_randomness)
+                    .zip(carried_messages)
+                    .zip(carried_randomness)
+            {
+                expected_blinded_values.extend(
+                    fresh_message
+                        .iter()
+                        .zip(carried_message)
+                        .map(|(fresh, carried)| *fresh + combination_challenge * *carried),
+                );
+                expected_blinded_values.extend(
+                    fresh_randomness
+                        .iter()
+                        .zip(carried_randomness)
+                        .map(|(fresh, carried)| *fresh + combination_challenge * *carried),
+                );
+            }
+        }
+        assert_eq!(
+            state.blinded_response_values().unwrap(),
+            expected_blinded_values
+        );
+        assert_eq!(
+            state.bind_combination_challenge(combination_challenge),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+
+        let mut rejecting_random_source = CountingRandomSource(0xC5);
+        assert!(matches!(
+            CompactWhirBaseCaseState::new(
+                source_message,
+                &previous_source_randomness,
+                vec![CompactChallengeField::ONE; 4],
+                target + CompactChallengeField::ONE,
+                final_fold_contract,
+                &folding_challenges,
+                vec![
+                    CompactWhirBaseMaskInput::new(
+                        bounded_base_mask_contract(4, 0, 1, 2, 3),
+                        second_mask_messages,
+                        second_mask_randomness,
+                        vec![vec![CompactChallengeField::ONE; 2]],
+                    )
+                    .unwrap()
+                ],
+                &mut rejecting_random_source,
+            ),
+            Err(CompactWhirError::InvalidRelation)
+        ));
+        assert_eq!(
+            fold_compact_whir_limb_major_values(
+                &previous_source_randomness[..15],
+                4,
+                &folding_challenges,
+            ),
+            Err(CompactWhirError::InvalidRelation)
+        );
     }
 
     #[test]

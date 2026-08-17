@@ -23,7 +23,10 @@ use super::compact_masking_coefficient_maps::{
 use super::compact_masking_coefficient_maps::{
     CompactCoefficientToViewMap, apply_cfw_inner_terminal_view, apply_whir_sumcheck_mask_view,
 };
-use super::compact_masking_prefix::CompactMaskingAttemptIdentity;
+use super::compact_masking_prefix::{CompactMaskingAttemptIdentity, CompactMaskingSemanticPrefix};
+use super::compact_masking_public_covector::{
+    CompactFactorOnePublicCovectorAuthority, CompactFactorOnePublicCovectorPoll,
+};
 use super::compact_proof_contract::{
     CompactPublicKeyVerifierInputs, CompactResponseComponentRoleContract,
     CompactVerifierMoveContract, CompactWhirEpochContract, CompactWhirFoldContract,
@@ -92,6 +95,61 @@ impl CompactMaskingSumcheckChallenges {
 pub(crate) struct CompactBaseFreshClaimCoefficients {
     epoch: u8,
     coefficients: Vec<CompactChallengeField>,
+}
+
+/// Public covectors independently replayed for the selected pre-challenge
+/// Construction 7.2 claim at its exact authenticated transcript prefix.
+pub(crate) struct CompactVerifiedPreChallengeBaseCovector {
+    source: Vec<CompactChallengeField>,
+    mask_groups: Vec<Vec<Vec<CompactChallengeField>>>,
+}
+
+/// One canonical extension-field leaf selected by a compact WHIR verifier
+/// query. Its committed value may be evaluated before a shared root's later
+/// last-use opening; the entropy owner independently maps the response and
+/// leaf ordinals back to their compiler-derived consumers.
+pub(crate) struct CompactMaskingQueryLeaf {
+    response_ordinal: u32,
+    leaf_ordinal: u64,
+    values: Vec<CompactChallengeField>,
+}
+
+impl CompactMaskingQueryLeaf {
+    pub(crate) fn new(
+        response_ordinal: u32,
+        leaf_ordinal: u64,
+        values: Vec<CompactChallengeField>,
+    ) -> Result<Self, CompactMaskingEntropyError> {
+        if values.is_empty() {
+            return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+        }
+        Ok(Self {
+            response_ordinal,
+            leaf_ordinal,
+            values,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn response_ordinal(&self) -> u32 {
+        self.response_ordinal
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn leaf_ordinal(&self) -> u64 {
+        self.leaf_ordinal
+    }
+}
+
+impl CompactVerifiedPreChallengeBaseCovector {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Vec<CompactChallengeField>,
+        Vec<Vec<Vec<CompactChallengeField>>>,
+    ) {
+        (self.source, self.mask_groups)
+    }
 }
 
 impl CompactBaseFreshClaimCoefficients {
@@ -1265,6 +1323,515 @@ pub(crate) fn verify_selected_compact_whir_source_query_masking(
         return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
     }
     authority.verify_coefficient_image_output(source_query_step, &[], None, query_outputs)
+}
+
+/// Replays the selected pre-challenge relation covectors from canonical public
+/// input and the exact authenticated verifier prefix, then authorizes the one
+/// fresh base-case claim against the production conditional-entropy owner.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    public_covector_authority: &CompactFactorOnePublicCovectorAuthority<'_>,
+    canonical_exposed_proof_prefix: &[u8],
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+) -> Result<CompactVerifiedPreChallengeBaseCovector, CompactMaskingEntropyError> {
+    if canonical_exposed_proof_prefix.is_empty()
+        || completed_messages.is_empty()
+        || completed_messages.len() >= inputs.verifier_moves.len()
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let next_move = inputs
+        .verifier_moves
+        .get(completed_messages.len())
+        .ok_or(CompactMaskingEntropyError::MissingTranscriptInput)?;
+    let [role] = next_move.role_coordinates.as_slice() else {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    };
+    if role.role_tag != 10
+        || role.epoch != 1
+        || role.batch_ordinal != 0
+        || role.round_ordinal != 0
+        || usize::try_from(next_move.ordinal).ok() != Some(completed_messages.len())
+        || public_covector_authority.contract_source_hash()
+            != inputs
+                .canonical_source_hash()
+                .map_err(|_| CompactMaskingEntropyError::InvalidContract)?
+                .into_bytes()
+    {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    }
+    let prefix = CompactMaskingSemanticPrefix::from_validated_transcript(
+        identity,
+        next_move.ordinal,
+        role.epoch,
+        public_covector_authority.contract_source_hash(),
+        canonical_exposed_proof_prefix.to_vec().into_boxed_slice(),
+        completed_messages.to_vec().into_boxed_slice(),
+    )
+    .map_err(|_| CompactMaskingEntropyError::MissingTranscriptInput)?;
+    let mut derivation = public_covector_authority
+        .begin_prefix_derivation(prefix)
+        .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientVector)?;
+    let authorization = match derivation
+        .advance(1)
+        .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientVector)?
+    {
+        CompactFactorOnePublicCovectorPoll::Complete(authorization) => authorization,
+        CompactFactorOnePublicCovectorPoll::WorkCompleted { .. } => {
+            return Err(CompactMaskingEntropyError::InvalidCoefficientVector);
+        }
+    };
+    if authorization.epoch() != Some(role.epoch) {
+        return Err(CompactMaskingEntropyError::InvalidCoefficientVector);
+    }
+    let coefficients = authorization
+        .coefficients()
+        .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?
+        .to_vec();
+    let claim = CompactBaseFreshClaimCoefficients {
+        epoch: role.epoch,
+        coefficients: coefficients.clone(),
+    };
+    let epoch = inputs
+        .whir_epochs
+        .iter()
+        .find(|epoch| epoch.epoch == role.epoch)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let mask_contracts = epoch
+        .external_mask_groups
+        .iter()
+        .chain(&epoch.internal_mask_groups)
+        .copied()
+        .collect::<Vec<_>>();
+    let final_fold = inputs
+        .whir_folds
+        .iter()
+        .find(|fold| fold.epoch == role.epoch && fold.batch_ordinal == 3)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let source_length = usize::try_from(final_fold.message_length)
+        .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+    let mut masking_authority = replay_selected_compact_masking_prefix(
+        inputs,
+        coefficient_maps,
+        identity,
+        completed_messages,
+    )?;
+    let steps = masking_authority
+        .authorize_next_response(Some(&claim))?
+        .to_vec();
+    let [claim_step] = steps.as_slice() else {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    };
+    if claim_step.kind() != (CompactMaskingDisclosureKind::BaseFreshClaim { epoch: role.epoch })
+        || claim_step.output_coordinate_count() != 1
+        || claim_step.conditional_rank() != 1
+        || claim_step.image != CompactMaskingDisclosureImage::FullCoordinateSpace
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+
+    let source = coefficients
+        .get(..source_length)
+        .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?
+        .to_vec();
+    let mut coefficient_offset = source_length;
+    let mut mask_groups = Vec::new();
+    for group in mask_contracts {
+        let width = usize::try_from(group.width)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        let message_length = usize::try_from(group.message_length)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        let mut group_covectors = Vec::new();
+        group_covectors
+            .try_reserve_exact(width)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        for _lane_ordinal in 0..width {
+            let end = coefficient_offset
+                .checked_add(message_length)
+                .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+            group_covectors.push(
+                coefficients
+                    .get(coefficient_offset..end)
+                    .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?
+                    .to_vec(),
+            );
+            coefficient_offset = end;
+        }
+        mask_groups.push(group_covectors);
+    }
+    if coefficient_offset != coefficients.len() {
+        return Err(CompactMaskingEntropyError::InvalidCoefficientVector);
+    }
+    Ok(CompactVerifiedPreChallengeBaseCovector {
+        source,
+        mask_groups,
+    })
+}
+
+/// Checks the live Construction 7.2 reveal response at the exact role-10
+/// transcript prefix. The entropy authority owns the one lost claim
+/// coordinate; the prover state separately checks that the emitted affine
+/// reveal satisfies that same claim equation.
+pub(crate) fn verify_selected_compact_pre_challenge_base_reveal_masking(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+    claim_coefficients: &[CompactChallengeField],
+) -> Result<(), CompactMaskingEntropyError> {
+    let (mut authority, _last_response_steps, last_message_steps) =
+        replay_selected_compact_masking_prefix_with_base_claim(
+            inputs,
+            coefficient_maps,
+            identity,
+            completed_messages,
+            epoch,
+            claim_coefficients,
+        )?;
+    if !last_message_steps.is_empty() {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    let reveal_steps = authority.authorize_next_response(None)?.to_vec();
+    validate_base_reveal_steps(
+        &authority.inputs,
+        epoch,
+        &reveal_steps,
+        expected_base_reveal_coordinate_count(&authority.inputs, epoch)?,
+    )
+}
+
+/// Checks every selected final query opened after the blinded response. The
+/// response-tree owner supplies canonical leaf values; this owner rederives
+/// their response components and query positions from the decoded contract
+/// and authenticated verifier messages before checking each conditional image.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
+    inputs: CompactPublicKeyVerifierInputs<'_>,
+    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+    claim_coefficients: &[CompactChallengeField],
+    fresh_source_mirror_coefficients: &[CompactChallengeField],
+    fresh_mask_mirror_coefficients: &[Vec<CompactChallengeField>],
+    query_leaves: &[CompactMaskingQueryLeaf],
+) -> Result<(), CompactMaskingEntropyError> {
+    if query_leaves.is_empty() {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let (authority, reveal_steps, final_query_steps) =
+        replay_selected_compact_masking_prefix_with_base_claim(
+            inputs,
+            coefficient_maps,
+            identity,
+            completed_messages,
+            epoch,
+            claim_coefficients,
+        )?;
+    validate_base_reveal_steps(
+        &authority.inputs,
+        epoch,
+        &reveal_steps,
+        expected_base_reveal_coordinate_count(&authority.inputs, epoch)?,
+    )?;
+
+    let epoch_contract = authority
+        .inputs
+        .whir_epochs
+        .iter()
+        .find(|contract| contract.epoch == epoch)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    if fresh_mask_mirror_coefficients.len()
+        != epoch_contract
+            .external_mask_groups
+            .len()
+            .checked_add(epoch_contract.internal_mask_groups.len())
+            .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let mut sorted_query_leaves = Vec::new();
+    sorted_query_leaves
+        .try_reserve_exact(query_leaves.len())
+        .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+    sorted_query_leaves.extend(query_leaves);
+    sorted_query_leaves
+        .sort_unstable_by_key(|query_leaf| (query_leaf.response_ordinal, query_leaf.leaf_ordinal));
+    if sorted_query_leaves.windows(2).any(|adjacent| {
+        adjacent[0].response_ordinal == adjacent[1].response_ordinal
+            && adjacent[0].leaf_ordinal == adjacent[1].leaf_ordinal
+    }) {
+        return Err(CompactMaskingEntropyError::DuplicateTranscriptInput);
+    }
+    let mut consumed_query_leaves = vec![false; sorted_query_leaves.len()];
+    for step in &final_query_steps {
+        let positions =
+            query_positions_for_disclosure(&authority.inputs, &authority.transcript, step.kind())?;
+        if !positions.preceding.is_empty() {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+        let candidate_output = query_leaf_values_for_step(
+            &authority.inputs,
+            step.kind(),
+            positions.current,
+            &sorted_query_leaves,
+            &mut consumed_query_leaves,
+        )?;
+        match step.kind() {
+            CompactMaskingDisclosureKind::SourceQueries {
+                epoch: step_epoch,
+                source_ordinal: 3,
+            }
+            | CompactMaskingDisclosureKind::CarriedMaskQueries {
+                epoch: step_epoch, ..
+            } if step_epoch == epoch => {
+                authority.verify_coefficient_image_output(step, &[], None, &candidate_output)?;
+            }
+            CompactMaskingDisclosureKind::FreshSourceQueries { epoch: step_epoch }
+                if step_epoch == epoch =>
+            {
+                authority.verify_coefficient_image_output(
+                    step,
+                    &[],
+                    Some(fresh_source_mirror_coefficients),
+                    &candidate_output,
+                )?;
+            }
+            CompactMaskingDisclosureKind::FreshMaskQueries {
+                epoch: step_epoch,
+                group_ordinal,
+            } if step_epoch == epoch => {
+                authority.verify_coefficient_image_output(
+                    step,
+                    &[],
+                    Some(
+                        fresh_mask_mirror_coefficients
+                            .get(usize::from(group_ordinal))
+                            .ok_or(CompactMaskingEntropyError::MissingTranscriptInput)?,
+                    ),
+                    &candidate_output,
+                )?;
+            }
+            _ => return Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
+        }
+    }
+    if final_query_steps.is_empty() || consumed_query_leaves.iter().any(|consumed| !consumed) {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    Ok(())
+}
+
+fn replay_selected_compact_masking_prefix_with_base_claim<'contract>(
+    inputs: CompactPublicKeyVerifierInputs<'contract>,
+    coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
+    identity: CompactMaskingAttemptIdentity,
+    completed_messages: &[DecodedFixedUniformVerifierMessage],
+    epoch: u8,
+    claim_coefficients: &[CompactChallengeField],
+) -> Result<
+    (
+        CompactMaskingEntropyAuthority<'contract>,
+        Vec<CompactMaskingEntropyStep>,
+        Vec<CompactMaskingEntropyStep>,
+    ),
+    CompactMaskingEntropyError,
+> {
+    if completed_messages.is_empty() || completed_messages.len() >= inputs.verifier_moves.len() {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    let claim = CompactBaseFreshClaimCoefficients {
+        epoch,
+        coefficients: claim_coefficients.to_vec(),
+    };
+    let mut authority = CompactMaskingEntropyAuthority::begin(inputs, coefficient_maps, identity)?;
+    let mut last_response_steps = Vec::new();
+    let mut last_message_steps = Vec::new();
+    for (move_index, message) in completed_messages.iter().enumerate() {
+        let response_steps = if authority.next_base_claim_requirement()?.is_some() {
+            authority.authorize_next_response(Some(&claim))?
+        } else {
+            authority.authorize_next_response(None)?
+        };
+        if move_index + 1 == completed_messages.len() {
+            last_response_steps = response_steps.to_vec();
+        }
+        let move_ordinal = u32::try_from(move_index)
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+        let message_steps = authority.ingest_verifier_message(move_ordinal, message)?;
+        if move_index + 1 == completed_messages.len() {
+            last_message_steps = message_steps.to_vec();
+        }
+    }
+    Ok((authority, last_response_steps, last_message_steps))
+}
+
+fn validate_base_reveal_steps(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    epoch: u8,
+    steps: &[CompactMaskingEntropyStep],
+    expected_reveal_coordinate_count: usize,
+) -> Result<(), CompactMaskingEntropyError> {
+    let epoch_contract = inputs
+        .whir_epochs
+        .iter()
+        .find(|contract| contract.epoch == epoch)
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    let expected_step_count = epoch_contract
+        .external_mask_groups
+        .len()
+        .checked_add(epoch_contract.internal_mask_groups.len())
+        .and_then(|count| count.checked_add(2))
+        .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+    if steps.len() != expected_step_count
+        || steps.first().is_none_or(|step| {
+            step.kind() != CompactMaskingDisclosureKind::BaseBlindedSourceMessage { epoch }
+        })
+        || steps.get(1).is_none_or(|step| {
+            step.kind() != CompactMaskingDisclosureKind::BaseBlindedSourceRandomness { epoch }
+        })
+    {
+        return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    for (group_ordinal, step) in steps.iter().skip(2).enumerate() {
+        if step.kind()
+            != (CompactMaskingDisclosureKind::BaseBlindedMaskGroup {
+                epoch,
+                group_ordinal: u8::try_from(group_ordinal)
+                    .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?,
+            })
+        {
+            return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+        }
+    }
+    let output_count = steps.iter().try_fold(0_u64, |count, step| {
+        count
+            .checked_add(step.output_coordinate_count())
+            .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)
+    })?;
+    let rank = steps.iter().try_fold(0_u64, |count, step| {
+        count
+            .checked_add(step.conditional_rank())
+            .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)
+    })?;
+    let linear_fiber_count = steps
+        .iter()
+        .filter(|step| {
+            matches!(
+                step.image,
+                CompactMaskingDisclosureImage::LinearClaimFiber { .. }
+            )
+        })
+        .count();
+    if usize::try_from(output_count).ok() != Some(expected_reveal_coordinate_count)
+        || rank.checked_add(1) != Some(output_count)
+        || linear_fiber_count != 1
+        || steps.iter().any(|step| match step.image {
+            CompactMaskingDisclosureImage::FullCoordinateSpace => {
+                step.conditional_rank() != step.output_coordinate_count()
+            }
+            CompactMaskingDisclosureImage::LinearClaimFiber { .. } => {
+                step.conditional_rank().checked_add(1) != Some(step.output_coordinate_count())
+            }
+            CompactMaskingDisclosureImage::CoefficientMapImage { .. } => true,
+        })
+    {
+        return Err(CompactMaskingEntropyError::RankFailure);
+    }
+    Ok(())
+}
+
+fn expected_base_reveal_coordinate_count(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    epoch: u8,
+) -> Result<usize, CompactMaskingEntropyError> {
+    let mut matching_folds = inputs
+        .whir_folds
+        .iter()
+        .filter(|fold| fold.epoch == epoch && fold.batch_ordinal == 3);
+    let final_fold = matching_folds
+        .next()
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    if matching_folds.next().is_some() {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    }
+    let mut matching_epochs = inputs
+        .whir_epochs
+        .iter()
+        .filter(|contract| contract.epoch == epoch);
+    let epoch_contract = matching_epochs
+        .next()
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    if matching_epochs.next().is_some() {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    }
+    let coordinate_count = epoch_contract
+        .external_mask_groups
+        .iter()
+        .chain(&epoch_contract.internal_mask_groups)
+        .try_fold(
+            final_fold
+                .message_length
+                .checked_add(final_fold.hiding_randomness_length)
+                .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?,
+            |count, group| {
+                group
+                    .message_length
+                    .checked_add(group.randomness_length)
+                    .and_then(|lane_count| lane_count.checked_mul(group.width))
+                    .and_then(|group_count| count.checked_add(group_count))
+                    .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)
+            },
+        )?;
+    usize::try_from(coordinate_count).map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)
+}
+
+fn query_leaf_values_for_step(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    kind: CompactMaskingDisclosureKind,
+    query_positions: &[u64],
+    query_leaves: &[&CompactMaskingQueryLeaf],
+    consumed_query_leaves: &mut [bool],
+) -> Result<Vec<CompactChallengeField>, CompactMaskingEntropyError> {
+    let (geometry, component) = query_component_for_disclosure(inputs, kind)?;
+    let expected_value_count_per_leaf =
+        usize::try_from(component.field_element_count_per_leaf())
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(
+            query_positions
+                .len()
+                .checked_mul(expected_value_count_per_leaf)
+                .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?,
+        )
+        .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
+    for query_position in query_positions {
+        let leaf_ordinal = component
+            .first_leaf_ordinal()
+            .checked_add(*query_position)
+            .ok_or(CompactMaskingEntropyError::ArithmeticOverflow)?;
+        let query_leaf_index = query_leaves
+            .binary_search_by_key(&(geometry.response_ordinal(), leaf_ordinal), |query_leaf| {
+                (query_leaf.response_ordinal, query_leaf.leaf_ordinal)
+            })
+            .map_err(|_| CompactMaskingEntropyError::MissingTranscriptInput)?;
+        let query_leaf = query_leaves[query_leaf_index];
+        if consumed_query_leaves
+            .get(query_leaf_index)
+            .copied()
+            .unwrap_or(true)
+            || query_leaf.values.len() != expected_value_count_per_leaf
+        {
+            return Err(CompactMaskingEntropyError::DuplicateTranscriptInput);
+        }
+        consumed_query_leaves[query_leaf_index] = true;
+        values.extend_from_slice(&query_leaf.values);
+    }
+    Ok(values)
 }
 
 fn replay_selected_compact_masking_prefix<'contract>(
@@ -3443,17 +4010,28 @@ struct CompactStepQueryPositions<'transcript> {
     current: &'transcript [u64],
 }
 
-fn query_positions_for_disclosure<'transcript>(
-    inputs: &CompactPublicKeyVerifierInputs<'_>,
-    transcript: &'transcript CompactMaskingEntropyTranscript,
+fn query_component_for_disclosure<'contract>(
+    inputs: &'contract CompactPublicKeyVerifierInputs<'_>,
     disclosure_kind: CompactMaskingDisclosureKind,
-) -> Result<CompactStepQueryPositions<'transcript>, CompactMaskingEntropyError> {
-    let component = inputs
+) -> Result<
+    (
+        &'contract CompactResponseMerkleGeometry,
+        &'contract CompactResponseComponentGeometry,
+    ),
+    CompactMaskingEntropyError,
+> {
+    let mut matches = inputs
         .response_merkle_geometries
         .iter()
         .zip(inputs.response_component_roles)
-        .flat_map(|(geometry, roles)| geometry.components().iter().zip(roles))
-        .find(|(_, role)| match disclosure_kind {
+        .flat_map(|(geometry, roles)| {
+            geometry
+                .components()
+                .iter()
+                .zip(roles)
+                .map(move |(component, role)| (geometry, component, role))
+        })
+        .filter(|(_, _, role)| match disclosure_kind {
             CompactMaskingDisclosureKind::SourceQueries {
                 epoch,
                 source_ordinal,
@@ -3484,9 +4062,22 @@ fn query_positions_for_disclosure<'transcript>(
                 group_ordinal,
             } => role.epoch == epoch && role.role_tag == 17 && role.batch_ordinal == group_ordinal,
             _ => false,
-        })
-        .ok_or(CompactMaskingEntropyError::InvalidContract)?
-        .0;
+        });
+    let (geometry, component, _) = matches
+        .next()
+        .ok_or(CompactMaskingEntropyError::InvalidContract)?;
+    if matches.next().is_some() {
+        return Err(CompactMaskingEntropyError::InvalidContract);
+    }
+    Ok((geometry, component))
+}
+
+fn query_positions_for_disclosure<'transcript>(
+    inputs: &CompactPublicKeyVerifierInputs<'_>,
+    transcript: &'transcript CompactMaskingEntropyTranscript,
+    disclosure_kind: CompactMaskingDisclosureKind,
+) -> Result<CompactStepQueryPositions<'transcript>, CompactMaskingEntropyError> {
+    let (_, component) = query_component_for_disclosure(inputs, disclosure_kind)?;
     let references = component_query_refs(component);
     let reference_index = match disclosure_kind {
         CompactMaskingDisclosureKind::CarriedMaskQueries { epoch: 2, .. }
@@ -4607,6 +5198,209 @@ mod tests {
             assert!(reveal.conditional_rank() > 0);
             assert_eq!(query.conditional_rank(), 0);
         }
+    }
+
+    #[test]
+    fn selected_first_epoch_final_queries_identify_deferred_union_transport() {
+        let (contract, maps) = selected();
+        let inputs = contract.verifier_inputs();
+        let transcript = selected_test_transcript(&inputs).expect("selected transcript");
+        let final_query_move = inputs
+            .verifier_moves
+            .iter()
+            .find(|verifier_move| {
+                verifier_move
+                    .role_coordinates
+                    .iter()
+                    .any(|role| role.role_tag == 11 && role.epoch == 1 && role.batch_ordinal == 0)
+            })
+            .expect("first-epoch final-query move");
+        let mut steps = Vec::new();
+        append_query_steps_for_move(
+            &inputs,
+            &maps,
+            &transcript,
+            final_query_move.ordinal,
+            &mut steps,
+        )
+        .expect("first-epoch final queries derive from the selected contract");
+
+        let mut deferred_union_count = 0;
+        let mut deferred_output_coordinate_count = 0_u64;
+        let mut immediate_component_count = 0;
+        let mut verifier_selected_leaf_count = 0_usize;
+        for step in &steps {
+            let (_geometry, component) =
+                query_component_for_disclosure(&inputs, step.kind).expect("query component");
+            let positions = query_positions_for_disclosure(&inputs, &transcript, step.kind)
+                .expect("query positions");
+            assert!(positions.preceding.is_empty());
+            verifier_selected_leaf_count += positions.current.len();
+            match component.query_selection() {
+                CompactResponseQuerySelection::VerifierMessageDistinctGroup {
+                    logical_verifier_move_ordinal,
+                    ..
+                } => {
+                    assert_eq!(logical_verifier_move_ordinal, final_query_move.ordinal);
+                    immediate_component_count += 1;
+                }
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                    first_logical_verifier_move_ordinal,
+                    second_logical_verifier_move_ordinal,
+                    ..
+                } => {
+                    assert_eq!(
+                        first_logical_verifier_move_ordinal,
+                        final_query_move.ordinal
+                    );
+                    assert!(second_logical_verifier_move_ordinal > final_query_move.ordinal);
+                    deferred_union_count += 1;
+                    deferred_output_coordinate_count += step.output_coordinate_count;
+                }
+                CompactResponseQuerySelection::Unqueried
+                | CompactResponseQuerySelection::EveryLeaf => {
+                    panic!("final query must use verifier-selected component coordinates")
+                }
+            }
+        }
+        assert_eq!(steps.len(), 18);
+        assert_eq!(immediate_component_count, 17);
+        assert_eq!(deferred_union_count, 1);
+        assert_eq!(deferred_output_coordinate_count, 798);
+        assert_eq!(verifier_selected_leaf_count, 7_080);
+    }
+
+    #[test]
+    fn production_final_query_gate_accepts_immediate_and_deferred_committed_leaves() {
+        let (contract, maps) = selected();
+        let inputs = contract.verifier_inputs();
+        let [pre_challenge_epoch, _main_epoch] = inputs.whir_epochs else {
+            panic!("the selected contract has two WHIR epochs")
+        };
+        let final_query_move_ordinal = inputs
+            .verifier_moves
+            .iter()
+            .find(|verifier_move| {
+                verifier_move
+                    .role_coordinates
+                    .iter()
+                    .any(|role| role.role_tag == 11 && role.epoch == pre_challenge_epoch.epoch)
+            })
+            .expect("first-epoch final-query move")
+            .ordinal;
+        let messages = (0..=usize::try_from(final_query_move_ordinal).unwrap())
+            .map(|move_index| selected_adversarial_message(&inputs, move_index))
+            .collect::<Vec<_>>();
+        let mut claim_coefficients = vec![
+            CompactChallengeField::ZERO;
+            usize::try_from(
+                base_fresh_message_dimension(&pre_challenge_epoch).expect("base message dimension"),
+            )
+            .unwrap()
+        ];
+        claim_coefficients[0] = CompactChallengeField::ONE;
+        let identity = CompactMaskingAttemptIdentity::new([7; 32], 0, [11; 64]);
+        let (authority, _reveal_steps, final_query_steps) =
+            replay_selected_compact_masking_prefix_with_base_claim(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                pre_challenge_epoch.epoch,
+                &claim_coefficients,
+            )
+            .expect("the production final-query prefix replays");
+
+        let mut query_leaves = Vec::new();
+        for step in &final_query_steps {
+            let positions = query_positions_for_disclosure(
+                &authority.inputs,
+                &authority.transcript,
+                step.kind(),
+            )
+            .expect("final query positions");
+            assert!(positions.preceding.is_empty());
+            let (geometry, component) =
+                query_component_for_disclosure(&authority.inputs, step.kind())
+                    .expect("final query component");
+            let value_count = usize::try_from(component.field_element_count_per_leaf()).unwrap();
+            assert_eq!(
+                usize::try_from(step.output_coordinate_count()).unwrap(),
+                positions.current.len() * value_count
+            );
+            for query_position in positions.current {
+                query_leaves.push(
+                    CompactMaskingQueryLeaf::new(
+                        geometry.response_ordinal(),
+                        component.first_leaf_ordinal() + *query_position,
+                        vec![CompactChallengeField::ZERO; value_count],
+                    )
+                    .expect("canonical zero query leaf"),
+                );
+            }
+        }
+
+        let final_fold = inputs
+            .whir_folds
+            .iter()
+            .find(|fold| fold.epoch == pre_challenge_epoch.epoch && fold.batch_ordinal == 3)
+            .expect("final pre-challenge fold");
+        let fresh_source_mirror_coefficients =
+            vec![
+                CompactChallengeField::ZERO;
+                usize::try_from(final_fold.message_length + final_fold.hiding_randomness_length,)
+                    .unwrap()
+            ];
+        let fresh_mask_mirror_coefficients = pre_challenge_epoch
+            .external_mask_groups
+            .iter()
+            .chain(&pre_challenge_epoch.internal_mask_groups)
+            .map(|group| {
+                vec![
+                    CompactChallengeField::ZERO;
+                    usize::try_from(group.width * (group.message_length + group.randomness_length),)
+                        .unwrap()
+                ]
+            })
+            .collect::<Vec<_>>();
+        let verify_query_leaves = |query_leaves: &[CompactMaskingQueryLeaf]| {
+            verify_selected_compact_pre_challenge_base_final_query_masking(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &messages,
+                pre_challenge_epoch.epoch,
+                &claim_coefficients,
+                &fresh_source_mirror_coefficients,
+                &fresh_mask_mirror_coefficients,
+                query_leaves,
+            )
+        };
+        verify_query_leaves(&query_leaves)
+            .expect("the final gate accepts immediate and deferred committed query leaves");
+
+        let duplicate_response_ordinal = query_leaves[0].response_ordinal;
+        let duplicate_leaf_ordinal = query_leaves[0].leaf_ordinal;
+        let duplicate_value_count = query_leaves[0].values.len();
+        query_leaves.push(
+            CompactMaskingQueryLeaf::new(
+                duplicate_response_ordinal,
+                duplicate_leaf_ordinal,
+                vec![CompactChallengeField::ZERO; duplicate_value_count],
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            verify_query_leaves(&query_leaves),
+            Err(CompactMaskingEntropyError::DuplicateTranscriptInput)
+        );
+        query_leaves.pop();
+
+        query_leaves.pop();
+        assert_eq!(
+            verify_query_leaves(&query_leaves),
+            Err(CompactMaskingEntropyError::MissingTranscriptInput)
+        );
     }
 
     #[test]
