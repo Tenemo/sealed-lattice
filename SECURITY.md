@@ -165,8 +165,13 @@ covector from verifier-bound CFW challenges and production matrix-role weights,
 streams all 4,194,304 authenticated witness elements into the matching relation,
 checks its target, samples the initial masked-sumcheck state from the live KMAC
 stream, and gates the sampled auxiliary target against the independently
-compiled conditional image. Guarded selected-size native coverage reaches this
-prepared state, but it has not committed a main-epoch response.
+compiled conditional image. The same state commits the initial mask-oracle,
+auxiliary, and padding response plus all seven round-wire responses, verifies
+every wire against its sequential conditional image, and authenticates every
+response checkpoint. Guarded selected-size native coverage reconciles 4,110
+committed leaves, 14 compiler-required round-wire openings, and a 32,768-element
+residual source and covector. It has not started the first main-epoch code
+switch or any later batch.
 The CFW phase reconciles 4,926 external-storage transactions, 1,006,632,840
 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes;
 measurements remain in its run diagnostics. At a later opening boundary, the
@@ -178,7 +183,8 @@ selected-size owner has not reached or measured that later opening move. This
 is native development evidence only.
 Selected-size main-source stripe opening replay, authenticated mid-stripe
 restart, cold restoration through the common worker, scalar-WASM execution,
-main-epoch response execution, and a complete emitted proof remain absent.
+the remaining main-epoch response execution, and a complete emitted proof
+remain absent.
 The test-only production-shaped small-chain owner uses the response state, but
 the production worker adapter, later main-WHIR response and fold execution,
 semantic composition, complete masking path, emitted-coordinate accounting,
@@ -206,8 +212,8 @@ opening. The later two source-query images are evaluated at their verifier-
 message boundaries and retained only after the same production masking check;
 all four pre-challenge auxiliaries and every round wire pass their live
 conditional-image gates. The verified first-epoch base prefix also authorizes
-the exact initial main-epoch replay, whose sampled auxiliary target passes its
-live conditional-image gate.
+the exact initial main-epoch replay; its sampled auxiliary target and all seven
+round wires pass their live conditional-image gates.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -232,8 +238,8 @@ to verified public input and the exact semantic prefix, and guarded coverage
 reaches the terminal 82-move lifecycle, including retry, restore, and nonempty-
 suffix rewind.
 
-The release path does not close masking: the main-epoch role-18 authority and
-sequential conditional images, whole-construction terminal simulator binding to
+The release path does not close masking: the later main-epoch conditional
+images and role-18 authority, whole-construction terminal simulator binding to
 the complete emitted proof, and the exact construction-level statistical-HVZK
 statement remain absent. The live CFW gates bind the canonical prefix through
 the final CFW response. The live pre-challenge WHIR path extends that binding
@@ -242,9 +248,11 @@ disclosures, the role-18 base claim, the role-10 blinded reveal, and the role-11
 final-query image. Final-query accounting follows logical query ownership rather
 than the response opening time: it excludes previously checked historical
 leaves and evaluates the first 399-leaf view of the shared cross-epoch root
-without releasing that root's deferred Merkle opening. These gates do not cover
-the main epoch or terminal whole-construction simulator and are not a complete
-emitted-byte correspondence argument.
+without releasing that root's deferred Merkle opening. The initial main-epoch
+auxiliary and all seven round wires extend the same live prefix through its
+first masked-sumcheck batch. These gates do not cover the remaining main epoch
+or terminal whole-construction simulator and are not a complete emitted-byte
+correspondence argument.
 The live bridge accounts for three symbolic quantum-PRF replacements: action-
 root key expansion, proof-coin and coordinate-stream derivation, and compact-
 generation expansion keyed by the two seeds. It also retains exact action-root,
@@ -374,11 +382,14 @@ that a coherent snapshot is newest.
   from the verifier-bound CFW challenges, streams the complete 4,194,304-element
   authenticated witness through the matching relation, checks its target, and
   gates the sampled initial auxiliary target using the opaque verified first-
-  epoch masking prefix. The production path owns verifier-derived opening
+  epoch masking prefix. It commits the initial main-epoch response and seven
+  round responses, gates every round wire, authenticates every checkpoint, and
+  reconciles 4,110 committed leaves, 14 openings, and a 32,768-element residual
+  relation. The production path owns verifier-derived opening
   recomputation, but selected-size main-source stripe opening replay, mid-stripe
-  restart, cold common-worker restoration, main-epoch response execution,
-  complete proof execution, browser resource reconciliation, and browser
-  execution remain unresolved.
+  restart, cold common-worker restoration, the remaining main-epoch response
+  execution, complete proof execution, browser resource reconciliation, and
+  browser execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

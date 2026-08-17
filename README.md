@@ -191,8 +191,13 @@ and target release remain incomplete or internal.
   main relation. It positively checks the resulting relation target, samples
   the initial main masked-sumcheck state from the live KMAC stream, and gates
   its auxiliary target against the independently compiled conditional image.
-  Guarded selected-size native execution reaches this prepared state. No main-
-  epoch response has yet been committed.
+  The shared epoch state machine then commits the initial mask-oracle,
+  auxiliary, and padding response plus all seven round-wire responses. Each
+  wire passes its live conditional-image gate before commitment, every response
+  publishes an authenticated checkpoint, and response custody supplies the 14
+  compiler-required round-wire openings. Guarded selected-size native execution
+  reconciles 4,110 committed leaves and finishes with a 32,768-element residual
+  source and covector. No main-epoch code switch or later batch has executed.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -206,16 +211,16 @@ and target release remain incomplete or internal.
   external-storage transactions, 1,006,632,840 bytes written, 2,013,265,440
   bytes read, and 587,202,560 peak CFW storage bytes.
   These measurements remain in the owning run diagnostics and do not
-  constitute scalar-WASM or browser evidence. The owner now reaches initial
-  main-epoch relation and masked-sumcheck preparation, but it does not yet cover
+  constitute scalar-WASM or browser evidence. The owner now completes the
+  initial main-epoch masked-sumcheck batch, but it does not yet cover
   a selected-size main-source stripe opening replay, authenticated mid-stripe
   restart, cold restoration through the common worker, JavaScript and browser-
-  process overlap, any main-epoch response, a complete emitted proof, or
-  algebraic verification of that proof. The test-only production-shaped small-
-  chain owner uses the response state, but main-epoch response execution,
-  terminal semantic composition, and the whole-construction masking simulator
-  remain test-only or incomplete. Before
-  the second response's masking material is drawn, release generation now re-
+  process overlap, the first main-epoch code switch, later main-epoch responses,
+  a complete emitted proof, or algebraic verification of that proof. The test-
+  only production-shaped small-chain owner uses the response state, but the
+  remaining main-epoch response execution, terminal semantic composition, and
+  the whole-construction masking simulator remain test-only or incomplete.
+  Before the second response's masking material is drawn, release generation now re-
   decodes its canonical public input through
   the selected verifier contract, independently derives and checks every
   coefficient-to-view map, and constructs the compiler/verifier-derived public-
@@ -240,9 +245,10 @@ and target release remain incomplete or internal.
   at their verifier-message boundaries and retained for last-use opening only
   after the same production masking check; all four pre-challenge auxiliaries
   and every round wire pass their live conditional-image gates. The verified
-  first-epoch base prefix also authorizes the exact initial main-epoch replay,
-  whose sampled auxiliary target passes its live conditional-image gate. The
-  fixed KMAC256/SHAKE256 joint assumption remains external. The live pre-challenge
+  first-epoch base prefix also authorizes the exact initial main-epoch replay;
+  its sampled auxiliary target and all seven round wires pass their live
+  conditional-image gates. The fixed KMAC256/SHAKE256 joint assumption remains
+  external. The live pre-challenge
   role-18 carried covector, role-10 blinded reveal, and role-11 final-query
   images are now connected to canonical generated values and the exact
   authenticated prefix. The main-epoch role-18 authority, later-epoch
