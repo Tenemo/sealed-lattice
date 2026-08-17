@@ -87,8 +87,9 @@ use crate::bgv::proof_suite::{
 use crate::bgv::proof_suite::{
     ProofBaseFieldElement,
     compact_cfw::{
-        COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwGeometry,
-        CompactCfwMaskMaterial, CompactCfwMatrixRole, CompactCfwTranscript,
+        COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_MATRIX_COUNT,
+        COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwGeometry, CompactCfwMaskMaterial,
+        CompactCfwMatrixRole, CompactCfwPublicMainCovectorCombination, CompactCfwTranscript,
         PreparedCompactCfwProver, compact_challenge_to_production, verify_compact_cfw_transcript,
     },
     compact_cfw_external_prover::{CompactCfwExternalProverState, CompactCfwExternalRowSource},
@@ -113,6 +114,7 @@ use crate::bgv::proof_suite::{
     compact_transcript::derive_compact_fiat_shamir_verifier_message,
     compact_whir::{
         COMPACT_WHIR_MASK_LOG_INVERSE_RATE, COMPACT_WHIR_PROTOCOL_SECURITY_LEVEL,
+        CompactWhirMainRelationPreparation, CompactWhirMainRelationPreparationPoll,
         compact_whir_commitment_scheme as small_chain_commitment_scheme,
     },
     external_memory::{ProofExternalMemoryUsage, tests::TestStorage},
@@ -3704,6 +3706,127 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                     outer_mask_covectors,
                     relation_claim_count,
                 ) = combined_relation.into_parts();
+
+                let public_combination =
+                    CompactCfwPublicMainCovectorCombination::from_public_challenges_before_whir_fold(
+                        cfw_geometry,
+                        &main_cross_epoch_point,
+                        copied_main_source_element_count,
+                        &fresh_round_challenges,
+                        fresh_joint_constraint_challenge,
+                        whir_batching_challenge,
+                    )
+                    .expect("public challenges determine the full main-WHIR coefficient seed");
+                let (public_continuation, public_source_covector) =
+                    public_combination.into_parts();
+                assert_eq!(
+                    public_continuation.batching_challenge(),
+                    whir_batching_challenge
+                );
+                let transpose_source = CompactStructuredAssignmentTransposeSource::new(
+                    Rc::clone(row_source.assignment_source()),
+                );
+                let mut public_accumulator =
+                    CompactStructuredWitnessCovectorAccumulator::from_public_relation(
+                        transpose_source,
+                        &relation,
+                        public_continuation.row_point(),
+                        public_continuation.matrix_role_weights(),
+                        public_source_covector,
+                    )
+                    .expect("the public main-WHIR transpose starts without resident matrices");
+                let public_source_covector = loop {
+                    match public_accumulator
+                        .advance(8_192)
+                        .expect("the public main-WHIR transpose advances")
+                    {
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            completed_work_unit_count,
+                            ..
+                        } => assert!(completed_work_unit_count > 0),
+                        CompactStructuredWitnessCovectorAccumulatorPoll::Complete(covector) => {
+                            break covector;
+                        }
+                    }
+                };
+                let public_covectors = public_continuation
+                    .finish_after_matrix_accumulation(public_source_covector)
+                    .expect("the public main-WHIR transpose produces every mask covector");
+                assert_eq!(public_covectors.source.as_slice(), source_covector);
+                assert_eq!(public_covectors.inner_masks, inner_mask_covectors);
+                assert_eq!(public_covectors.outer_masks, outer_mask_covectors);
+                assert_eq!(public_covectors.cross_epoch_masks, preceding_mask_covectors);
+
+                let inner_mask_message_arrays = inner_mask_messages
+                    .iter()
+                    .map(|message| {
+                        <[CompactChallengeField; COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH]>::try_from(
+                            message.as_slice(),
+                        )
+                        .expect("every inner mask has the production message width")
+                    })
+                    .collect::<Vec<_>>();
+                let outer_mask_message_arrays = outer_mask_messages
+                    .iter()
+                    .map(|message| {
+                        <[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]>::try_from(
+                            message.as_slice(),
+                        )
+                        .expect("every outer mask has the production message width")
+                    })
+                    .collect::<Vec<_>>();
+                let mut relation_preparation = CompactWhirMainRelationPreparation::new(
+                    public_covectors,
+                    &inner_mask_message_arrays,
+                    &outer_mask_message_arrays,
+                    [pre_challenge_mask, main_mask],
+                    whir_batching_challenge,
+                )
+                .expect("the public covectors and committed masks define the main-WHIR relation");
+                let mut streamed_source_element_count = 0_u64;
+                loop {
+                    match relation_preparation
+                        .poll(8_192, |source_ordinal| {
+                            Ok::<_, Infallible>(
+                                witness[usize::try_from(source_ordinal)
+                                    .expect("the reduced source ordinal fits usize")],
+                            )
+                        })
+                        .expect("the authenticated main-WHIR source streams")
+                    {
+                        CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
+                            processed_work_unit_count,
+                            ..
+                        } => {
+                            assert!((1..=8_192).contains(&processed_work_unit_count));
+                            streamed_source_element_count += processed_work_unit_count;
+                        }
+                        CompactWhirMainRelationPreparationPoll::Complete => break,
+                    }
+                }
+                assert_eq!(
+                    streamed_source_element_count,
+                    u64::try_from(witness.len()).expect("the reduced witness length fits u64")
+                );
+                let prepared_relation = relation_preparation
+                    .finish()
+                    .expect("the complete authenticated source enters main WHIR");
+                let (
+                    prepared_source_evaluations,
+                    prepared_source_covector,
+                    prepared_source_claim,
+                    prepared_target,
+                    prepared_mask_claim,
+                    prepared_input_binding_challenge,
+                ) = prepared_relation.relation_parts_for_test();
+                assert_eq!(prepared_source_evaluations, witness);
+                assert_eq!(prepared_source_covector, source_covector);
+                assert_eq!(prepared_target, target);
+                assert_eq!(prepared_source_claim + prepared_mask_claim, target);
+                assert_eq!(
+                    prepared_input_binding_challenge,
+                    whir_batching_challenge
+                );
                 assert_eq!(preceding_mask_covectors.len(), shared_mask_shape.width);
                 assert_eq!(relation_claim_count, expected_relation_claim_count);
                 assert_eq!(inner_mask_covectors.len(), inner_mask_shape.width);

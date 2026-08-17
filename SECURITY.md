@@ -156,6 +156,17 @@ exactly 7,080 compiler-derived query leaves before releasing the final secret
 state. Guarded native coverage executes this complete pre-challenge response
 path under the repository memory ceiling. It does not close the main WHIR
 epoch, a complete emitted proof, or browser evidence.
+The final gate returns only an opaque in-memory continuation bound to the proof
+attempt, first-epoch claim coefficients, and exact authenticated verifier-
+message prefix; it is neither serialized nor caller supplied. The release
+generation state uses that continuation to replay the masking chronology at the
+initial main-epoch boundary. It independently derives the complete main source
+covector from verifier-bound CFW challenges and production matrix-role weights,
+streams all 4,194,304 authenticated witness elements into the matching relation,
+checks its target, samples the initial masked-sumcheck state from the live KMAC
+stream, and gates the sampled auxiliary target against the independently
+compiled conditional image. Guarded selected-size native coverage reaches this
+prepared state, but it has not committed a main-epoch response.
 The CFW phase reconciles 4,926 external-storage transactions, 1,006,632,840
 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes;
 measurements remain in its run diagnostics. At a later opening boundary, the
@@ -167,12 +178,12 @@ selected-size owner has not reached or measured that later opening move. This
 is native development evidence only.
 Selected-size main-source stripe opening replay, authenticated mid-stripe
 restart, cold restoration through the common worker, scalar-WASM execution,
-the main WHIR epoch, and a complete emitted proof remain absent.
+main-epoch response execution, and a complete emitted proof remain absent.
 The test-only production-shaped small-chain owner uses the response state, but
-the WHIR family material provider, production worker adapter, semantic
-composition, remaining WHIR execution, complete masking path, emitted-coordinate
-accounting, fixed-tape arithmetic, proof production, and complete algebraic
-proof verification remain test-only or incomplete. Before post-lookup masking
+the production worker adapter, later main-WHIR response and fold execution,
+semantic composition, complete masking path, emitted-coordinate accounting,
+fixed-tape arithmetic, proof production, and complete algebraic proof
+verification remain test-only or incomplete. Before post-lookup masking
 material is drawn, release generation now independently re-decodes the canonical
 public input through the selected verifier contract, derives and checks every
 coefficient-to-view map, and constructs the compiler/verifier-derived public-
@@ -194,7 +205,9 @@ passes its full-rank conditional-image gate before generation releases any
 opening. The later two source-query images are evaluated at their verifier-
 message boundaries and retained only after the same production masking check;
 all four pre-challenge auxiliaries and every round wire pass their live
-conditional-image gates.
+conditional-image gates. The verified first-epoch base prefix also authorizes
+the exact initial main-epoch replay, whose sampled auxiliary target passes its
+live conditional-image gate.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -357,11 +370,15 @@ that a coherent snapshot is newest.
   immediate leaves plus 399 committed leaves whose shared-root Merkle opening
   remains deferred. Its CFW external-storage execution reconciles 4,926
   transactions, 1,006,632,840 bytes written, 2,013,265,440 bytes read, and
-  587,202,560 peak bytes. The production path owns verifier-derived opening
+  587,202,560 peak bytes. It then derives the initial main-epoch source covector
+  from the verifier-bound CFW challenges, streams the complete 4,194,304-element
+  authenticated witness through the matching relation, checks its target, and
+  gates the sampled initial auxiliary target using the opaque verified first-
+  epoch masking prefix. The production path owns verifier-derived opening
   recomputation, but selected-size main-source stripe opening replay, mid-stripe
-  restart, cold common-worker restoration, the main WHIR epoch, complete proof
-  execution, browser resource reconciliation, and browser execution remain
-  unresolved.
+  restart, cold common-worker restoration, main-epoch response execution,
+  complete proof execution, browser resource reconciliation, and browser
+  execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

@@ -24,8 +24,9 @@ mod production_small_chain;
 pub(crate) use witness_covector::compact_structured_witness_covector_geometry;
 
 pub(crate) use witness_covector::{
-    CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
-    StructuredTransposeValueSource,
+    CompactStructuredAssignmentTransposeSource, CompactStructuredWitnessCovectorAccumulator,
+    CompactStructuredWitnessCovectorAccumulatorPoll,
+    CompactStructuredWitnessCovectorAccumulatorStep, StructuredTransposeValueSource,
 };
 #[cfg(test)]
 pub(crate) use witness_covector::{
@@ -2205,6 +2206,10 @@ where
 
     pub(super) const fn row_count(&self) -> u64 {
         self.matrices.row_count
+    }
+
+    pub(super) const fn assignment_source(&self) -> &Assignment {
+        &self.assignment
     }
 
     pub(super) fn witness_value(
@@ -4540,8 +4545,7 @@ mod tests {
 
     #[test]
     #[ignore = "manual retained compact public-key assignment gate"]
-    fn heavy_rust_kernel_retained_public_key_authority_completes_pre_challenge_whir_base_responses()
-    {
+    fn heavy_rust_kernel_retained_public_key_authority_prepares_main_whir_sumcheck() {
         let authority = populate_compact_public_key_development_evidence_authority(0x43)
             .expect("standalone production-derived public-key authority populates");
         let action_private_randomness = authority.action_private_randomness;
@@ -5126,7 +5130,11 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFreshResponseCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponsePrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFinalQueryStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared
+                | CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { .. } => {
                     panic!("cross-epoch work cannot precede the post-lookup checkpoint")
                 }
             }
@@ -5278,7 +5286,11 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFreshResponseCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponsePrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFinalQueryStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared
+                | CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { .. } => {
                     panic!("post-lookup work cannot recur during the cross-epoch response")
                 }
             }
@@ -5450,7 +5462,11 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFreshResponseCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponsePrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFinalQueryStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared
+                | CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { .. } => {
                     panic!("pre-CFW work cannot recur during the complete CFW reduction")
                 }
             }
@@ -5695,7 +5711,11 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponsePrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFinalQueryStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete { .. } => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckComplete { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared
+                | CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { .. } => {
                     panic!("earlier generation work cannot recur during the initial WHIR sumcheck")
                 }
             }
@@ -5848,7 +5868,11 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFreshResponseCheckpointReady
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponsePrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFinalQueryStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared
+                | CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { .. } => {
                     panic!("earlier generation work cannot recur during the first WHIR code switch")
                 }
             }
@@ -6387,7 +6411,11 @@ mod tests {
                 }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponsePrepared
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFinalQueryStepCompleted { .. }
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseBlindedResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared
+                | CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { .. } => {
                     panic!("completed pre-challenge work cannot recur during the base response")
                 }
             }
@@ -6524,7 +6552,11 @@ mod tests {
                     ..
                 }
                 | CompactPublicKeyMainEpochPoll::PreChallengeWhirBasePrepared
-                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFreshResponseCheckpointReady => {
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseFreshResponseCheckpointReady
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared
+                | CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { .. } => {
                     panic!(
                         "completed pre-challenge work cannot recur during the blinded base response"
                     )
@@ -6562,6 +6594,75 @@ mod tests {
             final_query_processed_work_unit_count,
             blinded_response_leaf_count,
             final_opened_leaf_count,
+        );
+
+        let phase_started_at = Instant::now();
+        println!("compact public-key focused owner phase: prepare initial main WHIR sumcheck");
+        let expected_main_source_element_count =
+            prepared_main_epoch.family_material().witness_length();
+        assert_eq!(expected_main_source_element_count, 4_194_304);
+        prepared_main_epoch
+            .prepare_main_whir_initial_sumcheck()
+            .expect("the completed pre-challenge epoch starts the main-WHIR relation");
+        let mut covector_poll_count = 0_u64;
+        let mut covector_work_unit_count = 0_u64;
+        let mut covector_prepared_count = 0_u64;
+        let mut relation_source_poll_count = 0_u64;
+        let mut relation_source_element_count = 0_u64;
+        let mut relation_completion_poll_count = 0_u64;
+        loop {
+            match prepared_main_epoch
+                .poll_main_whir_initial_sumcheck_preparation(8_192)
+                .expect("the selected main-WHIR relation preparation advances")
+            {
+                CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted {
+                    completed_work_unit_count,
+                    ..
+                } => {
+                    assert!(completed_work_unit_count > 0);
+                    covector_poll_count += 1;
+                    covector_work_unit_count += completed_work_unit_count;
+                }
+                CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared => {
+                    covector_prepared_count += 1;
+                }
+                CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted {
+                    processed_work_unit_count,
+                    relation_complete,
+                } => {
+                    assert!((1..=8_192).contains(&processed_work_unit_count));
+                    relation_source_poll_count += 1;
+                    relation_source_element_count += processed_work_unit_count;
+                    relation_completion_poll_count += u64::from(relation_complete);
+                }
+                CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared { batch_ordinal } => {
+                    assert_eq!(batch_ordinal, 0);
+                    break;
+                }
+                unexpected => {
+                    panic!(
+                        "unexpected poll while preparing the initial main-WHIR sumcheck: {unexpected:?}"
+                    )
+                }
+            }
+        }
+        assert!(covector_poll_count > 0);
+        assert!(covector_work_unit_count > 0);
+        assert_eq!(covector_prepared_count, 1);
+        assert!(relation_source_poll_count > 1);
+        assert_eq!(
+            relation_source_element_count,
+            expected_main_source_element_count
+        );
+        assert_eq!(relation_completion_poll_count, 1);
+        assert!(prepared_main_epoch.main_whir_initial_sumcheck_ready());
+        println!(
+            "compact public-key focused owner phase complete: prepare initial main WHIR sumcheck elapsed_milliseconds={} covector_poll_count={} covector_work_unit_count={} relation_source_poll_count={} relation_source_element_count={}",
+            phase_started_at.elapsed().as_millis(),
+            covector_poll_count,
+            covector_work_unit_count,
+            relation_source_poll_count,
+            relation_source_element_count,
         );
         prepared_main_epoch
             .cancel_response_custody(&mut response_storage)

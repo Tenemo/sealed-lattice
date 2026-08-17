@@ -23,9 +23,10 @@ use crate::bgv::proof_suite::{
     compact_cfw::{
         COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError,
         CompactCfwGeometry, CompactCfwMaskMaterial, CompactCfwMaskedCrossEpochClaims,
-        CompactCfwPrefixEvaluationError, CompactCfwPrefixEvaluationState, CompactChallengeField,
-        compact_cfw_final_challenge_is_allowed, compact_challenge_from_production,
-        compact_challenge_to_production,
+        CompactCfwPrefixEvaluationError, CompactCfwPrefixEvaluationState,
+        CompactCfwPublicMainCovectorCombination, CompactCfwPublicMainCovectorContinuation,
+        CompactChallengeField, compact_cfw_final_challenge_is_allowed,
+        compact_challenge_from_production, compact_challenge_to_production,
     },
     compact_cfw_external_prover::{
         CompactCfwExternalProverExecutionError, CompactCfwExternalProverFinishError,
@@ -41,8 +42,8 @@ use crate::bgv::proof_suite::{
         derive_compact_masking_coefficient_map_certificate,
     },
     compact_masking_entropy::{
-        CompactMaskingEntropyError, CompactMaskingQueryLeaf,
-        derive_selected_compact_pre_challenge_base_covector,
+        CompactMaskingEntropyError, CompactMaskingQueryLeaf, CompactVerifiedBaseMaskingPrefix,
+        CompactVerifiedBaseRevealMasking, derive_selected_compact_pre_challenge_base_covector,
         verify_selected_compact_cfw_finish_masking, verify_selected_compact_cfw_round_masking,
         verify_selected_compact_cross_epoch_masking_prefix,
         verify_selected_compact_pre_challenge_base_final_query_masking,
@@ -78,7 +79,9 @@ use crate::bgv::proof_suite::{
         CompactWhirCodeSwitchRelationPreparation, CompactWhirCodeSwitchRelationPreparationPoll,
         CompactWhirCodeSwitchState, CompactWhirEncodedInitialOracle, CompactWhirEncodedMaskGroup,
         CompactWhirError, CompactWhirInitialSumcheckPoll, CompactWhirInitialSumcheckState,
-        CompactWhirPreChallengeRelationPreparation, CompactWhirPreChallengeRelationPreparationPoll,
+        CompactWhirMainRelationPreparation, CompactWhirMainRelationPreparationError,
+        CompactWhirMainRelationPreparationPoll, CompactWhirPreChallengeRelationPreparation,
+        CompactWhirPreChallengeRelationPreparationPoll,
         CompactWhirPreChallengeRelationPreparationStep, CompactWhirRecomputableExtensionError,
         CompactWhirRecomputableExtensionInitialOracle, CompactWhirRecomputableExtensionPoll,
         compact_whir_configuration_from_contract, compact_whir_mask_group_shape,
@@ -105,9 +108,11 @@ use super::{
         CompactPublicKeyBaseAssignment,
     },
     structured_r1cs::{
-        CompactStructuredR1csRowSource, CompactStructuredR1csRowSourcePreparation,
-        CompactStructuredR1csRowSourcePreparationPoll,
-        CompactStructuredR1csRowSourcePreparationStep,
+        CompactStructuredAssignmentTransposeSource, CompactStructuredR1csRowSource,
+        CompactStructuredR1csRowSourcePreparation, CompactStructuredR1csRowSourcePreparationPoll,
+        CompactStructuredR1csRowSourcePreparationStep, CompactStructuredWitnessCovectorAccumulator,
+        CompactStructuredWitnessCovectorAccumulatorPoll,
+        CompactStructuredWitnessCovectorAccumulatorStep,
     },
 };
 
@@ -116,6 +121,10 @@ type SelectedCompactPublicKeyRowSource =
     CompactStructuredR1csRowSource<SelectedCompactPublicKeyAssignment>;
 type SelectedCompactPublicKeyRowSourcePreparation =
     CompactStructuredR1csRowSourcePreparation<SelectedCompactPublicKeyAssignment>;
+type SelectedCompactPublicKeyTransposeSource =
+    CompactStructuredAssignmentTransposeSource<SelectedCompactPublicKeyAssignment>;
+type SelectedCompactPublicKeyCovectorAccumulator =
+    CompactStructuredWitnessCovectorAccumulator<SelectedCompactPublicKeyTransposeSource>;
 
 const COMPACT_PUBLIC_KEY_PRIVATE_COIN_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-public-key/private-coin-binding/v1";
@@ -446,6 +455,18 @@ pub(crate) enum CompactPublicKeyMainEpochPoll {
         processed_work_unit_count: u64,
     },
     PreChallengeWhirBaseBlindedResponseCheckpointReady,
+    MainWhirCovectorStepCompleted {
+        step: CompactStructuredWitnessCovectorAccumulatorStep,
+        completed_work_unit_count: u64,
+    },
+    MainWhirCovectorsPrepared,
+    MainWhirRelationSourceStepCompleted {
+        processed_work_unit_count: u64,
+        relation_complete: bool,
+    },
+    MainWhirSumcheckPrepared {
+        batch_ordinal: u8,
+    },
     PostLookupCheckpointReady,
     CrossEpochCheckpointReady,
 }
@@ -591,6 +612,10 @@ struct CompactPublicKeyPostLookupMaterial {
     pre_challenge_whir_sumcheck_batches: Vec<CompactPublicKeyWhirSumcheckBatch>,
     pre_challenge_whir_code_switches: Vec<CompactPublicKeyWhirCodeSwitch>,
     pre_challenge_whir_base_case: Option<CompactPublicKeyWhirBaseCase>,
+    main_whir_covector_accumulator: Option<SelectedCompactPublicKeyCovectorAccumulator>,
+    main_whir_covector_continuation: Option<CompactCfwPublicMainCovectorContinuation>,
+    main_whir_relation_preparation: Option<CompactWhirMainRelationPreparation>,
+    main_whir_sumcheck_batches: Vec<CompactPublicKeyWhirSumcheckBatch>,
 }
 
 struct CompactPublicKeyWhirSumcheckBatch {
@@ -846,9 +871,9 @@ struct CompactPublicKeyWhirBaseCase {
     fresh_response_leaf_count: u64,
     blinded_response_leaf_count: u64,
     fresh_claim_masking_verified: bool,
-    blinded_response_masking_verified: bool,
+    verified_blinded_response_masking: Option<CompactVerifiedBaseRevealMasking>,
     final_query_leaves: Vec<CompactMaskingQueryLeaf>,
-    final_query_masking_verified: bool,
+    verified_final_query_masking: Option<CompactVerifiedBaseMaskingPrefix>,
 }
 
 impl CompactPublicKeyWhirBaseCase {
@@ -2344,7 +2369,7 @@ impl PreparedCompactPublicKeyMainEpoch {
         self.post_lookup_material
             .as_ref()
             .and_then(|material| material.pre_challenge_whir_base_case.as_ref())
-            .is_some_and(|base_case| base_case.blinded_response_masking_verified)
+            .is_some_and(|base_case| base_case.verified_blinded_response_masking.is_some())
     }
 
     #[cfg(test)]
@@ -2352,7 +2377,7 @@ impl PreparedCompactPublicKeyMainEpoch {
         self.post_lookup_material
             .as_ref()
             .and_then(|material| material.pre_challenge_whir_base_case.as_ref())
-            .is_some_and(|base_case| base_case.final_query_masking_verified)
+            .is_some_and(|base_case| base_case.verified_final_query_masking.is_some())
     }
 
     pub(crate) fn poll_cfw<
@@ -2856,6 +2881,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                     ),
                 )?,
                 response_generation_state.verifier_messages(),
+                None,
                 pre_challenge_epoch.epoch,
                 0,
                 initial_sumcheck.auxiliary_target(),
@@ -3065,6 +3091,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                     ),
                 )?,
                 response_generation_state.verifier_messages(),
+                None,
                 pre_challenge_epoch.epoch,
                 active_batch_ordinal,
                 round_ordinal,
@@ -3885,6 +3912,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                         .masking_attempt_identity
                         .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
                     response_generation_state.verifier_messages(),
+                    None,
                     pre_challenge_epoch.epoch,
                     next_batch_ordinal,
                     sumcheck.auxiliary_target(),
@@ -4051,9 +4079,9 @@ impl PreparedCompactPublicKeyMainEpoch {
             fresh_response_leaf_count: fresh_response_geometry.merkle_leaf_count(),
             blinded_response_leaf_count: blinded_response_geometry.merkle_leaf_count(),
             fresh_claim_masking_verified: true,
-            blinded_response_masking_verified: false,
+            verified_blinded_response_masking: None,
             final_query_leaves: Vec::new(),
-            final_query_masking_verified: false,
+            verified_final_query_masking: None,
         });
         Ok(())
     }
@@ -4180,7 +4208,7 @@ impl PreparedCompactPublicKeyMainEpoch {
             }
             CompactResponseGenerationPoll::CheckpointCursorRequired => {
                 if !base_case.fresh_claim_masking_verified
-                    || base_case.blinded_response_masking_verified
+                    || base_case.verified_blinded_response_masking.is_some()
                 {
                     return Err(CompactPublicKeyMainEpochPollError::Preparation(
                         CompactPublicKeyMainEpochPreparationError::WrongPhase,
@@ -4270,8 +4298,8 @@ impl PreparedCompactPublicKeyMainEpoch {
                         CompactPublicKeyMainEpochPreparationError::WrongPhase,
                     ),
                 )?;
-                if !base_case.blinded_response_masking_verified
-                    || base_case.final_query_masking_verified
+                if base_case.verified_blinded_response_masking.is_none()
+                    || base_case.verified_final_query_masking.is_some()
                     || !base_case.final_query_leaves.is_empty()
                 {
                     return Err(CompactPublicKeyMainEpochPollError::Preparation(
@@ -4439,6 +4467,295 @@ impl PreparedCompactPublicKeyMainEpoch {
                 ))
             }
         }
+    }
+
+    pub(crate) fn prepare_main_whir_initial_sumcheck(
+        &mut self,
+    ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
+        let Self {
+            family_material,
+            response_generation_state,
+            post_lookup_material,
+        } = self;
+        let material = post_lookup_material
+            .as_mut()
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        if material
+            .pre_challenge_whir_base_case
+            .as_ref()
+            .is_none_or(|base_case| base_case.verified_final_query_masking.is_none())
+            || material.main_whir_covector_accumulator.is_some()
+            || material.main_whir_covector_continuation.is_some()
+            || material.main_whir_relation_preparation.is_some()
+            || !material.main_whir_sumcheck_batches.is_empty()
+            || response_generation_state.checkpoint_boundary().is_none()
+        {
+            return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+        }
+        let contract = selected_compact_public_key_proof_contract()?;
+        let [_pre_challenge_epoch, main_epoch] = contract.verifier_inputs().whir_epochs else {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        };
+        let completed_messages = response_generation_state.verifier_messages();
+        let response_ordinal = unique_response_ordinal_for_component_role(
+            &contract.verifier_inputs(),
+            11,
+            main_epoch.epoch,
+            0,
+            0,
+        )?;
+        if usize::try_from(response_ordinal)
+            .ok()
+            .is_none_or(|ordinal| ordinal != completed_messages.len())
+        {
+            return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+        }
+        let mut cfw_sumcheck_point = Vec::new();
+        cfw_sumcheck_point
+            .try_reserve_exact(material.cfw_geometry.sumcheck_round_count())
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
+        for round_index in 0..material.cfw_geometry.sumcheck_round_count() {
+            cfw_sumcheck_point.push(unique_completed_extension_role_challenge(
+                &contract.verifier_inputs(),
+                completed_messages,
+                4,
+                0,
+                0,
+                u32::try_from(round_index)
+                    .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
+            )?);
+        }
+        let joint_challenge = unique_completed_extension_role_challenge(
+            &contract.verifier_inputs(),
+            completed_messages,
+            5,
+            0,
+            0,
+            0,
+        )?;
+        let opening_batching_challenge = unique_completed_extension_role_challenge(
+            &contract.verifier_inputs(),
+            completed_messages,
+            6,
+            main_epoch.epoch,
+            0,
+            0,
+        )?;
+        let cross_epoch_point = material
+            .cross_epoch_point
+            .as_ref()
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        let copied_main_source_element_count = usize::try_from(
+            family_material
+                .relation()
+                .cross_epoch_copy_geometry()
+                .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?
+                .copied_element_count(),
+        )
+        .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let combination =
+            CompactCfwPublicMainCovectorCombination::from_public_challenges_before_whir_fold(
+                material.cfw_geometry,
+                cross_epoch_point,
+                copied_main_source_element_count,
+                &cfw_sumcheck_point,
+                joint_challenge,
+                opening_batching_challenge,
+            )?;
+        let (continuation, destination) = combination.into_parts();
+        let transpose_source = CompactStructuredAssignmentTransposeSource::new(Rc::clone(
+            family_material.row_source.assignment_source(),
+        ));
+        let accumulator = CompactStructuredWitnessCovectorAccumulator::from_public_relation(
+            transpose_source,
+            family_material.relation(),
+            continuation.row_point(),
+            continuation.matrix_role_weights(),
+            destination,
+        )?;
+        material.main_whir_covector_accumulator = Some(accumulator);
+        material.main_whir_covector_continuation = Some(continuation);
+        Ok(())
+    }
+
+    pub(crate) fn poll_main_whir_initial_sumcheck_preparation(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactPublicKeyMainEpochPoll, CompactPublicKeyMainEpochPreparationError> {
+        let Self {
+            family_material,
+            response_generation_state,
+            post_lookup_material,
+        } = self;
+        let material = post_lookup_material
+            .as_mut()
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        if material.main_whir_covector_accumulator.is_some() {
+            let poll = material
+                .main_whir_covector_accumulator
+                .as_mut()
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
+                .advance(maximum_work_unit_count)?;
+            match poll {
+                CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                    step,
+                    completed_work_unit_count,
+                } => {
+                    return Ok(
+                        CompactPublicKeyMainEpochPoll::MainWhirCovectorStepCompleted {
+                            step,
+                            completed_work_unit_count,
+                        },
+                    );
+                }
+                CompactStructuredWitnessCovectorAccumulatorPoll::Complete(source_covector) => {
+                    material.main_whir_covector_accumulator = None;
+                    let continuation = material
+                        .main_whir_covector_continuation
+                        .take()
+                        .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+                    let input_binding_challenge = continuation.batching_challenge();
+                    let public_covectors =
+                        continuation.finish_after_matrix_accumulation(source_covector)?;
+                    material.main_whir_relation_preparation =
+                        Some(CompactWhirMainRelationPreparation::new(
+                            public_covectors,
+                            material.cfw_mask_material.inner_masks(),
+                            material.cfw_mask_material.outer_masks(),
+                            material.cross_epoch_masks,
+                            input_binding_challenge,
+                        )?);
+                    return Ok(CompactPublicKeyMainEpochPoll::MainWhirCovectorsPrepared);
+                }
+            }
+        }
+
+        if material.main_whir_relation_preparation.is_some() {
+            let poll = material
+                .main_whir_relation_preparation
+                .as_mut()
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
+                .poll(maximum_work_unit_count, |source_ordinal| {
+                    family_material
+                        .row_source
+                        .witness_value(source_ordinal)
+                        .map(compact_challenge_from_production)
+                })
+                .map_err(|error| match error {
+                    CompactWhirMainRelationPreparationError::Whir(error) => {
+                        CompactPublicKeyMainEpochPreparationError::Whir(error)
+                    }
+                    CompactWhirMainRelationPreparationError::Source(error) => {
+                        CompactPublicKeyMainEpochPreparationError::Prover(error)
+                    }
+                })?;
+            match poll {
+                CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
+                    processed_work_unit_count,
+                    relation_complete,
+                } => {
+                    return Ok(
+                        CompactPublicKeyMainEpochPoll::MainWhirRelationSourceStepCompleted {
+                            processed_work_unit_count,
+                            relation_complete,
+                        },
+                    );
+                }
+                CompactWhirMainRelationPreparationPoll::Complete => {}
+            }
+            let preparation = material
+                .main_whir_relation_preparation
+                .take()
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+            let relation = preparation.finish()?;
+            let contract = selected_compact_public_key_proof_contract()?;
+            let [_pre_challenge_epoch, main_epoch] = contract.verifier_inputs().whir_epochs else {
+                return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+            };
+            let configuration = compact_whir_configuration_from_contract(main_epoch)?;
+            let mask_group = unique_internal_mask_group(main_epoch, 4, 0)?;
+            let initial_sumcheck = CompactWhirInitialSumcheckState::new(
+                relation,
+                &configuration,
+                0,
+                mask_group,
+                family_material
+                    .metadata
+                    .pre_challenge
+                    .randomness
+                    .whir_random_source_mut(),
+            )?;
+            family_material
+                .metadata
+                .pre_challenge
+                .randomness
+                .ensure_field_sampling_valid()?;
+            let response_ordinal = unique_response_ordinal_for_component_role(
+                &contract.verifier_inputs(),
+                11,
+                main_epoch.epoch,
+                0,
+                0,
+            )?;
+            let response_index = usize::try_from(response_ordinal)
+                .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+            let response_geometry = family_material
+                .response_merkle_geometries()
+                .get(response_index)
+                .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+            let response_roles = contract
+                .verifier_inputs()
+                .response_component_roles
+                .get(response_index)
+                .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+            validate_whir_sumcheck_response_geometry(
+                response_geometry,
+                response_roles,
+                main_epoch.epoch,
+                0,
+                initial_sumcheck.mask_oracle(),
+            )?;
+            let verified_base_prefix = material
+                .pre_challenge_whir_base_case
+                .as_ref()
+                .and_then(|base_case| base_case.verified_final_query_masking.as_ref())
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+            verify_selected_compact_whir_sumcheck_auxiliary_masking(
+                contract.verifier_inputs(),
+                &material.masking_coefficient_maps,
+                material
+                    .masking_attempt_identity
+                    .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
+                response_generation_state.verifier_messages(),
+                Some(verified_base_prefix),
+                main_epoch.epoch,
+                0,
+                initial_sumcheck.auxiliary_target(),
+            )
+            .map_err(CompactPublicKeyMainEpochPreparationError::WhirSumcheckAuxiliaryMasking)?;
+            material
+                .main_whir_sumcheck_batches
+                .push(CompactPublicKeyWhirSumcheckBatch::new(
+                    0,
+                    response_ordinal,
+                    initial_sumcheck,
+                    response_geometry.merkle_leaf_count(),
+                )?);
+            return Ok(CompactPublicKeyMainEpochPoll::MainWhirSumcheckPrepared {
+                batch_ordinal: 0,
+            });
+        }
+        Err(CompactPublicKeyMainEpochPreparationError::WrongPhase)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn main_whir_initial_sumcheck_ready(&self) -> bool {
+        self.post_lookup_material.as_ref().is_some_and(|material| {
+            material
+                .main_whir_sumcheck_batches
+                .first()
+                .is_some_and(|batch| batch.batch_ordinal == 0)
+        })
     }
 
     pub(crate) fn main_source_encoding_complete(&self) -> bool {
@@ -5128,14 +5445,14 @@ impl CompactPublicKeyPostLookupMaterial {
             .pre_challenge_whir_base_case
             .as_mut()
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        if base_case.blinded_response_masking_verified
-            || base_case.final_query_masking_verified
+        if base_case.verified_blinded_response_masking.is_some()
+            || base_case.verified_final_query_masking.is_some()
             || !base_case.final_query_leaves.is_empty()
         {
             return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
         }
         let claim_coefficients = base_case.state.base_claim_coefficients()?;
-        verify_selected_compact_pre_challenge_base_reveal_masking(
+        let verified_reveal_masking = verify_selected_compact_pre_challenge_base_reveal_masking(
             inputs,
             &self.masking_coefficient_maps,
             masking_attempt_identity,
@@ -5146,7 +5463,7 @@ impl CompactPublicKeyPostLookupMaterial {
         base_case
             .state
             .bind_combination_challenge(combination_challenge)?;
-        base_case.blinded_response_masking_verified = true;
+        base_case.verified_blinded_response_masking = Some(verified_reveal_masking);
         Ok(())
     }
 
@@ -5368,8 +5685,8 @@ impl CompactPublicKeyPostLookupMaterial {
             .pre_challenge_whir_base_case
             .as_ref()
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        if !base_case.blinded_response_masking_verified
-            || base_case.final_query_masking_verified
+        if base_case.verified_blinded_response_masking.is_none()
+            || base_case.verified_final_query_masking.is_some()
             || !base_case.state.fresh_source_opening_replay_complete()
             || !self
                 .pre_challenge_whir_code_switches
@@ -5378,7 +5695,6 @@ impl CompactPublicKeyPostLookupMaterial {
         {
             return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
         }
-        let claim_coefficients = base_case.state.base_claim_coefficients()?;
         let fresh_source_mirror_coefficients =
             base_case.state.fresh_source_mirror_coefficients()?;
         let mut fresh_mask_mirror_coefficients = Vec::new();
@@ -5392,17 +5708,21 @@ impl CompactPublicKeyPostLookupMaterial {
                     .fresh_mask_mirror_coefficients(group_ordinal)?,
             );
         }
-        verify_selected_compact_pre_challenge_base_final_query_masking(
-            inputs,
-            &self.masking_coefficient_maps,
-            masking_attempt_identity,
-            completed_messages,
-            pre_challenge_epoch.epoch,
-            &claim_coefficients,
-            &fresh_source_mirror_coefficients,
-            &fresh_mask_mirror_coefficients,
-            &base_case.final_query_leaves,
-        )?;
+        let verified_final_query_masking =
+            verify_selected_compact_pre_challenge_base_final_query_masking(
+                inputs,
+                &self.masking_coefficient_maps,
+                masking_attempt_identity,
+                completed_messages,
+                pre_challenge_epoch.epoch,
+                base_case
+                    .verified_blinded_response_masking
+                    .as_ref()
+                    .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
+                &fresh_source_mirror_coefficients,
+                &fresh_mask_mirror_coefficients,
+                &base_case.final_query_leaves,
+            )?;
 
         self.pre_challenge_whir_code_switches
             .last_mut()
@@ -5415,7 +5735,8 @@ impl CompactPublicKeyPostLookupMaterial {
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
         base_case.state.finish_final_query_opening_replay()?;
         base_case.final_query_leaves.clear();
-        base_case.final_query_masking_verified = true;
+        base_case.verified_blinded_response_masking = None;
+        base_case.verified_final_query_masking = Some(verified_final_query_masking);
         Ok(())
     }
 
@@ -5707,6 +6028,7 @@ impl CompactPublicKeyPostLookupMaterial {
                 self.masking_attempt_identity
                     .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
                 completed_messages,
+                None,
                 pre_challenge_epoch.epoch,
                 round_ordinal,
                 &query_outputs,
@@ -5745,6 +6067,7 @@ impl CompactPublicKeyPostLookupMaterial {
                 self.masking_attempt_identity
                     .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
                 completed_messages,
+                None,
                 pre_challenge_epoch.epoch,
                 round_ordinal,
                 &previous_code_switch.retained_source_query_outputs,
@@ -6167,6 +6490,10 @@ fn prepare_post_lookup_material(
         pre_challenge_whir_sumcheck_batches: Vec::new(),
         pre_challenge_whir_code_switches: Vec::new(),
         pre_challenge_whir_base_case: None,
+        main_whir_covector_accumulator: None,
+        main_whir_covector_continuation: None,
+        main_whir_relation_preparation: None,
+        main_whir_sumcheck_batches: Vec::new(),
     };
     validate_retained_post_lookup_material(
         &material,
@@ -6848,6 +7175,10 @@ fn validate_retained_post_lookup_material(
         || !material.pre_challenge_whir_sumcheck_batches.is_empty()
         || !material.pre_challenge_whir_code_switches.is_empty()
         || material.pre_challenge_whir_base_case.is_some()
+        || material.main_whir_covector_accumulator.is_some()
+        || material.main_whir_covector_continuation.is_some()
+        || material.main_whir_relation_preparation.is_some()
+        || !material.main_whir_sumcheck_batches.is_empty()
     {
         return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
     }

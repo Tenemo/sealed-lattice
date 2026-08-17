@@ -97,6 +97,18 @@ pub(crate) struct CompactBaseFreshClaimCoefficients {
     coefficients: Vec<CompactChallengeField>,
 }
 
+pub(crate) struct CompactVerifiedBaseRevealMasking {
+    identity: CompactMaskingAttemptIdentity,
+    claim: CompactBaseFreshClaimCoefficients,
+    completed_messages: Box<[DecodedFixedUniformVerifierMessage]>,
+}
+
+pub(crate) struct CompactVerifiedBaseMaskingPrefix {
+    identity: CompactMaskingAttemptIdentity,
+    claim: CompactBaseFreshClaimCoefficients,
+    completed_messages: Box<[DecodedFixedUniformVerifierMessage]>,
+}
+
 /// Public covectors independently replayed for the selected pre-challenge
 /// Construction 7.2 claim at its exact authenticated transcript prefix.
 pub(crate) struct CompactVerifiedPreChallengeBaseCovector {
@@ -186,6 +198,32 @@ impl CompactBaseFreshClaimCoefficients {
             epoch,
             coefficients,
         })
+    }
+}
+
+impl CompactVerifiedBaseRevealMasking {
+    fn authorizes_final_query(
+        &self,
+        identity: CompactMaskingAttemptIdentity,
+        epoch: u8,
+        completed_messages: &[DecodedFixedUniformVerifierMessage],
+    ) -> bool {
+        self.identity == identity
+            && self.claim.epoch == epoch
+            && self.completed_messages.len() < completed_messages.len()
+            && completed_messages.starts_with(&self.completed_messages)
+    }
+}
+
+impl CompactVerifiedBaseMaskingPrefix {
+    fn authorizes_replay(
+        &self,
+        identity: CompactMaskingAttemptIdentity,
+        completed_messages: &[DecodedFixedUniformVerifierMessage],
+    ) -> bool {
+        self.identity == identity
+            && self.completed_messages.len() <= completed_messages.len()
+            && completed_messages.starts_with(&self.completed_messages)
     }
 }
 
@@ -1196,6 +1234,7 @@ pub(crate) fn verify_selected_compact_whir_sumcheck_auxiliary_masking(
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
     epoch: u8,
     batch_ordinal: u8,
     auxiliary_target: CompactChallengeField,
@@ -1205,6 +1244,7 @@ pub(crate) fn verify_selected_compact_whir_sumcheck_auxiliary_masking(
         coefficient_maps,
         identity,
         completed_messages,
+        verified_base_prefix,
     )?;
     let steps = authority.authorize_next_response(None)?.to_vec();
     let [auxiliary_step] = steps.as_slice() else {
@@ -1232,6 +1272,7 @@ pub(crate) fn verify_selected_compact_whir_sumcheck_round_masking(
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
     epoch: u8,
     batch_ordinal: u8,
     round_ordinal: u32,
@@ -1252,6 +1293,7 @@ pub(crate) fn verify_selected_compact_whir_sumcheck_round_masking(
         coefficient_maps,
         identity,
         completed_messages,
+        verified_base_prefix,
     )?;
     let steps = authority.authorize_next_response(None)?.to_vec();
     let [round_step] = steps.as_slice() else {
@@ -1285,6 +1327,7 @@ pub(crate) fn verify_selected_compact_whir_source_query_masking(
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
     epoch: u8,
     source_ordinal: u8,
     query_outputs: &[CompactChallengeField],
@@ -1298,6 +1341,7 @@ pub(crate) fn verify_selected_compact_whir_source_query_masking(
         coefficient_maps,
         identity,
         &completed_messages[..selected_message_index],
+        verified_base_prefix,
     )?;
     authority.authorize_next_response(None)?;
     let selected_steps = authority
@@ -1418,6 +1462,7 @@ pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
         coefficient_maps,
         identity,
         completed_messages,
+        None,
     )?;
     let steps = masking_authority
         .authorize_next_response(Some(&claim))?
@@ -1482,7 +1527,7 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_reveal_masking(
     completed_messages: &[DecodedFixedUniformVerifierMessage],
     epoch: u8,
     claim_coefficients: &[CompactChallengeField],
-) -> Result<(), CompactMaskingEntropyError> {
+) -> Result<CompactVerifiedBaseRevealMasking, CompactMaskingEntropyError> {
     let (mut authority, _last_response_steps, last_message_steps) =
         replay_selected_compact_masking_prefix_with_base_claim(
             inputs,
@@ -1501,7 +1546,15 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_reveal_masking(
         epoch,
         &reveal_steps,
         expected_base_reveal_coordinate_count(&authority.inputs, epoch)?,
-    )
+    )?;
+    Ok(CompactVerifiedBaseRevealMasking {
+        identity,
+        claim: CompactBaseFreshClaimCoefficients {
+            epoch,
+            coefficients: claim_coefficients.to_vec(),
+        },
+        completed_messages: completed_messages.to_vec().into_boxed_slice(),
+    })
 }
 
 /// Checks every selected final query opened after the blinded response. The
@@ -1515,12 +1568,15 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
     epoch: u8,
-    claim_coefficients: &[CompactChallengeField],
+    verified_reveal: &CompactVerifiedBaseRevealMasking,
     fresh_source_mirror_coefficients: &[CompactChallengeField],
     fresh_mask_mirror_coefficients: &[Vec<CompactChallengeField>],
     query_leaves: &[CompactMaskingQueryLeaf],
-) -> Result<(), CompactMaskingEntropyError> {
+) -> Result<CompactVerifiedBaseMaskingPrefix, CompactMaskingEntropyError> {
     if query_leaves.is_empty() {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
+    if !verified_reveal.authorizes_final_query(identity, epoch, completed_messages) {
         return Err(CompactMaskingEntropyError::MissingTranscriptInput);
     }
     let (authority, reveal_steps, final_query_steps) =
@@ -1530,7 +1586,7 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
             identity,
             completed_messages,
             epoch,
-            claim_coefficients,
+            &verified_reveal.claim.coefficients,
         )?;
     validate_base_reveal_steps(
         &authority.inputs,
@@ -1622,7 +1678,11 @@ pub(crate) fn verify_selected_compact_pre_challenge_base_final_query_masking(
     if final_query_steps.is_empty() || consumed_query_leaves.iter().any(|consumed| !consumed) {
         return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
     }
-    Ok(())
+    Ok(CompactVerifiedBaseMaskingPrefix {
+        identity,
+        claim: verified_reveal.claim.clone(),
+        completed_messages: completed_messages.to_vec().into_boxed_slice(),
+    })
 }
 
 fn replay_selected_compact_masking_prefix_with_base_claim<'contract>(
@@ -1839,13 +1899,27 @@ fn replay_selected_compact_masking_prefix<'contract>(
     coefficient_maps: &'contract CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
+    verified_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
 ) -> Result<CompactMaskingEntropyAuthority<'contract>, CompactMaskingEntropyError> {
     if completed_messages.is_empty() || completed_messages.len() >= inputs.verifier_moves.len() {
         return Err(CompactMaskingEntropyError::MissingTranscriptInput);
     }
+    if verified_base_prefix
+        .is_some_and(|prefix| !prefix.authorizes_replay(identity, completed_messages))
+    {
+        return Err(CompactMaskingEntropyError::MissingTranscriptInput);
+    }
     let mut authority = CompactMaskingEntropyAuthority::begin(inputs, coefficient_maps, identity)?;
     for (move_index, message) in completed_messages.iter().enumerate() {
-        authority.authorize_next_response(None)?;
+        if let Some(requirement) = authority.next_base_claim_requirement()? {
+            let claim = verified_base_prefix
+                .map(|prefix| &prefix.claim)
+                .filter(|claim| claim.epoch == requirement.epoch)
+                .ok_or(CompactMaskingEntropyError::InvalidCoefficientVector)?;
+            authority.authorize_next_response(Some(claim))?;
+        } else {
+            authority.authorize_next_response(None)?;
+        }
         let move_ordinal = u32::try_from(move_index)
             .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?;
         let steps = authority
@@ -1862,6 +1936,8 @@ fn replay_selected_compact_masking_prefix<'contract>(
                     CompactMaskingDisclosureKind::SourceQueries { .. }
                 ) && source_query_step.conditional_rank()
                     == source_query_step.output_coordinate_count() => {}
+            _ if verified_base_prefix
+                .is_some_and(|prefix| move_index + 1 == prefix.completed_messages.len()) => {}
             _ => return Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
         }
     }
@@ -5300,6 +5376,26 @@ mod tests {
         ];
         claim_coefficients[0] = CompactChallengeField::ONE;
         let identity = CompactMaskingAttemptIdentity::new([7; 32], 0, [11; 64]);
+        let base_combination_move_ordinal = inputs
+            .verifier_moves
+            .iter()
+            .find(|verifier_move| {
+                verifier_move
+                    .role_coordinates
+                    .iter()
+                    .any(|role| role.role_tag == 10 && role.epoch == pre_challenge_epoch.epoch)
+            })
+            .expect("first-epoch base-combination move")
+            .ordinal;
+        let verified_reveal = verify_selected_compact_pre_challenge_base_reveal_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &messages[..=usize::try_from(base_combination_move_ordinal).unwrap()],
+            pre_challenge_epoch.epoch,
+            &claim_coefficients,
+        )
+        .expect("the compiler-derived base reveal masking is verified");
         let (authority, _reveal_steps, final_query_steps) =
             replay_selected_compact_masking_prefix_with_base_claim(
                 contract.verifier_inputs(),
@@ -5370,14 +5466,98 @@ mod tests {
                 identity,
                 &messages,
                 pre_challenge_epoch.epoch,
-                &claim_coefficients,
+                &verified_reveal,
                 &fresh_source_mirror_coefficients,
                 &fresh_mask_mirror_coefficients,
                 query_leaves,
             )
         };
-        verify_query_leaves(&query_leaves)
+        let verified_base_prefix = verify_query_leaves(&query_leaves)
             .expect("the final gate accepts immediate and deferred committed query leaves");
+
+        let [_pre_challenge_epoch, main_epoch] = inputs.whir_epochs else {
+            panic!("the selected compact contract has both WHIR epochs")
+        };
+        let mut main_auxiliary_response_ordinals = inputs
+            .response_component_roles
+            .iter()
+            .enumerate()
+            .filter_map(|(response_ordinal, roles)| {
+                roles
+                    .iter()
+                    .any(|role| {
+                        role.role_tag == 11
+                            && role.epoch == main_epoch.epoch
+                            && role.batch_ordinal == 0
+                            && role.round_ordinal == 0
+                    })
+                    .then_some(response_ordinal)
+            });
+        let main_auxiliary_response_ordinal = main_auxiliary_response_ordinals
+            .next()
+            .expect("the selected contract has an initial main-WHIR auxiliary response");
+        assert!(main_auxiliary_response_ordinals.next().is_none());
+        let main_completed_messages = (0..main_auxiliary_response_ordinal)
+            .map(|move_index| selected_adversarial_message(&inputs, move_index))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            replay_selected_compact_masking_prefix(
+                contract.verifier_inputs(),
+                &maps,
+                identity,
+                &main_completed_messages,
+                None,
+            ),
+            Err(CompactMaskingEntropyError::InvalidCoefficientVector)
+        ));
+        let mut main_authority = replay_selected_compact_masking_prefix(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &main_completed_messages,
+            Some(&verified_base_prefix),
+        )
+        .expect("the verified base prefix restores the initial main-WHIR masking state");
+        let main_auxiliary_steps = main_authority
+            .authorize_next_response(None)
+            .expect("the initial main-WHIR auxiliary response is authorized")
+            .to_vec();
+        let [main_auxiliary_step] = main_auxiliary_steps.as_slice() else {
+            panic!("the initial main-WHIR response has one auxiliary masking view")
+        };
+        assert_eq!(
+            main_auxiliary_step.kind(),
+            CompactMaskingDisclosureKind::WhirSumcheckAuxiliary {
+                epoch: main_epoch.epoch,
+                batch_ordinal: 0,
+            }
+        );
+        let main_auxiliary_request = main_authority
+            .prepare_coefficient_image(main_auxiliary_step, &[], None)
+            .expect("the main-WHIR auxiliary coefficient image derives");
+        let main_independent_coordinates = (0..main_auxiliary_step.conditional_rank())
+            .map(|coordinate_ordinal| CompactChallengeField::from_u64(1_401 + coordinate_ordinal))
+            .collect::<Vec<_>>();
+        let [main_auxiliary_target] = main_authority
+            .execute_coefficient_image(
+                main_auxiliary_step,
+                &main_auxiliary_request,
+                &main_independent_coordinates,
+            )
+            .expect("the main-WHIR auxiliary coefficient image executes")
+            .try_into()
+            .expect("the main-WHIR auxiliary view has one coordinate");
+        verify_selected_compact_whir_sumcheck_auxiliary_masking(
+            contract.verifier_inputs(),
+            &maps,
+            identity,
+            &main_completed_messages,
+            Some(&verified_base_prefix),
+            main_epoch.epoch,
+            0,
+            main_auxiliary_target,
+        )
+        .expect("the production gate accepts main WHIR only after the verified base prefix");
 
         let duplicate_response_ordinal = query_leaves[0].response_ordinal;
         let duplicate_leaf_ordinal = query_leaves[0].leaf_ordinal;
@@ -5390,17 +5570,17 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(
+        assert!(matches!(
             verify_query_leaves(&query_leaves),
             Err(CompactMaskingEntropyError::DuplicateTranscriptInput)
-        );
+        ));
         query_leaves.pop();
 
         query_leaves.pop();
-        assert_eq!(
+        assert!(matches!(
             verify_query_leaves(&query_leaves),
             Err(CompactMaskingEntropyError::MissingTranscriptInput)
-        );
+        ));
     }
 
     #[test]
@@ -5787,6 +5967,7 @@ mod tests {
             &maps,
             identity,
             &messages,
+            None,
             pre_challenge_epoch.epoch,
             0,
             whir_auxiliary_target,
@@ -5798,6 +5979,7 @@ mod tests {
                 &maps,
                 identity,
                 &messages,
+                None,
                 pre_challenge_epoch.epoch + 1,
                 0,
                 whir_auxiliary_target,
@@ -5846,6 +6028,7 @@ mod tests {
                 &maps,
                 identity,
                 &messages,
+                None,
                 pre_challenge_epoch.epoch,
                 0,
                 u32::try_from(round_index).unwrap(),
@@ -5860,6 +6043,7 @@ mod tests {
                         &maps,
                         identity,
                         &messages,
+                        None,
                         pre_challenge_epoch.epoch,
                         1,
                         0,
@@ -5874,6 +6058,7 @@ mod tests {
                         &maps,
                         identity,
                         &messages,
+                        None,
                         pre_challenge_epoch.epoch,
                         0,
                         0,
@@ -5888,6 +6073,7 @@ mod tests {
                         &maps,
                         identity,
                         &messages,
+                        None,
                         pre_challenge_epoch.epoch,
                         0,
                         0,
@@ -5954,6 +6140,7 @@ mod tests {
             &maps,
             identity,
             &messages,
+            None,
             pre_challenge_epoch.epoch,
             0,
             &query_outputs,
@@ -5965,6 +6152,7 @@ mod tests {
                 &maps,
                 identity,
                 &messages,
+                None,
                 pre_challenge_epoch.epoch,
                 1,
                 &query_outputs,
@@ -5977,6 +6165,7 @@ mod tests {
                 &maps,
                 identity,
                 &messages,
+                None,
                 pre_challenge_epoch.epoch,
                 0,
                 &query_outputs[..query_outputs.len() - 1],
@@ -5989,6 +6178,7 @@ mod tests {
                 &maps,
                 identity,
                 &messages[..messages.len() - 1],
+                None,
                 pre_challenge_epoch.epoch,
                 0,
                 &query_outputs,
@@ -6031,6 +6221,7 @@ mod tests {
             &maps,
             identity,
             &messages,
+            None,
             pre_challenge_epoch.epoch,
             1,
             second_whir_auxiliary_target,

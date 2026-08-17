@@ -400,6 +400,33 @@ where
     }
 }
 
+pub(crate) struct CompactStructuredAssignmentTransposeSource<Assignment> {
+    assignment: Assignment,
+}
+
+impl<Assignment> CompactStructuredAssignmentTransposeSource<Assignment> {
+    pub(crate) const fn new(assignment: Assignment) -> Self {
+        Self { assignment }
+    }
+}
+
+impl<Assignment> StructuredTransposeValueSource
+    for CompactStructuredAssignmentTransposeSource<Assignment>
+where
+    Assignment: CompactStructuredAssignmentSource,
+{
+    fn lookup_challenge(&self) -> ProofChallengeExtensionElement {
+        self.assignment.lookup_challenge()
+    }
+
+    fn public_input_base_value(
+        &self,
+        element_ordinal: u64,
+    ) -> Result<ProofBaseFieldElement, CommonProofProverError> {
+        self.assignment.public_input_base_value(element_ordinal)
+    }
+}
+
 impl<Assignment: CompactStructuredAssignmentSource> StructuredTransposeValueSource
     for CompactStructuredR1csRowSource<Assignment>
 {
@@ -667,6 +694,21 @@ impl<Source> CompactStructuredWitnessCovectorAccumulator<Source>
 where
     Source: StructuredTransposeValueSource,
 {
+    /// Builds the complete verifier-owned structured transpose without
+    /// materializing either sparse matrices or a padded public-input vector.
+    pub(crate) fn from_public_relation(
+        source: Source,
+        relation: &CompactPublicKeyRelationCatalog,
+        row_point: &[CompactChallengeField],
+        matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+        destination: Vec<CompactChallengeField>,
+    ) -> Result<Self, CommonProofProverError> {
+        let matrices = CompactStructuredR1csCatalog::derive(relation)?;
+        let geometry = CompactStructuredWitnessCovectorGeometry::derive(relation, &matrices)?;
+        let plan = StructuredTransposePlan::from_production(relation, &matrices, geometry)?;
+        Self::new(source, plan, row_point, matrix_role_weights, destination)
+    }
+
     /// Builds the public transpose directly in the image of one complete
     /// block fold. The projection is certified by the relation geometry: it
     /// must collapse every source block onto the single ring-sized

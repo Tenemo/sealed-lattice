@@ -5,14 +5,15 @@
 //! ring-coefficient vector and a ring-block vector. Sparse matrix terms are
 //! accumulated blockwise, while each public negacyclic band is transposed with
 //! one shared extension transform, one verifier-owned public base transform,
-//! and one extension inverse transform. This module accounts that production
-//! path without executing a selected-size transpose.
+//! and one extension inverse transform. This module executes that production
+//! path in bounded polls without materializing the sparse matrices.
 
 mod accumulator;
 
 pub(crate) use accumulator::{
-    CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
-    StructuredTransposeValueSource,
+    CompactStructuredAssignmentTransposeSource, CompactStructuredWitnessCovectorAccumulator,
+    CompactStructuredWitnessCovectorAccumulatorPoll,
+    CompactStructuredWitnessCovectorAccumulatorStep, StructuredTransposeValueSource,
 };
 #[cfg(test)]
 pub(crate) use accumulator::{

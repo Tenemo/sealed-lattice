@@ -181,6 +181,18 @@ and target release remain incomplete or internal.
   publishing the authenticated response checkpoint. Guarded selected-size
   native execution completes this pre-challenge response path; it is not a
   complete emitted proof or browser evidence.
+  The final masking gate mints only an opaque in-memory continuation bound to
+  the proof attempt, first-epoch claim coefficients, and exact authenticated
+  verifier-message prefix. It is not serialized or caller supplied. The same
+  generation state uses that continuation to replay the masking chronology at
+  the initial main-epoch boundary, independently derives the complete public
+  source covector from the verifier-bound CFW point and matrix-role weights,
+  and streams all 4,194,304 authenticated witness elements into the matching
+  main relation. It positively checks the resulting relation target, samples
+  the initial main masked-sumcheck state from the live KMAC stream, and gates
+  its auxiliary target against the independently compiled conditional image.
+  Guarded selected-size native execution reaches this prepared state. No main-
+  epoch response has yet been committed.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -194,15 +206,15 @@ and target release remain incomplete or internal.
   external-storage transactions, 1,006,632,840 bytes written, 2,013,265,440
   bytes read, and 587,202,560 peak CFW storage bytes.
   These measurements remain in the owning run diagnostics and do not
-  constitute scalar-WASM or browser evidence. The owner does not yet cover a
-  selected-size main-source stripe opening replay, authenticated mid-stripe
+  constitute scalar-WASM or browser evidence. The owner now reaches initial
+  main-epoch relation and masked-sumcheck preparation, but it does not yet cover
+  a selected-size main-source stripe opening replay, authenticated mid-stripe
   restart, cold restoration through the common worker, JavaScript and browser-
-  process overlap, the main WHIR epoch, a complete emitted proof, or algebraic
-  verification of that proof. The test-only production-shaped
-  small-chain owner uses the response state, but the WHIR family material
-  provider for the remaining epoch, production worker adapter, terminal
-  semantic composition, and whole-construction masking simulator remain test-
-  only or incomplete. Before
+  process overlap, any main-epoch response, a complete emitted proof, or
+  algebraic verification of that proof. The test-only production-shaped small-
+  chain owner uses the response state, but main-epoch response execution,
+  terminal semantic composition, and the whole-construction masking simulator
+  remain test-only or incomplete. Before
   the second response's masking material is drawn, release generation now re-
   decodes its canonical public input through
   the selected verifier contract, independently derives and checks every
@@ -227,8 +239,10 @@ and target release remain incomplete or internal.
   before any leaf is released. The later two source-query images are evaluated
   at their verifier-message boundaries and retained for last-use opening only
   after the same production masking check; all four pre-challenge auxiliaries
-  and every round wire pass their live conditional-image gates. The fixed
-  KMAC256/SHAKE256 joint assumption remains external. The live pre-challenge
+  and every round wire pass their live conditional-image gates. The verified
+  first-epoch base prefix also authorizes the exact initial main-epoch replay,
+  whose sampled auxiliary target passes its live conditional-image gate. The
+  fixed KMAC256/SHAKE256 joint assumption remains external. The live pre-challenge
   role-18 carried covector, role-10 blinded reveal, and role-11 final-query
   images are now connected to canonical generated values and the exact
   authenticated prefix. The main-epoch role-18 authority, later-epoch
@@ -254,8 +268,8 @@ ceremony or supported-phone qualification.
   `VerificationResult`, or complete compact generation and verification ABI
   exists. The release transport ABI checks canonical structure, transcript
   chronology, query derivation, and Merkle openings only.
-- The compact successor still requires the main-epoch WHIR sequential
-  conditional-image checks, its remaining live role-18 masking authority, a
+- The compact successor still requires the remaining main-epoch WHIR sequential
+  conditional-image checks, its live role-18 masking authority, a
   construction-level statistical-HVZK argument
   bound to the complete emitted proof, composition of the live KMAC bridge with
   its explicit quantum-PRF and joint fixed-Keccak assumptions, and the

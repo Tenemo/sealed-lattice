@@ -1310,7 +1310,7 @@ pub(crate) struct CompactCfwPublicMainCovectorCombination {
 
 pub(crate) struct CompactCfwPublicMainCovectorContinuation {
     geometry: CompactCfwGeometry,
-    projected_source_element_count: usize,
+    retained_source_element_count: usize,
     sumcheck_point: Vec<CompactChallengeField>,
     joint_inner_mask_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
     batching_challenge: CompactChallengeField,
@@ -1324,6 +1324,24 @@ pub(crate) struct CompactCfwPublicMainCovectors {
     pub(crate) inner_masks: Vec<Vec<CompactChallengeField>>,
     pub(crate) outer_masks: Vec<Vec<CompactChallengeField>>,
     pub(crate) cross_epoch_masks: Vec<Vec<CompactChallengeField>>,
+}
+
+impl CompactCfwPublicMainCovectors {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Vec<CompactChallengeField>,
+        Vec<Vec<CompactChallengeField>>,
+        Vec<Vec<CompactChallengeField>>,
+        Vec<Vec<CompactChallengeField>>,
+    ) {
+        (
+            self.source,
+            self.inner_masks,
+            self.outer_masks,
+            self.cross_epoch_masks,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1611,6 +1629,25 @@ impl CompactCfwClaimBatch {
 }
 
 impl CompactCfwPublicMainCovectorCombination {
+    pub(crate) fn from_public_challenges_before_whir_fold(
+        geometry: CompactCfwGeometry,
+        cross_epoch_point: &[CompactChallengeField],
+        copied_main_source_element_count: usize,
+        sumcheck_point: &[CompactChallengeField],
+        joint_challenge: CompactChallengeField,
+        batching_challenge: CompactChallengeField,
+    ) -> Result<Self, CompactCfwError> {
+        Self::from_public_challenges(
+            geometry,
+            cross_epoch_point,
+            copied_main_source_element_count,
+            sumcheck_point,
+            joint_challenge,
+            batching_challenge,
+            None,
+        )
+    }
+
     pub(crate) fn from_public_challenges_after_first_whir_fold(
         geometry: CompactCfwGeometry,
         cross_epoch_point: &[CompactChallengeField],
@@ -1619,6 +1656,29 @@ impl CompactCfwPublicMainCovectorCombination {
         joint_challenge: CompactChallengeField,
         batching_challenge: CompactChallengeField,
         first_fold_challenges: &[CompactChallengeField],
+    ) -> Result<Self, CompactCfwError> {
+        if first_fold_challenges.is_empty() {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        Self::from_public_challenges(
+            geometry,
+            cross_epoch_point,
+            copied_main_source_element_count,
+            sumcheck_point,
+            joint_challenge,
+            batching_challenge,
+            Some(first_fold_challenges),
+        )
+    }
+
+    fn from_public_challenges(
+        geometry: CompactCfwGeometry,
+        cross_epoch_point: &[CompactChallengeField],
+        copied_main_source_element_count: usize,
+        sumcheck_point: &[CompactChallengeField],
+        joint_challenge: CompactChallengeField,
+        batching_challenge: CompactChallengeField,
+        first_fold_challenges: Option<&[CompactChallengeField]>,
     ) -> Result<Self, CompactCfwError> {
         let expected_cross_epoch_point_coordinate_count =
             usize::try_from(geometry.witness_length().ilog2())
@@ -1631,16 +1691,17 @@ impl CompactCfwPublicMainCovectorCombination {
                     .map_err(|_| CompactCfwError::CountOverflow)?,
             )
             .ok_or(CompactCfwError::CountOverflow)?;
-        let projected_source_element_count = geometry
-            .witness_length()
-            .checked_shr(
-                u32::try_from(first_fold_challenges.len())
-                    .map_err(|_| CompactCfwError::CountOverflow)?,
-            )
-            .ok_or(CompactCfwError::CountOverflow)?;
-        if first_fold_challenges.is_empty()
-            || projected_source_element_count == 0
-            || !projected_source_element_count.is_power_of_two()
+        let retained_source_element_count = match first_fold_challenges {
+            Some(challenges) => geometry
+                .witness_length()
+                .checked_shr(
+                    u32::try_from(challenges.len()).map_err(|_| CompactCfwError::CountOverflow)?,
+                )
+                .ok_or(CompactCfwError::CountOverflow)?,
+            None => geometry.witness_length(),
+        };
+        if retained_source_element_count == 0
+            || !retained_source_element_count.is_power_of_two()
             || cross_epoch_point.len() != expected_cross_epoch_point_coordinate_count
             || copied_main_source_element_count == 0
             || copied_main_source_element_count > pre_challenge_message_element_count
@@ -1655,23 +1716,31 @@ impl CompactCfwPublicMainCovectorCombination {
 
         let mut source_covector = Vec::new();
         source_covector
-            .try_reserve_exact(projected_source_element_count)
+            .try_reserve_exact(retained_source_element_count)
             .map_err(|_| CompactCfwError::AllocationLimitExceeded)?;
-        source_covector.resize(projected_source_element_count, CompactChallengeField::ZERO);
-        if source_covector.capacity() != projected_source_element_count {
+        source_covector.resize(retained_source_element_count, CompactChallengeField::ZERO);
+        if source_covector.capacity() != retained_source_element_count {
             return Err(CompactCfwError::AllocationLimitExceeded);
         }
-        accumulate_projected_multilinear_prefix_covector(
-            &mut source_covector,
-            cross_epoch_point,
-            copied_main_source_element_count,
-            first_fold_challenges,
-        )?;
+        match first_fold_challenges {
+            Some(challenges) => accumulate_projected_multilinear_prefix_covector(
+                &mut source_covector,
+                cross_epoch_point,
+                copied_main_source_element_count,
+                challenges,
+            )?,
+            None => accumulate_scaled_multilinear_prefix_covector(
+                &mut source_covector,
+                cross_epoch_point,
+                copied_main_source_element_count,
+                CompactChallengeField::ONE,
+            )?,
+        }
         let joint_batching_coefficient = batching_challenge * batching_challenge;
         Ok(Self {
             continuation: CompactCfwPublicMainCovectorContinuation {
                 geometry,
-                projected_source_element_count,
+                retained_source_element_count,
                 sumcheck_point: sumcheck_point.to_vec(),
                 joint_inner_mask_weights: compact_cfw_zero_evader_weights(joint_challenge),
                 batching_challenge,
@@ -1705,12 +1774,16 @@ impl CompactCfwPublicMainCovectorContinuation {
             .map(|weight| weight * self.joint_batching_coefficient)
     }
 
-    pub(crate) fn finish_after_projected_matrix_accumulation(
+    pub(crate) const fn batching_challenge(&self) -> CompactChallengeField {
+        self.batching_challenge
+    }
+
+    pub(crate) fn finish_after_matrix_accumulation(
         self,
         source_covector: Vec<CompactChallengeField>,
     ) -> Result<CompactCfwPublicMainCovectors, CompactCfwError> {
-        if source_covector.len() != self.projected_source_element_count
-            || source_covector.capacity() != self.projected_source_element_count
+        if source_covector.len() != self.retained_source_element_count
+            || source_covector.capacity() != self.retained_source_element_count
         {
             return Err(CompactCfwError::InvalidClaimInput);
         }

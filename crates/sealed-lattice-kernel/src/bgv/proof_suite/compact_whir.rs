@@ -35,7 +35,10 @@ use sha3::{
 
 use super::{
     bounded_radix2_dft::BoundedRadix2Dft,
-    compact_cfw::CompactChallengeField,
+    compact_cfw::{
+        COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH,
+        CompactCfwPublicMainCovectors, CompactChallengeField,
+    },
     compact_proof_contract::{
         CompactWhirEpochContract, CompactWhirFoldContract, CompactWhirMaskGroupContract,
     },
@@ -160,6 +163,44 @@ pub(crate) struct CompactWhirPreChallengeRelationPreparation {
     phase: CompactWhirPreChallengeRelationPreparationPhase,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirMainRelationPreparationPoll {
+    SourceStepCompleted {
+        processed_work_unit_count: u64,
+        relation_complete: bool,
+    },
+    Complete,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirMainRelationPreparationError<SourceError> {
+    Whir(CompactWhirError),
+    Source(SourceError),
+}
+
+impl<SourceError> From<CompactWhirError> for CompactWhirMainRelationPreparationError<SourceError> {
+    fn from(error: CompactWhirError) -> Self {
+        Self::Whir(error)
+    }
+}
+
+/// Pollable construction of the verifier-determined main WHIR relation.
+///
+/// The structured transpose supplies only public coefficients. The prover
+/// streams its authenticated witness into the committed source order and
+/// evaluates the target from that source plus the already committed mask
+/// messages. Independent verification derives the same target from the CFW
+/// transcript and canonical public input; no prover-computed target is read
+/// from proof bytes.
+pub(crate) struct CompactWhirMainRelationPreparation {
+    source_evaluations: Vec<CompactChallengeField>,
+    source_covector: Vec<CompactChallengeField>,
+    next_source_element: usize,
+    source_claim: CompactChallengeField,
+    preceding_mask_claim: CompactChallengeField,
+    input_binding_challenge: CompactChallengeField,
+}
+
 /// Opaque, checked relation handed to one masked WHIR sumcheck batch.
 pub(crate) struct CompactWhirMaskedSumcheckRelation {
     source_evaluations: Vec<CompactChallengeField>,
@@ -168,6 +209,29 @@ pub(crate) struct CompactWhirMaskedSumcheckRelation {
     target: CompactChallengeField,
     preceding_mask_claim: CompactChallengeField,
     input_binding_challenge: CompactChallengeField,
+}
+
+#[cfg(test)]
+impl CompactWhirMaskedSumcheckRelation {
+    pub(crate) fn relation_parts_for_test(
+        &self,
+    ) -> (
+        &[CompactChallengeField],
+        &[CompactChallengeField],
+        CompactChallengeField,
+        CompactChallengeField,
+        CompactChallengeField,
+        CompactChallengeField,
+    ) {
+        (
+            &self.source_evaluations,
+            &self.source_covector,
+            self.source_claim,
+            self.target,
+            self.preceding_mask_claim,
+            self.input_binding_challenge,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -671,6 +735,139 @@ impl CompactWhirPreChallengeRelationPreparation {
             input_binding_challenge: self.opening_batching_challenge,
         })
     }
+}
+
+impl CompactWhirMainRelationPreparation {
+    pub(crate) fn new(
+        public_covectors: CompactCfwPublicMainCovectors,
+        inner_mask_messages: &[[CompactChallengeField; COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH]],
+        outer_mask_messages: &[[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]],
+        cross_epoch_masks: [CompactChallengeField; 2],
+        input_binding_challenge: CompactChallengeField,
+    ) -> Result<Self, CompactWhirError> {
+        let (source_covector, inner_mask_covectors, outer_mask_covectors, cross_covectors) =
+            public_covectors.into_parts();
+        if source_covector.is_empty()
+            || !source_covector.len().is_power_of_two()
+            || source_covector.capacity() != source_covector.len()
+        {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+        let mut preceding_mask_claim =
+            checked_mask_group_claim(&inner_mask_covectors, inner_mask_messages)?
+                + checked_mask_group_claim(&outer_mask_covectors, outer_mask_messages)?;
+        if cross_covectors.len() != cross_epoch_masks.len()
+            || cross_covectors
+                .iter()
+                .any(|covector| covector.as_slice().len() != 1)
+        {
+            return Err(CompactWhirError::InvalidRelation);
+        }
+        for (covector, mask) in cross_covectors.iter().zip(cross_epoch_masks) {
+            preceding_mask_claim += covector[0] * mask;
+        }
+        let mut source_evaluations = Vec::new();
+        source_evaluations
+            .try_reserve_exact(source_covector.len())
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        if source_evaluations.capacity() != source_covector.len() {
+            return Err(CompactWhirError::AllocationLimitExceeded);
+        }
+        Ok(Self {
+            source_evaluations,
+            source_covector,
+            next_source_element: 0,
+            source_claim: CompactChallengeField::ZERO,
+            preceding_mask_claim,
+            input_binding_challenge,
+        })
+    }
+
+    pub(crate) fn poll<SourceError>(
+        &mut self,
+        maximum_work_unit_count: u64,
+        mut source_value: impl FnMut(u64) -> Result<CompactChallengeField, SourceError>,
+    ) -> Result<
+        CompactWhirMainRelationPreparationPoll,
+        CompactWhirMainRelationPreparationError<SourceError>,
+    > {
+        let maximum_work_unit_count = usize::try_from(maximum_work_unit_count)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        if maximum_work_unit_count == 0 {
+            return Err(CompactWhirError::InvalidWorkBudget.into());
+        }
+        if self.next_source_element == self.source_covector.len() {
+            return Ok(CompactWhirMainRelationPreparationPoll::Complete);
+        }
+        let first_source_element = self.next_source_element;
+        let end = first_source_element
+            .saturating_add(maximum_work_unit_count)
+            .min(self.source_covector.len());
+        for source_ordinal in first_source_element..end {
+            let value = source_value(
+                u64::try_from(source_ordinal).map_err(|_| CompactWhirError::CountOverflow)?,
+            )
+            .map_err(CompactWhirMainRelationPreparationError::Source)?;
+            self.source_claim += value * self.source_covector[source_ordinal];
+            self.source_evaluations.push(value);
+            self.next_source_element = source_ordinal
+                .checked_add(1)
+                .ok_or(CompactWhirError::CountOverflow)?;
+        }
+        Ok(
+            CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
+                processed_work_unit_count: u64::try_from(end - first_source_element)
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
+                relation_complete: end == self.source_covector.len(),
+            },
+        )
+    }
+
+    pub(crate) fn finish(mut self) -> Result<CompactWhirMaskedSumcheckRelation, CompactWhirError> {
+        if self.next_source_element != self.source_covector.len()
+            || self.source_evaluations.len() != self.source_covector.len()
+            || self.source_evaluations.capacity() != self.source_covector.len()
+        {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        let target = self.source_claim + self.preceding_mask_claim;
+        Ok(CompactWhirMaskedSumcheckRelation {
+            source_evaluations: core::mem::take(&mut self.source_evaluations),
+            source_covector: core::mem::take(&mut self.source_covector),
+            source_claim: self.source_claim,
+            target,
+            preceding_mask_claim: self.preceding_mask_claim,
+            input_binding_challenge: self.input_binding_challenge,
+        })
+    }
+}
+
+impl Drop for CompactWhirMainRelationPreparation {
+    fn drop(&mut self) {
+        self.source_evaluations.fill(CompactChallengeField::ZERO);
+        self.source_covector.fill(CompactChallengeField::ZERO);
+        self.source_claim = CompactChallengeField::ZERO;
+        self.preceding_mask_claim = CompactChallengeField::ZERO;
+    }
+}
+
+fn checked_mask_group_claim<const MESSAGE_LENGTH: usize>(
+    covectors: &[Vec<CompactChallengeField>],
+    messages: &[[CompactChallengeField; MESSAGE_LENGTH]],
+) -> Result<CompactChallengeField, CompactWhirError> {
+    if covectors.len() != messages.len()
+        || covectors
+            .iter()
+            .any(|covector| covector.len() != MESSAGE_LENGTH)
+    {
+        return Err(CompactWhirError::InvalidRelation);
+    }
+    Ok(covectors
+        .iter()
+        .zip(messages)
+        .flat_map(|(covector, message)| covector.iter().zip(message))
+        .map(|(coefficient, value)| *coefficient * *value)
+        .sum())
 }
 
 impl Drop for CompactWhirPreChallengeRelationPreparation {
@@ -3748,6 +3945,241 @@ mod tests {
                 Ok(CompactWhirPreChallengeRelationPreparationPoll::StepCompleted { .. }) => {}
             }
         }
+    }
+
+    #[test]
+    fn main_relation_preparation_streams_the_exact_source_and_rejects_wrong_geometry() {
+        let source_evaluations = (1_u64..=8)
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let source_covector = (11_u64..=18)
+            .map(CompactChallengeField::from_u64)
+            .collect::<Vec<_>>();
+        let inner_mask_covectors = vec![
+            (21_u64..=24)
+                .map(CompactChallengeField::from_u64)
+                .collect::<Vec<_>>(),
+            (25_u64..=28)
+                .map(CompactChallengeField::from_u64)
+                .collect::<Vec<_>>(),
+        ];
+        let outer_mask_covectors = vec![
+            (31_u64..=38)
+                .map(CompactChallengeField::from_u64)
+                .collect::<Vec<_>>(),
+        ];
+        let cross_epoch_mask_covectors = vec![
+            vec![CompactChallengeField::from_u64(41)],
+            vec![CompactChallengeField::from_u64(43)],
+        ];
+        let inner_mask_messages = [
+            [
+                CompactChallengeField::from_u64(51),
+                CompactChallengeField::from_u64(52),
+                CompactChallengeField::from_u64(53),
+                CompactChallengeField::from_u64(54),
+            ],
+            [
+                CompactChallengeField::from_u64(55),
+                CompactChallengeField::from_u64(56),
+                CompactChallengeField::from_u64(57),
+                CompactChallengeField::from_u64(58),
+            ],
+        ];
+        let outer_mask_messages = [[
+            CompactChallengeField::from_u64(61),
+            CompactChallengeField::from_u64(62),
+            CompactChallengeField::from_u64(63),
+            CompactChallengeField::from_u64(64),
+            CompactChallengeField::from_u64(65),
+            CompactChallengeField::from_u64(66),
+            CompactChallengeField::from_u64(67),
+            CompactChallengeField::from_u64(68),
+        ]];
+        let cross_epoch_masks = [
+            CompactChallengeField::from_u64(71),
+            CompactChallengeField::from_u64(73),
+        ];
+        let input_binding_challenge = CompactChallengeField::from_u64(79);
+        let public_covectors = || CompactCfwPublicMainCovectors {
+            source: source_covector.clone(),
+            inner_masks: inner_mask_covectors.clone(),
+            outer_masks: outer_mask_covectors.clone(),
+            cross_epoch_masks: cross_epoch_mask_covectors.clone(),
+        };
+
+        let mut incomplete = CompactWhirMainRelationPreparation::new(
+            public_covectors(),
+            &inner_mask_messages,
+            &outer_mask_messages,
+            cross_epoch_masks,
+            input_binding_challenge,
+        )
+        .expect("valid main-relation geometry begins preparing");
+        assert_eq!(
+            incomplete.poll::<core::convert::Infallible>(0, |_| unreachable!()),
+            Err(CompactWhirMainRelationPreparationError::Whir(
+                CompactWhirError::InvalidWorkBudget
+            ))
+        );
+        assert!(matches!(
+            incomplete.finish(),
+            Err(CompactWhirError::WrongProverPhase)
+        ));
+
+        let mut source_failure = CompactWhirMainRelationPreparation::new(
+            public_covectors(),
+            &inner_mask_messages,
+            &outer_mask_messages,
+            cross_epoch_masks,
+            input_binding_challenge,
+        )
+        .expect("valid main-relation geometry begins preparing");
+        assert_eq!(
+            source_failure.poll(3, |source_ordinal| {
+                if source_ordinal == 1 {
+                    Err("authenticated source failure")
+                } else {
+                    Ok(source_evaluations[usize::try_from(source_ordinal).unwrap()])
+                }
+            }),
+            Err(CompactWhirMainRelationPreparationError::Source(
+                "authenticated source failure"
+            ))
+        );
+        loop {
+            match source_failure
+                .poll(3, |source_ordinal| {
+                    Ok::<_, core::convert::Infallible>(
+                        source_evaluations[usize::try_from(source_ordinal).unwrap()],
+                    )
+                })
+                .expect("the authenticated source resumes at the failed ordinal")
+            {
+                CompactWhirMainRelationPreparationPoll::SourceStepCompleted { .. } => {}
+                CompactWhirMainRelationPreparationPoll::Complete => break,
+            }
+        }
+        let resumed_relation = source_failure
+            .finish()
+            .expect("the resumed source produces one exact relation");
+        assert_eq!(resumed_relation.source_evaluations, source_evaluations);
+        assert_eq!(
+            resumed_relation.source_claim,
+            source_evaluations
+                .iter()
+                .zip(&source_covector)
+                .map(|(value, coefficient)| *value * *coefficient)
+                .sum::<CompactChallengeField>()
+        );
+
+        let mut preparation = CompactWhirMainRelationPreparation::new(
+            public_covectors(),
+            &inner_mask_messages,
+            &outer_mask_messages,
+            cross_epoch_masks,
+            input_binding_challenge,
+        )
+        .expect("valid main-relation geometry begins preparing");
+        let work_budgets = [1_u64, 3, 2];
+        let mut poll_ordinal = 0_usize;
+        let mut observed_source_ordinals = Vec::new();
+        loop {
+            match preparation
+                .poll(
+                    work_budgets[poll_ordinal % work_budgets.len()],
+                    |source_ordinal| {
+                        observed_source_ordinals.push(source_ordinal);
+                        Ok::<_, core::convert::Infallible>(
+                            source_evaluations[usize::try_from(source_ordinal).unwrap()],
+                        )
+                    },
+                )
+                .expect("the valid main relation advances")
+            {
+                CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
+                    processed_work_unit_count,
+                    relation_complete,
+                } => {
+                    assert!((1..=3).contains(&processed_work_unit_count));
+                    assert_eq!(
+                        relation_complete,
+                        observed_source_ordinals.len() == source_evaluations.len()
+                    );
+                }
+                CompactWhirMainRelationPreparationPoll::Complete => break,
+            }
+            poll_ordinal += 1;
+        }
+        assert_eq!(observed_source_ordinals, (0_u64..8).collect::<Vec<_>>());
+        let relation = preparation
+            .finish()
+            .expect("the complete main relation finishes");
+        let expected_source_claim = source_evaluations
+            .iter()
+            .zip(&source_covector)
+            .map(|(value, coefficient)| *value * *coefficient)
+            .sum::<CompactChallengeField>();
+        let expected_inner_mask_claim = inner_mask_covectors
+            .iter()
+            .zip(&inner_mask_messages)
+            .flat_map(|(covector, message)| covector.iter().zip(message))
+            .map(|(coefficient, value)| *coefficient * *value)
+            .sum::<CompactChallengeField>();
+        let expected_outer_mask_claim = outer_mask_covectors
+            .iter()
+            .zip(&outer_mask_messages)
+            .flat_map(|(covector, message)| covector.iter().zip(message))
+            .map(|(coefficient, value)| *coefficient * *value)
+            .sum::<CompactChallengeField>();
+        let expected_cross_epoch_mask_claim = cross_epoch_mask_covectors
+            .iter()
+            .zip(cross_epoch_masks)
+            .map(|(covector, value)| covector[0] * value)
+            .sum::<CompactChallengeField>();
+        let expected_mask_claim =
+            expected_inner_mask_claim + expected_outer_mask_claim + expected_cross_epoch_mask_claim;
+        assert_eq!(relation.source_evaluations, source_evaluations);
+        assert_eq!(relation.source_covector, source_covector);
+        assert_eq!(relation.source_claim, expected_source_claim);
+        assert_eq!(relation.preceding_mask_claim, expected_mask_claim);
+        assert_eq!(relation.target, expected_source_claim + expected_mask_claim);
+        assert_eq!(relation.input_binding_challenge, input_binding_challenge);
+
+        let mut wrong_cross_epoch_geometry = public_covectors();
+        wrong_cross_epoch_geometry.cross_epoch_masks[0].push(CompactChallengeField::ZERO);
+        assert!(matches!(
+            CompactWhirMainRelationPreparation::new(
+                wrong_cross_epoch_geometry,
+                &inner_mask_messages,
+                &outer_mask_messages,
+                cross_epoch_masks,
+                input_binding_challenge,
+            ),
+            Err(CompactWhirError::InvalidRelation)
+        ));
+        let mut non_power_of_two_source = public_covectors();
+        non_power_of_two_source.source.pop();
+        assert!(matches!(
+            CompactWhirMainRelationPreparation::new(
+                non_power_of_two_source,
+                &inner_mask_messages,
+                &outer_mask_messages,
+                cross_epoch_masks,
+                input_binding_challenge,
+            ),
+            Err(CompactWhirError::InvalidRelation)
+        ));
+        assert!(matches!(
+            CompactWhirMainRelationPreparation::new(
+                public_covectors(),
+                &inner_mask_messages[..1],
+                &outer_mask_messages,
+                cross_epoch_masks,
+                input_binding_challenge,
+            ),
+            Err(CompactWhirError::InvalidRelation)
+        ));
     }
 
     #[test]

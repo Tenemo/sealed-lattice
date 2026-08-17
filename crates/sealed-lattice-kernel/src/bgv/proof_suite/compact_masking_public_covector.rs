@@ -437,7 +437,7 @@ impl CompactFactorOnePublicCovectorDerivation<'_, '_> {
                             .continuation
                             .take()
                             .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
-                            .finish_after_projected_matrix_accumulation(source_covector)?;
+                            .finish_after_matrix_accumulation(source_covector)?;
                         let parsed = state
                             .parsed
                             .take()
