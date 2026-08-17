@@ -395,6 +395,7 @@ enum CompactWhirRecomputableExtensionStage {
     LoadSource,
     Transform,
     CaptureStripe,
+    CaptureOpeningRows,
     StripeReady,
     Complete,
     OpeningReplayComplete,
@@ -418,6 +419,7 @@ pub(crate) struct CompactWhirRecomputableExtensionInitialOracle {
     encoded_column_values: Option<Vec<CompactChallengeField>>,
     next_capture_row: usize,
     opening_row_ordinals: Vec<usize>,
+    opening_values: Vec<CompactChallengeField>,
     next_opening_row_offset: usize,
     stage: CompactWhirRecomputableExtensionStage,
 }
@@ -2703,6 +2705,7 @@ impl CompactWhirRecomputableExtensionInitialOracle {
             encoded_column_values: None,
             next_capture_row: 0,
             opening_row_ordinals: Vec::new(),
+            opening_values: Vec::new(),
             next_opening_row_offset: 0,
             stage: CompactWhirRecomputableExtensionStage::PrepareStripe,
         })
@@ -2740,6 +2743,8 @@ impl CompactWhirRecomputableExtensionInitialOracle {
         match self.stage {
             CompactWhirRecomputableExtensionStage::PrepareStripe => {
                 if !self.stripe_values.is_empty()
+                    || !self.opening_row_ordinals.is_empty()
+                    || !self.opening_values.is_empty()
                     || self.stripe_first_row >= self.stripe_end_row
                     || self.stripe_end_row > self.encoded_height
                     || self.current_column_ordinal != 0
@@ -2754,18 +2759,7 @@ impl CompactWhirRecomputableExtensionInitialOracle {
                         .checked_mul(self.width)
                         .ok_or(CompactWhirError::CountOverflow)?,
                 )?;
-                if self.opening_row_ordinals.is_empty() {
-                    self.next_response_row = self.stripe_first_row;
-                } else if self
-                    .opening_row_ordinals
-                    .get(self.next_opening_row_offset)
-                    .copied()
-                    != Some(self.next_response_row)
-                    || !(self.stripe_first_row..self.stripe_end_row)
-                        .contains(&self.next_response_row)
-                {
-                    return Err(CompactWhirError::InvalidEncodedMatrix.into());
-                }
+                self.next_response_row = self.stripe_first_row;
                 self.stage = CompactWhirRecomputableExtensionStage::PrepareColumn;
                 Ok(
                     CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted {
@@ -2866,8 +2860,13 @@ impl CompactWhirRecomputableExtensionInitialOracle {
                             .into_values()
                             .map_err(|_| CompactWhirError::InvalidEncodedMatrix)?,
                     );
-                    self.next_capture_row = self.stripe_first_row;
-                    self.stage = CompactWhirRecomputableExtensionStage::CaptureStripe;
+                    if self.opening_row_ordinals.is_empty() {
+                        self.next_capture_row = self.stripe_first_row;
+                        self.stage = CompactWhirRecomputableExtensionStage::CaptureStripe;
+                    } else {
+                        self.next_capture_row = 0;
+                        self.stage = CompactWhirRecomputableExtensionStage::CaptureOpeningRows;
+                    }
                 }
                 Ok(
                     CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted {
@@ -2877,6 +2876,9 @@ impl CompactWhirRecomputableExtensionInitialOracle {
                 )
             }
             CompactWhirRecomputableExtensionStage::CaptureStripe => {
+                if !self.opening_row_ordinals.is_empty() || !self.opening_values.is_empty() {
+                    return Err(CompactWhirError::InvalidEncodedMatrix.into());
+                }
                 let end = self
                     .next_capture_row
                     .saturating_add(maximum_work_unit_count)
@@ -2923,12 +2925,75 @@ impl CompactWhirRecomputableExtensionInitialOracle {
                     },
                 )
             }
+            CompactWhirRecomputableExtensionStage::CaptureOpeningRows => {
+                if self.opening_row_ordinals.is_empty()
+                    || self.opening_values.len()
+                        != self
+                            .opening_row_ordinals
+                            .len()
+                            .checked_mul(self.width)
+                            .ok_or(CompactWhirError::CountOverflow)?
+                {
+                    return Err(CompactWhirError::InvalidEncodedMatrix.into());
+                }
+                let end = self
+                    .next_capture_row
+                    .saturating_add(maximum_work_unit_count)
+                    .min(self.opening_row_ordinals.len());
+                let encoded_column_values = self
+                    .encoded_column_values
+                    .as_ref()
+                    .ok_or(CompactWhirError::InvalidEncodedMatrix)?;
+                for opening_row_offset in self.next_capture_row..end {
+                    let encoded_row = self.opening_row_ordinals[opening_row_offset];
+                    let destination = opening_row_offset
+                        .checked_mul(self.width)
+                        .and_then(|offset| offset.checked_add(self.current_column_ordinal))
+                        .ok_or(CompactWhirError::CountOverflow)?;
+                    self.opening_values[destination] = *encoded_column_values
+                        .get(encoded_row)
+                        .ok_or(CompactWhirError::InvalidEncodedMatrix)?;
+                }
+                let processed_work_unit_count = u64::try_from(end - self.next_capture_row)
+                    .map_err(|_| CompactWhirError::CountOverflow)?;
+                self.next_capture_row = end;
+                if end == self.opening_row_ordinals.len() {
+                    self.encoded_column_values
+                        .as_mut()
+                        .ok_or(CompactWhirError::InvalidEncodedMatrix)?
+                        .fill(CompactChallengeField::ZERO);
+                    self.encoded_column_values = None;
+                    self.current_column_ordinal = self
+                        .current_column_ordinal
+                        .checked_add(1)
+                        .ok_or(CompactWhirError::CountOverflow)?;
+                    self.stage = if self.current_column_ordinal == self.width {
+                        self.next_response_row = self.opening_row_ordinals[0];
+                        CompactWhirRecomputableExtensionStage::StripeReady
+                    } else {
+                        CompactWhirRecomputableExtensionStage::PrepareColumn
+                    };
+                }
+                Ok(
+                    CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted {
+                        processed_work_unit_count,
+                    },
+                )
+            }
             CompactWhirRecomputableExtensionStage::StripeReady => {
                 Ok(CompactWhirRecomputableExtensionPoll::StripeReady {
-                    first_row: u64::try_from(self.stripe_first_row)
-                        .map_err(|_| CompactWhirError::CountOverflow)?,
-                    row_count: u64::try_from(self.stripe_end_row - self.stripe_first_row)
-                        .map_err(|_| CompactWhirError::CountOverflow)?,
+                    first_row: u64::try_from(if self.opening_row_ordinals.is_empty() {
+                        self.stripe_first_row
+                    } else {
+                        self.next_response_row
+                    })
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
+                    row_count: u64::try_from(if self.opening_row_ordinals.is_empty() {
+                        self.stripe_end_row - self.stripe_first_row
+                    } else {
+                        1
+                    })
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
                 })
             }
             CompactWhirRecomputableExtensionStage::Complete
@@ -2942,9 +3007,34 @@ impl CompactWhirRecomputableExtensionInitialOracle {
         &self,
         row_ordinal: usize,
     ) -> Result<&[CompactChallengeField], CompactWhirError> {
+        if self.stage == CompactWhirRecomputableExtensionStage::StripeReady
+            && !self.opening_row_ordinals.is_empty()
+        {
+            if self
+                .opening_row_ordinals
+                .get(self.next_opening_row_offset)
+                .copied()
+                != Some(row_ordinal)
+            {
+                return Err(CompactWhirError::InvalidEncodedMatrix);
+            }
+            let first_value = self
+                .next_opening_row_offset
+                .checked_mul(self.width)
+                .ok_or(CompactWhirError::CountOverflow)?;
+            let end_value = first_value
+                .checked_add(self.width)
+                .ok_or(CompactWhirError::CountOverflow)?;
+            return self
+                .opening_values
+                .get(first_value..end_value)
+                .ok_or(CompactWhirError::InvalidEncodedMatrix);
+        }
         if self.stage != CompactWhirRecomputableExtensionStage::StripeReady
             || row_ordinal != self.next_response_row
             || !(self.stripe_first_row..self.stripe_end_row).contains(&row_ordinal)
+            || !self.opening_row_ordinals.is_empty()
+            || !self.opening_values.is_empty()
         {
             return Err(CompactWhirError::InvalidEncodedMatrix);
         }
@@ -2963,9 +3053,50 @@ impl CompactWhirRecomputableExtensionInitialOracle {
         &mut self,
         row_ordinal: usize,
     ) -> Result<(), CompactWhirError> {
+        if self.stage == CompactWhirRecomputableExtensionStage::StripeReady
+            && !self.opening_row_ordinals.is_empty()
+        {
+            if self
+                .opening_row_ordinals
+                .get(self.next_opening_row_offset)
+                .copied()
+                != Some(row_ordinal)
+            {
+                return Err(CompactWhirError::InvalidEncodedMatrix);
+            }
+            let first_value = self
+                .next_opening_row_offset
+                .checked_mul(self.width)
+                .ok_or(CompactWhirError::CountOverflow)?;
+            let end_value = first_value
+                .checked_add(self.width)
+                .ok_or(CompactWhirError::CountOverflow)?;
+            self.opening_values
+                .get_mut(first_value..end_value)
+                .ok_or(CompactWhirError::InvalidEncodedMatrix)?
+                .fill(CompactChallengeField::ZERO);
+            self.next_opening_row_offset = self
+                .next_opening_row_offset
+                .checked_add(1)
+                .ok_or(CompactWhirError::CountOverflow)?;
+            if let Some(next_opening_row) = self
+                .opening_row_ordinals
+                .get(self.next_opening_row_offset)
+                .copied()
+            {
+                self.next_response_row = next_opening_row;
+            } else {
+                self.opening_values.fill(CompactChallengeField::ZERO);
+                self.opening_values.clear();
+                self.stage = CompactWhirRecomputableExtensionStage::OpeningReplayComplete;
+            }
+            return Ok(());
+        }
         if self.stage != CompactWhirRecomputableExtensionStage::StripeReady
             || row_ordinal != self.next_response_row
             || row_ordinal >= self.stripe_end_row
+            || !self.opening_row_ordinals.is_empty()
+            || !self.opening_values.is_empty()
         {
             return Err(CompactWhirError::InvalidEncodedMatrix);
         }
@@ -2973,28 +3104,6 @@ impl CompactWhirRecomputableExtensionInitialOracle {
             .next_response_row
             .checked_add(1)
             .ok_or(CompactWhirError::CountOverflow)?;
-        if !self.opening_row_ordinals.is_empty() {
-            self.next_opening_row_offset = self
-                .next_opening_row_offset
-                .checked_add(1)
-                .ok_or(CompactWhirError::CountOverflow)?;
-            let Some(next_opening_row) = self
-                .opening_row_ordinals
-                .get(self.next_opening_row_offset)
-                .copied()
-            else {
-                self.clear_stripe_values();
-                self.stage = CompactWhirRecomputableExtensionStage::OpeningReplayComplete;
-                return Ok(());
-            };
-            if next_opening_row < self.stripe_end_row {
-                self.next_response_row = next_opening_row;
-                return Ok(());
-            }
-            self.clear_stripe_values();
-            self.prepare_stripe_containing(next_opening_row)?;
-            return Ok(());
-        }
         if self.next_response_row == self.stripe_end_row {
             self.clear_stripe_values();
             self.stripe_first_row = self.stripe_end_row;
@@ -3014,8 +3123,9 @@ impl CompactWhirRecomputableExtensionInitialOracle {
     }
 
     /// Begins the sole delayed-opening replay after the sequential response has
-    /// been committed. The rows come from the verifier-derived query schedule;
-    /// they must be strictly increasing so each touched stripe is encoded once.
+    /// been committed. The rows come from the verifier-derived query schedule.
+    /// They must be strictly increasing; one column-major encoding pass retains
+    /// only those rows, so query dispersion does not repeat a full transform.
     pub(crate) fn begin_opening_replay(
         &mut self,
         row_ordinals: &[usize],
@@ -3030,15 +3140,27 @@ impl CompactWhirRecomputableExtensionInitialOracle {
             || self.active_transform.is_some()
             || self.encoded_column_values.is_some()
             || !self.opening_row_ordinals.is_empty()
+            || !self.opening_values.is_empty()
         {
             return Err(CompactWhirError::InvalidEncodedMatrix);
         }
+        let opening_value_count = row_ordinals
+            .len()
+            .checked_mul(self.width)
+            .ok_or(CompactWhirError::CountOverflow)?;
+        let opening_values = allocate_zero_extension_values(opening_value_count)?;
         self.opening_row_ordinals
             .try_reserve_exact(row_ordinals.len())
             .map_err(|_| CompactWhirError::CountOverflow)?;
         self.opening_row_ordinals.extend_from_slice(row_ordinals);
+        self.opening_values = opening_values;
         self.next_opening_row_offset = 0;
-        self.prepare_stripe_containing(row_ordinals[0])
+        self.next_response_row = row_ordinals[0];
+        self.current_column_ordinal = 0;
+        self.next_source_row = 0;
+        self.next_capture_row = 0;
+        self.stage = CompactWhirRecomputableExtensionStage::PrepareColumn;
+        Ok(())
     }
 
     pub(crate) const fn can_begin_opening_replay(&self) -> bool {
@@ -3055,6 +3177,7 @@ impl CompactWhirRecomputableExtensionInitialOracle {
     pub(crate) fn finish_opening_replay(&mut self) -> Result<(), CompactWhirError> {
         if !self.opening_replay_complete()
             || !self.stripe_values.is_empty()
+            || !self.opening_values.is_empty()
             || self.active_transform.is_some()
             || self.encoded_column_values.is_some()
         {
@@ -3075,31 +3198,6 @@ impl CompactWhirRecomputableExtensionInitialOracle {
         )
     }
 
-    fn prepare_stripe_containing(&mut self, row_ordinal: usize) -> Result<(), CompactWhirError> {
-        if row_ordinal >= self.encoded_height
-            || self.maximum_stripe_row_count == 0
-            || !self.stripe_values.is_empty()
-            || self.active_transform.is_some()
-            || self.encoded_column_values.is_some()
-        {
-            return Err(CompactWhirError::InvalidEncodedMatrix);
-        }
-        self.stripe_first_row = row_ordinal
-            .checked_div(self.maximum_stripe_row_count)
-            .and_then(|stripe_ordinal| stripe_ordinal.checked_mul(self.maximum_stripe_row_count))
-            .ok_or(CompactWhirError::CountOverflow)?;
-        self.stripe_end_row = self
-            .stripe_first_row
-            .saturating_add(self.maximum_stripe_row_count)
-            .min(self.encoded_height);
-        self.next_response_row = row_ordinal;
-        self.current_column_ordinal = 0;
-        self.next_source_row = 0;
-        self.next_capture_row = 0;
-        self.stage = CompactWhirRecomputableExtensionStage::PrepareStripe;
-        Ok(())
-    }
-
     fn clear_stripe_values(&mut self) {
         self.stripe_values.fill(CompactChallengeField::ZERO);
         self.stripe_values.clear();
@@ -3110,6 +3208,7 @@ impl Drop for CompactWhirRecomputableExtensionInitialOracle {
     fn drop(&mut self) {
         self.randomness.fill(CompactChallengeField::ZERO);
         self.stripe_values.fill(CompactChallengeField::ZERO);
+        self.opening_values.fill(CompactChallengeField::ZERO);
         if let Some(values) = self.encoded_column_values.as_mut() {
             values.fill(CompactChallengeField::ZERO);
         }
@@ -4626,6 +4725,7 @@ mod tests {
         assert!(!recomputable.can_begin_opening_replay());
         assert!(!recomputable.is_complete());
         let mut opening_arithmetic_poll_count = 0_u64;
+        let mut opening_source_value_count = 0_usize;
         for row_ordinal in opening_rows {
             loop {
                 if let Ok(row) = recomputable.response_row(row_ordinal) {
@@ -4639,6 +4739,7 @@ mod tests {
                 }
                 match recomputable
                     .poll(4_096, |source_ordinal| {
+                        opening_source_value_count += 1;
                         Ok::<_, ()>(
                             message[usize::try_from(source_ordinal)
                                 .expect("small delayed source ordinal")],
@@ -4660,9 +4761,14 @@ mod tests {
                 .expect("the exact delayed opening row advances custody");
         }
         assert!(opening_arithmetic_poll_count > 0);
+        assert_eq!(opening_source_value_count, message.len());
         assert!(recomputable.is_complete());
         assert!(recomputable.response_row(opening_rows[0]).is_err());
         assert!(recomputable.begin_opening_replay(&opening_rows).is_err());
+        recomputable
+            .finish_opening_replay()
+            .expect("the one-pass opening replay releases its randomness");
+        assert!(recomputable.encoding_randomness().is_empty());
     }
 
     #[test]

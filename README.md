@@ -90,8 +90,9 @@ and target release remain incomplete or internal.
   public-input bytes from verifier-minted suite, application-statement,
   manifest, and relation bindings before independently decoding them. A
   release-owned public-key generation state now owns that family
-  materialization, its first three compact responses, and the complete CFW
-  response sequence together. It accepts the
+  materialization, the complete CFW and pre-challenge WHIR response sequence,
+  and the first two main-epoch masked-sumcheck batches with their intervening
+  code switch. It accepts the
   lookup challenge only through a borrowed first-message authority minted by
   its retained compact response state for the same proof geometry and
   canonical public input, then owns bounded lookup inversion and structured-row
@@ -156,12 +157,12 @@ and target release remain incomplete or internal.
   4,104 response leaves, eight compiler-required round-wire openings, and a
   2,048-element residual source and covector. The next two code switches derive
   their 432- and 400-position source-query schedules at the exact verifier-
-  message boundaries. Each replays only the touched canonical source stripes,
-  checks the retained query image against the independently compiled masking
-  map, folds those values into the next relation, and releases the full prior
-  source while retaining only the queried rows needed by its later Merkle
-  opening. Their padded commitments contain 8,192 leaves each and correctly
-  emit no openings at these moves because no response reaches last use there.
+  message boundaries. Each makes one column-major encoding pass over the prior
+  source, retains only the selected row cells, checks that query image against
+  the independently compiled masking map, folds those values into the next
+  relation, and releases the full prior source. Their padded commitments
+  contain 8,192 leaves each and correctly emit no openings at these moves
+  because no response reaches last use there.
   The following four-round masked-sumcheck batches each commit 4,104 leaves and
   supply eight required round-wire openings; their residual source lengths are
   128 and 8. The same release state then folds the final eight-element source
@@ -197,26 +198,35 @@ and target release remain incomplete or internal.
   publishes an authenticated checkpoint, and response custody supplies the 14
   compiler-required round-wire openings. Guarded selected-size native execution
   reconciles 4,110 committed leaves and finishes with a 32,768-element residual
-  source and covector. No main-epoch code switch or later batch has executed.
-  When a later verifier move opens the main response, the response state exposes
-  its complete verifier-derived query schedule only during that opening. The
-  production owner filters the exact main-source rows and replays each touched
-  canonical stripe once from retained source authority and action-private
-  encoding randomness. Focused coverage matches nonconsecutive replayed rows to
-  the eager canonical WHIR encoder across stripe boundaries and refuses
-  duplicate, reordered, out-of-range, premature, and repeated replay requests.
+  source and covector. The first main-epoch code switch then commits its
+  16,384-leaf next-source and switch-mask response, derives 396 source positions
+  from the authenticated verifier message, and reconstructs the 131,072-row by
+  128-lane main source in one column-major pass. It retains exactly those 396
+  rows, verifies all 50,688 query-major values against the independently
+  compiled masking image and verified first-epoch prefix, binds the folded
+  openings into the next relation, and releases the full source encoding
+  randomness. The response reaches no last use at that move and emits no
+  opening. Its exact 13,132,944-work-unit output relation feeds the next
+  four-round masked sumcheck, which commits 4,104 leaves, supplies eight round-
+  wire openings, and finishes with a 2,048-element residual source and
+  covector. Focused coverage matches nonconsecutive replayed rows to the eager
+  canonical WHIR encoder, proves that delayed replay reads each source element
+  once regardless of query dispersion, and refuses duplicate, reordered, out-
+  of-range, premature, and repeated replay requests.
   Guarded native development coverage exercises this selected-size path
   through all four pre-challenge masked-sumcheck batches and all three code
   switches under the repository memory ceiling. Its CFW phase reconciles 4,926
   external-storage transactions, 1,006,632,840 bytes written, 2,013,265,440
   bytes read, and 587,202,560 peak CFW storage bytes.
-  These measurements remain in the owning run diagnostics and do not
-  constitute scalar-WASM or browser evidence. The owner now completes the
-  initial main-epoch masked-sumcheck batch, but it does not yet cover
-  a selected-size main-source stripe opening replay, authenticated mid-stripe
-  restart, cold restoration through the common worker, JavaScript and browser-
-  process overlap, the first main-epoch code switch, later main-epoch responses,
-  a complete emitted proof, or algebraic verification of that proof. The test-
+  In the same guarded native run, the first main code switch completes in
+  5,160 milliseconds with 21,037 source polls; the complete guarded job peaks
+  at 938,106,880 bytes and its test process peaks at 926,597,120 bytes. These
+  measurements remain in the owning run diagnostics and do not constitute
+  scalar-WASM, browser, or phone evidence. The owner does not yet cover an
+  authenticated interruption inside the column-major replay, cold restoration
+  through the common worker, JavaScript and browser-process overlap, the
+  remaining two main-epoch code switches and batches, the main base case, a
+  complete emitted proof, or algebraic verification of that proof. The test-
   only production-shaped small-chain owner uses the response state, but the
   remaining main-epoch response execution, terminal semantic composition, and
   the whole-construction masking simulator remain test-only or incomplete.
@@ -247,13 +257,15 @@ and target release remain incomplete or internal.
   and every round wire pass their live conditional-image gates. The verified
   first-epoch base prefix also authorizes the exact initial main-epoch replay;
   its sampled auxiliary target and all seven round wires pass their live
-  conditional-image gates. The fixed KMAC256/SHAKE256 joint assumption remains
-  external. The live pre-challenge
+  conditional-image gates. The first main code-switch source-query image and
+  the following auxiliary and four round wires pass the same sequential live
+  gate under that verified prefix. The fixed KMAC256/SHAKE256 joint assumption
+  remains external. The live pre-challenge
   role-18 carried covector, role-10 blinded reveal, and role-11 final-query
   images are now connected to canonical generated values and the exact
-  authenticated prefix. The main-epoch role-18 authority, later-epoch
-  sequential images, and terminal whole-construction simulator are not
-  connected yet.
+  authenticated prefix. The main-epoch role-18 authority, the remaining two
+  code switches and batches, the base-case images, and the terminal whole-
+  construction simulator are not connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one
   schedule. Its one-shot carried-covector lifecycle is bound to verified public
   input and the exact transcript prefix, and guarded coverage reaches the
