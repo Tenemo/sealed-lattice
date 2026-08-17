@@ -154,8 +154,19 @@ and target release remain incomplete or internal.
   compiled conditional-image gate for its auxiliary and all four round wires,
   publishes an authenticated checkpoint for every response, and finishes with
   4,104 response leaves, eight compiler-required round-wire openings, and a
-  2,048-element residual source and covector. This is two masked-sumcheck
-  batches and one code switch, not a complete WHIR epoch or proof.
+  2,048-element residual source and covector. The next two code switches derive
+  their 432- and 400-position source-query schedules at the exact verifier-
+  message boundaries. Each replays only the touched canonical source stripes,
+  checks the retained query image against the independently compiled masking
+  map, folds those values into the next relation, and releases the full prior
+  source while retaining only the queried rows needed by its later Merkle
+  opening. Their padded commitments contain 8,192 leaves each and correctly
+  emit no openings at these moves because no response reaches last use there.
+  The following four-round masked-sumcheck batches each commit 4,104 leaves and
+  supply eight required round-wire openings; their residual source lengths are
+  128 and 8. This completes the selected pre-challenge fold chain in guarded
+  native execution, not the WHIR base case, final queries, a complete epoch, or
+  a proof.
   When a later verifier move opens the main response, the response state exposes
   its complete verifier-derived query schedule only during that opening. The
   production owner filters the exact main-source rows and replays each touched
@@ -164,21 +175,21 @@ and target release remain incomplete or internal.
   the eager canonical WHIR encoder across stripe boundaries and refuses
   duplicate, reordered, out-of-range, premature, and repeated replay requests.
   Guarded native development coverage exercises this selected-size path
-  through the second pre-challenge masked-sumcheck batch under the repository
-  memory ceiling. Its CFW phase reconciles 4,926 external-storage transactions,
-  1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
-  CFW storage bytes.
+  through all four pre-challenge masked-sumcheck batches and all three code
+  switches under the repository memory ceiling. Its CFW phase reconciles 4,926
+  external-storage transactions, 1,006,632,840 bytes written, 2,013,265,440
+  bytes read, and 587,202,560 peak CFW storage bytes.
   These measurements remain in the owning run diagnostics and do not
   constitute scalar-WASM or browser evidence. The owner does not yet cover a
   selected-size main-source stripe opening replay, authenticated mid-stripe
   restart, cold restoration through the common worker, JavaScript and browser-
-  process overlap, the remaining two pre-challenge masked-sumcheck batches
-  and two code switches, the base opening, a complete emitted WHIR epoch, or a
-  proof. The test-only production-shaped small-chain owner uses the response
-  state, but the WHIR family material provider, production worker adapter, WHIR
-  proof production, semantic execution, and complete masking path remain
-  test-only or incomplete. Before the second response's masking material is
-  drawn, release generation now re-decodes its canonical public input through
+  process overlap, the pre-challenge base response and final-query opening, a
+  complete emitted WHIR epoch, or a proof. The test-only production-shaped
+  small-chain owner uses the response state, but the WHIR family material
+  provider, production worker adapter, WHIR proof production, semantic
+  execution, and complete masking path remain test-only or incomplete. Before
+  the second response's masking material is drawn, release generation now re-
+  decodes its canonical public input through
   the selected verifier contract, independently derives and checks every
   coefficient-to-view map, and constructs the compiler/verifier-derived public-
   covector authority for those bytes. That release gate also rederives the
@@ -198,10 +209,12 @@ and target release remain incomplete or internal.
   round, the initial pre-challenge WHIR auxiliary, and all six initial WHIR
   round disclosures now pass their conditional-image gates. The first source-
   query disclosure also passes its verifier-prefix-derived full-rank image gate
-  before any leaf is released. The second batch replays that exact full-rank
-  disclosure prefix before enforcing its auxiliary and four round-wire image
-  gates. The fixed KMAC256/SHAKE256 joint assumption remains external. The
-  subsequent WHIR sequential images, both live role-18
+  before any leaf is released. The later two source-query images are evaluated
+  at their verifier-message boundaries and retained for last-use opening only
+  after the same production masking check; all four pre-challenge auxiliaries
+  and every round wire pass their live conditional-image gates. The fixed
+  KMAC256/SHAKE256 joint assumption remains external. The pre-challenge base
+  and final-query images, both live role-18
   carried covectors, and the terminal whole-construction simulator are not
   connected yet.
 - The test-only semantic workbench covers the checked 82-move factor-one

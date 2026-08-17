@@ -133,8 +133,17 @@ binds that extension challenge, and gates its auxiliary and four round wires
 against independently compiled conditional images before commitment.
 Authenticated checkpoints cover every response. Guarded selected-size coverage
 finishes this batch with 4,104 response leaves, eight compiler-required round-
-wire openings, and a 2,048-element residual source and covector. This is two
-masked-sumcheck batches and one code switch, not a complete WHIR epoch or proof.
+wire openings, and a 2,048-element residual source and covector. The next two
+code switches derive 432 and 400 source queries from their exact verifier
+messages, replay only the touched canonical stripes, verify the retained query
+images against independently compiled masking maps, and release the full prior
+sources after binding the next relations. Only the queried rows needed by later
+last-use Merkle openings remain. Both padded code-switch responses contain
+8,192 leaves and emit zero openings at their own moves, as required by the
+response-retention chronology. The following four-round batches each commit
+4,104 leaves and supply eight round-wire openings, reducing the residual source
+to 128 and then 8 elements. This closes the guarded native pre-challenge fold
+chain, not the WHIR base case, final queries, a complete epoch, or a proof.
 Guarded native coverage executes this path under the repository memory ceiling.
 The CFW phase reconciles 4,926 external-storage transactions, 1,006,632,840
 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak CFW storage bytes;
@@ -147,8 +156,8 @@ selected-size owner has not reached or measured that later opening move. This
 is native development evidence only.
 Selected-size main-source stripe opening replay, authenticated mid-stripe
 restart, cold restoration through the common worker, scalar-WASM execution,
-the remaining two pre-challenge masked-sumcheck batches and two code switches,
-the base opening, and a complete emitted WHIR epoch remain absent.
+the pre-challenge base response and final-query opening, and a complete emitted
+WHIR epoch remain absent.
 The test-only production-shaped small-chain owner uses the response state, but
 the WHIR family material provider, production worker adapter, semantic
 composition, remaining WHIR execution, complete masking path, emitted-coordinate
@@ -172,8 +181,10 @@ cannot initialize unless that check passed. Every live CFW round, the initial
 pre-challenge WHIR auxiliary, and all six initial WHIR round disclosures now
 pass their conditional-image gates. The first source-query disclosure also
 passes its full-rank conditional-image gate before generation releases any
-opening. The second masked-sumcheck batch replays that exact disclosure prefix
-and gates its auxiliary and four round wires before commitment.
+opening. The later two source-query images are evaluated at their verifier-
+message boundaries and retained only after the same production masking check;
+all four pre-challenge auxiliaries and every round wire pass their live
+conditional-image gates.
 
 The test-only factor-one semantic owner covers the checked 82-move schedule,
 including prefix knowledge states, deterministic bad-transition owners,
@@ -198,13 +209,15 @@ to verified public input and the exact semantic prefix, and guarded coverage
 reaches the terminal 82-move lifecycle, including retry, restore, and nonempty-
 suffix rewind.
 
-The release path does not close masking: the subsequent WHIR sequential
-conditional images, both live role-18 prefix consumptions, whole-construction
-terminal simulator binding to the complete emitted proof, and the exact
-construction-level statistical-HVZK statement remain absent. The live CFW gates
-bind only the canonical prefix through the final CFW response, and the live
-WHIR gates extend that binding through the first code-switch disclosure and the
-second masked-sumcheck batch. They are not a complete emitted-byte
+The release path does not close masking: the pre-challenge base and final-query
+images, later-epoch sequential conditional images, both live role-18 prefix
+consumptions, whole-construction terminal simulator binding to the complete
+emitted proof, and the exact construction-level statistical-HVZK statement
+remain absent. The live CFW gates bind only the canonical prefix through the
+final CFW response, and the live WHIR gates extend that binding through all four
+pre-challenge masked-sumcheck batches and all three code-switch source-query
+disclosures. They do not cover either live role-18 prefix consumption or the
+terminal whole-construction simulator and are not a complete emitted-byte
 correspondence argument.
 The live bridge accounts for three symbolic quantum-PRF replacements: action-
 root key expansion, proof-coin and coordinate-stream derivation, and compact-
@@ -316,12 +329,19 @@ that a coherent snapshot is newest.
   second masked-sumcheck batch through the role-nine mixed-output challenge,
   four conditional-image-gated rounds, authenticated response checkpoints,
   4,104 response leaves, eight round-wire openings, and a 2,048-element
-  residual relation. Its CFW external-storage
+  residual relation. It then completes the remaining two code switches and
+  masked-sumcheck batches. The 432- and 400-position query images are derived at
+  their verifier-message boundaries, checked against the production masking
+  maps, folded into the next relations, and retained in queried-row form for
+  later last-use openings. The two 8,192-leaf code-switch commitments emit no
+  premature openings; the following batches each own 4,104 response leaves and
+  eight round-wire openings and reduce the residual relation to 128 and then 8
+  elements. Its CFW external-storage
   execution reconciles 4,926 transactions, 1,006,632,840 bytes written,
   2,013,265,440 bytes read, and 587,202,560 peak bytes. The production path owns
   verifier-derived opening recomputation, but
   selected-size main-source stripe opening replay, mid-stripe restart, cold
-  common-worker restoration, the remaining first-epoch WHIR execution,
+  common-worker restoration, the pre-challenge base and final-query execution,
   complete proof execution, browser resource reconciliation, and browser
   execution remain unresolved.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile

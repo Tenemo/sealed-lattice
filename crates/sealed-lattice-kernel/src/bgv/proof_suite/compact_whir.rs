@@ -257,7 +257,7 @@ pub(crate) enum CompactWhirCodeSwitchPreparationPoll {
 pub(crate) struct CompactWhirCodeSwitchState {
     source_evaluations: Vec<CompactChallengeField>,
     source_oracle: CompactWhirRecomputableExtensionInitialOracle,
-    previous_encoding_randomness: Vec<Goldilocks>,
+    previous_encoding_randomness: Vec<CompactChallengeField>,
     folding_weights: Vec<CompactChallengeField>,
     folded_previous_randomness: Vec<CompactChallengeField>,
     next_randomness_element_ordinal: usize,
@@ -1152,9 +1152,41 @@ impl Drop for CompactWhirInitialSumcheckState {
 
 impl CompactWhirCodeSwitchState {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new<R: Rng>(
+    pub(crate) fn new_from_base_source<R: Rng>(
         source_evaluations: Vec<CompactChallengeField>,
-        previous_encoding_randomness: Vec<Goldilocks>,
+        mut previous_encoding_randomness: Vec<Goldilocks>,
+        folding_challenges: &[CompactChallengeField],
+        previous_source_contract: CompactWhirFoldContract,
+        next_source_contract: CompactWhirFoldContract,
+        switch_mask_contract: CompactWhirMaskGroupContract,
+        random_source: &mut R,
+    ) -> Result<Self, CompactWhirError> {
+        let mut promoted_randomness = Vec::new();
+        promoted_randomness
+            .try_reserve_exact(previous_encoding_randomness.len())
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        promoted_randomness.extend(
+            previous_encoding_randomness
+                .iter()
+                .copied()
+                .map(CompactChallengeField::from),
+        );
+        previous_encoding_randomness.fill(Goldilocks::ZERO);
+        Self::new_from_extension_source(
+            source_evaluations,
+            promoted_randomness,
+            folding_challenges,
+            previous_source_contract,
+            next_source_contract,
+            switch_mask_contract,
+            random_source,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_from_extension_source<R: Rng>(
+        source_evaluations: Vec<CompactChallengeField>,
+        previous_encoding_randomness: Vec<CompactChallengeField>,
         folding_challenges: &[CompactChallengeField],
         previous_source_contract: CompactWhirFoldContract,
         next_source_contract: CompactWhirFoldContract,
@@ -1267,10 +1299,8 @@ impl CompactWhirCodeSwitchState {
                         .folding_weights
                         .get(limb_ordinal)
                         .ok_or(CompactWhirError::InvalidConfiguration)?;
-                    self.folded_previous_randomness[coordinate_ordinal] += weight
-                        * CompactChallengeField::from(
-                            self.previous_encoding_randomness[element_ordinal],
-                        );
+                    self.folded_previous_randomness[coordinate_ordinal] +=
+                        weight * self.previous_encoding_randomness[element_ordinal];
                 }
                 let processed_work_unit_count =
                     u64::try_from(end - self.next_randomness_element_ordinal)
@@ -1278,7 +1308,8 @@ impl CompactWhirCodeSwitchState {
                 self.next_randomness_element_ordinal = end;
                 let fold_complete = end == self.previous_encoding_randomness.len();
                 if fold_complete {
-                    self.previous_encoding_randomness.fill(Goldilocks::ZERO);
+                    self.previous_encoding_randomness
+                        .fill(CompactChallengeField::ZERO);
                     self.previous_encoding_randomness.clear();
                     self.folding_weights.fill(CompactChallengeField::ZERO);
                     self.folding_weights.clear();
@@ -1302,6 +1333,34 @@ impl CompactWhirCodeSwitchState {
 
     pub(crate) const fn source_oracle(&self) -> &CompactWhirRecomputableExtensionInitialOracle {
         &self.source_oracle
+    }
+
+    pub(crate) fn source_encoding_randomness(&self) -> &[CompactChallengeField] {
+        self.source_oracle.encoding_randomness()
+    }
+
+    pub(crate) fn begin_source_opening_replay(
+        &mut self,
+        row_ordinals: &[usize],
+    ) -> Result<(), CompactWhirError> {
+        self.source_oracle.begin_opening_replay(row_ordinals)
+    }
+
+    pub(crate) const fn can_begin_source_opening_replay(&self) -> bool {
+        self.source_oracle.can_begin_opening_replay()
+    }
+
+    pub(crate) const fn source_opening_replay_complete(&self) -> bool {
+        self.source_oracle.opening_replay_complete()
+    }
+
+    pub(crate) fn finish_source_opening_replay(&mut self) -> Result<(), CompactWhirError> {
+        if !self.source_opening_replay_complete() || self.source_evaluations.is_empty() {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        self.source_evaluations.fill(CompactChallengeField::ZERO);
+        self.source_evaluations.clear();
+        self.source_oracle.finish_opening_replay()
     }
 
     pub(crate) fn poll_source_oracle(
@@ -1409,8 +1468,13 @@ impl CompactWhirCodeSwitchState {
         if !self.verifier_move_is_bound() || self.source_evaluations.is_empty() {
             return Err(CompactWhirError::WrongProverPhase);
         }
+        let mut source_evaluations = Vec::new();
+        source_evaluations
+            .try_reserve_exact(self.source_evaluations.len())
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        source_evaluations.extend_from_slice(&self.source_evaluations);
         Ok(CompactWhirBoundCodeSwitchInputs {
-            source_evaluations: core::mem::take(&mut self.source_evaluations),
+            source_evaluations,
             switch_mask_message: self.folded_previous_randomness.clone(),
             query_positions: self
                 .query_positions
@@ -1599,7 +1663,8 @@ impl Drop for CompactWhirCodeSwitchRelationPreparation {
 impl Drop for CompactWhirCodeSwitchState {
     fn drop(&mut self) {
         self.source_evaluations.fill(CompactChallengeField::ZERO);
-        self.previous_encoding_randomness.fill(Goldilocks::ZERO);
+        self.previous_encoding_randomness
+            .fill(CompactChallengeField::ZERO);
         self.folding_weights.fill(CompactChallengeField::ZERO);
         self.folded_previous_randomness
             .fill(CompactChallengeField::ZERO);
@@ -2189,6 +2254,28 @@ impl CompactWhirRecomputableExtensionInitialOracle {
 
     pub(crate) const fn can_begin_opening_replay(&self) -> bool {
         matches!(self.stage, CompactWhirRecomputableExtensionStage::Complete)
+    }
+
+    pub(crate) const fn opening_replay_complete(&self) -> bool {
+        matches!(
+            self.stage,
+            CompactWhirRecomputableExtensionStage::OpeningReplayComplete
+        )
+    }
+
+    pub(crate) fn finish_opening_replay(&mut self) -> Result<(), CompactWhirError> {
+        if !self.opening_replay_complete()
+            || !self.stripe_values.is_empty()
+            || self.active_transform.is_some()
+            || self.encoded_column_values.is_some()
+        {
+            return Err(CompactWhirError::InvalidEncodedMatrix);
+        }
+        self.randomness.fill(CompactChallengeField::ZERO);
+        self.randomness.clear();
+        self.opening_row_ordinals.clear();
+        self.next_opening_row_offset = 0;
+        Ok(())
     }
 
     pub(crate) const fn is_complete(&self) -> bool {
@@ -3356,7 +3443,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut random_source = CountingRandomSource(0xE5);
-        let mut state = CompactWhirCodeSwitchState::new(
+        let mut state = CompactWhirCodeSwitchState::new_from_base_source(
             source,
             previous_randomness,
             &folding_challenges,
@@ -3453,6 +3540,113 @@ mod tests {
             ),
             Err(CompactWhirError::InvalidRelation)
         );
+    }
+
+    #[test]
+    fn code_switch_source_remains_replayable_after_relation_inputs_are_taken() {
+        let previous_source_contract = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 0,
+            message_length: 8,
+            hiding_randomness_length: 2,
+            block_length: 16,
+            oracle_width: 2,
+            query_count: 2,
+            unique_decoding_radius: 2,
+        };
+        let next_source_contract = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 1,
+            message_length: 4,
+            hiding_randomness_length: 2,
+            block_length: 8,
+            oracle_width: 2,
+            query_count: 2,
+            unique_decoding_radius: 0,
+        };
+        let switch_mask_contract = CompactWhirMaskGroupContract {
+            role_tag: 5,
+            coordinate: 0,
+            width: 1,
+            message_length: 2,
+            randomness_length: 2,
+            domain_size: 16,
+            committed_encoding_source: 0,
+        };
+        let source_evaluations = (0..8_u64)
+            .map(|ordinal| CompactChallengeField::from_u64(ordinal * 17 + 3))
+            .collect::<Vec<_>>();
+        let previous_encoding_randomness = (0..4_u64)
+            .map(|ordinal| CompactChallengeField::from_u64(ordinal * 19 + 5))
+            .collect::<Vec<_>>();
+        let mut random_source = CountingRandomSource(0xE7);
+        let mut state = CompactWhirCodeSwitchState::new_from_extension_source(
+            source_evaluations,
+            previous_encoding_randomness,
+            &[CompactChallengeField::from_u64(23)],
+            previous_source_contract,
+            next_source_contract,
+            switch_mask_contract,
+            &mut random_source,
+        )
+        .expect("the compact code switch starts");
+
+        while !matches!(
+            state
+                .poll_preparation(8)
+                .expect("the compact code-switch preparation advances"),
+            CompactWhirCodeSwitchPreparationPoll::Complete
+        ) {}
+        for row_ordinal in 0..state.source_oracle().encoded_height() {
+            loop {
+                if state.source_row(row_ordinal).is_ok() {
+                    break;
+                }
+                state
+                    .poll_source_oracle(8)
+                    .expect("the compact code-switch source advances");
+            }
+            state
+                .mark_source_row_supplied(row_ordinal)
+                .expect("the sequential response row advances custody");
+        }
+        assert!(state.can_begin_source_opening_replay());
+
+        state
+            .bind_verifier_move(
+                &[1, 11],
+                CompactChallengeField::from_u64(29),
+                vec![CompactChallengeField::ZERO; 2],
+            )
+            .expect("the preceding-source verifier move binds");
+        let _relation_inputs = state
+            .take_relation_inputs()
+            .expect("the code-switch relation inputs remain available");
+        assert!(state.can_begin_source_opening_replay());
+
+        let opening_rows = [1_usize, 7];
+        state
+            .begin_source_opening_replay(&opening_rows)
+            .expect("the verifier-derived delayed replay starts");
+        for row_ordinal in opening_rows {
+            loop {
+                if state.source_row(row_ordinal).is_ok() {
+                    break;
+                }
+                state
+                    .poll_source_oracle(8)
+                    .expect("the delayed source replay advances");
+            }
+            state
+                .mark_source_row_supplied(row_ordinal)
+                .expect("the delayed response row advances custody");
+        }
+        assert!(state.source_opening_replay_complete());
+        state
+            .finish_source_opening_replay()
+            .expect("the completed replay releases retained source secrets");
+        assert!(state.source_evaluations.is_empty());
+        assert!(state.source_encoding_randomness().is_empty());
     }
 
     #[test]

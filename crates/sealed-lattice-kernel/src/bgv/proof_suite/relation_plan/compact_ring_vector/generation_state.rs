@@ -5,7 +5,7 @@
 //! only through the exact compact transcript authority, performs the bounded
 //! batch inversion, prepares the production structured-row source, drives the
 //! external-memory CFW reduction, and advances the first WHIR epoch through
-//! its initial masked sumcheck and first code switch. It does not yet execute
+//! every pre-challenge masked sumcheck and code switch. It does not yet execute
 //! either complete WHIR epoch and therefore cannot emit a proof or mint a
 //! workflow capability.
 
@@ -413,15 +413,22 @@ pub(crate) enum CompactPublicKeyMainEpochPoll {
         batch_ordinal: u8,
     },
     PreChallengeWhirCodeSwitchRandomnessStepCompleted {
+        round_ordinal: u8,
         processed_work_unit_count: u64,
         fold_complete: bool,
     },
-    PreChallengeWhirCodeSwitchPrepared,
+    PreChallengeWhirCodeSwitchPrepared {
+        round_ordinal: u8,
+    },
     PreChallengeWhirCodeSwitchSourceStepCompleted {
+        round_ordinal: u8,
         processed_work_unit_count: u64,
     },
-    PreChallengeWhirFirstCodeSwitchResponseCheckpointReady,
+    PreChallengeWhirCodeSwitchResponseCheckpointReady {
+        round_ordinal: u8,
+    },
     PreChallengeWhirCodeSwitchRelationStepCompleted {
+        round_ordinal: u8,
         processed_work_unit_count: u64,
         relation_complete: bool,
     },
@@ -568,11 +575,7 @@ struct CompactPublicKeyPostLookupMaterial {
     cfw_external_output: Option<CompactCfwExternalProverOutput>,
     pre_challenge_whir_relation_preparation: Option<CompactWhirPreChallengeRelationPreparation>,
     pre_challenge_whir_sumcheck_batches: Vec<CompactPublicKeyWhirSumcheckBatch>,
-    pre_challenge_whir_first_code_switch: Option<CompactWhirCodeSwitchState>,
-    pre_challenge_whir_first_code_switch_response_leaf_count: u64,
-    pre_challenge_whir_first_source_query_masking_verified: bool,
-    pre_challenge_whir_first_code_switch_relation_preparation:
-        Option<CompactWhirCodeSwitchRelationPreparation>,
+    pre_challenge_whir_code_switches: Vec<CompactPublicKeyWhirCodeSwitch>,
 }
 
 struct CompactPublicKeyWhirSumcheckBatch {
@@ -620,6 +623,163 @@ impl CompactPublicKeyWhirSumcheckBatch {
     }
 }
 
+struct CompactPublicKeyWhirCodeSwitch {
+    round_ordinal: u8,
+    response_ordinal: u32,
+    state: CompactWhirCodeSwitchState,
+    response_leaf_count: u64,
+    source_query_masking_verified: bool,
+    retained_source_query_positions: Option<Vec<u64>>,
+    retained_source_query_outputs: Vec<CompactChallengeField>,
+    relation_preparation: Option<CompactWhirCodeSwitchRelationPreparation>,
+}
+
+impl CompactPublicKeyWhirCodeSwitch {
+    fn new(round_ordinal: u8, response_ordinal: u32, state: CompactWhirCodeSwitchState) -> Self {
+        Self {
+            round_ordinal,
+            response_ordinal,
+            state,
+            response_leaf_count: 0,
+            source_query_masking_verified: false,
+            retained_source_query_positions: None,
+            retained_source_query_outputs: Vec::new(),
+            relation_preparation: None,
+        }
+    }
+
+    fn component_boundaries(&self) -> Result<[u64; 2], CompactPublicKeyMainEpochPreparationError> {
+        let source_end = u64::try_from(self.state.source_oracle().encoded_height())
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let mask_end = source_end
+            .checked_add(
+                u64::try_from(self.state.switch_mask_oracle()?.encoded_matrix().height())
+                    .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
+            )
+            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        if self.response_leaf_count == 0 || mask_end > self.response_leaf_count {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        }
+        Ok([source_end, mask_end])
+    }
+
+    fn poll_response_leaf(
+        &mut self,
+        leaf_ordinal: u64,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactPublicKeyCodeSwitchResponseLeafPoll, CompactPublicKeyMainEpochPreparationError>
+    {
+        let [source_end, _mask_end] = self.component_boundaries()?;
+        if leaf_ordinal >= self.response_leaf_count {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        }
+        if leaf_ordinal >= source_end {
+            return Ok(CompactPublicKeyCodeSwitchResponseLeafPoll::LeafReady(
+                self.response_leaf(leaf_ordinal)?,
+            ));
+        }
+        match self.state.poll_source_oracle(maximum_work_unit_count)? {
+            CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted {
+                processed_work_unit_count,
+            } => Ok(
+                CompactPublicKeyCodeSwitchResponseLeafPoll::ArithmeticStepCompleted {
+                    processed_work_unit_count,
+                },
+            ),
+            CompactWhirRecomputableExtensionPoll::StripeReady { .. } => {
+                let row = self
+                    .state
+                    .source_row(usize::try_from(leaf_ordinal).map_err(|_| {
+                        CompactPublicKeyMainEpochPreparationError::InvalidGeometry
+                    })?)?;
+                Ok(CompactPublicKeyCodeSwitchResponseLeafPoll::LeafReady(
+                    encoded_extension_values_response_leaf(Some(row))?,
+                ))
+            }
+        }
+    }
+
+    fn mark_response_leaf_supplied(
+        &mut self,
+        leaf_ordinal: u64,
+    ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
+        let [source_end, _mask_end] = self.component_boundaries()?;
+        if leaf_ordinal < source_end {
+            self.state.mark_source_row_supplied(
+                usize::try_from(leaf_ordinal)
+                    .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn response_leaf(
+        &self,
+        leaf_ordinal: u64,
+    ) -> Result<CompactOwnedResponseLeaf, CompactPublicKeyMainEpochPreparationError> {
+        if leaf_ordinal >= self.response_leaf_count {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        }
+        let [source_end, mask_end] = self.component_boundaries()?;
+        if leaf_ordinal < source_end {
+            let row_ordinal = usize::try_from(leaf_ordinal)
+                .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+            let row = if self.state.source_opening_replay_complete() {
+                self.retained_source_row(leaf_ordinal)?
+            } else {
+                self.state.source_row(row_ordinal)?
+            };
+            return encoded_extension_values_response_leaf(Some(row));
+        }
+        if leaf_ordinal < mask_end {
+            return encoded_extension_response_leaf(
+                self.state.switch_mask_oracle()?,
+                leaf_ordinal - source_end,
+            );
+        }
+        Ok(CompactOwnedResponseLeaf::padding())
+    }
+
+    fn retained_source_row(
+        &self,
+        leaf_ordinal: u64,
+    ) -> Result<&[CompactChallengeField], CompactPublicKeyMainEpochPreparationError> {
+        let positions = self
+            .retained_source_query_positions
+            .as_ref()
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        let query_index = positions
+            .binary_search(&leaf_ordinal)
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let width = self.state.source_oracle().width();
+        let first_value = query_index
+            .checked_mul(width)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let end_value = first_value
+            .checked_add(width)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        if width == 0
+            || self.retained_source_query_outputs.len()
+                != positions
+                    .len()
+                    .checked_mul(width)
+                    .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?
+        {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        }
+        self.retained_source_query_outputs
+            .get(first_value..end_value)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)
+    }
+}
+
+impl Drop for CompactPublicKeyWhirCodeSwitch {
+    fn drop(&mut self) {
+        self.retained_source_query_outputs
+            .fill(CompactChallengeField::ZERO);
+    }
+}
+
 enum CompactPublicKeyPostLookupResponseLeafPoll {
     ArithmeticStepCompleted { processed_work_unit_count: u64 },
     LeafReady(CompactOwnedResponseLeaf),
@@ -636,6 +796,11 @@ enum CompactPublicKeyCrossEpochResponseLeafPoll {
 enum CompactPublicKeyCodeSwitchResponseLeafPoll {
     ArithmeticStepCompleted { processed_work_unit_count: u64 },
     LeafReady(CompactOwnedResponseLeaf),
+}
+
+enum CompactPublicKeyCodeSwitchQueryEvaluationPoll {
+    StepCompleted { processed_work_unit_count: u64 },
+    Complete,
 }
 
 impl CompactPublicKeyGenerationState {
@@ -1830,26 +1995,51 @@ impl PreparedCompactPublicKeyMainEpoch {
     }
 
     #[cfg(test)]
-    pub(crate) fn pre_challenge_whir_first_code_switch_ready(&self) -> bool {
+    pub(crate) fn pre_challenge_whir_code_switch_ready(&self, round_ordinal: u8) -> bool {
         self.post_lookup_material
             .as_ref()
-            .and_then(|material| material.pre_challenge_whir_first_code_switch.as_ref())
-            .is_some_and(|state| state.switch_mask_oracle().is_ok())
+            .and_then(|material| {
+                material
+                    .pre_challenge_whir_code_switches
+                    .get(usize::from(round_ordinal))
+            })
+            .is_some_and(|code_switch| {
+                code_switch.round_ordinal == round_ordinal
+                    && code_switch.state.switch_mask_oracle().is_ok()
+            })
     }
 
     #[cfg(test)]
-    pub(crate) fn pre_challenge_whir_first_code_switch_bound(&self) -> bool {
+    pub(crate) fn pre_challenge_whir_code_switch_bound(&self, round_ordinal: u8) -> bool {
         self.post_lookup_material
             .as_ref()
-            .and_then(|material| material.pre_challenge_whir_first_code_switch.as_ref())
-            .is_some_and(CompactWhirCodeSwitchState::verifier_move_is_bound)
+            .and_then(|material| {
+                material
+                    .pre_challenge_whir_code_switches
+                    .get(usize::from(round_ordinal))
+            })
+            .is_some_and(|code_switch| {
+                code_switch.round_ordinal == round_ordinal
+                    && code_switch.state.verifier_move_is_bound()
+            })
     }
 
     #[cfg(test)]
-    pub(crate) fn pre_challenge_whir_first_source_query_masking_verified(&self) -> bool {
+    pub(crate) fn pre_challenge_whir_source_query_masking_verified(
+        &self,
+        source_ordinal: u8,
+    ) -> bool {
         self.post_lookup_material
             .as_ref()
-            .is_some_and(|material| material.pre_challenge_whir_first_source_query_masking_verified)
+            .and_then(|material| {
+                material
+                    .pre_challenge_whir_code_switches
+                    .get(usize::from(source_ordinal))
+            })
+            .is_some_and(|code_switch| {
+                code_switch.round_ordinal == source_ordinal
+                    && code_switch.source_query_masking_verified
+            })
     }
 
     pub(crate) fn poll_cfw<
@@ -2778,7 +2968,7 @@ impl PreparedCompactPublicKeyMainEpoch {
         }
     }
 
-    pub(crate) fn prepare_pre_challenge_whir_first_code_switch(
+    pub(crate) fn prepare_pre_challenge_whir_code_switch(
         &mut self,
     ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
         let Self {
@@ -2789,26 +2979,27 @@ impl PreparedCompactPublicKeyMainEpoch {
         let material = post_lookup_material
             .as_mut()
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        let initial_sumcheck_batch = material
+        let round_index = material.pre_challenge_whir_code_switches.len();
+        let round_ordinal = u8::try_from(round_index)
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let preceding_sumcheck_batch = material
             .pre_challenge_whir_sumcheck_batches
-            .first()
+            .get(round_index)
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        if material.pre_challenge_whir_first_code_switch.is_some()
-            || material.pre_challenge_whir_first_code_switch_response_leaf_count != 0
-            || material.pre_challenge_whir_first_source_query_masking_verified
-            || material.pre_challenge_whir_sumcheck_batches.len() != 1
-            || initial_sumcheck_batch.batch_ordinal != 0
-            || initial_sumcheck_batch.bound_round_advance_required
-            || initial_sumcheck_batch.round_masking_verified
-            || !initial_sumcheck_batch.combination_challenge_bound
+        if material.pre_challenge_whir_sumcheck_batches.len() != round_index + 1
+            || preceding_sumcheck_batch.batch_ordinal != round_ordinal
+            || preceding_sumcheck_batch.bound_round_advance_required
+            || preceding_sumcheck_batch.round_masking_verified
+            || !preceding_sumcheck_batch.combination_challenge_bound
         {
             return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
         }
         material.validate_pre_challenge_whir_sumcheck_completion(
             response_generation_state.verifier_messages(),
-            0,
+            round_index,
         )?;
-        let response_ordinal = material.pre_challenge_whir_first_code_switch_response_ordinal()?;
+        let response_ordinal =
+            material.pre_challenge_whir_code_switch_response_ordinal(round_ordinal)?;
         if response_generation_state.verifier_messages().len()
             != usize::try_from(response_ordinal)
                 .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?
@@ -2821,48 +3012,95 @@ impl PreparedCompactPublicKeyMainEpoch {
         let [pre_challenge_epoch, _main_epoch] = contract.verifier_inputs().whir_epochs else {
             return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
         };
-        let previous_source_contract =
-            unique_whir_fold_contract(&contract.verifier_inputs(), pre_challenge_epoch.epoch, 0)?;
-        let next_source_contract =
-            unique_whir_fold_contract(&contract.verifier_inputs(), pre_challenge_epoch.epoch, 1)?;
-        let switch_mask_contract = unique_internal_mask_group(pre_challenge_epoch, 5, 0)?;
+        let previous_source_contract = unique_whir_fold_contract(
+            &contract.verifier_inputs(),
+            pre_challenge_epoch.epoch,
+            round_ordinal,
+        )?;
+        let next_batch_ordinal = round_ordinal
+            .checked_add(1)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let next_source_contract = unique_whir_fold_contract(
+            &contract.verifier_inputs(),
+            pre_challenge_epoch.epoch,
+            next_batch_ordinal,
+        )?;
+        let switch_mask_contract =
+            unique_internal_mask_group(pre_challenge_epoch, 5, round_ordinal)?;
         let (source_evaluations, folding_challenges) = {
-            let initial_sumcheck = &mut material
+            let preceding_sumcheck = &mut material
                 .pre_challenge_whir_sumcheck_batches
-                .first_mut()
+                .get_mut(round_index)
                 .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-            let folding_challenges = initial_sumcheck.state.round_challenges().to_vec();
-            let source_evaluations = initial_sumcheck.state.take_residual_source()?;
+            let folding_challenges = preceding_sumcheck.state.round_challenges().to_vec();
+            let source_evaluations = preceding_sumcheck.state.take_residual_source()?;
             (source_evaluations, folding_challenges)
         };
-        let previous_encoding_randomness = family_material
-            .metadata
-            .pre_challenge
-            .encoded_oracle
-            .take_encoding_randomness()?;
-        let code_switch = CompactWhirCodeSwitchState::new(
-            source_evaluations,
-            previous_encoding_randomness,
-            &folding_challenges,
-            previous_source_contract,
-            next_source_contract,
-            switch_mask_contract,
-            family_material
+        let code_switch_state = if round_ordinal == 0 {
+            let previous_encoding_randomness = family_material
                 .metadata
                 .pre_challenge
-                .randomness
-                .whir_random_source_mut(),
-        )?;
+                .encoded_oracle
+                .take_encoding_randomness()?;
+            CompactWhirCodeSwitchState::new_from_base_source(
+                source_evaluations,
+                previous_encoding_randomness,
+                &folding_challenges,
+                previous_source_contract,
+                next_source_contract,
+                switch_mask_contract,
+                family_material
+                    .metadata
+                    .pre_challenge
+                    .randomness
+                    .whir_random_source_mut(),
+            )?
+        } else {
+            let previous_code_switch = material
+                .pre_challenge_whir_code_switches
+                .get(round_index - 1)
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+            if previous_code_switch.round_ordinal != round_ordinal - 1
+                || !previous_code_switch.source_query_masking_verified
+            {
+                return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+            }
+            let previous_randomness = previous_code_switch.state.source_encoding_randomness();
+            let mut copied_previous_randomness = Vec::new();
+            copied_previous_randomness
+                .try_reserve_exact(previous_randomness.len())
+                .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
+            copied_previous_randomness.extend_from_slice(previous_randomness);
+            CompactWhirCodeSwitchState::new_from_extension_source(
+                source_evaluations,
+                copied_previous_randomness,
+                &folding_challenges,
+                previous_source_contract,
+                next_source_contract,
+                switch_mask_contract,
+                family_material
+                    .metadata
+                    .pre_challenge
+                    .randomness
+                    .whir_random_source_mut(),
+            )?
+        };
         family_material
             .metadata
             .pre_challenge
             .randomness
             .ensure_field_sampling_valid()?;
-        material.pre_challenge_whir_first_code_switch = Some(code_switch);
+        material
+            .pre_challenge_whir_code_switches
+            .push(CompactPublicKeyWhirCodeSwitch::new(
+                round_ordinal,
+                response_ordinal,
+                code_switch_state,
+            ));
         Ok(())
     }
 
-    pub(crate) fn poll_pre_challenge_whir_first_code_switch<Storage: ProofExternalMemory>(
+    pub(crate) fn poll_pre_challenge_whir_code_switch<Storage: ProofExternalMemory>(
         &mut self,
         maximum_work_unit_count: u64,
         response_storage: &mut Storage,
@@ -2878,18 +3116,36 @@ impl PreparedCompactPublicKeyMainEpoch {
                 CompactPublicKeyMainEpochPreparationError::WrongPhase,
             ),
         )?;
+        let code_switch_index = material
+            .pre_challenge_whir_code_switches
+            .len()
+            .checked_sub(1)
+            .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+                CompactPublicKeyMainEpochPreparationError::WrongPhase,
+            ))?;
+        let round_ordinal = u8::try_from(code_switch_index).map_err(|_| {
+            CompactPublicKeyMainEpochPollError::Preparation(
+                CompactPublicKeyMainEpochPreparationError::InvalidGeometry,
+            )
+        })?;
         let response_ordinal = material
-            .pre_challenge_whir_first_code_switch_response_ordinal()
-            .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+            .pre_challenge_whir_code_switches
+            .get(code_switch_index)
+            .filter(|code_switch| code_switch.round_ordinal == round_ordinal)
+            .map(|code_switch| code_switch.response_ordinal)
+            .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+                CompactPublicKeyMainEpochPreparationError::WrongPhase,
+            ))?;
 
-        if material.pre_challenge_whir_first_code_switch_response_leaf_count == 0 {
+        if material.pre_challenge_whir_code_switches[code_switch_index].response_leaf_count == 0 {
             let code_switch = material
-                .pre_challenge_whir_first_code_switch
-                .as_mut()
+                .pre_challenge_whir_code_switches
+                .get_mut(code_switch_index)
                 .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
                     CompactPublicKeyMainEpochPreparationError::WrongPhase,
                 ))?;
             match code_switch
+                .state
                 .poll_preparation(maximum_work_unit_count)
                 .map_err(CompactPublicKeyMainEpochPreparationError::from)
                 .map_err(CompactPublicKeyMainEpochPollError::Preparation)?
@@ -2900,6 +3156,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                 } => {
                     return Ok(
                         CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRandomnessStepCompleted {
+                            round_ordinal,
                             processed_work_unit_count,
                             fold_complete,
                         },
@@ -2937,17 +3194,54 @@ impl PreparedCompactPublicKeyMainEpoch {
                 response_geometry,
                 response_roles,
                 pre_challenge_epoch.epoch,
-                0,
-                code_switch.source_oracle(),
+                u32::from(round_ordinal),
+                code_switch.state.source_oracle(),
                 code_switch
+                    .state
                     .switch_mask_oracle()
                     .map_err(CompactPublicKeyMainEpochPreparationError::from)
                     .map_err(CompactPublicKeyMainEpochPollError::Preparation)?,
             )
             .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-            material.pre_challenge_whir_first_code_switch_response_leaf_count =
-                response_geometry.merkle_leaf_count();
-            return Ok(CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchPrepared);
+            code_switch.response_leaf_count = response_geometry.merkle_leaf_count();
+            return Ok(
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchPrepared { round_ordinal },
+            );
+        }
+
+        if round_ordinal > 0
+            && response_generation_state.verifier_messages().len()
+                == usize::try_from(response_ordinal)
+                    .map_err(|_| {
+                        CompactPublicKeyMainEpochPollError::Preparation(
+                            CompactPublicKeyMainEpochPreparationError::InvalidGeometry,
+                        )
+                    })?
+                    .checked_add(1)
+                    .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+                        CompactPublicKeyMainEpochPreparationError::InvalidGeometry,
+                    ))?
+        {
+            match material
+                .poll_code_switch_source_query_evaluation(
+                    round_ordinal,
+                    maximum_work_unit_count,
+                    response_generation_state.verifier_messages(),
+                )
+                .map_err(CompactPublicKeyMainEpochPollError::Preparation)?
+            {
+                CompactPublicKeyCodeSwitchQueryEvaluationPoll::StepCompleted {
+                    processed_work_unit_count,
+                } => {
+                    return Ok(
+                        CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchSourceStepCompleted {
+                            round_ordinal,
+                            processed_work_unit_count,
+                        },
+                    );
+                }
+                CompactPublicKeyCodeSwitchQueryEvaluationPoll::Complete => {}
+            }
         }
 
         match response_generation_state
@@ -2972,7 +3266,8 @@ impl PreparedCompactPublicKeyMainEpoch {
                 leaf_ordinal,
             } if required_response_ordinal == response_ordinal => {
                 match material
-                    .poll_first_code_switch_response_leaf(
+                    .poll_code_switch_response_leaf(
+                        round_ordinal,
                         leaf_ordinal,
                         maximum_work_unit_count,
                     )
@@ -2982,12 +3277,18 @@ impl PreparedCompactPublicKeyMainEpoch {
                         processed_work_unit_count,
                     } => Ok(
                         CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchSourceStepCompleted {
+                            round_ordinal,
                             processed_work_unit_count,
                         },
                     ),
                     CompactPublicKeyCodeSwitchResponseLeafPoll::LeafReady(leaf) => {
                         let response_leaf_count = material
-                            .pre_challenge_whir_first_code_switch_response_leaf_count;
+                            .pre_challenge_whir_code_switches
+                            .get(code_switch_index)
+                            .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+                                CompactPublicKeyMainEpochPreparationError::WrongPhase,
+                            ))?
+                            .response_leaf_count;
                         let leaf_salt = family_material
                             .pre_challenge_material()
                             .randomness
@@ -3001,7 +3302,10 @@ impl PreparedCompactPublicKeyMainEpoch {
                             .supply_next_response_leaf(&leaf, &leaf_salt)
                             .map_err(CompactPublicKeyMainEpochPollError::ResponseGeneration)?;
                         material
-                            .mark_first_code_switch_response_leaf_supplied(leaf_ordinal)
+                            .mark_code_switch_response_leaf_supplied(
+                                round_ordinal,
+                                leaf_ordinal,
+                            )
                             .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
                         Ok(CompactPublicKeyMainEpochPoll::ResponseLeafSupplied {
                             leaf_ordinal,
@@ -3013,81 +3317,6 @@ impl PreparedCompactPublicKeyMainEpoch {
                 response_ordinal: opened_response_ordinal,
                 leaf_ordinal,
             } => {
-                if !material.pre_challenge_whir_first_source_query_masking_verified {
-                    let contract = selected_compact_public_key_proof_contract()
-                        .map_err(CompactPublicKeyMainEpochPreparationError::from)
-                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    let [pre_challenge_epoch, _main_epoch] = contract.verifier_inputs().whir_epochs
-                    else {
-                        return Err(CompactPublicKeyMainEpochPollError::Preparation(
-                            CompactPublicKeyMainEpochPreparationError::InvalidGeometry,
-                        ));
-                    };
-                    let (combination_challenge, query_positions) =
-                        completed_code_switch_verifier_move(
-                            &contract.verifier_inputs(),
-                            response_generation_state.verifier_messages(),
-                            pre_challenge_epoch.epoch,
-                            0,
-                        )
-                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    let query_outputs = family_material
-                        .pre_challenge_material()
-                        .source_query_outputs(query_positions)
-                        .map_err(CompactPublicKeyMainEpochPreparationError::from)
-                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    verify_selected_compact_whir_source_query_masking(
-                        contract.verifier_inputs(),
-                        &material.masking_coefficient_maps,
-                        material.masking_attempt_identity.ok_or(
-                            CompactPublicKeyMainEpochPollError::Preparation(
-                                CompactPublicKeyMainEpochPreparationError::WrongPhase,
-                            ),
-                        )?,
-                        response_generation_state.verifier_messages(),
-                        pre_challenge_epoch.epoch,
-                        0,
-                        &query_outputs,
-                    )
-                    .map_err(|error| {
-                        CompactPublicKeyMainEpochPollError::Preparation(
-                            CompactPublicKeyMainEpochPreparationError::WhirSourceQueryMasking {
-                                source_ordinal: 0,
-                                error,
-                            },
-                        )
-                    })?;
-                    let folding_challenges = material
-                        .pre_challenge_whir_sumcheck_batches
-                        .first()
-                        .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
-                            CompactPublicKeyMainEpochPreparationError::WrongPhase,
-                        ))?
-                        .state
-                        .round_challenges()
-                        .to_vec();
-                    let folded_source_openings = fold_compact_whir_query_major_source_openings(
-                        &query_outputs,
-                        query_positions.len(),
-                        &folding_challenges,
-                    )
-                    .map_err(CompactPublicKeyMainEpochPreparationError::from)
-                    .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    material
-                        .pre_challenge_whir_first_code_switch
-                        .as_mut()
-                        .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
-                            CompactPublicKeyMainEpochPreparationError::WrongPhase,
-                        ))?
-                        .bind_verifier_move(
-                            query_positions,
-                            combination_challenge,
-                            folded_source_openings,
-                        )
-                        .map_err(CompactPublicKeyMainEpochPreparationError::from)
-                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    material.pre_challenge_whir_first_source_query_masking_verified = true;
-                }
                 let leaf = compact_public_key_response_leaf(
                     family_material,
                     material,
@@ -3130,20 +3359,25 @@ impl PreparedCompactPublicKeyMainEpoch {
                 Ok(CompactPublicKeyMainEpochPoll::ResponseStorageTransactionCompleted)
             }
             CompactResponseGenerationPoll::CheckpointCursorRequired => {
-                if !material.pre_challenge_whir_first_source_query_masking_verified {
-                    return Err(CompactPublicKeyMainEpochPollError::Preparation(
-                        CompactPublicKeyMainEpochPreparationError::WrongPhase,
-                    ));
-                }
+                material
+                    .bind_code_switch_verifier_move(
+                        family_material,
+                        response_generation_state.verifier_messages(),
+                        round_ordinal,
+                    )
+                    .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
                 let _authority = response_generation_state
                     .verifier_message_authority(response_ordinal)
                     .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
                         CompactPublicKeyMainEpochPreparationError::WrongPhase,
                     ))?;
                 if !material
-                    .pre_challenge_whir_first_code_switch
-                    .as_ref()
-                    .is_some_and(CompactWhirCodeSwitchState::verifier_move_is_bound)
+                    .pre_challenge_whir_code_switches
+                    .get(code_switch_index)
+                    .is_some_and(|code_switch| {
+                        code_switch.source_query_masking_verified
+                            && code_switch.state.verifier_move_is_bound()
+                    })
                 {
                     return Err(CompactPublicKeyMainEpochPollError::Preparation(
                         CompactPublicKeyMainEpochPreparationError::WrongPhase,
@@ -3157,7 +3391,9 @@ impl PreparedCompactPublicKeyMainEpoch {
                     .supply_checkpoint_private_randomness_cursor(&canonical_randomness_cursor)
                     .map_err(CompactPublicKeyMainEpochPollError::ResponseGeneration)?;
                 Ok(
-                    CompactPublicKeyMainEpochPoll::PreChallengeWhirFirstCodeSwitchResponseCheckpointReady,
+                    CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchResponseCheckpointReady {
+                        round_ordinal,
+                    },
                 )
             }
             CompactResponseGenerationPoll::ResponseRequired { .. }
@@ -3170,7 +3406,7 @@ impl PreparedCompactPublicKeyMainEpoch {
         }
     }
 
-    pub(crate) fn prepare_pre_challenge_whir_second_sumcheck(
+    pub(crate) fn prepare_pre_challenge_whir_next_sumcheck(
         &mut self,
     ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
         let Self {
@@ -3181,13 +3417,23 @@ impl PreparedCompactPublicKeyMainEpoch {
         let material = post_lookup_material
             .as_mut()
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        let code_switch_response_ordinal =
-            material.pre_challenge_whir_first_code_switch_response_ordinal()?;
-        if material
-            .pre_challenge_whir_first_code_switch_relation_preparation
-            .is_some()
-            || material.pre_challenge_whir_sumcheck_batches.len() != 1
-            || !material.pre_challenge_whir_first_source_query_masking_verified
+        let code_switch_index = material
+            .pre_challenge_whir_code_switches
+            .len()
+            .checked_sub(1)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        let round_ordinal = u8::try_from(code_switch_index)
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let code_switch = material
+            .pre_challenge_whir_code_switches
+            .get(code_switch_index)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        let code_switch_response_ordinal = code_switch.response_ordinal;
+        if code_switch.round_ordinal != round_ordinal
+            || code_switch.relation_preparation.is_some()
+            || material.pre_challenge_whir_sumcheck_batches.len() != code_switch_index + 1
+            || !code_switch.source_query_masking_verified
+            || !code_switch.state.verifier_move_is_bound()
             || response_generation_state.verifier_messages().len()
                 != usize::try_from(code_switch_response_ordinal)
                     .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?
@@ -3197,20 +3443,21 @@ impl PreparedCompactPublicKeyMainEpoch {
         {
             return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
         }
-        let initial_sumcheck = &mut material
+        let preceding_sumcheck = &mut material
             .pre_challenge_whir_sumcheck_batches
-            .first_mut()
+            .get_mut(code_switch_index)
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        let source_claim = initial_sumcheck.state.residual_source_claim()?;
-        let preceding_mask_claim = initial_sumcheck.state.residual_mask_claim()?;
-        let target = initial_sumcheck.state.residual_target()?;
-        let source_covector = initial_sumcheck.state.take_residual_covector()?;
+        let source_claim = preceding_sumcheck.state.residual_source_claim()?;
+        let preceding_mask_claim = preceding_sumcheck.state.residual_mask_claim()?;
+        let target = preceding_sumcheck.state.residual_target()?;
+        let source_covector = preceding_sumcheck.state.take_residual_covector()?;
         let code_switch_inputs = material
-            .pre_challenge_whir_first_code_switch
-            .as_mut()
+            .pre_challenge_whir_code_switches
+            .get_mut(code_switch_index)
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
+            .state
             .take_relation_inputs()?;
-        material.pre_challenge_whir_first_code_switch_relation_preparation =
+        material.pre_challenge_whir_code_switches[code_switch_index].relation_preparation =
             Some(CompactWhirCodeSwitchRelationPreparation::new(
                 code_switch_inputs,
                 source_covector,
@@ -3221,7 +3468,7 @@ impl PreparedCompactPublicKeyMainEpoch {
         Ok(())
     }
 
-    pub(crate) fn poll_pre_challenge_whir_second_sumcheck_preparation(
+    pub(crate) fn poll_pre_challenge_whir_next_sumcheck_preparation(
         &mut self,
         maximum_work_unit_count: u64,
     ) -> Result<CompactPublicKeyMainEpochPoll, CompactPublicKeyMainEpochPreparationError> {
@@ -3233,12 +3480,24 @@ impl PreparedCompactPublicKeyMainEpoch {
         let material = post_lookup_material
             .as_mut()
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        if material.pre_challenge_whir_sumcheck_batches.len() != 1 {
+        let code_switch_index = material
+            .pre_challenge_whir_code_switches
+            .len()
+            .checked_sub(1)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        let round_ordinal = u8::try_from(code_switch_index)
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let next_batch_ordinal = round_ordinal
+            .checked_add(1)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        if material.pre_challenge_whir_sumcheck_batches.len() != code_switch_index + 1 {
             return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
         }
         let relation_preparation = material
-            .pre_challenge_whir_first_code_switch_relation_preparation
-            .as_mut()
+            .pre_challenge_whir_code_switches
+            .get_mut(code_switch_index)
+            .filter(|code_switch| code_switch.round_ordinal == round_ordinal)
+            .and_then(|code_switch| code_switch.relation_preparation.as_mut())
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
         match relation_preparation.poll(maximum_work_unit_count)? {
             CompactWhirCodeSwitchRelationPreparationPoll::QueryRelationStepCompleted {
@@ -3246,14 +3505,16 @@ impl PreparedCompactPublicKeyMainEpoch {
                 relation_complete,
             } => Ok(
                 CompactPublicKeyMainEpochPoll::PreChallengeWhirCodeSwitchRelationStepCompleted {
+                    round_ordinal,
                     processed_work_unit_count,
                     relation_complete,
                 },
             ),
             CompactWhirCodeSwitchRelationPreparationPoll::Complete => {
                 let relation = material
-                    .pre_challenge_whir_first_code_switch_relation_preparation
-                    .take()
+                    .pre_challenge_whir_code_switches
+                    .get_mut(code_switch_index)
+                    .and_then(|code_switch| code_switch.relation_preparation.take())
                     .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
                     .finish()?;
                 let contract = selected_compact_public_key_proof_contract()?;
@@ -3262,11 +3523,12 @@ impl PreparedCompactPublicKeyMainEpoch {
                     return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
                 };
                 let configuration = compact_whir_configuration_from_contract(pre_challenge_epoch)?;
-                let mask_group = unique_internal_mask_group(pre_challenge_epoch, 4, 1)?;
+                let mask_group =
+                    unique_internal_mask_group(pre_challenge_epoch, 4, next_batch_ordinal)?;
                 let sumcheck = CompactWhirInitialSumcheckState::new(
                     relation,
                     &configuration,
-                    1,
+                    usize::from(next_batch_ordinal),
                     mask_group,
                     family_material
                         .metadata
@@ -3279,8 +3541,8 @@ impl PreparedCompactPublicKeyMainEpoch {
                     .pre_challenge
                     .randomness
                     .ensure_field_sampling_valid()?;
-                let response_ordinal =
-                    material.pre_challenge_whir_sumcheck_initial_response_ordinal(1)?;
+                let response_ordinal = material
+                    .pre_challenge_whir_sumcheck_initial_response_ordinal(next_batch_ordinal)?;
                 let response_index = usize::try_from(response_ordinal)
                     .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
                 let response_geometry = family_material
@@ -3296,7 +3558,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                     response_geometry,
                     response_roles,
                     pre_challenge_epoch.epoch,
-                    1,
+                    next_batch_ordinal,
                     sumcheck.mask_oracle(),
                 )?;
                 verify_selected_compact_whir_sumcheck_auxiliary_masking(
@@ -3307,13 +3569,13 @@ impl PreparedCompactPublicKeyMainEpoch {
                         .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
                     response_generation_state.verifier_messages(),
                     pre_challenge_epoch.epoch,
-                    1,
+                    next_batch_ordinal,
                     sumcheck.auxiliary_target(),
                 )
                 .map_err(CompactPublicKeyMainEpochPreparationError::WhirSumcheckAuxiliaryMasking)?;
                 material.pre_challenge_whir_sumcheck_batches.push(
                     CompactPublicKeyWhirSumcheckBatch::new(
-                        1,
+                        next_batch_ordinal,
                         response_ordinal,
                         sumcheck,
                         response_geometry.merkle_leaf_count(),
@@ -3321,7 +3583,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                 );
                 Ok(
                     CompactPublicKeyMainEpochPoll::PreChallengeWhirSumcheckPrepared {
-                        batch_ordinal: 1,
+                        batch_ordinal: next_batch_ordinal,
                     },
                 )
             }
@@ -3816,17 +4078,30 @@ impl CompactPublicKeyPostLookupMaterial {
         )
     }
 
-    fn pre_challenge_whir_first_code_switch_response_ordinal(
+    fn pre_challenge_whir_code_switch_response_ordinal(
         &self,
+        round_ordinal: u8,
     ) -> Result<u32, CompactPublicKeyMainEpochPreparationError> {
-        let initial_batch = self
+        if let Some(code_switch) = self
+            .pre_challenge_whir_code_switches
+            .get(usize::from(round_ordinal))
+        {
+            if code_switch.round_ordinal != round_ordinal {
+                return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+            }
+            return Ok(code_switch.response_ordinal);
+        }
+        let preceding_batch = self
             .pre_challenge_whir_sumcheck_batches
-            .first()
+            .get(usize::from(round_ordinal))
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        initial_batch
+        if preceding_batch.batch_ordinal != round_ordinal {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        }
+        preceding_batch
             .initial_response_ordinal
             .checked_add(
-                u32::try_from(initial_batch.state.mask_messages().len())
+                u32::try_from(preceding_batch.state.mask_messages().len())
                     .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?
                     .checked_add(1)
                     .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
@@ -4045,116 +4320,298 @@ impl CompactPublicKeyPostLookupMaterial {
             };
             return encoded_extension_values_response_leaf(Some(core::slice::from_ref(value)));
         }
-        if response_ordinal == self.pre_challenge_whir_first_code_switch_response_ordinal()? {
-            return self.first_code_switch_response_leaf(leaf_ordinal);
+        for code_switch in &self.pre_challenge_whir_code_switches {
+            if response_ordinal == code_switch.response_ordinal {
+                return code_switch.response_leaf(leaf_ordinal);
+            }
         }
         Err(CompactPublicKeyMainEpochPreparationError::WrongPhase)
     }
 
-    fn first_code_switch_component_boundaries(
-        &self,
-    ) -> Result<[u64; 2], CompactPublicKeyMainEpochPreparationError> {
-        let code_switch = self
-            .pre_challenge_whir_first_code_switch
-            .as_ref()
-            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        let source_end = u64::try_from(code_switch.source_oracle().encoded_height())
-            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
-        let mask_end = source_end
-            .checked_add(
-                u64::try_from(code_switch.switch_mask_oracle()?.encoded_matrix().height())
-                    .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
-            )
-            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
-        if mask_end > self.pre_challenge_whir_first_code_switch_response_leaf_count {
-            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
-        }
-        Ok([source_end, mask_end])
-    }
-
-    fn poll_first_code_switch_response_leaf(
+    fn poll_code_switch_response_leaf(
         &mut self,
+        round_ordinal: u8,
         leaf_ordinal: u64,
         maximum_work_unit_count: u64,
     ) -> Result<CompactPublicKeyCodeSwitchResponseLeafPoll, CompactPublicKeyMainEpochPreparationError>
     {
-        let [source_end, _mask_end] = self.first_code_switch_component_boundaries()?;
-        if leaf_ordinal >= self.pre_challenge_whir_first_code_switch_response_leaf_count {
+        self.pre_challenge_whir_code_switches
+            .get_mut(usize::from(round_ordinal))
+            .filter(|code_switch| code_switch.round_ordinal == round_ordinal)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
+            .poll_response_leaf(leaf_ordinal, maximum_work_unit_count)
+    }
+
+    fn mark_code_switch_response_leaf_supplied(
+        &mut self,
+        round_ordinal: u8,
+        leaf_ordinal: u64,
+    ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
+        self.pre_challenge_whir_code_switches
+            .get_mut(usize::from(round_ordinal))
+            .filter(|code_switch| code_switch.round_ordinal == round_ordinal)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
+            .mark_response_leaf_supplied(leaf_ordinal)
+    }
+
+    fn poll_code_switch_source_query_evaluation(
+        &mut self,
+        active_round_ordinal: u8,
+        maximum_work_unit_count: u64,
+        completed_messages: &[DecodedFixedUniformVerifierMessage],
+    ) -> Result<
+        CompactPublicKeyCodeSwitchQueryEvaluationPoll,
+        CompactPublicKeyMainEpochPreparationError,
+    > {
+        if active_round_ordinal == 0 {
+            return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+        }
+        let active_index = usize::from(active_round_ordinal);
+        let previous_index = active_index - 1;
+        let contract = selected_compact_public_key_proof_contract()?;
+        let [pre_challenge_epoch, _main_epoch] = contract.verifier_inputs().whir_epochs else {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        };
+        let (_combination_challenge, query_positions) = completed_code_switch_verifier_move(
+            &contract.verifier_inputs(),
+            completed_messages,
+            pre_challenge_epoch.epoch,
+            u32::from(active_round_ordinal),
+        )?;
+        let (preceding_code_switches, active_and_later) = self
+            .pre_challenge_whir_code_switches
+            .split_at_mut(active_index);
+        let previous_code_switch = preceding_code_switches
+            .get_mut(previous_index)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        let active_code_switch = active_and_later
+            .first_mut()
+            .filter(|code_switch| code_switch.round_ordinal == active_round_ordinal)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        if active_code_switch.source_query_masking_verified
+            || active_code_switch.state.verifier_move_is_bound()
+        {
+            return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+        }
+        let [previous_source_end, _previous_mask_end] =
+            previous_code_switch.component_boundaries()?;
+        if query_positions.is_empty()
+            || query_positions
+                .last()
+                .is_none_or(|position| *position >= previous_source_end)
+        {
             return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
         }
-        if leaf_ordinal >= source_end {
-            return Ok(CompactPublicKeyCodeSwitchResponseLeafPoll::LeafReady(
-                self.first_code_switch_response_leaf(leaf_ordinal)?,
-            ));
+        if previous_code_switch
+            .retained_source_query_positions
+            .is_none()
+        {
+            if !previous_code_switch
+                .retained_source_query_outputs
+                .is_empty()
+                || !previous_code_switch.state.can_begin_source_opening_replay()
+            {
+                return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+            }
+            let mut positions = Vec::new();
+            positions
+                .try_reserve_exact(query_positions.len())
+                .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
+            positions.extend_from_slice(query_positions);
+            previous_code_switch
+                .retained_source_query_outputs
+                .try_reserve_exact(
+                    query_positions
+                        .len()
+                        .checked_mul(previous_code_switch.state.source_oracle().width())
+                        .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
+                )
+                .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
+            let mut opening_rows = Vec::new();
+            opening_rows
+                .try_reserve_exact(query_positions.len())
+                .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
+            for query_position in query_positions {
+                opening_rows.push(
+                    usize::try_from(*query_position)
+                        .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
+                );
+            }
+            previous_code_switch
+                .state
+                .begin_source_opening_replay(&opening_rows)?;
+            previous_code_switch.retained_source_query_positions = Some(positions);
+        } else if previous_code_switch
+            .retained_source_query_positions
+            .as_deref()
+            != Some(query_positions)
+        {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
         }
-        let code_switch = self
-            .pre_challenge_whir_first_code_switch
-            .as_mut()
-            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        match code_switch.poll_source_oracle(maximum_work_unit_count)? {
+
+        let width = previous_code_switch.state.source_oracle().width();
+        if width == 0 || previous_code_switch.retained_source_query_outputs.len() % width != 0 {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        }
+        let next_query_index = previous_code_switch.retained_source_query_outputs.len() / width;
+        if next_query_index == query_positions.len() {
+            return previous_code_switch
+                .state
+                .source_opening_replay_complete()
+                .then_some(CompactPublicKeyCodeSwitchQueryEvaluationPoll::Complete)
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+        }
+        let query_position = *query_positions
+            .get(next_query_index)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        let row_ordinal = usize::try_from(query_position)
+            .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
+        match previous_code_switch
+            .state
+            .poll_source_oracle(maximum_work_unit_count)?
+        {
             CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted {
                 processed_work_unit_count,
             } => Ok(
-                CompactPublicKeyCodeSwitchResponseLeafPoll::ArithmeticStepCompleted {
+                CompactPublicKeyCodeSwitchQueryEvaluationPoll::StepCompleted {
                     processed_work_unit_count,
                 },
             ),
             CompactWhirRecomputableExtensionPoll::StripeReady { .. } => {
-                let row = code_switch
-                    .source_row(usize::try_from(leaf_ordinal).map_err(|_| {
-                        CompactPublicKeyMainEpochPreparationError::InvalidGeometry
-                    })?)?;
-                Ok(CompactPublicKeyCodeSwitchResponseLeafPoll::LeafReady(
-                    encoded_extension_values_response_leaf(Some(row))?,
-                ))
+                let row = previous_code_switch.state.source_row(row_ordinal)?;
+                if row.len() != width {
+                    return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+                }
+                previous_code_switch
+                    .retained_source_query_outputs
+                    .extend_from_slice(row);
+                previous_code_switch
+                    .state
+                    .mark_source_row_supplied(row_ordinal)?;
+                Ok(
+                    CompactPublicKeyCodeSwitchQueryEvaluationPoll::StepCompleted {
+                        processed_work_unit_count: u64::try_from(width).map_err(|_| {
+                            CompactPublicKeyMainEpochPreparationError::InvalidGeometry
+                        })?,
+                    },
+                )
             }
         }
     }
 
-    fn mark_first_code_switch_response_leaf_supplied(
+    fn bind_code_switch_verifier_move(
         &mut self,
-        leaf_ordinal: u64,
+        family_material: &CompactPublicKeyFamilyMaterial,
+        completed_messages: &[DecodedFixedUniformVerifierMessage],
+        round_ordinal: u8,
     ) -> Result<(), CompactPublicKeyMainEpochPreparationError> {
-        let [source_end, _mask_end] = self.first_code_switch_component_boundaries()?;
-        if leaf_ordinal < source_end {
-            self.pre_challenge_whir_first_code_switch
-                .as_mut()
-                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
-                .mark_source_row_supplied(
-                    usize::try_from(leaf_ordinal)
-                        .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?,
-                )?;
+        let code_switch_index = usize::from(round_ordinal);
+        let code_switch = self
+            .pre_challenge_whir_code_switches
+            .get(code_switch_index)
+            .filter(|code_switch| code_switch.round_ordinal == round_ordinal)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        if code_switch.source_query_masking_verified || code_switch.state.verifier_move_is_bound() {
+            return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+        }
+        let contract = selected_compact_public_key_proof_contract()?;
+        let [pre_challenge_epoch, _main_epoch] = contract.verifier_inputs().whir_epochs else {
+            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+        };
+        let (combination_challenge, query_positions) = completed_code_switch_verifier_move(
+            &contract.verifier_inputs(),
+            completed_messages,
+            pre_challenge_epoch.epoch,
+            u32::from(round_ordinal),
+        )?;
+        let folding_challenges = self
+            .pre_challenge_whir_sumcheck_batches
+            .get(code_switch_index)
+            .filter(|batch| batch.batch_ordinal == round_ordinal)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?
+            .state
+            .round_challenges()
+            .to_vec();
+        let folded_source_openings = if round_ordinal == 0 {
+            let mut query_outputs = family_material
+                .pre_challenge_material()
+                .source_query_outputs(query_positions)?;
+            verify_selected_compact_whir_source_query_masking(
+                contract.verifier_inputs(),
+                &self.masking_coefficient_maps,
+                self.masking_attempt_identity
+                    .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
+                completed_messages,
+                pre_challenge_epoch.epoch,
+                round_ordinal,
+                &query_outputs,
+            )
+            .map_err(|error| {
+                CompactPublicKeyMainEpochPreparationError::WhirSourceQueryMasking {
+                    source_ordinal: round_ordinal,
+                    error,
+                }
+            })?;
+            let folded_source_openings = fold_compact_whir_query_major_source_openings(
+                &query_outputs,
+                query_positions.len(),
+                &folding_challenges,
+            )?;
+            query_outputs.fill(CompactChallengeField::ZERO);
+            folded_source_openings
+        } else {
+            let previous_code_switch = self
+                .pre_challenge_whir_code_switches
+                .get(code_switch_index - 1)
+                .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+            if !previous_code_switch.state.source_opening_replay_complete() {
+                return Err(CompactPublicKeyMainEpochPreparationError::WrongPhase);
+            }
+            if previous_code_switch
+                .retained_source_query_positions
+                .as_deref()
+                != Some(query_positions)
+            {
+                return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
+            }
+            verify_selected_compact_whir_source_query_masking(
+                contract.verifier_inputs(),
+                &self.masking_coefficient_maps,
+                self.masking_attempt_identity
+                    .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
+                completed_messages,
+                pre_challenge_epoch.epoch,
+                round_ordinal,
+                &previous_code_switch.retained_source_query_outputs,
+            )
+            .map_err(|error| {
+                CompactPublicKeyMainEpochPreparationError::WhirSourceQueryMasking {
+                    source_ordinal: round_ordinal,
+                    error,
+                }
+            })?;
+            fold_compact_whir_query_major_source_openings(
+                &previous_code_switch.retained_source_query_outputs,
+                query_positions.len(),
+                &folding_challenges,
+            )?
+        };
+        let code_switch = self
+            .pre_challenge_whir_code_switches
+            .get_mut(code_switch_index)
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        code_switch.state.bind_verifier_move(
+            query_positions,
+            combination_challenge,
+            folded_source_openings,
+        )?;
+        code_switch.source_query_masking_verified = true;
+        if round_ordinal > 0 {
+            self.pre_challenge_whir_code_switches[code_switch_index - 1]
+                .state
+                .finish_source_opening_replay()?;
         }
         Ok(())
-    }
-
-    fn first_code_switch_response_leaf(
-        &self,
-        leaf_ordinal: u64,
-    ) -> Result<CompactOwnedResponseLeaf, CompactPublicKeyMainEpochPreparationError> {
-        if leaf_ordinal >= self.pre_challenge_whir_first_code_switch_response_leaf_count {
-            return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
-        }
-        let [source_end, mask_end] = self.first_code_switch_component_boundaries()?;
-        let code_switch = self
-            .pre_challenge_whir_first_code_switch
-            .as_ref()
-            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        if leaf_ordinal < source_end {
-            return encoded_extension_values_response_leaf(Some(
-                code_switch
-                    .source_row(usize::try_from(leaf_ordinal).map_err(|_| {
-                        CompactPublicKeyMainEpochPreparationError::InvalidGeometry
-                    })?)?,
-            ));
-        }
-        if leaf_ordinal < mask_end {
-            return encoded_extension_response_leaf(
-                code_switch.switch_mask_oracle()?,
-                leaf_ordinal - source_end,
-            );
-        }
-        Ok(CompactOwnedResponseLeaf::padding())
     }
 
     fn component_leaf_boundaries(
@@ -4543,10 +5000,7 @@ fn prepare_post_lookup_material(
         cfw_external_output: None,
         pre_challenge_whir_relation_preparation: None,
         pre_challenge_whir_sumcheck_batches: Vec::new(),
-        pre_challenge_whir_first_code_switch: None,
-        pre_challenge_whir_first_code_switch_response_leaf_count: 0,
-        pre_challenge_whir_first_source_query_masking_verified: false,
-        pre_challenge_whir_first_code_switch_relation_preparation: None,
+        pre_challenge_whir_code_switches: Vec::new(),
     };
     validate_retained_post_lookup_material(
         &material,
@@ -4950,12 +5404,7 @@ fn validate_retained_post_lookup_material(
         || material.cfw_external_output.is_some()
         || material.pre_challenge_whir_relation_preparation.is_some()
         || !material.pre_challenge_whir_sumcheck_batches.is_empty()
-        || material.pre_challenge_whir_first_code_switch.is_some()
-        || material.pre_challenge_whir_first_code_switch_response_leaf_count != 0
-        || material.pre_challenge_whir_first_source_query_masking_verified
-        || material
-            .pre_challenge_whir_first_code_switch_relation_preparation
-            .is_some()
+        || !material.pre_challenge_whir_code_switches.is_empty()
     {
         return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
     }
@@ -5418,6 +5867,7 @@ mod tests {
     use crate::bgv::proof_suite::fixed_uniform_verifier_message::{
         FixedUniformDistinctQueryGeometry, derive_fixed_uniform_verifier_message,
     };
+    use rand::{SeedableRng, rngs::SmallRng};
 
     #[test]
     fn selected_cross_epoch_response_uses_scalar_leaves_from_the_compiler() {
@@ -5712,6 +6162,165 @@ mod tests {
             checked_role_count,
             pre_challenge_epoch.folding_schedule.len() - 1
         );
+    }
+
+    #[test]
+    fn retained_code_switch_source_rows_reproduce_delayed_merkle_leaves() {
+        let previous_source_contract = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 0,
+            message_length: 8,
+            hiding_randomness_length: 2,
+            block_length: 16,
+            oracle_width: 2,
+            query_count: 2,
+            unique_decoding_radius: 2,
+        };
+        let next_source_contract = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 1,
+            message_length: 4,
+            hiding_randomness_length: 2,
+            block_length: 8,
+            oracle_width: 2,
+            query_count: 2,
+            unique_decoding_radius: 0,
+        };
+        let switch_mask_contract = CompactWhirMaskGroupContract {
+            role_tag: 5,
+            coordinate: 0,
+            width: 1,
+            message_length: 2,
+            randomness_length: 2,
+            domain_size: 16,
+            committed_encoding_source: 0,
+        };
+        let source_evaluations = (0..8_u64)
+            .map(|ordinal| CompactChallengeField::from_u64(ordinal * 17 + 3))
+            .collect::<Vec<_>>();
+        let previous_encoding_randomness = (0..4_u64)
+            .map(|ordinal| CompactChallengeField::from_u64(ordinal * 19 + 5))
+            .collect::<Vec<_>>();
+        let mut random_source = SmallRng::seed_from_u64(0xC0_DE_51_17);
+        let state = CompactWhirCodeSwitchState::new_from_extension_source(
+            source_evaluations,
+            previous_encoding_randomness,
+            &[CompactChallengeField::from_u64(23)],
+            previous_source_contract,
+            next_source_contract,
+            switch_mask_contract,
+            &mut random_source,
+        )
+        .expect("the compact code switch starts");
+        let mut code_switch = CompactPublicKeyWhirCodeSwitch::new(0, 7, state);
+        while !matches!(
+            code_switch
+                .state
+                .poll_preparation(8)
+                .expect("the compact code-switch preparation advances"),
+            CompactWhirCodeSwitchPreparationPoll::Complete
+        ) {}
+        let source_leaf_count =
+            u64::try_from(code_switch.state.source_oracle().encoded_height()).unwrap();
+        let mask_leaf_count = u64::try_from(
+            code_switch
+                .state
+                .switch_mask_oracle()
+                .expect("the prepared switch mask exists")
+                .encoded_matrix()
+                .height(),
+        )
+        .unwrap();
+        code_switch.response_leaf_count = (source_leaf_count + mask_leaf_count).next_power_of_two();
+
+        let retained_positions = [1_u64, 7];
+        let mut original_retained_leaves = Vec::new();
+        for leaf_ordinal in 0..source_leaf_count {
+            loop {
+                match code_switch
+                    .poll_response_leaf(leaf_ordinal, 8)
+                    .expect("the sequential code-switch response advances")
+                {
+                    CompactPublicKeyCodeSwitchResponseLeafPoll::ArithmeticStepCompleted {
+                        ..
+                    } => {}
+                    CompactPublicKeyCodeSwitchResponseLeafPoll::LeafReady(leaf) => {
+                        if retained_positions.contains(&leaf_ordinal) {
+                            original_retained_leaves.push((leaf_ordinal, leaf));
+                        }
+                        code_switch
+                            .mark_response_leaf_supplied(leaf_ordinal)
+                            .expect("the sequential response row advances custody");
+                        break;
+                    }
+                }
+            }
+        }
+        code_switch
+            .state
+            .bind_verifier_move(
+                &[1, 11],
+                CompactChallengeField::from_u64(29),
+                vec![CompactChallengeField::ZERO; 2],
+            )
+            .expect("the preceding-source verifier move binds");
+        let _relation_inputs = code_switch
+            .state
+            .take_relation_inputs()
+            .expect("the next relation takes its owned inputs");
+
+        let opening_rows = retained_positions
+            .iter()
+            .copied()
+            .map(|position| usize::try_from(position).unwrap())
+            .collect::<Vec<_>>();
+        code_switch
+            .state
+            .begin_source_opening_replay(&opening_rows)
+            .expect("the delayed source replay starts");
+        code_switch.retained_source_query_positions = Some(retained_positions.to_vec());
+        for row_ordinal in opening_rows {
+            loop {
+                match code_switch
+                    .state
+                    .poll_source_oracle(8)
+                    .expect("the delayed source replay advances")
+                {
+                    CompactWhirRecomputableExtensionPoll::ArithmeticStepCompleted { .. } => {}
+                    CompactWhirRecomputableExtensionPoll::StripeReady { .. } => {
+                        code_switch.retained_source_query_outputs.extend_from_slice(
+                            code_switch
+                                .state
+                                .source_row(row_ordinal)
+                                .expect("the requested source row is ready"),
+                        );
+                        code_switch
+                            .state
+                            .mark_source_row_supplied(row_ordinal)
+                            .expect("the delayed source row advances custody");
+                        break;
+                    }
+                }
+            }
+        }
+        code_switch
+            .state
+            .finish_source_opening_replay()
+            .expect("the completed replay releases the full source");
+
+        for (leaf_ordinal, original_leaf) in original_retained_leaves {
+            assert_eq!(
+                code_switch
+                    .response_leaf(leaf_ordinal)
+                    .expect("the retained row reproduces its committed leaf"),
+                original_leaf
+            );
+        }
+        assert_eq!(
+            code_switch.response_leaf(2),
+            Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry)
+        );
+        assert!(code_switch.response_leaf(source_leaf_count).is_ok());
     }
 
     #[test]
