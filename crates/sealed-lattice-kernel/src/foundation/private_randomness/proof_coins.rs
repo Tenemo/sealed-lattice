@@ -28,6 +28,16 @@ impl PrivateRandomnessAttemptIdentifier {
     pub const fn as_bytes(&self) -> &[u8; PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
         &self.bytes
     }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(
+        bytes: [u8; PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            bytes,
+            attempt_class: AttemptClass::OrdinaryProof,
+        }
+    }
 }
 
 impl fmt::Debug for PrivateRandomnessAttemptIdentifier {

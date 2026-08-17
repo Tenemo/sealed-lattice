@@ -625,7 +625,6 @@ pub(crate) struct CompactPublicKeyFamilyMaterializationState {
 pub(crate) struct CompactPublicKeyGenerationState {
     family_materialization_state: CompactPublicKeyFamilyMaterializationState,
     response_generation_state: Option<CompactResponseGenerationState>,
-    proof_attempt_identifier: [u8; 32],
 }
 
 #[derive(Clone, Copy)]
@@ -1637,14 +1636,10 @@ enum CompactPublicKeyCodeSwitchQueryEvaluationPoll {
 }
 
 impl CompactPublicKeyGenerationState {
-    pub(crate) fn new(
-        sources: PreparedCompactPublicKeyAssignmentSources,
-        proof_attempt_identifier: [u8; 32],
-    ) -> Self {
+    pub(crate) fn new(sources: PreparedCompactPublicKeyAssignmentSources) -> Self {
         Self {
             family_materialization_state: CompactPublicKeyFamilyMaterializationState::new(sources),
             response_generation_state: None,
-            proof_attempt_identifier,
         }
     }
 
@@ -1753,7 +1748,7 @@ impl CompactPublicKeyGenerationState {
             }
             CompactPublicKeyFamilyMaterializationPoll::PreChallengeEncodingRequired => {
                 self.family_materialization_state
-                    .encode_pre_challenge_source(private_coins, self.proof_attempt_identifier)
+                    .encode_pre_challenge_source(private_coins)
                     .map_err(CompactPublicKeyGenerationError::PreChallengeEncoding)?;
                 Ok(CompactPublicKeyGenerationPoll::PreChallengeSourceEncoded)
             }
@@ -1965,7 +1960,6 @@ impl CompactPublicKeyFamilyMaterializationState {
     pub(crate) fn encode_pre_challenge_source<Coins: CommonProofPrivateCoinSource>(
         &mut self,
         private_coins: &mut Coins,
-        proof_attempt_identifier: [u8; 32],
     ) -> Result<(), CompactPublicKeyPreChallengeEncodingError<Coins::Error>> {
         let CompactPublicKeyFamilyMaterializationPhase::AwaitingPreChallengeEncoding(prepared) =
             core::mem::replace(
@@ -1976,8 +1970,7 @@ impl CompactPublicKeyFamilyMaterializationState {
             self.phase = CompactPublicKeyFamilyMaterializationPhase::Cancelled;
             return Err(CompactPublicKeyFamilyMaterializationError::WrongPhase.into());
         };
-        let result =
-            prepare_pre_challenge_material(&prepared, private_coins, proof_attempt_identifier);
+        let result = prepare_pre_challenge_material(&prepared, private_coins);
         match result {
             Ok(pre_challenge) => {
                 self.phase =
@@ -3504,17 +3497,20 @@ impl PreparedCompactPublicKeyMainEpoch {
                 .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
             let mask_group = unique_internal_mask_group(pre_challenge_epoch, 4, 0)
                 .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-            let initial_sumcheck = CompactWhirInitialSumcheckState::new(
-                relation,
-                &configuration,
-                0,
-                mask_group,
-                family_material
+            let initial_sumcheck = {
+                let mut random_source = family_material
                     .metadata
                     .pre_challenge
                     .randomness
-                    .whir_random_source_mut(),
-            )
+                    .whir_random_adapter();
+                CompactWhirInitialSumcheckState::new(
+                    relation,
+                    &configuration,
+                    0,
+                    mask_group,
+                    &mut random_source,
+                )
+            }
             .map_err(CompactPublicKeyMainEpochPreparationError::from)
             .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
             family_material
@@ -3681,6 +3677,11 @@ impl PreparedCompactPublicKeyMainEpoch {
                         .pre_challenge
                         .encoded_oracle
                         .take_encoding_randomness()?;
+                    let mut random_source = family_material
+                        .metadata
+                        .pre_challenge
+                        .randomness
+                        .whir_random_adapter();
                     CompactWhirCodeSwitchState::new_from_base_source(
                         source_evaluations,
                         previous_encoding_randomness,
@@ -3688,11 +3689,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                         previous_source_contract,
                         next_source_contract,
                         switch_mask_contract,
-                        family_material
-                            .metadata
-                            .pre_challenge
-                            .randomness
-                            .whir_random_source_mut(),
+                        &mut random_source,
                     )?
                 }
                 CompactPublicKeyWhirEpoch::Main => {
@@ -3703,6 +3700,11 @@ impl PreparedCompactPublicKeyMainEpoch {
                     }
                     let previous_encoding_randomness =
                         material.main_source_oracle.encoding_randomness().to_vec();
+                    let mut random_source = family_material
+                        .metadata
+                        .pre_challenge
+                        .randomness
+                        .whir_random_adapter();
                     CompactWhirCodeSwitchState::new_from_extension_source(
                         source_evaluations,
                         previous_encoding_randomness,
@@ -3710,11 +3712,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                         previous_source_contract,
                         next_source_contract,
                         switch_mask_contract,
-                        family_material
-                            .metadata
-                            .pre_challenge
-                            .randomness
-                            .whir_random_source_mut(),
+                        &mut random_source,
                     )?
                 }
             }
@@ -3734,6 +3732,11 @@ impl PreparedCompactPublicKeyMainEpoch {
                 .try_reserve_exact(previous_randomness.len())
                 .map_err(|_| CompactPublicKeyMainEpochPreparationError::AllocationLimitExceeded)?;
             copied_previous_randomness.extend_from_slice(previous_randomness);
+            let mut random_source = family_material
+                .metadata
+                .pre_challenge
+                .randomness
+                .whir_random_adapter();
             CompactWhirCodeSwitchState::new_from_extension_source(
                 source_evaluations,
                 copied_previous_randomness,
@@ -3741,11 +3744,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                 previous_source_contract,
                 next_source_contract,
                 switch_mask_contract,
-                family_material
-                    .metadata
-                    .pre_challenge
-                    .randomness
-                    .whir_random_source_mut(),
+                &mut random_source,
             )?
         };
         family_material
@@ -4228,17 +4227,20 @@ impl PreparedCompactPublicKeyMainEpoch {
                 let epoch = epoch_owner.contract(&contract.verifier_inputs())?;
                 let configuration = compact_whir_configuration_from_contract(epoch)?;
                 let mask_group = unique_internal_mask_group(epoch, 4, next_batch_ordinal)?;
-                let sumcheck = CompactWhirInitialSumcheckState::new(
-                    relation,
-                    &configuration,
-                    usize::from(next_batch_ordinal),
-                    mask_group,
-                    family_material
+                let sumcheck = {
+                    let mut random_source = family_material
                         .metadata
                         .pre_challenge
                         .randomness
-                        .whir_random_source_mut(),
-                )?;
+                        .whir_random_adapter();
+                    CompactWhirInitialSumcheckState::new(
+                        relation,
+                        &configuration,
+                        usize::from(next_batch_ordinal),
+                        mask_group,
+                        &mut random_source,
+                    )
+                }?;
                 family_material
                     .metadata
                     .pre_challenge
@@ -4465,18 +4467,21 @@ impl PreparedCompactPublicKeyMainEpoch {
             epoch.epoch,
             final_batch_ordinal,
         )?;
-        let state = CompactWhirBaseCaseState::new(
-            CompactWhirBaseRelation::new(source_message, source_covector, target),
-            &final_source_randomness,
-            final_fold_contract,
-            &final_folding_challenges,
-            mask_inputs,
-            family_material
+        let state = {
+            let mut random_source = family_material
                 .metadata
                 .pre_challenge
                 .randomness
-                .whir_random_source_mut(),
-        )?;
+                .whir_random_adapter();
+            CompactWhirBaseCaseState::new(
+                CompactWhirBaseRelation::new(source_message, source_covector, target),
+                &final_source_randomness,
+                final_fold_contract,
+                &final_folding_challenges,
+                mask_inputs,
+                &mut random_source,
+            )
+        }?;
         family_material
             .metadata
             .pre_challenge
@@ -5232,17 +5237,20 @@ impl PreparedCompactPublicKeyMainEpoch {
             };
             let configuration = compact_whir_configuration_from_contract(main_epoch)?;
             let mask_group = unique_internal_mask_group(main_epoch, 4, 0)?;
-            let initial_sumcheck = CompactWhirInitialSumcheckState::new(
-                relation,
-                &configuration,
-                0,
-                mask_group,
-                family_material
+            let initial_sumcheck = {
+                let mut random_source = family_material
                     .metadata
                     .pre_challenge
                     .randomness
-                    .whir_random_source_mut(),
-            )?;
+                    .whir_random_adapter();
+                CompactWhirInitialSumcheckState::new(
+                    relation,
+                    &configuration,
+                    0,
+                    mask_group,
+                    &mut random_source,
+                )
+            }?;
             family_material
                 .metadata
                 .pre_challenge
@@ -7549,37 +7557,46 @@ fn prepare_post_lookup_material(
 
     let randomness = &mut family_material.metadata.pre_challenge.randomness;
     let cfw_mask_material = {
-        let random_source = randomness.whir_random_source_mut();
+        let mut random_source = randomness.whir_random_adapter();
         CompactCfwMaskMaterial::sample(cfw_geometry, || random_source.random())?
     };
     randomness.ensure_field_sampling_valid()?;
     let cfw_auxiliary_target = cfw_mask_material.auxiliary_target(cfw_geometry)?;
     let inner_mask_messages = copy_mask_messages(cfw_mask_material.inner_masks())?;
-    let inner_mask_encoding_randomness = sample_mask_encoding_randomness(
-        randomness.whir_random_source_mut(),
-        inner_mask_shape.width,
-        inner_mask_shape.shape.randomness_len,
-    )?;
+    let inner_mask_encoding_randomness = {
+        let mut random_source = randomness.whir_random_adapter();
+        sample_mask_encoding_randomness(
+            &mut random_source,
+            inner_mask_shape.width,
+            inner_mask_shape.shape.randomness_len,
+        )?
+    };
     randomness.ensure_field_sampling_valid()?;
     let inner_mask_oracle = CompactWhirEncodedMaskGroup::encode(
         inner_mask_shape,
         &inner_mask_messages,
         &inner_mask_encoding_randomness,
     )?;
-    let main_source_oracle = CompactWhirRecomputableExtensionInitialOracle::sample(
-        &main_configuration,
-        randomness.whir_random_source_mut(),
-    )?;
+    let main_source_oracle = {
+        let mut random_source = randomness.whir_random_adapter();
+        CompactWhirRecomputableExtensionInitialOracle::sample(
+            &main_configuration,
+            &mut random_source,
+        )?
+    };
     randomness.ensure_field_sampling_valid()?;
     if main_source_oracle.source_element_count() != witness_length {
         return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
     }
     let outer_mask_messages = copy_mask_messages(cfw_mask_material.outer_masks())?;
-    let outer_mask_encoding_randomness = sample_mask_encoding_randomness(
-        randomness.whir_random_source_mut(),
-        outer_mask_shape.width,
-        outer_mask_shape.shape.randomness_len,
-    )?;
+    let outer_mask_encoding_randomness = {
+        let mut random_source = randomness.whir_random_adapter();
+        sample_mask_encoding_randomness(
+            &mut random_source,
+            outer_mask_shape.width,
+            outer_mask_shape.shape.randomness_len,
+        )?
+    };
     randomness.ensure_field_sampling_valid()?;
     let outer_mask_oracle = CompactWhirEncodedMaskGroup::encode(
         outer_mask_shape,
@@ -7587,16 +7604,19 @@ fn prepare_post_lookup_material(
         &outer_mask_encoding_randomness,
     )?;
     let cross_epoch_masks = {
-        let random_source = randomness.whir_random_source_mut();
+        let mut random_source = randomness.whir_random_adapter();
         [random_source.random(), random_source.random()]
     };
     randomness.ensure_field_sampling_valid()?;
     let cross_epoch_mask_messages = vec![vec![cross_epoch_masks[0]], vec![cross_epoch_masks[1]]];
-    let cross_epoch_mask_encoding_randomness = sample_mask_encoding_randomness(
-        randomness.whir_random_source_mut(),
-        cross_epoch_mask_shape.width,
-        cross_epoch_mask_shape.shape.randomness_len,
-    )?;
+    let cross_epoch_mask_encoding_randomness = {
+        let mut random_source = randomness.whir_random_adapter();
+        sample_mask_encoding_randomness(
+            &mut random_source,
+            cross_epoch_mask_shape.width,
+            cross_epoch_mask_shape.shape.randomness_len,
+        )?
+    };
     randomness.ensure_field_sampling_valid()?;
     let cross_epoch_mask_oracle = CompactWhirEncodedMaskGroup::encode(
         cross_epoch_mask_shape,
@@ -8890,7 +8910,6 @@ fn cfw_round_challenge_from_verifier_message(
 fn prepare_pre_challenge_material<Coins: CommonProofPrivateCoinSource>(
     prepared: &PreparedCompactPublicKeyBaseAssignment,
     private_coins: &mut Coins,
-    proof_attempt_identifier: [u8; 32],
 ) -> Result<
     CompactPublicKeyPreChallengeMaterial,
     CompactPublicKeyPreChallengeEncodingError<Coins::Error>,
@@ -8944,16 +8963,12 @@ fn prepare_pre_challenge_material<Coins: CommonProofPrivateCoinSource>(
         return Err(CompactPublicKeyFamilyMaterializationError::InvalidPreChallengeSource.into());
     }
 
-    let mut randomness = CompactGenerationAttemptRandomness::from_private_coins(
-        private_coins,
-        proof_attempt_identifier,
-    )
-    .map_err(CompactPublicKeyPreChallengeEncodingError::PrivateCoin)?;
-    let encoded_oracle = CompactWhirEncodedInitialOracle::encode(
-        &configuration,
-        source,
-        randomness.whir_random_source_mut(),
-    )?;
+    let mut randomness = CompactGenerationAttemptRandomness::from_private_coins(private_coins)
+        .map_err(CompactPublicKeyPreChallengeEncodingError::PrivateCoin)?;
+    let encoded_oracle = {
+        let mut random_source = randomness.whir_random_adapter();
+        CompactWhirEncodedInitialOracle::encode(&configuration, source, &mut random_source)?
+    };
     randomness.ensure_field_sampling_valid()?;
     let matrix = encoded_oracle.encoded_matrix();
     if u64::try_from(matrix.height()) != Ok(source_response_component.leaf_count())

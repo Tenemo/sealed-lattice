@@ -157,6 +157,11 @@ impl CommonProofPrivateCoinCoordinateCapacity {
 pub(crate) trait CommonProofPrivateCoinSource {
     type Error;
 
+    /// Returns the typed attempt identity that owns every coordinate exposed
+    /// through this source. Construction code must obtain attempt binding from
+    /// this custody boundary rather than accepting caller-supplied bytes.
+    fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier;
+
     fn sample_modulo(
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
@@ -542,6 +547,10 @@ where
     Source: CommonProofPrivateCoinSource,
 {
     type Error = RecordingCommonProofPrivateCoinError<Source::Error>;
+
+    fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+        self.source.private_randomness_attempt_identifier()
+    }
 
     fn sample_modulo(
         &mut self,
@@ -1174,6 +1183,10 @@ impl PrivateRandomnessCommonProofCoinSource {
 impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
     type Error = PrivateRandomnessCommonProofCoinError;
 
+    fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+        self.attempt_identifier
+    }
+
     fn sample_modulo(
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
@@ -1513,6 +1526,10 @@ mod tests {
 
     impl CommonProofPrivateCoinSource for SuccessfulRecordingDelegate {
         type Error = core::convert::Infallible;
+
+        fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+            PrivateRandomnessAttemptIdentifier::for_test([0xa1; 32])
+        }
 
         fn sample_modulo(
             &mut self,

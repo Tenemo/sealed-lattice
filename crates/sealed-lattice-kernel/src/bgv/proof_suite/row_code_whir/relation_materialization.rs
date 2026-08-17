@@ -532,6 +532,12 @@ mod tests {
     impl CommonProofPrivateCoinSource for DeterministicZeroCoinSource {
         type Error = Infallible;
 
+        fn private_randomness_attempt_identifier(
+            &self,
+        ) -> crate::foundation::PrivateRandomnessAttemptIdentifier {
+            crate::foundation::PrivateRandomnessAttemptIdentifier::for_test([0xb4; 32])
+        }
+
         fn sample_modulo(
             &mut self,
             _coordinate: CommonProofPrivateCoinCoordinate,

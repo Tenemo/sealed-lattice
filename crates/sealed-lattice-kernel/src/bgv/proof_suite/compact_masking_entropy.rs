@@ -1146,6 +1146,11 @@ pub(crate) fn verify_selected_compact_cfw_round_masking(
     {
         return Err(CompactMaskingEntropyError::MissingTranscriptInput);
     }
+    let compiler_round_rank = certified_cfw_round_conditional_rank(
+        coefficient_maps,
+        u64::try_from(inputs.cfw_configuration.geometry().sumcheck_round_count())
+            .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?,
+    )?;
     let mut authority = replay_selected_compact_cfw_masking_prefix(
         inputs,
         coefficient_maps,
@@ -1162,6 +1167,11 @@ pub(crate) fn verify_selected_compact_cfw_round_masking(
                 .map_err(|_| CompactMaskingEntropyError::ArithmeticOverflow)?
     {
         return Err(CompactMaskingEntropyError::DisclosureOutOfOrder);
+    }
+    if compiler_round_rank != CFW_OUTER_MASK_MESSAGE_LENGTH_U64 - 1
+        || round_step.conditional_rank() != compiler_round_rank
+    {
+        return Err(CompactMaskingEntropyError::RankFailure);
     }
     authority.verify_coefficient_image_output(
         round_step,
@@ -3999,6 +4009,44 @@ fn cfw_outer_incremental_ranks(
     incremental_group_ranks(row_groups, columns)
 }
 
+fn certified_cfw_round_conditional_rank(
+    certificate: &CompactMaskingCoefficientMapCertificate,
+    expected_round_count: u64,
+) -> Result<u64, CompactMaskingEntropyError> {
+    let map = certificate
+        .maps()
+        .iter()
+        .find(|map| {
+            map.coordinate.role == CompactMaskingViewRole::Sumcheck
+                && map.coordinate.epoch == 0
+                && map.coordinate.batch_ordinal == 0
+                && map.coordinate.coordinate == 1
+        })
+        .ok_or(CompactMaskingEntropyError::InvalidCoefficientMap)?;
+    if !matches!(
+        (&map.projection, map.surjectivity),
+        (
+            CompactCoefficientProjection::CfwOuterTranscript { round_count },
+            CompactSurjectivityWitness::CfwOuterFullColumnRank {
+                round_count: witness_round_count,
+            },
+        ) if *round_count == expected_round_count
+            && witness_round_count == expected_round_count
+    ) || map.private_coordinate_count
+        != checked_product(&[expected_round_count, CFW_OUTER_MASK_MESSAGE_LENGTH_U64])?
+    {
+        return Err(CompactMaskingEntropyError::InvalidCoefficientMap);
+    }
+
+    // The compiler witness assigns one pivot to every nonconstant
+    // coefficient of the eight-coordinate CFW round polynomial. The remaining
+    // coordinate is fixed by the preceding sumcheck claim, so every live round
+    // has a seven-dimensional conditional image.
+    CFW_OUTER_MASK_MESSAGE_LENGTH_U64
+        .checked_sub(1)
+        .ok_or(CompactMaskingEntropyError::RankFailure)
+}
+
 #[cfg(test)]
 fn cfw_inner_terminal_rank(
     certificate: &CompactMaskingCoefficientMapCertificate,
@@ -6106,6 +6154,7 @@ mod tests {
             let [round_step] = steps.as_slice() else {
                 panic!("one CFW masking step must own each round")
             };
+            assert_eq!(round_step.conditional_rank(), 7);
             let request = authority
                 .prepare_coefficient_image(round_step, &preceding_outer_outputs, None)
                 .expect("the round conditional image derives");

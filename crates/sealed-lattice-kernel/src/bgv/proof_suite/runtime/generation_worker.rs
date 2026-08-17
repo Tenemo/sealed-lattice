@@ -34,7 +34,8 @@ use super::{
     hash_framed_parts_512, verified_application_statement_hash,
 };
 use crate::foundation::{
-    PreparedPublicOnlyProofAttemptSource, WitnessBoundPreparedActionProofAttemptSource,
+    PreparedPublicOnlyProofAttemptSource, PrivateRandomnessAttemptIdentifier,
+    WitnessBoundPreparedActionProofAttemptSource,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,6 +191,8 @@ fn decode_common_proof_generation_cursor_manifest(
 }
 
 trait ErasedCommonProofPrivateCoinSource {
+    fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier;
+
     fn sample_modulo(
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
@@ -223,6 +226,10 @@ impl<Source> ErasedCommonProofPrivateCoinSource
 where
     Source: CheckpointableCommonProofPrivateCoinSource,
 {
+    fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+        self.0.private_randomness_attempt_identifier()
+    }
+
     fn sample_modulo(
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
@@ -280,6 +287,10 @@ impl CheckpointableCommonProofPrivateCoinSource for CommonProofWorkerPrivateCoin
 
 impl CommonProofPrivateCoinSource for CommonProofWorkerPrivateCoinSource {
     type Error = CommonProofGenerationSourceError;
+
+    fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+        self.0.private_randomness_attempt_identifier()
+    }
 
     fn sample_modulo(
         &mut self,
@@ -2360,6 +2371,10 @@ mod generation_cursor_manifest_tests {
 
     impl CommonProofPrivateCoinSource for FixedCheckpointCoinSource {
         type Error = CommonProofGenerationSourceError;
+
+        fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+            PrivateRandomnessAttemptIdentifier::for_test([0xc1; 32])
+        }
 
         fn sample_modulo(
             &mut self,

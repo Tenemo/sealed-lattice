@@ -5249,8 +5249,7 @@ mod tests {
                 &prepared_sources.relation_plan_variant,
             )
             .expect("compact private-coin coordinate capacity derives");
-        let mut generation_state =
-            CompactPublicKeyGenerationState::new(prepared_sources, proof_attempt_identifier);
+        let mut generation_state = CompactPublicKeyGenerationState::new(prepared_sources);
         let mut loaded_column_ordinals = Vec::new();
         loop {
             match generation_state

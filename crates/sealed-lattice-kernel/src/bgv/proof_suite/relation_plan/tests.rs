@@ -1877,6 +1877,12 @@ struct CoordinatePrivateCoins;
 impl crate::bgv::proof_suite::CommonProofPrivateCoinSource for CoordinatePrivateCoins {
     type Error = core::convert::Infallible;
 
+    fn private_randomness_attempt_identifier(
+        &self,
+    ) -> crate::foundation::PrivateRandomnessAttemptIdentifier {
+        crate::foundation::PrivateRandomnessAttemptIdentifier::for_test([0xb5; 32])
+    }
+
     fn sample_modulo(
         &mut self,
         coordinate: crate::bgv::proof_suite::CommonProofPrivateCoinCoordinate,

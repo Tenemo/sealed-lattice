@@ -17,7 +17,9 @@ use super::{
     compact_response_generation::CompactOwnedResponseLeaf,
     prover::{CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSource},
 };
-use crate::foundation::SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT;
+use crate::foundation::{
+    PrivateRandomnessAttemptIdentifier, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+};
 
 pub(crate) const COMPACT_PRIVATE_SEED_BYTE_LENGTH: usize = 64;
 pub(crate) const COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH: usize = 64;
@@ -50,12 +52,12 @@ pub(crate) enum CompactGenerationRandomnessError {
 }
 
 pub(crate) struct CompactGenerationAttemptRandomness {
-    proof_attempt_identifier: [u8; 32],
+    proof_attempt_identifier: PrivateRandomnessAttemptIdentifier,
     response_salt_seed: Zeroizing<[u8; COMPACT_PRIVATE_SEED_BYTE_LENGTH]>,
-    whir_random_source: CompactWhirRandomSource,
+    canonical_goldilocks_field_sampler: CompactCanonicalGoldilocksFieldSampler,
 }
 
-pub(crate) struct CompactWhirRandomSource {
+struct CompactCanonicalGoldilocksFieldSampler {
     private_seed: Zeroizing<[u8; COMPACT_PRIVATE_SEED_BYTE_LENGTH]>,
     next_block_ordinal: u64,
     buffered_block: Zeroizing<[u8; COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH]>,
@@ -65,11 +67,15 @@ pub(crate) struct CompactWhirRandomSource {
     unsupported_random_access: bool,
 }
 
+pub(crate) struct CompactWhirRandomAdapter<'sampler> {
+    sampler: &'sampler mut CompactCanonicalGoldilocksFieldSampler,
+}
+
 impl CompactGenerationAttemptRandomness {
     pub(crate) fn from_private_coins<Coins: CommonProofPrivateCoinSource>(
         private_coins: &mut Coins,
-        proof_attempt_identifier: [u8; 32],
     ) -> Result<Self, Coins::Error> {
+        let proof_attempt_identifier = private_coins.private_randomness_attempt_identifier();
         let [whir_seed_coordinate, response_salt_seed_coordinate] =
             COMPACT_GENERATION_PRIVATE_SEED_COORDINATES;
         let whir_random_seed = sample_compact_private_seed(private_coins, whir_seed_coordinate)?;
@@ -78,24 +84,34 @@ impl CompactGenerationAttemptRandomness {
         Ok(Self {
             proof_attempt_identifier,
             response_salt_seed,
-            whir_random_source: CompactWhirRandomSource::new(whir_random_seed),
+            canonical_goldilocks_field_sampler: CompactCanonicalGoldilocksFieldSampler::new(
+                whir_random_seed,
+            ),
         })
     }
 
     pub(crate) const fn proof_attempt_identifier(&self) -> [u8; 32] {
-        self.proof_attempt_identifier
+        *self.proof_attempt_identifier.as_bytes()
     }
 
-    pub(crate) const fn whir_random_source_mut(&mut self) -> &mut CompactWhirRandomSource {
-        &mut self.whir_random_source
+    pub(crate) fn whir_random_adapter(&mut self) -> CompactWhirRandomAdapter<'_> {
+        CompactWhirRandomAdapter {
+            sampler: &mut self.canonical_goldilocks_field_sampler,
+        }
     }
 
     pub(crate) fn ensure_field_sampling_valid(
         &self,
     ) -> Result<(), CompactGenerationRandomnessError> {
-        if self.whir_random_source.unsupported_random_access {
+        if self
+            .canonical_goldilocks_field_sampler
+            .unsupported_random_access
+        {
             Err(CompactGenerationRandomnessError::UnsupportedRandomAccess)
-        } else if self.whir_random_source.field_sampler_exhausted {
+        } else if self
+            .canonical_goldilocks_field_sampler
+            .field_sampler_exhausted
+        {
             Err(CompactGenerationRandomnessError::FieldSamplerExhausted)
         } else {
             Ok(())
@@ -123,7 +139,7 @@ impl CompactGenerationAttemptRandomness {
             self.response_salt_seed.as_ref(),
             COMPACT_PRIVATE_LEAF_SALT_CUSTOMIZATION,
             &[
-                &self.proof_attempt_identifier,
+                self.proof_attempt_identifier.as_bytes(),
                 &response_ordinal.to_le_bytes(),
                 &leaf_count.to_le_bytes(),
                 &leaf_ordinal.to_le_bytes(),
@@ -144,7 +160,7 @@ impl CompactGenerationAttemptRandomness {
             self.response_salt_seed.as_ref(),
             COMPACT_FIAT_SHAMIR_ROUND_SALT_CUSTOMIZATION,
             &[
-                &self.proof_attempt_identifier,
+                self.proof_attempt_identifier.as_bytes(),
                 &response_ordinal.to_le_bytes(),
             ],
             &mut salt,
@@ -164,9 +180,13 @@ impl CompactGenerationAttemptRandomness {
             .copy_from_slice(&COMPACT_GENERATION_RANDOMNESS_CURSOR_VERSION.to_le_bytes());
         canonical_bytes[12..16]
             .copy_from_slice(&COMPACT_GENERATION_RANDOMNESS_CURSOR_BYTE_LENGTH_U32.to_le_bytes());
-        canonical_bytes[16..48].copy_from_slice(&self.proof_attempt_identifier);
-        canonical_bytes[48..]
-            .copy_from_slice(&self.whir_random_source.consumed_byte_count().to_le_bytes());
+        canonical_bytes[16..48].copy_from_slice(self.proof_attempt_identifier.as_bytes());
+        canonical_bytes[48..].copy_from_slice(
+            &self
+                .canonical_goldilocks_field_sampler
+                .consumed_byte_count()
+                .to_le_bytes(),
+        );
         canonical_bytes
     }
 
@@ -203,7 +223,7 @@ impl CompactGenerationAttemptRandomness {
     }
 }
 
-impl CompactWhirRandomSource {
+impl CompactCanonicalGoldilocksFieldSampler {
     fn new(private_seed: Zeroizing<[u8; COMPACT_PRIVATE_SEED_BYTE_LENGTH]>) -> Self {
         Self {
             private_seed,
@@ -264,40 +284,44 @@ impl CompactWhirRandomSource {
         self.fill(&mut bytes);
         u64::from_le_bytes(bytes)
     }
+
+    fn sample_canonical_goldilocks_field_value(&mut self) -> u64 {
+        let sampled = sample_bounded_canonical_base_field_value(|| self.next_raw_u64());
+        if let Some(value) = sampled {
+            value
+        } else {
+            self.field_sampler_exhausted = true;
+            // `rand::Rng` is infallible. The construction checks this retained
+            // refusal before accepting or emitting the sampled batch.
+            0
+        }
+    }
 }
 
-impl TryRng for CompactWhirRandomSource {
+impl TryRng for CompactWhirRandomAdapter<'_> {
     type Error = Infallible;
 
     fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-        self.unsupported_random_access = true;
+        self.sampler.unsupported_random_access = true;
         let mut bytes = [0_u8; size_of::<u32>()];
-        self.fill(&mut bytes);
+        self.sampler.fill(&mut bytes);
         Ok(u32::from_le_bytes(bytes))
     }
 
     fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-        let sampled = sample_bounded_canonical_base_field_value(|| self.next_raw_u64());
-        if let Some(value) = sampled {
-            Ok(value)
-        } else {
-            self.field_sampler_exhausted = true;
-            // `rand::Rng` is infallible. Production callers check the retained
-            // exhaustion flag before accepting or emitting the sampled batch.
-            Ok(0)
-        }
+        Ok(self.sampler.sample_canonical_goldilocks_field_value())
     }
 
     fn try_fill_bytes(&mut self, destination: &mut [u8]) -> Result<(), Self::Error> {
         if !destination.is_empty() {
-            self.unsupported_random_access = true;
+            self.sampler.unsupported_random_access = true;
         }
-        self.fill(destination);
+        self.sampler.fill(destination);
         Ok(())
     }
 }
 
-impl TryCryptoRng for CompactWhirRandomSource {}
+impl TryCryptoRng for CompactWhirRandomAdapter<'_> {}
 
 fn sample_compact_private_seed<Coins: CommonProofPrivateCoinSource>(
     private_coins: &mut Coins,
@@ -339,12 +363,17 @@ mod tests {
     use super::*;
 
     struct DeterministicPrivateCoins {
+        attempt_identifier: PrivateRandomnessAttemptIdentifier,
         next_byte: u8,
         observed_raw_fills: Vec<(CommonProofPrivateCoinCoordinate, usize)>,
     }
 
     impl CommonProofPrivateCoinSource for DeterministicPrivateCoins {
         type Error = Infallible;
+
+        fn private_randomness_attempt_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+            self.attempt_identifier
+        }
 
         fn sample_modulo(
             &mut self,
@@ -382,13 +411,12 @@ mod tests {
 
     #[test]
     fn attempt_and_response_coordinates_separate_every_random_output() {
-        let mut first_coins = deterministic_private_coins();
-        let mut replayed_coins = deterministic_private_coins();
-        let mut first =
-            CompactGenerationAttemptRandomness::from_private_coins(&mut first_coins, [0x11; 32])
-                .expect("the compact attempt randomness derives");
+        let mut first_coins = deterministic_private_coins(0x11);
+        let mut replayed_coins = deterministic_private_coins(0x11);
+        let mut first = CompactGenerationAttemptRandomness::from_private_coins(&mut first_coins)
+            .expect("the compact attempt randomness derives");
         let mut replayed =
-            CompactGenerationAttemptRandomness::from_private_coins(&mut replayed_coins, [0x11; 32])
+            CompactGenerationAttemptRandomness::from_private_coins(&mut replayed_coins)
                 .expect("the compact attempt randomness rederives");
         assert_eq!(
             first_coins.observed_raw_fills,
@@ -403,7 +431,10 @@ mod tests {
                 ),
             ],
         );
-        assert_eq!(first.try_next_u64(), replayed.try_next_u64());
+        assert_eq!(
+            first.sample_canonical_goldilocks_field_value_for_test(),
+            replayed.sample_canonical_goldilocks_field_value_for_test()
+        );
         first
             .ensure_field_sampling_valid()
             .expect("the deterministic KMAC field sampler remains live");
@@ -424,20 +455,17 @@ mod tests {
 
     #[test]
     fn checkpoint_cursor_is_canonical_attempt_bound_and_live() {
-        let mut first_coins = deterministic_private_coins();
-        let mut replayed_coins = deterministic_private_coins();
-        let mut changed_attempt_coins = deterministic_private_coins();
-        let mut first =
-            CompactGenerationAttemptRandomness::from_private_coins(&mut first_coins, [0x31; 32])
-                .expect("the first compact attempt randomness derives");
+        let mut first_coins = deterministic_private_coins(0x31);
+        let mut replayed_coins = deterministic_private_coins(0x31);
+        let mut changed_attempt_coins = deterministic_private_coins(0x32);
+        let mut first = CompactGenerationAttemptRandomness::from_private_coins(&mut first_coins)
+            .expect("the first compact attempt randomness derives");
         let mut replayed =
-            CompactGenerationAttemptRandomness::from_private_coins(&mut replayed_coins, [0x31; 32])
+            CompactGenerationAttemptRandomness::from_private_coins(&mut replayed_coins)
                 .expect("the replayed compact attempt randomness derives");
-        let changed_attempt = CompactGenerationAttemptRandomness::from_private_coins(
-            &mut changed_attempt_coins,
-            [0x32; 32],
-        )
-        .expect("the changed compact attempt randomness derives");
+        let changed_attempt =
+            CompactGenerationAttemptRandomness::from_private_coins(&mut changed_attempt_coins)
+                .expect("the changed compact attempt randomness derives");
 
         let initial_cursor = first.canonical_checkpoint_cursor_bytes();
         assert_eq!(initial_cursor, replayed.canonical_checkpoint_cursor_bytes());
@@ -459,7 +487,7 @@ mod tests {
 
         let mut random_bytes = [0_u8; COMPACT_WHIR_RANDOM_BLOCK_BYTE_LENGTH + 1];
         first
-            .whir_random_source_mut()
+            .whir_random_adapter()
             .try_fill_bytes(&mut random_bytes)
             .expect("the KMAC stream is infallible");
         assert_eq!(
@@ -481,7 +509,7 @@ mod tests {
             Err(CompactGenerationRandomnessCursorError::WrongLiveCursor)
         );
         replayed
-            .whir_random_source_mut()
+            .whir_random_adapter()
             .try_fill_bytes(&mut random_bytes)
             .expect("the replayed KMAC stream is infallible");
         replayed
@@ -516,15 +544,18 @@ mod tests {
     }
 
     impl CompactGenerationAttemptRandomness {
-        fn try_next_u64(&mut self) -> u64 {
-            self.whir_random_source
+        fn sample_canonical_goldilocks_field_value_for_test(&mut self) -> u64 {
+            self.whir_random_adapter()
                 .try_next_u64()
                 .expect("the KMAC stream is infallible")
         }
     }
 
-    fn deterministic_private_coins() -> DeterministicPrivateCoins {
+    fn deterministic_private_coins(attempt_identifier_byte: u8) -> DeterministicPrivateCoins {
         DeterministicPrivateCoins {
+            attempt_identifier: PrivateRandomnessAttemptIdentifier::for_test(
+                [attempt_identifier_byte; 32],
+            ),
             next_byte: 1,
             observed_raw_fills: Vec::new(),
         }
