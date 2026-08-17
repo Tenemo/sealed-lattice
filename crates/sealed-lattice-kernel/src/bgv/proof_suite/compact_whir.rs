@@ -260,17 +260,17 @@ enum CompactWhirInitialSumcheckPhase {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactWhirInitialSumcheckPoll {
-    RoundPolynomialStepCompleted {
+    RoundPolynomial {
         round_ordinal: u32,
         processed_work_unit_count: u64,
         polynomial_ready: bool,
     },
-    BoundRoundStepCompleted {
+    BoundRound {
         round_ordinal: u32,
         processed_work_unit_count: u64,
         round_complete: bool,
     },
-    WeightScalingStepCompleted {
+    WeightScaling {
         processed_work_unit_count: u64,
         scaling_complete: bool,
     },
@@ -463,6 +463,26 @@ struct CompactWhirBaseMaskState {
     fresh_messages: Vec<Vec<CompactChallengeField>>,
     fresh_randomness: Vec<Vec<CompactChallengeField>>,
     fresh_oracle: CompactWhirEncodedMaskGroup,
+}
+
+pub(crate) struct CompactWhirBaseRelation {
+    source_message: Vec<CompactChallengeField>,
+    source_covector: Vec<CompactChallengeField>,
+    target: CompactChallengeField,
+}
+
+impl CompactWhirBaseRelation {
+    pub(crate) fn new(
+        source_message: Vec<CompactChallengeField>,
+        source_covector: Vec<CompactChallengeField>,
+        target: CompactChallengeField,
+    ) -> Self {
+        Self {
+            source_message,
+            source_covector,
+            target,
+        }
+    }
 }
 
 /// Production Construction 7.2 state after the last masked sumcheck. It folds
@@ -1067,14 +1087,12 @@ impl CompactWhirInitialSumcheckState {
                         leading_coefficient,
                     };
                 }
-                Ok(
-                    CompactWhirInitialSumcheckPoll::RoundPolynomialStepCompleted {
-                        round_ordinal: self.current_round_ordinal()?,
-                        processed_work_unit_count: u64::try_from(end - next_pair_ordinal)
-                            .map_err(|_| CompactWhirError::CountOverflow)?,
-                        polynomial_ready,
-                    },
-                )
+                Ok(CompactWhirInitialSumcheckPoll::RoundPolynomial {
+                    round_ordinal: self.current_round_ordinal()?,
+                    processed_work_unit_count: u64::try_from(end - next_pair_ordinal)
+                        .map_err(|_| CompactWhirError::CountOverflow)?,
+                    polynomial_ready,
+                })
             }
             CompactWhirInitialSumcheckPhase::FoldingRound {
                 challenge,
@@ -1126,7 +1144,7 @@ impl CompactWhirInitialSumcheckState {
                         leading_coefficient,
                     };
                 }
-                Ok(CompactWhirInitialSumcheckPoll::BoundRoundStepCompleted {
+                Ok(CompactWhirInitialSumcheckPoll::BoundRound {
                     round_ordinal: u32::try_from(
                         self.round_challenges
                             .len()
@@ -1160,7 +1178,7 @@ impl CompactWhirInitialSumcheckState {
                         next_element_ordinal: end,
                     };
                 }
-                Ok(CompactWhirInitialSumcheckPoll::WeightScalingStepCompleted {
+                Ok(CompactWhirInitialSumcheckPoll::WeightScaling {
                     processed_work_unit_count: u64::try_from(end - next_element_ordinal)
                         .map_err(|_| CompactWhirError::CountOverflow)?,
                     scaling_complete,
@@ -1549,7 +1567,7 @@ impl CompactWhirCodeSwitchState {
                     self.folding_weights.fill(CompactChallengeField::ZERO);
                     self.folding_weights.clear();
                     self.switch_mask_oracle = Some(CompactWhirEncodedMaskGroup::encode(
-                        self.switch_mask_shape.clone(),
+                        self.switch_mask_shape,
                         core::slice::from_ref(&self.folded_previous_randomness),
                         core::slice::from_ref(&self.switch_mask_encoding_randomness),
                     )?);
@@ -1948,15 +1966,18 @@ impl CompactWhirBaseMaskInput {
 
 impl CompactWhirBaseCaseState {
     pub(crate) fn new<R: Rng>(
-        source_message: Vec<CompactChallengeField>,
+        relation: CompactWhirBaseRelation,
         previous_source_randomness: &[CompactChallengeField],
-        source_covector: Vec<CompactChallengeField>,
-        target: CompactChallengeField,
         final_fold_contract: CompactWhirFoldContract,
         final_folding_challenges: &[CompactChallengeField],
         mask_inputs: Vec<CompactWhirBaseMaskInput>,
         random_source: &mut R,
     ) -> Result<Self, CompactWhirError> {
+        let CompactWhirBaseRelation {
+            source_message,
+            source_covector,
+            target,
+        } = relation;
         let source_message_length = usize::try_from(final_fold_contract.message_length)
             .map_err(|_| CompactWhirError::CountOverflow)?;
         let final_randomness_length = usize::try_from(final_fold_contract.hiding_randomness_length)
@@ -3748,10 +3769,8 @@ mod tests {
 
         let mut random_source = CountingRandomSource(0xB5);
         let mut state = CompactWhirBaseCaseState::new(
-            source_message.clone(),
+            CompactWhirBaseRelation::new(source_message.clone(), source_covector, target),
             &previous_source_randomness,
-            source_covector,
-            target,
             final_fold_contract,
             &folding_challenges,
             mask_inputs,
@@ -3861,10 +3880,12 @@ mod tests {
         let mut rejecting_random_source = CountingRandomSource(0xC5);
         assert!(matches!(
             CompactWhirBaseCaseState::new(
-                source_message,
+                CompactWhirBaseRelation::new(
+                    source_message,
+                    vec![CompactChallengeField::ONE; 4],
+                    target + CompactChallengeField::ONE,
+                ),
                 &previous_source_randomness,
-                vec![CompactChallengeField::ONE; 4],
-                target + CompactChallengeField::ONE,
                 final_fold_contract,
                 &folding_challenges,
                 vec![
@@ -4146,19 +4167,15 @@ mod tests {
                 "authenticated source failure"
             ))
         );
-        loop {
-            match source_failure
+        while let CompactWhirMainRelationPreparationPoll::SourceStepCompleted { .. } =
+            source_failure
                 .poll(3, |source_ordinal| {
                     Ok::<_, core::convert::Infallible>(
                         source_evaluations[usize::try_from(source_ordinal).unwrap()],
                     )
                 })
                 .expect("the authenticated source resumes at the failed ordinal")
-            {
-                CompactWhirMainRelationPreparationPoll::SourceStepCompleted { .. } => {}
-                CompactWhirMainRelationPreparationPoll::Complete => break,
-            }
-        }
+        {}
         let resumed_relation = source_failure
             .finish()
             .expect("the resumed source produces one exact relation");
@@ -4183,31 +4200,26 @@ mod tests {
         let work_budgets = [1_u64, 3, 2];
         let mut poll_ordinal = 0_usize;
         let mut observed_source_ordinals = Vec::new();
-        loop {
-            match preparation
-                .poll(
-                    work_budgets[poll_ordinal % work_budgets.len()],
-                    |source_ordinal| {
-                        observed_source_ordinals.push(source_ordinal);
-                        Ok::<_, core::convert::Infallible>(
-                            source_evaluations[usize::try_from(source_ordinal).unwrap()],
-                        )
-                    },
-                )
-                .expect("the valid main relation advances")
-            {
-                CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
-                    processed_work_unit_count,
-                    relation_complete,
-                } => {
-                    assert!((1..=3).contains(&processed_work_unit_count));
-                    assert_eq!(
-                        relation_complete,
-                        observed_source_ordinals.len() == source_evaluations.len()
-                    );
-                }
-                CompactWhirMainRelationPreparationPoll::Complete => break,
-            }
+        while let CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
+            processed_work_unit_count,
+            relation_complete,
+        } = preparation
+            .poll(
+                work_budgets[poll_ordinal % work_budgets.len()],
+                |source_ordinal| {
+                    observed_source_ordinals.push(source_ordinal);
+                    Ok::<_, core::convert::Infallible>(
+                        source_evaluations[usize::try_from(source_ordinal).unwrap()],
+                    )
+                },
+            )
+            .expect("the valid main relation advances")
+        {
+            assert!((1..=3).contains(&processed_work_unit_count));
+            assert_eq!(
+                relation_complete,
+                observed_source_ordinals.len() == source_evaluations.len()
+            );
             poll_ordinal += 1;
         }
         assert_eq!(observed_source_ordinals, (0_u64..8).collect::<Vec<_>>());
@@ -4418,7 +4430,7 @@ mod tests {
             let round_number = round_index + 1;
             let live_multiplier =
                 CompactChallengeField::TWO.exp_u64((folding_factor - round_number) as u64);
-            let mut full = vec![CompactChallengeField::ZERO; 3];
+            let mut full = [CompactChallengeField::ZERO; 3];
             for (coefficient, mask_coefficient) in full.iter_mut().zip(&mask) {
                 *coefficient += live_multiplier * *mask_coefficient;
             }
@@ -4443,7 +4455,7 @@ mod tests {
                 poll_ordinal += 1;
                 if matches!(
                     poll,
-                    CompactWhirInitialSumcheckPoll::RoundPolynomialStepCompleted {
+                    CompactWhirInitialSumcheckPoll::RoundPolynomial {
                         polynomial_ready: true,
                         ..
                     }
@@ -4495,7 +4507,7 @@ mod tests {
                 poll_ordinal += 1;
                 if matches!(
                     poll,
-                    CompactWhirInitialSumcheckPoll::BoundRoundStepCompleted {
+                    CompactWhirInitialSumcheckPoll::BoundRound {
                         round_complete: true,
                         ..
                     }
@@ -4512,7 +4524,7 @@ mod tests {
             poll_ordinal += 1;
             if matches!(
                 poll,
-                CompactWhirInitialSumcheckPoll::WeightScalingStepCompleted {
+                CompactWhirInitialSumcheckPoll::WeightScaling {
                     scaling_complete: true,
                     ..
                 }
@@ -4880,19 +4892,14 @@ mod tests {
         );
         let work_budgets = [1_u64, 17, 509, 4_096];
         let mut poll_ordinal = 0_usize;
-        loop {
-            match state
-                .poll_preparation(work_budgets[poll_ordinal % work_budgets.len()])
-                .expect("the switch-mask fold advances")
-            {
-                CompactWhirCodeSwitchPreparationPoll::RandomnessFoldStepCompleted {
-                    processed_work_unit_count,
-                    ..
-                } => {
-                    assert!(processed_work_unit_count > 0);
-                }
-                CompactWhirCodeSwitchPreparationPoll::Complete => break,
-            }
+        while let CompactWhirCodeSwitchPreparationPoll::RandomnessFoldStepCompleted {
+            processed_work_unit_count,
+            ..
+        } = state
+            .poll_preparation(work_budgets[poll_ordinal % work_budgets.len()])
+            .expect("the switch-mask fold advances")
+        {
+            assert!(processed_work_unit_count > 0);
             poll_ordinal += 1;
         }
         assert_eq!(
@@ -5138,20 +5145,15 @@ mod tests {
         let work_budgets = [1_u64, 3, 7];
         let mut poll_ordinal = 0_usize;
         let mut processed_work_unit_count = 0_u64;
-        loop {
-            match preparation
-                .poll(work_budgets[poll_ordinal % work_budgets.len()])
-                .expect("the code-switch output relation advances")
-            {
-                CompactWhirCodeSwitchRelationPreparationPoll::QueryRelationStepCompleted {
-                    processed_work_unit_count: processed,
-                    ..
-                } => {
-                    assert!(processed > 0);
-                    processed_work_unit_count += processed;
-                }
-                CompactWhirCodeSwitchRelationPreparationPoll::Complete => break,
-            }
+        while let CompactWhirCodeSwitchRelationPreparationPoll::QueryRelationStepCompleted {
+            processed_work_unit_count: processed,
+            ..
+        } = preparation
+            .poll(work_budgets[poll_ordinal % work_budgets.len()])
+            .expect("the code-switch output relation advances")
+        {
+            assert!(processed > 0);
+            processed_work_unit_count += processed;
             poll_ordinal += 1;
         }
         assert_eq!(processed_work_unit_count, 12);

@@ -44,7 +44,7 @@ use crate::bgv::proof_suite::{
     compact_masking_entropy::{
         CompactMaskingEntropyError, CompactMaskingQueryLeaf, CompactVerifiedBaseMaskingPrefix,
         CompactVerifiedBaseRevealMasking, CompactVerifiedWhirBaseCovector,
-        begin_selected_compact_whir_base_covector_derivation,
+        CompactWhirSumcheckBatchCoordinate, begin_selected_compact_whir_base_covector_derivation,
         derive_selected_compact_pre_challenge_base_covector,
         finish_selected_compact_whir_base_covector_derivation,
         verify_selected_compact_cfw_finish_masking, verify_selected_compact_cfw_round_masking,
@@ -70,19 +70,20 @@ use crate::bgv::proof_suite::{
         CompactProofWireGeometry, CompactPublicInputBindings, DecodedCompactPublicInput,
     },
     compact_response_generation::{
-        CompactOwnedResponseLeaf, CompactResponseGenerationError, CompactResponseGenerationPoll,
-        CompactResponseGenerationPollError, CompactResponseGenerationState,
-        CompactVerifierMessageAuthority,
+        CompactOwnedResponseLeaf, CompactResponseGenerationError, CompactResponseGenerationOutput,
+        CompactResponseGenerationPoll, CompactResponseGenerationPollError,
+        CompactResponseGenerationState, CompactVerifierMessageAuthority,
     },
     compact_response_merkle::{
         CompactResponseComponentGeometry, CompactResponseLeafValueKind,
         CompactResponseMerkleGeometry, CompactResponseQuerySelection,
     },
     compact_whir::{
-        CompactWhirBaseCaseState, CompactWhirBaseMaskInput, CompactWhirCodeSwitchPreparationPoll,
-        CompactWhirCodeSwitchRelationPreparation, CompactWhirCodeSwitchRelationPreparationPoll,
-        CompactWhirCodeSwitchState, CompactWhirEncodedInitialOracle, CompactWhirEncodedMaskGroup,
-        CompactWhirError, CompactWhirInitialSumcheckPoll, CompactWhirInitialSumcheckState,
+        CompactWhirBaseCaseState, CompactWhirBaseMaskInput, CompactWhirBaseRelation,
+        CompactWhirCodeSwitchPreparationPoll, CompactWhirCodeSwitchRelationPreparation,
+        CompactWhirCodeSwitchRelationPreparationPoll, CompactWhirCodeSwitchState,
+        CompactWhirEncodedInitialOracle, CompactWhirEncodedMaskGroup, CompactWhirError,
+        CompactWhirInitialSumcheckPoll, CompactWhirInitialSumcheckState,
         CompactWhirMainRelationPreparation, CompactWhirMainRelationPreparationError,
         CompactWhirMainRelationPreparationPoll, CompactWhirPreChallengeRelationPreparation,
         CompactWhirPreChallengeRelationPreparationPoll,
@@ -286,6 +287,7 @@ pub(crate) enum CompactPublicKeyMainEpochPreparationError {
     Randomness(CompactGenerationRandomnessError),
     Whir(CompactWhirError),
     Prover(CommonProofProverError),
+    ResponseGeneration(CompactResponseGenerationError),
 }
 
 impl From<CompactPublicKeyFamilyMaterializationError>
@@ -353,6 +355,12 @@ impl From<CompactWhirError> for CompactPublicKeyMainEpochPreparationError {
 impl From<CommonProofProverError> for CompactPublicKeyMainEpochPreparationError {
     fn from(error: CommonProofProverError) -> Self {
         Self::Prover(error)
+    }
+}
+
+impl From<CompactResponseGenerationError> for CompactPublicKeyMainEpochPreparationError {
+    fn from(error: CompactResponseGenerationError) -> Self {
+        Self::ResponseGeneration(error)
     }
 }
 
@@ -1162,7 +1170,7 @@ impl CompactPublicKeyRetainedSourceQueries {
     }
 
     fn next_position(&self) -> Result<Option<u64>, CompactPublicKeyMainEpochPreparationError> {
-        if self.outputs.len() % self.width != 0 {
+        if !self.outputs.len().is_multiple_of(self.width) {
             return Err(CompactPublicKeyMainEpochPreparationError::InvalidGeometry);
         }
         Ok(self.positions.get(self.outputs.len() / self.width).copied())
@@ -3555,8 +3563,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                 )?,
                 response_generation_state.verifier_messages(),
                 None,
-                pre_challenge_epoch.epoch,
-                0,
+                CompactWhirSumcheckBatchCoordinate::new(pre_challenge_epoch.epoch, 0),
                 initial_sumcheck.auxiliary_target(),
             )
             .map_err(|error| {
@@ -4265,8 +4272,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                         .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
                     response_generation_state.verifier_messages(),
                     material.verified_base_masking_prefix(epoch_owner)?,
-                    epoch.epoch,
-                    next_batch_ordinal,
+                    CompactWhirSumcheckBatchCoordinate::new(epoch.epoch, next_batch_ordinal),
                     sumcheck.auxiliary_target(),
                 )
                 .map_err(CompactPublicKeyMainEpochPreparationError::WhirSumcheckAuxiliaryMasking)?;
@@ -4460,10 +4466,8 @@ impl PreparedCompactPublicKeyMainEpoch {
             final_batch_ordinal,
         )?;
         let state = CompactWhirBaseCaseState::new(
-            source_message,
+            CompactWhirBaseRelation::new(source_message, source_covector, target),
             &final_source_randomness,
-            source_covector,
-            target,
             final_fold_contract,
             &final_folding_challenges,
             mask_inputs,
@@ -4625,7 +4629,6 @@ impl PreparedCompactPublicKeyMainEpoch {
                     )
                     .map_err(CompactPublicKeyMainEpochPreparationError::WhirBaseFreshMasking)
                     .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    drop(public_covector_authority);
                     Self::finish_whir_base_case_preparation(
                         family_material,
                         response_generation_state,
@@ -5283,8 +5286,7 @@ impl PreparedCompactPublicKeyMainEpoch {
                     .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?,
                 response_generation_state.verifier_messages(),
                 Some(verified_base_prefix),
-                main_epoch.epoch,
-                0,
+                CompactWhirSumcheckBatchCoordinate::new(main_epoch.epoch, 0),
                 initial_sumcheck.auxiliary_target(),
             )
             .map_err(CompactPublicKeyMainEpochPreparationError::WhirSumcheckAuxiliaryMasking)?;
@@ -5378,11 +5380,20 @@ impl PreparedCompactPublicKeyMainEpoch {
         self.response_generation_state.checkpoint_boundary()
     }
 
-    pub(crate) fn cancel_response_custody<Storage: ProofExternalMemory>(
-        &mut self,
-        storage: &mut Storage,
-    ) -> Result<(), CompactResponseGenerationPollError<Storage::Error>> {
-        self.response_generation_state.cancel(storage)
+    pub(crate) fn finish(
+        self,
+    ) -> Result<CompactResponseGenerationOutput, CompactPublicKeyMainEpochPreparationError> {
+        let Self {
+            family_material: _,
+            response_generation_state,
+            post_lookup_material,
+        } = self;
+        post_lookup_material
+            .as_ref()
+            .and_then(|material| material.main_whir_base_case.as_ref())
+            .and_then(|base_case| base_case.verified_final_query_masking.as_ref())
+            .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
+        Ok(response_generation_state.finish()?)
     }
 }
 
@@ -5417,7 +5428,7 @@ fn poll_compact_public_key_whir_sumcheck<Storage: ProofExternalMemory>(
             .map_err(CompactPublicKeyMainEpochPreparationError::from)
             .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
         return match sumcheck_poll {
-            CompactWhirInitialSumcheckPoll::BoundRoundStepCompleted {
+            CompactWhirInitialSumcheckPoll::BoundRound {
                 round_ordinal,
                 round_complete,
                 ..
@@ -5440,7 +5451,7 @@ fn poll_compact_public_key_whir_sumcheck<Storage: ProofExternalMemory>(
                     round_complete,
                 ))
             }
-            CompactWhirInitialSumcheckPoll::WeightScalingStepCompleted {
+            CompactWhirInitialSumcheckPoll::WeightScaling {
                 scaling_complete, ..
             } => {
                 if scaling_complete {
@@ -5470,7 +5481,7 @@ fn poll_compact_public_key_whir_sumcheck<Storage: ProofExternalMemory>(
                     Ok(epoch_owner.weight_scaling_poll(active_batch_ordinal, scaling_complete))
                 }
             }
-            CompactWhirInitialSumcheckPoll::RoundPolynomialStepCompleted { .. } => {
+            CompactWhirInitialSumcheckPoll::RoundPolynomial { .. } => {
                 Err(CompactPublicKeyMainEpochPollError::Preparation(
                     CompactPublicKeyMainEpochPreparationError::WrongPhase,
                 ))
@@ -5504,7 +5515,7 @@ fn poll_compact_public_key_whir_sumcheck<Storage: ProofExternalMemory>(
             .map_err(CompactPublicKeyMainEpochPreparationError::from)
             .map_err(CompactPublicKeyMainEpochPollError::Preparation)?
         {
-            CompactWhirInitialSumcheckPoll::RoundPolynomialStepCompleted {
+            CompactWhirInitialSumcheckPoll::RoundPolynomial {
                 round_ordinal,
                 polynomial_ready,
                 ..
@@ -9168,7 +9179,7 @@ mod tests {
         ]);
 
         let query_leaf = compact_masking_query_leaf(
-            &inputs.response_merkle_geometries,
+            inputs.response_merkle_geometries,
             current_move_ordinal,
             response_ordinal,
             leaf_ordinal,
@@ -9191,7 +9202,7 @@ mod tests {
         ));
         assert!(matches!(
             compact_masking_query_leaf(
-                &inputs.response_merkle_geometries,
+                inputs.response_merkle_geometries,
                 current_move_ordinal,
                 response_ordinal,
                 leaf_ordinal,
@@ -9204,7 +9215,7 @@ mod tests {
         ));
         assert!(matches!(
             compact_masking_query_leaf(
-                &inputs.response_merkle_geometries,
+                inputs.response_merkle_geometries,
                 current_move_ordinal,
                 response_ordinal,
                 leaf_ordinal,
@@ -9214,7 +9225,7 @@ mod tests {
         ));
         assert!(matches!(
             compact_masking_query_leaf(
-                &inputs.response_merkle_geometries,
+                inputs.response_merkle_geometries,
                 u32::MAX,
                 response_ordinal,
                 leaf_ordinal,
@@ -9344,7 +9355,7 @@ mod tests {
 
         assert!(matches!(
             compact_masking_query_leaf(
-                &inputs.response_merkle_geometries,
+                inputs.response_merkle_geometries,
                 final_query_move_ordinal,
                 response_geometry.response_ordinal(),
                 leaf_ordinal,
@@ -9354,7 +9365,7 @@ mod tests {
         ));
         assert!(matches!(
             compact_masking_query_leaf(
-                &inputs.response_merkle_geometries,
+                inputs.response_merkle_geometries,
                 historical_move_ordinal,
                 response_geometry.response_ordinal(),
                 leaf_ordinal,

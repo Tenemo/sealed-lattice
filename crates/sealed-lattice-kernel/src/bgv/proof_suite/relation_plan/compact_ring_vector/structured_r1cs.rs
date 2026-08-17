@@ -3187,6 +3187,7 @@ mod tests {
             proof_suite::{
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
+                compact_public_key_verifier::validate_selected_compact_public_key_transport,
                 compact_response_merkle::CompactResponseLeafValueKind,
                 compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement,
@@ -4057,8 +4058,7 @@ mod tests {
         epoch: &CompactWhirEpochContract,
         epoch_owner: SelectedWhirEpochOwner,
         round_ordinal: u8,
-        expected_response_ordinal: u32,
-        preceding_safe_boundary_ordinal: u32,
+        preceding_phase: CompletedSelectedWhirPhase,
     ) -> CompletedSelectedWhirPhase {
         let response_ordinal = contract
             .verifier_inputs()
@@ -4076,7 +4076,7 @@ mod tests {
             })
             .and_then(|response_index| u32::try_from(response_index).ok())
             .expect("the selected code-switch response exists");
-        assert_eq!(response_ordinal, expected_response_ordinal);
+        assert_eq!(response_ordinal, preceding_phase.next_response_ordinal);
         let response_geometry = &contract.verifier_inputs().response_merkle_geometries
             [usize::try_from(response_ordinal).unwrap()];
         let due_response_ordinals = contract
@@ -4255,7 +4255,7 @@ mod tests {
             .expect("the selected code switch retains its checkpoint");
         assert_eq!(
             checkpoint.safe_boundary_ordinal(),
-            preceding_safe_boundary_ordinal + 1
+            preceding_phase.safe_boundary_ordinal + 1
         );
         assert_eq!(
             u32::from_le_bytes(checkpoint.position()[8..12].try_into().unwrap()),
@@ -4393,8 +4393,7 @@ mod tests {
         epoch: &CompactWhirEpochContract,
         epoch_owner: SelectedWhirEpochOwner,
         batch_ordinal: u8,
-        expected_initial_response_ordinal: u32,
-        preceding_safe_boundary_ordinal: u32,
+        preceding_phase: CompletedSelectedWhirPhase,
     ) -> CompletedSelectedWhirPhase {
         let round_count = usize::try_from(epoch.folding_schedule[usize::from(batch_ordinal)])
             .expect("the selected folding factor fits usize");
@@ -4434,7 +4433,10 @@ mod tests {
             })
             .and_then(|response_index| u32::try_from(response_index).ok())
             .expect("the selected WHIR batch has one mask response");
-        assert_eq!(initial_response_ordinal, expected_initial_response_ordinal);
+        assert_eq!(
+            initial_response_ordinal,
+            preceding_phase.next_response_ordinal
+        );
         let response_count = round_count + 1;
         let first_round_response_index = usize::try_from(initial_response_ordinal + 1).unwrap();
         let round_response_geometries = &contract.verifier_inputs().response_merkle_geometries
@@ -4665,7 +4667,7 @@ mod tests {
             .expect("the selected WHIR batch retains its final checkpoint");
         assert_eq!(
             checkpoint.safe_boundary_ordinal(),
-            preceding_safe_boundary_ordinal + u32::try_from(response_count).unwrap()
+            preceding_phase.safe_boundary_ordinal + u32::try_from(response_count).unwrap()
         );
         println!(
             "compact public-key focused owner phase complete: WHIR sumcheck epoch={} batch_ordinal={} round_count={} residual_length={} round_polynomial_poll_count={} bound_round_poll_count={} weight_scaling_poll_count={} response_leaf_count={} opened_leaf_count={}",
@@ -6932,8 +6934,7 @@ mod tests {
                 pre_challenge_whir_epoch,
                 SelectedWhirEpochOwner::PreChallenge,
                 round_ordinal,
-                completed_phase.next_response_ordinal,
-                completed_phase.safe_boundary_ordinal,
+                completed_phase,
             );
             println!(
                 "compact public-key focused owner phase elapsed_milliseconds={} round_ordinal={round_ordinal}",
@@ -6954,8 +6955,7 @@ mod tests {
                 pre_challenge_whir_epoch,
                 SelectedWhirEpochOwner::PreChallenge,
                 round_ordinal + 1,
-                completed_phase.next_response_ordinal,
-                completed_phase.safe_boundary_ordinal,
+                completed_phase,
             );
         }
         assert_eq!(
@@ -7283,8 +7283,7 @@ mod tests {
             main_whir_epoch,
             SelectedWhirEpochOwner::Main,
             0,
-            completed_main_whir_phase.next_response_ordinal,
-            completed_main_whir_phase.safe_boundary_ordinal,
+            completed_main_whir_phase,
         );
         let expected_main_source_query_count = selected_compact_contract
             .verifier_inputs()
@@ -7320,8 +7319,7 @@ mod tests {
             main_whir_epoch,
             SelectedWhirEpochOwner::Main,
             1,
-            completed_main_whir_phase.next_response_ordinal,
-            completed_main_whir_phase.safe_boundary_ordinal,
+            completed_main_whir_phase,
         );
         println!(
             "compact public-key focused owner phase complete: second main WHIR sumcheck elapsed_milliseconds={} next_response_ordinal={} safe_boundary_ordinal={}",
@@ -7341,8 +7339,7 @@ mod tests {
                 main_whir_epoch,
                 SelectedWhirEpochOwner::Main,
                 round_ordinal,
-                completed_main_whir_phase.next_response_ordinal,
-                completed_main_whir_phase.safe_boundary_ordinal,
+                completed_main_whir_phase,
             );
             println!(
                 "compact public-key focused owner phase elapsed_milliseconds={} round_ordinal={round_ordinal}",
@@ -7363,8 +7360,7 @@ mod tests {
                 main_whir_epoch,
                 SelectedWhirEpochOwner::Main,
                 round_ordinal + 1,
-                completed_main_whir_phase.next_response_ordinal,
-                completed_main_whir_phase.safe_boundary_ordinal,
+                completed_main_whir_phase,
             );
         }
         assert_eq!(prepared_main_epoch.main_whir_residual_length(3), Some(8));
@@ -7384,12 +7380,38 @@ mod tests {
             completed_main_whir_phase.next_response_ordinal,
             completed_main_whir_phase.safe_boundary_ordinal,
         );
-        prepared_main_epoch
-            .cancel_response_custody(&mut response_storage)
-            .expect("the completed main-WHIR base releases retained response custody");
+        let public_input_bindings = prepared_main_epoch
+            .family_material()
+            .public_input_bindings();
+        let canonical_public_input_bytes = prepared_main_epoch
+            .family_material()
+            .canonical_public_input_bytes()
+            .to_vec();
+        let response_generation_output = prepared_main_epoch
+            .finish()
+            .expect("the terminal main-WHIR base emits one complete canonical proof");
+        validate_selected_compact_public_key_transport(
+            public_input_bindings,
+            response_generation_output.canonical_proof_bytes(),
+            &canonical_public_input_bytes,
+        )
+        .expect("the independent transport verifier accepts the emitted proof bytes");
         println!(
-            "compact public-key focused owner complete elapsed_milliseconds={}",
-            execution_started_at.elapsed().as_millis()
+            "compact public-key focused owner complete elapsed_milliseconds={} canonical_proof_byte_length={} response_storage_transaction_count={} response_storage_written_bytes={} response_storage_read_bytes={} response_storage_peak_bytes={}",
+            execution_started_at.elapsed().as_millis(),
+            response_generation_output.canonical_proof_bytes().len(),
+            response_generation_output
+                .external_memory_usage()
+                .transaction_count(),
+            response_generation_output
+                .external_memory_usage()
+                .total_written_byte_length(),
+            response_generation_output
+                .external_memory_usage()
+                .total_read_byte_length(),
+            response_generation_output
+                .external_memory_usage()
+                .peak_stored_byte_length(),
         );
     }
 

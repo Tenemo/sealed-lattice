@@ -68,194 +68,40 @@ and target release remain incomplete or internal.
 - The rejected row-code/WHIR proof body remains only as a fail-closed
   implementation and comparison oracle until its replacement accepts the same
   transported production relations and hostile corpus.
-- The compact successor has a default-compiled typed contract plus a release
-  transport boundary that strictly decodes proof and public-input bytes,
-  derives the verifier transcript and response-query schedule, and validates
-  every salted Merkle opening. It returns typed refusals and cannot mint a
-  proof or workflow capability because CFW and WHIR equations are not yet
-  connected to that boundary. The scalar CFW prover/verifier algebra and its
-  bounded external-memory transaction driver now compile into the release
-  kernel. The authenticated compact assignment loader, bounded lookup-inverse
-  materializer, owned structured-row preparation, and structured transpose also
-  compile into the scalar release kernel without borrowed worker-lifetime
-  state. The incremental proof assembler, prover transcript cursor, bounded
-  response-tree writer and scanner, retained-tree coordinator, and authenticated
-  response-checkpoint boundary are also release code and own the geometry and
-  canonical public-input bytes they retain. A release-owned compact response
-  state now drives those components with verifier-selected leaf replay, exact
-  transaction yielding, cancellation, authenticated cursor restoration, and
-  byte-identical genesis replay. A release-owned public-key family adapter now
-  joins the frozen factor-one contract to the retained setup authority, polls
-  the exact 202 authenticated source columns, and derives canonical
-  public-input bytes from verifier-minted suite, application-statement,
-  manifest, and relation bindings before independently decoding them. A
-  release-owned public-key generation state now owns that family
-  materialization, the complete CFW, and both WHIR response sequences through
-  their base responses and final-query masking gates. It accepts the
-  lookup challenge only through a borrowed first-message authority minted by
-  its retained compact response state for the same proof geometry and
-  canonical public input, then owns bounded lookup inversion and structured-row
-  preparation. Its guarded selected-size owner derives the first WHIR epoch's
-  exact 2,097,152-element source from authenticated quotient-and-multiplicity
-  values plus canonical zero padding, draws independent WHIR and response-salt
-  seeds from action-private coins, retains WHIR's exact 131,072-row by
-  64-element encoding, and streams those values into the contract-derived
-  salted response tree. The same release state then samples the production CFW
-  masks and the inner, outer, and shared cross-epoch WHIR mask encodings. It
-  derives the main epoch's exact logical 131,072-row by 128-element extension
-  encoding directly from the production structured-row source. That logical
-  matrix is 671,088,640 bytes and is never retained whole: generation
-  recomputes eight canonical 16,384-row stripes of 83,886,080 bytes each while
-  retaining one 5,242,880-byte encoded column. It streams the complete
-  262,144-leaf second response into external storage, derives the second
-  verifier message and its 21-coordinate cross-epoch point, and publishes the
-  next authenticated response checkpoint. It then commits the four-leaf
-  cross-epoch response and executes all 23 rounds of the production
-  external-memory CFW prover. Before any round response begins, generation
-  checks the real polynomial against the compiler-derived rank-seven
-  conditional image; each transcript challenge is bound once before the next
-  fold. The final atomic response checks the translated full-rank terminal
-  values first, then checks the outer evaluations against the independently
-  recomputed verifier hyperplane, while retaining the canonical outer-first
-  wire order. Authenticated response checkpoints cover the cross-epoch
-  response, every completed CFW round, and the final CFW response. The strict
-  version-two 56-byte attempt-and-WHIR-position cursor remains bound into the
-  response checkpoints; superseded version-one cursors refuse.
-  After the final CFW checkpoint, the same state takes custody of the retained
-  first-epoch source, expands the verifier-derived equality covector in bounded
-  polls, and positively checks the source claim and masked cross-epoch
-  equalities. It samples the selected initial WHIR sumcheck masks from the live
-  KMAC stream, commits the canonical mask-oracle, auxiliary, and padding
-  response, binds the exact transcript challenge, and emits all six round
-  responses. The auxiliary and every round disclosure pass their independently
-  compiled conditional-image gates before response construction, and every
-  response publishes an authenticated checkpoint before the next fold. The
-  guarded selected-size owner completes this batch with 4,108 response leaves,
-  12 verifier-selected openings, and a 32,768-element residual source and
-  covector. It then folds the original source's 25,344 base-field encoding-
-  randomness coordinates at those six challenges into 396 extension-field
-  coordinates. The first code switch samples contract-sized next-source and
-  switch-mask randomness from the live KMAC stream, streams the exact 8,192-row
-  by 16-element source and 4,096-row by one-element mask into a 16,384-leaf
-  response, and consumes the verifier's one extension challenge, one base-field
-  challenge, and 396 distinct source queries. Before releasing any opening,
-  generation routes all 25,344 query-major source coordinates through the
-  independently compiled full-rank conditional-image gate. It then supplies
-  the 396 original-source leaves, binds the query set and combination challenge
-  once, and publishes the authenticated response checkpoint. The owner then
-  constructs the exact code-switch output relation in bounded polls from the
-  retained next-source values, residual covector and claims, switch-mask
-  message, 396 verifier-selected positions, and folded source openings. It
-  requires the accumulated source and preceding-mask claims to equal the
-  accumulated opening target before starting the next batch. The role-nine
-  verifier move is consumed through its exact mixed-output shape: one extension
-  challenge, one base-field challenge, and one distinct-query group. The second
-  masked sumcheck binds that extension challenge, enforces the independently
-  compiled conditional-image gate for its auxiliary and all four round wires,
-  publishes an authenticated checkpoint for every response, and finishes with
-  4,104 response leaves, eight compiler-required round-wire openings, and a
-  2,048-element residual source and covector. The next two code switches derive
-  their 432- and 400-position source-query schedules at the exact verifier-
-  message boundaries. Each makes one column-major encoding pass over the prior
-  source, retains only the selected row cells, checks that query image against
-  the independently compiled masking map, folds those values into the next
-  relation, and releases the full prior source. Their padded commitments
-  contain 8,192 leaves each and correctly emit no openings at these moves
-  because no response reaches last use there.
-  The following four-round masked-sumcheck batches each commit 4,104 leaves and
-  supply eight required round-wire openings; their residual source lengths are
-  128 and 8. The same release state then folds the final eight-element source
-  and every retained mask-randomness source to the base case, independently
-  derives the role-18 carried covector from the canonical public input and
-  authenticated transcript prefix, and checks the resulting fresh claim. It
-  commits the 32,768-leaf fresh response, consumes the transcript-derived
-  combination challenge only after the role-10 blinded reveal passes its
-  production conditional-image gate, and commits the 16,384-leaf blinded
-  response. At the first-epoch final-query move, response-tree custody supplies
-  19,133 authenticated openings. The masking owner attributes only the 6,681
-  leaves selected by that move, excludes 830 historical source-query leaves
-  already checked at their owning move, and evaluates 399 committed leaves of
-  the epoch-neutral shared cross-epoch root without opening that root before
-  its second-epoch last use. Its final gate therefore checks exactly 7,080
-  compiler-derived query leaves before releasing the final secret state and
-  publishing the authenticated response checkpoint. Guarded selected-size
-  native execution completes this pre-challenge response path; it is not a
-  complete emitted proof or browser evidence.
-  The final masking gate mints only an opaque in-memory continuation bound to
-  the proof attempt, first-epoch claim coefficients, and exact authenticated
-  verifier-message prefix. It is not serialized or caller supplied. The same
-  generation state uses that continuation to replay the masking chronology at
-  the initial main-epoch boundary, independently derives the complete public
-  source covector from the verifier-bound CFW point and matrix-role weights,
-  and streams all 4,194,304 authenticated witness elements into the matching
-  main relation. It positively checks the resulting relation target, samples
-  the initial main masked-sumcheck state from the live KMAC stream, and gates
-  its auxiliary target against the independently compiled conditional image.
-  The shared epoch state machine then commits the initial mask-oracle,
-  auxiliary, and padding response plus all seven round-wire responses. Each
-  wire passes its live conditional-image gate before commitment, every response
-  publishes an authenticated checkpoint, and response custody supplies the 14
-  compiler-required round-wire openings. Guarded selected-size native execution
-  reconciles 4,110 committed leaves and finishes with a 32,768-element residual
-  source and covector. The first main-epoch code switch then commits its
-  16,384-leaf next-source and switch-mask response, derives 396 source positions
-  from the authenticated verifier message, and reconstructs the 131,072-row by
-  128-lane main source in one column-major pass. It retains exactly those 396
-  rows, verifies all 50,688 query-major values against the independently
-  compiled masking image and verified first-epoch prefix, binds the folded
-  openings into the next relation, and releases the full source encoding
-  randomness. The response reaches no last use at that move and emits no
-  opening. Its exact 13,132,944-work-unit output relation feeds the next
-  four-round masked sumcheck, which commits 4,104 leaves, supplies eight round-
-  wire openings, and finishes with a 2,048-element residual source and
-  covector. The next two main code switches derive 432- and 400-position query
-  schedules from their authenticated verifier messages, retain their selected
-  rows in one column-major pass over each preceding source, and verify the
-  complete query images under the same first-epoch masking prefix. Their
-  8,192-leaf responses emit no premature openings. The exact 1,071,360- and
-  211,200-work-unit output relations feed two more four-round batches; each
-  commits 4,104 leaves and supplies eight round-wire openings, reducing the
-  residual source and covector to 128 and then eight elements. The state then
-  incrementally derives the main base public covectors from the canonical public
-  input, verifier-bound CFW challenges, exact relation compiler, and verified
-  first-epoch prefix. It folds the final source and retained mask material,
-  gates the role-18 fresh claim, commits the 32,768-leaf fresh response, gates
-  the role-10 blinded reveal, and commits the 65,536-leaf blinded response. The
-  role-11 final-query gate consumes each physical shared-root leaf once and
-  conditions its second logical arm on the verified first-epoch base output.
-  Response custody supplies only the transcript-selected openings, and the
-  state publishes the final authenticated response checkpoint after all 82
-  responses.
-  Focused coverage matches nonconsecutive replayed rows to the eager canonical
-  WHIR encoder, proves that delayed replay reads each source element once
-  regardless of query dispersion, and refuses duplicate, reordered, out-of-
-  range, premature, and repeated replay requests. Guarded native development
-  coverage executes the complete selected-size response sequence under the
-  repository memory ceiling. Its CFW phase reconciles 4,926 external-storage
-  transactions, 1,006,632,840 bytes written, 2,013,265,440 bytes read, and
-  587,202,560 peak CFW storage bytes. Timings and process-memory samples remain
-  in the owning run diagnostics; this run is not scalar-WebAssembly, browser,
-  or phone evidence. Authenticated interruption during source replay or base-
-  covector derivation, cold restoration through the common worker, JavaScript
-  and browser-process overlap, complete proof finalization, and algebraic
-  verification remain absent.
-  Before masking material is drawn, release generation independently redecodes
-  the canonical public input, derives every coefficient-to-view map, and checks
-  the single-proof KMAC call census. Coordinate-separated KMAC256 streams supply
-  bounded Goldilocks samples, private leaf salts, and round salts. Generation
-  binds every live CFW and WHIR disclosure, including both base cases, to the
-  canonical proof prefix and authenticated verifier chronology before releasing
-  it. The fixed KMAC256/SHAKE256 joint assumption and the terminal whole-
-  construction simulator remain external or incomplete.
+- The compact successor's release transport boundary strictly decodes proof and
+  public-input bytes, derives the verifier transcript and response-query
+  schedule, validates every salted Merkle opening, and returns typed refusals.
+  It does not verify the CFW or WHIR equations and cannot mint a proof or
+  workflow capability.
+- Release code also owns the scalar CFW mechanics, bounded external storage,
+  assignment and structured-row preparation, transcript and proof assembly,
+  response-tree custody, and authenticated response checkpoints. For the
+  public-key-share family, guarded selected-size native execution now reaches
+  the final checkpoint after all 82 responses, including both WHIR epochs and
+  every live conditional-image gate. The release-state finisher emits one
+  23,815,474-byte canonical compact-proof candidate, and the independent
+  transport check accepts its canonical structure, transcript chronology,
+  verifier queries, and salted Merkle openings. This is transport acceptance
+  only: no CFW or WHIR equation is algebraically verified, so the candidate is
+  not an accepted proof and mints no capability.
+- That guarded native run reconciles 4,926 CFW storage transactions,
+  1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
+  stored bytes. The peak is 2.1875 times the 268,435,456-byte scratch planning
+  target and above its 50% automatic-variance band, so it still requires an
+  explicit engineering disposition. It remains below the 1,073,741,824-byte
+  absolute scratch bound. None of these numbers is release-WebAssembly,
+  IndexedDB, browser-process, or phone evidence.
+- Release generation redecodes its canonical public input, derives the
+  coefficient-to-view maps, enforces the single-proof KMAC call census, and uses
+  coordinate-separated KMAC256 streams for field samples, private leaf salts,
+  and Fiat-Shamir salts. The terminal whole-construction simulator, the joint
+  fixed-KMAC256/fixed-SHAKE256 assumption, and the fixed-tape shared-QRO premise
+  remain incomplete or external assumptions.
 - The test-only semantic workbench covers the checked 82-move factor-one
-  schedule. Its one-shot carried-covector lifecycle is bound to verified public
-  input and the exact transcript prefix, and guarded coverage reaches the
-  terminal ideal simulator lifecycle.
+  schedule and terminal simulator lifecycle. It is source-level regression
+  evidence, not a production proof, emitted-byte argument, or runtime result.
 - The WebAssembly producer and SDK copy have a byte-for-byte reproducibility
-  gate. The release path contains the compact transport validator and the owned
-  scalar generation state through the final response schedule, but it does not
-  yet finalize a complete compact proof or perform complete algebraic proof
-  verification.
+  gate. Reproducibility establishes build identity only.
 
 These items are development evidence only. Test-only, fixture-backed, native,
 Node.js, desktop-browser, and emulated results do not establish an accepted
@@ -264,10 +110,10 @@ ceremony or supported-phone qualification.
 ### Remaining completion boundary
 
 - No exact suite is frozen or selectable.
-- No complete production compact prover, complete emitted compact proof, final
-  proof `VerificationResult`, or complete compact generation and verification
-  ABI exists. The release transport ABI checks canonical structure, transcript
-  chronology, query derivation, and Merkle openings only.
+- No production compact generation API, algebraically verified emitted compact
+  proof, final proof `VerificationResult`, or complete compact generation and
+  verification ABI exists. The release transport ABI checks canonical
+  structure, transcript chronology, query derivation, and Merkle openings only.
 - The compact successor still requires a construction-level statistical-HVZK
   argument bound to the complete emitted proof, composition of the live KMAC
   bridge with its explicit quantum-PRF and joint fixed-Keccak assumptions, and
@@ -277,8 +123,9 @@ ceremony or supported-phone qualification.
 - Browser custody does not yet provide complete proactive authenticated
   checkpointing and exact resume for every dominant compact-proof boundary.
 - The accepted setup-to-release capability flow is not connected end to end.
-- No production compact proof has completed the guarded native and scalar
-  release-WebAssembly desktop-browser evidence path.
+- No compact proof has completed the scalar release-WebAssembly desktop-browser
+  evidence path after guarded native generation and independent transport
+  acceptance.
 - No physical-phone profile is qualified. Supported-phone evidence must use the
   same frozen bytes and remains independent from cryptographic completion.
 - No connected ten-participant mobile rehearsal exists.

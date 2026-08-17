@@ -52,13 +52,6 @@ mod compact_masking_coefficient_maps;
 mod compact_masking_entropy;
 mod compact_masking_kmac;
 mod compact_masking_prefix;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "release generation constructs this authority before masking; live role-18 derivation remains incomplete"
-    )
-)]
 mod compact_masking_public_covector;
 #[cfg(test)]
 mod compact_masking_simulator;

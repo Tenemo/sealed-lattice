@@ -1230,16 +1230,34 @@ pub(crate) fn verify_selected_compact_cfw_finish_masking(
 /// Verifies the live auxiliary target of one compact WHIR masked-sumcheck
 /// batch against the independently compiled coefficient image at the exact
 /// authenticated transcript prefix that precedes the response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CompactWhirSumcheckBatchCoordinate {
+    epoch: u8,
+    batch_ordinal: u8,
+}
+
+impl CompactWhirSumcheckBatchCoordinate {
+    pub(crate) const fn new(epoch: u8, batch_ordinal: u8) -> Self {
+        Self {
+            epoch,
+            batch_ordinal,
+        }
+    }
+}
+
 pub(crate) fn verify_selected_compact_whir_sumcheck_auxiliary_masking(
     inputs: CompactPublicKeyVerifierInputs<'_>,
     coefficient_maps: &CompactMaskingCoefficientMapCertificate,
     identity: CompactMaskingAttemptIdentity,
     completed_messages: &[DecodedFixedUniformVerifierMessage],
     verified_base_prefix: Option<&CompactVerifiedBaseMaskingPrefix>,
-    epoch: u8,
-    batch_ordinal: u8,
+    coordinate: CompactWhirSumcheckBatchCoordinate,
     auxiliary_target: CompactChallengeField,
 ) -> Result<(), CompactMaskingEntropyError> {
+    let CompactWhirSumcheckBatchCoordinate {
+        epoch,
+        batch_ordinal,
+    } = coordinate;
     let mut authority = replay_selected_compact_masking_prefix(
         inputs,
         coefficient_maps,
@@ -5524,7 +5542,7 @@ mod tests {
         let mut claim_coefficients = vec![
             CompactChallengeField::ZERO;
             usize::try_from(
-                base_fresh_message_dimension(&pre_challenge_epoch).expect("base message dimension"),
+                base_fresh_message_dimension(pre_challenge_epoch).expect("base message dimension"),
             )
             .unwrap()
         ];
@@ -5710,8 +5728,7 @@ mod tests {
             identity,
             &main_completed_messages,
             Some(&verified_base_prefix),
-            main_epoch.epoch,
-            0,
+            CompactWhirSumcheckBatchCoordinate::new(main_epoch.epoch, 0),
             main_auxiliary_target,
         )
         .expect("the production gate accepts main WHIR only after the verified base prefix");
@@ -5733,7 +5750,7 @@ mod tests {
         let mut main_claim_coefficients = vec![
             CompactChallengeField::ZERO;
             usize::try_from(
-                base_fresh_message_dimension(&main_epoch).expect("main base message dimension"),
+                base_fresh_message_dimension(main_epoch).expect("main base message dimension"),
             )
             .unwrap()
         ];
@@ -6257,8 +6274,7 @@ mod tests {
             identity,
             &messages,
             None,
-            pre_challenge_epoch.epoch,
-            0,
+            CompactWhirSumcheckBatchCoordinate::new(pre_challenge_epoch.epoch, 0),
             whir_auxiliary_target,
         )
         .expect("the production gate accepts the compiler-derived WHIR auxiliary image");
@@ -6269,8 +6285,7 @@ mod tests {
                 identity,
                 &messages,
                 None,
-                pre_challenge_epoch.epoch + 1,
-                0,
+                CompactWhirSumcheckBatchCoordinate::new(pre_challenge_epoch.epoch + 1, 0),
                 whir_auxiliary_target,
             ),
             Err(CompactMaskingEntropyError::DisclosureOutOfOrder),
@@ -6511,8 +6526,7 @@ mod tests {
             identity,
             &messages,
             None,
-            pre_challenge_epoch.epoch,
-            1,
+            CompactWhirSumcheckBatchCoordinate::new(pre_challenge_epoch.epoch, 1),
             second_whir_auxiliary_target,
         )
         .expect("the second auxiliary gate replays the full-rank source-query disclosure");

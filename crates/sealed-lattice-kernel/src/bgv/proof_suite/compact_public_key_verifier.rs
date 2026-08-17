@@ -8,6 +8,9 @@
 
 use std::mem::size_of;
 
+use super::compact_generation_checkpoint::{
+    CompactGenerationCheckpointError, CompactResponseCheckpointSchedule,
+};
 use super::compact_merkle_privacy::{
     CompactMerklePrivacyCertificate, CompactMerklePrivacyError,
     derive_and_validate_compact_response_query_schedule,
@@ -466,6 +469,21 @@ fn begin_compact_public_key_transport_bytes(
     {
         return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
     }
+    let derived_checkpoint_schedule = CompactResponseCheckpointSchedule::derive(
+        geometry.proof_wire_geometry,
+        geometry.response_merkle_geometries,
+    )
+    .map_err(|error| match error {
+        CompactGenerationCheckpointError::ResponseMerkle(error) => {
+            CompactPublicKeyTransportError::Merkle(error)
+        }
+        _ => CompactPublicKeyTransportError::InvalidResponseRegistry,
+    })?;
+    if derived_checkpoint_schedule.completed_proof_response_counts()
+        != geometry.completed_response_counts
+    {
+        return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+    }
     CompactResponseQuerySchedule::validate_registry(
         geometry.response_merkle_geometries,
         geometry.proof_wire_geometry.responses(),
@@ -603,23 +621,33 @@ fn verify_compact_openings_through_boundary(
         if usize::try_from(decoded_response.ordinal()).ok() != Some(response_index)
             || decoded_response.ordinal() != wire_geometry.ordinal()
             || decoded_response.ordinal() != merkle_geometry.response_ordinal()
-            || merkle_geometry.last_query_verifier_move_ordinal() != move_ordinal
+            || merkle_geometry.last_query_verifier_move_ordinal() > move_ordinal
         {
             return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
         }
+        let response_verifier_message_count = usize::try_from(
+            merkle_geometry
+                .last_query_verifier_move_ordinal()
+                .checked_add(1)
+                .ok_or(CompactPublicKeyTransportError::ArithmeticOverflow)?,
+        )
+        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let response_verifier_message_prefix = verifier_message_prefix
+            .get(..response_verifier_message_count)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
         let query_schedule = match merkle_privacy_certificate {
             Some(certificate) => derive_and_validate_compact_response_query_schedule(
                 certificate,
                 decoded_response.ordinal(),
                 merkle_geometry,
                 geometry.proof_wire_geometry.responses(),
-                verifier_message_prefix,
+                response_verifier_message_prefix,
             )?,
             #[cfg(test)]
             None => CompactResponseQuerySchedule::derive_at_last_query_boundary(
                 merkle_geometry,
                 geometry.proof_wire_geometry.responses(),
-                verifier_message_prefix,
+                response_verifier_message_prefix,
             )?,
             #[cfg(not(test))]
             None => return Err(CompactPublicKeyTransportError::InvalidResponseRegistry),
@@ -850,15 +878,18 @@ mod tests {
     use crate::bgv::proof_suite::compact_proof_wire::{
         COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireGeometry,
         CompactProofResponseWireInput, CompactProofWireGeometry, CompactProofWireInput,
-        CompactPublicInputWireGeometry, PROOF_FIXED_HEADER_BYTE_LENGTH, encode_compact_proof_wire,
-        encode_compact_public_input,
+        CompactPublicInputWireGeometry, PROOF_FIXED_HEADER_BYTE_LENGTH, decode_compact_proof_wire,
+        decode_compact_public_input, encode_compact_proof_wire, encode_compact_public_input,
     };
     use crate::bgv::proof_suite::compact_response_merkle::{
         CompactResponseComponentGeometry, CompactResponseLeafValue, CompactResponseLeafValueKind,
         CompactResponseMerkleGeometry, CompactResponseQuerySelection, compact_response_leaf_digest,
+        compact_response_merkle_parent_digest,
     };
     use crate::bgv::proof_suite::field::ProofBaseFieldElement;
-    use crate::bgv::proof_suite::fixed_uniform_verifier_message::FixedUniformVerifierMessageGeometry;
+    use crate::bgv::proof_suite::fixed_uniform_verifier_message::{
+        FixedUniformDistinctQueryGeometry, FixedUniformVerifierMessageGeometry,
+    };
     use crate::foundation::Hash512;
 
     struct SmallTransportFixture {
@@ -969,7 +1000,7 @@ mod tests {
                 proof_bytes,
                 public_input_bytes,
                 &self.merkle_geometries,
-                2,
+                self.merkle_geometries.len(),
             )
         }
 
@@ -1070,6 +1101,183 @@ mod tests {
         }
     }
 
+    fn lagging_canonical_suffix_fixture() -> SmallTransportFixture {
+        const RESPONSE_COUNT: usize = 4;
+
+        let bindings = bindings(31);
+        let public_input_geometry =
+            CompactPublicInputWireGeometry::new(1, 1).expect("public-input geometry");
+        let canonical_public_input_bytes =
+            encode_compact_public_input(public_input_geometry, bindings, &[base(37)])
+                .expect("canonical public input");
+        let verifier_message_geometries = (0..RESPONSE_COUNT)
+            .map(|move_index| {
+                let distinct_query_groups = if move_index == RESPONSE_COUNT - 1 {
+                    vec![FixedUniformDistinctQueryGeometry::new(2, 1)]
+                } else {
+                    Vec::new()
+                };
+                FixedUniformVerifierMessageGeometry::new(0, 0, 1, distinct_query_groups)
+                    .expect("verifier-message geometry")
+            })
+            .collect::<Vec<_>>();
+        let proof_geometry = CompactProofWireGeometry::new(
+            verifier_message_geometries
+                .iter()
+                .enumerate()
+                .map(|(response_index, verifier_message_geometry)| {
+                    CompactProofResponseWireGeometry::new(
+                        u32::try_from(response_index).expect("small response index"),
+                        1,
+                        0,
+                        1,
+                        u64::from(response_index == 1),
+                        verifier_message_geometry.clone(),
+                    )
+                    .expect("response wire geometry")
+                })
+                .collect(),
+        )
+        .expect("proof wire geometry");
+        let merkle_geometries = (0..RESPONSE_COUNT)
+            .map(|response_index| {
+                let (leaf_count, query_selection) = if response_index == 1 {
+                    (
+                        2,
+                        CompactResponseQuerySelection::VerifierMessageDistinctGroup {
+                            logical_verifier_move_ordinal: 3,
+                            distinct_query_group_ordinal: 0,
+                        },
+                    )
+                } else {
+                    (1, CompactResponseQuerySelection::EveryLeaf)
+                };
+                CompactResponseMerkleGeometry::new(
+                    u32::try_from(response_index).expect("small response index"),
+                    vec![CompactResponseComponentGeometry::new(
+                        0,
+                        leaf_count,
+                        1,
+                        query_selection,
+                        CompactResponseLeafValueKind::BaseField,
+                        1,
+                    )],
+                )
+                .expect("response Merkle geometry")
+            })
+            .collect::<Vec<_>>();
+
+        let single_leaf_response = |response_index: usize| {
+            let opened_value = base(41 + u64::try_from(response_index).unwrap());
+            let leaf_salt = [0x51 + u8::try_from(response_index).expect("small response index");
+                COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+            let root = compact_response_leaf_digest(
+                &merkle_geometries[response_index],
+                0,
+                CompactResponseLeafValue::BaseField(&[opened_value]),
+                &leaf_salt,
+            )
+            .expect("single-leaf response root");
+            CompactProofResponseWireInput::new(
+                root,
+                [0x61 + u8::try_from(response_index).expect("small response index");
+                    COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
+                vec![opened_value],
+                Vec::new(),
+                vec![leaf_salt],
+                Vec::new(),
+            )
+        };
+        let delayed_values = [base(53), base(59)];
+        let delayed_leaf_salts = [
+            [0x71; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+            [0x72; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+        ];
+        let delayed_leaf_digests = [0_usize, 1].map(|leaf_index| {
+            compact_response_leaf_digest(
+                &merkle_geometries[1],
+                u64::try_from(leaf_index).expect("small leaf index"),
+                CompactResponseLeafValue::BaseField(&[delayed_values[leaf_index]]),
+                &delayed_leaf_salts[leaf_index],
+            )
+            .expect("delayed response leaf digest")
+        });
+        let delayed_root = compact_response_merkle_parent_digest(
+            &merkle_geometries[1],
+            1,
+            0,
+            delayed_leaf_digests[0],
+            delayed_leaf_digests[1],
+        )
+        .expect("delayed response root");
+        let delayed_response = |queried_leaf_index: usize| {
+            CompactProofResponseWireInput::new(
+                delayed_root,
+                [0x62; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
+                vec![delayed_values[queried_leaf_index]],
+                Vec::new(),
+                vec![delayed_leaf_salts[queried_leaf_index]],
+                vec![delayed_leaf_digests[1 - queried_leaf_index]],
+            )
+        };
+
+        let mut response_inputs = vec![
+            single_leaf_response(0),
+            delayed_response(0),
+            single_leaf_response(2),
+            single_leaf_response(3),
+        ];
+        let provisional_proof_bytes = encode_compact_proof_wire(
+            &proof_geometry,
+            &CompactProofWireInput::new(response_inputs.clone()),
+        )
+        .expect("provisional proof bytes");
+        let provisional_decoded_proof =
+            decode_compact_proof_wire(&proof_geometry, &provisional_proof_bytes)
+                .expect("provisional proof decodes");
+        let decoded_public_input = decode_compact_public_input(
+            public_input_geometry,
+            bindings,
+            &canonical_public_input_bytes,
+        )
+        .expect("public input decodes");
+        let final_verifier_message = derive_compact_fiat_shamir_verifier_message(
+            &proof_geometry,
+            &provisional_decoded_proof,
+            &provisional_proof_bytes,
+            &decoded_public_input,
+            &canonical_public_input_bytes,
+            3,
+        )
+        .expect("final verifier message derives");
+        let queried_leaf_index =
+            usize::try_from(final_verifier_message.distinct_query_groups()[0][0])
+                .expect("small queried leaf index");
+        response_inputs[1] = delayed_response(queried_leaf_index);
+        let canonical_proof_bytes = encode_compact_proof_wire(
+            &proof_geometry,
+            &CompactProofWireInput::new(response_inputs),
+        )
+        .expect("canonical proof bytes");
+        let completed_response_counts =
+            CompactResponseCheckpointSchedule::derive(&proof_geometry, &merkle_geometries)
+                .expect("checkpoint schedule")
+                .completed_proof_response_counts()
+                .to_vec();
+        assert_eq!(completed_response_counts, vec![1, 1, 1, 4]);
+
+        SmallTransportFixture {
+            contract_source_hash: Hash512::from_bytes([0xA6; Hash512::BYTE_LENGTH]),
+            public_input_geometry,
+            proof_geometry,
+            merkle_geometries,
+            completed_response_counts,
+            bindings,
+            canonical_proof_bytes,
+            canonical_public_input_bytes,
+        }
+    }
+
     fn base(value: u64) -> ProofBaseFieldElement {
         ProofBaseFieldElement::from_canonical(value).expect("canonical base-field element")
     }
@@ -1095,6 +1303,20 @@ mod tests {
             .expect("small transport verifies");
         assert_eq!(verified.decoded_proof.responses().len(), 2);
         assert_eq!(verified.verifier_messages.len(), 2);
+    }
+
+    #[test]
+    fn transport_verifies_a_canonical_suffix_released_after_head_of_line_blocking() {
+        let fixture = lagging_canonical_suffix_fixture();
+        let verified = fixture
+            .verify(
+                fixture.bindings,
+                &fixture.canonical_proof_bytes,
+                &fixture.canonical_public_input_bytes,
+            )
+            .expect("lagging canonical suffix verifies");
+        assert_eq!(verified.decoded_proof.responses().len(), 4);
+        assert_eq!(verified.verifier_messages.len(), 4);
     }
 
     #[test]
@@ -1409,6 +1631,13 @@ mod tests {
             Err(CompactPublicKeyTransportError::Merkle(
                 CompactResponseMerkleError::InvalidGeometry
             ))
+        ));
+
+        let mut wrong_checkpoint_schedule = SmallTransportFixture::new();
+        wrong_checkpoint_schedule.completed_response_counts[0] = 0;
+        assert!(matches!(
+            wrong_checkpoint_schedule.begin_state(),
+            Err(CompactPublicKeyTransportError::InvalidResponseRegistry)
         ));
     }
 

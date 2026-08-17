@@ -1326,15 +1326,15 @@ pub(crate) struct CompactCfwPublicMainCovectors {
     pub(crate) cross_epoch_masks: Vec<Vec<CompactChallengeField>>,
 }
 
+type CompactCfwPublicMainCovectorParts = (
+    Vec<CompactChallengeField>,
+    Vec<Vec<CompactChallengeField>>,
+    Vec<Vec<CompactChallengeField>>,
+    Vec<Vec<CompactChallengeField>>,
+);
+
 impl CompactCfwPublicMainCovectors {
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Vec<CompactChallengeField>,
-        Vec<Vec<CompactChallengeField>>,
-        Vec<Vec<CompactChallengeField>>,
-        Vec<Vec<CompactChallengeField>>,
-    ) {
+    pub(crate) fn into_parts(self) -> CompactCfwPublicMainCovectorParts {
         (
             self.source,
             self.inner_masks,

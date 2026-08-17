@@ -3784,8 +3784,10 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                 )
                 .expect("the public covectors and committed masks define the main-WHIR relation");
                 let mut streamed_source_element_count = 0_u64;
-                loop {
-                    match relation_preparation
+                while let CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
+                    processed_work_unit_count,
+                    ..
+                } = relation_preparation
                         .poll(8_192, |source_ordinal| {
                             Ok::<_, Infallible>(
                                 witness[usize::try_from(source_ordinal)
@@ -3793,16 +3795,9 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                             )
                         })
                         .expect("the authenticated main-WHIR source streams")
-                    {
-                        CompactWhirMainRelationPreparationPoll::SourceStepCompleted {
-                            processed_work_unit_count,
-                            ..
-                        } => {
-                            assert!((1..=8_192).contains(&processed_work_unit_count));
-                            streamed_source_element_count += processed_work_unit_count;
-                        }
-                        CompactWhirMainRelationPreparationPoll::Complete => break,
-                    }
+                {
+                    assert!((1..=8_192).contains(&processed_work_unit_count));
+                    streamed_source_element_count += processed_work_unit_count;
                 }
                 assert_eq!(
                     streamed_source_element_count,
