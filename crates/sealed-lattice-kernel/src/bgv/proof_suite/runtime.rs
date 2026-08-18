@@ -44,7 +44,10 @@ use super::{
     row_code_whir::RowCodeWhirConstructionPlan, verified_application_statement_hash,
 };
 #[cfg(test)]
-use super::{SelectedApplicationStatementContext, decode_selected_vss_share_linkage_statement};
+use super::{
+    SelectedApplicationStatementContext, decode_selected_public_key_share_statement,
+    decode_selected_vss_share_linkage_statement,
+};
 
 const HASH_BYTE_LENGTH: usize = 64;
 const VERIFICATION_BINDING_HASH_DOMAIN: &str =
@@ -633,6 +636,94 @@ impl VerifiedCommonProofStatementSource {
             || statement.roster_hash() != context.roster_hash().into_bytes()
             || statement.public_setup_seed()
                 != verified_public_randomness.public_setup_seed().into_bytes()
+            || verified_public_randomness
+                .ordered_participant_identities()
+                .get(usize::from(roster_position))
+                .map(|identity| identity.into_bytes())
+                != Some(statement.participant_identity())
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let application_slot = ProofApplicationSlot::new(
+            context.suite_identifier(),
+            context.ceremony_context_hash(),
+            context.action_context_hash(),
+            schema_identifier,
+            Some(roster_position),
+            None,
+            None,
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let proof_header = ProofObjectHeader::from_canonical_application_statement(
+            canonical_application_statement_bytes.clone(),
+            &CanonicalDecodeLimits::default(),
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let proof_application_binding = ProofApplicationBinding::new(
+            application_slot,
+            proof_header
+                .proof_header_hash()
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
+            proof_stream_descriptor.clone(),
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let application_source_authority = VerifiedCommonProofApplicationSourceAuthority {
+            suite_identifier: context.suite_identifier(),
+            ceremony_context_hash: context.ceremony_context_hash(),
+            action_context_hash: context.action_context_hash(),
+            application_source_object_hash: verified_public_randomness.setup_proof_context_hash(),
+            application_statement_schema_identifier: schema_identifier,
+            producer_roster_position: Some(roster_position),
+            schedule_position: None,
+            producer_sequence: None,
+            proof_stream_descriptor,
+        };
+        Self::from_exact_family_application_source_authority(
+            application_source_authority,
+            context.protocol_version(),
+            canonical_application_statement_bytes,
+            proof_application_binding,
+            relation_plan,
+            limits,
+        )
+    }
+
+    /// Test-only exact public-key source seam for the standalone compact
+    /// emitted-byte owner. The canonical statement, participant coordinates,
+    /// setup context, and public randomness are all checked before the generic
+    /// family source exists; detached roots cannot enter this constructor.
+    #[cfg(test)]
+    pub(in crate::bgv) fn from_test_verified_public_key_share_statement_source(
+        verified_public_randomness: &VerifiedPublicRandomness,
+        canonical_application_statement_bytes: Vec<u8>,
+        proof_stream_descriptor: StreamDescriptor,
+        relation_plan: CommonProofRelationPlanCapability,
+        limits: CommonProofRuntimeLimits,
+    ) -> Result<Self, CommonProofRuntimeError> {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+        if relation_plan.application_statement_schema_identifier() != schema_identifier
+            || relation_plan.schedule_position.is_some()
+            || relation_plan.top_count.is_some()
+        {
+            return Err(CommonProofRuntimeError::InvalidPlanCapability);
+        }
+        let context = verified_public_randomness.context();
+        let statement = decode_selected_public_key_share_statement(
+            &canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                context.protocol_version(),
+                context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let roster_position = statement.roster_position();
+        if statement.setup_proof_context_hash()
+            != verified_public_randomness
+                .setup_proof_context_hash()
+                .into_bytes()
             || verified_public_randomness
                 .ordered_participant_identities()
                 .get(usize::from(roster_position))

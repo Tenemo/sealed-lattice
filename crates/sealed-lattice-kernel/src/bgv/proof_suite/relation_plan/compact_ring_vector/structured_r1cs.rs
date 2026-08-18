@@ -3191,6 +3191,7 @@ mod tests {
         bgv::{
             proof_suite::{
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
+                VerifiedCommonProofStatementSource,
                 compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::CompactPublicInputBindings,
@@ -3201,6 +3202,7 @@ mod tests {
                     CompactPublicKeyAlgebraicVerification,
                     CompactPublicKeyAlgebraicVerificationPoll,
                 },
+                compact_public_key_statement_correspondence::verify_selected_compact_public_key_statement_correspondence,
                 compact_public_key_verifier::{
                     VerifiedCompactPublicKeyTransport, verify_selected_compact_public_key_transport,
                 },
@@ -3211,19 +3213,19 @@ mod tests {
                     CommonProofPrivateCoinCoordinateCapacity,
                     PrivateRandomnessCommonProofCoinSource,
                 },
-                verified_application_statement_hash,
+                selected_proof_runtime_limits, verified_application_statement_hash,
             },
             setup::{
                 SetupGenerationKeyRelationApplication, SetupKeyRelationGenerationPreparationError,
-                SetupKeyRelationProofFamily,
+                SetupKeyRelationProofFamily, VerifiedSetupPolynomialLowDegreePrerequisite,
                 populate_compact_public_key_development_evidence_authority,
                 resolve_setup_generation_compact_public_key_development_preparation_source,
                 with_exclusive_setup_generation_compact_public_key_development_relation,
             },
         },
         foundation::{
-            Hash512, PersistentProofCoinInput, ProofApplicationSlot,
-            prepare_exact_same_secret_evidence_attempt,
+            CanonicalStreamDomain, Hash512, PersistentProofCoinInput, ProofApplicationSlot,
+            derive_canonical_stream_descriptor, prepare_exact_same_secret_evidence_attempt,
         },
     };
 
@@ -7762,8 +7764,82 @@ mod tests {
             verified_transport.proof_view().canonical_bytes(),
             canonical_proof_bytes
         );
+        let evidence_authority = populate_compact_public_key_development_evidence_authority(0x43)
+            .expect("the deterministic public-key source authority reconstructs");
+        let preparation_source =
+            resolve_setup_generation_compact_public_key_development_preparation_source(
+                &evidence_authority.authority,
+            )
+            .expect("the deterministic public-key statement source reconstructs");
+        let verified_public_randomness = evidence_authority.verified_public_randomness;
+        let (relation_input, relation_context) = super::super::selected_input_and_context()
+            .expect("the selected public-key relation input and context derive");
+        let compiled_relation = compile_public_key_share_relation_with_source_layout(
+            &relation_input,
+            &relation_context,
+        )
+        .expect("the selected public-key relation compiles independently");
+        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
+            &compiled_relation.relation_plan,
+            &relation_context,
+            None,
+            None,
+        )
+        .expect("the selected public-key relation capability derives independently");
+        let canonical_application_statement_bytes = preparation_source
+            .canonical_application_statement_bytes()
+            .to_vec();
+        let proof_stream_descriptor = derive_canonical_stream_descriptor(
+            CanonicalStreamDomain::PublicKeyShareProof,
+            &canonical_proof_bytes,
+        )
+        .expect("the emitted compact proof has a canonical stream descriptor");
+        let runtime_limits =
+            selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)
+                .expect("the selected public-key runtime limits derive");
+        let statement_source =
+            VerifiedCommonProofStatementSource::from_test_verified_public_key_share_statement_source(
+                &verified_public_randomness,
+                canonical_application_statement_bytes.clone(),
+                proof_stream_descriptor,
+                relation_plan,
+                runtime_limits,
+            )
+            .expect("the verifier-owned compact public-key statement source derives");
+        let verified_context = verified_public_randomness.context();
+        let decoded_statement = decode_selected_public_key_share_statement(
+            &canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                verified_context.protocol_version(),
+                verified_context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .expect("the verifier-owned public-key statement decodes");
+        let setup_polynomial_prerequisite = VerifiedSetupPolynomialLowDegreePrerequisite::for_test(
+            verified_context.protocol_version(),
+            verified_context.suite_identifier().into_bytes(),
+            verified_context.ceremony_context_hash().into_bytes(),
+            verified_context.action_context_hash().into_bytes(),
+            decoded_statement.setup_proof_context_hash(),
+            decoded_statement.participant_identity(),
+            decoded_statement.roster_position(),
+            decoded_statement.anchor_commitment_roots(),
+        );
+        let correspondence = verify_selected_compact_public_key_statement_correspondence(
+            &verified_transport,
+            &statement_source,
+            &verified_public_randomness,
+            &setup_polynomial_prerequisite,
+        )
+        .expect("every emitted compact public value corresponds to its accepted statement source");
+        assert_eq!(correspondence.public_ring_vector_count(), 61);
+        assert_eq!(correspondence.verified_column_count(), 122);
+        assert!(correspondence.verifier_sequence_column_count() > 0);
+        assert_eq!(correspondence.statement_tree_count(), 4);
         println!(
-            "checkpointed compact public-key algebraic verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} completed_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={}",
+            "checkpointed compact public-key algebraic and statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} completed_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
             verification_started_at.elapsed().as_millis(),
             algebraic_poll_count,
             observed_safe_boundary_count,
@@ -7771,6 +7847,8 @@ mod tests {
             completed_work_unit_count,
             resume_complete_count,
             canonical_proof_bytes.len(),
+            correspondence.verified_column_count(),
+            correspondence.statement_tree_count(),
         );
     }
 

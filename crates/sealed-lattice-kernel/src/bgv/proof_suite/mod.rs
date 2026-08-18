@@ -71,6 +71,8 @@ mod compact_proof_contract;
 mod compact_proof_wire;
 mod compact_public_key_algebraic_verifier;
 #[cfg(test)]
+mod compact_public_key_statement_correspondence;
+#[cfg(test)]
 mod compact_public_key_static_catalog;
 mod compact_public_key_verifier;
 #[cfg(test)]

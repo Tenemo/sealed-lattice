@@ -506,6 +506,11 @@ impl CompactPublicKeyRelationCatalog {
     }
 
     #[cfg(test)]
+    pub(crate) fn ordered_public_vectors(&self) -> &[CompactRingVectorReference] {
+        &self.ordered_public_vectors
+    }
+
+    #[cfg(test)]
     pub(crate) const fn witness_ring_vector_count(&self) -> u64 {
         self.witness_ring_vector_count
     }

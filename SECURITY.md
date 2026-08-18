@@ -64,9 +64,15 @@ consequences are:
   verifier independently derives the structured public CFW contribution and
   accepts the exact emitted proof after checking the CFW transcript, both WHIR
   epochs, all six code switches, both terminal blinded relations, and the
-  authenticated source and mask spot checks. The candidate is still not an
-  accepted proof: the complete equation-invalid hostile corpus, final public
-  SDK handoff, and capability transition remain open.
+  authenticated source and mask spot checks. The same guarded owner derives
+  the verifier-owned statement source independently, matches the proof-stream
+  descriptor and all 64 verifier-sequence columns, and rebuilds the four
+  statement-owned setup-polynomial roots from the other 58 public columns.
+  Thus all 122 transported public columns correspond to the accepted source
+  for this candidate. The candidate is still not an accepted proof: this does
+  not compose the masking theorem with every emitted byte or establish
+  salted-Merkle/EPRO privacy, and the complete equation-invalid hostile corpus,
+  final public SDK handoff, and capability transition remain open.
 - The compact transport ABI returns typed refusals but does not return
   `isValid` or mint a proof capability. A separate raw release-kernel ABI and
   internal TypeScript closed-worker driver begin or restore, bounded-poll,
@@ -151,10 +157,13 @@ unproved and has no numeric instantiation.
 
 ### Emitted-byte and QROM boundary
 
-No complete production proof currently assigns every byte, root, salt,
-frontier, transcript message, query, and verifier consumer to the theorem
-correspondence. Reduced fixtures, static maxima, and the transport-only
-validator cannot substitute for those bytes.
+One guarded native candidate now has exact source correspondence for its proof
+descriptor and all 122 transported public columns, including reproduction of
+the four statement-owned roots. No complete production proof yet assigns every
+byte, salt, frontier, transcript message, query, and verifier consumer to the
+construction masking theorem and privacy games. Reduced fixtures, static
+maxima, transport validation, and public-column correspondence cannot
+substitute for that complete composition.
 
 The Appendix A.1 arithmetic derives `qPi = 79,310` but still requires a
 production theorem premise connecting the predecessor-linked SHAKE256 graph to

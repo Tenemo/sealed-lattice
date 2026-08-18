@@ -166,6 +166,8 @@ pub(crate) use committed_material_adapter::fused_vss_radix_51_source_provider_me
 #[cfg(test)]
 pub(crate) use committed_material_adapter::selected_vss_source_provider_memory_accounting;
 #[cfg(test)]
+pub(crate) use compact_ring_vector::derive_compact_public_key_relation_catalog;
+#[cfg(test)]
 pub(crate) use compact_ring_vector::{
     CompactLookupRelationGeometry, compact_structured_r1cs_row_source_geometry,
     compact_structured_witness_covector_geometry,

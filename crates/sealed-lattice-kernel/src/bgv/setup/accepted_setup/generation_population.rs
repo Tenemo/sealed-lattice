@@ -121,6 +121,7 @@ pub(crate) struct ExactSameSecretEvidenceAuthority {
 pub(crate) struct CompactPublicKeyDevelopmentEvidenceAuthority {
     pub(crate) action_private_randomness: Rc<ActionPrivateRandomness>,
     pub(crate) authority: Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>,
+    pub(in crate::bgv) verified_public_randomness: VerifiedPublicRandomness,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -249,6 +250,7 @@ pub(crate) fn populate_compact_public_key_development_evidence_authority(
     Ok(CompactPublicKeyDevelopmentEvidenceAuthority {
         action_private_randomness,
         authority,
+        verified_public_randomness,
     })
 }
 

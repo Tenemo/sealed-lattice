@@ -339,6 +339,24 @@ impl SetupPublicPolynomialRootBuilder {
         source_polynomial_degree_bound_exclusive: usize,
         row_width: u32,
     ) -> Result<Self, SetupPublicPolynomialError> {
+        Self::from_verifier_owned_context_hash(
+            context.context_hash()?,
+            evaluation_domain_size,
+            source_polynomial_degree_bound_exclusive,
+            row_width,
+        )
+    }
+
+    /// Rebuilds a setup-polynomial root from a context hash that was already
+    /// derived by a verifier-owned statement-tree capability. This does not
+    /// accept a producer claim: callers must first obtain the hash from the
+    /// positively checked statement source.
+    pub(in crate::bgv::proof_suite) fn from_verifier_owned_context_hash(
+        public_polynomial_context_hash: [u8; 64],
+        evaluation_domain_size: usize,
+        source_polynomial_degree_bound_exclusive: usize,
+        row_width: u32,
+    ) -> Result<Self, SetupPublicPolynomialError> {
         if evaluation_domain_size < 2
             || !evaluation_domain_size.is_power_of_two()
             || source_polynomial_degree_bound_exclusive == 0
@@ -362,7 +380,6 @@ impl SetupPublicPolynomialRootBuilder {
             ProofEvaluationDomain::new_subgroup(source_polynomial_degree_bound_exclusive)?;
         let evaluation_domain =
             ProofEvaluationDomain::new(evaluation_domain_size, PROOF_EVALUATION_COSET_OFFSET)?;
-        let public_polynomial_context_hash = context.context_hash()?;
         let expected_column_count =
             usize::try_from(row_width).map_err(|_| SetupPublicPolynomialError::CountOverflow)?;
         let mut source_polynomial_coefficients = Vec::new();

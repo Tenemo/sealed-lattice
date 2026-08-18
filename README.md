@@ -97,8 +97,15 @@ and target release remain incomplete or internal.
   from genesis before live work continues. A guarded current-source run
   destroys the first verifier, restores a fresh verifier from boundary zero,
   reproduces that cursor byte for byte, observes all 290 safe-boundary
-  ordinals, and accepts the exact emitted proof. This is native prototype
-  evidence only.
+  ordinals, and accepts the exact emitted proof. The same guarded owner derives
+  the public-key statement source independently from verified setup
+  randomness, checks the canonical proof-stream descriptor and all 61 public
+  ring vectors, regenerates 64 verifier-sequence columns, and rebuilds the
+  four statement-owned setup-polynomial roots from the remaining 58 columns.
+  All 122 transported public columns correspond to that accepted statement
+  source. This is native prototype evidence for one candidate; it does not
+  connect the construction masking theorem to every emitted byte, establish
+  salted-Merkle or EPRO privacy, or mint a capability.
   Raw release-kernel begin, resume, bounded-poll, cursor-copy, and cancellation
   functions own the same verifier state. An internal TypeScript closed-worker
   driver publishes and restores the cursor, suppresses publication during
