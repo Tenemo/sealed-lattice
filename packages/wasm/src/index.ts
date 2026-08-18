@@ -204,6 +204,8 @@ export type { AcceptedSetupPackageBuilder } from './accepted-setup-package-build
 export { readAcceptedSetupCompactPublicKeyVerificationCheckpointGeometry } from './accepted-setup-proof-verification-runtime.js';
 export type {
     AcceptedSetupCompactPublicKeyVerificationCheckpointGeometry,
+    AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyOpening,
+    AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyOpener,
     AcceptedSetupCompactPublicKeyVerificationInput,
     AcceptedSetupCompactPublicKeyVerificationResume,
     AcceptedSetupCompactPublicKeyVerificationWorkerOptions,

@@ -117,6 +117,7 @@ type FakeAcceptedSetupProofVerificationRuntime = Readonly<{
         >;
         pollRefusalReleaseCount: number;
         preparationStatus: number;
+        checkpointSourceDigests: Uint8Array<ArrayBuffer>;
     };
     discardedTerminalSources: number[];
     finishStatus: { value: number };
@@ -187,6 +188,10 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
             ],
             pollRefusalReleaseCount: 0,
             preparationStatus: 0,
+            checkpointSourceDigests: Uint8Array.from(
+                { length: 4 * 64 },
+                (_unused, byteIndex) => (byteIndex * 37 + 11) & 0xff,
+            ),
         };
     const discardedTerminalSources: number[] = [];
     const finishStatus = { value: 0 };
@@ -463,6 +468,23 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
             () => 404,
         sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count:
             () => 4_509,
+        sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests:
+            (
+                preparedHandle: number,
+                outputPointer: number,
+                outputByteLength: number,
+            ) => {
+                expect(preparedHandle).toBe(81);
+                expect(outputByteLength).toBe(
+                    compactPublicKey.checkpointSourceDigests.byteLength,
+                );
+                new Uint8Array(
+                    memory.buffer,
+                    outputPointer,
+                    outputByteLength,
+                ).set(compactPublicKey.checkpointSourceDigests);
+                return 0;
+            },
         sealed_lattice_accepted_setup_public_key_share_discard_terminal_source:
             (handle: number) => {
                 discardedTerminalSources.push(handle);
@@ -823,6 +845,89 @@ describe('accepted-setup compact public-key verification', () => {
         expect(runtime.allocations.size).toBe(0);
     });
 
+    it('opens fresh custody from four verifier-derived source digests after preparation', async () => {
+        const runtime = createFakeRuntime();
+        const release = vi.fn(() => Promise.resolve());
+        const checkpointCustody = {
+            publishAuthenticatedCheckpoint: vi.fn(() => Promise.resolve()),
+            release,
+            restoreAuthenticatedCheckpoint: vi.fn(() =>
+                Promise.reject(new Error('fresh custody cannot restore')),
+            ),
+        };
+        const observedSourceDigests: number[][] = [];
+        const input = compactPublicKeyVerificationInput(runtime.kernel);
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker({
+                ...input,
+                options: {
+                    ...input.options,
+                    openCheckpointCustody: (
+                        orderedSourceDigests: readonly Uint8Array<ArrayBuffer>[],
+                    ) => {
+                        observedSourceDigests.push(
+                            ...orderedSourceDigests.map((digest) =>
+                                Array.from(digest),
+                            ),
+                        );
+                        return Promise.resolve({
+                            checkpointCustody,
+                            mode: 'fresh' as const,
+                        });
+                    },
+                },
+            } as never),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+
+        expect(observedSourceDigests).toEqual(
+            Array.from({ length: 4 }, (_unused, digestIndex) =>
+                Array.from(
+                    runtime.compactPublicKey.checkpointSourceDigests.slice(
+                        digestIndex * 64,
+                        (digestIndex + 1) * 64,
+                    ),
+                ),
+            ),
+        );
+        expect(release).toHaveBeenCalledOnce();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('releases a worker-opened custody when the opener returns a malformed mode', async () => {
+        const runtime = createFakeRuntime();
+        const release = vi.fn(() => Promise.resolve());
+        const checkpointCustody = {
+            publishAuthenticatedCheckpoint: vi.fn(() => Promise.resolve()),
+            release,
+            restoreAuthenticatedCheckpoint: vi.fn(() =>
+                Promise.reject(new Error('fresh custody cannot restore')),
+            ),
+        };
+        const input = compactPublicKeyVerificationInput(runtime.kernel);
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker({
+                ...input,
+                options: {
+                    ...input.options,
+                    openCheckpointCustody: () =>
+                        Promise.resolve({
+                            checkpointCustody,
+                            mode: 'detached',
+                        } as never),
+                },
+            } as never),
+        ).rejects.toThrow(/malformed/u);
+
+        expect(release).toHaveBeenCalledOnce();
+        expect(
+            checkpointCustody.publishAuthenticatedCheckpoint,
+        ).not.toHaveBeenCalled();
+        expect(runtime.compactPublicKey.discardedPreparedHandles).toEqual([81]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
     it('restores a source-correspondence cursor and requires its exact replay boundary', async () => {
         const runtime = createFakeRuntime();
         runtime.compactPublicKey.pollOutcomes.splice(
@@ -909,7 +1014,7 @@ describe('accepted-setup compact public-key verification', () => {
                     resume: { checkpointCustody: resumedCheckpointCustody },
                 },
             } as never),
-        ).rejects.toThrow(/never both/u);
+        ).rejects.toThrow(/exactly one/u);
 
         expect(freshRelease).toHaveBeenCalledOnce();
         expect(resumedRelease).toHaveBeenCalledOnce();

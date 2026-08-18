@@ -788,7 +788,7 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
             return createCommittedInitialization();
         },
         custody: custodyFacade,
-        openCheckpointStore: () => {
+        openCheckpointStore: (checkpointInput) => {
             transferableCheckpointStore ??= openAuthenticatedCheckpointStore({
                 authorityContext: runtimeAuthorityContext({
                     actionContextHash: binding.actionContextHash,
@@ -796,10 +796,10 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
                     ownerParticipantIdentity: binding.participantId,
                     suiteIdentifier: binding.suiteId,
                 }),
-                boundaryPolicy: commonProofCheckpointBoundaryPolicy,
+                boundaryPolicy: checkpointInput.boundaryPolicy,
                 cryptoProvider,
                 encryptionKey,
-                limits: commonProofCheckpointLimits,
+                limits: checkpointInput.limits,
                 store: checkpointStorage.store,
             });
             return Promise.resolve(transferableCheckpointStore);

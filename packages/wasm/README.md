@@ -63,10 +63,12 @@ algebra-only cursor and the accepted cursor. The accepted adapter reads its
 404-byte, 4,509-boundary geometry from kernel exports and uses a separate
 canonical state-stream domain. Worker options make fresh and resumed custody
 mutually exclusive, and the runtime rejects hostile dual-custody input before
-kernel preparation while releasing every distinct identity. The concrete
-cold-restore test uses synthetic cursor bytes. Production browser-worker
-installation, bounded transport and terminal WHIR, and selected actual-byte
-cold restoration remain open. Compact generation is
+kernel preparation while releasing every distinct identity. The protocol
+custody-worker host installs the accepted adapter, copies its four checkpoint
+source digests from the prepared Rust authority, and evicts terminal state. Its
+current host test uses same-realm synthetic cursor bytes. Dedicated-worker
+destruction and recreation, bounded transport and terminal WHIR, and selected
+actual-byte cold restoration remain open. Compact generation is
 not a worker-facing runtime capability, and no complete generation and
 verification ABI pair exists.
 

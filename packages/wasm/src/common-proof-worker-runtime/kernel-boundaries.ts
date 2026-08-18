@@ -304,6 +304,9 @@ type AcceptedSetupCompactPublicKeyVerificationKernelPreparation =
     | Readonly<{ kind: 'prepared'; preparedHandle: number }>
     | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
 
+const acceptedSetupCompactPublicKeyCheckpointSourceDigestCount = 4;
+const acceptedSetupCompactPublicKeyCheckpointSourceDigestByteLength = 64;
+
 type AcceptedSetupCompactPublicKeyVerificationKernelBegin =
     | Readonly<{ kind: 'started'; operationHandle: number }>
     | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
@@ -2453,6 +2456,58 @@ export class CommonProofVerificationKernelBoundary {
                     );
                 }
                 return byteLength;
+            },
+        );
+    }
+
+    public copyAcceptedSetupCompactPublicKeyVerificationCheckpointSourceDigests(
+        preparedHandle: number,
+    ): readonly Uint8Array<ArrayBuffer>[] {
+        requireLiveHandle(
+            preparedHandle,
+            'The accepted-setup compact public-key prepared handle',
+        );
+        const outputByteLength =
+            acceptedSetupCompactPublicKeyCheckpointSourceDigestCount *
+            acceptedSetupCompactPublicKeyCheckpointSourceDigestByteLength;
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key checkpoint source-digest copy',
+            () => {
+                const outputPointer =
+                    this.#memoryBoundary.allocate(outputByteLength);
+                try {
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests',
+                        )(preparedHandle, outputPointer, outputByteLength),
+                        'accepted-setup compact public-key checkpoint source-digest copy',
+                    );
+                    const output = new Uint8Array(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        outputByteLength,
+                    );
+                    return Object.freeze(
+                        Array.from(
+                            {
+                                length: acceptedSetupCompactPublicKeyCheckpointSourceDigestCount,
+                            },
+                            (_unused, digestIndex) =>
+                                output.slice(
+                                    digestIndex *
+                                        acceptedSetupCompactPublicKeyCheckpointSourceDigestByteLength,
+                                    (digestIndex + 1) *
+                                        acceptedSetupCompactPublicKeyCheckpointSourceDigestByteLength,
+                                ),
+                        ),
+                    );
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        outputByteLength,
+                    );
+                }
             },
         );
     }

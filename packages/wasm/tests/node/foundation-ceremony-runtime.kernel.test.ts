@@ -163,6 +163,8 @@ describe('foundation ceremony Rust/WASM boundary', () => {
             commandRuntime.wasmExports
                 .sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint,
             commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests,
+            commandRuntime.wasmExports
                 .sealed_lattice_accepted_setup_compact_public_key_cancel_verification,
             commandRuntime.wasmExports
                 .sealed_lattice_accepted_setup_compact_public_key_finish_verification,

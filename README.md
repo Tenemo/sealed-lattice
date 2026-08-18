@@ -132,8 +132,13 @@ and target release remain incomplete or internal.
   hostile-input guard refuses both fields before kernel preparation, releases
   every distinct supplied identity once, and uses one adopted object for
   restoration, later publication, and final release. The concrete cold-restore
-  test uses synthetic cursor bytes; the adapter is not yet installed in the
-  production browser worker host.
+  test uses synthetic cursor bytes. The production custody-worker host now
+  installs the accepted adapter, routes its deterministic checkpoint profile
+  through a strict policy, obtains all four source digests from the prepared
+  Rust verifier, publishes resume coordinates only after durable commit, and
+  evicts the terminal checkpoint. Current host coverage is same-realm; it does
+  not destroy and recreate a dedicated browser `Worker` or restore selected
+  actual proof bytes.
   Terminal WHIR is still one synchronous, uninterruptible call before its
   post-WHIR boundary.
   At selected pre-challenge geometry, the current fold retains an 80 MiB input,
@@ -219,9 +224,10 @@ ceremony or supported-phone qualification.
   protocol checkpoint-store adapters now separate the 400-byte, 290-boundary
   algebraic cursor from the kernel-derived 404-byte, 4,509-boundary accepted
   cursor. The worker refuses split custody before kernel preparation and retires
-  every supplied identity. Production browser-host installation, selected
-  actual-byte cold restoration, and the complete transported equation-invalid
-  hostile corpus are absent.
+  every supplied identity. The custody-worker host installs the accepted
+  adapter and evicts terminal state, but dedicated-worker invocation and
+  destruction, selected actual-byte cold restoration, and the complete
+  transported equation-invalid hostile corpus are absent.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the
@@ -229,10 +235,12 @@ ceremony or supported-phone qualification.
   applicable SHAKE256 fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
-- Browser custody does not yet install the single-identity accepted-cursor
-  adapter in the production worker host or supply bounded transport and terminal
-  WHIR, selected actual-byte cold-resume evidence for every compact-proof
-  boundary, or reconciled browser-origin storage reclamation.
+- Browser custody installs the single-identity accepted-cursor adapter in the
+  production worker-host implementation, but has only same-realm synthetic
+  resume coverage. It does not yet supply dedicated-worker destruction and
+  recreation, bounded transport and terminal WHIR, selected actual-byte
+  cold-resume evidence for every compact-proof boundary, or reconciled
+  browser-origin storage reclamation.
 - The accepted setup-to-release capability flow is not connected end to end.
 - No compact proof has completed the scalar release-WebAssembly desktop-browser
   evidence path after guarded native generation and independent transport and

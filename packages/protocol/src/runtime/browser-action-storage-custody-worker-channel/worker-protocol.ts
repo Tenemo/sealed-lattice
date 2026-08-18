@@ -2,6 +2,8 @@ import {
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
+    verifyAcceptedSetupCompactPublicKeyShareInClosedWorker,
+    type AcceptedSetupCompactPublicKeyVerificationInput,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type CommonProofGenerationWorkerOptions,
@@ -112,6 +114,67 @@ export type CustodyWorkerLike = Pick<
 >;
 
 type InstalledCustodyWorkerHost = () => Promise<void>;
+
+export type InstalledAcceptedSetupCompactPublicKeyCheckpointDescription =
+    Readonly<{
+        checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
+        safeBoundaryOrdinal: number;
+    }>;
+
+type InstalledAcceptedSetupCompactPublicKeyVerificationInput = Omit<
+    AcceptedSetupCompactPublicKeyVerificationInput,
+    'options'
+> &
+    Readonly<{
+        checkpoint:
+            | Readonly<{
+                  mode: 'fresh';
+              }>
+            | Readonly<{
+                  checkpointLineageIdentifier: Uint8Array;
+                  mode: 'resumed';
+                  safeBoundaryOrdinal: number;
+              }>;
+        onCheckpointPublished?(
+            description: InstalledAcceptedSetupCompactPublicKeyCheckpointDescription,
+        ): Promise<void> | void;
+        options?: Readonly<{
+            maximumWorkUnitCountPerPoll?: number;
+            signal?: AbortSignal;
+            yieldControl?: () => Promise<void>;
+        }>;
+    }>;
+
+export const installedCustodyWorkerHostAcceptedSetupCompactPublicKeyVerifiers =
+    new WeakMap<
+        InstalledCustodyWorkerHost,
+        (
+            input: InstalledAcceptedSetupCompactPublicKeyVerificationInput,
+        ) => ReturnType<
+            typeof verifyAcceptedSetupCompactPublicKeyShareInClosedWorker
+        >
+    >();
+
+/** Internal accepted-family entry that executes inside the installed worker. */
+export const verifyAcceptedSetupCompactPublicKeyShareInInstalledCustodyWorker =
+    (
+        installedHost: InstalledCustodyWorkerHost,
+        input: InstalledAcceptedSetupCompactPublicKeyVerificationInput,
+    ): ReturnType<
+        typeof verifyAcceptedSetupCompactPublicKeyShareInClosedWorker
+    > => {
+        const verify =
+            installedCustodyWorkerHostAcceptedSetupCompactPublicKeyVerifiers.get(
+                installedHost,
+            );
+        if (verify === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The installed custody worker host cannot verify accepted-setup compact public-key proofs.',
+            );
+        }
+        return verify(input);
+    };
 
 export type InstalledCommonProofCapabilityTransfer = Readonly<{
     capability: VerifiedCommonProofCapability;

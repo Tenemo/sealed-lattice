@@ -112,6 +112,16 @@ export type AcceptedSetupCompactPublicKeyVerificationResume = Readonly<{
     checkpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
 }>;
 
+export type AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyOpening =
+    Readonly<{
+        checkpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
+        mode: 'fresh' | 'resumed';
+    }>;
+
+export type AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyOpener = (
+    orderedSourceDigests: readonly Uint8Array<ArrayBuffer>[],
+) => Promise<AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyOpening>;
+
 type AcceptedSetupCompactPublicKeyVerificationSchedulingOptions = Readonly<{
     maximumWorkUnitCountPerPoll?: number;
     signal?: AbortSignal;
@@ -128,6 +138,11 @@ export type AcceptedSetupCompactPublicKeyVerificationWorkerOptions =
             | Readonly<{
                   checkpointCustody?: never;
                   resume: AcceptedSetupCompactPublicKeyVerificationResume;
+              }>
+            | Readonly<{
+                  checkpointCustody?: never;
+                  openCheckpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyOpener;
+                  resume?: never;
               }>
         );
 
@@ -824,40 +839,47 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
     const yieldControl = options.yieldControl ?? yieldBrowserWorkerTurn;
     const runtimeCustodyOptions: Readonly<{
         checkpointCustody?: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
+        openCheckpointCustody?: AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyOpener;
         resume?: AcceptedSetupCompactPublicKeyVerificationResume;
     }> = options;
-    const resume = runtimeCustodyOptions.resume;
-    const checkpointCustody =
-        runtimeCustodyOptions.checkpointCustody ?? resume?.checkpointCustody;
-    const suppliedCheckpointCustodies =
+    const directResume = runtimeCustodyOptions.resume;
+    let checkpointCustody =
+        runtimeCustodyOptions.checkpointCustody ??
+        directResume?.checkpointCustody;
+    const adoptedCheckpointCustodies =
         runtimeCustodyOptions.checkpointCustody === undefined
-            ? resume === undefined
+            ? directResume === undefined
                 ? []
-                : [resume.checkpointCustody]
-            : resume === undefined ||
-                resume.checkpointCustody ===
+                : [directResume.checkpointCustody]
+            : directResume === undefined ||
+                directResume.checkpointCustody ===
                     runtimeCustodyOptions.checkpointCustody
               ? [runtimeCustodyOptions.checkpointCustody]
               : [
                     runtimeCustodyOptions.checkpointCustody,
-                    resume.checkpointCustody,
+                    directResume.checkpointCustody,
                 ];
     const kernel = new CommonProofVerificationKernelBoundary(context);
     let preparedHandle = 0;
     let operationHandle = 0;
     let verifiedCapabilityHandle = 0;
-    let deterministicReplayComplete = resume === undefined;
+    let resumed = directResume !== undefined;
+    let deterministicReplayComplete = !resumed;
     let expectedResumeSafeBoundaryOrdinal: number | undefined;
     let operationResult: VerificationResult<undefined> | undefined;
     let operationFailure: unknown;
 
     try {
         if (
-            runtimeCustodyOptions.checkpointCustody !== undefined &&
-            resume !== undefined
+            Number(runtimeCustodyOptions.checkpointCustody !== undefined) +
+                Number(directResume !== undefined) +
+                Number(
+                    runtimeCustodyOptions.openCheckpointCustody !== undefined,
+                ) >
+            1
         ) {
             throw new CanonicalStreamResourceError(
-                'Accepted-setup compact public-key verification accepts either fresh checkpoint custody or resumed checkpoint custody, never both.',
+                'Accepted-setup compact public-key verification accepts exactly one direct fresh, direct resumed, or worker-opened checkpoint custody mode.',
             );
         }
         throwIfCompactPublicKeyVerificationCancelled(signal);
@@ -873,42 +895,95 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
             });
         } else {
             preparedHandle = preparation.preparedHandle;
-            const begin =
-                resume === undefined
-                    ? kernel.beginAcceptedSetupCompactPublicKeyVerification(
-                          preparedHandle,
-                          canonicalProofBytes,
-                          canonicalPublicInputBytes,
-                      )
-                    : await (async () => {
-                          if (checkpointCustody === undefined) {
-                              throw new CanonicalStreamInternalError(
-                                  'Accepted-setup compact public-key verification resume has no checkpoint custody.',
-                              );
-                          }
-                          const restoredCheckpoint =
-                              await restoreCompactPublicKeyVerificationCheckpoint(
-                                  kernel,
-                                  checkpointCustody,
-                              );
-                          expectedResumeSafeBoundaryOrdinal =
-                              restoredCheckpoint.safeBoundaryOrdinal;
-                          try {
-                              throwIfCompactPublicKeyVerificationCancelled(
-                                  signal,
-                              );
-                              return kernel.resumeAcceptedSetupCompactPublicKeyVerification(
-                                  preparedHandle,
-                                  canonicalProofBytes,
-                                  canonicalPublicInputBytes,
-                                  restoredCheckpoint.canonicalCheckpointBytes,
-                              );
-                          } finally {
-                              restoredCheckpoint.canonicalCheckpointBytes.fill(
-                                  0,
-                              );
-                          }
-                      })();
+            if (runtimeCustodyOptions.openCheckpointCustody !== undefined) {
+                const orderedSourceDigests =
+                    kernel.copyAcceptedSetupCompactPublicKeyVerificationCheckpointSourceDigests(
+                        preparedHandle,
+                    );
+                let untrustedOpenedCustody: unknown;
+                try {
+                    untrustedOpenedCustody =
+                        await runtimeCustodyOptions.openCheckpointCustody(
+                            orderedSourceDigests,
+                        );
+                } finally {
+                    for (const sourceDigest of orderedSourceDigests) {
+                        sourceDigest.fill(0);
+                    }
+                }
+                const openedCustodyCandidate =
+                    typeof untrustedOpenedCustody === 'object' &&
+                    untrustedOpenedCustody !== null
+                        ? (untrustedOpenedCustody as {
+                              checkpointCustody?: unknown;
+                              mode?: unknown;
+                          })
+                        : undefined;
+                const checkpointCustodyCandidate =
+                    typeof openedCustodyCandidate?.checkpointCustody ===
+                        'object' &&
+                    openedCustodyCandidate.checkpointCustody !== null
+                        ? (openedCustodyCandidate.checkpointCustody as {
+                              publishAuthenticatedCheckpoint?: unknown;
+                              release?: unknown;
+                              restoreAuthenticatedCheckpoint?: unknown;
+                          })
+                        : undefined;
+                if (typeof checkpointCustodyCandidate?.release === 'function') {
+                    adoptedCheckpointCustodies.push(
+                        checkpointCustodyCandidate as AcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
+                    );
+                }
+                if (
+                    (openedCustodyCandidate?.mode !== 'fresh' &&
+                        openedCustodyCandidate?.mode !== 'resumed') ||
+                    checkpointCustodyCandidate === undefined ||
+                    typeof checkpointCustodyCandidate.publishAuthenticatedCheckpoint !==
+                        'function' ||
+                    typeof checkpointCustodyCandidate.release !== 'function' ||
+                    typeof checkpointCustodyCandidate.restoreAuthenticatedCheckpoint !==
+                        'function'
+                ) {
+                    throw new CanonicalStreamInternalError(
+                        'The worker checkpoint-custody opener returned a malformed accepted-setup compact public-key custody.',
+                    );
+                }
+                checkpointCustody =
+                    checkpointCustodyCandidate as AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
+                resumed = openedCustodyCandidate.mode === 'resumed';
+                deterministicReplayComplete = !resumed;
+            }
+            const begin = !resumed
+                ? kernel.beginAcceptedSetupCompactPublicKeyVerification(
+                      preparedHandle,
+                      canonicalProofBytes,
+                      canonicalPublicInputBytes,
+                  )
+                : await (async () => {
+                      if (checkpointCustody === undefined) {
+                          throw new CanonicalStreamInternalError(
+                              'Accepted-setup compact public-key verification resume has no checkpoint custody.',
+                          );
+                      }
+                      const restoredCheckpoint =
+                          await restoreCompactPublicKeyVerificationCheckpoint(
+                              kernel,
+                              checkpointCustody,
+                          );
+                      expectedResumeSafeBoundaryOrdinal =
+                          restoredCheckpoint.safeBoundaryOrdinal;
+                      try {
+                          throwIfCompactPublicKeyVerificationCancelled(signal);
+                          return kernel.resumeAcceptedSetupCompactPublicKeyVerification(
+                              preparedHandle,
+                              canonicalProofBytes,
+                              canonicalPublicInputBytes,
+                              restoredCheckpoint.canonicalCheckpointBytes,
+                          );
+                      } finally {
+                          restoredCheckpoint.canonicalCheckpointBytes.fill(0);
+                      }
+                  })();
             if (begin.kind === 'refused') {
                 operationResult = Object.freeze({
                     isValid: false,
@@ -942,7 +1017,7 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
                             break;
                         case 'resume-complete':
                             if (
-                                resume === undefined ||
+                                !resumed ||
                                 deterministicReplayComplete ||
                                 poll.checkpointSafeBoundaryOrdinal !==
                                     expectedResumeSafeBoundaryOrdinal
@@ -1027,9 +1102,11 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
             cleanupFailures.push(cleanupFailure);
         }
     }
-    for (const suppliedCheckpointCustody of suppliedCheckpointCustodies) {
+    for (const adoptedCheckpointCustody of new Set(
+        adoptedCheckpointCustodies,
+    )) {
         try {
-            await suppliedCheckpointCustody.release();
+            await adoptedCheckpointCustody.release();
         } catch (cleanupFailure) {
             cleanupFailures.push(cleanupFailure);
         }

@@ -15,6 +15,8 @@ import {
     produceClosedWorkerActionRandomnessReservationIntent,
     produceClosedWorkerActionRandomnessReservationWitnessVote,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
+    verifyAcceptedSetupCompactPublicKeyShareInClosedWorker,
+    type AcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type VerifiedStateDurableBinding,
     verifyClosedWorkerActionRandomnessReservationIntentForWitness,
@@ -77,6 +79,11 @@ import type {
     CommonProofBrowserCustody,
     CommonProofCheckpointResumeDescriptor,
 } from '../common-proof-browser-custody.js';
+import {
+    createAcceptedSetupCompactPublicKeyVerificationCheckpointBoundaryPolicy,
+    openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
+} from '../compact-public-key-algebraic-verification-checkpoint-custody.js';
+import { compactPublicKeyVerificationCheckpointStateStreamDomains } from '../compact-public-key-verification-checkpoint-contract.js';
 import type {
     CommonProofApplicationPublicationDisposition,
     DurableStateWitnessServiceLimits,
@@ -140,6 +147,7 @@ import {
     installedCustodyWorkerHostCommonProofCheckpointLineageReleasers,
     installedCustodyWorkerHostCommonProofCheckpointLineageReservers,
     installedCustodyWorkerHostCommonProofGenerationPreparers,
+    installedCustodyWorkerHostAcceptedSetupCompactPublicKeyVerifiers,
     retireInstalledCommonProofExecutionEnvironment,
     type CustodyWorkerCommand,
     type CustodyWorkerRequest,
@@ -934,6 +942,58 @@ export const installBrowserActionStorageCustodyWorkerHost = (
     }
     let lastRequestIdentifier = 0;
     let ownedCustody: WebLockOwnedBrowserActionStorageCustody | undefined;
+    let acceptedSetupCompactPublicKeyCheckpointBoundaryPolicy:
+        | CheckpointBoundaryPolicy
+        | undefined;
+    const installedCheckpointBoundaryPolicy:
+        | CheckpointBoundaryPolicy
+        | undefined =
+        input.checkpointStore === undefined
+            ? undefined
+            : Object.freeze({
+                  validatePublication: (validationInput) => {
+                      const acceptedBoundary =
+                          validationInput.boundary.stateStreamDomain ===
+                          compactPublicKeyVerificationCheckpointStateStreamDomains.acceptedSetup;
+                      if (
+                          validationInput.previousBoundary !== undefined &&
+                          (validationInput.previousBoundary
+                              .stateStreamDomain ===
+                              compactPublicKeyVerificationCheckpointStateStreamDomains.acceptedSetup) !==
+                              acceptedBoundary
+                      ) {
+                          throw new BrowserActionStorageCustodyError(
+                              'InvalidInput',
+                              'A checkpoint lineage cannot change its verification profile.',
+                          );
+                      }
+                      const policy = acceptedBoundary
+                          ? acceptedSetupCompactPublicKeyCheckpointBoundaryPolicy
+                          : input.checkpointStore?.boundaryPolicy;
+                      if (policy === undefined) {
+                          throw new BrowserActionStorageCustodyError(
+                              'InvalidState',
+                              'Accepted-setup compact public-key checkpoint custody has no installed boundary policy.',
+                          );
+                      }
+                      return policy.validatePublication(validationInput);
+                  },
+                  validateResume: (validationInput) => {
+                      const acceptedBoundary =
+                          validationInput.expectedBoundary.stateStreamDomain ===
+                          compactPublicKeyVerificationCheckpointStateStreamDomains.acceptedSetup;
+                      const policy = acceptedBoundary
+                          ? acceptedSetupCompactPublicKeyCheckpointBoundaryPolicy
+                          : input.checkpointStore?.boundaryPolicy;
+                      if (policy === undefined) {
+                          throw new BrowserActionStorageCustodyError(
+                              'InvalidState',
+                              'Accepted-setup compact public-key checkpoint custody has no installed boundary policy.',
+                          );
+                      }
+                      return policy.validateResume(validationInput);
+                  },
+              });
     let checkpointStore: AuthenticatedCheckpointStore | undefined;
     let openingCheckpointStore:
         | Promise<AuthenticatedCheckpointStore>
@@ -1037,6 +1097,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
     >();
     const commonProofPreparedOperations =
         new Set<InstalledCommonProofPreparedOperation>();
+    let acceptedSetupCompactPublicKeyVerificationActive = false;
     const retirePreparedCommonProofOperation = async (
         preparedOperation: InstalledCommonProofPreparedOperation,
     ): Promise<void> => {
@@ -1148,7 +1209,12 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 );
             }
             openingCheckpointStore ??= ownedCustody
-                .openCheckpointStore(input.checkpointStore)
+                .openCheckpointStore({
+                    ...input.checkpointStore,
+                    boundaryPolicy:
+                        installedCheckpointBoundaryPolicy ??
+                        input.checkpointStore.boundaryPolicy,
+                })
                 .then((opened) => opened.claimExclusiveOwner());
             checkpointStore = await openingCheckpointStore;
             return checkpointStore;
@@ -3481,6 +3547,166 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 storeReservation,
             );
             return reservation;
+        },
+    );
+    installedCustodyWorkerHostAcceptedSetupCompactPublicKeyVerifiers.set(
+        uninstall,
+        (verificationInput) => {
+            if (uninstalled || terminalFailure !== undefined) {
+                return Promise.reject(
+                    terminalFailure ??
+                        new BrowserActionStorageCustodyError(
+                            'Closed',
+                            'The custody worker host is no longer available for accepted-setup compact public-key verification.',
+                        ),
+                );
+            }
+            if (acceptedSetupCompactPublicKeyVerificationActive) {
+                return Promise.reject(
+                    new BrowserActionStorageCustodyError(
+                        'InvalidState',
+                        'The installed worker already owns an accepted-setup compact public-key verification.',
+                    ),
+                );
+            }
+            const copiedCheckpoint =
+                verificationInput.checkpoint.mode === 'fresh'
+                    ? ({ mode: 'fresh' } as const)
+                    : Object.freeze({
+                          checkpointLineageIdentifier: Uint8Array.from(
+                              copyBytes(
+                                  verificationInput.checkpoint
+                                      .checkpointLineageIdentifier,
+                                  mutationIdentifierByteLength,
+                                  'Accepted-setup compact public-key checkpoint-lineage identifier',
+                              ),
+                          ),
+                          mode: 'resumed' as const,
+                          safeBoundaryOrdinal:
+                              verificationInput.checkpoint.safeBoundaryOrdinal,
+                      });
+            acceptedSetupCompactPublicKeyVerificationActive = true;
+            const runVerification = operationTail.then(async () => {
+                let openedCheckpointLineageIdentifier:
+                    | Uint8Array<ArrayBuffer>
+                    | undefined;
+                try {
+                    acceptedSetupCompactPublicKeyCheckpointBoundaryPolicy =
+                        createAcceptedSetupCompactPublicKeyVerificationCheckpointBoundaryPolicy(
+                            verificationInput.kernel,
+                        );
+                    const store = await requireCheckpointStore();
+                    const verificationResult =
+                        await verifyAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                            {
+                                assembly: verificationInput.assembly,
+                                canonicalApplicationStatementBytes:
+                                    verificationInput.canonicalApplicationStatementBytes,
+                                canonicalProofBytes:
+                                    verificationInput.canonicalProofBytes,
+                                canonicalPublicInputBytes:
+                                    verificationInput.canonicalPublicInputBytes,
+                                kernel: verificationInput.kernel,
+                                options: {
+                                    ...verificationInput.options,
+                                    openCheckpointCustody: async (
+                                        orderedSourceDigests,
+                                    ) => {
+                                        const opened =
+                                            await openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody(
+                                                store,
+                                                {
+                                                    kernel: verificationInput.kernel,
+                                                    orderedSourceDigests,
+                                                    ...(copiedCheckpoint.mode ===
+                                                    'fresh'
+                                                        ? {}
+                                                        : {
+                                                              resume: {
+                                                                  checkpointLineageIdentifier:
+                                                                      copiedCheckpoint.checkpointLineageIdentifier,
+                                                                  safeBoundaryOrdinal:
+                                                                      copiedCheckpoint.safeBoundaryOrdinal,
+                                                              },
+                                                          }),
+                                                    signal: verificationInput
+                                                        .options?.signal,
+                                                },
+                                            );
+                                        openedCheckpointLineageIdentifier =
+                                            Uint8Array.from(
+                                                opened.checkpointLineageIdentifier,
+                                            );
+                                        const checkpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody =
+                                            Object.freeze({
+                                                publishAuthenticatedCheckpoint:
+                                                    async (
+                                                        canonicalCheckpointBytes,
+                                                        safeBoundaryOrdinal,
+                                                    ) => {
+                                                        await opened.checkpointCustody.publishAuthenticatedCheckpoint(
+                                                            canonicalCheckpointBytes,
+                                                            safeBoundaryOrdinal,
+                                                        );
+                                                        try {
+                                                            await verificationInput.onCheckpointPublished?.(
+                                                                Object.freeze({
+                                                                    checkpointLineageIdentifier:
+                                                                        Uint8Array.from(
+                                                                            opened.checkpointLineageIdentifier,
+                                                                        ),
+                                                                    safeBoundaryOrdinal,
+                                                                }),
+                                                            );
+                                                        } catch (notificationFailure) {
+                                                            try {
+                                                                await store.evict(
+                                                                    opened.checkpointLineageIdentifier,
+                                                                );
+                                                            } catch (cleanupFailure) {
+                                                                throw new BrowserActionStorageCustodyError(
+                                                                    'StorageFailure',
+                                                                    'Accepted-setup compact public-key checkpoint reporting failed and its unreported durable checkpoint could not be evicted.',
+                                                                    [
+                                                                        notificationFailure,
+                                                                        cleanupFailure,
+                                                                    ],
+                                                                );
+                                                            }
+                                                            throw notificationFailure;
+                                                        }
+                                                    },
+                                                release: () =>
+                                                    opened.checkpointCustody.release(),
+                                                restoreAuthenticatedCheckpoint:
+                                                    () =>
+                                                        opened.checkpointCustody.restoreAuthenticatedCheckpoint(),
+                                            });
+                                        return Object.freeze({
+                                            checkpointCustody,
+                                            mode: copiedCheckpoint.mode,
+                                        });
+                                    },
+                                },
+                            },
+                        );
+                    if (openedCheckpointLineageIdentifier !== undefined) {
+                        await store.evict(openedCheckpointLineageIdentifier);
+                    }
+                    return verificationResult;
+                } finally {
+                    openedCheckpointLineageIdentifier?.fill(0);
+                    if (copiedCheckpoint.mode === 'resumed') {
+                        copiedCheckpoint.checkpointLineageIdentifier.fill(0);
+                    }
+                    acceptedSetupCompactPublicKeyVerificationActive = false;
+                }
+            });
+            operationTail = runVerification.then(
+                () => undefined,
+                () => undefined,
+            );
+            return runVerification;
         },
     );
     installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.set(

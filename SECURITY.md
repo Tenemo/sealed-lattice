@@ -100,11 +100,15 @@ consequences are:
   exclusive. A hostile dual-custody input is refused before kernel preparation,
   every distinct supplied identity is released once, and one adopted identity
   performs restoration, publication, and cleanup. The concrete cold-restore
-  test uses synthetic cursor bytes, and the adapter is not installed in the
-  production browser worker host. Terminal WHIR itself is also still one
-  synchronous call before the new boundary. At selected pre-challenge geometry,
-  its current first fold has a source-derived minimum overlap of 209,715,200
-  bytes before other verifier state. Production-host custody installation,
+  test uses synthetic cursor bytes. The production custody-worker host now
+  installs the accepted adapter, routes only its exact deterministic checkpoint
+  profile, obtains its four source digests from the prepared Rust verifier,
+  publishes resume coordinates only after durable commit, and evicts terminal
+  state. That host coverage remains same-realm; it does not establish
+  dedicated-worker destruction and recreation. Terminal WHIR itself is also
+  still one synchronous call before the new boundary. At selected pre-challenge
+  geometry, its current first fold has a source-derived minimum overlap of
+  209,715,200 bytes before other verifier state. Dedicated-worker invocation,
   bounded transport and terminal WHIR, selected actual-byte cold restoration,
   the complete equation-invalid hostile corpus, and the compact generation
   release ABI remain absent.
@@ -244,16 +248,19 @@ that a coherent snapshot is newest.
   response-generation exports plus source-bound accepted-verification lifecycle
   exports. Concrete protocol adapters now separate the algebra-only and accepted
   cursors; the accepted geometry comes from kernel exports, and the worker
-  enforces one custody identity. The production browser-worker host installs
-  neither adapter, and no compact generation ABI completes the pair.
+  enforces one custody identity. The custody-worker host installs the accepted
+  adapter with verifier-derived source bindings and terminal eviction, but its
+  current coverage is same-realm, the algebra-only adapter is not installed,
+  and no compact generation ABI completes the pair.
 - `SEC-020`: Guarded selected-size native evidence covers the complete
   public-key response schedule, source-bound algebraic verification, and one
   exact emitted-proof restore through the algebra-only cursor. The accepted
-  adapter has synthetic-byte cold-restore coverage. A separate desktop Chromium
-  diagnostic replays the CFW storage lifecycle. Synchronous terminal WHIR and
-  its memory overlap, browser-storage amplification, release-WebAssembly proof
-  execution, selected actual-byte accepted-cursor restoration, and full browser
-  custody remain open.
+  adapter has same-realm synthetic-byte host resume coverage, including
+  wrong-source refusal and terminal checkpoint eviction. A separate desktop
+  Chromium diagnostic replays the CFW storage lifecycle. Dedicated-worker loss,
+  synchronous terminal WHIR and its memory overlap, browser-storage
+  amplification, release-WebAssembly proof execution, selected actual-byte
+  accepted-cursor restoration, and full browser custody remain open.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

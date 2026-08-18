@@ -11,7 +11,10 @@ import {
     AuthenticatedCheckpointStoreError,
     describeAuthenticatedCheckpointStateStream,
     type AuthenticatedCheckpointStore,
+    type CheckpointBoundary,
+    type CheckpointBoundaryPolicy,
     type CheckpointOperationIdentity,
+    type ExpectedCheckpointBoundary,
     type ResumedCheckpoint,
 } from './authenticated-checkpoint-store.js';
 import {
@@ -21,6 +24,7 @@ import {
 
 const hashByteLength = 64;
 const checkpointLineageIdentifierByteLength = 32;
+const acceptedSetupCompactPublicKeyCheckpointSourceDigestCount = 4;
 
 type CompactPublicKeyVerificationCheckpointProfile = Readonly<{
     checkpointByteLength: number;
@@ -36,6 +40,79 @@ const compactPublicKeyAlgebraicVerificationCheckpointProfile = Object.freeze({
     stateStreamDomain:
         compactPublicKeyVerificationCheckpointStateStreamDomains.algebraic,
 }) satisfies CompactPublicKeyVerificationCheckpointProfile;
+
+const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+    if (left.byteLength !== right.byteLength) return false;
+    let difference = 0;
+    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
+        difference |= (left[byteIndex] ?? 0) ^ (right[byteIndex] ?? 0);
+    }
+    return difference === 0;
+};
+
+const validateAcceptedSetupCompactPublicKeyCheckpointBoundary = (
+    boundary: CheckpointBoundary | ExpectedCheckpointBoundary,
+    safeBoundaryCount: number,
+): void => {
+    const expectedCursorManifestBytes =
+        createEmptyCompactPublicKeyVerificationPrivateRandomnessCursorManifestBytes();
+    const valid =
+        boundary.operationKind === publicKeyShareProofFamilySchemaIdentifier &&
+        boundary.stateStreamDomain ===
+            compactPublicKeyVerificationCheckpointStateStreamDomains.acceptedSetup &&
+        Number.isSafeInteger(boundary.safeBoundaryOrdinal) &&
+        boundary.safeBoundaryOrdinal >= 0 &&
+        boundary.safeBoundaryOrdinal < safeBoundaryCount &&
+        Array.isArray(boundary.orderedSourceDigests) &&
+        boundary.orderedSourceDigests.length ===
+            acceptedSetupCompactPublicKeyCheckpointSourceDigestCount &&
+        boundary.orderedSourceDigests.every(
+            (digest) =>
+                digest instanceof Uint8Array &&
+                digest.byteLength === hashByteLength,
+        ) &&
+        boundary.privateRandomnessStreamAttemptIdentifier === undefined &&
+        boundary.privateRandomCursorManifestBytes instanceof Uint8Array &&
+        bytesEqual(
+            boundary.privateRandomCursorManifestBytes,
+            expectedCursorManifestBytes,
+        );
+    expectedCursorManifestBytes.fill(0);
+    if (!valid) {
+        throw new AuthenticatedCheckpointStoreError(
+            'InvalidInput',
+            'The accepted-setup compact public-key checkpoint boundary is outside its canonical release profile.',
+        );
+    }
+};
+
+export const createAcceptedSetupCompactPublicKeyVerificationCheckpointBoundaryPolicy =
+    (kernel: TranscriptCoreKernel): CheckpointBoundaryPolicy => {
+        const { safeBoundaryCount } =
+            readAcceptedSetupCompactPublicKeyVerificationCheckpointGeometry(
+                kernel,
+            );
+        return Object.freeze({
+            validatePublication: ({ boundary, previousBoundary }) => {
+                if (previousBoundary !== undefined) {
+                    validateAcceptedSetupCompactPublicKeyCheckpointBoundary(
+                        previousBoundary,
+                        safeBoundaryCount,
+                    );
+                }
+                validateAcceptedSetupCompactPublicKeyCheckpointBoundary(
+                    boundary,
+                    safeBoundaryCount,
+                );
+            },
+            validateResume: ({ expectedBoundary }) => {
+                validateAcceptedSetupCompactPublicKeyCheckpointBoundary(
+                    expectedBoundary,
+                    safeBoundaryCount,
+                );
+            },
+        });
+    };
 
 export type CompactPublicKeyAlgebraicVerificationCheckpointResume = Readonly<{
     checkpointLineageIdentifier: Uint8Array;

@@ -1542,6 +1542,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         outputPointer: number,
         outputByteLength: number,
     ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests?: (
+        preparedHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
     sealed_lattice_accepted_setup_compact_public_key_cancel_verification?: (
         operationHandle: number,
     ) => number;

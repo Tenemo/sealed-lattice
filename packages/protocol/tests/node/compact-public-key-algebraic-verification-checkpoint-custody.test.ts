@@ -1,4 +1,5 @@
 import { foundationProfile } from '@sealed-lattice/types';
+import { publicKeyShareProofFamilySchemaIdentifier } from '@sealed-lattice/wasm';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,6 +8,11 @@ import {
     type AuthenticatedCheckpointStoreLimits,
     type CheckpointBoundaryPolicy,
 } from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
+import { createAcceptedSetupCompactPublicKeyVerificationCheckpointBoundaryPolicy } from '#packages/protocol/src/runtime/compact-public-key-algebraic-verification-checkpoint-custody';
+import {
+    compactPublicKeyVerificationCheckpointStateStreamDomains,
+    createEmptyCompactPublicKeyVerificationPrivateRandomnessCursorManifestBytes,
+} from '#packages/protocol/src/runtime/compact-public-key-verification-checkpoint-contract';
 import type { UntrustedStorageTransactionStore } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
     generateRuntimeStorageEncryptionKey,
@@ -433,6 +439,62 @@ describe('Compact public-key algebraic verification checkpoint custody', () => {
 });
 
 describe('Accepted-setup compact public-key verification checkpoint custody', () => {
+    it('accepts only the exact deterministic accepted-verifier boundary profile', async () => {
+        const policy =
+            createAcceptedSetupCompactPublicKeyVerificationCheckpointBoundaryPolicy(
+                createAcceptedCheckpointGeometryKernel(),
+            );
+        const validBoundary = {
+            operationKind: publicKeyShareProofFamilySchemaIdentifier,
+            orderedSourceDigests: sourceDigests(),
+            privateRandomCursorManifestBytes:
+                createEmptyCompactPublicKeyVerificationPrivateRandomnessCursorManifestBytes(),
+            safeBoundaryOrdinal: 4_508,
+            stateStreamDomain:
+                compactPublicKeyVerificationCheckpointStateStreamDomains.acceptedSetup,
+        };
+
+        await expect(
+            Promise.resolve().then(() =>
+                policy.validateResume({
+                    checkpointLineageIdentifier: new Uint8Array(32),
+                    expectedBoundary: validBoundary,
+                }),
+            ),
+        ).resolves.toBeUndefined();
+
+        for (const malformedBoundary of [
+            {
+                ...validBoundary,
+                operationKind: publicKeyShareProofFamilySchemaIdentifier + 1,
+            },
+            {
+                ...validBoundary,
+                orderedSourceDigests: sourceDigests().slice(1),
+            },
+            {
+                ...validBoundary,
+                privateRandomCursorManifestBytes: Uint8Array.of(0),
+            },
+            {
+                ...validBoundary,
+                privateRandomnessStreamAttemptIdentifier: new Uint8Array(32),
+            },
+            { ...validBoundary, safeBoundaryOrdinal: 4_509 },
+            { ...validBoundary, safeBoundaryOrdinal: -1 },
+            { ...validBoundary, stateStreamDomain: 'wrong-domain' },
+        ]) {
+            await expect(
+                Promise.resolve().then(() =>
+                    policy.validateResume({
+                        checkpointLineageIdentifier: new Uint8Array(32),
+                        expectedBoundary: malformedBoundary,
+                    }),
+                ),
+            ).rejects.toMatchObject({ code: 'InvalidInput' });
+        }
+    });
+
     it('derives accepted geometry from canonical kernel exports before opening custody', async () => {
         const { store } = await openCheckpointStore();
         try {

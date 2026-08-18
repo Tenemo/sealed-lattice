@@ -16,7 +16,11 @@ not a separately supported public voting API.
   cursor across interrupted replacement. The algebra-only profile uses 400
   bytes and 290 CFW boundaries. The accepted profile reads its 404-byte,
   4,509-boundary geometry from the loaded scalar WASM kernel and uses a distinct
-  canonical state-stream domain.
+  canonical state-stream domain. The custody-worker host routes that profile
+  through a strict policy, takes all four source digests from the prepared Rust
+  verifier, reports resume coordinates only after durable publication, and
+  evicts terminal state. Current host coverage is same-realm and synthetic;
+  dedicated-worker loss and selected actual-byte restoration remain open.
 - Assemble inputs for setup, ballot, aggregation, evaluator, finality, and
   target-release verification without reimplementing certified cryptography in
   TypeScript.

@@ -910,6 +910,54 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_compact_public_key_copy_v
     0
 }
 
+/// Copies the four verifier-derived public-input bindings retained by one
+/// prepared accepted-setup compact public-key verification. These are the
+/// ordered source digests used by authenticated checkpoint custody; callers
+/// cannot substitute a different checkpoint lineage without the later
+/// transport and source-correspondence checks refusing it.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the compact transport-binding byte
+/// length reported by `sealed_lattice_compact_public_key_transport_bindings_byte_length`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+    prepared_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length != COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let bindings = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .accepted_setup_compact_public_key_prepared_verifications
+            .get(&prepared_handle)
+            .map(|prepared| {
+                prepared
+                    .statement_authority
+                    .expected_public_input_bindings()
+            })
+            .ok_or(RefusalReason::ConsumedState)
+    });
+    let bindings = match bindings {
+        Ok(bindings) => bindings,
+        Err(refusal_reason) => return refusal_status(refusal_reason),
+    };
+    let mut output_cursor = output_pointer;
+    for binding in bindings.ordered_hashes() {
+        unsafe {
+            output_cursor
+                .copy_from_nonoverlapping(binding.as_bytes().as_ptr(), Hash512::BYTE_LENGTH);
+            output_cursor = output_cursor.add(Hash512::BYTE_LENGTH);
+        }
+    }
+    0
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_accepted_setup_compact_public_key_finish_verification(
     verified_capability_handle: u32,
@@ -3896,6 +3944,39 @@ mod tests {
         assert_ne!(
             ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+        );
+        let mut source_digests = [0xa5_u8; COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+                    19,
+                    source_digests.as_mut_ptr(),
+                    source_digests.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert!(source_digests.iter().all(|byte| *byte == 0xa5));
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+                    19,
+                    source_digests.as_mut_ptr(),
+                    source_digests.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert!(source_digests.iter().all(|byte| *byte == 0xa5));
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+                    19,
+                    core::ptr::null_mut(),
+                    source_digests.len(),
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
         );
         let mut poll_kind = u32::MAX;
         let mut completed_work_unit_count = u32::MAX;

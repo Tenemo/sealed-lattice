@@ -565,6 +565,7 @@ type NumberExportName =
     | 'sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification'
     | 'sealed_lattice_accepted_setup_compact_public_key_begin_verification'
     | 'sealed_lattice_accepted_setup_compact_public_key_cancel_verification'
+    | 'sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests'
     | 'sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint'
     | 'sealed_lattice_accepted_setup_compact_public_key_discard_capability'
     | 'sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification'
