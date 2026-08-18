@@ -3159,7 +3159,12 @@ mod tests {
     use core::cell::Cell;
 
     #[cfg(not(target_arch = "wasm32"))]
-    use std::time::Instant;
+    use std::{
+        fs::{self, OpenOptions},
+        io::{ErrorKind, Write},
+        path::{Path, PathBuf},
+        time::Instant,
+    };
 
     #[cfg(not(target_arch = "wasm32"))]
     use super::super::{
@@ -3188,6 +3193,14 @@ mod tests {
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
                 compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
+                compact_proof_wire::CompactPublicInputBindings,
+                compact_public_key_algebraic_verifier::{
+                    CompactPublicKeyAlgebraicVerification,
+                    CompactPublicKeyAlgebraicVerificationPoll,
+                },
+                compact_public_key_verifier::{
+                    VerifiedCompactPublicKeyTransport, verify_selected_compact_public_key_transport,
+                },
                 compact_response_merkle::CompactResponseLeafValueKind,
                 compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement,
@@ -3210,6 +3223,147 @@ mod tests {
             prepare_exact_same_secret_evidence_attempt,
         },
     };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    const COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC: [u8; 8] = *b"SLCAPK01";
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn compact_public_key_algebraic_checkpoint_directory() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("the kernel crate belongs to the repository workspace")
+            .join("temp")
+            .join("test-checkpoints")
+            .join("compact-public-key-algebraic-verification")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_or_validate_compact_public_key_algebraic_checkpoint_file(
+        file_name: &str,
+        expected_bytes: &[u8],
+    ) {
+        let directory = compact_public_key_algebraic_checkpoint_directory();
+        fs::create_dir_all(&directory).expect("the algebraic checkpoint directory is available");
+        let path = directory.join(file_name);
+        match fs::read(&path) {
+            Ok(existing_bytes) => assert_eq!(
+                existing_bytes, expected_bytes,
+                "the existing algebraic checkpoint must match the current deterministic proof"
+            ),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .expect("the new algebraic checkpoint file is created exactly once");
+                file.write_all(expected_bytes)
+                    .expect("the complete algebraic checkpoint file is written");
+                file.sync_all()
+                    .expect("the complete algebraic checkpoint file is durable");
+            }
+            Err(error) => panic!("the algebraic checkpoint file can be read: {error}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn encode_compact_public_key_algebraic_checkpoint_context(
+        public_input_bindings: CompactPublicInputBindings,
+        proof_attempt_identifier: [u8; 32],
+        compact_construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
+        checkpoint_schedule_digest: Hash512,
+        source_replay_binding: [u8; Hash512::BYTE_LENGTH],
+        private_coin_derivation_binding_hash: Hash512,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC.len()
+                + proof_attempt_identifier.len()
+                + 8 * Hash512::BYTE_LENGTH,
+        );
+        bytes.extend_from_slice(&COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC);
+        bytes.extend_from_slice(&proof_attempt_identifier);
+        for binding in public_input_bindings.ordered_hashes() {
+            bytes.extend_from_slice(&binding.into_bytes());
+        }
+        bytes.extend_from_slice(&compact_construction_identity_hash);
+        bytes.extend_from_slice(&checkpoint_schedule_digest.into_bytes());
+        bytes.extend_from_slice(&source_replay_binding);
+        bytes.extend_from_slice(&private_coin_derivation_binding_hash.into_bytes());
+        bytes
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn decode_compact_public_key_algebraic_checkpoint_bindings(
+        bytes: &[u8],
+    ) -> CompactPublicInputBindings {
+        const PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
+        const CONTEXT_HASH_COUNT: usize = 8;
+        let expected_byte_length = COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC.len()
+            + PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH
+            + CONTEXT_HASH_COUNT * Hash512::BYTE_LENGTH;
+        assert_eq!(bytes.len(), expected_byte_length);
+        assert_eq!(
+            &bytes[..COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC.len()],
+            &COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC
+        );
+        let mut cursor = COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC.len();
+        let proof_attempt_identifier =
+            &bytes[cursor..cursor + PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+        assert_ne!(
+            proof_attempt_identifier,
+            [0_u8; PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH]
+        );
+        cursor += PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH;
+        let mut context_hashes = Vec::with_capacity(CONTEXT_HASH_COUNT);
+        for _ in 0..CONTEXT_HASH_COUNT {
+            let hash_bytes: [u8; Hash512::BYTE_LENGTH] = bytes
+                [cursor..cursor + Hash512::BYTE_LENGTH]
+                .try_into()
+                .expect("the checkpoint context contains one complete hash");
+            assert_ne!(hash_bytes, [0_u8; Hash512::BYTE_LENGTH]);
+            context_hashes.push(Hash512::from_bytes(hash_bytes));
+            cursor += Hash512::BYTE_LENGTH;
+        }
+        assert_eq!(cursor, bytes.len());
+        CompactPublicInputBindings::new(
+            context_hashes[0],
+            context_hashes[1],
+            context_hashes[2],
+            context_hashes[3],
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn verify_compact_public_key_bytes_algebraically(
+        public_input_bindings: CompactPublicInputBindings,
+        canonical_proof_bytes: Box<[u8]>,
+        canonical_public_input_bytes: Box<[u8]>,
+    ) -> (VerifiedCompactPublicKeyTransport, u64) {
+        let transport = verify_selected_compact_public_key_transport(
+            public_input_bindings,
+            canonical_proof_bytes,
+            canonical_public_input_bytes,
+        )
+        .expect("the emitted proof passes independent compact transport verification");
+        let mut algebraic_verification = CompactPublicKeyAlgebraicVerification::begin(transport)
+            .expect("the compact algebraic verifier accepts the transported inputs");
+        let mut algebraic_poll_count = 0_u64;
+        let algebraic_terminal = loop {
+            match algebraic_verification
+                .advance(65_536)
+                .expect("the compact CFW and WHIR equations verify")
+            {
+                CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert!(completed_work_unit_count > 0);
+                    algebraic_poll_count += 1;
+                }
+                CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => break *terminal,
+            }
+        };
+        (algebraic_terminal.into_transport(), algebraic_poll_count)
+    }
 
     struct CountingCompactCfwExternalRowSource<'source, Source> {
         source: &'source Source,
@@ -7389,6 +7543,26 @@ mod tests {
         let response_generation_output = prepared_main_epoch
             .finish()
             .expect("the terminal main-WHIR base emits one complete canonical proof");
+        let checkpoint_context = encode_compact_public_key_algebraic_checkpoint_context(
+            public_input_bindings,
+            proof_attempt_identifier,
+            compact_construction_identity_hash,
+            checkpoint_schedule_digest,
+            source_replay_binding,
+            private_coin_derivation_binding_hash,
+        );
+        write_or_validate_compact_public_key_algebraic_checkpoint_file(
+            "generated-proof.bin",
+            response_generation_output.canonical_proof_bytes(),
+        );
+        write_or_validate_compact_public_key_algebraic_checkpoint_file(
+            "public-input.bin",
+            &canonical_public_input_bytes,
+        );
+        write_or_validate_compact_public_key_algebraic_checkpoint_file(
+            "binding-and-context.bin",
+            &checkpoint_context,
+        );
         let emitted_cdhz_measurement = measure_selected_compact_emission_cdhz(
             Some(response_generation_output.canonical_proof_bytes()),
             Some(&canonical_public_input_bytes),
@@ -7405,6 +7579,25 @@ mod tests {
         assert_eq!(
             actual_byte_census.shared_hash_graph.total_hash_count,
             emitted_cdhz_measurement.observed_nrdx_verifier_q_v
+        );
+        let algebraic_verification_started_at = Instant::now();
+        let (verified_transport, algebraic_poll_count) =
+            verify_compact_public_key_bytes_algebraically(
+                public_input_bindings,
+                response_generation_output
+                    .canonical_proof_bytes()
+                    .to_vec()
+                    .into_boxed_slice(),
+                canonical_public_input_bytes.clone().into_boxed_slice(),
+            );
+        assert_eq!(
+            verified_transport.proof_view().canonical_bytes(),
+            response_generation_output.canonical_proof_bytes()
+        );
+        println!(
+            "compact public-key focused owner positive algebraic verification complete elapsed_milliseconds={} cfw_poll_count={}",
+            algebraic_verification_started_at.elapsed().as_millis(),
+            algebraic_poll_count,
         );
         println!(
             "compact public-key focused owner complete elapsed_milliseconds={} canonical_proof_byte_length={} opened_leaf_count={} frontier_node_count={} verifier_hash_count={} response_storage_transaction_count={} response_storage_written_bytes={} response_storage_read_bytes={} response_storage_peak_bytes={}",
@@ -7425,6 +7618,37 @@ mod tests {
             response_generation_output
                 .external_memory_usage()
                 .peak_stored_byte_length(),
+        );
+    }
+
+    #[test]
+    #[ignore = "manual checkpointed compact public-key algebraic verification gate"]
+    fn heavy_rust_kernel_checkpointed_compact_public_key_proof_verifies_algebraically() {
+        let checkpoint_directory = compact_public_key_algebraic_checkpoint_directory();
+        let canonical_proof_bytes = fs::read(checkpoint_directory.join("generated-proof.bin"))
+            .expect("the generated compact proof checkpoint exists");
+        let canonical_public_input_bytes = fs::read(checkpoint_directory.join("public-input.bin"))
+            .expect("the compact public-input checkpoint exists");
+        let context_bytes = fs::read(checkpoint_directory.join("binding-and-context.bin"))
+            .expect("the compact binding-and-context checkpoint exists");
+        let public_input_bindings =
+            decode_compact_public_key_algebraic_checkpoint_bindings(&context_bytes);
+        let verification_started_at = Instant::now();
+        let (verified_transport, algebraic_poll_count) =
+            verify_compact_public_key_bytes_algebraically(
+                public_input_bindings,
+                canonical_proof_bytes.clone().into_boxed_slice(),
+                canonical_public_input_bytes.into_boxed_slice(),
+            );
+        assert_eq!(
+            verified_transport.proof_view().canonical_bytes(),
+            canonical_proof_bytes
+        );
+        println!(
+            "checkpointed compact public-key algebraic verification complete elapsed_milliseconds={} cfw_poll_count={} canonical_proof_byte_length={}",
+            verification_started_at.elapsed().as_millis(),
+            algebraic_poll_count,
+            canonical_proof_bytes.len(),
         );
     }
 

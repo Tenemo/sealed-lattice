@@ -74,6 +74,36 @@ struct PublicProductTask {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublicDirectCoefficient {
+    SignedInteger(i128),
+    LookupChallenge,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublicDirectRowPattern {
+    Exact { row_coefficient_ordinal: u64 },
+    CompleteBlock { public_element_stride: u64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PublicDirectTask {
+    row_block_ordinal: u64,
+    row_pattern: PublicDirectRowPattern,
+    first_public_element: u64,
+    public_element_count_per_row: u64,
+    coefficient: PublicDirectCoefficient,
+    matrix_role: CompactCfwMatrixRole,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PublicCenteringTask {
+    row_block_ordinal: u64,
+    public_vector_first_element: u64,
+    centering_coefficient: i128,
+    matrix_role: CompactCfwMatrixRole,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LookupReciprocalTask {
     row_block_ordinal: u64,
     row_coefficient_ordinal: u64,
@@ -88,9 +118,12 @@ pub(super) struct StructuredTransposePlan {
     ring_variable_count: u32,
     ring_block_count: u64,
     ring_block_variable_count: u32,
+    public_input_element_count: u64,
     source_covector_element_count: u64,
     transform_domain_size: u64,
     sparse_tasks: Box<[SparseTask]>,
+    public_direct_tasks: Box<[PublicDirectTask]>,
+    public_centering_tasks: Box<[PublicCenteringTask]>,
     public_product_tasks: Box<[PublicProductTask]>,
     lookup_reciprocal_task: LookupReciprocalTask,
 }
@@ -102,6 +135,8 @@ impl StructuredTransposePlan {
         geometry: CompactStructuredWitnessCovectorGeometry,
     ) -> Result<Self, CommonProofProverError> {
         let mut sparse_tasks = Vec::new();
+        let mut public_direct_tasks = Vec::new();
+        let mut public_centering_tasks = Vec::new();
         let mut public_product_tasks = Vec::new();
         let mut lookup_reciprocal_task = None;
         for segment in &relation.ordered_constraint_segments {
@@ -117,12 +152,15 @@ impl StructuredTransposePlan {
                     for (matrix_role, form) in matrix_forms(&row) {
                         append_form_tasks(
                             form,
+                            None,
                             matrix_role,
                             row_block_ordinal,
                             row_coefficient_ordinal,
                             true,
                             matrices,
                             &mut sparse_tasks,
+                            &mut public_direct_tasks,
+                            &mut public_centering_tasks,
                             &mut public_product_tasks,
                             &mut lookup_reciprocal_task,
                         )?;
@@ -145,16 +183,27 @@ impl StructuredTransposePlan {
                             )
                             .ok_or(CommonProofProverError::CountOverflow)?;
                         let row = matrices.row(relation, representative_row_ordinal)?;
+                        let next_row = matrices.row(
+                            relation,
+                            representative_row_ordinal
+                                .checked_add(1)
+                                .ok_or(CommonProofProverError::CountOverflow)?,
+                        )?;
                         let row_block_ordinal = representative_row_ordinal / relation.ring_degree;
-                        for (matrix_role, form) in matrix_forms(&row) {
+                        for ((matrix_role, form), (_, next_form)) in
+                            matrix_forms(&row).into_iter().zip(matrix_forms(&next_row))
+                        {
                             append_form_tasks(
                                 form,
+                                Some(next_form),
                                 matrix_role,
                                 row_block_ordinal,
                                 0,
                                 false,
                                 matrices,
                                 &mut sparse_tasks,
+                                &mut public_direct_tasks,
+                                &mut public_centering_tasks,
                                 &mut public_product_tasks,
                                 &mut lookup_reciprocal_task,
                             )?;
@@ -196,9 +245,12 @@ impl StructuredTransposePlan {
             ring_variable_count: geometry.ring_variable_count(),
             ring_block_count: geometry.ring_block_count(),
             ring_block_variable_count: geometry.ring_block_variable_count(),
+            public_input_element_count: matrices.public_input_length,
             source_covector_element_count: geometry.source_covector_element_count(),
             transform_domain_size: geometry.transform_domain_size(),
             sparse_tasks: sparse_tasks.into_boxed_slice(),
+            public_direct_tasks: public_direct_tasks.into_boxed_slice(),
+            public_centering_tasks: public_centering_tasks.into_boxed_slice(),
             public_product_tasks: public_product_tasks.into_boxed_slice(),
             lookup_reciprocal_task,
         };
@@ -210,6 +262,7 @@ impl StructuredTransposePlan {
         if self.ring_degree < 2
             || !self.ring_degree.is_power_of_two()
             || !self.ring_block_count.is_power_of_two()
+            || self.public_input_element_count == 0
             || self.ring_variable_count != self.ring_degree.ilog2()
             || self.ring_block_variable_count != self.ring_block_count.ilog2()
             || self.ring_degree.checked_mul(2) != Some(self.transform_domain_size)
@@ -244,9 +297,53 @@ impl StructuredTransposePlan {
         for task in &self.public_product_tasks {
             if task.row_block_ordinal >= self.ring_block_count
                 || task
+                    .public_vector_first_element
+                    .checked_add(self.ring_degree)
+                    .is_none_or(|end| end > self.public_input_element_count)
+                || task
                     .private_vector_first_destination_element
                     .checked_add(self.ring_degree)
                     .is_none_or(|end| end > self.source_covector_element_count)
+            {
+                return Err(CommonProofProverError::InvalidInput);
+            }
+        }
+        for task in &self.public_direct_tasks {
+            let row_pattern_is_valid = match task.row_pattern {
+                PublicDirectRowPattern::Exact {
+                    row_coefficient_ordinal,
+                } => row_coefficient_ordinal < self.ring_degree,
+                PublicDirectRowPattern::CompleteBlock {
+                    public_element_stride,
+                } => {
+                    public_element_stride <= 1
+                        && task
+                            .first_public_element
+                            .checked_add(public_element_stride.saturating_mul(self.ring_degree - 1))
+                            .and_then(|last_start| {
+                                last_start.checked_add(task.public_element_count_per_row)
+                            })
+                            .is_some_and(|end| end <= self.public_input_element_count)
+                }
+            };
+            if task.row_block_ordinal >= self.ring_block_count
+                || task.public_element_count_per_row == 0
+                || !row_pattern_is_valid
+                || matches!(task.row_pattern, PublicDirectRowPattern::Exact { .. })
+                    && task
+                        .first_public_element
+                        .checked_add(task.public_element_count_per_row)
+                        .is_none_or(|end| end > self.public_input_element_count)
+            {
+                return Err(CommonProofProverError::InvalidInput);
+            }
+        }
+        for task in &self.public_centering_tasks {
+            if task.row_block_ordinal >= self.ring_block_count
+                || task
+                    .public_vector_first_element
+                    .checked_add(self.ring_degree)
+                    .is_none_or(|end| end > self.public_input_element_count)
             {
                 return Err(CommonProofProverError::InvalidInput);
             }
@@ -278,25 +375,75 @@ fn matrix_forms(
 #[allow(clippy::too_many_arguments)]
 fn append_form_tasks(
     form: &CompactStructuredLinearForm,
+    next_form: Option<&CompactStructuredLinearForm>,
     matrix_role: CompactCfwMatrixRole,
     row_block_ordinal: u64,
     row_coefficient_ordinal: u64,
     global_lookup_row: bool,
     matrices: &CompactStructuredR1csCatalog,
     sparse_tasks: &mut Vec<SparseTask>,
+    public_direct_tasks: &mut Vec<PublicDirectTask>,
+    public_centering_tasks: &mut Vec<PublicCenteringTask>,
     public_product_tasks: &mut Vec<PublicProductTask>,
     lookup_reciprocal_task: &mut Option<LookupReciprocalTask>,
 ) -> Result<(), CommonProofProverError> {
-    for term in &form.ordered_terms {
+    if next_form.is_some_and(|next| next.ordered_terms.len() != form.ordered_terms.len()) {
+        return Err(RelationPlanError::InvalidConstraint.into());
+    }
+    for (term_index, term) in form.ordered_terms.iter().enumerate() {
+        let next_term = next_form.and_then(|next| next.ordered_terms.get(term_index));
         match *term {
             CompactStructuredMatrixTerm::StaticEntry {
                 column_ordinal,
                 integer_coefficient,
             } => {
                 if column_ordinal < matrices.public_input_length {
+                    let row_pattern = if global_lookup_row {
+                        PublicDirectRowPattern::Exact {
+                            row_coefficient_ordinal,
+                        }
+                    } else {
+                        let CompactStructuredMatrixTerm::StaticEntry {
+                            column_ordinal: next_column_ordinal,
+                            integer_coefficient: next_integer_coefficient,
+                        } = *next_term.ok_or(RelationPlanError::InvalidConstraint)?
+                        else {
+                            return Err(RelationPlanError::InvalidConstraint.into());
+                        };
+                        let public_element_stride = next_column_ordinal
+                            .checked_sub(column_ordinal)
+                            .filter(|stride| *stride <= 1)
+                            .ok_or(RelationPlanError::InvalidConstraint)?;
+                        if next_integer_coefficient != integer_coefficient {
+                            return Err(RelationPlanError::InvalidConstraint.into());
+                        }
+                        PublicDirectRowPattern::CompleteBlock {
+                            public_element_stride,
+                        }
+                    };
+                    public_direct_tasks.push(PublicDirectTask {
+                        row_block_ordinal,
+                        row_pattern,
+                        first_public_element: column_ordinal,
+                        public_element_count_per_row: 1,
+                        coefficient: PublicDirectCoefficient::SignedInteger(integer_coefficient),
+                        matrix_role,
+                    });
                     continue;
                 }
                 if global_lookup_row || row_coefficient_ordinal != 0 {
+                    return Err(RelationPlanError::InvalidConstraint.into());
+                }
+                let CompactStructuredMatrixTerm::StaticEntry {
+                    column_ordinal: next_column_ordinal,
+                    integer_coefficient: next_integer_coefficient,
+                } = *next_term.ok_or(RelationPlanError::InvalidConstraint)?
+                else {
+                    return Err(RelationPlanError::InvalidConstraint.into());
+                };
+                if next_column_ordinal != column_ordinal + 1
+                    || next_integer_coefficient != integer_coefficient
+                {
                     return Err(RelationPlanError::InvalidConstraint.into());
                 }
                 sparse_tasks.push(SparseTask::Block(BlockStaticTask {
@@ -310,12 +457,72 @@ fn append_form_tasks(
                 if column_ordinal >= matrices.public_input_length {
                     return Err(RelationPlanError::InvalidConstraint.into());
                 }
+                let row_pattern = if global_lookup_row {
+                    PublicDirectRowPattern::Exact {
+                        row_coefficient_ordinal,
+                    }
+                } else {
+                    let CompactStructuredMatrixTerm::LookupChallengeEntry {
+                        column_ordinal: next_column_ordinal,
+                    } = *next_term.ok_or(RelationPlanError::InvalidConstraint)?
+                    else {
+                        return Err(RelationPlanError::InvalidConstraint.into());
+                    };
+                    let public_element_stride = next_column_ordinal
+                        .checked_sub(column_ordinal)
+                        .filter(|stride| *stride <= 1)
+                        .ok_or(RelationPlanError::InvalidConstraint)?;
+                    PublicDirectRowPattern::CompleteBlock {
+                        public_element_stride,
+                    }
+                };
+                public_direct_tasks.push(PublicDirectTask {
+                    row_block_ordinal,
+                    row_pattern,
+                    first_public_element: column_ordinal,
+                    public_element_count_per_row: 1,
+                    coefficient: PublicDirectCoefficient::LookupChallenge,
+                    matrix_role,
+                });
             }
             CompactStructuredMatrixTerm::UniformStaticRange {
                 first_column_ordinal,
                 element_count,
                 integer_coefficient,
             } => {
+                let range_end = first_column_ordinal
+                    .checked_add(element_count)
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+                if range_end <= matrices.public_input_length {
+                    let row_pattern = if global_lookup_row {
+                        PublicDirectRowPattern::Exact {
+                            row_coefficient_ordinal,
+                        }
+                    } else {
+                        match *next_term.ok_or(RelationPlanError::InvalidConstraint)? {
+                            CompactStructuredMatrixTerm::UniformStaticRange {
+                                first_column_ordinal: next_first_column_ordinal,
+                                element_count: next_element_count,
+                                integer_coefficient: next_integer_coefficient,
+                            } if next_first_column_ordinal == first_column_ordinal
+                                && next_element_count == element_count
+                                && next_integer_coefficient == integer_coefficient => {}
+                            _ => return Err(RelationPlanError::InvalidConstraint.into()),
+                        }
+                        PublicDirectRowPattern::CompleteBlock {
+                            public_element_stride: 0,
+                        }
+                    };
+                    public_direct_tasks.push(PublicDirectTask {
+                        row_block_ordinal,
+                        row_pattern,
+                        first_public_element: first_column_ordinal,
+                        public_element_count_per_row: element_count,
+                        coefficient: PublicDirectCoefficient::SignedInteger(integer_coefficient),
+                        matrix_role,
+                    });
+                    continue;
+                }
                 if !global_lookup_row || first_column_ordinal < matrices.public_input_length {
                     return Err(RelationPlanError::InvalidConstraint.into());
                 }
@@ -350,8 +557,8 @@ fn append_form_tasks(
                 public_vector_first_column_ordinal,
                 private_vector_first_column_ordinal,
                 output_coefficient_ordinal,
+                centered_offset,
                 integer_coefficient,
-                ..
             } => {
                 if global_lookup_row
                     || row_coefficient_ordinal != 0
@@ -361,6 +568,19 @@ fn append_form_tasks(
                 {
                     return Err(RelationPlanError::InvalidConstraint.into());
                 }
+                match *next_term.ok_or(RelationPlanError::InvalidConstraint)? {
+                    CompactStructuredMatrixTerm::PublicNegacyclicMatrixBand {
+                        public_vector_first_column_ordinal: next_public_first,
+                        private_vector_first_column_ordinal: next_private_first,
+                        output_coefficient_ordinal: 1,
+                        centered_offset: next_centered_offset,
+                        integer_coefficient: next_integer_coefficient,
+                    } if next_public_first == public_vector_first_column_ordinal
+                        && next_private_first == private_vector_first_column_ordinal
+                        && next_centered_offset == centered_offset
+                        && next_integer_coefficient == integer_coefficient => {}
+                    _ => return Err(RelationPlanError::InvalidConstraint.into()),
+                }
                 public_product_tasks.push(PublicProductTask {
                     row_block_ordinal,
                     public_vector_first_element: public_vector_first_column_ordinal,
@@ -369,6 +589,17 @@ fn append_form_tasks(
                     integer_coefficient,
                     matrix_role,
                 });
+                if centered_offset != 0 {
+                    public_centering_tasks.push(PublicCenteringTask {
+                        row_block_ordinal,
+                        public_vector_first_element: public_vector_first_column_ordinal,
+                        centering_coefficient: integer_coefficient
+                            .checked_mul(i128::from(centered_offset))
+                            .and_then(i128::checked_neg)
+                            .ok_or(RelationPlanError::IntegerBoundOverflow)?,
+                        matrix_role,
+                    });
+                }
             }
         }
     }
@@ -531,6 +762,8 @@ pub(crate) enum CompactStructuredWitnessCovectorAccumulatorStep {
     DestinationProjection,
     CoefficientEquality,
     BlockEquality,
+    PublicInputContribution,
+    PublicCenteringContribution,
     SparseWitness,
     LookupTablePrefixProduct,
     LookupTableProductInversion,
@@ -608,6 +841,21 @@ enum AccumulatorPhase {
     BuildDestinationProjection,
     BuildCoefficientEquality,
     BuildBlockEquality,
+    PublicDirect {
+        task_ordinal: usize,
+        next_row_offset: u64,
+        next_element_offset: u64,
+    },
+    PublicCenteringTotal {
+        task_ordinal: usize,
+        next_public_coefficient_ordinal: u64,
+        running_total: ProofChallengeExtensionElement,
+    },
+    PublicCenteringWeighted {
+        task_ordinal: usize,
+        next_output_coefficient_ordinal: u64,
+        signed_public_sum: ProofChallengeExtensionElement,
+    },
     SparseWitness {
         task_ordinal: usize,
         next_element_offset: u64,
@@ -675,6 +923,7 @@ where
     block_equality_builder: Option<LittleEndianEqualityBuilder>,
     coefficient_equality: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     block_equality: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+    public_contributions: Option<[ProofChallengeExtensionElement; COMPACT_CFW_MATRIX_COUNT]>,
     lookup_prefix_products: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     public_transform: Option<Zeroizing<Vec<ProofBaseFieldElement>>>,
     product_transform: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
@@ -731,6 +980,31 @@ where
             matrix_role_weights,
             destination,
             block_folding_challenges,
+            false,
+        )
+    }
+
+    /// Builds the projected transpose and the three verifier-owned public CFW
+    /// matrix evaluations in the same bounded structural traversal.
+    pub(crate) fn from_projected_public_relation_with_public_contributions(
+        source: Source,
+        relation: &CompactPublicKeyRelationCatalog,
+        row_point: &[CompactChallengeField],
+        matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+        destination: Vec<CompactChallengeField>,
+        block_folding_challenges: &[CompactChallengeField],
+    ) -> Result<Self, CommonProofProverError> {
+        let matrices = CompactStructuredR1csCatalog::derive(relation)?;
+        let geometry = CompactStructuredWitnessCovectorGeometry::derive(relation, &matrices)?;
+        let plan = StructuredTransposePlan::from_production(relation, &matrices, geometry)?;
+        Self::new_with_block_fold(
+            source,
+            plan,
+            row_point,
+            matrix_role_weights,
+            destination,
+            block_folding_challenges,
+            true,
         )
     }
 
@@ -748,6 +1022,7 @@ where
             matrix_role_weights,
             destination,
             None,
+            false,
         )
     }
 
@@ -758,6 +1033,7 @@ where
         matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
         destination: Vec<CompactChallengeField>,
         block_folding_challenges: &[CompactChallengeField],
+        track_public_contributions: bool,
     ) -> Result<Self, CommonProofProverError> {
         Self::new_with_optional_block_fold(
             source,
@@ -766,6 +1042,7 @@ where
             matrix_role_weights,
             destination,
             Some(block_folding_challenges),
+            track_public_contributions,
         )
     }
 
@@ -776,6 +1053,7 @@ where
         matrix_role_weights: [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
         destination: Vec<CompactChallengeField>,
         block_folding_challenges: Option<&[CompactChallengeField]>,
+        track_public_contributions: bool,
     ) -> Result<Self, CommonProofProverError> {
         plan.check()?;
         let expected_row_point_length = plan
@@ -865,6 +1143,8 @@ where
             block_equality_builder: Some(LittleEndianEqualityBuilder::new(block_point)?),
             coefficient_equality: None,
             block_equality: None,
+            public_contributions: track_public_contributions
+                .then_some([ProofChallengeExtensionElement::ZERO; COMPACT_CFW_MATRIX_COUNT]),
             lookup_prefix_products: None,
             public_transform: None,
             product_transform: None,
@@ -875,6 +1155,18 @@ where
                 AccumulatorPhase::BuildCoefficientEquality
             },
         })
+    }
+
+    pub(crate) fn completed_public_contributions(
+        &self,
+    ) -> Result<[CompactChallengeField; COMPACT_CFW_MATRIX_COUNT], CommonProofProverError> {
+        if self.phase != AccumulatorPhase::Complete {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Ok(self
+            .public_contributions
+            .ok_or(CommonProofProverError::InvalidInput)?
+            .map(compact_challenge_from_production))
     }
 
     /// Advances through one element chunk or one isolated transform.
@@ -954,9 +1246,17 @@ where
                                 .ok_or(CommonProofProverError::InvalidInput)?
                                 .finish()?,
                         );
-                        self.phase = AccumulatorPhase::SparseWitness {
-                            task_ordinal: 0,
-                            next_element_offset: 0,
+                        self.phase = if self.public_contributions.is_some() {
+                            AccumulatorPhase::PublicDirect {
+                                task_ordinal: 0,
+                                next_row_offset: 0,
+                                next_element_offset: 0,
+                            }
+                        } else {
+                            AccumulatorPhase::SparseWitness {
+                                task_ordinal: 0,
+                                next_element_offset: 0,
+                            }
                         };
                         continue;
                     }
@@ -964,6 +1264,228 @@ where
                     return step_completed(
                         CompactStructuredWitnessCovectorAccumulatorStep::BlockEquality,
                         completed_parent_count,
+                    );
+                }
+                AccumulatorPhase::PublicDirect {
+                    task_ordinal,
+                    next_row_offset,
+                    next_element_offset,
+                } => {
+                    let Some(&task) = self.plan.public_direct_tasks.get(task_ordinal) else {
+                        self.phase = AccumulatorPhase::PublicCenteringTotal {
+                            task_ordinal: 0,
+                            next_public_coefficient_ordinal: 0,
+                            running_total: ProofChallengeExtensionElement::ZERO,
+                        };
+                        continue;
+                    };
+                    let (row_count, row_coefficient_ordinal, public_element_stride) =
+                        match task.row_pattern {
+                            PublicDirectRowPattern::Exact {
+                                row_coefficient_ordinal,
+                            } => (1, row_coefficient_ordinal, 0),
+                            PublicDirectRowPattern::CompleteBlock {
+                                public_element_stride,
+                            } => (
+                                self.plan.ring_degree,
+                                next_row_offset,
+                                public_element_stride,
+                            ),
+                        };
+                    if next_row_offset == row_count {
+                        self.phase = AccumulatorPhase::PublicDirect {
+                            task_ordinal: task_ordinal
+                                .checked_add(1)
+                                .ok_or(CommonProofProverError::CountOverflow)?,
+                            next_row_offset: 0,
+                            next_element_offset: 0,
+                        };
+                        continue;
+                    }
+                    if next_element_offset == task.public_element_count_per_row {
+                        self.phase = AccumulatorPhase::PublicDirect {
+                            task_ordinal,
+                            next_row_offset: next_row_offset
+                                .checked_add(1)
+                                .ok_or(CommonProofProverError::CountOverflow)?,
+                            next_element_offset: 0,
+                        };
+                        continue;
+                    }
+                    let completed_element_count = task
+                        .public_element_count_per_row
+                        .checked_sub(next_element_offset)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        .min(maximum_element_count);
+                    let end_element_offset = next_element_offset
+                        .checked_add(completed_element_count)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let row_weight =
+                        self.row_weight(task.row_block_ordinal, row_coefficient_ordinal)?;
+                    for element_offset in next_element_offset..end_element_offset {
+                        let public_element = task
+                            .first_public_element
+                            .checked_add(
+                                next_row_offset
+                                    .checked_mul(public_element_stride)
+                                    .ok_or(CommonProofProverError::CountOverflow)?,
+                            )
+                            .and_then(|element| element.checked_add(element_offset))
+                            .ok_or(CommonProofProverError::CountOverflow)?;
+                        let public_value = ProofChallengeExtensionElement::from_base(
+                            self.source.public_input_base_value(public_element)?,
+                        );
+                        let term_value = match task.coefficient {
+                            PublicDirectCoefficient::SignedInteger(coefficient) => public_value
+                                .multiply_base(base_element_from_signed_integer(coefficient)?),
+                            PublicDirectCoefficient::LookupChallenge => {
+                                public_value.multiply(self.source.lookup_challenge())
+                            }
+                        };
+                        self.add_public_contribution(
+                            task.matrix_role,
+                            row_weight.multiply(term_value),
+                        )?;
+                    }
+                    self.phase = AccumulatorPhase::PublicDirect {
+                        task_ordinal,
+                        next_row_offset,
+                        next_element_offset: end_element_offset,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::PublicInputContribution,
+                            completed_work_unit_count: completed_element_count,
+                        },
+                    );
+                }
+                AccumulatorPhase::PublicCenteringTotal {
+                    task_ordinal,
+                    next_public_coefficient_ordinal,
+                    mut running_total,
+                } => {
+                    let Some(&task) = self.plan.public_centering_tasks.get(task_ordinal) else {
+                        self.phase = AccumulatorPhase::SparseWitness {
+                            task_ordinal: 0,
+                            next_element_offset: 0,
+                        };
+                        continue;
+                    };
+                    if next_public_coefficient_ordinal == self.plan.ring_degree {
+                        let first_public_value = ProofChallengeExtensionElement::from_base(
+                            self.source
+                                .public_input_base_value(task.public_vector_first_element)?,
+                        );
+                        self.phase = AccumulatorPhase::PublicCenteringWeighted {
+                            task_ordinal,
+                            next_output_coefficient_ordinal: 0,
+                            signed_public_sum: first_public_value
+                                .add(first_public_value)
+                                .subtract(running_total),
+                        };
+                        continue;
+                    }
+                    let completed_coefficient_count = self
+                        .plan
+                        .ring_degree
+                        .checked_sub(next_public_coefficient_ordinal)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        .min(maximum_element_count);
+                    let end_coefficient_ordinal = next_public_coefficient_ordinal
+                        .checked_add(completed_coefficient_count)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    for public_coefficient_ordinal in
+                        next_public_coefficient_ordinal..end_coefficient_ordinal
+                    {
+                        running_total =
+                            running_total.add(ProofChallengeExtensionElement::from_base(
+                                self.source.public_input_base_value(
+                                    task.public_vector_first_element
+                                        .checked_add(public_coefficient_ordinal)
+                                        .ok_or(CommonProofProverError::CountOverflow)?,
+                                )?,
+                            ));
+                    }
+                    self.phase = AccumulatorPhase::PublicCenteringTotal {
+                        task_ordinal,
+                        next_public_coefficient_ordinal: end_coefficient_ordinal,
+                        running_total,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::PublicCenteringContribution,
+                            completed_work_unit_count: completed_coefficient_count,
+                        },
+                    );
+                }
+                AccumulatorPhase::PublicCenteringWeighted {
+                    task_ordinal,
+                    next_output_coefficient_ordinal,
+                    mut signed_public_sum,
+                } => {
+                    let task = *self
+                        .plan
+                        .public_centering_tasks
+                        .get(task_ordinal)
+                        .ok_or(CommonProofProverError::InvalidInput)?;
+                    if next_output_coefficient_ordinal == self.plan.ring_degree {
+                        self.phase = AccumulatorPhase::PublicCenteringTotal {
+                            task_ordinal: task_ordinal
+                                .checked_add(1)
+                                .ok_or(CommonProofProverError::CountOverflow)?,
+                            next_public_coefficient_ordinal: 0,
+                            running_total: ProofChallengeExtensionElement::ZERO,
+                        };
+                        continue;
+                    }
+                    let completed_coefficient_count = self
+                        .plan
+                        .ring_degree
+                        .checked_sub(next_output_coefficient_ordinal)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        .min(maximum_element_count);
+                    let end_output_coefficient_ordinal = next_output_coefficient_ordinal
+                        .checked_add(completed_coefficient_count)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let centering_coefficient =
+                        base_element_from_signed_integer(task.centering_coefficient)?;
+                    for output_coefficient_ordinal in
+                        next_output_coefficient_ordinal..end_output_coefficient_ordinal
+                    {
+                        let row_weight =
+                            self.row_weight(task.row_block_ordinal, output_coefficient_ordinal)?;
+                        self.add_public_contribution(
+                            task.matrix_role,
+                            row_weight
+                                .multiply(signed_public_sum)
+                                .multiply_base(centering_coefficient),
+                        )?;
+                        let next_public_coefficient_ordinal = output_coefficient_ordinal
+                            .checked_add(1)
+                            .ok_or(CommonProofProverError::CountOverflow)?;
+                        if next_public_coefficient_ordinal < self.plan.ring_degree {
+                            let next_public_value = ProofChallengeExtensionElement::from_base(
+                                self.source.public_input_base_value(
+                                    task.public_vector_first_element
+                                        .checked_add(next_public_coefficient_ordinal)
+                                        .ok_or(CommonProofProverError::CountOverflow)?,
+                                )?,
+                            );
+                            signed_public_sum = signed_public_sum
+                                .add(next_public_value)
+                                .add(next_public_value);
+                        }
+                    }
+                    self.phase = AccumulatorPhase::PublicCenteringWeighted {
+                        task_ordinal,
+                        next_output_coefficient_ordinal: end_output_coefficient_ordinal,
+                        signed_public_sum,
+                    };
+                    return Ok(
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            step: CompactStructuredWitnessCovectorAccumulatorStep::PublicCenteringContribution,
+                            completed_work_unit_count: completed_coefficient_count,
+                        },
                     );
                 }
                 AccumulatorPhase::SparseWitness {
@@ -1695,6 +2217,20 @@ where
         self.add_projected_destination(destination_element, contribution)
     }
 
+    fn add_public_contribution(
+        &mut self,
+        matrix_role: CompactCfwMatrixRole,
+        contribution: ProofChallengeExtensionElement,
+    ) -> Result<(), CommonProofProverError> {
+        let destination = self
+            .public_contributions
+            .as_mut()
+            .and_then(|contributions| contributions.get_mut(matrix_role.ordinal()))
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        *destination = destination.add(contribution);
+        Ok(())
+    }
+
     fn destination_projection_weight(
         &self,
         destination_block_ordinal: u64,
@@ -2021,6 +2557,7 @@ mod tests {
             ring_variable_count: 2,
             ring_block_count: 4,
             ring_block_variable_count: 2,
+            public_input_element_count: 12,
             source_covector_element_count: 16,
             transform_domain_size: 8,
             sparse_tasks: vec![
@@ -2045,6 +2582,36 @@ mod tests {
                     matrix_role: CompactCfwMatrixRole::Product,
                 }),
             ]
+            .into_boxed_slice(),
+            public_direct_tasks: vec![
+                PublicDirectTask {
+                    row_block_ordinal: 0,
+                    row_pattern: PublicDirectRowPattern::CompleteBlock {
+                        public_element_stride: 1,
+                    },
+                    first_public_element: 0,
+                    public_element_count_per_row: 1,
+                    coefficient: PublicDirectCoefficient::SignedInteger(5),
+                    matrix_role: CompactCfwMatrixRole::LeftMultiplicand,
+                },
+                PublicDirectTask {
+                    row_block_ordinal: 2,
+                    row_pattern: PublicDirectRowPattern::Exact {
+                        row_coefficient_ordinal: 1,
+                    },
+                    first_public_element: 11,
+                    public_element_count_per_row: 1,
+                    coefficient: PublicDirectCoefficient::LookupChallenge,
+                    matrix_role: CompactCfwMatrixRole::Product,
+                },
+            ]
+            .into_boxed_slice(),
+            public_centering_tasks: vec![PublicCenteringTask {
+                row_block_ordinal: 1,
+                public_vector_first_element: 4,
+                centering_coefficient: -6,
+                matrix_role: CompactCfwMatrixRole::RightMultiplicand,
+            }]
             .into_boxed_slice(),
             public_product_tasks: vec![
                 PublicProductTask {
@@ -2203,6 +2770,78 @@ mod tests {
                 .map(compact_challenge_from_production)
                 .collect::<Vec<_>>()
         );
+        let projected_expected = (0..4)
+            .map(|coefficient_ordinal| {
+                block_weights.iter().enumerate().fold(
+                    CompactChallengeField::ZERO,
+                    |value, (block_ordinal, weight)| {
+                        value + *weight * actual[4 * block_ordinal + coefficient_ordinal]
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let contribution_source = SmallTransposeSource {
+            public_values: public_values.clone(),
+            lookup_challenge,
+        };
+        let (contribution_destination, public_contributions) =
+            drain_accumulator_with_public_contributions(
+                CompactStructuredWitnessCovectorAccumulator::new_with_block_fold(
+                    contribution_source,
+                    plan.clone(),
+                    &compact_row_point,
+                    matrix_role_weights,
+                    projected_initial.clone(),
+                    &folding_challenges,
+                    true,
+                )
+                .expect("small contribution accumulator"),
+                3,
+            );
+        let mut expected_public_contributions =
+            [ProofChallengeExtensionElement::ZERO; COMPACT_CFW_MATRIX_COUNT];
+        for row_ordinal in 0..16_usize {
+            let row_block_ordinal = row_ordinal / 4;
+            let row_coefficient_ordinal = row_ordinal % 4;
+            let row_weight = little_endian_row_weight(&row_point, row_ordinal);
+            if row_block_ordinal == 0 {
+                let public_value = ProofChallengeExtensionElement::from_base(
+                    public_values[row_coefficient_ordinal],
+                );
+                expected_public_contributions[CompactCfwMatrixRole::LeftMultiplicand.ordinal()] =
+                    expected_public_contributions[CompactCfwMatrixRole::LeftMultiplicand.ordinal()]
+                        .add(row_weight.multiply(public_value.multiply(signed_extension(5))));
+            }
+            if row_block_ordinal == 1 {
+                let signed_public_sum = public_values[4..8].iter().copied().enumerate().fold(
+                    ProofChallengeExtensionElement::ZERO,
+                    |sum, (public_coefficient_ordinal, public_value)| {
+                        let value = ProofChallengeExtensionElement::from_base(public_value);
+                        if public_coefficient_ordinal <= row_coefficient_ordinal {
+                            sum.add(value)
+                        } else {
+                            sum.subtract(value)
+                        }
+                    },
+                );
+                expected_public_contributions[CompactCfwMatrixRole::RightMultiplicand.ordinal()] =
+                    expected_public_contributions
+                        [CompactCfwMatrixRole::RightMultiplicand.ordinal()]
+                    .add(row_weight.multiply(signed_public_sum.multiply(signed_extension(-6))));
+            }
+            if row_block_ordinal == 2 && row_coefficient_ordinal == 1 {
+                let public_value = ProofChallengeExtensionElement::from_base(public_values[11]);
+                expected_public_contributions[CompactCfwMatrixRole::Product.ordinal()] =
+                    expected_public_contributions[CompactCfwMatrixRole::Product.ordinal()]
+                        .add(row_weight.multiply(public_value.multiply(lookup_challenge)));
+            }
+        }
+        assert_eq!(contribution_destination, projected_expected);
+        assert_eq!(
+            public_contributions,
+            expected_public_contributions.map(compact_challenge_from_production)
+        );
 
         let projected_source = SmallTransposeSource {
             public_values,
@@ -2216,20 +2855,11 @@ mod tests {
                 matrix_role_weights,
                 projected_initial,
                 &folding_challenges,
+                false,
             )
             .expect("small projected accumulator"),
             3,
         );
-        let projected_expected = (0..4)
-            .map(|coefficient_ordinal| {
-                block_weights.iter().enumerate().fold(
-                    CompactChallengeField::ZERO,
-                    |value, (block_ordinal, weight)| {
-                        value + *weight * actual[4 * block_ordinal + coefficient_ordinal]
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
         assert_eq!(projected_actual, projected_expected);
         assert_eq!(
             projected_step_work,
@@ -2323,6 +2953,31 @@ mod tests {
                 }
                 CompactStructuredWitnessCovectorAccumulatorPoll::Complete(destination) => {
                     return (destination, step_work);
+                }
+            }
+        }
+    }
+
+    fn drain_accumulator_with_public_contributions<Source: StructuredTransposeValueSource>(
+        mut accumulator: CompactStructuredWitnessCovectorAccumulator<Source>,
+        maximum_element_count: u64,
+    ) -> (
+        Vec<CompactChallengeField>,
+        [CompactChallengeField; COMPACT_CFW_MATRIX_COUNT],
+    ) {
+        loop {
+            match accumulator
+                .advance(maximum_element_count)
+                .expect("bounded contribution accumulator poll")
+            {
+                CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted { .. } => {}
+                CompactStructuredWitnessCovectorAccumulatorPoll::Complete(destination) => {
+                    return (
+                        destination,
+                        accumulator
+                            .completed_public_contributions()
+                            .expect("completed public contributions"),
+                    );
                 }
             }
         }

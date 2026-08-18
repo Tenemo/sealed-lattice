@@ -22,6 +22,7 @@ pub(crate) use super::compact_cfw_geometry::{
 use super::field::{PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement};
 
 pub(crate) type CompactChallengeField = BinomialExtensionField<Goldilocks, 5>;
+const COMPACT_CFW_CROSS_EPOCH_CLAIM_COUNT: usize = 2;
 const COMPACT_CFW_CROSS_EPOCH_MASK_COVECTOR_COUNT: usize = 2;
 
 pub(crate) fn compact_challenge_from_production(
@@ -1091,6 +1092,10 @@ impl CompactCfwMaskedCrossEpochClaims {
             self.mask_difference,
         ]
     }
+
+    pub(crate) fn point(&self) -> &[CompactChallengeField] {
+        &self.point
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1459,6 +1464,30 @@ impl CompactCfwToWhirPayloadGeometry {
 }
 
 impl CompactCfwClaimBatch {
+    pub(crate) fn main_relation_target_with_masked_cross_epoch_claims(
+        &self,
+        claims: &CompactCfwMaskedCrossEpochClaims,
+        batching_challenge: CompactChallengeField,
+    ) -> Result<CompactChallengeField, CompactCfwError> {
+        self.validate_masked_cross_epoch_claims(claims)?;
+        let joint_batching_coefficient = batching_challenge * batching_challenge;
+        let mut target = claims.masked_main_evaluation
+            + batching_challenge * claims.mask_difference
+            + joint_batching_coefficient * self.joint_target;
+        let mut batching_coefficient = joint_batching_coefficient * batching_challenge;
+        for _round_ordinal in 0..self.geometry.sumcheck_round_count() {
+            for _matrix_role in CompactCfwMatrixRole::ALL {
+                batching_coefficient *= batching_challenge;
+                batching_coefficient *= batching_challenge;
+            }
+        }
+        for outer_evaluation in &self.outer_evaluations {
+            target += batching_coefficient * *outer_evaluation;
+            batching_coefficient *= batching_challenge;
+        }
+        Ok(target)
+    }
+
     pub(crate) fn combine_with_preceding_opening_claims(
         self,
         matrices: &impl CompactCfwR1csMatrices,
@@ -1547,44 +1576,7 @@ impl CompactCfwClaimBatch {
         claims: CompactCfwMaskedCrossEpochClaims,
         batching_challenge: CompactChallengeField,
     ) -> Result<CompactCfwMatrixClaimCombination, CompactCfwError> {
-        const CROSS_EPOCH_CLAIM_COUNT: usize = 2;
-        if self.sumcheck_point.len() != self.geometry.sumcheck_round_count()
-            || self.outer_evaluations.len() != self.geometry.outer_mask_count()
-            || self.sumcheck_point.capacity() != self.sumcheck_point.len()
-            || self.outer_evaluations.capacity() != self.outer_evaluations.len()
-        {
-            return Err(CompactCfwError::InvalidClaimInput);
-        }
-        let payload_geometry =
-            CompactCfwToWhirPayloadGeometry::derive_with_preceding_mask_covector_element_count(
-                self.geometry,
-                CROSS_EPOCH_CLAIM_COUNT,
-                COMPACT_CFW_CROSS_EPOCH_MASK_COVECTOR_COUNT,
-            )?;
-        let expected_cross_epoch_point_coordinate_count = payload_geometry
-            .source_variable_count()
-            .checked_sub(1)
-            .ok_or(CompactCfwError::InvalidClaimInput)?;
-        let pre_challenge_message_element_count = 1_usize
-            .checked_shl(
-                u32::try_from(expected_cross_epoch_point_coordinate_count)
-                    .map_err(|_| CompactCfwError::CountOverflow)?,
-            )
-            .ok_or(CompactCfwError::CountOverflow)?;
-        if claims.point.len() != expected_cross_epoch_point_coordinate_count
-            || claims.copied_main_source_element_count == 0
-            || claims.copied_main_source_element_count > pre_challenge_message_element_count
-            || claims.masked_pre_challenge_evaluation
-                - claims.masked_main_evaluation
-                - claims.mask_difference
-                != CompactChallengeField::ZERO
-            || self.geometry.witness_length()
-                != pre_challenge_message_element_count
-                    .checked_mul(2)
-                    .ok_or(CompactCfwError::CountOverflow)?
-        {
-            return Err(CompactCfwError::InvalidClaimInput);
-        }
+        let payload_geometry = self.validate_masked_cross_epoch_claims(&claims)?;
 
         let mut source_covector = Vec::new();
         source_covector
@@ -1621,10 +1613,54 @@ impl CompactCfwClaimBatch {
                 preceding_mask_covectors,
                 batching_challenge,
                 joint_batching_coefficient,
-                preceding_opening_claim_count: CROSS_EPOCH_CLAIM_COUNT,
+                preceding_opening_claim_count: COMPACT_CFW_CROSS_EPOCH_CLAIM_COUNT,
             },
             source_covector,
         })
+    }
+
+    fn validate_masked_cross_epoch_claims(
+        &self,
+        claims: &CompactCfwMaskedCrossEpochClaims,
+    ) -> Result<CompactCfwToWhirPayloadGeometry, CompactCfwError> {
+        if self.sumcheck_point.len() != self.geometry.sumcheck_round_count()
+            || self.outer_evaluations.len() != self.geometry.outer_mask_count()
+            || self.sumcheck_point.capacity() != self.sumcheck_point.len()
+            || self.outer_evaluations.capacity() != self.outer_evaluations.len()
+        {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        let payload_geometry =
+            CompactCfwToWhirPayloadGeometry::derive_with_preceding_mask_covector_element_count(
+                self.geometry,
+                COMPACT_CFW_CROSS_EPOCH_CLAIM_COUNT,
+                COMPACT_CFW_CROSS_EPOCH_MASK_COVECTOR_COUNT,
+            )?;
+        let expected_cross_epoch_point_coordinate_count = payload_geometry
+            .source_variable_count()
+            .checked_sub(1)
+            .ok_or(CompactCfwError::InvalidClaimInput)?;
+        let pre_challenge_message_element_count = 1_usize
+            .checked_shl(
+                u32::try_from(expected_cross_epoch_point_coordinate_count)
+                    .map_err(|_| CompactCfwError::CountOverflow)?,
+            )
+            .ok_or(CompactCfwError::CountOverflow)?;
+        if claims.point.len() != expected_cross_epoch_point_coordinate_count
+            || claims.copied_main_source_element_count == 0
+            || claims.copied_main_source_element_count > pre_challenge_message_element_count
+            || claims.masked_pre_challenge_evaluation
+                - claims.masked_main_evaluation
+                - claims.mask_difference
+                != CompactChallengeField::ZERO
+            || self.geometry.witness_length()
+                != pre_challenge_message_element_count
+                    .checked_mul(2)
+                    .ok_or(CompactCfwError::CountOverflow)?
+        {
+            return Err(CompactCfwError::InvalidClaimInput);
+        }
+        Ok(payload_geometry)
     }
 }
 
@@ -2012,8 +2048,45 @@ pub(crate) fn verify_compact_cfw_transcript(
     joint_constraint_challenge: CompactChallengeField,
 ) -> Result<CompactCfwClaimBatch, CompactCfwError> {
     let geometry = CompactCfwGeometry::derive(matrices.witness_length())?;
-    if public_input.len() != geometry.witness_length()
-        || equality_point.len() != geometry.sumcheck_round_count()
+    if public_input.len() != geometry.witness_length() {
+        return Err(CompactCfwError::InvalidGeometry);
+    }
+    let joint_inner_mask_weights = compact_cfw_zero_evader_weights(joint_constraint_challenge);
+    let mut weighted_public_contribution = CompactChallengeField::ZERO;
+    for matrix_role in CompactCfwMatrixRole::ALL {
+        weighted_public_contribution += joint_inner_mask_weights[matrix_role.ordinal()]
+            * matrices.public_contribution_at_row_point(
+                matrix_role,
+                sumcheck_point,
+                public_input,
+            )?;
+    }
+    verify_compact_cfw_transcript_with_weighted_public_contribution(
+        geometry,
+        transcript,
+        constraint_combining_challenge,
+        equality_point,
+        sumcheck_point,
+        joint_constraint_challenge,
+        weighted_public_contribution,
+    )
+}
+
+/// Verifies the complete CFW transcript after a structured verifier owner has
+/// independently accumulated the weighted public matrix contribution. This is
+/// the production entry point for the compact verifier, which must not
+/// materialize the selected sparse matrices or a padded public-input vector.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_compact_cfw_transcript_with_weighted_public_contribution(
+    geometry: CompactCfwGeometry,
+    transcript: &CompactCfwTranscript,
+    constraint_combining_challenge: CompactChallengeField,
+    equality_point: &[CompactChallengeField],
+    sumcheck_point: &[CompactChallengeField],
+    joint_constraint_challenge: CompactChallengeField,
+    weighted_public_contribution: CompactChallengeField,
+) -> Result<CompactCfwClaimBatch, CompactCfwError> {
+    if equality_point.len() != geometry.sumcheck_round_count()
         || sumcheck_point.len() != geometry.sumcheck_round_count()
         || transcript.round_polynomials().len() != geometry.sumcheck_round_count()
         || transcript.outer_evaluations().len() != geometry.outer_mask_count()
@@ -2057,13 +2130,13 @@ pub(crate) fn verify_compact_cfw_transcript(
     }
 
     let joint_inner_mask_weights = compact_cfw_zero_evader_weights(joint_constraint_challenge);
-    let mut joint_target = CompactChallengeField::ZERO;
-    for matrix_role in CompactCfwMatrixRole::ALL {
-        let public_contribution =
-            matrices.public_contribution_at_row_point(matrix_role, sumcheck_point, public_input)?;
-        let weight = joint_inner_mask_weights[matrix_role.ordinal()];
-        joint_target += weight * (final_values[matrix_role.ordinal()] - public_contribution);
-    }
+    let joint_target = CompactCfwMatrixRole::ALL
+        .iter()
+        .map(|matrix_role| {
+            joint_inner_mask_weights[matrix_role.ordinal()] * final_values[matrix_role.ordinal()]
+        })
+        .sum::<CompactChallengeField>()
+        - weighted_public_contribution;
 
     Ok(CompactCfwClaimBatch {
         geometry,
@@ -3300,15 +3373,22 @@ mod tests {
                 ),
             Err(CompactCfwError::InvalidClaimInput)
         ));
+        let exact_cross_epoch_claims = CompactCfwMaskedCrossEpochClaims::new(
+            cross_epoch_point.clone(),
+            copied_element_count,
+            masked_pre_challenge_evaluation,
+            masked_main_evaluation,
+            mask_difference,
+        );
+        let independently_derived_target = claims
+            .main_relation_target_with_masked_cross_epoch_claims(
+                &exact_cross_epoch_claims,
+                batching_challenge,
+            )
+            .expect("the public target follows from the verified CFW claims");
         let combination = claims
             .begin_combining_with_masked_cross_epoch_claims(
-                CompactCfwMaskedCrossEpochClaims::new(
-                    cross_epoch_point,
-                    copied_element_count,
-                    masked_pre_challenge_evaluation,
-                    masked_main_evaluation,
-                    mask_difference,
-                ),
+                exact_cross_epoch_claims,
                 batching_challenge,
             )
             .expect("masked cross-epoch CFW combination");
@@ -3331,6 +3411,7 @@ mod tests {
             outer_mask_covectors,
             claim_count,
         ) = combined.into_parts();
+        assert_eq!(independently_derived_target, target);
         assert_eq!(
             cross_epoch_mask_covectors,
             vec![

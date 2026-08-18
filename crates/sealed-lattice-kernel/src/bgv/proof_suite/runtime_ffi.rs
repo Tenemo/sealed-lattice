@@ -21,7 +21,13 @@ use crate::foundation::{
 };
 
 use super::compact_proof_wire::CompactPublicInputBindings;
-use super::compact_public_key_verifier::validate_selected_compact_public_key_transport;
+use super::compact_public_key_algebraic_verifier::{
+    CompactPublicKeyAlgebraicVerification, CompactPublicKeyAlgebraicVerificationError,
+    CompactPublicKeyAlgebraicVerificationPoll,
+};
+use super::compact_public_key_verifier::{
+    validate_selected_compact_public_key_transport, verify_selected_compact_public_key_transport,
+};
 use super::runtime::{
     CommonProofVerificationReadbackAccounting, ExpectedCommonProofPackageBindings,
     common_proof_registry_entry_count, require_common_proof_worker_process_admission_capacity,
@@ -64,6 +70,8 @@ const VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH: usize =
 const COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT: usize = 4;
 const COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH: usize =
     COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT * Hash512::BYTE_LENGTH;
+const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS: u32 = 1;
+const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE: u32 = 5;
 
 fn write_diagnostic_u64(output: &mut [u8], word_index: usize, value: u64) {
     let offset = word_index * size_of::<u64>();
@@ -221,6 +229,164 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_validate_transport(
         Ok(()) => 0,
         Err(refusal_reason) => u32::from(refusal_reason.canonical_code()),
     }
+}
+
+fn copy_compact_public_key_verification_input(input: &[u8]) -> Result<Box<[u8]>, RefusalReason> {
+    if input.is_empty() {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let mut owned = Vec::new();
+    owned
+        .try_reserve_exact(input.len())
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    owned.extend_from_slice(input);
+    Ok(owned.into_boxed_slice())
+}
+
+/// Begins positive algebraic verification after strict compact transport
+/// validation. The returned handle owns the exact proof and public-input bytes
+/// until completion, cancellation, or a terminal refusal.
+///
+/// This boundary does not mint a proof or workflow capability. A complete poll
+/// means only that the release-owned CFW and WHIR verifier accepted the exact
+/// transported bytes.
+///
+/// # Safety
+///
+/// Each input pointer must either be null with a zero byte length or name its
+/// full readable byte range. A non-null status pointer must name one writable
+/// `u32` in WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_begin_algebraic_verification(
+    bindings_pointer: *const u8,
+    bindings_byte_length: usize,
+    proof_pointer: *const u8,
+    proof_byte_length: usize,
+    public_input_pointer: *const u8,
+    public_input_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let capacity_result = COMMON_PROOF_WASM_RUNTIME_REGISTRY
+        .with(|registry| registry.borrow().require_new_entry_capacity(true));
+    if let Err(error) = capacity_result {
+        unsafe {
+            write_status(status_pointer, runtime_error_status(error));
+        }
+        return 0;
+    }
+
+    let bindings = unsafe { input_bytes(bindings_pointer, bindings_byte_length) };
+    let proof = unsafe { input_bytes(proof_pointer, proof_byte_length) };
+    let public_input = unsafe { input_bytes(public_input_pointer, public_input_byte_length) };
+    let result = (|| {
+        let bindings =
+            decode_compact_public_key_transport_bindings(bindings).map_err(refusal_status)?;
+        let proof = copy_compact_public_key_verification_input(proof).map_err(refusal_status)?;
+        let public_input =
+            copy_compact_public_key_verification_input(public_input).map_err(refusal_status)?;
+        let transport = verify_selected_compact_public_key_transport(bindings, proof, public_input)
+            .map_err(|error| refusal_status(error.refusal_reason()))?;
+        let verification = CompactPublicKeyAlgebraicVerification::begin(transport)
+            .map_err(compact_public_key_algebraic_verification_error_status)?;
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .retain_compact_public_key_verification(verification)
+                .map_err(runtime_error_status)
+        })
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe {
+                write_status(status_pointer, 0);
+            }
+            handle
+        }
+        Err(status) => {
+            unsafe {
+                write_status(status_pointer, status);
+            }
+            0
+        }
+    }
+}
+
+/// Advances one bounded CFW verifier slice. The final poll also checks both
+/// WHIR epochs and destroys the accepted byte owner without minting a
+/// capability.
+///
+/// # Safety
+///
+/// Both output pointers must name one writable `u32` in WebAssembly linear
+/// memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_poll(
+    operation_handle: u32,
+    maximum_work_unit_count: u32,
+    poll_kind_pointer: *mut u32,
+    completed_work_unit_count_pointer: *mut u32,
+) -> u32 {
+    if maximum_work_unit_count == 0
+        || poll_kind_pointer.is_null()
+        || completed_work_unit_count_pointer.is_null()
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let mut verification = registry
+            .compact_public_key_verifications
+            .remove(&operation_handle)
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        match verification.advance(u64::from(maximum_work_unit_count)) {
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                completed_work_unit_count,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
+                    completed_work_unit_count,
+                ))
+            }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal)) => {
+                drop((*terminal).into_transport());
+                Ok((COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE, 0))
+            }
+            Err(error) => Err(compact_public_key_algebraic_verification_error_status(
+                error,
+            )),
+        }
+    });
+    let (poll_kind, completed_work_unit_count) = match result {
+        Ok(output) => output,
+        Err(status) => return status,
+    };
+    unsafe {
+        poll_kind_pointer.write(poll_kind);
+        completed_work_unit_count_pointer.write(completed_work_unit_count);
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_cancel_algebraic_verification(
+    operation_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .compact_public_key_verifications
+            .remove(&operation_handle)
+            .map_or_else(|| refusal_status(RefusalReason::ConsumedState), |_| 0)
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -400,6 +566,7 @@ thread_local! {
 }
 
 struct CommonProofWasmRuntimeRegistry {
+    next_compact_public_key_verification_handle: u32,
     next_generation_family_adapter_handle: u32,
     next_verification_family_adapter_handle: u32,
     next_prepared_generation_handle: u32,
@@ -408,6 +575,7 @@ struct CommonProofWasmRuntimeRegistry {
     verification_family_adapters: BTreeMap<u32, CommonProofVerificationFamilyAdapter>,
     prepared_generations: BTreeMap<u32, PreparedCommonProofGeneration>,
     prepared_verifications: BTreeMap<u32, PreparedCommonProofVerification>,
+    compact_public_key_verifications: BTreeMap<u32, CompactPublicKeyAlgebraicVerification>,
     generation_preparation_reservations: BTreeSet<u32>,
     verification_family_adapter_reservations: BTreeSet<u32>,
     runtime: CommonProofRuntimeRegistry,
@@ -417,6 +585,7 @@ struct CommonProofWasmRuntimeRegistry {
 impl Default for CommonProofWasmRuntimeRegistry {
     fn default() -> Self {
         Self {
+            next_compact_public_key_verification_handle: 1,
             next_generation_family_adapter_handle: 1,
             next_verification_family_adapter_handle: 1,
             next_prepared_generation_handle: 1,
@@ -425,6 +594,7 @@ impl Default for CommonProofWasmRuntimeRegistry {
             verification_family_adapters: BTreeMap::new(),
             prepared_generations: BTreeMap::new(),
             prepared_verifications: BTreeMap::new(),
+            compact_public_key_verifications: BTreeMap::new(),
             generation_preparation_reservations: BTreeSet::new(),
             verification_family_adapter_reservations: BTreeSet::new(),
             runtime: CommonProofRuntimeRegistry::default(),
@@ -440,6 +610,7 @@ impl CommonProofWasmRuntimeRegistry {
             self.verification_family_adapters.len(),
             self.prepared_generations.len(),
             self.prepared_verifications.len(),
+            self.compact_public_key_verifications.len(),
             self.generation_preparation_reservations.len(),
             self.verification_family_adapter_reservations.len(),
         ])
@@ -493,6 +664,30 @@ impl CommonProofWasmRuntimeRegistry {
             .checked_add(1)
             .filter(|next| *next != 0)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        Ok(handle)
+    }
+
+    fn retain_compact_public_key_verification(
+        &mut self,
+        verification: CompactPublicKeyAlgebraicVerification,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_compact_public_key_verification_handle;
+        if handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_compact_public_key_verification_handle = self
+            .next_compact_public_key_verification_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self
+            .compact_public_key_verifications
+            .insert(handle, verification)
+            .is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
         Ok(handle)
     }
 
@@ -1480,6 +1675,12 @@ fn verification_worker_error_status(error: CommonProofVerificationWorkerError) -
         }
         CommonProofVerificationWorkerError::Verifier => refusal_status(RefusalReason::InvalidProof),
     }
+}
+
+fn compact_public_key_algebraic_verification_error_status(
+    error: CompactPublicKeyAlgebraicVerificationError,
+) -> u32 {
+    refusal_status(error.refusal_reason())
 }
 
 fn generation_worker_error_status(error: CommonProofGenerationWorkerError) -> u32 {
@@ -2841,6 +3042,83 @@ mod tests {
             },
             refusal_status(RefusalReason::MalformedEncoding),
             "an exact binding frame reaches strict proof decoding",
+        );
+    }
+
+    #[test]
+    fn compact_public_key_algebraic_verification_boundary_refuses_malformed_and_stale_operations() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let selected_contract =
+            super::super::compact_proof_contract::CompactPublicKeyProofContract::decode_selected()
+                .expect("the selected compact proof contract is valid");
+        let canonical_bindings = [
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes(
+                selected_contract
+                    .verifier_inputs()
+                    .relation
+                    .relation_plan_variant_hash(),
+            ),
+        ]
+        .iter()
+        .flat_map(|binding| binding.as_bytes().iter().copied())
+        .collect::<Vec<_>>();
+        let malformed_proof = [0xa5_u8];
+        let malformed_public_input = [0x5a_u8];
+        let mut status = u32::MAX;
+        let handle = unsafe {
+            sealed_lattice_compact_public_key_begin_algebraic_verification(
+                canonical_bindings.as_ptr(),
+                canonical_bindings.len(),
+                malformed_proof.as_ptr(),
+                malformed_proof.len(),
+                malformed_public_input.as_ptr(),
+                malformed_public_input.len(),
+                &mut status,
+            )
+        };
+        assert_eq!(handle, 0);
+        assert_eq!(status, refusal_status(RefusalReason::MalformedEncoding));
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            assert!(
+                registry
+                    .borrow()
+                    .compact_public_key_verifications
+                    .is_empty()
+            );
+        });
+
+        let mut poll_kind = u32::MAX;
+        let mut completed_work_unit_count = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_algebraic_verification_poll(
+                    17,
+                    0,
+                    &mut poll_kind,
+                    &mut completed_work_unit_count,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_algebraic_verification_poll(
+                    17,
+                    1,
+                    &mut poll_kind,
+                    &mut completed_work_unit_count,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(poll_kind, u32::MAX);
+        assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(
+            sealed_lattice_compact_public_key_cancel_algebraic_verification(17),
+            refusal_status(RefusalReason::ConsumedState),
         );
     }
 

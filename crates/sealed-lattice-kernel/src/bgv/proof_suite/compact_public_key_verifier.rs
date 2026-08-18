@@ -16,20 +16,24 @@ use super::compact_merkle_privacy::{
     derive_and_validate_compact_response_query_schedule,
     derive_selected_compact_merkle_privacy_certificate,
 };
-#[cfg(test)]
 use super::compact_proof_contract::CompactPublicKeyVerifierInputs;
 use super::compact_proof_contract::{CompactProofContractError, CompactPublicKeyProofContract};
 use super::compact_proof_wire::{
     CompactProofWireError, CompactPublicInputBindings, DecodedCompactProofWire,
     DecodedCompactPublicInput, decode_compact_proof_wire, decode_compact_public_input,
 };
-use super::compact_response_merkle::CompactResponseQuerySchedule;
 use super::compact_response_merkle::{
     CompactResponseMerkleError, verify_decoded_compact_response_opening,
+};
+use super::compact_response_merkle::{
+    CompactResponseQuerySchedule, DecodedCompactResponseBaseLeaf,
+    DecodedCompactResponseExtensionLeaf, decode_verified_compact_response_base_component,
+    decode_verified_compact_response_extension_component,
 };
 use super::compact_transcript::{
     CompactTranscriptError, derive_compact_fiat_shamir_verifier_message,
 };
+use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
 use crate::foundation::{Hash512, RefusalReason};
 use crate::hashing::{StreamingHash512, hash_framed_parts_512};
@@ -118,7 +122,6 @@ impl CompactPublicKeyTransportError {
 /// Transport terminal for one compact byte pair whose transcript schedule and
 /// salted Merkle openings have all been verified. Algebraic proof validity is
 /// outside this type's guarantee.
-#[cfg(test)]
 pub(crate) struct VerifiedCompactPublicKeyTransport {
     canonical_proof_bytes: Box<[u8]>,
     decoded_proof: DecodedCompactProofWire,
@@ -126,9 +129,85 @@ pub(crate) struct VerifiedCompactPublicKeyTransport {
     verifier_messages: Box<[DecodedFixedUniformVerifierMessage]>,
 }
 
+/// One semantic response role recovered only after its canonical response
+/// opening has passed transport verification.
+pub(super) struct VerifiedCompactResponseRole<FieldElement> {
+    component_leaf_count: u64,
+    field_element_count_per_leaf: u64,
+    opened_leaves:
+        Vec<super::compact_response_merkle::DecodedCompactResponseFieldLeaf<FieldElement>>,
+}
+
+pub(super) type VerifiedCompactBaseResponseRole =
+    VerifiedCompactResponseRole<ProofBaseFieldElement>;
+pub(super) type VerifiedCompactExtensionResponseRole =
+    VerifiedCompactResponseRole<ProofChallengeExtensionElement>;
+
+/// Borrowed semantic verifier role from the canonical Fiat-Shamir transcript.
+pub(super) struct VerifiedCompactVerifierRoleView<'transport> {
+    extension_elements: &'transport [ProofChallengeExtensionElement],
+    base_field_elements: &'transport [ProofBaseFieldElement],
+    distinct_query_groups: &'transport [Vec<u64>],
+}
+
+impl<'transport> VerifiedCompactVerifierRoleView<'transport> {
+    pub(super) const fn extension_elements(&self) -> &'transport [ProofChallengeExtensionElement] {
+        self.extension_elements
+    }
+
+    pub(super) const fn base_field_elements(&self) -> &'transport [ProofBaseFieldElement] {
+        self.base_field_elements
+    }
+
+    pub(super) const fn distinct_query_groups(&self) -> &'transport [Vec<u64>] {
+        self.distinct_query_groups
+    }
+}
+
+impl<FieldElement: Copy> VerifiedCompactResponseRole<FieldElement> {
+    pub(super) fn opened_leaves(
+        &self,
+    ) -> &[super::compact_response_merkle::DecodedCompactResponseFieldLeaf<FieldElement>] {
+        &self.opened_leaves
+    }
+
+    pub(super) fn complete_values(
+        &self,
+    ) -> Result<Vec<FieldElement>, CompactPublicKeyTransportError> {
+        if u64::try_from(self.opened_leaves.len()).ok() != Some(self.component_leaf_count)
+            || self
+                .opened_leaves
+                .iter()
+                .enumerate()
+                .any(|(leaf_index, leaf)| {
+                    u64::try_from(leaf_index).ok() != Some(leaf.component_leaf_ordinal())
+                        || u64::try_from(leaf.values().len()).ok()
+                            != Some(self.field_element_count_per_leaf)
+                })
+        {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        let value_count = self
+            .component_leaf_count
+            .checked_mul(self.field_element_count_per_leaf)
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or(CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(value_count)
+            .map_err(|_| CompactPublicKeyTransportError::AllocationLimitExceeded)?;
+        for leaf in &self.opened_leaves {
+            values.extend_from_slice(leaf.values());
+        }
+        if values.len() != value_count {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        Ok(values)
+    }
+}
+
 /// Owning result of the one strict canonical public-input decode used by the
 /// compact transport and the semantic covector authority.
-#[cfg(test)]
 pub(crate) struct VerifiedCompactPublicInputTransport {
     contract: CompactPublicKeyProofContract,
     bindings: CompactPublicInputBindings,
@@ -158,14 +237,12 @@ impl VerifiedCompactProofTransportView<'_> {
 /// Borrowed public-input bytes inseparably paired with their decoded range
 /// owner.
 #[derive(Clone, Copy)]
-#[cfg(test)]
 pub(crate) struct VerifiedCompactPublicInputTransportView<'transport> {
     canonical_bytes: &'transport [u8],
     decoded: &'transport DecodedCompactPublicInput,
     binding: [u8; Hash512::BYTE_LENGTH],
 }
 
-#[cfg(test)]
 impl<'transport> VerifiedCompactPublicInputTransportView<'transport> {
     pub(crate) const fn canonical_bytes(&self) -> &'transport [u8] {
         self.canonical_bytes
@@ -180,7 +257,6 @@ impl<'transport> VerifiedCompactPublicInputTransportView<'transport> {
     }
 }
 
-#[cfg(test)]
 impl VerifiedCompactPublicInputTransport {
     fn from_selected_decoded(
         contract: CompactPublicKeyProofContract,
@@ -226,12 +302,12 @@ impl VerifiedCompactPublicInputTransport {
     }
 }
 
-#[cfg(test)]
 impl VerifiedCompactPublicKeyTransport {
     pub(crate) fn verifier_inputs(&self) -> CompactPublicKeyVerifierInputs<'_> {
         self.public_input.verifier_inputs()
     }
 
+    #[cfg(test)]
     pub(crate) fn proof_view(&self) -> VerifiedCompactProofTransportView<'_> {
         VerifiedCompactProofTransportView {
             canonical_bytes: &self.canonical_proof_bytes,
@@ -239,12 +315,272 @@ impl VerifiedCompactPublicKeyTransport {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn public_input_view(&self) -> VerifiedCompactPublicInputTransportView<'_> {
         self.public_input.view()
     }
 
+    pub(super) const fn public_input_owner(&self) -> &VerifiedCompactPublicInputTransport {
+        &self.public_input
+    }
+
+    #[cfg(test)]
     pub(crate) fn verifier_messages(&self) -> &[DecodedFixedUniformVerifierMessage] {
         &self.verifier_messages
+    }
+
+    /// Resolves one unique semantic verifier role and borrows its exact output
+    /// ranges from the transcript-derived message owner.
+    pub(super) fn verifier_role(
+        &self,
+        role_tag: u8,
+        epoch: u8,
+        batch_ordinal: u8,
+        round_ordinal: u32,
+    ) -> Result<VerifiedCompactVerifierRoleView<'_>, CompactPublicKeyTransportError> {
+        let inputs = self.verifier_inputs();
+        if inputs.verifier_moves.len() != self.verifier_messages.len() {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        let mut matched = None;
+        for (move_contract, message) in inputs.verifier_moves.iter().zip(&self.verifier_messages) {
+            for coordinate in &move_contract.role_coordinates {
+                if coordinate.role_tag == role_tag
+                    && coordinate.epoch == epoch
+                    && coordinate.batch_ordinal == batch_ordinal
+                    && coordinate.round_ordinal == round_ordinal
+                {
+                    if matched.is_some() {
+                        return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+                    }
+                    let extension_start = usize::try_from(coordinate.extension_output_start)
+                        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+                    let extension_end = usize::try_from(coordinate.extension_output_end)
+                        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+                    let base_start = usize::try_from(coordinate.base_field_output_start)
+                        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+                    let base_end = usize::try_from(coordinate.base_field_output_end)
+                        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+                    let group_start = usize::try_from(coordinate.distinct_query_group_start)
+                        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+                    let group_end = usize::try_from(coordinate.distinct_query_group_end)
+                        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+                    matched = Some(VerifiedCompactVerifierRoleView {
+                        extension_elements: message
+                            .extension_elements()
+                            .get(extension_start..extension_end)
+                            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?,
+                        base_field_elements: message
+                            .base_field_elements()
+                            .get(base_start..base_end)
+                            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?,
+                        distinct_query_groups: message
+                            .distinct_query_groups()
+                            .get(group_start..group_end)
+                            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?,
+                    });
+                }
+            }
+        }
+        matched.ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)
+    }
+
+    /// Returns one authenticated extension-field response component. The
+    /// transport constructor has already verified the exact query schedule,
+    /// salts, frontier, and response root before this view can exist.
+    pub(super) fn opened_extension_component(
+        &self,
+        response_ordinal: u32,
+        component_ordinal: u32,
+    ) -> Result<Vec<DecodedCompactResponseExtensionLeaf>, CompactPublicKeyTransportError> {
+        let response_index = usize::try_from(response_ordinal)
+            .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let verifier_inputs = self.verifier_inputs();
+        let decoded_response = self
+            .decoded_proof
+            .responses()
+            .get(response_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let merkle_geometry = verifier_inputs
+            .response_merkle_geometries
+            .get(response_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        if decoded_response.ordinal() != response_ordinal
+            || merkle_geometry.response_ordinal() != response_ordinal
+        {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        let verifier_message_prefix_length = usize::try_from(
+            merkle_geometry
+                .last_query_verifier_move_ordinal()
+                .checked_add(1)
+                .ok_or(CompactPublicKeyTransportError::ArithmeticOverflow)?,
+        )
+        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let verifier_message_prefix = self
+            .verifier_messages
+            .get(..verifier_message_prefix_length)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let query_schedule = CompactResponseQuerySchedule::derive_at_last_query_boundary(
+            merkle_geometry,
+            verifier_inputs.proof_wire_geometry.responses(),
+            verifier_message_prefix,
+        )?;
+        decode_verified_compact_response_extension_component(
+            merkle_geometry,
+            decoded_response,
+            &self.canonical_proof_bytes,
+            &query_schedule,
+            component_ordinal,
+        )
+        .map_err(Into::into)
+    }
+
+    /// Returns one authenticated base-field response component. The transport
+    /// constructor has already verified the same owning response opening.
+    pub(super) fn opened_base_component(
+        &self,
+        response_ordinal: u32,
+        component_ordinal: u32,
+    ) -> Result<Vec<DecodedCompactResponseBaseLeaf>, CompactPublicKeyTransportError> {
+        let response_index = usize::try_from(response_ordinal)
+            .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let verifier_inputs = self.verifier_inputs();
+        let decoded_response = self
+            .decoded_proof
+            .responses()
+            .get(response_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let merkle_geometry = verifier_inputs
+            .response_merkle_geometries
+            .get(response_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        if decoded_response.ordinal() != response_ordinal
+            || merkle_geometry.response_ordinal() != response_ordinal
+        {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        let verifier_message_prefix_length = usize::try_from(
+            merkle_geometry
+                .last_query_verifier_move_ordinal()
+                .checked_add(1)
+                .ok_or(CompactPublicKeyTransportError::ArithmeticOverflow)?,
+        )
+        .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let verifier_message_prefix = self
+            .verifier_messages
+            .get(..verifier_message_prefix_length)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let query_schedule = CompactResponseQuerySchedule::derive_at_last_query_boundary(
+            merkle_geometry,
+            verifier_inputs.proof_wire_geometry.responses(),
+            verifier_message_prefix,
+        )?;
+        decode_verified_compact_response_base_component(
+            merkle_geometry,
+            decoded_response,
+            &self.canonical_proof_bytes,
+            &query_schedule,
+            component_ordinal,
+        )
+        .map_err(Into::into)
+    }
+
+    /// Resolves one semantic response role through the selected contract and
+    /// returns only values authenticated by the owning transport terminal.
+    pub(super) fn opened_extension_role(
+        &self,
+        role_tag: u8,
+        epoch: u8,
+        batch_ordinal: u8,
+        round_ordinal: u32,
+    ) -> Result<VerifiedCompactExtensionResponseRole, CompactPublicKeyTransportError> {
+        let (response_index, component_index) =
+            self.response_role_coordinates(role_tag, epoch, batch_ordinal, round_ordinal)?;
+        let verifier_inputs = self.verifier_inputs();
+        let merkle_geometry = verifier_inputs
+            .response_merkle_geometries
+            .get(response_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let component_geometry = merkle_geometry
+            .components()
+            .get(component_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let response_ordinal = u32::try_from(response_index)
+            .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let component_ordinal = u32::try_from(component_index)
+            .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        if merkle_geometry.response_ordinal() != response_ordinal {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        Ok(VerifiedCompactExtensionResponseRole {
+            component_leaf_count: component_geometry.leaf_count(),
+            field_element_count_per_leaf: component_geometry.field_element_count_per_leaf(),
+            opened_leaves: self.opened_extension_component(response_ordinal, component_ordinal)?,
+        })
+    }
+
+    /// Resolves one semantic base-field response role after transport
+    /// authentication. The selected contract uses this for the first
+    /// pre-challenge source oracle.
+    pub(super) fn opened_base_role(
+        &self,
+        role_tag: u8,
+        epoch: u8,
+        batch_ordinal: u8,
+        round_ordinal: u32,
+    ) -> Result<VerifiedCompactBaseResponseRole, CompactPublicKeyTransportError> {
+        let (response_index, component_index) =
+            self.response_role_coordinates(role_tag, epoch, batch_ordinal, round_ordinal)?;
+        let verifier_inputs = self.verifier_inputs();
+        let merkle_geometry = verifier_inputs
+            .response_merkle_geometries
+            .get(response_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let component_geometry = merkle_geometry
+            .components()
+            .get(component_index)
+            .ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)?;
+        let response_ordinal = u32::try_from(response_index)
+            .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        let component_ordinal = u32::try_from(component_index)
+            .map_err(|_| CompactPublicKeyTransportError::ArithmeticOverflow)?;
+        if merkle_geometry.response_ordinal() != response_ordinal {
+            return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+        }
+        Ok(VerifiedCompactBaseResponseRole {
+            component_leaf_count: component_geometry.leaf_count(),
+            field_element_count_per_leaf: component_geometry.field_element_count_per_leaf(),
+            opened_leaves: self.opened_base_component(response_ordinal, component_ordinal)?,
+        })
+    }
+
+    fn response_role_coordinates(
+        &self,
+        role_tag: u8,
+        epoch: u8,
+        batch_ordinal: u8,
+        round_ordinal: u32,
+    ) -> Result<(usize, usize), CompactPublicKeyTransportError> {
+        let verifier_inputs = self.verifier_inputs();
+        let mut match_coordinates = None;
+        for (response_index, response_roles) in
+            verifier_inputs.response_component_roles.iter().enumerate()
+        {
+            for (component_index, role) in response_roles.iter().copied().enumerate() {
+                if role.role_tag == role_tag
+                    && role.epoch == epoch
+                    && role.batch_ordinal == batch_ordinal
+                    && role.round_ordinal == round_ordinal
+                {
+                    if match_coordinates.is_some() {
+                        return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
+                    }
+                    match_coordinates = Some((response_index, component_index));
+                }
+            }
+        }
+        match_coordinates.ok_or(CompactPublicKeyTransportError::InvalidResponseRegistry)
     }
 }
 
@@ -295,8 +631,7 @@ pub(crate) fn validate_selected_compact_public_key_transport(
     .map(drop)
 }
 
-#[cfg(test)]
-pub(crate) fn verify_selected_compact_public_key_transport_for_test(
+pub(crate) fn verify_selected_compact_public_key_transport(
     public_input_bindings: CompactPublicInputBindings,
     canonical_proof_bytes: Box<[u8]>,
     canonical_public_input_bytes: Box<[u8]>,

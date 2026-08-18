@@ -69,6 +69,7 @@ mod compact_proof_contract;
     )
 )]
 mod compact_proof_wire;
+mod compact_public_key_algebraic_verifier;
 #[cfg(test)]
 mod compact_public_key_static_catalog;
 mod compact_public_key_verifier;
@@ -101,6 +102,7 @@ mod compact_response_tree_external;
 )]
 mod compact_transcript;
 mod compact_whir;
+mod compact_whir_algebraic_verifier;
 mod compact_whir_geometry;
 mod component_material_stream;
 mod component_public_polynomial_runtime;

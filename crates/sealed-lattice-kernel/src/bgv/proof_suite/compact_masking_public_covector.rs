@@ -22,9 +22,9 @@ use super::compact_proof_wire::CompactProofWireError;
 use super::compact_proof_wire::{
     CompactPublicInputBindings, DecodedCompactPublicInput, decode_compact_public_input,
 };
-#[cfg(test)]
-use super::compact_public_key_verifier::VerifiedCompactPublicInputTransport;
-use super::compact_public_key_verifier::compact_public_input_transport_binding;
+use super::compact_public_key_verifier::{
+    VerifiedCompactPublicInputTransport, compact_public_input_transport_binding,
+};
 use super::compact_reed_solomon_domain::{
     CompactReedSolomonDomainError, canonical_reed_solomon_domain_evaluation_points,
 };
@@ -164,7 +164,6 @@ impl CompactFactorOnePublicInputView<'_> {
 }
 
 impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
-    #[cfg(test)]
     pub(crate) fn from_verified_public_input(
         public_input: &'transport VerifiedCompactPublicInputTransport,
     ) -> Result<Self, CompactFactorOnePublicCovectorError> {
@@ -238,6 +237,19 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
 
     pub(crate) const fn public_input_binding(&self) -> [u8; 64] {
         self.public_input.binding()
+    }
+
+    pub(super) fn transpose_source(
+        &self,
+        lookup_challenge: ProofChallengeExtensionElement,
+    ) -> Result<CompactFactorOnePublicTransposeSource, CompactFactorOnePublicCovectorError> {
+        CompactFactorOnePublicTransposeSource::new(
+            self.public_input,
+            self.verifier_inputs
+                .relation
+                .padded_public_input_element_count(),
+            lookup_challenge,
+        )
     }
 
     pub(crate) fn begin_prefix_derivation(
@@ -375,7 +387,7 @@ struct CompactFactorOneMainTransposeState {
     public_input_binding: [u8; 64],
 }
 
-struct CompactFactorOnePublicTransposeSource {
+pub(super) struct CompactFactorOnePublicTransposeSource {
     canonical_public_input_bytes: Box<[u8]>,
     decoded_public_input: DecodedCompactPublicInput,
     padded_public_input_element_count: u64,

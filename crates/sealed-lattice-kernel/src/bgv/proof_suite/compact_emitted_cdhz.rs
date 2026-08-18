@@ -21,7 +21,7 @@ use super::compact_proof_wire::{CompactProofWireError, CompactPublicInputBinding
 use super::compact_public_key_verifier::{
     CompactPublicKeyTransportError, VerifiedCompactPublicKeyTransport,
     compact_proof_transport_binding, compact_public_input_transport_binding,
-    verify_selected_compact_public_key_transport_for_test,
+    verify_selected_compact_public_key_transport,
 };
 #[cfg(test)]
 use super::compact_response_merkle::{
@@ -224,7 +224,7 @@ pub(crate) fn measure_selected_compact_emission_cdhz(
         canonical_proof_bytes.ok_or(CompactEmittedCdhzError::MissingEmittedProof)?;
     let canonical_public_input_bytes =
         canonical_public_input_bytes.ok_or(CompactEmittedCdhzError::MissingEmittedPublicInput)?;
-    let transport = verify_selected_compact_public_key_transport_for_test(
+    let transport = verify_selected_compact_public_key_transport(
         expected_public_input_bindings,
         canonical_proof_bytes.to_vec().into_boxed_slice(),
         canonical_public_input_bytes.to_vec().into_boxed_slice(),

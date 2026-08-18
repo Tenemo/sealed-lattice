@@ -605,7 +605,6 @@ impl DecodedCompactProofResponse {
         )
     }
 
-    #[cfg(test)]
     pub(crate) fn base_field_value(
         &self,
         canonical_proof_bytes: &[u8],
@@ -638,7 +637,6 @@ impl DecodedCompactProofResponse {
         )
     }
 
-    #[cfg(test)]
     pub(crate) fn extension_field_value(
         &self,
         canonical_proof_bytes: &[u8],
@@ -756,7 +754,7 @@ impl CompactPublicInputBindings {
         }
     }
 
-    const fn ordered_hashes(self) -> [Hash512; PUBLIC_INPUT_BINDING_COUNT] {
+    pub(crate) const fn ordered_hashes(self) -> [Hash512; PUBLIC_INPUT_BINDING_COUNT] {
         [
             self.suite_identifier,
             self.application_statement_hash,
@@ -1417,7 +1415,6 @@ fn read_u64_at(bytes: &[u8], offset: usize) -> Result<u64, CompactProofWireError
     Ok(u64::from_le_bytes(read_array_at(bytes, offset)?))
 }
 
-#[cfg(test)]
 fn read_extension_at(
     bytes: &[u8],
     offset: usize,

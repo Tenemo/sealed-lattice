@@ -71,8 +71,8 @@ and target release remain incomplete or internal.
 - The compact successor's release transport boundary strictly decodes proof and
   public-input bytes, derives the verifier transcript and response-query
   schedule, validates every salted Merkle opening, and returns typed refusals.
-  It does not verify the CFW or WHIR equations and cannot mint a proof or
-  workflow capability.
+  That transport boundary does not verify the CFW or WHIR equations and cannot
+  mint a proof or workflow capability.
 - Release code also owns the scalar CFW mechanics, bounded external storage,
   assignment and structured-row preparation, transcript and proof assembly,
   response-tree custody, and authenticated response checkpoints. For the
@@ -81,9 +81,16 @@ and target release remain incomplete or internal.
   every live conditional-image gate. The release-state finisher emits one
   23,815,474-byte canonical compact-proof candidate, and the independent
   transport check accepts its canonical structure, transcript chronology,
-  verifier queries, and salted Merkle openings. This is transport acceptance
-  only: no CFW or WHIR equation is algebraically verified, so the candidate is
-  not an accepted proof and mints no capability.
+  verifier queries, and salted Merkle openings. A release-owned pollable
+  algebraic verifier then independently derives the structured public CFW
+  contribution and verifies the CFW transcript, both WHIR epochs, all six code
+  switches, both terminal blinded relations, and the authenticated source and
+  mask spot checks. A guarded current-source replay accepts the exact emitted
+  proof from checkpointed transported bytes. This is native prototype evidence
+  only. Raw release-kernel begin, bounded poll, and cancellation functions now
+  own the same verifier state, but the full equation-invalid hostile corpus,
+  state codec, TypeScript worker integration, final `VerificationResult`, and
+  capability transition remain absent.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -147,10 +154,13 @@ ceremony or supported-phone qualification.
 ### Remaining completion boundary
 
 - No exact suite is frozen or selectable.
-- No production compact generation API, algebraically verified emitted compact
-  proof, final proof `VerificationResult`, or complete compact generation and
-  verification ABI exists. The release transport ABI checks canonical
-  structure, transcript chronology, query derivation, and Merkle openings only.
+- No production compact generation API, final proof `VerificationResult`, or
+  complete compact generation and verification ABI exists. The release
+  transport ABI checks canonical structure, transcript chronology, query
+  derivation, and Merkle openings only. A separate raw kernel ABI can begin,
+  poll, and cancel algebraic verification, but it has no checkpoint codec,
+  worker integration, complete transported equation-invalid hostile corpus, or
+  capability handoff.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the
@@ -162,8 +172,8 @@ ceremony or supported-phone qualification.
   checkpointing and exact resume for every dominant compact-proof boundary.
 - The accepted setup-to-release capability flow is not connected end to end.
 - No compact proof has completed the scalar release-WebAssembly desktop-browser
-  evidence path after guarded native generation and independent transport
-  acceptance.
+  evidence path after guarded native generation and independent transport and
+  algebraic verification.
 - No physical-phone profile is qualified. Supported-phone evidence must use the
   same frozen bytes and remains independent from cryptographic completion.
 - No connected ten-participant mobile rehearsal exists.

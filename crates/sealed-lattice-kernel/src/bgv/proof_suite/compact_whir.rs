@@ -3518,6 +3518,10 @@ mod tests {
     use rand::{TryCryptoRng, TryRng};
 
     use super::*;
+    use crate::bgv::proof_suite::compact_whir_algebraic_verifier::{
+        CompactWhirAlgebraicRelation, CompactWhirCodeSwitchTranscript,
+        CompactWhirSumcheckTranscript,
+    };
 
     struct CountingRandomSource(u64);
 
@@ -4347,7 +4351,7 @@ mod tests {
         let opening_batching_challenge = CompactChallengeField::from_u64(1_201);
         let relation = prepared_test_relation(
             source,
-            equality_point,
+            equality_point.clone(),
             pre_challenge_mask,
             main_mask,
             opening_batching_challenge,
@@ -4394,6 +4398,41 @@ mod tests {
         );
 
         let combination_challenge = CompactChallengeField::from_u64(1_303);
+        let sumcheck_mask_contract = initial_sumcheck_mask_contract(&configuration);
+        let verifier_epoch_contract = CompactWhirEpochContract {
+            epoch: 1,
+            polynomial_variable_count: u32::try_from(configuration.num_variables).unwrap(),
+            folding_schedule: [
+                u32::try_from(configuration.round_folding_factor(0)).unwrap(),
+                1,
+                1,
+                1,
+            ],
+            final_variable_count: 3,
+            round_log_inverse_rates: [2, 4, 8],
+            mask_query_count: sumcheck_mask_contract.randomness_length,
+            internal_mask_groups: vec![sumcheck_mask_contract],
+            external_mask_groups: vec![bounded_base_mask_contract(1, 0, 2, 1, 4)],
+        };
+        let verifier_fold_contract = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 0,
+            message_length: u64::try_from(
+                (1_usize << configuration.num_variables) >> configuration.round_folding_factor(0),
+            )
+            .unwrap(),
+            hiding_randomness_length: 4,
+            block_length: 256,
+            oracle_width: 1_u64 << configuration.round_folding_factor(0),
+            query_count: 4,
+            unique_decoding_radius: 93,
+        };
+        let mut verifier_relation = CompactWhirAlgebraicRelation::pre_challenge(
+            &verifier_epoch_contract,
+            &equality_point,
+            state.masked_target(),
+        )
+        .expect("the verifier derives the public pre-challenge relation");
         state
             .bind_combination_challenge(combination_challenge)
             .expect("the exact combination challenge binds");
@@ -4557,6 +4596,40 @@ mod tests {
             combination_challenge * reference_mask_carry
         );
         assert_eq!(state.round_challenges(), challenges);
+        let round_wires = (0..challenges.len())
+            .map(|round_ordinal| state.round_wire(round_ordinal).unwrap().try_into().unwrap())
+            .collect::<Vec<[CompactChallengeField; 2]>>();
+        verifier_relation
+            .verify_sumcheck_batch(
+                &verifier_epoch_contract,
+                verifier_fold_contract,
+                0,
+                false,
+                CompactWhirSumcheckTranscript {
+                    auxiliary_target: state.auxiliary_target(),
+                    combination_challenge,
+                    round_wires: &round_wires,
+                    round_challenges: &challenges,
+                },
+            )
+            .expect("the verifier independently replays the masked sumcheck");
+        assert_eq!(
+            verifier_relation.source_covector(),
+            state.residual_covector().unwrap()
+        );
+        assert_eq!(verifier_relation.target(), state.residual_target().unwrap());
+        let carried_mask_claim = verifier_relation.mask_group_covectors()[0][0]
+            * pre_challenge_mask
+            + verifier_relation.mask_group_covectors()[0][1] * main_mask;
+        let sumcheck_mask_claim = verifier_relation.mask_group_covectors()[1]
+            .iter()
+            .zip(state.mask_messages().iter().flatten())
+            .map(|(coefficient, value)| *coefficient * *value)
+            .sum::<CompactChallengeField>();
+        assert_eq!(
+            carried_mask_claim + sumcheck_mask_claim,
+            state.residual_mask_claim().unwrap()
+        );
         assert_eq!(state.poll(1), Err(CompactWhirError::WrongProverPhase));
     }
 
@@ -5190,6 +5263,90 @@ mod tests {
         assert_eq!(
             relation.source_claim + relation.preceding_mask_claim,
             relation.target
+        );
+
+        let external_mask_contract = bounded_base_mask_contract(1, 0, 1, 1, 1);
+        let sumcheck_mask_contract = bounded_base_mask_contract(4, 0, 1, 1, 1);
+        let switch_mask_contract = bounded_base_mask_contract(5, 0, 1, 2, 1);
+        let verifier_epoch = CompactWhirEpochContract {
+            epoch: 1,
+            polynomial_variable_count: 6,
+            folding_schedule: [1, 1, 1, 1],
+            final_variable_count: 2,
+            round_log_inverse_rates: [2, 2, 2],
+            mask_query_count: 1,
+            internal_mask_groups: vec![sumcheck_mask_contract, switch_mask_contract],
+            external_mask_groups: vec![external_mask_contract],
+        };
+        let input_fold = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 0,
+            message_length: 4,
+            hiding_randomness_length: 2,
+            block_length: 8,
+            oracle_width: 2,
+            query_count: 2,
+            unique_decoding_radius: 0,
+        };
+        let output_fold = CompactWhirFoldContract {
+            epoch: 1,
+            batch_ordinal: 1,
+            message_length: 2,
+            hiding_randomness_length: 1,
+            block_length: 8,
+            oracle_width: 2,
+            query_count: 1,
+            unique_decoding_radius: 0,
+        };
+        let mut verifier_relation = CompactWhirAlgebraicRelation::from_parts_for_test(
+            [2_u64, 4, 6, 8]
+                .into_iter()
+                .map(CompactChallengeField::from_u64)
+                .collect(),
+            vec![
+                vec![CompactChallengeField::from_u64(29)],
+                vec![CompactChallengeField::from_u64(31)],
+            ],
+            input_target,
+        );
+        let verifier_query_positions = query_positions
+            .iter()
+            .map(|position| u64::try_from(*position).unwrap())
+            .collect::<Vec<_>>();
+        verifier_relation
+            .verify_code_switch(
+                &verifier_epoch,
+                input_fold,
+                output_fold,
+                0,
+                CompactWhirCodeSwitchTranscript {
+                    combination_challenge,
+                    query_positions: &verifier_query_positions,
+                    folded_source_openings: &folded_source_openings,
+                },
+            )
+            .expect("the verifier replays the same code-switch relation");
+        assert_eq!(
+            verifier_relation.source_covector(),
+            &expected_source_covector
+        );
+        assert_eq!(verifier_relation.target(), expected_target);
+        let expected_switch_mask_covector = query_points.iter().enumerate().fold(
+            vec![CompactChallengeField::ZERO; switch_mask_message.len()],
+            |mut covector, (query_ordinal, point)| {
+                let mut power = point.exp_u64(source_evaluations.len() as u64);
+                let coefficient =
+                    combination_challenge.exp_u64(u64::try_from(query_ordinal + 1).unwrap());
+                for destination in &mut covector {
+                    *destination += coefficient * power;
+                    power *= *point;
+                }
+                covector
+            },
+        );
+        assert_eq!(
+            verifier_relation.mask_group_covectors().last().unwrap(),
+            &expected_switch_mask_covector
         );
 
         let mut wrong_openings = folded_source_openings;

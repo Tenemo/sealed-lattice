@@ -384,7 +384,7 @@ impl CompactResponseMerkleGeometry {
         Ok(())
     }
 
-    fn leaf_descriptor(
+    pub(crate) fn leaf_descriptor(
         &self,
         leaf_ordinal: u64,
     ) -> Result<CompactResponseLeafDescriptor, CompactResponseMerkleError> {
@@ -1015,6 +1015,196 @@ pub(crate) struct CompactResponseLeafDescriptor {
     leaf_ordinal: u64,
     value_kind: CompactResponseLeafValueKind,
     field_element_count: u64,
+}
+
+impl CompactResponseLeafDescriptor {
+    pub(crate) const fn component_ordinal(self) -> u32 {
+        self.component_ordinal
+    }
+
+    pub(crate) const fn component_leaf_ordinal(self) -> u64 {
+        self.component_leaf_ordinal
+    }
+
+    pub(crate) const fn value_kind(self) -> CompactResponseLeafValueKind {
+        self.value_kind
+    }
+
+    pub(crate) const fn field_element_count(self) -> u64 {
+        self.field_element_count
+    }
+}
+
+/// One field-valued leaf recovered from a response whose canonical opening
+/// has already been verified by the compact transport owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DecodedCompactResponseFieldLeaf<FieldElement> {
+    component_leaf_ordinal: u64,
+    values: Vec<FieldElement>,
+}
+
+pub(super) type DecodedCompactResponseBaseLeaf =
+    DecodedCompactResponseFieldLeaf<ProofBaseFieldElement>;
+pub(super) type DecodedCompactResponseExtensionLeaf =
+    DecodedCompactResponseFieldLeaf<ProofChallengeExtensionElement>;
+
+impl<FieldElement> DecodedCompactResponseFieldLeaf<FieldElement> {
+    pub(super) const fn component_leaf_ordinal(&self) -> u64 {
+        self.component_leaf_ordinal
+    }
+
+    pub(super) fn values(&self) -> &[FieldElement] {
+        &self.values
+    }
+}
+
+/// Recovers one response component from canonical opened values. This helper
+/// deliberately performs no authentication itself: its only production caller
+/// is the owning transport terminal, which has already verified every salted
+/// Merkle opening against the response root.
+pub(super) fn decode_verified_compact_response_extension_component(
+    geometry: &CompactResponseMerkleGeometry,
+    decoded_response: &DecodedCompactProofResponse,
+    canonical_proof_bytes: &[u8],
+    query_schedule: &CompactResponseQuerySchedule,
+    component_ordinal: u32,
+) -> Result<Vec<DecodedCompactResponseExtensionLeaf>, CompactResponseMerkleError> {
+    decode_verified_compact_response_component(
+        geometry,
+        decoded_response,
+        canonical_proof_bytes,
+        query_schedule,
+        component_ordinal,
+        CompactResponseLeafValueKind::ExtensionField,
+        DecodedCompactProofResponse::extension_field_value,
+    )
+}
+
+/// Recovers one authenticated base-field response component while preserving
+/// its component-local leaf coordinates.
+pub(super) fn decode_verified_compact_response_base_component(
+    geometry: &CompactResponseMerkleGeometry,
+    decoded_response: &DecodedCompactProofResponse,
+    canonical_proof_bytes: &[u8],
+    query_schedule: &CompactResponseQuerySchedule,
+    component_ordinal: u32,
+) -> Result<Vec<DecodedCompactResponseBaseLeaf>, CompactResponseMerkleError> {
+    decode_verified_compact_response_component(
+        geometry,
+        decoded_response,
+        canonical_proof_bytes,
+        query_schedule,
+        component_ordinal,
+        CompactResponseLeafValueKind::BaseField,
+        DecodedCompactProofResponse::base_field_value,
+    )
+}
+
+fn decode_verified_compact_response_component<FieldElement>(
+    geometry: &CompactResponseMerkleGeometry,
+    decoded_response: &DecodedCompactProofResponse,
+    canonical_proof_bytes: &[u8],
+    query_schedule: &CompactResponseQuerySchedule,
+    component_ordinal: u32,
+    expected_value_kind: CompactResponseLeafValueKind,
+    decode_value: impl Fn(
+        &DecodedCompactProofResponse,
+        &[u8],
+        usize,
+    ) -> Result<FieldElement, CompactProofWireError>,
+) -> Result<Vec<DecodedCompactResponseFieldLeaf<FieldElement>>, CompactResponseMerkleError> {
+    geometry.validate_query_leaf_ordinals(query_schedule.as_slice())?;
+    if decoded_response.ordinal() != geometry.response_ordinal
+        || decoded_response.queried_leaf_count() != query_schedule.as_slice().len()
+    {
+        return Err(CompactResponseMerkleError::WireGeometryMismatch);
+    }
+    let component_index = usize::try_from(component_ordinal)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let component = geometry
+        .components
+        .get(component_index)
+        .ok_or(CompactResponseMerkleError::InvalidGeometry)?;
+    if component.value_kind != expected_value_kind {
+        return Err(CompactResponseMerkleError::WrongLeafValueKind);
+    }
+
+    let maximum_output_count = usize::try_from(component.maximum_queried_leaf_count)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(maximum_output_count)
+        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+    let mut base_field_value_offset = 0_usize;
+    let mut extension_field_value_offset = 0_usize;
+    for leaf_ordinal in query_schedule.as_slice() {
+        let descriptor = geometry.leaf_descriptor(*leaf_ordinal)?;
+        let field_element_count = usize::try_from(descriptor.field_element_count())
+            .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+        match descriptor.value_kind() {
+            CompactResponseLeafValueKind::BaseField => {
+                let value_end = base_field_value_offset
+                    .checked_add(field_element_count)
+                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
+                if expected_value_kind == CompactResponseLeafValueKind::BaseField
+                    && descriptor.component_ordinal() == component_ordinal
+                {
+                    let mut values = Vec::new();
+                    values
+                        .try_reserve_exact(field_element_count)
+                        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+                    for value_ordinal in base_field_value_offset..value_end {
+                        values.push(
+                            decode_value(decoded_response, canonical_proof_bytes, value_ordinal)
+                                .map_err(map_wire_error)?,
+                        );
+                    }
+                    output.push(DecodedCompactResponseFieldLeaf {
+                        component_leaf_ordinal: descriptor.component_leaf_ordinal(),
+                        values,
+                    });
+                }
+                base_field_value_offset = value_end;
+            }
+            CompactResponseLeafValueKind::ExtensionField => {
+                let value_end = extension_field_value_offset
+                    .checked_add(field_element_count)
+                    .ok_or(CompactResponseMerkleError::CountOverflow)?;
+                if expected_value_kind == CompactResponseLeafValueKind::ExtensionField
+                    && descriptor.component_ordinal() == component_ordinal
+                {
+                    let mut values = Vec::new();
+                    values
+                        .try_reserve_exact(field_element_count)
+                        .map_err(|_| CompactResponseMerkleError::CountOverflow)?;
+                    for value_ordinal in extension_field_value_offset..value_end {
+                        values.push(
+                            decode_value(decoded_response, canonical_proof_bytes, value_ordinal)
+                                .map_err(map_wire_error)?,
+                        );
+                    }
+                    output.push(DecodedCompactResponseFieldLeaf {
+                        component_leaf_ordinal: descriptor.component_leaf_ordinal(),
+                        values,
+                    });
+                }
+                extension_field_value_offset = value_end;
+            }
+            CompactResponseLeafValueKind::Padding => {
+                return Err(CompactResponseMerkleError::InvalidOpeningIndices);
+            }
+        }
+    }
+    if base_field_value_offset != decoded_response.queried_base_field_element_count()
+        || extension_field_value_offset != decoded_response.queried_extension_field_element_count()
+        || output.len()
+            < usize::try_from(component.minimum_queried_leaf_count)
+                .map_err(|_| CompactResponseMerkleError::CountOverflow)?
+        || output.len() > maximum_output_count
+    {
+        return Err(CompactResponseMerkleError::WireGeometryMismatch);
+    }
+    Ok(output)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3170,6 +3360,89 @@ mod tests {
         }
         assert_eq!(opened_leaf_offset, expected_value_bytes.len());
         assert!(cursor.next_opened_leaf().unwrap().is_none());
+    }
+
+    #[test]
+    fn verified_component_views_preserve_component_leaf_coordinates() {
+        let geometry = response_geometry();
+        let query_leaf_ordinals = [0, 2, 4];
+        let (wire_geometry, canonical_proof_bytes) =
+            encoded_opening(&geometry, &query_leaf_ordinals, false, false, false, false);
+        let decoded = decode_compact_proof_wire(&wire_geometry, &canonical_proof_bytes).unwrap();
+        let query_schedule = CompactResponseQuerySchedule {
+            leaf_ordinals: query_leaf_ordinals.to_vec(),
+        };
+
+        let extension_leaves = decode_verified_compact_response_extension_component(
+            &geometry,
+            &decoded.responses()[0],
+            &canonical_proof_bytes,
+            &query_schedule,
+            1,
+        )
+        .unwrap();
+        assert_eq!(extension_leaves.len(), 2);
+        assert_eq!(extension_leaves[0].component_leaf_ordinal(), 0);
+        assert_eq!(extension_leaves[0].values(), &[extension(23)]);
+        assert_eq!(extension_leaves[1].component_leaf_ordinal(), 2);
+        assert_eq!(extension_leaves[1].values(), &[extension(31)]);
+
+        assert_eq!(
+            decode_verified_compact_response_extension_component(
+                &geometry,
+                &decoded.responses()[0],
+                &canonical_proof_bytes,
+                &query_schedule,
+                0,
+            ),
+            Err(CompactResponseMerkleError::WrongLeafValueKind)
+        );
+        assert_eq!(
+            decode_verified_compact_response_extension_component(
+                &geometry,
+                &decoded.responses()[0],
+                &canonical_proof_bytes,
+                &query_schedule,
+                3,
+            ),
+            Err(CompactResponseMerkleError::InvalidGeometry)
+        );
+
+        let incomplete_query_schedule = CompactResponseQuerySchedule {
+            leaf_ordinals: query_leaf_ordinals[..2].to_vec(),
+        };
+        assert_eq!(
+            decode_verified_compact_response_extension_component(
+                &geometry,
+                &decoded.responses()[0],
+                &canonical_proof_bytes,
+                &incomplete_query_schedule,
+                1,
+            ),
+            Err(CompactResponseMerkleError::InvalidOpeningIndices)
+        );
+
+        let base_leaves = decode_verified_compact_response_base_component(
+            &geometry,
+            &decoded.responses()[0],
+            &canonical_proof_bytes,
+            &query_schedule,
+            0,
+        )
+        .unwrap();
+        assert_eq!(base_leaves.len(), 1);
+        assert_eq!(base_leaves[0].component_leaf_ordinal(), 0);
+        assert_eq!(base_leaves[0].values(), &[base(11), base(13)]);
+        assert_eq!(
+            decode_verified_compact_response_base_component(
+                &geometry,
+                &decoded.responses()[0],
+                &canonical_proof_bytes,
+                &query_schedule,
+                1,
+            ),
+            Err(CompactResponseMerkleError::WrongLeafValueKind)
+        );
     }
 
     #[test]

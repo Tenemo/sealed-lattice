@@ -60,13 +60,19 @@ consequences are:
   conditional-image gates across both WHIR epochs. Its finisher emits a
   23,815,474-byte canonical compact-proof candidate. The independent transport
   check accepts its canonical structure, transcript chronology, verifier
-  queries, and salted Merkle openings. The candidate is not an accepted proof:
-  no CFW or WHIR equation is algebraically verified, and no capability is
-  minted.
+  queries, and salted Merkle openings. A release-owned pollable algebraic
+  verifier independently derives the structured public CFW contribution and
+  accepts the exact emitted proof after checking the CFW transcript, both WHIR
+  epochs, all six code switches, both terminal blinded relations, and the
+  authenticated source and mask spot checks. The candidate is still not an
+  accepted proof: the complete equation-invalid hostile corpus, final public
+  verification result, and capability transition remain open.
 - The compact transport ABI returns typed refusals but does not return
-  `isValid`, mint a proof capability, or supply the final algebraic
-  `VerificationResult`. Complete generation and verification release ABIs do
-  not exist.
+  `isValid`, mint a proof capability, or supply the final `VerificationResult`.
+  A separate raw release-kernel ABI begins, polls, and cancels the internal
+  algebraic verifier, but it has no checkpoint codec, TypeScript worker
+  integration, final typed result, or capability handoff. Complete generation
+  and verification release ABIs do not exist.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
@@ -198,16 +204,19 @@ that a coherent snapshot is newest.
 - `SEC-019`: Reproducible scalar release WebAssembly and SDK bytes
   establish build identity only. The release artifact contains compact transport
   validation and public-key response generation through the complete 82-response
-  schedule, but it has no compact generation API, complete algebraic
-  verification, or final generation and verification ABIs.
+  schedule plus raw begin, bounded-poll, and cancellation functions for the
+  internal algebraic verifier, but it has no compact generation API,
+  checkpointable worker-integrated verification, final typed result, or final
+  generation and verification ABIs.
 - `SEC-020`: Guarded selected-size native evidence covers the public-key
-  family's complete response-generation schedule. A separate desktop Chromium
-  diagnostic replays its exact CFW storage lifecycle and exposes an
-  orders-of-magnitude physical-storage amplification. The current proof
-  boundary above owns the candidate's acceptance status. These results do not
-  establish a final `VerificationResult`, release-WebAssembly proof execution,
-  cold common-worker restoration, complete durable browser custody, or
-  supported-phone feasibility.
+  family's complete response-generation schedule and one fresh algebraic replay
+  of its exact emitted proof. A separate desktop Chromium diagnostic replays its
+  exact CFW storage lifecycle and exposes an orders-of-magnitude physical-storage
+  amplification. The current proof boundary above owns the candidate's
+  acceptance status. These results do not establish a final
+  `VerificationResult`, release-WebAssembly proof execution, cold common-worker
+  restoration, complete durable browser custody, or supported-phone
+  feasibility.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

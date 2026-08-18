@@ -35,10 +35,13 @@ or mint a proof capability.
 The scalar CFW and bounded external-memory machinery, authenticated assignment
 loader, structured row source, transpose path, incremental proof assembly,
 response-tree custody, and response checkpoints compile into the release
-kernel. The retained public-key generation state can drive its selected-size
-source preparation and initial response prefix, but the common-proof worker
-does not call it and compact proof generation and complete algebraic
-verification are not release runtime capabilities.
+kernel. The internal pollable verifier independently checks the compact CFW and
+WHIR algebra after transport, and guarded native evidence accepts one complete
+selected-size public-key proof. Raw kernel exports can begin, bounded-poll, and
+cancel that verifier state. The common-proof worker does not call the generation
+or algebraic verification states, however, so compact proof generation,
+checkpoint restoration, final verification results, and proof capabilities are
+not worker-facing runtime capabilities.
 
 Test-only proof workbenches and native or desktop results are not an accepted
 ceremony or supported-phone evidence. The repository [README](../../README.md)
