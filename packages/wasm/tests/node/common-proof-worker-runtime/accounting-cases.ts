@@ -4,8 +4,13 @@ import {
     CommonProofGenerationKernelBoundary,
     CommonProofVerificationKernelBoundary,
 } from '../../../src/common-proof-worker-runtime/kernel-boundaries.js';
+import { verifyCompactPublicKeyAlgebraicallyInClosedWorker } from '../../../src/common-proof-worker-runtime/runtime.js';
 
-import { createMockKernelRuntime, memoryBytes } from './kernel-fixtures.js';
+import {
+    createMockKernelRuntime,
+    memoryBytes,
+    writeUnsigned32,
+} from './kernel-fixtures.js';
 
 const encodeUnsigned64Words = (
     values: readonly bigint[],
@@ -365,5 +370,267 @@ describe('Compact public-key transport boundary', () => {
                 Uint8Array.of(2),
             ),
         ).toThrow(/status 6/u);
+    });
+});
+
+describe('Compact public-key algebraic verification worker', () => {
+    const bindings = Object.freeze({
+        suiteIdentifier: new Uint8Array(64).fill(0x11),
+        applicationStatementHash: new Uint8Array(64).fill(0x22),
+        manifestHash: new Uint8Array(64).fill(0x33),
+        relationPlanHash: new Uint8Array(64).fill(0x44),
+    });
+    const proofBytes = Uint8Array.of(0x51, 0x52, 0x53);
+    const publicInputBytes = Uint8Array.of(0x61, 0x62);
+
+    it('drives bounded progress to one typed positive result without cancellation', async () => {
+        let pollCount = 0;
+        let cancellationCount = 0;
+        let yieldCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_begin_algebraic_verification: (
+                bindingsPointer,
+                bindingsByteLength,
+                proofPointer,
+                proofByteLength,
+                publicInputPointer,
+                publicInputByteLength,
+                statusPointer,
+            ) => {
+                expect(bindingsByteLength).toBe(256);
+                expect(
+                    memoryBytes(memory, bindingsPointer, bindingsByteLength),
+                ).toEqual(
+                    new Uint8Array([
+                        ...bindings.suiteIdentifier,
+                        ...bindings.applicationStatementHash,
+                        ...bindings.manifestHash,
+                        ...bindings.relationPlanHash,
+                    ]),
+                );
+                expect(
+                    memoryBytes(memory, proofPointer, proofByteLength),
+                ).toEqual(proofBytes);
+                expect(
+                    memoryBytes(
+                        memory,
+                        publicInputPointer,
+                        publicInputByteLength,
+                    ),
+                ).toEqual(publicInputBytes);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 91;
+            },
+            sealed_lattice_compact_public_key_algebraic_verification_poll: (
+                operationHandle,
+                maximumWorkUnitCount,
+                pollKindPointer,
+                completedWorkUnitCountPointer,
+            ) => {
+                expect(operationHandle).toBe(91);
+                expect(maximumWorkUnitCount).toBe(17);
+                pollCount += 1;
+                writeUnsigned32(
+                    memory,
+                    pollKindPointer,
+                    pollCount === 1 ? 1 : 5,
+                );
+                writeUnsigned32(
+                    memory,
+                    completedWorkUnitCountPointer,
+                    pollCount === 1 ? 17 : 0,
+                );
+                return 0;
+            },
+            sealed_lattice_compact_public_key_cancel_algebraic_verification:
+                () => {
+                    cancellationCount += 1;
+                    return 0;
+                },
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    maximumWorkUnitCountPerPoll: 17,
+                    yieldControl: () => {
+                        yieldCount += 1;
+                        return Promise.resolve();
+                    },
+                },
+            ),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+        expect(pollCount).toBe(2);
+        expect(yieldCount).toBe(1);
+        expect(cancellationCount).toBe(0);
+    });
+
+    it('returns begin and poll refusals as typed verification results', async () => {
+        const beginRefusalRuntime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_begin_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                statusPointer,
+            ) => {
+                writeUnsigned32(memory, statusPointer, 0x000b);
+                return 0;
+            },
+        }));
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                beginRefusalRuntime,
+                { bindings, proofBytes, publicInputBytes },
+            ),
+        ).resolves.toEqual({
+            isValid: false,
+            refusalReason: 'invalidProof',
+        });
+
+        let cancellationCount = 0;
+        const pollRefusalRuntime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_begin_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                statusPointer,
+            ) => {
+                writeUnsigned32(memory, statusPointer, 0);
+                return 92;
+            },
+            sealed_lattice_compact_public_key_algebraic_verification_poll: () =>
+                0x0006,
+            sealed_lattice_compact_public_key_cancel_algebraic_verification:
+                () => {
+                    cancellationCount += 1;
+                    return 0;
+                },
+        }));
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                pollRefusalRuntime,
+                { bindings, proofBytes, publicInputBytes },
+            ),
+        ).resolves.toEqual({
+            isValid: false,
+            refusalReason: 'wrongHashOrRoot',
+        });
+        expect(cancellationCount).toBe(0);
+    });
+
+    it('cancels the live Rust verifier after an abort between bounded polls', async () => {
+        const abortController = new AbortController();
+        let cancellationCount = 0;
+        let pollCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_begin_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                statusPointer,
+            ) => {
+                writeUnsigned32(memory, statusPointer, 0);
+                return 93;
+            },
+            sealed_lattice_compact_public_key_algebraic_verification_poll: (
+                operationHandle,
+                _maximumWorkUnitCount,
+                pollKindPointer,
+                completedWorkUnitCountPointer,
+            ) => {
+                expect(operationHandle).toBe(93);
+                pollCount += 1;
+                writeUnsigned32(memory, pollKindPointer, 1);
+                writeUnsigned32(memory, completedWorkUnitCountPointer, 1);
+                return 0;
+            },
+            sealed_lattice_compact_public_key_cancel_algebraic_verification: (
+                operationHandle,
+            ) => {
+                expect(operationHandle).toBe(93);
+                cancellationCount += 1;
+                return 0;
+            },
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    maximumWorkUnitCountPerPoll: 1,
+                    signal: abortController.signal,
+                    yieldControl: () => {
+                        abortController.abort('test cancellation');
+                        return Promise.resolve();
+                    },
+                },
+            ),
+        ).rejects.toMatchObject({ code: 'Cancelled' });
+        expect(pollCount).toBe(1);
+        expect(cancellationCount).toBe(1);
+    });
+
+    it('rejects malformed progress metadata and retires the live operation', async () => {
+        let cancellationCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_begin_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                statusPointer,
+            ) => {
+                writeUnsigned32(memory, statusPointer, 0);
+                return 94;
+            },
+            sealed_lattice_compact_public_key_algebraic_verification_poll: (
+                _operationHandle,
+                _maximumWorkUnitCount,
+                pollKindPointer,
+                completedWorkUnitCountPointer,
+            ) => {
+                writeUnsigned32(memory, pollKindPointer, 1);
+                writeUnsigned32(memory, completedWorkUnitCountPointer, 2);
+                return 0;
+            },
+            sealed_lattice_compact_public_key_cancel_algebraic_verification:
+                () => {
+                    cancellationCount += 1;
+                    return 0;
+                },
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                { maximumWorkUnitCountPerPoll: 1 },
+            ),
+        ).rejects.toThrow(/invalid bounded progress/u);
+        expect(cancellationCount).toBe(1);
     });
 });

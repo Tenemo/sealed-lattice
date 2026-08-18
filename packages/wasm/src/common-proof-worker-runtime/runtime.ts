@@ -1,3 +1,5 @@
+import type { VerificationResult } from '@sealed-lattice/types';
+
 import { byteArraysEqual } from '../byte-array.js';
 import {
     decodeCommonProofGenerationCursorManifest,
@@ -42,6 +44,7 @@ import {
     yieldBrowserWorkerTurn,
     type ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
     type ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
+    type CompactPublicKeyTransportBindings,
     type CommonProofAuthenticatedSourceRangeRequest,
     type CommonProofBrowserStorageAccounting,
     type CommonProofGenerationExternalMemoryAccounting,
@@ -172,6 +175,18 @@ export type AuthenticatedCommonProofInputStore = Readonly<{
 }>;
 
 export type CommonProofVerificationWorkerOptions = Readonly<{
+    signal?: AbortSignal;
+    yieldControl?: () => Promise<void>;
+}>;
+
+type CompactPublicKeyAlgebraicVerificationInput = Readonly<{
+    bindings: CompactPublicKeyTransportBindings;
+    proofBytes: Uint8Array;
+    publicInputBytes: Uint8Array;
+}>;
+
+type CompactPublicKeyAlgebraicVerificationWorkerOptions = Readonly<{
+    maximumWorkUnitCountPerPoll?: number;
     signal?: AbortSignal;
     yieldControl?: () => Promise<void>;
 }>;
@@ -2024,6 +2039,93 @@ const throwIfVerificationCancelled = (signal?: AbortSignal): void => {
             'The common-proof verification operation was cancelled.',
             signal.reason,
         );
+    }
+};
+
+const defaultCompactPublicKeyMaximumWorkUnitCountPerPoll = 4_096;
+
+/**
+ * Verifies the exact compact public-key transport and every production CFW and
+ * WHIR equation through bounded scalar WASM polls. This genuine verification
+ * result deliberately carries no workflow capability; capability handoff stays
+ * refused until the compact family adapter owns the complete lifecycle.
+ */
+export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
+    context: TranscriptCoreKernelCommandRuntime,
+    input: CompactPublicKeyAlgebraicVerificationInput,
+    options: CompactPublicKeyAlgebraicVerificationWorkerOptions = {},
+): Promise<VerificationResult<undefined>> => {
+    const maximumWorkUnitCountPerPoll =
+        options.maximumWorkUnitCountPerPoll ??
+        defaultCompactPublicKeyMaximumWorkUnitCountPerPoll;
+    if (
+        !Number.isSafeInteger(maximumWorkUnitCountPerPoll) ||
+        maximumWorkUnitCountPerPoll <= 0 ||
+        maximumWorkUnitCountPerPoll > 0xffff_ffff
+    ) {
+        throw resourceFailure(
+            'The compact public-key algebraic verification work-unit bound must be a positive unsigned 32-bit integer.',
+        );
+    }
+
+    const kernel = new CommonProofVerificationKernelBoundary(context);
+    const signal = options.signal;
+    const yieldControl = options.yieldControl ?? yieldBrowserWorkerTurn;
+    let operationHandle: number | undefined;
+    let operationTerminal = false;
+    try {
+        throwIfVerificationCancelled(signal);
+        const begin = kernel.beginCompactPublicKeyAlgebraicVerification(
+            input.bindings,
+            input.proofBytes,
+            input.publicInputBytes,
+        );
+        if (begin.kind === 'refused') {
+            return Object.freeze({
+                isValid: false,
+                refusalReason: begin.refusalReason,
+            });
+        }
+        operationHandle = begin.operationHandle;
+        for (;;) {
+            throwIfVerificationCancelled(signal);
+            const poll = kernel.pollCompactPublicKeyAlgebraicVerification(
+                operationHandle,
+                maximumWorkUnitCountPerPoll,
+            );
+            switch (poll.kind) {
+                case 'progress':
+                    await yieldControl();
+                    break;
+                case 'refused':
+                    operationTerminal = true;
+                    return Object.freeze({
+                        isValid: false,
+                        refusalReason: poll.refusalReason,
+                    });
+                case 'complete':
+                    operationTerminal = true;
+                    return Object.freeze({
+                        isValid: true,
+                        value: undefined,
+                    });
+            }
+        }
+    } catch (error) {
+        if (operationHandle !== undefined && !operationTerminal) {
+            try {
+                kernel.cancelCompactPublicKeyAlgebraicVerification(
+                    operationHandle,
+                );
+                operationTerminal = true;
+            } catch (cancellationError) {
+                throw permanentRetirementFailure(
+                    { cancellationError, operationError: error },
+                    'The compact public-key algebraic verifier failed and could not retire its operation.',
+                );
+            }
+        }
+        throw error;
     }
 };
 

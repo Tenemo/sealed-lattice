@@ -1,9 +1,12 @@
+import type { RefusalReason } from '@sealed-lattice/types';
+
 import { byteArraysEqual } from '../byte-array.js';
 import { decodeCommonProofCheckpointCursorManifest } from '../common-proof-checkpoint-cursor-manifest.js';
 import {
     decodeCommonProofGenerationCursorManifest,
     maximumCommonProofGenerationCursorManifestByteLength,
 } from '../common-proof-generation-cursor-manifest.js';
+import { refusalReasonByCode } from '../transcript-core-bridge/kernel-errors.js';
 import {
     resolveNumberExport,
     type TranscriptCoreKernelCommandRuntime,
@@ -55,6 +58,8 @@ const verificationPollPrefixAccepted = 2;
 const verificationPollQueryHeaderAccepted = 3;
 const verificationPollQueryTreeAccepted = 4;
 const verificationPollComplete = 5;
+const compactPublicKeyAlgebraicVerificationPollProgress = 1;
+const compactPublicKeyAlgebraicVerificationPollComplete = 5;
 export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
@@ -156,7 +161,7 @@ export type ClosedWorkerCommonProofVerificationFamilyAdapterDescription =
         commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     }>;
 
-type CompactPublicKeyTransportBindings = Readonly<{
+export type CompactPublicKeyTransportBindings = Readonly<{
     applicationStatementHash: Uint8Array;
     manifestHash: Uint8Array;
     relationPlanHash: Uint8Array;
@@ -271,6 +276,18 @@ type CommonProofVerificationKernelPoll =
           kind: 'query-tree-accepted';
       }>
     | Readonly<{ kind: 'complete' }>;
+
+type CompactPublicKeyAlgebraicVerificationKernelBegin =
+    | Readonly<{ kind: 'started'; operationHandle: number }>
+    | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
+
+type CompactPublicKeyAlgebraicVerificationKernelPoll =
+    | Readonly<{
+          completedWorkUnitCount: number;
+          kind: 'progress';
+      }>
+    | Readonly<{ kind: 'complete' }>
+    | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
 
 export const kernelFailure = (
     message: string,
@@ -399,6 +416,23 @@ export const requireKernelSuccess = (
             `The common-proof kernel refused ${operation} with status ${status}.`,
         );
     }
+};
+
+const decodeCompactPublicKeyAlgebraicVerificationStatus = (
+    status: number,
+    operation: string,
+): RefusalReason | undefined => {
+    requireUnsigned32(status, `${operation} status`);
+    if (status === 0) {
+        return undefined;
+    }
+    const refusalReason = refusalReasonByCode.get(status);
+    if (refusalReason === undefined) {
+        throw kernelFailure(
+            `The compact public-key algebraic verifier returned unknown status ${String(status)} during ${operation}.`,
+        );
+    }
+    return refusalReason;
 };
 
 export const yieldBrowserWorkerTurn = (): Promise<void> =>
@@ -1725,16 +1759,11 @@ export class CommonProofVerificationKernelBoundary {
         });
     }
 
-    /**
-     * Checks canonical compact transport framing, transcript chronology, and
-     * salted Merkle openings only. Success is not CFW or WHIR proof validity
-     * and must not mint a proof or workflow capability.
-     */
-    public validateCompactPublicKeyTransport(
+    #copyCompactPublicKeyTransportBindings(
         bindings: CompactPublicKeyTransportBindings,
         proofBytes: Uint8Array,
         publicInputBytes: Uint8Array,
-    ): void {
+    ): Uint8Array<ArrayBuffer> {
         for (const [value, label] of [
             [bindings.suiteIdentifier, 'The compact suite identifier'],
             [
@@ -1758,50 +1787,141 @@ export class CommonProofVerificationKernelBoundary {
                 'The compact transport bytes must be nonempty and remain within the accepted release boundary.',
             );
         }
-        this.#context.runExclusive(
-            'compact public-key transport validation',
-            () => {
-                const reportedBindingByteLength = requireUnsigned32(
-                    resolveNumberExport(
-                        this.#context.wasmExports,
-                        'sealed_lattice_compact_public_key_transport_bindings_byte_length',
-                    )(),
-                    'The compact transport binding byte length',
-                );
-                if (
-                    reportedBindingByteLength !==
-                    compactPublicKeyTransportBindingsByteLength
-                ) {
-                    throw kernelFailure(
-                        'The compact transport binding geometry disagrees with the worker.',
-                    );
-                }
-                const canonicalBindings = new Uint8Array(
-                    compactPublicKeyTransportBindingsByteLength,
-                );
-                canonicalBindings.set(bindings.suiteIdentifier, 0);
-                canonicalBindings.set(
-                    bindings.applicationStatementHash,
-                    hashByteLength,
-                );
-                canonicalBindings.set(
-                    bindings.manifestHash,
-                    2 * hashByteLength,
-                );
-                canonicalBindings.set(
-                    bindings.relationPlanHash,
-                    3 * hashByteLength,
-                );
-                const bindingsPointer =
-                    this.#memoryBoundary.copy(canonicalBindings);
-                const proofPointer = this.#memoryBoundary.copy(proofBytes);
-                const publicInputPointer =
-                    this.#memoryBoundary.copy(publicInputBytes);
-                try {
-                    requireKernelSuccess(
-                        resolveNumberExport(
+        const canonicalBindings = new Uint8Array(
+            compactPublicKeyTransportBindingsByteLength,
+        );
+        canonicalBindings.set(bindings.suiteIdentifier, 0);
+        canonicalBindings.set(
+            bindings.applicationStatementHash,
+            hashByteLength,
+        );
+        canonicalBindings.set(bindings.manifestHash, 2 * hashByteLength);
+        canonicalBindings.set(bindings.relationPlanHash, 3 * hashByteLength);
+        return canonicalBindings;
+    }
+
+    #requireCompactPublicKeyTransportBindingGeometry(): void {
+        const reportedBindingByteLength = requireUnsigned32(
+            resolveNumberExport(
+                this.#context.wasmExports,
+                'sealed_lattice_compact_public_key_transport_bindings_byte_length',
+            )(),
+            'The compact transport binding byte length',
+        );
+        if (
+            reportedBindingByteLength !==
+            compactPublicKeyTransportBindingsByteLength
+        ) {
+            throw kernelFailure(
+                'The compact transport binding geometry disagrees with the worker.',
+            );
+        }
+    }
+
+    /**
+     * Checks canonical compact transport framing, transcript chronology, and
+     * salted Merkle openings only. Success is not CFW or WHIR proof validity
+     * and must not mint a proof or workflow capability.
+     */
+    public validateCompactPublicKeyTransport(
+        bindings: CompactPublicKeyTransportBindings,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+    ): void {
+        const canonicalBindings = this.#copyCompactPublicKeyTransportBindings(
+            bindings,
+            proofBytes,
+            publicInputBytes,
+        );
+        try {
+            this.#context.runExclusive(
+                'compact public-key transport validation',
+                () => {
+                    this.#requireCompactPublicKeyTransportBindingGeometry();
+                    let bindingsPointer: number | undefined;
+                    let proofPointer: number | undefined;
+                    let publicInputPointer: number | undefined;
+                    try {
+                        bindingsPointer =
+                            this.#memoryBoundary.copy(canonicalBindings);
+                        proofPointer = this.#memoryBoundary.copy(proofBytes);
+                        publicInputPointer =
+                            this.#memoryBoundary.copy(publicInputBytes);
+                        requireKernelSuccess(
+                            resolveNumberExport(
+                                this.#context.wasmExports,
+                                'sealed_lattice_compact_public_key_validate_transport',
+                            )(
+                                bindingsPointer,
+                                canonicalBindings.byteLength,
+                                proofPointer,
+                                proofBytes.byteLength,
+                                publicInputPointer,
+                                publicInputBytes.byteLength,
+                            ),
+                            'compact public-key transport validation',
+                        );
+                    } finally {
+                        if (publicInputPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                publicInputPointer,
+                                publicInputBytes.byteLength,
+                            );
+                        }
+                        if (proofPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                proofPointer,
+                                proofBytes.byteLength,
+                            );
+                        }
+                        if (bindingsPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                bindingsPointer,
+                                compactPublicKeyTransportBindingsByteLength,
+                            );
+                        }
+                    }
+                },
+            );
+        } finally {
+            canonicalBindings.fill(0);
+        }
+    }
+
+    /**
+     * Copies one exact compact proof into Rust-owned verification custody after
+     * strict transport validation. A refusal never returns a live handle.
+     */
+    public beginCompactPublicKeyAlgebraicVerification(
+        bindings: CompactPublicKeyTransportBindings,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+    ): CompactPublicKeyAlgebraicVerificationKernelBegin {
+        const canonicalBindings = this.#copyCompactPublicKeyTransportBindings(
+            bindings,
+            proofBytes,
+            publicInputBytes,
+        );
+        try {
+            return this.#context.runExclusive(
+                'compact public-key algebraic verification begin',
+                () => {
+                    this.#requireCompactPublicKeyTransportBindingGeometry();
+                    let bindingsPointer: number | undefined;
+                    let proofPointer: number | undefined;
+                    let publicInputPointer: number | undefined;
+                    let statusPointer: number | undefined;
+                    try {
+                        bindingsPointer =
+                            this.#memoryBoundary.copy(canonicalBindings);
+                        proofPointer = this.#memoryBoundary.copy(proofBytes);
+                        publicInputPointer =
+                            this.#memoryBoundary.copy(publicInputBytes);
+                        statusPointer =
+                            this.#memoryBoundary.allocateZeroedWords(1);
+                        const operationHandle = resolveNumberExport(
                             this.#context.wasmExports,
-                            'sealed_lattice_compact_public_key_validate_transport',
+                            'sealed_lattice_compact_public_key_begin_algebraic_verification',
                         )(
                             bindingsPointer,
                             canonicalBindings.byteLength,
@@ -1809,24 +1929,169 @@ export class CommonProofVerificationKernelBoundary {
                             proofBytes.byteLength,
                             publicInputPointer,
                             publicInputBytes.byteLength,
-                        ),
-                        'compact public-key transport validation',
+                            statusPointer,
+                        );
+                        const [status] = this.#memoryBoundary.readWords(
+                            statusPointer,
+                            1,
+                        );
+                        const refusalReason =
+                            decodeCompactPublicKeyAlgebraicVerificationStatus(
+                                status,
+                                'algebraic verification begin',
+                            );
+                        if (refusalReason !== undefined) {
+                            if (operationHandle !== 0) {
+                                throw kernelFailure(
+                                    'A refused compact public-key algebraic verifier begin returned a live handle.',
+                                );
+                            }
+                            return Object.freeze({
+                                kind: 'refused',
+                                refusalReason,
+                            });
+                        }
+                        return Object.freeze({
+                            kind: 'started',
+                            operationHandle: requireLiveHandle(
+                                operationHandle,
+                                'The compact public-key algebraic verification operation handle',
+                            ),
+                        });
+                    } finally {
+                        if (statusPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                statusPointer,
+                                wasm32WordByteLength,
+                            );
+                        }
+                        if (publicInputPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                publicInputPointer,
+                                publicInputBytes.byteLength,
+                            );
+                        }
+                        if (proofPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                proofPointer,
+                                proofBytes.byteLength,
+                            );
+                        }
+                        if (bindingsPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                bindingsPointer,
+                                canonicalBindings.byteLength,
+                            );
+                        }
+                    }
+                },
+            );
+        } finally {
+            canonicalBindings.fill(0);
+        }
+    }
+
+    /** Advances one bounded algebraic-verifier slice without minting authority. */
+    public pollCompactPublicKeyAlgebraicVerification(
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+    ): CompactPublicKeyAlgebraicVerificationKernelPoll {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key algebraic verification operation handle',
+        );
+        requireUnsigned32(
+            maximumWorkUnitCount,
+            'The compact public-key algebraic verification work-unit bound',
+        );
+        if (maximumWorkUnitCount === 0) {
+            throw resourceFailure(
+                'The compact public-key algebraic verification work-unit bound must be positive.',
+            );
+        }
+        return this.#context.runExclusive(
+            'compact public-key algebraic verification poll',
+            () => {
+                const metadataPointer =
+                    this.#memoryBoundary.allocateZeroedWords(2);
+                try {
+                    const status = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_algebraic_verification_poll',
+                    )(
+                        operationHandle,
+                        maximumWorkUnitCount,
+                        metadataPointer,
+                        metadataPointer + wasm32WordByteLength,
                     );
+                    const refusalReason =
+                        decodeCompactPublicKeyAlgebraicVerificationStatus(
+                            status,
+                            'algebraic verification poll',
+                        );
+                    if (refusalReason !== undefined) {
+                        return Object.freeze({
+                            kind: 'refused',
+                            refusalReason,
+                        });
+                    }
+                    const [pollKind, completedWorkUnitCount] =
+                        this.#memoryBoundary.readWords(metadataPointer, 2);
+                    switch (pollKind) {
+                        case compactPublicKeyAlgebraicVerificationPollProgress: {
+                            if (
+                                completedWorkUnitCount === 0 ||
+                                completedWorkUnitCount > maximumWorkUnitCount
+                            ) {
+                                throw kernelFailure(
+                                    'The compact public-key algebraic verifier reported invalid bounded progress.',
+                                );
+                            }
+                            return Object.freeze({
+                                completedWorkUnitCount,
+                                kind: 'progress',
+                            });
+                        }
+                        case compactPublicKeyAlgebraicVerificationPollComplete: {
+                            if (completedWorkUnitCount !== 0) {
+                                throw kernelFailure(
+                                    'The completed compact public-key algebraic verifier reported residual work.',
+                                );
+                            }
+                            return Object.freeze({ kind: 'complete' });
+                        }
+                        default:
+                            throw kernelFailure(
+                                `The compact public-key algebraic verifier returned unknown poll kind ${String(pollKind)}.`,
+                            );
+                    }
                 } finally {
-                    canonicalBindings.fill(0);
                     this.#memoryBoundary.zeroAndDeallocate(
-                        bindingsPointer,
-                        compactPublicKeyTransportBindingsByteLength,
-                    );
-                    this.#memoryBoundary.zeroAndDeallocate(
-                        proofPointer,
-                        proofBytes.byteLength,
-                    );
-                    this.#memoryBoundary.zeroAndDeallocate(
-                        publicInputPointer,
-                        publicInputBytes.byteLength,
+                        metadataPointer,
+                        2 * wasm32WordByteLength,
                     );
                 }
+            },
+        );
+    }
+
+    public cancelCompactPublicKeyAlgebraicVerification(
+        operationHandle: number,
+    ): void {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key algebraic verification operation handle',
+        );
+        this.#context.runExclusive(
+            'compact public-key algebraic verification cancellation',
+            () => {
+                requireKernelSuccess(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_cancel_algebraic_verification',
+                    )(operationHandle),
+                    'compact public-key algebraic verification cancellation',
+                );
             },
         );
     }

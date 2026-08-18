@@ -87,10 +87,13 @@ and target release remain incomplete or internal.
   switches, both terminal blinded relations, and the authenticated source and
   mask spot checks. A guarded current-source replay accepts the exact emitted
   proof from checkpointed transported bytes. This is native prototype evidence
-  only. Raw release-kernel begin, bounded poll, and cancellation functions now
-  own the same verifier state, but the full equation-invalid hostile corpus,
-  state codec, TypeScript worker integration, final `VerificationResult`, and
-  capability transition remain absent.
+  only. Raw release-kernel begin, bounded poll, and cancellation functions own
+  the same verifier state. An internal TypeScript closed-worker driver now
+  yields between bounded polls, preserves typed refusals, returns a positive
+  `VerificationResult` only after algebraic completion, and cancels unfinished
+  operations. It deliberately mints no authority. The full equation-invalid
+  hostile corpus, state codec, authenticated browser custody, and capability
+  transition remain absent.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -154,13 +157,14 @@ ceremony or supported-phone qualification.
 ### Remaining completion boundary
 
 - No exact suite is frozen or selectable.
-- No production compact generation API, final proof `VerificationResult`, or
-  complete compact generation and verification ABI exists. The release
+- No production compact generation API, workflow-capability handoff, or complete
+  compact generation and verification ABI exists. The release
   transport ABI checks canonical structure, transcript chronology, query
-  derivation, and Merkle openings only. A separate raw kernel ABI can begin,
-  poll, and cancel algebraic verification, but it has no checkpoint codec,
-  worker integration, complete transported equation-invalid hostile corpus, or
-  capability handoff.
+  derivation, and Merkle openings only. A separate raw kernel ABI and internal
+  closed-worker driver can begin, bounded-poll, cancel, and return the terminal
+  algebraic `VerificationResult`, but they have no checkpoint codec,
+  authenticated browser custody, complete transported equation-invalid hostile
+  corpus, or capability handoff.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the

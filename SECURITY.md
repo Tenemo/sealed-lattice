@@ -68,11 +68,12 @@ consequences are:
   accepted proof: the complete equation-invalid hostile corpus, final public
   verification result, and capability transition remain open.
 - The compact transport ABI returns typed refusals but does not return
-  `isValid`, mint a proof capability, or supply the final `VerificationResult`.
-  A separate raw release-kernel ABI begins, polls, and cancels the internal
-  algebraic verifier, but it has no checkpoint codec, TypeScript worker
-  integration, final typed result, or capability handoff. Complete generation
-  and verification release ABIs do not exist.
+  `isValid` or mint a proof capability. A separate raw release-kernel ABI and
+  internal TypeScript closed-worker driver begin, bounded-poll, cancel, and
+  return the terminal algebraic `VerificationResult`. The driver mints no
+  authority and has no checkpoint codec, authenticated browser custody,
+  complete equation-invalid hostile corpus, or capability handoff. Complete
+  generation and verification release ABIs do not exist.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
@@ -205,9 +206,10 @@ that a coherent snapshot is newest.
   establish build identity only. The release artifact contains compact transport
   validation and public-key response generation through the complete 82-response
   schedule plus raw begin, bounded-poll, and cancellation functions for the
-  internal algebraic verifier, but it has no compact generation API,
-  checkpointable worker-integrated verification, final typed result, or final
-  generation and verification ABIs.
+  internal algebraic verifier. A typed closed-worker driver now owns that
+  authority-free verification result, but there is no compact generation API,
+  checkpointable authenticated browser custody, capability handoff, or final
+  generation and verification ABI pair.
 - `SEC-020`: Guarded selected-size native evidence covers the public-key
   family's complete response-generation schedule and one fresh algebraic replay
   of its exact emitted proof. A separate desktop Chromium diagnostic replays its
