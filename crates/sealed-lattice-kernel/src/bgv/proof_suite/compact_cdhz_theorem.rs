@@ -3,10 +3,11 @@
 //!
 //! This module maps an emitted-byte census into the theorem coordinates used
 //! by the selected implicit-instance-free construction. The census is not a
-//! proof-acceptance capability: the caller must also provide the opaque
-//! relaxed round-by-round knowledge bound minted by the semantic adapter and
-//! an opaque fixed-tape uniformity premise. No production constructor for the
-//! latter exists until the shared-QRO replacement is proved.
+//! proof-acceptance capability: the caller must also provide independently
+//! owned semantic, masking-correspondence, emitted-byte,
+//! Merkle-privacy-correspondence, and fixed-SHAKE premises. The latter four
+//! have no production constructors until the live algebraic chain and
+//! shared-QRO replacement prove their exact correspondences.
 
 use std::cmp::Ordering;
 
@@ -16,8 +17,10 @@ use num_traits::{One, Zero};
 use super::compact_emitted_cdhz::CompactEmittedCdhzMeasurement;
 use super::compact_factor_one_semantics::CompactFactorOneSemanticErrorTheorem;
 use super::compact_fixed_tape_uniformity::CompactFixedTapeUniformityPremise;
+use super::compact_proof_contract::CompactPublicKeyProofContract;
 use super::compact_response_merkle::{
     COMPACT_RESPONSE_LEAF_HASH_DOMAIN, COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
+    CompactResponseQuerySelection,
 };
 use super::compact_transcript::COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN;
 use super::fixed_uniform_verifier_message::{
@@ -38,14 +41,21 @@ const MERKLE_ONLINE_MULTIPLIER: u64 = 240;
 const APPENDIX_A_ONE_ONLINE_MULTIPLIER: u64 = 4;
 const MERKLE_COMMUTATIVITY_MULTIPLIER: u64 = 240;
 const APPENDIX_A_ONE_COMMUTATIVITY_MULTIPLIER: u64 = 2;
+const TARGET_ADAPTIVE_SOUNDNESS_DENOMINATOR_EXPONENT: usize = 80;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactCdhzAppendixAOneError {
     MissingEmittedMeasurement,
-    MissingFixedTapeUniformityPremise,
-    FixedTapeUniformityPremiseMismatch,
+    MissingSemanticPremise,
+    MissingMaskingPremise,
+    MissingEmittedBytePremise,
+    MissingMerklePrivacyPremise,
+    MissingShakePremise,
+    PremiseBindingMismatch,
+    ShakePremiseMismatch,
     UnexpectedEmittedCoordinates,
     InvalidRelaxedRoundByRoundKnowledgeBound,
+    AdaptiveSoundnessTargetExceeded,
     ArithmeticOverflow,
 }
 
@@ -99,6 +109,26 @@ impl CompactCdhzExactRational {
     fn scale(&self, multiplier: &BigUint) -> Self {
         Self::from_nonzero_parts(&self.numerator * multiplier, self.denominator.clone())
     }
+
+    fn checked_subtract(&self, right: &Self) -> Option<Self> {
+        let common_divisor =
+            greatest_common_divisor(self.denominator.clone(), right.denominator.clone());
+        let left_scale = &right.denominator / &common_divisor;
+        let right_scale = &self.denominator / &common_divisor;
+        let left_numerator = &self.numerator * &left_scale;
+        let right_numerator = &right.numerator * &right_scale;
+        (left_numerator >= right_numerator).then(|| {
+            Self::from_nonzero_parts(
+                left_numerator - right_numerator,
+                &self.denominator * left_scale,
+            )
+        })
+    }
+
+    fn divide_by_positive_integer(&self, divisor: &BigUint) -> Option<Self> {
+        (!divisor.is_zero())
+            .then(|| Self::from_nonzero_parts(self.numerator.clone(), &self.denominator * divisor))
+    }
 }
 
 impl PartialOrd for CompactCdhzExactRational {
@@ -151,6 +181,87 @@ impl CompactRelaxedRoundByRoundKnowledgeBound {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct CompactCdhzEmittedByteBinding {
+    canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
+    canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl CompactCdhzEmittedByteBinding {
+    fn from_measurement(measurement: &CompactEmittedCdhzMeasurement) -> Self {
+        let census = &measurement.decoded_actual_byte_census;
+        Self {
+            canonical_proof_binding: census.canonical_proof_binding,
+            canonical_public_input_binding: census.canonical_public_input_binding,
+        }
+    }
+
+    fn matches_measurement(&self, measurement: &CompactEmittedCdhzMeasurement) -> bool {
+        self == &Self::from_measurement(measurement)
+    }
+}
+
+/// Conditional bridge from the construction-level masking theorem to one
+/// exact emitted byte pair. No production constructor exists before the live
+/// algebraic chain supplies that correspondence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCdhzMaskingPremise {
+    emitted_byte_binding: CompactCdhzEmittedByteBinding,
+}
+
+/// Conditional correspondence between the executable relation owners and one
+/// exact emitted byte pair. Strict transport validation alone cannot mint it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCdhzEmittedBytePremise {
+    emitted_byte_binding: CompactCdhzEmittedByteBinding,
+}
+
+/// Conditional bridge from the salted-Merkle privacy theorem to every opening
+/// in one exact emitted byte pair. The geometry certificate alone cannot mint
+/// it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCdhzMerklePrivacyPremise {
+    emitted_byte_binding: CompactCdhzEmittedByteBinding,
+}
+
+/// Complete prerequisite bundle for the conditional Appendix A.1 calculator.
+/// Every field is optional so absence has a typed refusal, but an arithmetic
+/// certificate requires all five independently owned premises.
+pub(crate) struct CompactCdhzAppendixAOnePremises<'premise> {
+    semantic: Option<&'premise CompactRelaxedRoundByRoundKnowledgeBound>,
+    masking: Option<CompactCdhzMaskingPremise>,
+    emitted_byte: Option<CompactCdhzEmittedBytePremise>,
+    merkle_privacy: Option<CompactCdhzMerklePrivacyPremise>,
+    shake: Option<&'premise CompactFixedTapeUniformityPremise>,
+}
+
+impl CompactCdhzMaskingPremise {
+    #[cfg(test)]
+    fn assume_for_appendix_arithmetic_test(measurement: &CompactEmittedCdhzMeasurement) -> Self {
+        Self {
+            emitted_byte_binding: CompactCdhzEmittedByteBinding::from_measurement(measurement),
+        }
+    }
+}
+
+impl CompactCdhzEmittedBytePremise {
+    #[cfg(test)]
+    fn assume_for_appendix_arithmetic_test(measurement: &CompactEmittedCdhzMeasurement) -> Self {
+        Self {
+            emitted_byte_binding: CompactCdhzEmittedByteBinding::from_measurement(measurement),
+        }
+    }
+}
+
+impl CompactCdhzMerklePrivacyPremise {
+    #[cfg(test)]
+    fn assume_for_appendix_arithmetic_test(measurement: &CompactEmittedCdhzMeasurement) -> Self {
+        Self {
+            emitted_byte_binding: CompactCdhzEmittedByteBinding::from_measurement(measurement),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactCdhzAppendixAOneCoordinates {
     adversarial_query_bound: BigUint,
     response_vector_commitment_count: u64,
@@ -167,6 +278,65 @@ impl CompactCdhzAppendixAOneCoordinates {
     fn try_from_measurement(
         measurement: &CompactEmittedCdhzMeasurement,
     ) -> Result<Self, CompactCdhzAppendixAOneError> {
+        measurement
+            .validate_internal_consistency()
+            .map_err(|_| CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)?;
+        let selected_contract = CompactPublicKeyProofContract::decode_selected()
+            .map_err(|_| CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)?;
+        let selected_verifier_inputs = selected_contract.verifier_inputs();
+        let expected_distinct_query_group_count = selected_verifier_inputs
+            .verifier_moves
+            .iter()
+            .try_fold(0_u64, |count, verifier_move| {
+                count
+                    .checked_add(
+                        u64::try_from(verifier_move.message_geometry.distinct_query_groups().len())
+                            .map_err(|_| CompactCdhzAppendixAOneError::ArithmeticOverflow)?,
+                    )
+                    .ok_or(CompactCdhzAppendixAOneError::ArithmeticOverflow)
+            })?;
+        let expected_distinct_query_group_element_count = selected_verifier_inputs
+            .verifier_moves
+            .iter()
+            .flat_map(|verifier_move| verifier_move.message_geometry.distinct_query_groups())
+            .try_fold(0_u64, |count, group| {
+                count
+                    .checked_add(group.query_count())
+                    .ok_or(CompactCdhzAppendixAOneError::ArithmeticOverflow)
+            })?;
+        let expected_internal_relation_commitment_count = selected_verifier_inputs
+            .verifier_moves
+            .iter()
+            .map(|verifier_move| u64::from(verifier_move.preceding_commitment_count))
+            .max()
+            .ok_or(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)?;
+        let expected_query_group_consumer_edge_count = selected_verifier_inputs
+            .response_merkle_geometries
+            .iter()
+            .flat_map(|geometry| geometry.components())
+            .try_fold(0_u64, |count, component| {
+                count
+                    .checked_add(match component.query_selection() {
+                        CompactResponseQuerySelection::Unqueried
+                        | CompactResponseQuerySelection::EveryLeaf => 0,
+                        CompactResponseQuerySelection::VerifierMessageDistinctGroup { .. } => 1,
+                        CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion {
+                            ..
+                        } => 2,
+                    })
+                    .ok_or(CompactCdhzAppendixAOneError::ArithmeticOverflow)
+            })?;
+        let actual_byte_census = &measurement.decoded_actual_byte_census;
+        if actual_byte_census.distinct_query_group_count != expected_distinct_query_group_count
+            || actual_byte_census.distinct_query_group_element_count
+                != expected_distinct_query_group_element_count
+            || actual_byte_census.internal_relation_commitment_count
+                != expected_internal_relation_commitment_count
+            || actual_byte_census.verifier_query_group_consumer_edge_count
+                != expected_query_group_consumer_edge_count
+        {
+            return Err(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates);
+        }
         let mut minimum_verifier_randomness_bit_length = None;
         let mut concrete_fiat_shamir_query_count = 0_u64;
         let mut maximum_round_vector_symbol_length = 0_u64;
@@ -460,6 +630,42 @@ impl CompactCdhzAdaptiveSoundnessTerms {
     }
 }
 
+/// Exact remaining relaxed-RBR allowance under the complete `2^-80`
+/// Appendix A.1 partition. The limiting vertex and its state coefficient are
+/// derived together; no standalone reserve constant is accepted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactCdhzKappaHeadroom {
+    target_adaptive_soundness: CompactCdhzExactRational,
+    limiting_vertex: CompactCdhzOracleMassVertex,
+    limiting_state_term_coefficient: BigUint,
+    limiting_nonsemantic_partition: CompactCdhzExactRational,
+    maximum_relaxed_round_by_round_knowledge_bound: CompactCdhzExactRational,
+}
+
+impl CompactCdhzKappaHeadroom {
+    pub(crate) const fn target_adaptive_soundness(&self) -> &CompactCdhzExactRational {
+        &self.target_adaptive_soundness
+    }
+
+    pub(crate) const fn limiting_vertex(&self) -> CompactCdhzOracleMassVertex {
+        self.limiting_vertex
+    }
+
+    pub(crate) const fn limiting_state_term_coefficient(&self) -> &BigUint {
+        &self.limiting_state_term_coefficient
+    }
+
+    pub(crate) const fn limiting_nonsemantic_partition(&self) -> &CompactCdhzExactRational {
+        &self.limiting_nonsemantic_partition
+    }
+
+    pub(crate) const fn maximum_relaxed_round_by_round_knowledge_bound(
+        &self,
+    ) -> &CompactCdhzExactRational {
+        &self.maximum_relaxed_round_by_round_knowledge_bound
+    }
+}
+
 /// Exact Appendix A.1 specialization for adaptive soundness with zero input
 /// and output implicit-instance tuple sizes. It certifies arithmetic only;
 /// proof acceptance still belongs to the production verifier.
@@ -473,6 +679,7 @@ pub(crate) struct CompactCdhzAppendixAOneCertificate {
     maximizing_vertices: Vec<CompactCdhzOracleMassVertex>,
     selected_maximizing_vertex: CompactCdhzOracleMassVertex,
     adaptive_soundness_terms: CompactCdhzAdaptiveSoundnessTerms,
+    kappa_headroom: CompactCdhzKappaHeadroom,
 }
 
 impl CompactCdhzAppendixAOneCertificate {
@@ -509,23 +716,55 @@ impl CompactCdhzAppendixAOneCertificate {
     pub(crate) const fn adaptive_soundness_terms(&self) -> &CompactCdhzAdaptiveSoundnessTerms {
         &self.adaptive_soundness_terms
     }
+
+    pub(crate) const fn kappa_headroom(&self) -> &CompactCdhzKappaHeadroom {
+        &self.kappa_headroom
+    }
 }
 
-/// Instantiates Appendix A.1 for one selected emitted census. The semantic
-/// relaxed round-by-round knowledge bound upper-bounds the state-restoration
-/// soundness premise; the remaining losses are the exact Theorem 8.3 Merkle
-/// bounds in the Appendix A.1 argument positions.
+/// Instantiates Appendix A.1 for one selected emitted census after every
+/// independently owned prerequisite is byte-bound. The semantic relaxed
+/// round-by-round knowledge bound upper-bounds the state-restoration premise;
+/// the remaining losses are the exact Theorem 8.3 Merkle bounds and positive
+/// fixed-tape terms in the Appendix A.1 argument positions.
 pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
     measurement: Option<&CompactEmittedCdhzMeasurement>,
-    relaxed_round_by_round_knowledge_bound: &CompactRelaxedRoundByRoundKnowledgeBound,
-    fixed_tape_uniformity_premise: Option<&CompactFixedTapeUniformityPremise>,
+    premises: &CompactCdhzAppendixAOnePremises<'_>,
 ) -> Result<CompactCdhzAppendixAOneCertificate, CompactCdhzAppendixAOneError> {
     let measurement = measurement.ok_or(CompactCdhzAppendixAOneError::MissingEmittedMeasurement)?;
-    let fixed_tape_uniformity_premise = fixed_tape_uniformity_premise
-        .ok_or(CompactCdhzAppendixAOneError::MissingFixedTapeUniformityPremise)?;
+    let relaxed_round_by_round_knowledge_bound = premises
+        .semantic
+        .ok_or(CompactCdhzAppendixAOneError::MissingSemanticPremise)?;
+    let masking_premise = premises
+        .masking
+        .as_ref()
+        .ok_or(CompactCdhzAppendixAOneError::MissingMaskingPremise)?;
+    let emitted_byte_premise = premises
+        .emitted_byte
+        .as_ref()
+        .ok_or(CompactCdhzAppendixAOneError::MissingEmittedBytePremise)?;
+    let merkle_privacy_premise = premises
+        .merkle_privacy
+        .as_ref()
+        .ok_or(CompactCdhzAppendixAOneError::MissingMerklePrivacyPremise)?;
+    let fixed_tape_uniformity_premise = premises
+        .shake
+        .ok_or(CompactCdhzAppendixAOneError::MissingShakePremise)?;
+    if !masking_premise
+        .emitted_byte_binding
+        .matches_measurement(measurement)
+        || !emitted_byte_premise
+            .emitted_byte_binding
+            .matches_measurement(measurement)
+        || !merkle_privacy_premise
+            .emitted_byte_binding
+            .matches_measurement(measurement)
+    {
+        return Err(CompactCdhzAppendixAOneError::PremiseBindingMismatch);
+    }
     fixed_tape_uniformity_premise
         .validate_measurement(measurement)
-        .map_err(|_| CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch)?;
+        .map_err(|_| CompactCdhzAppendixAOneError::ShakePremiseMismatch)?;
     let coordinates = CompactCdhzAppendixAOneCoordinates::try_from_measurement(measurement)?;
     if fixed_tape_uniformity_premise.round_count()
         != usize::try_from(coordinates.response_vector_commitment_count())
@@ -533,7 +772,7 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
         || fixed_tape_uniformity_premise.minimum_uniform_message_bit_length()
             != coordinates.minimum_verifier_randomness_bit_length()
     {
-        return Err(CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch);
+        return Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch);
     }
     let direct_initial_transition_bound = compact_cfw_direct_initial_transition_bound();
     if relaxed_round_by_round_knowledge_bound.maximum_error() < &direct_initial_transition_bound {
@@ -629,13 +868,80 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
         sampler_exhaustion_numerator.clone(),
         sampler_exhaustion_denominator.clone(),
     )?;
-    let fixed_terms = fixed_state_restoration_semantic_error
-        .add(&fixed_verifier_randomness)
+    let fixed_nonsemantic_terms = fixed_verifier_randomness
         .add(&fixed_offline_extraction)
         .add(&fixed_online_indistinguishability)
         .add(&merkle_commutativity)
         .add(&fixed_tape_seed_collision)
         .add(&fixed_tape_sampler_exhaustion);
+    let target_adaptive_soundness = CompactCdhzExactRational::from_nonzero_parts(
+        BigUint::one(),
+        BigUint::one() << TARGET_ADAPTIVE_SOUNDNESS_DENOMINATOR_EXPONENT,
+    );
+    let state_term_coefficient_per_mass =
+        BigUint::from(APPENDIX_A_ONE_STATE_RESTORATION_MULTIPLIER * STATE_RESTORATION_MULTIPLIER)
+            * &state_query_factor;
+    let kappa_headroom_candidates = [
+        (
+            CompactCdhzOracleMassVertex::NoAdversarialQueries,
+            &state_term_coefficient_per_mass * &round_count,
+            fixed_nonsemantic_terms.clone(),
+        ),
+        (
+            CompactCdhzOracleMassVertex::FiatShamirOracle,
+            &state_term_coefficient_per_mass * (adversarial_query_bound + &round_count),
+            fixed_nonsemantic_terms.clone(),
+        ),
+        (
+            CompactCdhzOracleMassVertex::StandardVectorCommitmentOracle,
+            &state_term_coefficient_per_mass * &round_count,
+            fixed_nonsemantic_terms.add(
+                &oracle_mass_coefficients
+                    .standard_vector_commitment_oracle()
+                    .scale(adversarial_query_bound),
+            ),
+        ),
+        (
+            CompactCdhzOracleMassVertex::MultiExtractOracle,
+            &state_term_coefficient_per_mass * &round_count,
+            fixed_nonsemantic_terms.add(
+                &oracle_mass_coefficients
+                    .multi_extract_oracle()
+                    .scale(adversarial_query_bound),
+            ),
+        ),
+    ];
+    let mut kappa_headroom = None;
+    for (vertex, state_term_coefficient, nonsemantic_partition) in kappa_headroom_candidates {
+        let residual = target_adaptive_soundness
+            .checked_subtract(&nonsemantic_partition)
+            .ok_or(CompactCdhzAppendixAOneError::AdaptiveSoundnessTargetExceeded)?;
+        let maximum_knowledge_bound = residual
+            .divide_by_positive_integer(&state_term_coefficient)
+            .ok_or(CompactCdhzAppendixAOneError::ArithmeticOverflow)?;
+        if kappa_headroom
+            .as_ref()
+            .is_none_or(|current: &CompactCdhzKappaHeadroom| {
+                maximum_knowledge_bound < current.maximum_relaxed_round_by_round_knowledge_bound
+            })
+        {
+            kappa_headroom = Some(CompactCdhzKappaHeadroom {
+                target_adaptive_soundness: target_adaptive_soundness.clone(),
+                limiting_vertex: vertex,
+                limiting_state_term_coefficient: state_term_coefficient,
+                limiting_nonsemantic_partition: nonsemantic_partition,
+                maximum_relaxed_round_by_round_knowledge_bound: maximum_knowledge_bound,
+            });
+        }
+    }
+    let kappa_headroom =
+        kappa_headroom.ok_or(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)?;
+    if relaxed_round_by_round_knowledge_bound.maximum_error()
+        > kappa_headroom.maximum_relaxed_round_by_round_knowledge_bound()
+    {
+        return Err(CompactCdhzAppendixAOneError::AdaptiveSoundnessTargetExceeded);
+    }
+    let fixed_terms = fixed_state_restoration_semantic_error.add(&fixed_nonsemantic_terms);
 
     let simplex_vertex_bounds = CompactCdhzSimplexVertexBounds {
         no_adversarial_queries: fixed_terms.clone(),
@@ -698,6 +1004,9 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
     {
         return Err(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates);
     }
+    if total_adaptive_soundness > target_adaptive_soundness {
+        return Err(CompactCdhzAppendixAOneError::AdaptiveSoundnessTargetExceeded);
+    }
 
     Ok(CompactCdhzAppendixAOneCertificate {
         coordinates,
@@ -718,6 +1027,7 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
             fixed_tape_sampler_exhaustion,
             total_adaptive_soundness,
         },
+        kappa_headroom,
     })
 }
 
@@ -742,8 +1052,8 @@ fn fixed_tape_loss(
     numerator: BigUint,
     denominator: BigUint,
 ) -> Result<CompactCdhzExactRational, CompactCdhzAppendixAOneError> {
-    if denominator.is_zero() || numerator > denominator {
-        return Err(CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch);
+    if numerator.is_zero() || denominator.is_zero() || numerator > denominator {
+        return Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch);
     }
     Ok(CompactCdhzExactRational::from_nonzero_parts(
         numerator,
@@ -810,7 +1120,8 @@ mod tests {
     use super::*;
     use crate::bgv::proof_suite::compact_emitted_cdhz::{
         CompactCdhzMerkleMultiExtractionTerms, CompactCdhzOracleFamilyCensus,
-        CompactCdhzRandomOracleDomains, CompactEmittedCdhzRound,
+        CompactCdhzRandomOracleDomains, CompactDecodedActualByteCensus, CompactEmittedCdhzRound,
+        CompactSharedHashGraphCensus,
     };
     use crate::bgv::proof_suite::compact_proof_contract::CompactPublicKeyProofContract;
 
@@ -833,6 +1144,37 @@ mod tests {
     fn assumed_fixed_tape_uniformity_premise() -> CompactFixedTapeUniformityPremise {
         CompactFixedTapeUniformityPremise::assume_for_appendix_arithmetic_test()
             .expect("selected conditional fixed-tape arithmetic fixture")
+    }
+
+    fn assumed_complete_premises<'premise>(
+        measurement: &CompactEmittedCdhzMeasurement,
+        semantic: &'premise CompactRelaxedRoundByRoundKnowledgeBound,
+        shake: &'premise CompactFixedTapeUniformityPremise,
+    ) -> CompactCdhzAppendixAOnePremises<'premise> {
+        CompactCdhzAppendixAOnePremises {
+            semantic: Some(semantic),
+            masking: Some(
+                CompactCdhzMaskingPremise::assume_for_appendix_arithmetic_test(measurement),
+            ),
+            emitted_byte: Some(
+                CompactCdhzEmittedBytePremise::assume_for_appendix_arithmetic_test(measurement),
+            ),
+            merkle_privacy: Some(
+                CompactCdhzMerklePrivacyPremise::assume_for_appendix_arithmetic_test(measurement),
+            ),
+            shake: Some(shake),
+        }
+    }
+
+    fn derive_with_assumed_complete_premises(
+        measurement: Option<&CompactEmittedCdhzMeasurement>,
+        semantic: &CompactRelaxedRoundByRoundKnowledgeBound,
+    ) -> Result<CompactCdhzAppendixAOneCertificate, CompactCdhzAppendixAOneError> {
+        let shake = assumed_fixed_tape_uniformity_premise();
+        let premise_measurement = measurement
+            .expect("the complete conditional arithmetic fixture needs measurement bytes");
+        let premises = assumed_complete_premises(premise_measurement, semantic, &shake);
+        derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(measurement, &premises)
     }
 
     fn selected_coordinate_measurement_for_test() -> CompactEmittedCdhzMeasurement {
@@ -900,6 +1242,31 @@ mod tests {
                 },
             )
             .collect();
+        let verifier_inputs = contract.verifier_inputs();
+        let distinct_query_group_count = verifier_inputs
+            .verifier_moves
+            .iter()
+            .map(|verifier_move| verifier_move.message_geometry.distinct_query_groups().len())
+            .sum::<usize>();
+        let distinct_query_group_element_count = verifier_inputs
+            .verifier_moves
+            .iter()
+            .flat_map(|verifier_move| verifier_move.message_geometry.distinct_query_groups())
+            .map(|group| group.query_count())
+            .sum::<u64>();
+        let verifier_query_group_consumer_edge_count = verifier_inputs
+            .response_merkle_geometries
+            .iter()
+            .flat_map(|geometry| geometry.components())
+            .map(|component| match component.query_selection() {
+                CompactResponseQuerySelection::Unqueried
+                | CompactResponseQuerySelection::EveryLeaf => 0_u64,
+                CompactResponseQuerySelection::VerifierMessageDistinctGroup { .. } => 1,
+                CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion { .. } => 2,
+            })
+            .sum::<u64>();
+        let transcript_commitment_absorption_count =
+            TEST_RESPONSE_VECTOR_COMMITMENT_COUNT * (TEST_RESPONSE_VECTOR_COMMITMENT_COUNT + 1) / 2;
         CompactEmittedCdhzMeasurement {
             canonical_proof_byte_length: 1,
             canonical_public_input_byte_length: 1,
@@ -916,6 +1283,42 @@ mod tests {
             maximum_proof_vector_symbol_length: TEST_MAXIMUM_PROOF_VECTOR_SYMBOL_LENGTH,
             emitted_answer_byte_length: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
             emitted_merkle_opening_byte_length: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+            decoded_actual_byte_census: CompactDecodedActualByteCensus {
+                canonical_proof_binding: [0x11; Hash512::BYTE_LENGTH],
+                canonical_public_input_binding: [0x22; Hash512::BYTE_LENGTH],
+                prover_response_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                verifier_message_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                distinct_query_group_count: u64::try_from(distinct_query_group_count)
+                    .expect("selected group count fits u64"),
+                distinct_query_group_element_count,
+                response_opening_tuple_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                response_commitment_root_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                internal_relation_commitment_count: 45,
+                opened_leaf_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                secret_leaf_salt_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                round_salt_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                frontier_node_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                frontier_dictionary_entry_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                verifier_response_consumer_edge_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                verifier_query_group_consumer_edge_count,
+                transcript_public_input_length_absorption_count:
+                    TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                transcript_public_input_absorption_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                transcript_commitment_identifier_absorption_count:
+                    transcript_commitment_absorption_count,
+                transcript_commitment_root_absorption_count: transcript_commitment_absorption_count,
+                transcript_round_salt_absorption_count: transcript_commitment_absorption_count,
+                shared_hash_graph: CompactSharedHashGraphCensus {
+                    fiat_shamir_prefix_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                    fixed_message_seed_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                    fixed_message_block_hash_count: TEST_CONCRETE_FIAT_SHAMIR_QUERY_COUNT
+                        - 2 * TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                    opened_leaf_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                    merkle_parent_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                    total_hash_count: TEST_CONCRETE_FIAT_SHAMIR_QUERY_COUNT
+                        + 2 * TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                },
+            },
             merkle_multi_extraction: CompactCdhzMerkleMultiExtractionTerms {
                 output_bit_length: u16::try_from(Hash512::BYTE_LENGTH * 8)
                     .expect("test output width"),
@@ -950,10 +1353,9 @@ mod tests {
     #[test]
     fn selected_appendix_a_one_coordinates_are_exact() {
         let measurement = selected_coordinate_measurement_for_test();
-        let certificate = derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+        let certificate = derive_with_assumed_complete_premises(
             Some(&measurement),
             &distinct_semantic_knowledge_bound(),
-            Some(&assumed_fixed_tape_uniformity_premise()),
         )
         .expect("selected Appendix A.1 certificate");
         let coordinates = certificate.coordinates();
@@ -973,15 +1375,54 @@ mod tests {
     }
 
     #[test]
-    fn missing_fixed_tape_uniformity_premise_keeps_the_terminal_unavailable() {
+    fn every_missing_conditional_premise_keeps_the_terminal_unavailable() {
         let measurement = selected_coordinate_measurement_for_test();
+        let semantic = distinct_semantic_knowledge_bound();
+        let shake = assumed_fixed_tape_uniformity_premise();
+        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        premises.semantic = None;
         assert_eq!(
             derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
                 Some(&measurement),
-                &distinct_semantic_knowledge_bound(),
-                None,
+                &premises,
             ),
-            Err(CompactCdhzAppendixAOneError::MissingFixedTapeUniformityPremise)
+            Err(CompactCdhzAppendixAOneError::MissingSemanticPremise)
+        );
+        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        premises.masking = None;
+        assert_eq!(
+            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+                Some(&measurement),
+                &premises,
+            ),
+            Err(CompactCdhzAppendixAOneError::MissingMaskingPremise)
+        );
+        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        premises.emitted_byte = None;
+        assert_eq!(
+            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+                Some(&measurement),
+                &premises,
+            ),
+            Err(CompactCdhzAppendixAOneError::MissingEmittedBytePremise)
+        );
+        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        premises.merkle_privacy = None;
+        assert_eq!(
+            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+                Some(&measurement),
+                &premises,
+            ),
+            Err(CompactCdhzAppendixAOneError::MissingMerklePrivacyPremise)
+        );
+        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        premises.shake = None;
+        assert_eq!(
+            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+                Some(&measurement),
+                &premises,
+            ),
+            Err(CompactCdhzAppendixAOneError::MissingShakePremise)
         );
     }
 
@@ -994,11 +1435,7 @@ mod tests {
             .merkle_multi_extraction
             .input_implicit_instance_tuple_size = 1;
         assert_eq!(
-            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-                Some(&measurement),
-                &knowledge_bound,
-                Some(&assumed_fixed_tape_uniformity_premise()),
-            ),
+            derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound,),
             Err(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)
         );
         measurement
@@ -1008,11 +1445,7 @@ mod tests {
             .merkle_multi_extraction
             .output_implicit_instance_tuple_size = 1;
         assert_eq!(
-            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-                Some(&measurement),
-                &knowledge_bound,
-                Some(&assumed_fixed_tape_uniformity_premise()),
-            ),
+            derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound,),
             Err(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)
         );
     }
@@ -1021,12 +1454,9 @@ mod tests {
     fn theorem_eight_three_coefficients_use_appendix_a_one_argument_positions() {
         let measurement = selected_coordinate_measurement_for_test();
         let knowledge_bound = distinct_semantic_knowledge_bound();
-        let certificate = derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-            Some(&measurement),
-            &knowledge_bound,
-            Some(&assumed_fixed_tape_uniformity_premise()),
-        )
-        .expect("selected Appendix A.1 certificate");
+        let certificate =
+            derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound)
+                .expect("selected Appendix A.1 certificate");
         let coefficients = certificate.oracle_mass_coefficients();
         let t = certificate.coordinates().adversarial_query_bound();
         let k = BigUint::from(TEST_RESPONSE_VECTOR_COMMITMENT_COUNT);
@@ -1061,10 +1491,9 @@ mod tests {
     #[test]
     fn full_affine_objective_selects_fiat_shamir_mass() {
         let measurement = selected_coordinate_measurement_for_test();
-        let certificate = derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+        let certificate = derive_with_assumed_complete_premises(
             Some(&measurement),
             &distinct_semantic_knowledge_bound(),
-            Some(&assumed_fixed_tape_uniformity_premise()),
         )
         .expect("selected Appendix A.1 certificate");
         let coefficients = certificate.oracle_mass_coefficients();
@@ -1103,12 +1532,94 @@ mod tests {
     }
 
     #[test]
+    fn relaxed_rbr_headroom_is_derived_from_the_complete_target_partition() {
+        let measurement = selected_coordinate_measurement_for_test();
+        let knowledge_bound = distinct_semantic_knowledge_bound();
+        let certificate =
+            derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound)
+                .expect("selected Appendix A.1 certificate");
+        let headroom = certificate.kappa_headroom();
+
+        assert_eq!(
+            headroom.limiting_vertex(),
+            CompactCdhzOracleMassVertex::FiatShamirOracle
+        );
+        let recomposed_target = headroom
+            .maximum_relaxed_round_by_round_knowledge_bound()
+            .scale(headroom.limiting_state_term_coefficient())
+            .add(headroom.limiting_nonsemantic_partition());
+        assert_eq!(&recomposed_target, headroom.target_adaptive_soundness());
+        assert!(
+            knowledge_bound.maximum_error()
+                <= headroom.maximum_relaxed_round_by_round_knowledge_bound()
+        );
+        assert!(
+            certificate
+                .adaptive_soundness_terms()
+                .total_adaptive_soundness()
+                <= headroom.target_adaptive_soundness()
+        );
+
+        let excessive_bound = CompactRelaxedRoundByRoundKnowledgeBound::from_ratio_for_test(
+            BigUint::one(),
+            BigUint::one(),
+        )
+        .expect("unit semantic bound is structurally valid");
+        assert_eq!(
+            derive_with_assumed_complete_premises(Some(&measurement), &excessive_bound),
+            Err(CompactCdhzAppendixAOneError::AdaptiveSoundnessTargetExceeded)
+        );
+    }
+
+    #[test]
+    fn premise_bindings_and_decoded_census_coordinates_are_load_bearing() {
+        let measurement = selected_coordinate_measurement_for_test();
+        let semantic = distinct_semantic_knowledge_bound();
+        let shake = assumed_fixed_tape_uniformity_premise();
+        let premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        let mut substituted_binding = measurement.clone();
+        substituted_binding
+            .decoded_actual_byte_census
+            .canonical_proof_binding[0] ^= 1;
+        assert_eq!(
+            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+                Some(&substituted_binding),
+                &premises,
+            ),
+            Err(CompactCdhzAppendixAOneError::PremiseBindingMismatch)
+        );
+
+        let census_mutations: [fn(&mut CompactDecodedActualByteCensus); 5] = [
+            |census| census.distinct_query_group_count += 1,
+            |census| census.opened_leaf_count += 1,
+            |census| census.internal_relation_commitment_count += 1,
+            |census| census.verifier_query_group_consumer_edge_count += 1,
+            |census| census.shared_hash_graph.total_hash_count += 1,
+        ];
+        for mutate in census_mutations {
+            let mut mutated = measurement.clone();
+            mutate(&mut mutated.decoded_actual_byte_census);
+            assert_eq!(
+                derive_with_assumed_complete_premises(Some(&mutated), &semantic),
+                Err(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)
+            );
+        }
+    }
+
+    #[test]
+    fn a_fixed_tape_premise_cannot_contribute_zero_distinguishing_loss() {
+        assert_eq!(
+            fixed_tape_loss(BigUint::zero(), BigUint::one()),
+            Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch)
+        );
+    }
+
+    #[test]
     fn every_simplex_vertex_is_the_fixed_loss_plus_its_exact_mass_coefficient() {
         let measurement = selected_coordinate_measurement_for_test();
-        let certificate = derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+        let certificate = derive_with_assumed_complete_premises(
             Some(&measurement),
             &distinct_semantic_knowledge_bound(),
-            Some(&assumed_fixed_tape_uniformity_premise()),
         )
         .expect("selected Appendix A.1 certificate");
         let coefficients = certificate.oracle_mass_coefficients();
@@ -1139,12 +1650,9 @@ mod tests {
     fn selected_terms_match_the_exact_appendix_a_one_instantiation() {
         let measurement = selected_coordinate_measurement_for_test();
         let knowledge_bound = distinct_semantic_knowledge_bound();
-        let certificate = derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-            Some(&measurement),
-            &knowledge_bound,
-            Some(&assumed_fixed_tape_uniformity_premise()),
-        )
-        .expect("selected Appendix A.1 certificate");
+        let certificate =
+            derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound)
+                .expect("selected Appendix A.1 certificate");
         let terms = certificate.adaptive_soundness_terms();
         let t = certificate.coordinates().adversarial_query_bound();
         let k = BigUint::from(TEST_RESPONSE_VECTOR_COMMITMENT_COUNT);
@@ -1223,10 +1731,9 @@ mod tests {
     #[test]
     fn direct_initial_transition_is_separate_from_the_semantic_maximum() {
         let measurement = selected_coordinate_measurement_for_test();
-        let certificate = derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
+        let certificate = derive_with_assumed_complete_premises(
             Some(&measurement),
             &distinct_semantic_knowledge_bound(),
-            Some(&assumed_fixed_tape_uniformity_premise()),
         )
         .expect("selected Appendix A.1 certificate");
         let field_cardinality = selected_challenge_field_cardinality();
@@ -1248,11 +1755,7 @@ mod tests {
             )
             .expect("well-formed but incomplete semantic maximum");
         assert_eq!(
-            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-                Some(&measurement),
-                &invalid_semantic_maximum,
-                Some(&assumed_fixed_tape_uniformity_premise()),
-            ),
+            derive_with_assumed_complete_premises(Some(&measurement), &invalid_semantic_maximum,),
             Err(CompactCdhzAppendixAOneError::InvalidRelaxedRoundByRoundKnowledgeBound)
         );
     }
@@ -1261,12 +1764,9 @@ mod tests {
     fn emitted_q_v_is_the_concrete_shared_qro_bound() {
         let mut measurement = selected_coordinate_measurement_for_test();
         let knowledge_bound = distinct_semantic_knowledge_bound();
-        let certificate = derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-            Some(&measurement),
-            &knowledge_bound,
-            Some(&assumed_fixed_tape_uniformity_premise()),
-        )
-        .expect("selected Appendix A.1 certificate");
+        let certificate =
+            derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound)
+                .expect("selected Appendix A.1 certificate");
 
         assert_eq!(
             certificate
@@ -1276,11 +1776,7 @@ mod tests {
         );
         measurement.nrdx_verifier_q_v_bound = 248_549;
         assert_eq!(
-            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-                Some(&measurement),
-                &knowledge_bound,
-                Some(&assumed_fixed_tape_uniformity_premise()),
-            ),
+            derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound,),
             Err(CompactCdhzAppendixAOneError::UnexpectedEmittedCoordinates)
         );
     }
@@ -1320,24 +1816,20 @@ mod tests {
             let mut measurement = selected_coordinate_measurement_for_test();
             mutate(&mut measurement.random_oracle_domains);
             assert_eq!(
-                derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-                    Some(&measurement),
-                    &knowledge_bound,
-                    Some(&assumed_fixed_tape_uniformity_premise()),
-                ),
-                Err(CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch)
+                derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound,),
+                Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch)
             );
         }
     }
 
     #[test]
     fn absent_measurement_cannot_mint_adaptive_soundness_arithmetic() {
+        let binding_measurement = selected_coordinate_measurement_for_test();
+        let semantic = distinct_semantic_knowledge_bound();
+        let shake = assumed_fixed_tape_uniformity_premise();
+        let premises = assumed_complete_premises(&binding_measurement, &semantic, &shake);
         assert_eq!(
-            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
-                None,
-                &distinct_semantic_knowledge_bound(),
-                Some(&assumed_fixed_tape_uniformity_premise()),
-            ),
+            derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(None, &premises,),
             Err(CompactCdhzAppendixAOneError::MissingEmittedMeasurement)
         );
     }

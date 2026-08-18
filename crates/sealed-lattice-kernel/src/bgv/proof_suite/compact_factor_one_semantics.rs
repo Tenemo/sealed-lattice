@@ -1092,6 +1092,73 @@ mod tests {
             )),
             2
         );
+
+        let event_count = |predicate: fn(CompactFactorOneSemanticOwner) -> bool| {
+            theorem
+                .moves
+                .iter()
+                .filter(|move_bound| predicate(move_bound.owner))
+                .map(|move_bound| move_bound.events.len())
+                .sum::<usize>()
+        };
+        let bad_transition_region_counts = [
+            event_count(|owner| {
+                matches!(
+                    owner,
+                    CompactFactorOneSemanticOwner::LookupChallenge
+                        | CompactFactorOneSemanticOwner::CrossEpochPoint
+                )
+            }),
+            event_count(|owner| {
+                matches!(
+                    owner,
+                    CompactFactorOneSemanticOwner::CfwInitialRandomness
+                        | CompactFactorOneSemanticOwner::CfwSumcheckRound { .. }
+                        | CompactFactorOneSemanticOwner::CfwJointAndPreWhirOpening
+                )
+            }),
+            event_count(|owner| {
+                matches!(
+                    owner,
+                    CompactFactorOneSemanticOwner::WhirMaskedSumcheckCombination { .. }
+                )
+            }),
+            event_count(|owner| matches!(owner, CompactFactorOneSemanticOwner::WhirFolding { .. })),
+            event_count(|owner| {
+                matches!(owner, CompactFactorOneSemanticOwner::WhirCodeSwitch { .. })
+            }),
+            event_count(|owner| {
+                matches!(
+                    owner,
+                    CompactFactorOneSemanticOwner::WhirBaseCombination { .. }
+                )
+            }),
+            event_count(|owner| {
+                matches!(
+                    owner,
+                    CompactFactorOneSemanticOwner::PreWhirFinalAndMainWhirOpening
+                )
+            }),
+            event_count(|owner| {
+                matches!(owner, CompactFactorOneSemanticOwner::MainWhirFinalQueries)
+            }),
+        ];
+        assert_eq!(bad_transition_region_counts, [2, 26, 8, 74, 12, 22, 10, 11]);
+        assert_eq!(bad_transition_region_counts.iter().sum::<usize>(), 165);
+
+        let composition_boundary_count = theorem
+            .moves
+            .iter()
+            .filter(|move_bound| {
+                matches!(
+                    move_bound.owner,
+                    CompactFactorOneSemanticOwner::CfwJointAndPreWhirOpening
+                        | CompactFactorOneSemanticOwner::WhirMaskedSumcheckCombination { .. }
+                        | CompactFactorOneSemanticOwner::WhirCodeSwitch { .. }
+                )
+            })
+            .count();
+        assert_eq!(composition_boundary_count, 15);
     }
 
     #[test]

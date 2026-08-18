@@ -3,7 +3,9 @@
 //! The generated compact-proof contract owns the verifier geometry. This
 //! module retains the census value types used by the theorem arithmetic. Tests
 //! can measure those coordinates from an already-verified compact transport;
-//! no release transport verifier or emitted-proof measurement path exists yet.
+//! the release transport validates structure and salted openings, while
+//! algebraic proof verification and production premise constructors remain
+//! unavailable.
 
 use std::mem::size_of;
 
@@ -18,13 +20,14 @@ use super::compact_proof_wire::{CompactProofWireError, CompactPublicInputBinding
 #[cfg(test)]
 use super::compact_public_key_verifier::{
     CompactPublicKeyTransportError, VerifiedCompactPublicKeyTransport,
+    compact_proof_transport_binding, compact_public_input_transport_binding,
     verify_selected_compact_public_key_transport_for_test,
 };
-use super::compact_response_merkle::CompactResponseLeafValueKind;
 #[cfg(test)]
 use super::compact_response_merkle::{
     COMPACT_RESPONSE_LEAF_HASH_DOMAIN, COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
 };
+use super::compact_response_merkle::{CompactResponseLeafValueKind, CompactResponseQuerySelection};
 #[cfg(test)]
 use super::compact_transcript::COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN;
 #[cfg(test)]
@@ -113,6 +116,48 @@ pub(crate) struct CompactEmittedCdhzRound {
     pub(crate) concrete_fiat_shamir_hash_query_count: u64,
 }
 
+/// Physical calls made by the verifier through the compact construction's
+/// one fixed-SHAKE256 graph. The logical Fiat-Shamir message, response
+/// opening, and vector-commitment counts remain separate census coordinates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactSharedHashGraphCensus {
+    pub(crate) fiat_shamir_prefix_hash_count: u64,
+    pub(crate) fixed_message_seed_hash_count: u64,
+    pub(crate) fixed_message_block_hash_count: u64,
+    pub(crate) opened_leaf_hash_count: u64,
+    pub(crate) merkle_parent_hash_count: u64,
+    pub(crate) total_hash_count: u64,
+}
+
+/// Census bound to the exact canonical proof/public-input pair held by the
+/// decoded transport owner. It inventories the transported tuples and every
+/// verifier consumer edge without claiming any CFW or WHIR equation holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactDecodedActualByteCensus {
+    pub(crate) canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) prover_response_count: u64,
+    pub(crate) verifier_message_count: u64,
+    pub(crate) distinct_query_group_count: u64,
+    pub(crate) distinct_query_group_element_count: u64,
+    pub(crate) response_opening_tuple_count: u64,
+    pub(crate) response_commitment_root_count: u64,
+    pub(crate) internal_relation_commitment_count: u64,
+    pub(crate) opened_leaf_count: u64,
+    pub(crate) secret_leaf_salt_count: u64,
+    pub(crate) round_salt_count: u64,
+    pub(crate) frontier_node_count: u64,
+    pub(crate) frontier_dictionary_entry_count: u64,
+    pub(crate) verifier_response_consumer_edge_count: u64,
+    pub(crate) verifier_query_group_consumer_edge_count: u64,
+    pub(crate) transcript_public_input_length_absorption_count: u64,
+    pub(crate) transcript_public_input_absorption_count: u64,
+    pub(crate) transcript_commitment_identifier_absorption_count: u64,
+    pub(crate) transcript_commitment_root_absorption_count: u64,
+    pub(crate) transcript_round_salt_absorption_count: u64,
+    pub(crate) shared_hash_graph: CompactSharedHashGraphCensus,
+}
+
 impl CompactEmittedCdhzRound {
     fn observed_vector_commitment_check_query_count(&self) -> Result<u64, CompactEmittedCdhzError> {
         self.observed_query_count
@@ -160,6 +205,7 @@ pub(crate) struct CompactEmittedCdhzMeasurement {
     pub(crate) maximum_proof_vector_symbol_length: u64,
     pub(crate) emitted_answer_byte_length: u64,
     pub(crate) emitted_merkle_opening_byte_length: u64,
+    pub(crate) decoded_actual_byte_census: CompactDecodedActualByteCensus,
     pub(crate) merkle_multi_extraction: CompactCdhzMerkleMultiExtractionTerms,
     pub(crate) oracle_family_census: CompactCdhzOracleFamilyCensus,
     pub(crate) random_oracle_domains: CompactCdhzRandomOracleDomains,
@@ -214,12 +260,18 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
     let mut observed_proof_query_count = 0_u64;
     let mut theorem_proof_query_bound = 0_u64;
     let mut observed_merkle_check_query_count = 0_u64;
+    let mut observed_merkle_parent_hash_query_count = 0_u64;
     let mut geometry_merkle_check_query_bound = 0_u64;
     let mut concrete_fiat_shamir_hash_query_count = 0_u64;
+    let mut fixed_message_hash_query_count = 0_u64;
     let mut maximum_proof_vector_symbol_length = 0_u64;
     let mut maximum_leaf_value_byte_length = 0_u64;
     let mut emitted_answer_byte_length = 0_u64;
     let mut emitted_merkle_opening_byte_length = 0_u64;
+    let mut frontier_node_count = 0_u64;
+    let mut frontier_dictionary_entry_count = 0_u64;
+    let mut verifier_query_group_consumer_edge_count = 0_u64;
+    let mut transcript_commitment_absorption_count = 0_u64;
 
     for response_index in 0..response_count {
         let decoded_response = &proof.decoded().responses()[response_index];
@@ -258,7 +310,7 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
                 .map_err(|_| CompactEmittedCdhzError::InvalidCensus)?,
         )
         .map_err(|_| CompactEmittedCdhzError::ArithmeticOverflow)?;
-        let fixed_message_hash_query_count = wire_geometry
+        let round_fixed_message_hash_query_count = wire_geometry
             .verifier_message_geometry()
             .concrete_hash_query_count()
             .map_err(|_| CompactEmittedCdhzError::InvalidCensus)?;
@@ -267,7 +319,7 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         // predecessor-linked 512-bit block query. The CDHZ reduction defines
         // qV as verifier query complexity, so the compound logical round is
         // not substituted for this concrete shared-QRO census.
-        let round_fiat_shamir_hash_query_count = fixed_message_hash_query_count
+        let round_fiat_shamir_hash_query_count = round_fixed_message_hash_query_count
             .checked_add(1)
             .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
         let proof_vector_symbol_length = merkle_geometry.merkle_leaf_count();
@@ -299,6 +351,10 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
             observed_merkle_check_query_count,
             round.observed_vector_commitment_check_query_count()?,
         )?;
+        observed_merkle_parent_hash_query_count = checked_add(
+            observed_merkle_parent_hash_query_count,
+            round.observed_parent_hash_query_count,
+        )?;
         geometry_merkle_check_query_bound = checked_add(
             geometry_merkle_check_query_bound,
             round.geometry_vector_commitment_check_query_bound()?,
@@ -306,6 +362,10 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         concrete_fiat_shamir_hash_query_count = checked_add(
             concrete_fiat_shamir_hash_query_count,
             round.concrete_fiat_shamir_hash_query_count,
+        )?;
+        fixed_message_hash_query_count = checked_add(
+            fixed_message_hash_query_count,
+            round_fixed_message_hash_query_count,
         )?;
         emitted_answer_byte_length =
             checked_add(emitted_answer_byte_length, round.emitted_answer_byte_length)?;
@@ -318,6 +378,30 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         maximum_leaf_value_byte_length = maximum_leaf_value_byte_length.max(
             maximum_response_leaf_value_byte_length(merkle_geometry.components())?,
         );
+        frontier_node_count = checked_add(frontier_node_count, round.observed_frontier_node_count)?;
+        frontier_dictionary_entry_count = checked_add(
+            frontier_dictionary_entry_count,
+            round.observed_frontier_dictionary_entry_count,
+        )?;
+        verifier_query_group_consumer_edge_count = checked_add(
+            verifier_query_group_consumer_edge_count,
+            merkle_geometry.components().iter().try_fold(
+                0_u64,
+                |consumer_edge_count, component| {
+                    checked_add(
+                        consumer_edge_count,
+                        query_selection_consumer_edge_count(component.query_selection()),
+                    )
+                },
+            )?,
+        )?;
+        transcript_commitment_absorption_count = checked_add(
+            transcript_commitment_absorption_count,
+            u64::try_from(response_index)
+                .map_err(|_| CompactEmittedCdhzError::ArithmeticOverflow)?
+                .checked_add(1)
+                .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?,
+        )?;
         rounds.push(round);
     }
 
@@ -328,6 +412,12 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         return Err(CompactEmittedCdhzError::InvalidCensus);
     }
     let ior_round_count = u64_from_usize(rounds.len())?;
+    if fixed_message_hash_query_count < ior_round_count {
+        return Err(CompactEmittedCdhzError::InvalidCensus);
+    }
+    let fixed_message_block_hash_count = fixed_message_hash_query_count
+        .checked_sub(ior_round_count)
+        .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
     let observed_logical_verifier_oracle_call_count =
         checked_add(ior_round_count, observed_merkle_check_query_count)?;
     let logical_verifier_oracle_call_bound =
@@ -351,6 +441,38 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         return Err(CompactEmittedCdhzError::InvalidCensus);
     }
 
+    let distinct_query_group_count =
+        transport
+            .verifier_messages()
+            .iter()
+            .try_fold(0_u64, |count, message| {
+                checked_add(
+                    count,
+                    u64_from_usize(message.distinct_query_groups().len())?,
+                )
+            })?;
+    let distinct_query_group_element_count =
+        transport
+            .verifier_messages()
+            .iter()
+            .try_fold(0_u64, |message_total, message| {
+                message
+                    .distinct_query_groups()
+                    .iter()
+                    .try_fold(message_total, |group_total, group| {
+                        checked_add(group_total, u64_from_usize(group.len())?)
+                    })
+            })?;
+    let internal_relation_commitment_count = verifier_inputs
+        .verifier_moves
+        .iter()
+        .map(|verifier_move| u64::from(verifier_move.preceding_commitment_count))
+        .max()
+        .ok_or(CompactEmittedCdhzError::InvalidCensus)?;
+    let shared_hash_graph_total = concrete_fiat_shamir_hash_query_count
+        .checked_add(observed_merkle_check_query_count)
+        .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
+
     let measurement = CompactEmittedCdhzMeasurement {
         canonical_proof_byte_length: u64_from_usize(proof.canonical_bytes().len())?,
         canonical_public_input_byte_length: u64_from_usize(public_input.canonical_bytes().len())?,
@@ -368,6 +490,40 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         maximum_proof_vector_symbol_length,
         emitted_answer_byte_length,
         emitted_merkle_opening_byte_length,
+        decoded_actual_byte_census: CompactDecodedActualByteCensus {
+            canonical_proof_binding: compact_proof_transport_binding(proof.canonical_bytes()),
+            canonical_public_input_binding: compact_public_input_transport_binding(
+                public_input.canonical_bytes(),
+            ),
+            prover_response_count: ior_round_count,
+            verifier_message_count: ior_round_count,
+            distinct_query_group_count,
+            distinct_query_group_element_count,
+            response_opening_tuple_count: ior_round_count,
+            response_commitment_root_count: ior_round_count,
+            internal_relation_commitment_count,
+            opened_leaf_count: observed_proof_query_count,
+            secret_leaf_salt_count: observed_proof_query_count,
+            round_salt_count: ior_round_count,
+            frontier_node_count,
+            frontier_dictionary_entry_count,
+            verifier_response_consumer_edge_count: ior_round_count,
+            verifier_query_group_consumer_edge_count,
+            transcript_public_input_length_absorption_count: ior_round_count,
+            transcript_public_input_absorption_count: ior_round_count,
+            transcript_commitment_identifier_absorption_count:
+                transcript_commitment_absorption_count,
+            transcript_commitment_root_absorption_count: transcript_commitment_absorption_count,
+            transcript_round_salt_absorption_count: transcript_commitment_absorption_count,
+            shared_hash_graph: CompactSharedHashGraphCensus {
+                fiat_shamir_prefix_hash_count: ior_round_count,
+                fixed_message_seed_hash_count: ior_round_count,
+                fixed_message_block_hash_count,
+                opened_leaf_hash_count: observed_proof_query_count,
+                merkle_parent_hash_count: observed_merkle_parent_hash_query_count,
+                total_hash_count: shared_hash_graph_total,
+            },
+        },
         merkle_multi_extraction: CompactCdhzMerkleMultiExtractionTerms {
             output_bit_length: CDHZ_MERKLE_OUTPUT_BIT_LENGTH,
             leaf_salt_bit_length: CDHZ_MERKLE_LEAF_SALT_BIT_LENGTH,
@@ -395,7 +551,87 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         },
         rounds,
     };
+    measurement.validate_internal_consistency()?;
     Ok(measurement)
+}
+
+impl CompactEmittedCdhzMeasurement {
+    pub(super) fn validate_internal_consistency(&self) -> Result<(), CompactEmittedCdhzError> {
+        let round_count = u64_from_usize(self.rounds.len())?;
+        let observed_frontier_node_count = self.rounds.iter().try_fold(0_u64, |total, round| {
+            checked_add(total, round.observed_frontier_node_count)
+        })?;
+        let observed_frontier_dictionary_entry_count =
+            self.rounds.iter().try_fold(0_u64, |total, round| {
+                checked_add(total, round.observed_frontier_dictionary_entry_count)
+            })?;
+        let observed_parent_hash_count = self.rounds.iter().try_fold(0_u64, |total, round| {
+            checked_add(total, round.observed_parent_hash_query_count)
+        })?;
+        let concrete_fiat_shamir_hash_count =
+            self.rounds.iter().try_fold(0_u64, |total, round| {
+                checked_add(total, round.concrete_fiat_shamir_hash_query_count)
+            })?;
+        let expected_transcript_commitment_absorption_count = round_count
+            .checked_mul(
+                round_count
+                    .checked_add(1)
+                    .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?,
+            )
+            .and_then(|count| count.checked_div(2))
+            .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
+        let census = &self.decoded_actual_byte_census;
+        let hash_graph = &census.shared_hash_graph;
+        let expected_hash_graph_total = hash_graph
+            .fiat_shamir_prefix_hash_count
+            .checked_add(hash_graph.fixed_message_seed_hash_count)
+            .and_then(|count| count.checked_add(hash_graph.fixed_message_block_hash_count))
+            .and_then(|count| count.checked_add(hash_graph.opened_leaf_hash_count))
+            .and_then(|count| count.checked_add(hash_graph.merkle_parent_hash_count))
+            .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
+        if round_count == 0
+            || census.prover_response_count != round_count
+            || census.verifier_message_count != round_count
+            || census.response_opening_tuple_count != round_count
+            || census.response_commitment_root_count != round_count
+            || census.opened_leaf_count != self.observed_proof_query_count
+            || census.secret_leaf_salt_count != self.observed_proof_query_count
+            || census.round_salt_count != round_count
+            || census.frontier_node_count != observed_frontier_node_count
+            || census.frontier_dictionary_entry_count != observed_frontier_dictionary_entry_count
+            || census.verifier_response_consumer_edge_count != round_count
+            || census.transcript_public_input_length_absorption_count != round_count
+            || census.transcript_public_input_absorption_count != round_count
+            || census.transcript_commitment_identifier_absorption_count
+                != expected_transcript_commitment_absorption_count
+            || census.transcript_commitment_root_absorption_count
+                != expected_transcript_commitment_absorption_count
+            || census.transcript_round_salt_absorption_count
+                != expected_transcript_commitment_absorption_count
+            || hash_graph.fiat_shamir_prefix_hash_count != round_count
+            || hash_graph.fixed_message_seed_hash_count != round_count
+            || hash_graph.opened_leaf_hash_count != self.observed_proof_query_count
+            || hash_graph.merkle_parent_hash_count != observed_parent_hash_count
+            || hash_graph
+                .fiat_shamir_prefix_hash_count
+                .checked_add(hash_graph.fixed_message_seed_hash_count)
+                .and_then(|count| count.checked_add(hash_graph.fixed_message_block_hash_count))
+                != Some(concrete_fiat_shamir_hash_count)
+            || hash_graph.total_hash_count != expected_hash_graph_total
+            || hash_graph.total_hash_count != self.observed_nrdx_verifier_q_v
+        {
+            return Err(CompactEmittedCdhzError::InvalidCensus);
+        }
+        Ok(())
+    }
+}
+
+const fn query_selection_consumer_edge_count(selection: CompactResponseQuerySelection) -> u64 {
+    match selection {
+        CompactResponseQuerySelection::Unqueried | CompactResponseQuerySelection::EveryLeaf => 0,
+        CompactResponseQuerySelection::VerifierMessageDistinctGroup { .. } => 1,
+        CompactResponseQuerySelection::VerifierMessageDistinctGroupUnion { .. } => 2,
+    }
 }
 
 fn maximum_parent_hash_query_bound(

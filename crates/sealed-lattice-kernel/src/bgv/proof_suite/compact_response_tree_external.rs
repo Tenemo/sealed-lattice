@@ -936,6 +936,7 @@ fn compact_response_tree_setup_as_execution_error<StorageError>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::compact_proof_contract::CompactPublicKeyProofContract;
     use crate::bgv::proof_suite::compact_proof_wire::{
         COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH, CompactProofResponseWireGeometry,
         CompactProofWireGeometry, CompactPublicInputBindings, CompactPublicInputWireGeometry,
@@ -1144,6 +1145,68 @@ mod tests {
             .expect("third retained-tree Merkle geometry"),
         ];
         (merkle_geometries, wire_geometries)
+    }
+
+    #[test]
+    fn selected_retained_response_tree_aggregate_is_source_derived() {
+        let contract = CompactPublicKeyProofContract::decode_selected()
+            .expect("selected compact proof contract decodes");
+        let verifier_inputs = contract.verifier_inputs();
+        let mut current_retained_response_tree_byte_length = 0_u64;
+        let mut maximum_transient_response_tree_byte_length = 0_u64;
+        let mut post_lookup_retained_response_tree_byte_length = None;
+        for (response_index, response_geometry) in verifier_inputs
+            .response_merkle_geometries
+            .iter()
+            .enumerate()
+        {
+            let verifier_move_ordinal =
+                u32::try_from(response_index).expect("selected response ordinal fits u32");
+            let last_query_verifier_move_ordinal =
+                response_geometry.last_query_verifier_move_ordinal();
+            assert!(last_query_verifier_move_ordinal >= verifier_move_ordinal);
+            let response_tree_byte_length = expected_postorder_tree_byte_length(response_geometry)
+                .expect("selected retained response tree length derives");
+            current_retained_response_tree_byte_length = current_retained_response_tree_byte_length
+                .checked_add(response_tree_byte_length)
+                .expect("selected retained-tree live set fits u64");
+            maximum_transient_response_tree_byte_length =
+                maximum_transient_response_tree_byte_length
+                    .max(current_retained_response_tree_byte_length);
+
+            for due_response_geometry in verifier_inputs
+                .response_merkle_geometries
+                .iter()
+                .take(response_index + 1)
+                .filter(|geometry| {
+                    geometry.last_query_verifier_move_ordinal() == verifier_move_ordinal
+                })
+            {
+                current_retained_response_tree_byte_length =
+                    current_retained_response_tree_byte_length
+                        .checked_sub(
+                            expected_postorder_tree_byte_length(due_response_geometry)
+                                .expect("selected due response tree length derives"),
+                        )
+                        .expect("a due retained tree is live before release");
+            }
+            if verifier_move_ordinal == 1 {
+                post_lookup_retained_response_tree_byte_length =
+                    Some(current_retained_response_tree_byte_length);
+            }
+        }
+
+        assert_eq!(verifier_inputs.response_merkle_geometries.len(), 82);
+        assert_eq!(current_retained_response_tree_byte_length, 0);
+        assert!(
+            maximum_transient_response_tree_byte_length
+                > post_lookup_retained_response_tree_byte_length
+                    .expect("the post-lookup retained-tree boundary is visited")
+        );
+        assert_eq!(
+            post_lookup_retained_response_tree_byte_length,
+            Some(50_331_520)
+        );
     }
 
     fn commit_retained_response(

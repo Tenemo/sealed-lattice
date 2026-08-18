@@ -115,6 +115,28 @@ and target release remain incomplete or internal.
   is exactly zero for one fresh canonical construction attempt. This is
   construction-level theorem evidence, not an emitted-byte argument,
   salted-Merkle/EPRO privacy result, production proof, or runtime result.
+- Test-only noninteractive instrumentation now derives the 165 bad-transition
+  events as eight executable-owner regions (`2`, `26`, `8`, `74`, `12`, `22`,
+  `10`, and `11`), derives all 15 composition boundaries, and retains the
+  maximum error owned by one verifier move rather than summing the chronology.
+  Its decoded actual-byte owner binds the proof/public-input pair and inventories
+  response tuples, verifier messages, commitments, openings, queries, salts,
+  frontier nodes, transcript absorptions, consumer edges, and the shared
+  fixed-SHAKE256 verifier hash graph. The conditional Appendix A.1 calculator
+  requires separate semantic, masking-correspondence, emitted-byte,
+  Merkle-privacy-correspondence, and SHAKE premises and derives its relaxed-RBR
+  headroom from the complete `2^-80` partition. The correspondence and SHAKE
+  premises have no production constructors, so this instrumentation produces
+  neither an accepted proof nor a security-bit claim.
+- The selected lifecycle inventory remains 103 physical proof objects and 159
+  logical relation instances. A compact corpus roll-up records the public-key
+  share's 23,815,474-byte object only as a transport candidate, keeps that row
+  and all eleven other family sizes explicitly blocked, and therefore reports
+  no accepted ceremony-wide byte total.
+- A source assertion now derives 50,331,520 live retained-response-tree bytes
+  at the post-lookup release boundary. This is distinct from the
+  transient-inclusive 52,952,832-byte response-storage peak and is geometry
+  evidence, not a browser runtime measurement.
 - The WebAssembly producer and SDK copy have a byte-for-byte reproducibility
   gate. Reproducibility establishes build identity only.
 

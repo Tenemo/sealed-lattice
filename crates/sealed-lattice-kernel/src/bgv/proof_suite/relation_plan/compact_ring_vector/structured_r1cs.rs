@@ -3186,8 +3186,8 @@ mod tests {
         bgv::{
             proof_suite::{
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
+                compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
-                compact_public_key_verifier::validate_selected_compact_public_key_transport,
                 compact_response_merkle::CompactResponseLeafValueKind,
                 compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement,
@@ -7389,16 +7389,30 @@ mod tests {
         let response_generation_output = prepared_main_epoch
             .finish()
             .expect("the terminal main-WHIR base emits one complete canonical proof");
-        validate_selected_compact_public_key_transport(
+        let emitted_cdhz_measurement = measure_selected_compact_emission_cdhz(
+            Some(response_generation_output.canonical_proof_bytes()),
+            Some(&canonical_public_input_bytes),
             public_input_bindings,
-            response_generation_output.canonical_proof_bytes(),
-            &canonical_public_input_bytes,
         )
-        .expect("the independent transport verifier accepts the emitted proof bytes");
+        .expect("the decoded actual-byte owner accepts and inventories the emitted transport");
+        let actual_byte_census = &emitted_cdhz_measurement.decoded_actual_byte_census;
+        assert_eq!(emitted_cdhz_measurement.rounds.len(), 82);
+        assert_eq!(actual_byte_census.prover_response_count, 82);
+        assert_eq!(actual_byte_census.verifier_message_count, 82);
+        assert_eq!(actual_byte_census.response_opening_tuple_count, 82);
+        assert_eq!(actual_byte_census.response_commitment_root_count, 82);
+        assert_eq!(actual_byte_census.internal_relation_commitment_count, 45);
+        assert_eq!(
+            actual_byte_census.shared_hash_graph.total_hash_count,
+            emitted_cdhz_measurement.observed_nrdx_verifier_q_v
+        );
         println!(
-            "compact public-key focused owner complete elapsed_milliseconds={} canonical_proof_byte_length={} response_storage_transaction_count={} response_storage_written_bytes={} response_storage_read_bytes={} response_storage_peak_bytes={}",
+            "compact public-key focused owner complete elapsed_milliseconds={} canonical_proof_byte_length={} opened_leaf_count={} frontier_node_count={} verifier_hash_count={} response_storage_transaction_count={} response_storage_written_bytes={} response_storage_read_bytes={} response_storage_peak_bytes={}",
             execution_started_at.elapsed().as_millis(),
             response_generation_output.canonical_proof_bytes().len(),
+            actual_byte_census.opened_leaf_count,
+            actual_byte_census.frontier_node_count,
+            actual_byte_census.shared_hash_graph.total_hash_count,
             response_generation_output
                 .external_memory_usage()
                 .transaction_count(),

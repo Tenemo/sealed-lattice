@@ -772,6 +772,11 @@ fn transport_byte_digest(domain: &str, bytes: &[u8]) -> Hash512 {
     Hash512::from_bytes(hasher.finalize())
 }
 
+#[cfg(test)]
+pub(crate) fn compact_proof_transport_binding(bytes: &[u8]) -> [u8; Hash512::BYTE_LENGTH] {
+    transport_byte_digest(COMPACT_TRANSPORT_PROOF_DIGEST_DOMAIN, bytes).into_bytes()
+}
+
 pub(crate) fn compact_public_input_transport_binding(bytes: &[u8]) -> [u8; Hash512::BYTE_LENGTH] {
     transport_byte_digest(COMPACT_TRANSPORT_PUBLIC_INPUT_DIGEST_DOMAIN, bytes).into_bytes()
 }

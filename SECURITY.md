@@ -67,6 +67,26 @@ consequences are:
   `isValid`, mint a proof capability, or supply the final algebraic
   `VerificationResult`. Complete generation and verification release ABIs do
   not exist.
+- Test-only instrumentation derives the exact 165-event interactive ledger and
+  15 composition boundaries from executable owners while preserving the
+  maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
+  bound to the canonical proof/public-input pair and covers response tuples,
+  commitments, openings, queries, salts, frontier nodes, transcript
+  absorptions, verifier consumers, and fixed-SHAKE256 hash calls. The
+  conditional Appendix A.1 calculator refuses unless semantic,
+  masking-correspondence, emitted-byte, Merkle-privacy-correspondence, and SHAKE
+  premises are all present and byte-bound. It derives relaxed-RBR headroom from
+  the complete `2^-80` partition, but the correspondence and SHAKE premises
+  still have no production constructors. No security level or proof capability
+  follows from this arithmetic.
+- The selected 103-physical-proof, 159-logical-instance corpus roll-up remains
+  incomplete. The 23,815,474-byte public-key-share transport candidate is not
+  an accepted family size, the other eleven family sizes are unknown, and no
+  ceremony-wide compact byte total exists.
+- Source geometry now pins 50,331,520 retained-response-tree bytes at the
+  post-lookup release boundary, separately from the 52,952,832-byte
+  transient-inclusive response-storage peak. Neither number is browser
+  lifecycle or supported-phone evidence.
 - The guarded CFW run reconciles 4,926 logical storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   stored bytes. A separate nonqualifying desktop Chromium replay used the exact

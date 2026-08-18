@@ -43,6 +43,8 @@ mod compact_cfw_geometry;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 mod compact_cfw_storage_diagnostic;
 #[cfg(test)]
+mod compact_corpus_accounting;
+#[cfg(test)]
 mod compact_emitted_cdhz;
 #[cfg(test)]
 mod compact_factor_one_semantics;
