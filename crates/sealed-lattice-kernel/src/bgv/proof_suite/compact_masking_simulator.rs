@@ -1,10 +1,12 @@
-//! Adaptive ideal masking simulation for the selected compact proof chronology.
+//! Adaptive Real/Ideal masking games for the selected compact proof chronology.
 //!
 //! This security-game owner exposes only ideal-uniform conditioned disclosures.
 //! The coefficient-map owner fixes every disclosed coordinate and construction-
 //! commitment embedding; the streaming entropy owner authorizes disclosure rank
 //! against the verifier messages actually chosen so far. Concrete KMAC coins,
-//! salted-Merkle roots, and EPRO programming are separate replacement games.
+//! A terminal fresh-attempt trace derives the pathwise Real-game fiber law and
+//! checks it against the Ideal oracle's independently consumed coordinates.
+//! Salted-Merkle roots, emitted bytes, and EPRO programming are separate games.
 
 use super::compact_cfw::{COMPACT_CFW_MATRIX_COUNT, CompactChallengeField};
 use super::compact_masking_coefficient_maps::{
@@ -13,7 +15,8 @@ use super::compact_masking_coefficient_maps::{
 };
 use super::compact_masking_entropy::{
     CompactBaseFreshClaimCoefficients, CompactMaskingDisclosureImage, CompactMaskingDisclosureKind,
-    CompactMaskingEntropyAuthority, CompactMaskingEntropyError, CompactMaskingEntropyStep,
+    CompactMaskingEntropyAuthority, CompactMaskingEntropyCertificate, CompactMaskingEntropyError,
+    CompactMaskingEntropyStep,
 };
 use super::compact_masking_prefix::{CompactMaskingAttemptIdentity, CompactMaskingSemanticPrefix};
 use super::compact_masking_public_covector::{
@@ -36,6 +39,8 @@ const IDEAL_PRIVATE_COORDINATE_DOMAIN: &[u8] =
     b"sealed-lattice/proof/compact-adaptive-masking-private-coordinate/v1";
 const IDEAL_COMMITMENT_DOMAIN: &[u8] =
     b"sealed-lattice/proof/compact-adaptive-masking-commitment/v1";
+const CONSTRUCTION_MASKING_THEOREM_BINDING_DOMAIN: &str =
+    "sealed-lattice/proof/compact-construction-masking-theorem/v1";
 pub(crate) const COMPACT_MASKING_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 
 pub(crate) type CompactMaskingAttemptIdentifier =
@@ -178,6 +183,7 @@ pub(crate) enum CompactMaskingSimulatorError {
     WrongTranscript,
     Role18AuthorizationRequired,
     InvalidRole18Authorization,
+    InvalidConstructionGameLaw,
     PublicCovector(CompactFactorOnePublicCovectorError),
 }
 
@@ -196,6 +202,204 @@ impl From<CompactMaskingEntropyError> for CompactMaskingSimulatorError {
 impl From<CompactFactorOnePublicCovectorError> for CompactMaskingSimulatorError {
     fn from(error: CompactFactorOnePublicCovectorError) -> Self {
         Self::PublicCovector(error)
+    }
+}
+
+/// The two adaptive experiments compared by the construction-level masking
+/// theorem. The Real experiment starts from a canonical relation witness and
+/// uniform private construction coordinates. The Ideal experiment receives no
+/// witness and samples only the independently uniform coordinates authorized by
+/// each conditioned affine image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactAdaptiveMaskingExperiment {
+    RealCanonicalConstruction,
+    WitnessFreeIdealUniform,
+}
+
+/// Deliberately closed scope of the exact statistical claim below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactConstructionMaskingClaimScope {
+    SingleCanonicalProofAttempt,
+    AuthenticatedReset,
+    ReusedPrivateRandomness,
+    MultipleProofs,
+    ProofFamily,
+    Ceremony,
+    SharedRandomOracle,
+    ExplicitlyProgrammableRandomOracle,
+    QuantumRandomOracleZeroKnowledge,
+    CanonicalEmittedProofBytes,
+}
+
+/// One pathwise conditional distribution in both adaptive games.
+///
+/// The Real count is the independently derived rank of the compiler-owned map
+/// after all earlier disclosures. The Ideal count is reconstructed from the
+/// actual addressed-oracle cursor consumed by the witness-free simulator. Equal
+/// counts mean that both games assign probability `|F|^-rank` to every point in
+/// the same conditioned affine image. The residual dimension is the logarithm
+/// over the challenge field of every Real-game fiber size after that point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CompactMaskingConditionalGameLaw {
+    step_ordinal: u32,
+    verifier_move_ordinal: u32,
+    output_coordinate_count: u64,
+    real_uniform_coordinate_count: u64,
+    ideal_uniform_coordinate_count: u64,
+    cumulative_real_rank: u64,
+    real_fiber_dimension_before: u64,
+    real_fiber_dimension_after: u64,
+}
+
+impl CompactMaskingConditionalGameLaw {
+    pub(crate) const fn probability_exponent(
+        self,
+        experiment: CompactAdaptiveMaskingExperiment,
+    ) -> u64 {
+        match experiment {
+            CompactAdaptiveMaskingExperiment::RealCanonicalConstruction => {
+                self.real_uniform_coordinate_count
+            }
+            CompactAdaptiveMaskingExperiment::WitnessFreeIdealUniform => {
+                self.ideal_uniform_coordinate_count
+            }
+        }
+    }
+}
+
+/// Exact pathwise Real/Ideal equality for the selected abstract construction.
+///
+/// This object is derived only from the canonical contract, compiler maps,
+/// independently verified public input, streaming rank authority, and a
+/// terminal witness-free simulator trace. It is neither serialized nor accepted
+/// by the proof verifier. In particular it does not cover the outer salted
+/// Merkle bytes, Fiat-Shamir/QROM transformation, retries with fresh randomness,
+/// or composition with another proof.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactConstructionMaskingTheorem {
+    contract_source_hash: [u8; 64],
+    coefficient_map_binding: [u8; 64],
+    public_input_binding: [u8; 64],
+    masking_contract_binding: [u8; 64],
+    disclosure_digest: [u8; 64],
+    verifier_move_count: usize,
+    construction_commitment_count: usize,
+    exposed_output_coordinate_count: u64,
+    private_coordinate_count: u64,
+    joint_disclosure_rank: u64,
+    residual_fiber_dimension: u64,
+    shared_cross_epoch_query_overlap: u64,
+    conditional_laws: Vec<CompactMaskingConditionalGameLaw>,
+    exact_statistical_distance_numerator: u8,
+    exact_statistical_distance_denominator: u8,
+    theorem_binding: [u8; 64],
+}
+
+impl CompactConstructionMaskingTheorem {
+    pub(crate) const fn applies_to(&self, scope: CompactConstructionMaskingClaimScope) -> bool {
+        matches!(
+            scope,
+            CompactConstructionMaskingClaimScope::SingleCanonicalProofAttempt
+        )
+    }
+
+    fn check(&self) -> Result<(), CompactMaskingSimulatorError> {
+        if self.theorem_binding != self.recomputed_binding()?
+            || self.contract_source_hash != self.coefficient_map_binding
+            || self.verifier_move_count != 82
+            || self.construction_commitment_count != 45
+            || self.private_coordinate_count != 230_488
+            || self.joint_disclosure_rank > 230_324
+            || self.residual_fiber_dimension < 164
+            || self
+                .joint_disclosure_rank
+                .checked_add(self.residual_fiber_dimension)
+                != Some(self.private_coordinate_count)
+            || self.conditional_laws.is_empty()
+            || self.exact_statistical_distance_numerator != 0
+            || self.exact_statistical_distance_denominator != 1
+            || !self.applies_to(CompactConstructionMaskingClaimScope::SingleCanonicalProofAttempt)
+        {
+            return Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw);
+        }
+
+        let mut expected_fiber_dimension = self.private_coordinate_count;
+        let mut expected_cumulative_rank = 0_u64;
+        let mut expected_output_coordinate_count = 0_u64;
+        for (expected_step_ordinal, law) in self.conditional_laws.iter().enumerate() {
+            expected_cumulative_rank = expected_cumulative_rank
+                .checked_add(law.real_uniform_coordinate_count)
+                .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+            expected_output_coordinate_count = expected_output_coordinate_count
+                .checked_add(law.output_coordinate_count)
+                .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+            let expected_after = expected_fiber_dimension
+                .checked_sub(law.real_uniform_coordinate_count)
+                .ok_or(CompactMaskingSimulatorError::InvalidConstructionGameLaw)?;
+            if usize::try_from(law.step_ordinal).ok() != Some(expected_step_ordinal)
+                || usize::try_from(law.verifier_move_ordinal)
+                    .ok()
+                    .is_none_or(|ordinal| ordinal >= self.verifier_move_count)
+                || law.real_uniform_coordinate_count != law.ideal_uniform_coordinate_count
+                || law.real_uniform_coordinate_count > law.output_coordinate_count
+                || law.cumulative_real_rank != expected_cumulative_rank
+                || law.real_fiber_dimension_before != expected_fiber_dimension
+                || law.real_fiber_dimension_after != expected_after
+            {
+                return Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw);
+            }
+            expected_fiber_dimension = expected_after;
+        }
+        if expected_cumulative_rank != self.joint_disclosure_rank
+            || expected_fiber_dimension != self.residual_fiber_dimension
+            || expected_output_coordinate_count != self.exposed_output_coordinate_count
+        {
+            return Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw);
+        }
+        Ok(())
+    }
+
+    fn recomputed_binding(&self) -> Result<[u8; 64], CompactMaskingSimulatorError> {
+        let verifier_move_count = u64::try_from(self.verifier_move_count)
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        let construction_commitment_count = u64::try_from(self.construction_commitment_count)
+            .map_err(|_| CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        let mut law_bytes = Vec::with_capacity(
+            self.conditional_laws
+                .len()
+                .checked_mul(8 * 8)
+                .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?,
+        );
+        for law in &self.conditional_laws {
+            law_bytes.extend_from_slice(&u64::from(law.step_ordinal).to_le_bytes());
+            law_bytes.extend_from_slice(&u64::from(law.verifier_move_ordinal).to_le_bytes());
+            law_bytes.extend_from_slice(&law.output_coordinate_count.to_le_bytes());
+            law_bytes.extend_from_slice(&law.real_uniform_coordinate_count.to_le_bytes());
+            law_bytes.extend_from_slice(&law.ideal_uniform_coordinate_count.to_le_bytes());
+            law_bytes.extend_from_slice(&law.cumulative_real_rank.to_le_bytes());
+            law_bytes.extend_from_slice(&law.real_fiber_dimension_before.to_le_bytes());
+            law_bytes.extend_from_slice(&law.real_fiber_dimension_after.to_le_bytes());
+        }
+        Ok(hash_framed_parts_512(
+            CONSTRUCTION_MASKING_THEOREM_BINDING_DOMAIN,
+            &[
+                &self.contract_source_hash,
+                &self.coefficient_map_binding,
+                &self.public_input_binding,
+                &self.masking_contract_binding,
+                &self.disclosure_digest,
+                &verifier_move_count.to_le_bytes(),
+                &construction_commitment_count.to_le_bytes(),
+                &self.exposed_output_coordinate_count.to_le_bytes(),
+                &self.private_coordinate_count.to_le_bytes(),
+                &self.joint_disclosure_rank.to_le_bytes(),
+                &self.residual_fiber_dimension.to_le_bytes(),
+                &self.shared_cross_epoch_query_overlap.to_le_bytes(),
+                &law_bytes,
+                &[self.exact_statistical_distance_numerator],
+                &[self.exact_statistical_distance_denominator],
+            ],
+        ))
     }
 }
 
@@ -557,6 +761,32 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
     pub(crate) fn finish(
         self,
     ) -> Result<CompactMaskingSimulationCheckpoint, CompactMaskingSimulatorError> {
+        self.validate_terminal_prefix()?;
+        self.checkpoint()
+    }
+
+    /// Finishes the fresh single-attempt Ideal experiment and derives the exact
+    /// pathwise Real/Ideal distribution law. A reset or retired randomness range
+    /// is intentionally outside this claim even though the lifecycle simulator
+    /// can exercise and authenticate those operations separately.
+    pub(crate) fn finish_construction_masking_theorem(
+        self,
+    ) -> Result<
+        (
+            CompactMaskingSimulationCheckpoint,
+            CompactConstructionMaskingTheorem,
+        ),
+        CompactMaskingSimulatorError,
+    > {
+        let entropy_certificate = self.validate_terminal_prefix()?;
+        let theorem = derive_construction_masking_theorem(&self, &entropy_certificate)?;
+        let checkpoint = self.checkpoint()?;
+        Ok((checkpoint, theorem))
+    }
+
+    fn validate_terminal_prefix(
+        &self,
+    ) -> Result<CompactMaskingEntropyCertificate, CompactMaskingSimulatorError> {
         let entropy_authority = self.replay_validated_attempt_prefix()?;
         if self.attempt.moves.len() != self.verifier_inputs.verifier_moves.len() {
             return Err(CompactMaskingSimulatorError::SimulationNotActive);
@@ -595,7 +825,7 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
         {
             return Err(CompactMaskingSimulatorError::WrongCommitmentProgression);
         }
-        self.checkpoint()
+        Ok(certificate)
     }
 
     fn advance_inner(
@@ -914,6 +1144,110 @@ impl<'contract> CompactAdaptiveMaskingSimulator<'contract> {
         }
         Ok(entropy_authority)
     }
+}
+
+fn derive_construction_masking_theorem(
+    simulator: &CompactAdaptiveMaskingSimulator<'_>,
+    entropy_certificate: &CompactMaskingEntropyCertificate,
+) -> Result<CompactConstructionMaskingTheorem, CompactMaskingSimulatorError> {
+    if simulator.attempt.reset_ordinal != 0
+        || !simulator.retired_coin_ranges.is_empty()
+        || !simulator.retired_commitment_handles.is_empty()
+    {
+        return Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw);
+    }
+    let public_input_binding = simulator
+        .public_covector_authority
+        .as_ref()
+        .map(CompactFactorOnePublicCovectorAuthority::public_input_binding)
+        .ok_or(CompactMaskingSimulatorError::InvalidConstructionGameLaw)?;
+    let disclosures = simulator
+        .attempt
+        .moves
+        .iter()
+        .flat_map(|record| {
+            record
+                .conditioned_view
+                .disclosures
+                .iter()
+                .chain(&record.post_message_disclosures)
+        })
+        .collect::<Vec<_>>();
+    if disclosures.len() != entropy_certificate.steps().len() {
+        return Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw);
+    }
+
+    let mut conditional_laws = Vec::with_capacity(disclosures.len());
+    let mut exposed_output_coordinate_count = 0_u64;
+    let mut real_fiber_dimension_before = entropy_certificate.private_coordinate_count();
+    for (step_index, (disclosure, entropy_step)) in disclosures
+        .iter()
+        .zip(entropy_certificate.steps())
+        .enumerate()
+    {
+        let ideal_coin_coordinate_end = disclosures
+            .get(step_index + 1)
+            .map_or(simulator.attempt.next_coin_coordinate, |next| {
+                next.coin_coordinate_start
+            });
+        let ideal_uniform_coordinate_count = ideal_coin_coordinate_end
+            .checked_sub(disclosure.coin_coordinate_start)
+            .ok_or(CompactMaskingSimulatorError::InvalidConstructionGameLaw)?;
+        let real_uniform_coordinate_count = entropy_step.conditional_rank();
+        let real_fiber_dimension_after = real_fiber_dimension_before
+            .checked_sub(real_uniform_coordinate_count)
+            .ok_or(CompactMaskingSimulatorError::InvalidConstructionGameLaw)?;
+        exposed_output_coordinate_count = exposed_output_coordinate_count
+            .checked_add(entropy_step.output_coordinate_count())
+            .ok_or(CompactMaskingSimulatorError::ArithmeticOverflow)?;
+        if &disclosure.entropy_step != entropy_step
+            || u64::try_from(disclosure.field_values.len()).ok()
+                != Some(entropy_step.output_coordinate_count())
+            || real_uniform_coordinate_count != ideal_uniform_coordinate_count
+            || entropy_step.residual_entropy_dimension() != real_fiber_dimension_after
+        {
+            return Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw);
+        }
+        conditional_laws.push(CompactMaskingConditionalGameLaw {
+            step_ordinal: entropy_step.ordinal(),
+            verifier_move_ordinal: entropy_step.verifier_move_ordinal(),
+            output_coordinate_count: entropy_step.output_coordinate_count(),
+            real_uniform_coordinate_count,
+            ideal_uniform_coordinate_count,
+            cumulative_real_rank: entropy_step.cumulative_rank(),
+            real_fiber_dimension_before,
+            real_fiber_dimension_after,
+        });
+        real_fiber_dimension_before = real_fiber_dimension_after;
+    }
+
+    let construction_commitment_count = simulator
+        .attempt
+        .moves
+        .iter()
+        .map(|record| record.conditioned_view.new_construction_commitments.len())
+        .sum();
+    let mut theorem = CompactConstructionMaskingTheorem {
+        contract_source_hash: simulator.contract_source_hash.into_bytes(),
+        coefficient_map_binding: simulator.coefficient_maps.certificate_digest(),
+        public_input_binding,
+        masking_contract_binding: entropy_certificate.contract_binding(),
+        disclosure_digest: entropy_certificate.disclosure_digest(),
+        verifier_move_count: simulator.verifier_inputs.verifier_moves.len(),
+        construction_commitment_count,
+        exposed_output_coordinate_count,
+        private_coordinate_count: entropy_certificate.private_coordinate_count(),
+        joint_disclosure_rank: entropy_certificate.joint_disclosure_rank(),
+        residual_fiber_dimension: entropy_certificate.residual_conditional_entropy_dimension(),
+        shared_cross_epoch_query_overlap: entropy_certificate.shared_cross_epoch_query_overlap(),
+        conditional_laws,
+        exact_statistical_distance_numerator: 0,
+        exact_statistical_distance_denominator: 1,
+        theorem_binding: [0_u8; 64],
+    };
+    theorem.theorem_binding = theorem.recomputed_binding()?;
+    theorem.check()?;
+    Ok(theorem)
 }
 
 fn attempt_identity(attempt: &CompactAttemptState) -> CompactMaskingAttemptIdentity {
@@ -2520,7 +2854,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "guarded selected terminal adaptive masking-simulator lifecycle"]
+    #[ignore = "guarded selected construction masking theorem and simulator lifecycle"]
     fn heavy_rust_kernel_selected_masking_simulator_terminal_authenticates_restore_and_rewind() {
         let private_key = [0x9d; 64];
         let (contract, maps) = selected_simulator(private_key);
@@ -2531,6 +2865,7 @@ mod tests {
                 &verified_public_input,
             )
             .expect("selected public-input authority");
+        let expected_public_input_binding = public_covector_authority.public_input_binding();
         let mut simulator = CompactAdaptiveMaskingSimulator::new_with_public_covector_authority(
             contract.verifier_inputs(),
             &maps,
@@ -2587,7 +2922,7 @@ mod tests {
         assert!(!abandoned_handles.is_empty());
         let reset_ordinal = simulator.attempt.reset_ordinal;
         simulator
-            .rewind_security_game_suffix(nonterminal_checkpoint)
+            .rewind_security_game_suffix(nonterminal_checkpoint.clone())
             .expect("authenticated nonempty suffix rewinds");
         assert_eq!(simulator.attempt.reset_ordinal, reset_ordinal + 1);
         assert!(simulator.retired_coin_ranges.iter().any(|range| {
@@ -2601,14 +2936,97 @@ mod tests {
                 .all(|handle| simulator.retired_commitment_handles.contains(handle))
         );
 
+        let fresh_completion_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("fresh single-attempt completion authority");
+        let mut simulator =
+            CompactAdaptiveMaskingSimulator::restore_with_public_covector_authority(
+                contract.verifier_inputs(),
+                &maps,
+                nonterminal_checkpoint,
+                private_key,
+                fresh_completion_authority,
+            )
+            .expect("fresh single-attempt branch restores");
         advance_to_terminal_prefix(&mut simulator, &mut verifier);
         assert_eq!(
             simulator.attempt.moves.len(),
             simulator.verifier_inputs.verifier_moves.len()
         );
-        let terminal_checkpoint = simulator
-            .finish()
-            .expect("terminal simulator authenticates");
+        let (terminal_checkpoint, theorem) = simulator
+            .finish_construction_masking_theorem()
+            .expect("fresh terminal simulator derives the construction masking theorem");
+        assert_eq!(theorem.public_input_binding, expected_public_input_binding);
+        assert_eq!(theorem.verifier_move_count, 82);
+        assert_eq!(theorem.construction_commitment_count, 45);
+        assert_eq!(theorem.private_coordinate_count, 230_488);
+        assert!(theorem.joint_disclosure_rank < 230_324);
+        assert!(theorem.residual_fiber_dimension > 164);
+        assert_eq!(
+            theorem.joint_disclosure_rank + theorem.residual_fiber_dimension,
+            theorem.private_coordinate_count
+        );
+        assert!(theorem.shared_cross_epoch_query_overlap > 0);
+        assert!(theorem.exposed_output_coordinate_count >= theorem.joint_disclosure_rank);
+        assert_eq!(theorem.exact_statistical_distance_numerator, 0);
+        assert_eq!(theorem.exact_statistical_distance_denominator, 1);
+        for experiment in [
+            CompactAdaptiveMaskingExperiment::RealCanonicalConstruction,
+            CompactAdaptiveMaskingExperiment::WitnessFreeIdealUniform,
+        ] {
+            assert_eq!(
+                theorem
+                    .conditional_laws
+                    .iter()
+                    .map(|law| law.probability_exponent(experiment))
+                    .sum::<u64>(),
+                theorem.joint_disclosure_rank
+            );
+        }
+        assert!(
+            theorem.applies_to(CompactConstructionMaskingClaimScope::SingleCanonicalProofAttempt)
+        );
+        for excluded_scope in [
+            CompactConstructionMaskingClaimScope::AuthenticatedReset,
+            CompactConstructionMaskingClaimScope::ReusedPrivateRandomness,
+            CompactConstructionMaskingClaimScope::MultipleProofs,
+            CompactConstructionMaskingClaimScope::ProofFamily,
+            CompactConstructionMaskingClaimScope::Ceremony,
+            CompactConstructionMaskingClaimScope::SharedRandomOracle,
+            CompactConstructionMaskingClaimScope::ExplicitlyProgrammableRandomOracle,
+            CompactConstructionMaskingClaimScope::QuantumRandomOracleZeroKnowledge,
+            CompactConstructionMaskingClaimScope::CanonicalEmittedProofBytes,
+        ] {
+            assert!(!theorem.applies_to(excluded_scope));
+        }
+        theorem
+            .check()
+            .expect("construction masking theorem remains intrinsically bound");
+
+        let mut changed_public_input = theorem.clone();
+        changed_public_input.public_input_binding[0] ^= 1;
+        assert_eq!(
+            changed_public_input.check(),
+            Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw)
+        );
+        let mut changed_ideal_rank = theorem.clone();
+        changed_ideal_rank.conditional_laws[0].ideal_uniform_coordinate_count += 1;
+        assert_eq!(
+            changed_ideal_rank.check(),
+            Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw)
+        );
+        let mut changed_residual_fiber = theorem.clone();
+        changed_residual_fiber
+            .conditional_laws
+            .last_mut()
+            .expect("selected law is nonempty")
+            .real_fiber_dimension_after += 1;
+        assert_eq!(
+            changed_residual_fiber.check(),
+            Err(CompactMaskingSimulatorError::InvalidConstructionGameLaw)
+        );
 
         let terminal_restore_authority =
             CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
@@ -2662,24 +3080,6 @@ mod tests {
             sample_exact_goldilocks(|_| Goldilocks::ORDER_U64),
             Err(CompactMaskingSimulatorError::IdealOracleRefused)
         );
-    }
-
-    #[test]
-    fn affine_mask_and_ideal_uniform_samples_have_equal_distributions_not_equal_samples() {
-        const SMALL_FIELD_CARDINALITY: usize = 257;
-        let secret = 83_usize;
-        let mut real_histogram = [0_u16; SMALL_FIELD_CARDINALITY];
-        let mut ideal_histogram = [0_u16; SMALL_FIELD_CARDINALITY];
-        let mut samples_all_equal = true;
-        for mask in 0..SMALL_FIELD_CARDINALITY {
-            let real = (secret + mask) % SMALL_FIELD_CARDINALITY;
-            let ideal = (17 * mask + 11) % SMALL_FIELD_CARDINALITY;
-            real_histogram[real] += 1;
-            ideal_histogram[ideal] += 1;
-            samples_all_equal &= real == ideal;
-        }
-        assert_eq!(real_histogram, ideal_histogram);
-        assert!(!samples_all_equal);
     }
 
     #[test]

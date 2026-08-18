@@ -48,6 +48,58 @@ const SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH: u32 = 512;
 /// excluded from this numeric gate.
 const SELECTED_KNOWN_LOSS_SECURITY_BIT_FLOOR: usize = 256;
 
+/// Exact deployment boundary assumed by the single-proof masking hybrid.
+///
+/// This is a symbolic assumption, not a producer assertion or a verification
+/// capability. It states that one adversary using both deployed interfaces may
+/// replace the domain-separated, keyed KMAC256 calls by the random functions
+/// named in the three qPRF hops while treating fixed SHAKE256 as the one ideal
+/// quantum random oracle used by the later transcript and Merkle reductions.
+/// Because both interfaces use Keccak-f[1600], the joint game carries one
+/// additional symbolic shared-permutation advantage; domain separation does not
+/// make that advantage zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompactMaskingJointPrimitiveAssumption {
+    FixedKmac256QprfAndFixedShake256IdealQroWithSharedKeccakF1600,
+}
+
+impl CompactMaskingJointPrimitiveAssumption {
+    const fn identifier(self) -> &'static str {
+        match self {
+            Self::FixedKmac256QprfAndFixedShake256IdealQroWithSharedKeccakF1600 => {
+                "fixed-kmac256-qprf-and-fixed-shake256-ideal-qro-with-shared-keccak-f1600"
+            }
+        }
+    }
+}
+
+/// Source requirement and symbolic primitive model carried by the release
+/// masking bridge. Validation rederives its numeric terms separately; these
+/// labels cannot be supplied by a proof producer and never enter acceptance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompactMaskingDeploymentHybridStatement {
+    selected_contract_source_hash: Hash512,
+    browser_action_root_bit_length: u32,
+    quantum_query_budget: u128,
+    kmac_qprf_hop_count: u8,
+    shake256_ideal_qro_output_bit_length: u32,
+    joint_primitive_assumption: CompactMaskingJointPrimitiveAssumption,
+}
+
+impl CompactMaskingDeploymentHybridStatement {
+    fn validate(self) -> Result<Hash512, CompactMaskingKmacError> {
+        if self.browser_action_root_bit_length != bit_length(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH)?
+            || self.quantum_query_budget != DECLARED_ADVERSARIAL_QUERY_BUDGET
+            || self.kmac_qprf_hop_count != 3
+            || self.shake256_ideal_qro_output_bit_length != SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH
+            || self.joint_primitive_assumption.identifier().is_empty()
+        {
+            return Err(CompactMaskingKmacError::InvalidCensus);
+        }
+        Ok(self.selected_contract_source_hash)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactMaskingKmacError {
     Contract(CompactProofContractError),
@@ -212,9 +264,9 @@ struct CompactMaskingKmacQuantumHybridLoss {
 /// Derivation recomputes the selected contract hash, KMAC census,
 /// authority-derived union multiplicity, exact quantum-query terms, and the
 /// 256-bit known-loss floor. The three KMAC quantum-PRF advantages remain
-/// symbolic. Joint security of the fixed KMAC256 and SHAKE256 interfaces over
-/// Keccak-f is an external unproved assumption; this accounting neither
-/// instantiates that assumption nor grants proof-acceptance authority.
+/// symbolic. The release bridge names the compatible joint fixed-KMAC256 and
+/// fixed-SHAKE256 interface assumption over Keccak-f[1600], but this accounting
+/// neither proves that assumption nor grants proof-acceptance authority.
 #[cfg(test)]
 pub(crate) struct CompactMaskingKmacConditionalHybridAccounting {
     selected_contract_source_hash: Hash512,
@@ -416,7 +468,7 @@ pub(crate) fn derive_selected_compact_masking_kmac_conditional_hybrid_accounting
 }
 
 /// Derives conditional quantum-hybrid accounting for one selected
-/// multiplicity. This arithmetic leaves the external joint KMAC256/SHAKE256
+/// multiplicity. This arithmetic leaves the named joint KMAC256/SHAKE256
 /// security assumption unproved and does not mint an authority for it.
 fn derive_selected_compact_masking_kmac_components(
     application_multiplicity: u64,
@@ -435,9 +487,24 @@ fn derive_selected_compact_masking_kmac_components(
 /// assumption remains external.
 pub(crate) fn derive_selected_compact_masking_kmac_bridge()
 -> Result<Hash512, CompactMaskingKmacError> {
-    let (selected_contract_source_hash, _hybrid_loss) =
+    derive_selected_compact_masking_deployment_hybrid_statement()?.validate()
+}
+
+fn derive_selected_compact_masking_deployment_hybrid_statement()
+-> Result<CompactMaskingDeploymentHybridStatement, CompactMaskingKmacError> {
+    let (selected_contract_source_hash, hybrid_loss) =
         derive_selected_compact_masking_kmac_components(1)?;
-    Ok(selected_contract_source_hash)
+    let kmac_qprf_hop_count = u8::try_from(hybrid_loss.qprf_hops.len())
+        .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?;
+    Ok(CompactMaskingDeploymentHybridStatement {
+        selected_contract_source_hash,
+        browser_action_root_bit_length: bit_length(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH)?,
+        quantum_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
+        kmac_qprf_hop_count,
+        shake256_ideal_qro_output_bit_length: SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH,
+        joint_primitive_assumption:
+            CompactMaskingJointPrimitiveAssumption::FixedKmac256QprfAndFixedShake256IdealQroWithSharedKeccakF1600,
+    })
 }
 
 #[cfg(test)]
@@ -1007,6 +1074,58 @@ mod tests {
                     .hybrid_loss
                     .known_loss_sum
                     .is_at_most_inverse_power_of_two(SELECTED_KNOWN_LOSS_SECURITY_BIT_FLOOR,),
+            );
+        }
+    }
+
+    #[test]
+    fn release_bridge_states_the_browser_root_and_joint_fixed_keccak_assumption() {
+        let statement = derive_selected_compact_masking_deployment_hybrid_statement()
+            .expect("selected deployment hybrid statement derives");
+        let selected_contract_hash = CompactPublicKeyProofContract::decode_selected()
+            .expect("selected compact contract decodes")
+            .verifier_inputs()
+            .canonical_source_hash()
+            .expect("selected compact contract hashes");
+
+        assert_eq!(statement.validate(), Ok(selected_contract_hash));
+        assert_eq!(statement.browser_action_root_bit_length, 512);
+        assert_eq!(
+            statement.quantum_query_budget,
+            DECLARED_ADVERSARIAL_QUERY_BUDGET
+        );
+        assert_eq!(statement.kmac_qprf_hop_count, 3);
+        assert_eq!(statement.shake256_ideal_qro_output_bit_length, 512);
+        assert_eq!(
+            statement.joint_primitive_assumption.identifier(),
+            "fixed-kmac256-qprf-and-fixed-shake256-ideal-qro-with-shared-keccak-f1600"
+        );
+        assert_eq!(
+            derive_selected_compact_masking_kmac_bridge(),
+            Ok(selected_contract_hash)
+        );
+
+        for invalid_statement in [
+            CompactMaskingDeploymentHybridStatement {
+                browser_action_root_bit_length: 256,
+                ..statement
+            },
+            CompactMaskingDeploymentHybridStatement {
+                quantum_query_budget: statement.quantum_query_budget - 1,
+                ..statement
+            },
+            CompactMaskingDeploymentHybridStatement {
+                kmac_qprf_hop_count: 2,
+                ..statement
+            },
+            CompactMaskingDeploymentHybridStatement {
+                shake256_ideal_qro_output_bit_length: 256,
+                ..statement
+            },
+        ] {
+            assert_eq!(
+                invalid_statement.validate(),
+                Err(CompactMaskingKmacError::InvalidCensus)
             );
         }
     }

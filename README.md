@@ -103,12 +103,18 @@ and target release remain incomplete or internal.
 - Release generation redecodes its canonical public input, derives the
   coefficient-to-view maps, enforces the single-proof KMAC call census, and uses
   coordinate-separated KMAC256 streams for field samples, private leaf salts,
-  and Fiat-Shamir salts. The terminal whole-construction simulator, the joint
-  fixed-KMAC256/fixed-SHAKE256 assumption, and the fixed-tape shared-QRO premise
-  remain incomplete or external assumptions.
-- The test-only semantic workbench covers the checked 82-move factor-one
-  schedule and terminal simulator lifecycle. It is source-level regression
-  evidence, not a production proof, emitted-byte argument, or runtime result.
+  and Fiat-Shamir salts. Its release bridge carries three symbolic quantum-PRF
+  hops and the named compatible fixed-KMAC256/fixed-SHAKE256 shared-Keccak
+  assumption. That assumption remains unproved and has no assigned numeric
+  advantage.
+- The guarded security-game owner covers the checked 82-move factor-one
+  schedule, all 45 abstract construction commitments, and adaptive overlapping
+  queries. It derives the Real-game conditional ranks independently from the
+  compiler and compares them with the witness-free Ideal simulator's consumed
+  coordinates at every disclosure. The resulting pathwise statistical distance
+  is exactly zero for one fresh canonical construction attempt. This is
+  construction-level theorem evidence, not an emitted-byte argument,
+  salted-Merkle/EPRO privacy result, production proof, or runtime result.
 - The WebAssembly producer and SDK copy have a byte-for-byte reproducibility
   gate. Reproducibility establishes build identity only.
 
@@ -123,10 +129,11 @@ ceremony or supported-phone qualification.
   proof, final proof `VerificationResult`, or complete compact generation and
   verification ABI exists. The release transport ABI checks canonical
   structure, transcript chronology, query derivation, and Merkle openings only.
-- The compact successor still requires a construction-level statistical-HVZK
-  argument bound to the complete emitted proof, composition of the live KMAC
-  bridge with its explicit quantum-PRF and joint fixed-Keccak assumptions, and
-  the applicable SHAKE256 fixed-tape and QROM theorem chain.
+- The compact successor still requires correspondence between the completed
+  single-attempt construction-level masking theorem and every emitted proof
+  byte, the actual salted-Merkle and EPRO privacy games, and composition of the
+  live KMAC bridge under its unproved joint fixed-Keccak assumption with the
+  applicable SHAKE256 fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
 - Browser custody does not yet provide complete proactive authenticated

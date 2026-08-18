@@ -90,17 +90,25 @@ base-field encoding-randomness coordinates into 396 extension-field source
 coordinates, then independently samples 6,912 next-source randomness elements
 and 399 switch-mask randomness elements. Those three quantities are distinct.
 
-The test-only simulator covers the complete 82-move source-level lifecycle, but
-the terminal whole-construction simulator is not bound to a complete emitted
-production proof. Construction-level statistical HVZK, salted-Merkle privacy
-for the actual proof, and multi-proof, family, retry, reused-randomness,
-shared-oracle, and ceremony composition remain open.
+The guarded construction security game covers the complete 82-move lifecycle,
+all 45 abstract construction commitments, and adaptive overlapping queries. At
+each disclosure it independently derives the Real-game conditional rank from
+the compiler-owned map and compares that rank with the witness-free Ideal
+simulator's consumed coordinates. The two path laws are identical, so the
+single-fresh-attempt ideal-uniform construction has exact statistical distance
+zero. The theorem binds the verified public input and refuses reset, retry,
+reused-randomness, multi-proof, family, ceremony, shared-oracle, EPRO, QROM, and
+canonical emitted-byte scope extensions. Salted-Merkle privacy and
+correspondence with one complete emitted production proof remain open.
 
 The release coin bridge accounts for three symbolic quantum-PRF replacements
-and the exact known sampler and collision terms. KMAC256 and SHAKE256 share
-fixed Keccak-f; domain separation alone does not establish independent qPRF and
-ideal-QRO interfaces. The compatible joint assumption or reduction remains
-required.
+and the exact known sampler and collision terms. It now states the compatible
+joint assumption: within the declared quantum-query budget, simultaneous use of
+the domain-separated keyed KMAC256 interfaces and fixed SHAKE256 is replaced by
+the named per-key random functions and one ideal quantum random oracle, with the
+explicit qPRF terms plus one symbolic shared-Keccak-f[1600] interface advantage.
+Domain separation does not make that advantage zero. The assumption remains
+unproved and has no numeric instantiation.
 
 ### Emitted-byte and QROM boundary
 
@@ -143,9 +151,9 @@ that a coherent snapshot is newest.
 - `SEC-004`: The production proof backend is rejected for mobile proving. The
   compact successor remains incomplete and cannot generate or verify one
   accepted production proof or select a suite.
-- `SEC-005`: Construction-level masking, emitted-byte correspondence,
-  salted-Merkle privacy, the deployed KMAC hybrid, fixed-tape shared-QRO premise,
-  and exact Appendix A.1/Merkle/QROM composition remain open. No soundness
+- `SEC-005`: Emitted-byte correspondence, salted-Merkle and EPRO privacy, the
+  symbolic joint fixed-Keccak assumption, fixed-tape shared-QRO premise, and
+  exact Appendix A.1/Merkle/QROM composition remain open. No soundness
   certificate or security bit count is authorized.
 - `SEC-006`: The participant bridge does not connect the complete verifier-
   minted capability and checkpoint chain from setup through release.

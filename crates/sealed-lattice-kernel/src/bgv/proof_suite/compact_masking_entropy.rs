@@ -421,6 +421,16 @@ impl CompactMaskingEntropyStep {
     pub(crate) const fn conditional_rank(&self) -> u64 {
         self.conditional_rank
     }
+
+    #[cfg(test)]
+    pub(crate) const fn cumulative_rank(&self) -> u64 {
+        self.cumulative_rank
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn residual_entropy_dimension(&self) -> u64 {
+        self.residual_entropy_dimension
+    }
 }
 
 #[cfg(test)]
@@ -456,6 +466,14 @@ impl CompactMaskingEntropyCertificate {
 
     pub(crate) const fn shared_cross_epoch_query_overlap(&self) -> u64 {
         self.shared_cross_epoch_query_overlap
+    }
+
+    pub(crate) const fn disclosure_digest(&self) -> [u8; 64] {
+        self.disclosure_digest
+    }
+
+    pub(crate) const fn contract_binding(&self) -> [u8; 64] {
+        self.contract_binding
     }
 
     pub(crate) fn check(
