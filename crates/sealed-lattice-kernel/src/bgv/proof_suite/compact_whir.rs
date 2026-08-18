@@ -3520,7 +3520,7 @@ mod tests {
     use super::*;
     use crate::bgv::proof_suite::compact_whir_algebraic_verifier::{
         CompactWhirAlgebraicRelation, CompactWhirCodeSwitchTranscript,
-        CompactWhirSumcheckTranscript,
+        CompactWhirSumcheckTranscript, CompactWhirSumcheckVerificationPoll,
     };
 
     struct CountingRandomSource(u64);
@@ -4599,8 +4599,13 @@ mod tests {
         let round_wires = (0..challenges.len())
             .map(|round_ordinal| state.round_wire(round_ordinal).unwrap().try_into().unwrap())
             .collect::<Vec<[CompactChallengeField; 2]>>();
-        verifier_relation
-            .verify_sumcheck_batch(
+        let expected_fold_work_unit_count = verifier_relation
+            .source_covector()
+            .len()
+            .checked_sub(usize::try_from(verifier_fold_contract.message_length).unwrap())
+            .unwrap();
+        let mut sumcheck_verification = verifier_relation
+            .begin_sumcheck_batch(
                 &verifier_epoch_contract,
                 verifier_fold_contract,
                 0,
@@ -4612,7 +4617,40 @@ mod tests {
                     round_challenges: &challenges,
                 },
             )
-            .expect("the verifier independently replays the masked sumcheck");
+            .expect("the verifier independently begins the masked sumcheck");
+        let work_budgets = [1_u64, 7, 3, 13];
+        let mut poll_ordinal = 0_usize;
+        let mut completed_fold_work_unit_count = 0_u64;
+        loop {
+            let work_budget = work_budgets[poll_ordinal % work_budgets.len()];
+            poll_ordinal += 1;
+            match sumcheck_verification
+                .advance(
+                    &mut verifier_relation,
+                    &verifier_epoch_contract,
+                    work_budget,
+                )
+                .expect("the bounded verifier sumcheck fold advances")
+            {
+                CompactWhirSumcheckVerificationPoll::WorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert!((1..=work_budget).contains(&completed_work_unit_count));
+                    completed_fold_work_unit_count += completed_work_unit_count;
+                }
+                CompactWhirSumcheckVerificationPoll::Complete {
+                    completed_work_unit_count,
+                } => {
+                    assert!(completed_work_unit_count <= work_budget);
+                    completed_fold_work_unit_count += completed_work_unit_count;
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            completed_fold_work_unit_count,
+            u64::try_from(expected_fold_work_unit_count).unwrap()
+        );
         assert_eq!(
             verifier_relation.source_covector(),
             state.residual_covector().unwrap()

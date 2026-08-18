@@ -22,8 +22,13 @@ pub(crate) struct CompactWhirInPlaceCovectorFold {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CompactWhirInPlaceCovectorFoldPoll {
-    WorkCompleted { completed_work_unit_count: u64 },
-    Complete(Vec<CompactChallengeField>),
+    WorkCompleted {
+        completed_work_unit_count: u64,
+    },
+    Complete {
+        completed_work_unit_count: u64,
+        values: Vec<CompactChallengeField>,
+    },
 }
 
 impl CompactWhirInPlaceCovectorFold {
@@ -65,11 +70,13 @@ impl CompactWhirInPlaceCovectorFold {
         let mut completed_work_unit_count = 0_u64;
         loop {
             if self.challenge_ordinal == self.challenges.len() {
-                return Ok(CompactWhirInPlaceCovectorFoldPoll::Complete(
-                    self.values
+                return Ok(CompactWhirInPlaceCovectorFoldPoll::Complete {
+                    completed_work_unit_count,
+                    values: self
+                        .values
                         .take()
                         .ok_or(CompactWhirCovectorFoldError::InvalidGeometry)?,
-                ));
+                });
             }
             if self.active_column_count < 2 || !self.active_column_count.is_multiple_of(2) {
                 return Err(CompactWhirCovectorFoldError::InvalidGeometry);
@@ -147,7 +154,7 @@ pub(crate) fn fold_compact_whir_covector_in_place(
     loop {
         match fold.advance(u64::MAX)? {
             CompactWhirInPlaceCovectorFoldPoll::WorkCompleted { .. } => {}
-            CompactWhirInPlaceCovectorFoldPoll::Complete(values) => return Ok(values),
+            CompactWhirInPlaceCovectorFoldPoll::Complete { values, .. } => return Ok(values),
         }
     }
 }
@@ -219,7 +226,9 @@ mod tests {
                         } => {
                             assert!((1..=work_budget).contains(&completed_work_unit_count));
                         }
-                        CompactWhirInPlaceCovectorFoldPoll::Complete(values) => break values,
+                        CompactWhirInPlaceCovectorFoldPoll::Complete { values, .. } => {
+                            break values;
+                        }
                     }
                 };
                 assert_eq!(completed, expected);
@@ -253,7 +262,10 @@ mod tests {
         );
         assert!(matches!(
             fold.advance(1).unwrap(),
-            CompactWhirInPlaceCovectorFoldPoll::Complete(_)
+            CompactWhirInPlaceCovectorFoldPoll::Complete {
+                completed_work_unit_count: 1,
+                ..
+            }
         ));
         assert_eq!(
             fold.advance(1),

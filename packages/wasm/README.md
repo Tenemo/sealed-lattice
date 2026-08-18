@@ -50,16 +50,21 @@ internal common-proof worker driver yields between bounded polls,
 publishes and restores that cursor through an authenticated-custody contract,
 prevents publication during replay, preserves typed refusals, and returns a
 positive `VerificationResult` only after source correspondence and one-shot
-accepted-setup terminal commit. The five CFW polynomial transforms are
-incremental. The accepted verifier exposes 4,509 fixed cursor ordinals: 290 at
-65,536-work-unit intervals across 19,005,440 of the selected CFW phase's
-19,038,593 work units, one after terminal WHIR returns, and 4,218 across all 122
-public columns and all 1,024 cosets of each of four statement roots. The
-post-WHIR cursor does not make terminal WHIR incremental. Its bounded fold now
-reuses and truncates the original source allocation in both production
-covector consumers instead of retaining a clone and separate output, but the
-outer verifier still drains that primitive synchronously and has no live
-browser memory measurement. The protocol
+accepted-setup terminal commit. The five CFW polynomial transforms and the
+seven WHIR folds remaining after the CFW handoff are incremental. The accepted
+verifier exposes 4,509 fixed cursor ordinals: 290 at 65,536-work-unit intervals
+across 19,005,440 of the selected CFW phase's 19,038,593 work units, one after
+both WHIR epochs, and 4,218 across all 122 public columns and all 1,024 cosets
+of each of four statement roots. Contract geometry derives 2,129,904 remaining
+WHIR fold work units, and the current transported candidate completes them in
+33 outer polls of at most 65,536 units. The bounded fold reuses and truncates
+the original source allocation in both production covector consumers instead
+of retaining a clone and separate output. The verifier-derived public-covector
+replay still drains the shared primitive synchronously. The accepted cursor has
+no intermediate WHIR ordinals, and code-switch and base-case transitions are
+not separately metered, so the outer polls do not yet establish durable cold
+resume or complete foreground bounds. There is no live browser memory
+measurement. The protocol
 package now owns distinct authenticated-store adapters for the 400-byte
 algebra-only cursor and the accepted cursor. The accepted adapter reads its
 404-byte, 4,509-boundary geometry from kernel exports and uses a separate
@@ -69,8 +74,8 @@ kernel preparation while releasing every distinct identity. The protocol
 custody-worker host installs the accepted adapter, copies its four checkpoint
 source digests from the prepared Rust authority, and evicts terminal state. Its
 current host test uses same-realm synthetic cursor bytes. Dedicated-worker
-destruction and recreation, bounded transport and terminal WHIR, and selected
-actual-byte cold restoration remain open. Compact generation is
+destruction and recreation, bounded transport, durable WHIR restoration, and
+selected actual-byte cold restoration remain open. Compact generation is
 not a worker-facing runtime capability, and no complete generation and
 verification ABI pair exists.
 

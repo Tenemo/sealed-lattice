@@ -441,9 +441,8 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_resume_algebraic_veri
     }
 }
 
-/// Advances one bounded CFW verifier slice. The final poll also checks both
-/// WHIR epochs and destroys the accepted byte owner without minting a
-/// capability.
+/// Advances one bounded CFW or WHIR-fold verifier slice. The terminal poll
+/// destroys the accepted byte owner without minting a capability.
 ///
 /// # Safety
 ///
@@ -509,9 +508,29 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
                     checkpoint_safe_boundary_ordinal,
                 ))
             }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
+                completed_work_unit_count,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
+                    completed_work_unit_count,
+                    NO_SECOND_POLL_VALUE,
+                ))
+            }
             Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                 completed_work_unit_count,
             }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
                 if registry
                     .compact_public_key_verifications
                     .insert(operation_handle, verification)

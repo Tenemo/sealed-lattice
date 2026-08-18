@@ -404,15 +404,40 @@ impl AcceptedCompactPublicKeyVerification {
                                 checkpoint_safe_boundary_ordinal,
                             });
                         }
+                        CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
+                            completed_work_unit_count,
+                        } => {
+                            if self.completed_cfw_work_unit_count
+                                != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
+                            {
+                                return Err(RefusalReason::InvalidProof);
+                            }
+                            let completed_work_unit_count =
+                                u32::try_from(completed_work_unit_count)
+                                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+                            if completed_work_unit_count == 0 {
+                                return Err(RefusalReason::InvalidProof);
+                            }
+                            self.stage = Some(
+                                AcceptedCompactPublicKeyVerificationStage::Algebraic(verification),
+                            );
+                            return Ok(AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
+                                completed_work_unit_count,
+                                checkpoint_safe_boundary_ordinal: None,
+                            });
+                        }
                         CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                             completed_work_unit_count,
                         } => {
-                            if completed_work_unit_count != 1
+                            if completed_work_unit_count == 0
                                 || self.completed_cfw_work_unit_count
                                     != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
                             {
                                 return Err(RefusalReason::InvalidProof);
                             }
+                            let completed_work_unit_count =
+                                u32::try_from(completed_work_unit_count)
+                                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
                             self.whir_verified = true;
                             self.stage = Some(
                                 AcceptedCompactPublicKeyVerificationStage::Algebraic(verification),

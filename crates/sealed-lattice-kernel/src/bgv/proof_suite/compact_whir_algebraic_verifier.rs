@@ -13,7 +13,8 @@ use super::compact_proof_contract::{
     CompactWhirEpochContract, CompactWhirFoldContract, CompactWhirMaskGroupContract,
 };
 use super::compact_whir_covector_fold::{
-    CompactWhirCovectorFoldError, fold_compact_whir_covector_in_place,
+    CompactWhirCovectorFoldError, CompactWhirInPlaceCovectorFold,
+    CompactWhirInPlaceCovectorFoldPoll,
 };
 
 const COMPACT_WHIR_BATCH_COUNT: usize = 4;
@@ -58,6 +59,28 @@ pub(crate) struct CompactWhirSumcheckTranscript<'transcript> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactWhirSumcheckVerification {
+    preparation: Option<CompactWhirSumcheckPreparation>,
+    source_fold: Option<CompactWhirInPlaceCovectorFold>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirSumcheckVerificationPoll {
+    WorkCompleted { completed_work_unit_count: u64 },
+    Complete { completed_work_unit_count: u64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CompactWhirSumcheckPreparation {
+    batch_ordinal: usize,
+    combination_challenge: CompactChallengeField,
+    expected_output_length: usize,
+    folding_factor: usize,
+    residual_target: CompactChallengeField,
+    round_challenges: Vec<CompactChallengeField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactWhirCodeSwitchTranscript<'transcript> {
     pub(crate) combination_challenge: CompactChallengeField,
     pub(crate) query_positions: &'transcript [u64],
@@ -68,6 +91,51 @@ pub(crate) struct CompactWhirCodeSwitchTranscript<'transcript> {
 pub(crate) struct CompactWhirBlindedMaskReveal {
     pub(crate) messages: Vec<Vec<CompactChallengeField>>,
     pub(crate) randomness: Vec<Vec<CompactChallengeField>>,
+}
+
+impl CompactWhirSumcheckVerification {
+    pub(crate) fn advance(
+        &mut self,
+        relation: &mut CompactWhirAlgebraicRelation,
+        epoch: &CompactWhirEpochContract,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactWhirSumcheckVerificationPoll, CompactWhirAlgebraicVerifierError> {
+        if maximum_work_unit_count == 0 {
+            return Err(CompactWhirAlgebraicVerifierError::InvalidRelation);
+        }
+        let completed_work_unit_count = if let Some(source_fold) = &mut self.source_fold {
+            match source_fold
+                .advance(maximum_work_unit_count)
+                .map_err(compact_whir_covector_fold_error)?
+            {
+                CompactWhirInPlaceCovectorFoldPoll::WorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    return Ok(CompactWhirSumcheckVerificationPoll::WorkCompleted {
+                        completed_work_unit_count,
+                    });
+                }
+                CompactWhirInPlaceCovectorFoldPoll::Complete {
+                    completed_work_unit_count,
+                    values,
+                } => {
+                    relation.source_covector = values;
+                    completed_work_unit_count
+                }
+            }
+        } else {
+            0
+        };
+        self.source_fold = None;
+        let preparation = self
+            .preparation
+            .take()
+            .ok_or(CompactWhirAlgebraicVerifierError::InvalidRelation)?;
+        relation.finish_sumcheck_batch(epoch, preparation)?;
+        Ok(CompactWhirSumcheckVerificationPoll::Complete {
+            completed_work_unit_count,
+        })
+    }
 }
 
 impl CompactWhirAlgebraicRelation {
@@ -124,14 +192,14 @@ impl CompactWhirAlgebraicRelation {
         Ok(relation)
     }
 
-    pub(crate) fn verify_sumcheck_batch(
+    pub(crate) fn begin_sumcheck_batch(
         &mut self,
         epoch: &CompactWhirEpochContract,
         fold: CompactWhirFoldContract,
         batch_ordinal: usize,
         source_was_already_folded: bool,
         transcript: CompactWhirSumcheckTranscript<'_>,
-    ) -> Result<(), CompactWhirAlgebraicVerifierError> {
+    ) -> Result<CompactWhirSumcheckVerification, CompactWhirAlgebraicVerifierError> {
         if batch_ordinal >= COMPACT_WHIR_BATCH_COUNT
             || usize::from(fold.epoch) != usize::from(epoch.epoch)
             || usize::from(fold.batch_ordinal) != batch_ordinal
@@ -176,41 +244,64 @@ impl CompactWhirAlgebraicRelation {
             residual_target = constant + *challenge * linear + *challenge * *challenge * leading;
         }
 
-        if !source_was_already_folded {
-            self.source_covector = fold_compact_whir_covector_in_place(
-                core::mem::take(&mut self.source_covector),
-                folding_factor,
-                transcript.round_challenges,
+        let source_fold = if source_was_already_folded {
+            None
+        } else {
+            Some(
+                CompactWhirInPlaceCovectorFold::new(
+                    core::mem::take(&mut self.source_covector),
+                    folding_factor,
+                    transcript.round_challenges,
+                )
+                .map_err(compact_whir_covector_fold_error)?,
             )
-            .map_err(compact_whir_covector_fold_error)?;
-        }
-        if self.source_covector.len() != expected_output_length {
+        };
+        Ok(CompactWhirSumcheckVerification {
+            preparation: Some(CompactWhirSumcheckPreparation {
+                batch_ordinal,
+                combination_challenge: transcript.combination_challenge,
+                expected_output_length,
+                folding_factor,
+                residual_target,
+                round_challenges: transcript.round_challenges.to_vec(),
+            }),
+            source_fold,
+        })
+    }
+
+    fn finish_sumcheck_batch(
+        &mut self,
+        epoch: &CompactWhirEpochContract,
+        preparation: CompactWhirSumcheckPreparation,
+    ) -> Result<(), CompactWhirAlgebraicVerifierError> {
+        if self.source_covector.len() != preparation.expected_output_length {
             return Err(CompactWhirAlgebraicVerifierError::InvalidRelation);
         }
-        scale_in_place(&mut self.source_covector, transcript.combination_challenge);
+        scale_in_place(&mut self.source_covector, preparation.combination_challenge);
         let carried_mask_scale =
-            transcript.combination_challenge * power_of_two(folding_factor).inverse();
+            preparation.combination_challenge * power_of_two(preparation.folding_factor).inverse();
         for covector in &mut self.mask_group_covectors {
             scale_in_place(covector, carried_mask_scale);
         }
         let mut sumcheck_mask_covectors = Vec::new();
         sumcheck_mask_covectors
             .try_reserve_exact(
-                folding_factor
+                preparation
+                    .folding_factor
                     .checked_mul(COMPACT_WHIR_SUMCHECK_MESSAGE_LENGTH)
                     .ok_or(CompactWhirAlgebraicVerifierError::ArithmeticOverflow)?,
             )
             .map_err(|_| CompactWhirAlgebraicVerifierError::ArithmeticOverflow)?;
-        for challenge in transcript.round_challenges {
+        for challenge in preparation.round_challenges {
             sumcheck_mask_covectors.extend([
                 CompactChallengeField::ONE,
-                *challenge,
-                *challenge * *challenge,
+                challenge,
+                challenge * challenge,
             ]);
         }
         self.mask_group_covectors.push(sumcheck_mask_covectors);
-        self.target = residual_target;
-        self.validate_internal_prefix(epoch, batch_ordinal, false)
+        self.target = preparation.residual_target;
+        self.validate_internal_prefix(epoch, preparation.batch_ordinal, false)
     }
 
     pub(crate) fn verify_code_switch(

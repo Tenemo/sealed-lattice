@@ -3206,6 +3206,7 @@ mod tests {
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
                     CompactPublicKeyAlgebraicVerification,
                     CompactPublicKeyAlgebraicVerificationPoll,
+                    compact_public_key_whir_fold_work_unit_count,
                 },
                 compact_public_key_statement_correspondence::CompactPublicKeyStatementCorrespondenceVerificationPoll,
                 compact_public_key_verifier::{
@@ -3373,10 +3374,16 @@ mod tests {
                 CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
                     panic!("a fresh compact algebraic verification cannot complete replay")
                 }
+                CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert!((1..=65_536).contains(&completed_work_unit_count));
+                    algebraic_poll_count += 1;
+                }
                 CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                     completed_work_unit_count,
                 } => {
-                    assert_eq!(completed_work_unit_count, 1);
+                    assert!((1..=65_536).contains(&completed_work_unit_count));
                     algebraic_poll_count += 1;
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => break *terminal,
@@ -7689,6 +7696,9 @@ mod tests {
             canonical_public_input_bytes.clone().into_boxed_slice(),
         )
         .expect("the checkpoint source passes independent compact transport verification");
+        let expected_whir_work_unit_count =
+            compact_public_key_whir_fold_work_unit_count(initial_transport.verifier_inputs())
+                .expect("the selected WHIR fold work derives from the verified contract");
         let mut initial_verification =
             CompactPublicKeyAlgebraicVerification::begin(initial_transport)
                 .expect("the compact algebraic verifier accepts the checkpoint source");
@@ -7705,6 +7715,9 @@ mod tests {
             }
             CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
                 panic!("a fresh verifier cannot complete checkpoint replay")
+            }
+            CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted { .. } => {
+                panic!("one bounded slice cannot reach terminal WHIR work")
             }
             CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted { .. } => {
                 panic!("one bounded slice cannot reach terminal WHIR verification")
@@ -7737,6 +7750,7 @@ mod tests {
         let mut resume_complete_count = 0_u64;
         let mut terminal_cfw_segment_poll_count = 0_u64;
         let mut whir_verification_poll_count = 0_u64;
+        let mut completed_whir_work_unit_count = 0_u64;
         let algebraically_verified_proof = loop {
             match resumed_verification
                 .advance(65_536)
@@ -7781,10 +7795,22 @@ mod tests {
                         canonical_verification_checkpoint,
                     );
                 }
+                CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert!((1..=65_536).contains(&completed_work_unit_count));
+                    completed_whir_work_unit_count = completed_whir_work_unit_count
+                        .checked_add(completed_work_unit_count)
+                        .expect("the selected WHIR work count fits u64");
+                    whir_verification_poll_count += 1;
+                }
                 CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                     completed_work_unit_count,
                 } => {
-                    assert_eq!(completed_work_unit_count, 1);
+                    assert!((1..=65_536).contains(&completed_work_unit_count));
+                    completed_whir_work_unit_count = completed_whir_work_unit_count
+                        .checked_add(completed_work_unit_count)
+                        .expect("the selected WHIR work count fits u64");
                     whir_verification_poll_count += 1;
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => {
@@ -7794,7 +7820,11 @@ mod tests {
         };
         assert_eq!(resume_complete_count, 1);
         assert_eq!(terminal_cfw_segment_poll_count, 1);
-        assert_eq!(whir_verification_poll_count, 1);
+        assert!(whir_verification_poll_count > 1);
+        assert_eq!(
+            completed_whir_work_unit_count,
+            expected_whir_work_unit_count,
+        );
         assert_eq!(
             observed_safe_boundary_count,
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
@@ -7925,13 +7955,14 @@ mod tests {
         assert!(correspondence.verifier_sequence_column_count() > 0);
         assert_eq!(correspondence.statement_tree_count(), 4);
         println!(
-            "checkpointed compact public-key algebraic and statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} whir_verification_poll_count={} completed_work_unit_count={} correspondence_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
+            "checkpointed compact public-key algebraic and statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} whir_verification_poll_count={} completed_work_unit_count={} whir_work_unit_count={} correspondence_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
             verification_started_at.elapsed().as_millis(),
             algebraic_poll_count,
             observed_safe_boundary_count,
             terminal_cfw_segment_poll_count,
             whir_verification_poll_count,
             completed_work_unit_count,
+            completed_whir_work_unit_count,
             correspondence_work_unit_count,
             resume_complete_count,
             canonical_proof_bytes.len(),

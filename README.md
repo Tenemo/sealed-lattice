@@ -85,12 +85,15 @@ and target release remain incomplete or internal.
   algebraic verifier then independently derives the structured public CFW
   contribution and verifies the CFW transcript, both WHIR epochs, all six code
   switches, both terminal blinded relations, and the authenticated source and
-  mask spot checks. All five CFW polynomial transforms are incremental, and the
-  verifier coalesces caller poll slices to kernel-owned boundaries spaced by
-  65,536 work units. The selected CFW phase contains exactly 19,038,593 work
-  units: 290 cursor boundaries cover 19,005,440 units and leave one 33,153-unit
-  terminal CFW segment before the still-synchronous WHIR terminal work. Each
-  boundary exposes a canonical 400-byte safe cursor that binds the four
+  mask spot checks. All five CFW polynomial transforms and the seven WHIR folds
+  remaining after the CFW handoff are incremental. The verifier coalesces CFW
+  caller slices to kernel-owned boundaries spaced by 65,536 work units. The
+  selected CFW phase contains exactly 19,038,593 work units: 290 cursor
+  boundaries cover 19,005,440 units and leave one 33,153-unit terminal CFW
+  segment. Contract geometry independently derives 2,129,904 remaining WHIR
+  fold work units, and the current transported candidate completes them in 33
+  polls of at most 65,536 units. Each CFW boundary exposes a canonical 400-byte
+  safe cursor that binds the four
   public-input coordinates, complete proof and public-input digests, and
   cumulative completed work. It contains no opaque transform state:
   restoration revalidates the transported bytes and deterministically replays
@@ -121,9 +124,10 @@ and target release remain incomplete or internal.
   The TypeScript closed-worker driver returns `isValid: true` only after that
   one-shot commit and retires its prepared, running, or positive kernel
   authority on every refusal and cancellation path. A guarded selected-size
-  native run observed one post-WHIR poll and exactly 4,218 source work units
-  while reproducing all four roots and accepting the same 23,815,474 proof
-  bytes. A concrete protocol adapter now publishes and cold-restores the
+  native run observed 33 bounded WHIR fold polls totaling 2,129,904 work units
+  and exactly 4,218 source work units while reproducing all four roots and
+  accepting the same 23,815,474 proof bytes. A concrete protocol adapter now
+  publishes and cold-restores the
   404-byte cursor across all 4,509 accepted-verifier ordinals under a state-stream
   domain distinct from the 400-byte algebra-only cursor. It reads its byte length
   and boundary count from the loaded scalar WASM kernel and takes its operation
@@ -139,18 +143,22 @@ and target release remain incomplete or internal.
   evicts the terminal checkpoint. Current host coverage is same-realm; it does
   not destroy and recreate a dedicated browser `Worker` or restore selected
   actual proof bytes.
-  Terminal WHIR still drains one bounded in-place primitive synchronously
-  before its post-WHIR boundary. At selected pre-challenge geometry, both the
-  algebraic verifier and verifier-derived public-covector replay now fold the
-  `2^21` 40-byte source elements inside the original allocation and truncate it
-  without allocating a clone or separate output. Equivalence tests cover
+  The algebraic verifier now surfaces deterministic outer polls for all seven
+  WHIR folds remaining after the CFW handoff. At selected pre-challenge
+  geometry, both it and verifier-derived public-covector replay fold the `2^21`
+  40-byte source elements inside the original allocation and truncate it
+  without allocating a clone or separate output. The public-covector replay
+  still drains the shared primitive synchronously. Equivalence tests cover
   irregular poll budgets, every compact folding factor, nontrivial column
-  lengths, invalid geometry, zero budgets, and terminal reuse. This removes the
-  prior three-buffer source overlap, but it is ownership evidence rather than a
-  browser memory measurement. Outer polling and durable WHIR boundaries,
-  bounded transport, selected actual-byte cold restoration, the full
-  equation-invalid hostile corpus, and the complete durable lifecycle remain
-  open.
+  lengths, invalid geometry, zero budgets, and terminal reuse. The six code
+  switches and two base cases execute between fold polls and are not separately
+  work-metered. The accepted cursor still publishes only one durable boundary
+  after both WHIR epochs, so the 33 fold polls are yield and cancellation
+  surfaces rather than cold-restore points. This removes the prior three-buffer
+  source overlap, but it is ownership evidence rather than a browser memory
+  measurement. Durable WHIR boundaries, bounded transport, selected
+  actual-byte cold restoration, the full equation-invalid hostile corpus, and
+  the complete durable lifecycle remain open.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -224,11 +232,13 @@ ceremony or supported-phone qualification.
   now carry one public-key-share verification through positive capability
   commit, while its internal closed-worker driver publishes source-bound safe
   cursors through a custody contract and preserves typed refusals. Its durable
-  schedule covers CFW, one point after terminal WHIR, all public-column
+  schedule covers CFW, one point after both WHIR epochs, all public-column
   reconstruction, and each statement-root coset after synchronous transport
-  revalidation. Terminal WHIR itself remains synchronous, although its
-  production covector owners now reuse the input allocation rather than
-  retaining clone and output buffers. The concrete
+  revalidation. The seven remaining WHIR folds are externally pollable, but
+  their intermediate states are not durable cursor boundaries and their
+  transition checks are not separately work-metered. The production covector
+  owners reuse the input allocation rather than retaining clone and output
+  buffers. The concrete
   protocol checkpoint-store adapters now separate the 400-byte, 290-boundary
   algebraic cursor from the kernel-derived 404-byte, 4,509-boundary accepted
   cursor. The worker refuses split custody before kernel preparation and retires
@@ -246,7 +256,7 @@ ceremony or supported-phone qualification.
 - Browser custody installs the single-identity accepted-cursor adapter in the
   production worker-host implementation, but has only same-realm synthetic
   resume coverage. It does not yet supply dedicated-worker destruction and
-  recreation, bounded transport and terminal WHIR, selected actual-byte
+  recreation, bounded transport, durable WHIR restoration, selected actual-byte
   cold-resume evidence for every compact-proof boundary, or reconciled
   browser-origin storage reclamation.
 - The accepted setup-to-release capability flow is not connected end to end.

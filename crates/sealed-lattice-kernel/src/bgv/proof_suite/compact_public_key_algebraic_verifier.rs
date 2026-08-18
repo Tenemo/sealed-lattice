@@ -30,6 +30,7 @@ use super::compact_whir::{CompactWhirError, fold_compact_whir_query_major_source
 use super::compact_whir_algebraic_verifier::{
     CompactWhirAlgebraicRelation, CompactWhirAlgebraicVerifierError, CompactWhirBlindedMaskReveal,
     CompactWhirCodeSwitchTranscript, CompactWhirSourceSpotCheck, CompactWhirSumcheckTranscript,
+    CompactWhirSumcheckVerification, CompactWhirSumcheckVerificationPoll,
     verify_compact_whir_mask_spot_checks, verify_compact_whir_source_spot_checks,
 };
 use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
@@ -532,6 +533,523 @@ impl CompactPublicKeyCfwVerification {
     }
 }
 
+struct CompactPublicKeyWhirVerification {
+    completed_work_unit_count: u64,
+    expected_work_unit_count: u64,
+    phase: Option<CompactPublicKeyWhirVerificationPhase>,
+}
+
+enum CompactPublicKeyWhirVerificationPhase {
+    PreChallenge {
+        verification: CompactPublicKeyWhirEpochVerification,
+        main_relation_target: CompactChallengeField,
+        main_public_covectors: CompactCfwPublicMainCovectors,
+        first_main_fold_challenges: Vec<CompactChallengeField>,
+    },
+    Main(CompactPublicKeyWhirEpochVerification),
+}
+
+struct CompactPublicKeyWhirEpochVerification {
+    active_folding_challenges: Vec<CompactChallengeField>,
+    already_applied_first_fold_challenges: Option<Vec<CompactChallengeField>>,
+    batch_index: usize,
+    epoch_tag: u8,
+    final_folding_challenges: Vec<CompactChallengeField>,
+    relation: CompactWhirAlgebraicRelation,
+    stage: Option<CompactPublicKeyWhirEpochVerificationStage>,
+}
+
+enum CompactPublicKeyWhirEpochVerificationStage {
+    BeginBatch,
+    Sumcheck(Box<CompactWhirSumcheckVerification>),
+    FinishBatch,
+    BaseCase,
+}
+
+enum CompactPublicKeyWhirVerificationPoll {
+    WorkCompleted { completed_work_unit_count: u64 },
+    Complete { completed_work_unit_count: u64 },
+}
+
+impl CompactPublicKeyWhirVerification {
+    fn begin(
+        transport: &VerifiedCompactPublicKeyTransport,
+        handoff: AlgebraicallyVerifiedCompactCfwHandoff,
+    ) -> Result<Self, CompactPublicKeyAlgebraicVerificationError> {
+        let inputs = transport.verifier_inputs();
+        let pre_challenge_epoch =
+            required_whir_epoch(inputs.whir_epochs, PRE_CHALLENGE_WHIR_EPOCH)?;
+        let (
+            main_relation_target,
+            main_public_covectors,
+            first_main_fold_challenges,
+            cross_epoch_point,
+            masked_pre_challenge_target,
+        ) = handoff.into_parts();
+        let pre_challenge_relation = CompactWhirAlgebraicRelation::pre_challenge(
+            pre_challenge_epoch,
+            &cross_epoch_point,
+            masked_pre_challenge_target,
+        )
+        .map_err(|error| {
+            compact_whir_verification_error(
+                PRE_CHALLENGE_WHIR_EPOCH,
+                CompactPublicKeyWhirVerificationStage::InitialRelation,
+                error,
+            )
+        })?;
+        Ok(Self {
+            completed_work_unit_count: 0,
+            expected_work_unit_count: compact_public_key_whir_fold_work_unit_count(inputs)?,
+            phase: Some(CompactPublicKeyWhirVerificationPhase::PreChallenge {
+                verification: CompactPublicKeyWhirEpochVerification::new(
+                    PRE_CHALLENGE_WHIR_EPOCH,
+                    pre_challenge_relation,
+                    None,
+                ),
+                main_relation_target,
+                main_public_covectors,
+                first_main_fold_challenges,
+            }),
+        })
+    }
+
+    fn advance(
+        &mut self,
+        transport: &VerifiedCompactPublicKeyTransport,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactPublicKeyWhirVerificationPoll, CompactPublicKeyAlgebraicVerificationError>
+    {
+        if maximum_work_unit_count == 0 {
+            return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+        }
+        let mut total_completed_work_unit_count = 0_u64;
+        loop {
+            let remaining_work_unit_count = maximum_work_unit_count
+                .checked_sub(total_completed_work_unit_count)
+                .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+            if remaining_work_unit_count == 0 {
+                return Ok(CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                    completed_work_unit_count: total_completed_work_unit_count,
+                });
+            }
+            let phase = self
+                .phase
+                .take()
+                .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?;
+            match phase {
+                CompactPublicKeyWhirVerificationPhase::PreChallenge {
+                    mut verification,
+                    main_relation_target,
+                    main_public_covectors,
+                    first_main_fold_challenges,
+                } => match verification.advance(transport, remaining_work_unit_count)? {
+                    CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                        completed_work_unit_count,
+                    } => {
+                        validate_whir_poll_work_count(
+                            completed_work_unit_count,
+                            remaining_work_unit_count,
+                        )?;
+                        self.completed_work_unit_count = self
+                            .completed_work_unit_count
+                            .checked_add(completed_work_unit_count)
+                            .ok_or(
+                                CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                            )?;
+                        self.phase = Some(CompactPublicKeyWhirVerificationPhase::PreChallenge {
+                            verification,
+                            main_relation_target,
+                            main_public_covectors,
+                            first_main_fold_challenges,
+                        });
+                        return Ok(CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                            completed_work_unit_count: total_completed_work_unit_count
+                                .checked_add(completed_work_unit_count)
+                                .ok_or(
+                                    CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                                )?,
+                        });
+                    }
+                    CompactPublicKeyWhirVerificationPoll::Complete {
+                        completed_work_unit_count,
+                    } => {
+                        if completed_work_unit_count > remaining_work_unit_count {
+                            return Err(
+                                CompactPublicKeyAlgebraicVerificationError::InvalidTranscript,
+                            );
+                        }
+                        total_completed_work_unit_count = total_completed_work_unit_count
+                            .checked_add(completed_work_unit_count)
+                            .ok_or(
+                                CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                            )?;
+                        self.completed_work_unit_count = self
+                            .completed_work_unit_count
+                            .checked_add(completed_work_unit_count)
+                            .ok_or(
+                                CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                            )?;
+                        let main_epoch = required_whir_epoch(
+                            transport.verifier_inputs().whir_epochs,
+                            MAIN_WHIR_EPOCH,
+                        )?;
+                        let main_relation = CompactWhirAlgebraicRelation::main(
+                            main_epoch,
+                            main_public_covectors,
+                            main_relation_target,
+                        )
+                        .map_err(|error| {
+                            compact_whir_verification_error(
+                                MAIN_WHIR_EPOCH,
+                                CompactPublicKeyWhirVerificationStage::InitialRelation,
+                                error,
+                            )
+                        })?;
+                        self.phase = Some(CompactPublicKeyWhirVerificationPhase::Main(
+                            CompactPublicKeyWhirEpochVerification::new(
+                                MAIN_WHIR_EPOCH,
+                                main_relation,
+                                Some(first_main_fold_challenges),
+                            ),
+                        ));
+                    }
+                },
+                CompactPublicKeyWhirVerificationPhase::Main(mut verification) => {
+                    match verification.advance(transport, remaining_work_unit_count)? {
+                        CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                            completed_work_unit_count,
+                        } => {
+                            validate_whir_poll_work_count(
+                                completed_work_unit_count,
+                                remaining_work_unit_count,
+                            )?;
+                            self.completed_work_unit_count = self
+                                .completed_work_unit_count
+                                .checked_add(completed_work_unit_count)
+                                .ok_or(
+                                    CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                                )?;
+                            self.phase =
+                                Some(CompactPublicKeyWhirVerificationPhase::Main(verification));
+                            return Ok(CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                                completed_work_unit_count: total_completed_work_unit_count
+                                    .checked_add(completed_work_unit_count)
+                                    .ok_or(
+                                        CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                                    )?,
+                            });
+                        }
+                        CompactPublicKeyWhirVerificationPoll::Complete {
+                            completed_work_unit_count,
+                        } => {
+                            if completed_work_unit_count > remaining_work_unit_count {
+                                return Err(
+                                    CompactPublicKeyAlgebraicVerificationError::InvalidTranscript,
+                                );
+                            }
+                            self.completed_work_unit_count = self
+                                .completed_work_unit_count
+                                .checked_add(completed_work_unit_count)
+                                .ok_or(
+                                    CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                                )?;
+                            if self.completed_work_unit_count != self.expected_work_unit_count {
+                                return Err(
+                                    CompactPublicKeyAlgebraicVerificationError::InvalidTranscript,
+                                );
+                            }
+                            return Ok(CompactPublicKeyWhirVerificationPoll::Complete {
+                                completed_work_unit_count: total_completed_work_unit_count
+                                    .checked_add(completed_work_unit_count)
+                                    .ok_or(
+                                        CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                                    )?,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl CompactPublicKeyWhirEpochVerification {
+    fn new(
+        epoch_tag: u8,
+        relation: CompactWhirAlgebraicRelation,
+        already_applied_first_fold_challenges: Option<Vec<CompactChallengeField>>,
+    ) -> Self {
+        Self {
+            active_folding_challenges: Vec::new(),
+            already_applied_first_fold_challenges,
+            batch_index: 0,
+            epoch_tag,
+            final_folding_challenges: Vec::new(),
+            relation,
+            stage: Some(CompactPublicKeyWhirEpochVerificationStage::BeginBatch),
+        }
+    }
+
+    fn advance(
+        &mut self,
+        transport: &VerifiedCompactPublicKeyTransport,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactPublicKeyWhirVerificationPoll, CompactPublicKeyAlgebraicVerificationError>
+    {
+        if maximum_work_unit_count == 0 {
+            return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+        }
+        let inputs = transport.verifier_inputs();
+        let epoch = required_whir_epoch(inputs.whir_epochs, self.epoch_tag)?;
+        let folds = required_whir_folds(inputs.whir_folds, self.epoch_tag)?;
+        let mut total_completed_work_unit_count = 0_u64;
+        loop {
+            let stage = self
+                .stage
+                .take()
+                .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?;
+            match stage {
+                CompactPublicKeyWhirEpochVerificationStage::BeginBatch => {
+                    if self.batch_index >= COMPACT_WHIR_BATCH_COUNT {
+                        return Err(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript);
+                    }
+                    let batch_ordinal = u8::try_from(self.batch_index).map_err(|_| {
+                        CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow
+                    })?;
+                    let auxiliary_target = required_complete_response_role(
+                        transport,
+                        12,
+                        epoch.epoch,
+                        batch_ordinal,
+                        0,
+                        1,
+                    )?[0];
+                    let combination_challenge = compact_challenge_from_production(
+                        required_verifier_extension_role(
+                            transport,
+                            7,
+                            epoch.epoch,
+                            batch_ordinal,
+                            0,
+                            1,
+                        )?[0],
+                    );
+                    let folding_factor = usize::try_from(epoch.folding_schedule[self.batch_index])
+                        .map_err(|_| {
+                            CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow
+                        })?;
+                    let mut round_wires = Vec::new();
+                    let mut round_challenges = Vec::new();
+                    round_wires.try_reserve_exact(folding_factor).map_err(|_| {
+                        CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow
+                    })?;
+                    round_challenges
+                        .try_reserve_exact(folding_factor)
+                        .map_err(|_| {
+                            CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow
+                        })?;
+                    for round_index in 0..folding_factor {
+                        let round_ordinal = u32::try_from(round_index).map_err(|_| {
+                            CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow
+                        })?;
+                        round_wires.push(
+                            required_complete_response_role(
+                                transport,
+                                13,
+                                epoch.epoch,
+                                batch_ordinal,
+                                round_ordinal,
+                                2,
+                            )?
+                            .try_into()
+                            .map_err(|_| {
+                                CompactPublicKeyAlgebraicVerificationError::InvalidTranscript
+                            })?,
+                        );
+                        round_challenges.push(compact_challenge_from_production(
+                            required_verifier_extension_role(
+                                transport,
+                                8,
+                                epoch.epoch,
+                                batch_ordinal,
+                                round_ordinal,
+                                1,
+                            )?[0],
+                        ));
+                    }
+                    let source_was_already_folded = self.batch_index == 0
+                        && self.already_applied_first_fold_challenges.is_some();
+                    if source_was_already_folded
+                        && self
+                            .already_applied_first_fold_challenges
+                            .as_deref()
+                            .is_none_or(|expected| expected != round_challenges)
+                    {
+                        return Err(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript);
+                    }
+                    self.active_folding_challenges = round_challenges;
+                    let verification = self
+                        .relation
+                        .begin_sumcheck_batch(
+                            epoch,
+                            folds[self.batch_index],
+                            self.batch_index,
+                            source_was_already_folded,
+                            CompactWhirSumcheckTranscript {
+                                auxiliary_target,
+                                combination_challenge,
+                                round_wires: &round_wires,
+                                round_challenges: &self.active_folding_challenges,
+                            },
+                        )
+                        .map_err(|error| {
+                            compact_whir_verification_error(
+                                epoch.epoch,
+                                CompactPublicKeyWhirVerificationStage::Sumcheck { batch_ordinal },
+                                error,
+                            )
+                        })?;
+                    self.stage = Some(CompactPublicKeyWhirEpochVerificationStage::Sumcheck(
+                        Box::new(verification),
+                    ));
+                }
+                CompactPublicKeyWhirEpochVerificationStage::Sumcheck(mut verification) => {
+                    let batch_ordinal = u8::try_from(self.batch_index).map_err(|_| {
+                        CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow
+                    })?;
+                    let remaining_work_unit_count = maximum_work_unit_count
+                        .checked_sub(total_completed_work_unit_count)
+                        .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+                    if remaining_work_unit_count == 0 {
+                        self.stage = Some(CompactPublicKeyWhirEpochVerificationStage::Sumcheck(
+                            verification,
+                        ));
+                        return Ok(CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                            completed_work_unit_count: total_completed_work_unit_count,
+                        });
+                    }
+                    match verification
+                        .advance(&mut self.relation, epoch, remaining_work_unit_count)
+                        .map_err(|error| {
+                            compact_whir_verification_error(
+                                epoch.epoch,
+                                CompactPublicKeyWhirVerificationStage::Sumcheck { batch_ordinal },
+                                error,
+                            )
+                        })? {
+                        CompactWhirSumcheckVerificationPoll::WorkCompleted {
+                            completed_work_unit_count,
+                        } => {
+                            validate_whir_poll_work_count(
+                                completed_work_unit_count,
+                                remaining_work_unit_count,
+                            )?;
+                            self.stage = Some(
+                                CompactPublicKeyWhirEpochVerificationStage::Sumcheck(verification),
+                            );
+                            return Ok(CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                                completed_work_unit_count: total_completed_work_unit_count
+                                    .checked_add(completed_work_unit_count)
+                                    .ok_or(
+                                        CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                                    )?,
+                            });
+                        }
+                        CompactWhirSumcheckVerificationPoll::Complete {
+                            completed_work_unit_count,
+                        } => {
+                            if completed_work_unit_count > remaining_work_unit_count {
+                                return Err(
+                                    CompactPublicKeyAlgebraicVerificationError::InvalidTranscript,
+                                );
+                            }
+                            total_completed_work_unit_count = total_completed_work_unit_count
+                                .checked_add(completed_work_unit_count)
+                                .ok_or(
+                                    CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow,
+                                )?;
+                            self.stage =
+                                Some(CompactPublicKeyWhirEpochVerificationStage::FinishBatch);
+                        }
+                    }
+                }
+                CompactPublicKeyWhirEpochVerificationStage::FinishBatch => {
+                    if self.batch_index == COMPACT_WHIR_BATCH_COUNT - 1 {
+                        self.final_folding_challenges =
+                            core::mem::take(&mut self.active_folding_challenges);
+                        self.batch_index += 1;
+                        self.stage = Some(CompactPublicKeyWhirEpochVerificationStage::BaseCase);
+                    } else {
+                        verify_compact_whir_code_switch(
+                            transport,
+                            epoch,
+                            folds[self.batch_index],
+                            folds[self.batch_index + 1],
+                            self.batch_index,
+                            &self.active_folding_challenges,
+                            &mut self.relation,
+                        )?;
+                        self.active_folding_challenges.clear();
+                        self.batch_index += 1;
+                        self.stage = Some(CompactPublicKeyWhirEpochVerificationStage::BeginBatch);
+                    }
+                }
+                CompactPublicKeyWhirEpochVerificationStage::BaseCase => {
+                    verify_compact_whir_base_case(
+                        transport,
+                        epoch,
+                        folds[COMPACT_WHIR_BATCH_COUNT - 1],
+                        &self.final_folding_challenges,
+                        &self.relation,
+                    )?;
+                    return Ok(CompactPublicKeyWhirVerificationPoll::Complete {
+                        completed_work_unit_count: total_completed_work_unit_count,
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn validate_whir_poll_work_count(
+    completed_work_unit_count: u64,
+    maximum_work_unit_count: u64,
+) -> Result<(), CompactPublicKeyAlgebraicVerificationError> {
+    if completed_work_unit_count == 0 || completed_work_unit_count > maximum_work_unit_count {
+        return Err(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript);
+    }
+    Ok(())
+}
+
+pub(crate) fn compact_public_key_whir_fold_work_unit_count(
+    inputs: super::compact_proof_contract::CompactPublicKeyVerifierInputs<'_>,
+) -> Result<u64, CompactPublicKeyAlgebraicVerificationError> {
+    let mut total_work_unit_count = 0_u64;
+    for epoch_tag in [PRE_CHALLENGE_WHIR_EPOCH, MAIN_WHIR_EPOCH] {
+        let epoch = required_whir_epoch(inputs.whir_epochs, epoch_tag)?;
+        let folds = required_whir_folds(inputs.whir_folds, epoch_tag)?;
+        for (batch_index, fold) in folds.into_iter().enumerate() {
+            if epoch_tag == MAIN_WHIR_EPOCH && batch_index == 0 {
+                continue;
+            }
+            let folding_factor = epoch.folding_schedule[batch_index];
+            let folded_column_multiplier = 1_u64
+                .checked_shl(folding_factor)
+                .and_then(|width| width.checked_sub(1))
+                .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+            total_work_unit_count = total_work_unit_count
+                .checked_add(
+                    fold.message_length
+                        .checked_mul(folded_column_multiplier)
+                        .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?,
+                )
+                .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+        }
+    }
+    Ok(total_work_unit_count)
+}
+
 /// Pollable positive verifier for one selected compact public-key proof. The
 /// transport terminal remains owned here until CFW and both WHIR epochs have
 /// passed their independent equations.
@@ -540,6 +1058,7 @@ pub(crate) struct CompactPublicKeyAlgebraicVerification {
     cfw_verification: CompactPublicKeyCfwVerification,
     completed_work_unit_count: u64,
     replay_target_work_unit_count: Option<u64>,
+    whir_verification: Option<CompactPublicKeyWhirVerification>,
     whir_verified: bool,
 }
 
@@ -552,8 +1071,11 @@ pub(crate) enum CompactPublicKeyAlgebraicVerificationPoll {
         completed_work_unit_count: u64,
         checkpoint_safe_boundary_ordinal: u32,
     },
+    WhirWorkCompleted {
+        completed_work_unit_count: u64,
+    },
     WhirCompleted {
-        completed_work_unit_count: u32,
+        completed_work_unit_count: u64,
     },
     Complete(Box<AlgebraicallyVerifiedCompactPublicKeyProof>),
 }
@@ -586,6 +1108,7 @@ impl CompactPublicKeyAlgebraicVerification {
             cfw_verification,
             completed_work_unit_count: 0,
             replay_target_work_unit_count: None,
+            whir_verification: None,
             whir_verified: false,
         })
     }
@@ -665,6 +1188,9 @@ impl CompactPublicKeyAlgebraicVerification {
                 }),
             ));
         }
+        if self.whir_verification.is_some() {
+            return self.advance_whir(maximum_work_unit_count);
+        }
         let replay_work_unit_count = self
             .replay_target_work_unit_count
             .map(|target_work_unit_count| {
@@ -740,10 +1266,48 @@ impl CompactPublicKeyAlgebraicVerification {
                     .transport
                     .as_ref()
                     .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?;
-                verify_compact_whir_epochs(transport, *handoff)?;
+                self.whir_verification = Some(CompactPublicKeyWhirVerification::begin(
+                    transport, *handoff,
+                )?);
+                self.advance_whir(maximum_work_unit_count)
+            }
+        }
+    }
+
+    fn advance_whir(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactPublicKeyAlgebraicVerificationPoll, CompactPublicKeyAlgebraicVerificationError>
+    {
+        let poll = self
+            .whir_verification
+            .as_mut()
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?
+            .advance(
+                self.transport
+                    .as_ref()
+                    .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?,
+                maximum_work_unit_count,
+            )?;
+        match poll {
+            CompactPublicKeyWhirVerificationPoll::WorkCompleted {
+                completed_work_unit_count,
+            } => {
+                validate_whir_poll_work_count(completed_work_unit_count, maximum_work_unit_count)?;
+                Ok(
+                    CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
+                        completed_work_unit_count,
+                    },
+                )
+            }
+            CompactPublicKeyWhirVerificationPoll::Complete {
+                completed_work_unit_count,
+            } => {
+                validate_whir_poll_work_count(completed_work_unit_count, maximum_work_unit_count)?;
+                self.whir_verification = None;
                 self.whir_verified = true;
                 Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
-                    completed_work_unit_count: 1,
+                    completed_work_unit_count,
                 })
             }
         }
@@ -772,162 +1336,6 @@ pub(crate) fn compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
             - 1,
     )
     .ok()
-}
-
-fn verify_compact_whir_epochs(
-    transport: &VerifiedCompactPublicKeyTransport,
-    handoff: AlgebraicallyVerifiedCompactCfwHandoff,
-) -> Result<(), CompactPublicKeyAlgebraicVerificationError> {
-    let inputs = transport.verifier_inputs();
-    let pre_challenge_epoch = required_whir_epoch(inputs.whir_epochs, PRE_CHALLENGE_WHIR_EPOCH)?;
-    let pre_challenge_folds = required_whir_folds(inputs.whir_folds, PRE_CHALLENGE_WHIR_EPOCH)?;
-    let main_epoch = required_whir_epoch(inputs.whir_epochs, MAIN_WHIR_EPOCH)?;
-    let main_folds = required_whir_folds(inputs.whir_folds, MAIN_WHIR_EPOCH)?;
-    let (
-        main_relation_target,
-        main_public_covectors,
-        first_main_fold_challenges,
-        cross_epoch_point,
-        masked_pre_challenge_target,
-    ) = handoff.into_parts();
-
-    let pre_challenge_relation = CompactWhirAlgebraicRelation::pre_challenge(
-        pre_challenge_epoch,
-        &cross_epoch_point,
-        masked_pre_challenge_target,
-    )
-    .map_err(|error| {
-        compact_whir_verification_error(
-            PRE_CHALLENGE_WHIR_EPOCH,
-            CompactPublicKeyWhirVerificationStage::InitialRelation,
-            error,
-        )
-    })?;
-    verify_compact_whir_epoch(
-        transport,
-        pre_challenge_epoch,
-        pre_challenge_folds,
-        pre_challenge_relation,
-        None,
-    )?;
-
-    let main_relation =
-        CompactWhirAlgebraicRelation::main(main_epoch, main_public_covectors, main_relation_target)
-            .map_err(|error| {
-                compact_whir_verification_error(
-                    MAIN_WHIR_EPOCH,
-                    CompactPublicKeyWhirVerificationStage::InitialRelation,
-                    error,
-                )
-            })?;
-    verify_compact_whir_epoch(
-        transport,
-        main_epoch,
-        main_folds,
-        main_relation,
-        Some(&first_main_fold_challenges),
-    )
-}
-
-fn verify_compact_whir_epoch(
-    transport: &VerifiedCompactPublicKeyTransport,
-    epoch: &super::compact_proof_contract::CompactWhirEpochContract,
-    folds: [super::compact_proof_contract::CompactWhirFoldContract; COMPACT_WHIR_BATCH_COUNT],
-    mut relation: CompactWhirAlgebraicRelation,
-    already_applied_first_fold_challenges: Option<&[CompactChallengeField]>,
-) -> Result<(), CompactPublicKeyAlgebraicVerificationError> {
-    let mut final_folding_challenges = Vec::new();
-    for (batch_index, fold) in folds.iter().copied().enumerate() {
-        let batch_ordinal = u8::try_from(batch_index)
-            .map_err(|_| CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
-        let auxiliary_target =
-            required_complete_response_role(transport, 12, epoch.epoch, batch_ordinal, 0, 1)?[0];
-        let combination_challenge = compact_challenge_from_production(
-            required_verifier_extension_role(transport, 7, epoch.epoch, batch_ordinal, 0, 1)?[0],
-        );
-        let folding_factor = usize::try_from(epoch.folding_schedule[batch_index])
-            .map_err(|_| CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
-        let mut round_wires = Vec::new();
-        let mut round_challenges = Vec::new();
-        round_wires
-            .try_reserve_exact(folding_factor)
-            .map_err(|_| CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
-        round_challenges
-            .try_reserve_exact(folding_factor)
-            .map_err(|_| CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
-        for round_index in 0..folding_factor {
-            let round_ordinal = u32::try_from(round_index)
-                .map_err(|_| CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
-            round_wires.push(
-                required_complete_response_role(
-                    transport,
-                    13,
-                    epoch.epoch,
-                    batch_ordinal,
-                    round_ordinal,
-                    2,
-                )?
-                .try_into()
-                .map_err(|_| CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?,
-            );
-            round_challenges.push(compact_challenge_from_production(
-                required_verifier_extension_role(
-                    transport,
-                    8,
-                    epoch.epoch,
-                    batch_ordinal,
-                    round_ordinal,
-                    1,
-                )?[0],
-            ));
-        }
-        if batch_index == 0
-            && already_applied_first_fold_challenges
-                .is_some_and(|expected| expected != round_challenges)
-        {
-            return Err(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript);
-        }
-        relation
-            .verify_sumcheck_batch(
-                epoch,
-                fold,
-                batch_index,
-                batch_index == 0 && already_applied_first_fold_challenges.is_some(),
-                CompactWhirSumcheckTranscript {
-                    auxiliary_target,
-                    combination_challenge,
-                    round_wires: &round_wires,
-                    round_challenges: &round_challenges,
-                },
-            )
-            .map_err(|error| {
-                compact_whir_verification_error(
-                    epoch.epoch,
-                    CompactPublicKeyWhirVerificationStage::Sumcheck { batch_ordinal },
-                    error,
-                )
-            })?;
-        if batch_index == COMPACT_WHIR_BATCH_COUNT - 1 {
-            final_folding_challenges = round_challenges;
-        } else {
-            verify_compact_whir_code_switch(
-                transport,
-                epoch,
-                folds[batch_index],
-                folds[batch_index + 1],
-                batch_index,
-                &round_challenges,
-                &mut relation,
-            )?;
-        }
-    }
-    verify_compact_whir_base_case(
-        transport,
-        epoch,
-        folds[COMPACT_WHIR_BATCH_COUNT - 1],
-        &final_folding_challenges,
-        &relation,
-    )
 }
 
 fn verify_compact_whir_code_switch(
@@ -1542,6 +1950,7 @@ fn required_complete_response_role(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract;
 
     fn checkpoint(
         completed_work_unit_count: u64,
@@ -1614,5 +2023,15 @@ mod tests {
                 Err(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint)
             );
         }
+    }
+
+    #[test]
+    fn selected_contract_derives_the_complete_whir_fold_work_census() {
+        let contract =
+            selected_compact_public_key_proof_contract().expect("the selected contract decodes");
+        let completed_work_unit_count =
+            compact_public_key_whir_fold_work_unit_count(contract.verifier_inputs())
+                .expect("the selected WHIR work census derives");
+        assert_eq!(completed_work_unit_count, 2_129_904);
     }
 }
