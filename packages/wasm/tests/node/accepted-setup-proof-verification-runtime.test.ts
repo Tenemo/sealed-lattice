@@ -2,6 +2,7 @@ import { refusalReasonCodes } from '@sealed-lattice/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    verifyAcceptedSetupCompactPublicKeyShareInClosedWorker,
     verifyAcceptedSetupSameSecretInClosedWorker,
     verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker,
     verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker,
@@ -96,6 +97,26 @@ type VerificationFamily = 'publicKeyShare' | 'sameSecret';
 
 type FakeAcceptedSetupProofVerificationRuntime = Readonly<{
     allocations: ReadonlyMap<number, number>;
+    compactPublicKey: {
+        beginStatus: number;
+        cancelledOperationHandles: number[];
+        discardedCapabilityHandles: number[];
+        discardedPreparedHandles: number[];
+        finishStatus: number;
+        observedProofBytes: number[];
+        observedPublicInputBytes: number[];
+        pollOutcomes: Array<
+            Readonly<{
+                checkpointSafeBoundaryOrdinal: number;
+                completedWorkUnitCount: number;
+                pollKind: number;
+                status: number;
+                verifiedCapabilityHandle: number;
+            }>
+        >;
+        pollRefusalReleaseCount: number;
+        preparationStatus: number;
+    };
     discardedTerminalSources: number[];
     finishStatus: { value: number };
     generatedFinishes: Array<
@@ -137,6 +158,34 @@ const writeStatus = (
 const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     const allocations = new Map<number, number>();
+    const compactPublicKey: FakeAcceptedSetupProofVerificationRuntime['compactPublicKey'] =
+        {
+            beginStatus: 0,
+            cancelledOperationHandles: [],
+            discardedCapabilityHandles: [],
+            discardedPreparedHandles: [],
+            finishStatus: 0,
+            observedProofBytes: [],
+            observedPublicInputBytes: [],
+            pollOutcomes: [
+                {
+                    checkpointSafeBoundaryOrdinal: 0xffff_ffff,
+                    completedWorkUnitCount: 7,
+                    pollKind: 1,
+                    status: 0,
+                    verifiedCapabilityHandle: 0,
+                },
+                {
+                    checkpointSafeBoundaryOrdinal: 0xffff_ffff,
+                    completedWorkUnitCount: 0,
+                    pollKind: 5,
+                    status: 0,
+                    verifiedCapabilityHandle: 81,
+                },
+            ],
+            pollRefusalReleaseCount: 0,
+            preparationStatus: 0,
+        };
     const discardedTerminalSources: number[] = [];
     const finishStatus = { value: 0 };
     const generatedFinishes: Array<
@@ -251,6 +300,117 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
     };
 
     const wasmExports = {
+        sealed_lattice_accepted_setup_compact_public_key_begin_verification: (
+            preparedHandle: number,
+            proofPointer: number,
+            proofByteLength: number,
+            publicInputPointer: number,
+            publicInputByteLength: number,
+            statusPointer: number,
+        ) => {
+            expect(preparedHandle).toBe(81);
+            compactPublicKey.observedProofBytes = Array.from(
+                new Uint8Array(memory.buffer, proofPointer, proofByteLength),
+            );
+            compactPublicKey.observedPublicInputBytes = Array.from(
+                new Uint8Array(
+                    memory.buffer,
+                    publicInputPointer,
+                    publicInputByteLength,
+                ),
+            );
+            writeStatus(memory, statusPointer, compactPublicKey.beginStatus);
+            return compactPublicKey.beginStatus === 0 ? 81 : 0;
+        },
+        sealed_lattice_accepted_setup_compact_public_key_cancel_verification: (
+            handle: number,
+        ) => {
+            compactPublicKey.cancelledOperationHandles.push(handle);
+            return 0;
+        },
+        sealed_lattice_accepted_setup_compact_public_key_discard_capability: (
+            handle: number,
+        ) => {
+            compactPublicKey.discardedCapabilityHandles.push(handle);
+            return 0;
+        },
+        sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification:
+            (handle: number) => {
+                compactPublicKey.discardedPreparedHandles.push(handle);
+                return 0;
+            },
+        sealed_lattice_accepted_setup_compact_public_key_finish_verification: (
+            handle: number,
+        ) => {
+            expect(handle).toBe(81);
+            return compactPublicKey.finishStatus;
+        },
+        sealed_lattice_accepted_setup_compact_public_key_verification_poll: (
+            operationHandle: number,
+            maximumWorkUnitCount: number,
+            pollKindPointer: number,
+            completedWorkUnitCountPointer: number,
+            checkpointSafeBoundaryOrdinalPointer: number,
+            verifiedCapabilityHandlePointer: number,
+        ) => {
+            expect(operationHandle).toBe(81);
+            expect(maximumWorkUnitCount).toBe(7);
+            const outcome = compactPublicKey.pollOutcomes.shift();
+            if (outcome === undefined) {
+                throw new Error(
+                    'The focused compact public-key verifier exhausted its poll outcomes.',
+                );
+            }
+            if (outcome.status !== 0) {
+                compactPublicKey.pollRefusalReleaseCount += 1;
+                return outcome.status;
+            }
+            writeStatus(memory, pollKindPointer, outcome.pollKind);
+            writeStatus(
+                memory,
+                completedWorkUnitCountPointer,
+                outcome.completedWorkUnitCount,
+            );
+            writeStatus(
+                memory,
+                checkpointSafeBoundaryOrdinalPointer,
+                outcome.checkpointSafeBoundaryOrdinal,
+            );
+            writeStatus(
+                memory,
+                verifiedCapabilityHandlePointer,
+                outcome.verifiedCapabilityHandle,
+            );
+            return 0;
+        },
+        sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification:
+            (
+                _assemblyHandle: number,
+                statementPointer: number,
+                statementByteLength: number,
+                statusPointer: number,
+            ) => {
+                preparedStatements.push({
+                    bytes: Array.from(
+                        new Uint8Array(
+                            memory.buffer,
+                            statementPointer,
+                            statementByteLength,
+                        ),
+                    ),
+                    family: 'publicKeyShare',
+                });
+                writeStatus(
+                    memory,
+                    statusPointer,
+                    compactPublicKey.preparationStatus,
+                );
+                return compactPublicKey.preparationStatus === 0 ? 81 : 0;
+            },
+        sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
+            () => 400,
+        sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count:
+            () => 290,
         sealed_lattice_accepted_setup_public_key_share_discard_terminal_source:
             (handle: number) => {
                 discardedTerminalSources.push(handle);
@@ -395,6 +555,7 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
     registerCommonProofKernelContext(kernel, context);
     return Object.freeze({
         allocations,
+        compactPublicKey,
         discardedTerminalSources,
         finishStatus,
         generatedFinishes,
@@ -412,6 +573,18 @@ const verificationInput = (kernel: TranscriptCoreKernel) => ({
     canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
     inputStore: Object.freeze({}),
     kernel,
+});
+
+const compactPublicKeyVerificationInput = (kernel: TranscriptCoreKernel) => ({
+    assembly: Object.freeze({}),
+    canonicalApplicationStatementBytes: Uint8Array.of(4, 5, 6, 7),
+    canonicalProofBytes: Uint8Array.of(8, 9, 10),
+    canonicalPublicInputBytes: Uint8Array.of(11, 12),
+    kernel,
+    options: {
+        maximumWorkUnitCountPerPoll: 7,
+        yieldControl: () => Promise.resolve(),
+    },
 });
 
 beforeEach(() => {
@@ -509,6 +682,127 @@ describe('accepted-setup generated proof verification', () => {
         expect(runtime.generatedFinishes).toEqual([]);
         expect(boundaryMocks.applyGeneratedCapability).not.toHaveBeenCalled();
         expect(boundaryMocks.verifiedConsumptionOutcomes).toEqual([true]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+});
+
+describe('accepted-setup compact public-key verification', () => {
+    it('commits only the source-bound positive capability', async () => {
+        const runtime = createFakeRuntime();
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactPublicKeyVerificationInput(runtime.kernel) as never,
+            ),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+
+        expect(runtime.compactPublicKey.observedProofBytes).toEqual([8, 9, 10]);
+        expect(runtime.compactPublicKey.observedPublicInputBytes).toEqual([
+            11, 12,
+        ]);
+        expect(runtime.compactPublicKey.pollOutcomes).toEqual([]);
+        expect(runtime.compactPublicKey.cancelledOperationHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedPreparedHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedCapabilityHandles).toEqual([]);
+        expect(runtime.preparedStatements).toEqual([
+            {
+                bytes: [4, 5, 6, 7],
+                family: 'publicKeyShare',
+            },
+        ]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('discards the restored prepared authority after a begin refusal', async () => {
+        const runtime = createFakeRuntime();
+        runtime.compactPublicKey.beginStatus = refusalReasonCodes.wrongContext;
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactPublicKeyVerificationInput(runtime.kernel) as never,
+            ),
+        ).resolves.toEqual({
+            isValid: false,
+            refusalReason: 'wrongContext',
+        });
+
+        expect(runtime.compactPublicKey.discardedPreparedHandles).toEqual([81]);
+        expect(runtime.compactPublicKey.cancelledOperationHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedCapabilityHandles).toEqual([]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('treats a poll refusal as terminal without cancelling a consumed operation', async () => {
+        const runtime = createFakeRuntime();
+        runtime.compactPublicKey.pollOutcomes.splice(0, 2, {
+            checkpointSafeBoundaryOrdinal: 0xffff_ffff,
+            completedWorkUnitCount: 0,
+            pollKind: 0,
+            status: refusalReasonCodes.invalidProof,
+            verifiedCapabilityHandle: 0,
+        });
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactPublicKeyVerificationInput(runtime.kernel) as never,
+            ),
+        ).resolves.toEqual({
+            isValid: false,
+            refusalReason: 'invalidProof',
+        });
+
+        expect(runtime.compactPublicKey.pollRefusalReleaseCount).toBe(1);
+        expect(runtime.compactPublicKey.cancelledOperationHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedPreparedHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedCapabilityHandles).toEqual([]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('discards a positive capability when its destination slot refuses commit', async () => {
+        const runtime = createFakeRuntime();
+        runtime.compactPublicKey.finishStatus = refusalReasonCodes.wrongContext;
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactPublicKeyVerificationInput(runtime.kernel) as never,
+            ),
+        ).resolves.toEqual({
+            isValid: false,
+            refusalReason: 'wrongContext',
+        });
+
+        expect(runtime.compactPublicKey.discardedCapabilityHandles).toEqual([
+            81,
+        ]);
+        expect(runtime.compactPublicKey.cancelledOperationHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedPreparedHandles).toEqual([]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('cancels the live verifier when the worker is aborted between slices', async () => {
+        const runtime = createFakeRuntime();
+        const cancellationController = new AbortController();
+        const input = compactPublicKeyVerificationInput(runtime.kernel);
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker({
+                ...input,
+                options: {
+                    ...input.options,
+                    signal: cancellationController.signal,
+                    yieldControl: () => {
+                        cancellationController.abort();
+                        return Promise.resolve();
+                    },
+                },
+            } as never),
+        ).rejects.toThrow(/cancelled/u);
+
+        expect(runtime.compactPublicKey.cancelledOperationHandles).toEqual([
+            81,
+        ]);
+        expect(runtime.compactPublicKey.discardedPreparedHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedCapabilityHandles).toEqual([]);
         expect(runtime.allocations.size).toBe(0);
     });
 });

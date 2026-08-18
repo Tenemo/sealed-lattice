@@ -3191,7 +3191,7 @@ mod tests {
         bgv::{
             proof_suite::{
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
-                VerifiedCommonProofStatementSource,
+                VerifiedCommonProofStatementSource, VerifiedCompactPublicKeyStatementAuthority,
                 compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::CompactPublicInputBindings,
@@ -3202,7 +3202,6 @@ mod tests {
                     CompactPublicKeyAlgebraicVerification,
                     CompactPublicKeyAlgebraicVerificationPoll,
                 },
-                compact_public_key_statement_correspondence::verify_selected_compact_public_key_statement_correspondence,
                 compact_public_key_verifier::{
                     VerifiedCompactPublicKeyTransport, verify_selected_compact_public_key_transport,
                 },
@@ -7693,7 +7692,7 @@ mod tests {
         let mut observed_safe_boundary_count = 1_u32;
         let mut resume_complete_count = 0_u64;
         let mut terminal_cfw_segment_poll_count = 0_u64;
-        let verified_transport = loop {
+        let algebraically_verified_proof = loop {
             match resumed_verification
                 .advance(65_536)
                 .expect("bounded replay and continued algebraic verification succeed")
@@ -7738,7 +7737,7 @@ mod tests {
                     );
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => {
-                    break (*terminal).into_transport();
+                    break *terminal;
                 }
             }
         };
@@ -7761,7 +7760,10 @@ mod tests {
             u64::from(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT),
         );
         assert_eq!(
-            verified_transport.proof_view().canonical_bytes(),
+            algebraically_verified_proof
+                .transport()
+                .proof_view()
+                .canonical_bytes(),
             canonical_proof_bytes
         );
         let evidence_authority = populate_compact_public_key_development_evidence_authority(0x43)
@@ -7827,13 +7829,19 @@ mod tests {
             decoded_statement.roster_position(),
             decoded_statement.anchor_commitment_roots(),
         );
-        let correspondence = verify_selected_compact_public_key_statement_correspondence(
-            &verified_transport,
-            &statement_source,
-            &verified_public_randomness,
-            &setup_polynomial_prerequisite,
-        )
-        .expect("every emitted compact public value corresponds to its accepted statement source");
+        let statement_authority =
+            VerifiedCompactPublicKeyStatementAuthority::from_verified_accepted_setup_sources(
+                statement_source,
+                &verified_public_randomness,
+                setup_polynomial_prerequisite,
+            )
+            .expect("the accepted compact public-key statement authority derives");
+        let source_verified_proof = statement_authority
+            .bind_algebraically_verified_proof(algebraically_verified_proof)
+            .expect(
+                "every emitted compact public value corresponds to its accepted statement source",
+            );
+        let correspondence = source_verified_proof.correspondence();
         assert_eq!(correspondence.public_ring_vector_count(), 61);
         assert_eq!(correspondence.verified_column_count(), 122);
         assert!(correspondence.verifier_sequence_column_count() > 0);

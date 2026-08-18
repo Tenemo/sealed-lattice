@@ -69,10 +69,14 @@ consequences are:
   descriptor and all 64 verifier-sequence columns, and rebuilds the four
   statement-owned setup-polynomial roots from the other 58 public columns.
   Thus all 122 transported public columns correspond to the accepted source
-  for this candidate. The candidate is still not an accepted proof: this does
-  not compose the masking theorem with every emitted byte or establish
-  salted-Merkle/EPRO privacy, and the complete equation-invalid hostile corpus,
-  final public SDK handoff, and capability transition remain open.
+  for this candidate. The source-bound accepted-setup release ABI now derives
+  the transport bindings from that retained authority and mints a positive
+  proof capability only after algebraic verification and source
+  correspondence; its finisher commits the exact public-key-share terminal to
+  the accepted setup assembly. This is not cryptographic closure for the
+  candidate: it does not compose the masking theorem with every emitted byte or
+  establish salted-Merkle/EPRO privacy, and the complete equation-invalid
+  hostile corpus and final public SDK workflow remain open.
 - The compact transport ABI returns typed refusals but does not return
   `isValid` or mint a proof capability. A separate raw release-kernel ABI and
   internal TypeScript closed-worker driver begin or restore, bounded-poll,
@@ -88,10 +92,13 @@ consequences are:
   adapter binds the exact source list and ordinal into authenticated storage,
   keeps the last committed cursor when replacement is interrupted, restores
   after process-local store reconstruction, and fails closed on missing or
-  corrupt state. The driver mints no authority, and that adapter is not yet
-  installed in the production browser-worker host. The complete
-  equation-invalid hostile corpus and capability handoff remain absent.
-  Complete generation and verification release ABIs do not exist.
+  corrupt state. The source-bound driver returns `isValid: true` only after the
+  positive capability commits, and retires every other live authority on
+  refusal or cancellation. That adapter is not yet installed in the production
+  browser-worker host. Transport revalidation, terminal WHIR, and the final
+  122-column source reconstruction remain synchronous. The complete
+  equation-invalid hostile corpus and compact generation release ABI remain
+  absent.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
@@ -226,14 +233,14 @@ that a coherent snapshot is newest.
 - `SEC-019`: Reproducible scalar release WebAssembly and SDK bytes
   establish build identity only. The release artifact contains compact transport
   validation and public-key response generation through the complete 82-response
-  schedule plus raw begin, resume, bounded-poll, source-bound cursor-copy, and
-  cancellation functions for the internal algebraic verifier. A typed
-  closed-worker driver now owns that authority-free verification result and an
-  authenticated-custody callback boundary. The protocol package now provides a
-  concrete authenticated-store adapter for the 290 bounded CFW cursor
-  ordinals, but it is not installed in the production browser-worker host.
-  There is no compact generation API, capability handoff, or final generation
-  and verification ABI pair.
+  schedule plus source-bound prepare, begin, resume, bounded-poll, cursor-copy,
+  cancellation, positive-capability finish, and explicit-discard functions for
+  accepted-setup public-key verification. The typed closed-worker driver owns
+  that linear authority and an authenticated-custody callback boundary. The
+  protocol package provides a concrete authenticated-store adapter for the 290
+  bounded CFW cursor ordinals, but it is not installed in the production
+  browser-worker host. There is no compact generation API or final end-to-end
+  generation and verification ABI pair.
 - `SEC-020`: Guarded selected-size native evidence covers the public-key
   family's complete response-generation schedule and one cold algebraic restore
   of its exact emitted proof from a source-bound safe cursor. A separate desktop

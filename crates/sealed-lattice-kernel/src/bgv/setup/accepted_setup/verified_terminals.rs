@@ -7,9 +7,9 @@ use crate::{
             BorrowedVerifiedCommonProofCapability, BoundTreeConstructionKind, BoundTreeRootUse,
             CommonProofVerifierError, ConsumedVerifiedCommonProofCapability,
             RelationTreeDescriptor, SelectedApplicationStatementContext,
-            SetupPublicPolynomialContext, SetupPublicPolynomialTree, SuiteModulusReference,
-            VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
-            VerifiedStreamedProofTreeTerminalPreflight,
+            SetupPublicPolynomialContext, SetupPublicPolynomialTree,
+            SourceVerifiedCompactPublicKeyProof, SuiteModulusReference, VerifiedStatementOwnedTree,
+            VerifiedStreamedProofTreeTerminal, VerifiedStreamedProofTreeTerminalPreflight,
             decode_selected_aggregate_threshold_share_statement,
             decode_selected_collective_public_key_aggregate_statement,
             decode_selected_public_key_share_statement, decode_selected_same_secret_statement,
@@ -327,6 +327,29 @@ impl VerifiedPublicKeyShareTerminalPreflight {
 }
 
 impl VerifiedPublicKeyShareTerminal {
+    /// Consumes the exact compact terminal after transport, CFW, both WHIR
+    /// epochs, and complete public-input source correspondence have passed.
+    /// The source fields are inaccessible until that positive chain exists.
+    pub(in crate::bgv) fn from_source_verified_compact_public_key_proof(
+        verified_proof: SourceVerifiedCompactPublicKeyProof,
+    ) -> Self {
+        let source = verified_proof.into_accepted_terminal_source();
+        Self {
+            protocol_version: source.protocol_version(),
+            suite_identifier: source.suite_identifier(),
+            manifest_hash: source.manifest_hash(),
+            ceremony_context_hash: source.ceremony_context_hash(),
+            action_context_hash: source.action_context_hash(),
+            roster_hash: source.roster_hash(),
+            setup_proof_context_hash: source.setup_proof_context_hash(),
+            participant_identity: source.participant_identity(),
+            roster_position: source.roster_position(),
+            anchor_commitment_roots: source.anchor_commitment_roots(),
+            public_key_share_root: source.public_key_share_root(),
+            proof_stream_descriptor: source.proof_stream_descriptor().clone(),
+        }
+    }
+
     pub(in crate::bgv) fn preflight_from_borrowed_common_proof(
         verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
         canonical_application_statement_bytes: &[u8],

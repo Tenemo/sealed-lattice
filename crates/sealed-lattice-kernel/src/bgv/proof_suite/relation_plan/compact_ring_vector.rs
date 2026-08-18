@@ -505,7 +505,6 @@ impl CompactPublicKeyRelationCatalog {
         self.public_input_ring_vector_count
     }
 
-    #[cfg(test)]
     pub(crate) fn ordered_public_vectors(&self) -> &[CompactRingVectorReference] {
         &self.ordered_public_vectors
     }

@@ -118,6 +118,9 @@ pub(in crate::bgv) use accepted_setup::{
     VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
     derive_recipient_input_root, verify_public_randomness_board_sources,
 };
+pub(in crate::bgv) use accepted_setup::{
+    commit_source_verified_compact_public_key_proof, discard_compact_public_key_verification_source,
+};
 #[cfg(test)]
 pub(in crate::bgv) use accepted_setup::{
     resolve_setup_generation_compact_public_key_development_preparation_source,

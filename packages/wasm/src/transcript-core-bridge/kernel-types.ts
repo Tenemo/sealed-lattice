@@ -1287,6 +1287,12 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_accepted_setup_public_key_share_discard_terminal_source?: (
         terminalSourceHandle: number,
     ) => number;
+    sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification?: (
+        assemblyHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_same_secret_prepare_generation?: (
         selectedSuiteHandle: number,
         setupGenerationAuthorityHandle: number,
@@ -1502,6 +1508,49 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         operationHandle: number,
         outputPointer: number,
         outputByteLength: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_begin_verification?: (
+        preparedHandle: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_resume_verification?: (
+        preparedHandle: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        checkpointPointer: number,
+        checkpointByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_verification_poll?: (
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+        pollKindPointer: number,
+        completedWorkUnitCountPointer: number,
+        checkpointSafeBoundaryOrdinalPointer: number,
+        verifiedCapabilityHandlePointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_cancel_verification?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_finish_verification?: (
+        verifiedCapabilityHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification?: (
+        preparedHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_discard_capability?: (
+        verifiedCapabilityHandle: number,
     ) => number;
     sealed_lattice_common_proof_begin_generation?: (
         preparedGenerationHandle: number,

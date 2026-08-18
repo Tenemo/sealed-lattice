@@ -298,6 +298,28 @@ type CompactPublicKeyAlgebraicVerificationKernelPoll =
     | Readonly<{ kind: 'complete' }>
     | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
 
+type AcceptedSetupCompactPublicKeyVerificationKernelPreparation =
+    | Readonly<{ kind: 'prepared'; preparedHandle: number }>
+    | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
+
+type AcceptedSetupCompactPublicKeyVerificationKernelBegin =
+    | Readonly<{ kind: 'started'; operationHandle: number }>
+    | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
+
+type AcceptedSetupCompactPublicKeyVerificationKernelPoll =
+    | Readonly<{
+          checkpointSafeBoundaryOrdinal?: number;
+          completedWorkUnitCount: number;
+          kind: 'progress';
+      }>
+    | Readonly<{
+          checkpointSafeBoundaryOrdinal: number;
+          completedWorkUnitCount: number;
+          kind: 'resume-complete';
+      }>
+    | Readonly<{ kind: 'complete'; verifiedCapabilityHandle: number }>
+    | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
+
 export const kernelFailure = (
     message: string,
     failureCause?: unknown,
@@ -1768,6 +1790,24 @@ export class CommonProofVerificationKernelBoundary {
         });
     }
 
+    #requireCompactPublicKeyTransportBytes(
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+    ): void {
+        if (
+            !(proofBytes instanceof Uint8Array) ||
+            proofBytes.byteLength === 0 ||
+            proofBytes.byteLength > maximumCommonProofByteLength ||
+            !(publicInputBytes instanceof Uint8Array) ||
+            publicInputBytes.byteLength === 0 ||
+            publicInputBytes.byteLength > maximumCommonProofByteLength
+        ) {
+            throw resourceFailure(
+                'The compact transport bytes must be nonempty and remain within the accepted release boundary.',
+            );
+        }
+    }
+
     #copyCompactPublicKeyTransportBindings(
         bindings: CompactPublicKeyTransportBindings,
         proofBytes: Uint8Array,
@@ -1784,18 +1824,10 @@ export class CommonProofVerificationKernelBoundary {
         ] as const) {
             requireExactApplicationBytes(value, hashByteLength, label);
         }
-        if (
-            !(proofBytes instanceof Uint8Array) ||
-            proofBytes.byteLength === 0 ||
-            proofBytes.byteLength > maximumCommonProofByteLength ||
-            !(publicInputBytes instanceof Uint8Array) ||
-            publicInputBytes.byteLength === 0 ||
-            publicInputBytes.byteLength > maximumCommonProofByteLength
-        ) {
-            throw resourceFailure(
-                'The compact transport bytes must be nonempty and remain within the accepted release boundary.',
-            );
-        }
+        this.#requireCompactPublicKeyTransportBytes(
+            proofBytes,
+            publicInputBytes,
+        );
         const canonicalBindings = new Uint8Array(
             compactPublicKeyTransportBindingsByteLength,
         );
@@ -2317,6 +2349,497 @@ export class CommonProofVerificationKernelBoundary {
                         'sealed_lattice_compact_public_key_cancel_algebraic_verification',
                     )(operationHandle),
                     'compact public-key algebraic verification cancellation',
+                );
+            },
+        );
+    }
+
+    public prepareAcceptedSetupCompactPublicKeyVerification(
+        assemblyHandle: number,
+        canonicalApplicationStatementBytes: Uint8Array,
+    ): AcceptedSetupCompactPublicKeyVerificationKernelPreparation {
+        requireLiveHandle(
+            assemblyHandle,
+            'The accepted-setup verification assembly handle',
+        );
+        if (
+            !(canonicalApplicationStatementBytes instanceof Uint8Array) ||
+            canonicalApplicationStatementBytes.byteLength === 0 ||
+            canonicalApplicationStatementBytes.byteLength >
+                maximumCommonProofByteLength
+        ) {
+            throw resourceFailure(
+                'The compact public-key application statement must be nonempty and remain within the accepted release boundary.',
+            );
+        }
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key verification preparation',
+            () => {
+                const statementPointer = this.#memoryBoundary.copy(
+                    canonicalApplicationStatementBytes,
+                );
+                const statusPointer =
+                    this.#memoryBoundary.allocateZeroedWords(1);
+                try {
+                    const preparedHandle = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification',
+                    )(
+                        assemblyHandle,
+                        statementPointer,
+                        canonicalApplicationStatementBytes.byteLength,
+                        statusPointer,
+                    );
+                    const [status] = this.#memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    const refusalReason =
+                        decodeCompactPublicKeyAlgebraicVerificationStatus(
+                            status,
+                            'accepted-setup compact public-key verification preparation',
+                        );
+                    if (refusalReason !== undefined) {
+                        if (preparedHandle !== 0) {
+                            throw kernelFailure(
+                                'A refused accepted-setup compact verifier preparation returned a live handle.',
+                            );
+                        }
+                        return Object.freeze({
+                            kind: 'refused',
+                            refusalReason,
+                        });
+                    }
+                    return Object.freeze({
+                        kind: 'prepared',
+                        preparedHandle: requireLiveHandle(
+                            preparedHandle,
+                            'The accepted-setup compact public-key prepared handle',
+                        ),
+                    });
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        statementPointer,
+                        canonicalApplicationStatementBytes.byteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public beginAcceptedSetupCompactPublicKeyVerification(
+        preparedHandle: number,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+    ): AcceptedSetupCompactPublicKeyVerificationKernelBegin {
+        return this.#startAcceptedSetupCompactPublicKeyVerification(
+            preparedHandle,
+            proofBytes,
+            publicInputBytes,
+        );
+    }
+
+    public resumeAcceptedSetupCompactPublicKeyVerification(
+        preparedHandle: number,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+        canonicalCheckpointBytes: Uint8Array,
+    ): AcceptedSetupCompactPublicKeyVerificationKernelBegin {
+        if (
+            !(canonicalCheckpointBytes instanceof Uint8Array) ||
+            canonicalCheckpointBytes.byteLength !==
+                this.compactPublicKeyAlgebraicVerificationCheckpointByteLength()
+        ) {
+            throw resourceFailure(
+                'The accepted-setup compact public-key verification checkpoint has the wrong byte length.',
+            );
+        }
+        return this.#startAcceptedSetupCompactPublicKeyVerification(
+            preparedHandle,
+            proofBytes,
+            publicInputBytes,
+            canonicalCheckpointBytes,
+        );
+    }
+
+    #startAcceptedSetupCompactPublicKeyVerification(
+        preparedHandle: number,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+        canonicalCheckpointBytes?: Uint8Array,
+    ): AcceptedSetupCompactPublicKeyVerificationKernelBegin {
+        requireLiveHandle(
+            preparedHandle,
+            'The accepted-setup compact public-key prepared handle',
+        );
+        this.#requireCompactPublicKeyTransportBytes(
+            proofBytes,
+            publicInputBytes,
+        );
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key verification begin',
+            () => {
+                const proofPointer = this.#memoryBoundary.copy(proofBytes);
+                const publicInputPointer =
+                    this.#memoryBoundary.copy(publicInputBytes);
+                const checkpointPointer =
+                    canonicalCheckpointBytes === undefined
+                        ? undefined
+                        : this.#memoryBoundary.copy(canonicalCheckpointBytes);
+                const statusPointer =
+                    this.#memoryBoundary.allocateZeroedWords(1);
+                try {
+                    const operationHandle =
+                        canonicalCheckpointBytes === undefined
+                            ? resolveNumberExport(
+                                  this.#context.wasmExports,
+                                  'sealed_lattice_accepted_setup_compact_public_key_begin_verification',
+                              )(
+                                  preparedHandle,
+                                  proofPointer,
+                                  proofBytes.byteLength,
+                                  publicInputPointer,
+                                  publicInputBytes.byteLength,
+                                  statusPointer,
+                              )
+                            : resolveNumberExport(
+                                  this.#context.wasmExports,
+                                  'sealed_lattice_accepted_setup_compact_public_key_resume_verification',
+                              )(
+                                  preparedHandle,
+                                  proofPointer,
+                                  proofBytes.byteLength,
+                                  publicInputPointer,
+                                  publicInputBytes.byteLength,
+                                  checkpointPointer!,
+                                  canonicalCheckpointBytes.byteLength,
+                                  statusPointer,
+                              );
+                    const [status] = this.#memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    const refusalReason =
+                        decodeCompactPublicKeyAlgebraicVerificationStatus(
+                            status,
+                            'accepted-setup compact public-key verification begin',
+                        );
+                    if (refusalReason !== undefined) {
+                        if (operationHandle !== 0) {
+                            throw kernelFailure(
+                                'A refused accepted-setup compact verifier begin returned a live handle.',
+                            );
+                        }
+                        return Object.freeze({
+                            kind: 'refused',
+                            refusalReason,
+                        });
+                    }
+                    const liveOperationHandle = requireLiveHandle(
+                        operationHandle,
+                        'The accepted-setup compact public-key verification operation handle',
+                    );
+                    if (liveOperationHandle !== preparedHandle) {
+                        throw kernelFailure(
+                            'The accepted-setup compact verifier changed its linear handle during begin.',
+                        );
+                    }
+                    return Object.freeze({
+                        kind: 'started',
+                        operationHandle: liveOperationHandle,
+                    });
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                    if (checkpointPointer !== undefined) {
+                        this.#memoryBoundary.zeroAndDeallocate(
+                            checkpointPointer,
+                            canonicalCheckpointBytes!.byteLength,
+                        );
+                    }
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        publicInputPointer,
+                        publicInputBytes.byteLength,
+                    );
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        proofPointer,
+                        proofBytes.byteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public copyAcceptedSetupCompactPublicKeyVerificationCheckpoint(
+        operationHandle: number,
+    ): Uint8Array<ArrayBuffer> {
+        requireLiveHandle(
+            operationHandle,
+            'The accepted-setup compact public-key verification operation handle',
+        );
+        const checkpointByteLength =
+            this.compactPublicKeyAlgebraicVerificationCheckpointByteLength();
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key verification checkpoint copy',
+            () => {
+                const outputPointer =
+                    this.#memoryBoundary.allocate(checkpointByteLength);
+                try {
+                    const status = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint',
+                    )(operationHandle, outputPointer, checkpointByteLength);
+                    const refusalReason =
+                        decodeCompactPublicKeyAlgebraicVerificationStatus(
+                            status,
+                            'accepted-setup compact public-key verification checkpoint copy',
+                        );
+                    if (refusalReason !== undefined) {
+                        throw kernelFailure(
+                            `The accepted-setup compact verifier refused checkpoint copy with ${refusalReason}.`,
+                        );
+                    }
+                    return new Uint8Array(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        checkpointByteLength,
+                    ).slice();
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        checkpointByteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public pollAcceptedSetupCompactPublicKeyVerification(
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+    ): AcceptedSetupCompactPublicKeyVerificationKernelPoll {
+        requireLiveHandle(
+            operationHandle,
+            'The accepted-setup compact public-key verification operation handle',
+        );
+        requireUnsigned32(
+            maximumWorkUnitCount,
+            'The accepted-setup compact public-key verification work-unit bound',
+        );
+        if (maximumWorkUnitCount === 0) {
+            throw resourceFailure(
+                'The accepted-setup compact public-key verification work-unit bound must be positive.',
+            );
+        }
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key verification poll',
+            () => {
+                const safeBoundaryCount =
+                    this.#requireCompactPublicKeyAlgebraicVerificationSafeBoundaryCount();
+                const metadataPointer =
+                    this.#memoryBoundary.allocateZeroedWords(4);
+                try {
+                    const status = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_compact_public_key_verification_poll',
+                    )(
+                        operationHandle,
+                        maximumWorkUnitCount,
+                        metadataPointer,
+                        metadataPointer + wasm32WordByteLength,
+                        metadataPointer + 2 * wasm32WordByteLength,
+                        metadataPointer + 3 * wasm32WordByteLength,
+                    );
+                    const refusalReason =
+                        decodeCompactPublicKeyAlgebraicVerificationStatus(
+                            status,
+                            'accepted-setup compact public-key verification poll',
+                        );
+                    if (refusalReason !== undefined) {
+                        return Object.freeze({
+                            kind: 'refused',
+                            refusalReason,
+                        });
+                    }
+                    const [
+                        pollKind,
+                        completedWorkUnitCount,
+                        checkpointSafeBoundaryOrdinal,
+                        verifiedCapabilityHandle,
+                    ] = this.#memoryBoundary.readWords(metadataPointer, 4);
+                    switch (pollKind) {
+                        case compactPublicKeyAlgebraicVerificationPollProgress: {
+                            if (
+                                completedWorkUnitCount === 0 ||
+                                completedWorkUnitCount > maximumWorkUnitCount ||
+                                verifiedCapabilityHandle !== 0
+                            ) {
+                                throw kernelFailure(
+                                    'The accepted-setup compact verifier reported invalid bounded progress.',
+                                );
+                            }
+                            if (
+                                checkpointSafeBoundaryOrdinal !==
+                                    noSecondPollValue &&
+                                checkpointSafeBoundaryOrdinal >=
+                                    safeBoundaryCount
+                            ) {
+                                throw kernelFailure(
+                                    'The accepted-setup compact verifier reported an unassigned checkpoint boundary.',
+                                );
+                            }
+                            return Object.freeze({
+                                ...(checkpointSafeBoundaryOrdinal ===
+                                noSecondPollValue
+                                    ? {}
+                                    : { checkpointSafeBoundaryOrdinal }),
+                                completedWorkUnitCount,
+                                kind: 'progress',
+                            });
+                        }
+                        case compactPublicKeyAlgebraicVerificationPollResumeComplete: {
+                            if (
+                                completedWorkUnitCount === 0 ||
+                                completedWorkUnitCount > maximumWorkUnitCount ||
+                                checkpointSafeBoundaryOrdinal ===
+                                    noSecondPollValue ||
+                                checkpointSafeBoundaryOrdinal >=
+                                    safeBoundaryCount ||
+                                verifiedCapabilityHandle !== 0
+                            ) {
+                                throw kernelFailure(
+                                    'The accepted-setup compact verifier reported invalid replay completion.',
+                                );
+                            }
+                            return Object.freeze({
+                                checkpointSafeBoundaryOrdinal,
+                                completedWorkUnitCount,
+                                kind: 'resume-complete',
+                            });
+                        }
+                        case compactPublicKeyAlgebraicVerificationPollComplete: {
+                            if (
+                                completedWorkUnitCount !== 0 ||
+                                checkpointSafeBoundaryOrdinal !==
+                                    noSecondPollValue
+                            ) {
+                                throw kernelFailure(
+                                    'The completed accepted-setup compact verifier reported residual work.',
+                                );
+                            }
+                            const liveCapabilityHandle = requireLiveHandle(
+                                verifiedCapabilityHandle,
+                                'The accepted-setup compact public-key verified capability handle',
+                            );
+                            if (liveCapabilityHandle !== operationHandle) {
+                                throw kernelFailure(
+                                    'The accepted-setup compact verifier changed its linear handle at capability handoff.',
+                                );
+                            }
+                            return Object.freeze({
+                                kind: 'complete',
+                                verifiedCapabilityHandle: liveCapabilityHandle,
+                            });
+                        }
+                        default:
+                            throw kernelFailure(
+                                `The accepted-setup compact verifier returned unknown poll kind ${String(pollKind)}.`,
+                            );
+                    }
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        metadataPointer,
+                        4 * wasm32WordByteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public cancelAcceptedSetupCompactPublicKeyVerification(
+        operationHandle: number,
+    ): void {
+        requireLiveHandle(
+            operationHandle,
+            'The accepted-setup compact public-key verification operation handle',
+        );
+        this.#context.runExclusive(
+            'accepted-setup compact public-key verification cancellation',
+            () => {
+                requireKernelSuccess(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_compact_public_key_cancel_verification',
+                    )(operationHandle),
+                    'accepted-setup compact public-key verification cancellation',
+                );
+            },
+        );
+    }
+
+    public discardAcceptedSetupCompactPublicKeyPreparedVerification(
+        preparedHandle: number,
+    ): void {
+        requireLiveHandle(
+            preparedHandle,
+            'The accepted-setup compact public-key prepared handle',
+        );
+        this.#context.runExclusive(
+            'accepted-setup compact public-key prepared-source discard',
+            () => {
+                requireKernelSuccess(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification',
+                    )(preparedHandle),
+                    'accepted-setup compact public-key prepared-source discard',
+                );
+            },
+        );
+    }
+
+    public finishAcceptedSetupCompactPublicKeyVerification(
+        verifiedCapabilityHandle: number,
+    ): RefusalReason | undefined {
+        requireLiveHandle(
+            verifiedCapabilityHandle,
+            'The accepted-setup compact public-key verified capability handle',
+        );
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key verification finish',
+            () =>
+                decodeCompactPublicKeyAlgebraicVerificationStatus(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_compact_public_key_finish_verification',
+                    )(verifiedCapabilityHandle),
+                    'accepted-setup compact public-key verification finish',
+                ),
+        );
+    }
+
+    public discardAcceptedSetupCompactPublicKeyCapability(
+        verifiedCapabilityHandle: number,
+    ): void {
+        requireLiveHandle(
+            verifiedCapabilityHandle,
+            'The accepted-setup compact public-key verified capability handle',
+        );
+        this.#context.runExclusive(
+            'accepted-setup compact public-key capability discard',
+            () => {
+                requireKernelSuccess(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_compact_public_key_discard_capability',
+                    )(verifiedCapabilityHandle),
+                    'accepted-setup compact public-key capability discard',
                 );
             },
         );

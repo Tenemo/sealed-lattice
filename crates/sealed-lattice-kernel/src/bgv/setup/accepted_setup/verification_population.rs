@@ -13,8 +13,9 @@ use crate::{
         proof_suite::{
             CommonProofRelationPlanCapability, CommonProofRuntimeError,
             CommonProofSelectedSuiteCapabilityHandle, SelectedApplicationStatementContext,
-            ValidatedRelationPlanArtifact, VerifiedCommonProofCapabilityHandle,
-            VerifiedCommonProofStatementSource, VerifiedKeyRelationColumnEvaluator,
+            SourceVerifiedCompactPublicKeyProof, ValidatedRelationPlanArtifact,
+            VerifiedCommonProofCapabilityHandle, VerifiedCommonProofStatementSource,
+            VerifiedCompactPublicKeyStatementAuthority, VerifiedKeyRelationColumnEvaluator,
             VerifiedStatementOwnedTree, bind_generated_common_proof_to_verified_statement_source,
             compile_public_key_share_relation_plan, compile_same_secret_relation_plan,
             consume_attached_verified_vss_low_degree_evidence,
@@ -26,16 +27,20 @@ use crate::{
             require_reserved_setup_key_relation_generation_statement_source,
             reserve_setup_key_relation_generation_statement_source,
             restore_setup_key_relation_generation_statement_source,
+            retain_accepted_setup_compact_public_key_verification_source,
             retain_common_proof_verification_family_adapter_from_upstream, runtime_error_status,
             selected_proof_runtime_limits, selected_public_key_share_relation_plan_input,
             selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
         },
-        setup::SetupKeyRelationProofFamily,
         setup::accepted_setup::{
             commit_preflighted_verified_public_key_share_terminal,
             commit_preflighted_verified_same_secret_terminal,
             preflight_verified_public_key_share_terminal_slot,
             preflight_verified_same_secret_terminal_slot,
+        },
+        setup::{
+            SetupKeyRelationProofFamily, VerifiedPublicRandomness,
+            VerifiedSetupPolynomialLowDegreePrerequisite,
         },
     },
     foundation::{
@@ -178,47 +183,20 @@ fn take_terminal_source_for_finish(
     })
 }
 
-fn prepare_verification(
+fn with_prepared_accepted_setup_statement<Output>(
     family: AcceptedSetupProofFamily,
-    selected_suite_handle: u32,
     assembly_handle: u32,
-    same_secret_low_degree_evidence_source: Option<SameSecretLowDegreeEvidenceSource>,
-    canonical_application_statement_bytes: &[u8],
+    canonical_application_statement_bytes: Vec<u8>,
     generation_statement_source_handle: Option<u32>,
-) -> Result<(u32, u32), CommonProofRuntimeError> {
-    if canonical_application_statement_bytes.is_empty()
-        || canonical_application_statement_bytes.len()
-            > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
-    {
-        return Err(CommonProofRuntimeError::WrongVerificationBinding);
-    }
-    let same_secret_prerequisite = match (family, same_secret_low_degree_evidence_source) {
-        (
-            AcceptedSetupProofFamily::SameSecret,
-            Some(SameSecretLowDegreeEvidenceSource::Available(handle)),
-        ) => Some(consume_verified_vss_low_degree_evidence(handle)?),
-        (
-            AcceptedSetupProofFamily::SameSecret,
-            Some(SameSecretLowDegreeEvidenceSource::AttachedToGeneration {
-                handle,
-                generation_binding_hash,
-            }),
-        ) => Some(consume_attached_verified_vss_low_degree_evidence(
-            handle,
-            generation_binding_hash,
-        )?),
-        (AcceptedSetupProofFamily::PublicKeyShare, None) => None,
-        _ => return Err(CommonProofRuntimeError::WrongVerificationBinding),
-    };
-    let schema_identifier = family.schema_identifier();
-    let canonical_application_statement_bytes = canonical_application_statement_bytes.to_vec();
-    let (
-        statement_source,
-        statement_trees,
-        verified_column_evaluator,
-        setup_polynomial_prerequisite,
-        terminal_source,
-    ) = with_accepted_setup_verification_sources(
+    finish: impl FnOnce(
+        VerifiedCommonProofStatementSource,
+        &VerifiedPublicRandomness,
+        ValidatedRelationPlanArtifact,
+        Option<VerifiedSetupPolynomialLowDegreePrerequisite>,
+        AcceptedSetupVerificationTerminalSource,
+    ) -> Result<Output, CommonProofRuntimeError>,
+) -> Result<Output, CommonProofRuntimeError> {
+    with_accepted_setup_verification_sources(
         assembly_handle,
         |package, verified_public_randomness| {
             let context = verified_public_randomness.context();
@@ -253,6 +231,7 @@ fn prepare_verification(
                     )?)
                 }
             };
+            let schema_identifier = family.schema_identifier();
             let selected_slots = package
                 .selected_public_proof_slots()
                 .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
@@ -322,16 +301,6 @@ fn prepare_verification(
             )
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
             let relation_plan = relation_plan_artifact.compiled_plan();
-            let relation_plan_variant = relation_plan
-                .select_variant(None, None)
-                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-            let verified_column_evaluator =
-                VerifiedKeyRelationColumnEvaluator::from_verified_public_randomness(
-                    verified_public_randomness,
-                    &relation_plan_artifact,
-                    relation_plan_variant,
-                )
-                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
             let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
                 relation_plan,
                 &relation_context,
@@ -362,6 +331,83 @@ fn prepare_verification(
                     relation_plan_capability,
                     runtime_limits,
                 )?;
+            finish(
+                statement_source,
+                verified_public_randomness,
+                relation_plan_artifact,
+                setup_polynomial_prerequisite,
+                AcceptedSetupVerificationTerminalSource {
+                    family,
+                    assembly_handle,
+                    generation_statement_source_handle,
+                    canonical_application_statement_bytes: canonical_application_statement_bytes
+                        .into_boxed_slice(),
+                },
+            )
+        },
+    )
+}
+
+fn prepare_verification(
+    family: AcceptedSetupProofFamily,
+    selected_suite_handle: u32,
+    assembly_handle: u32,
+    same_secret_low_degree_evidence_source: Option<SameSecretLowDegreeEvidenceSource>,
+    canonical_application_statement_bytes: &[u8],
+    generation_statement_source_handle: Option<u32>,
+) -> Result<(u32, u32), CommonProofRuntimeError> {
+    if canonical_application_statement_bytes.is_empty()
+        || canonical_application_statement_bytes.len()
+            > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+    {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    let same_secret_prerequisite = match (family, same_secret_low_degree_evidence_source) {
+        (
+            AcceptedSetupProofFamily::SameSecret,
+            Some(SameSecretLowDegreeEvidenceSource::Available(handle)),
+        ) => Some(consume_verified_vss_low_degree_evidence(handle)?),
+        (
+            AcceptedSetupProofFamily::SameSecret,
+            Some(SameSecretLowDegreeEvidenceSource::AttachedToGeneration {
+                handle,
+                generation_binding_hash,
+            }),
+        ) => Some(consume_attached_verified_vss_low_degree_evidence(
+            handle,
+            generation_binding_hash,
+        )?),
+        (AcceptedSetupProofFamily::PublicKeyShare, None) => None,
+        _ => return Err(CommonProofRuntimeError::WrongVerificationBinding),
+    };
+    let canonical_application_statement_bytes = canonical_application_statement_bytes.to_vec();
+    let (
+        statement_source,
+        statement_trees,
+        verified_column_evaluator,
+        setup_polynomial_prerequisite,
+        terminal_source,
+    ) = with_prepared_accepted_setup_statement(
+        family,
+        assembly_handle,
+        canonical_application_statement_bytes,
+        generation_statement_source_handle,
+        |statement_source,
+         verified_public_randomness,
+         relation_plan_artifact,
+         setup_polynomial_prerequisite,
+         terminal_source| {
+            let relation_plan = relation_plan_artifact.compiled_plan();
+            let relation_plan_variant = relation_plan
+                .select_variant(None, None)
+                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+            let verified_column_evaluator =
+                VerifiedKeyRelationColumnEvaluator::from_verified_public_randomness(
+                    verified_public_randomness,
+                    &relation_plan_artifact,
+                    relation_plan_variant,
+                )
+                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
             let statement_trees =
                 VerifiedStatementOwnedTree::from_verified_accepted_setup_statement_source(
                     &statement_source,
@@ -373,14 +419,7 @@ fn prepare_verification(
                 statement_trees,
                 verified_column_evaluator,
                 setup_polynomial_prerequisite,
-                AcceptedSetupVerificationTerminalSource {
-                    family,
-                    assembly_handle,
-                    generation_statement_source_handle,
-                    canonical_application_statement_bytes: canonical_application_statement_bytes
-                        .clone()
-                        .into_boxed_slice(),
-                },
+                terminal_source,
             ))
         },
     )?;
@@ -424,6 +463,93 @@ fn prepare_verification(
             Err(error)
         }
     }
+}
+
+pub(in crate::bgv) fn reserve_compact_public_key_verification_source(
+    assembly_handle: u32,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<(VerifiedCompactPublicKeyStatementAuthority, u32), CommonProofRuntimeError> {
+    if canonical_application_statement_bytes.is_empty()
+        || canonical_application_statement_bytes.len()
+            > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+    {
+        return Err(CommonProofRuntimeError::WrongVerificationBinding);
+    }
+    let (statement_authority, terminal_source) = with_prepared_accepted_setup_statement(
+        AcceptedSetupProofFamily::PublicKeyShare,
+        assembly_handle,
+        canonical_application_statement_bytes.to_vec(),
+        None,
+        |statement_source,
+         verified_public_randomness,
+         relation_plan_artifact,
+         setup_polynomial_prerequisite,
+         terminal_source| {
+            drop(relation_plan_artifact);
+            let prerequisite = setup_polynomial_prerequisite
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            let statement_authority =
+                VerifiedCompactPublicKeyStatementAuthority::from_verified_accepted_setup_sources(
+                    statement_source,
+                    verified_public_randomness,
+                    prerequisite,
+                )
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+            Ok((statement_authority, terminal_source))
+        },
+    )?;
+    let terminal_source_handle = ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY
+        .with(|registry| registry.borrow_mut().retain(terminal_source))?;
+    Ok((statement_authority, terminal_source_handle))
+}
+
+pub(in crate::bgv) fn commit_source_verified_compact_public_key_proof(
+    terminal_source_handle: u32,
+    verified_proof: SourceVerifiedCompactPublicKeyProof,
+) -> Result<
+    (),
+    (
+        CommonProofRuntimeError,
+        Box<SourceVerifiedCompactPublicKeyProof>,
+    ),
+> {
+    let terminal_source = match take_terminal_source_for_finish(
+        terminal_source_handle,
+        AcceptedSetupProofFamily::PublicKeyShare,
+        false,
+    ) {
+        Ok(source) => source,
+        Err(error) => return Err((error, Box::new(verified_proof))),
+    };
+    let prepared_slot = match preflight_verified_public_key_share_terminal_slot(
+        terminal_source.assembly_handle,
+        verified_proof.roster_position(),
+    ) {
+        Ok(prepared_slot) => prepared_slot,
+        Err(error) => {
+            let restoration =
+                ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+                    registry
+                        .borrow_mut()
+                        .restore(terminal_source_handle, terminal_source)
+                });
+            return Err((restoration.err().unwrap_or(error), Box::new(verified_proof)));
+        }
+    };
+    let terminal = VerifiedPublicKeyShareTerminal::from_source_verified_compact_public_key_proof(
+        verified_proof,
+    );
+    commit_preflighted_verified_public_key_share_terminal(prepared_slot, terminal);
+    Ok(())
+}
+
+pub(in crate::bgv) fn discard_compact_public_key_verification_source(
+    terminal_source_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    discard_terminal_source(
+        terminal_source_handle,
+        AcceptedSetupProofFamily::PublicKeyShare,
+    )
 }
 
 fn prepare_generated_verification(
@@ -1046,6 +1172,57 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_public_key_share_prepare_
                 status_pointer,
             },
         )
+    }
+}
+
+/// Retains the exact accepted package statement and same-secret prerequisite
+/// for the source-bound compact public-key verifier. The returned handle owns
+/// all four public-input bindings; callers provide only proof bytes and public
+/// input bytes to the subsequent begin or resume boundary.
+///
+/// # Safety
+///
+/// The statement pointer must name its declared readable range. A non-null
+/// status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification(
+    assembly_handle: u32,
+    canonical_application_statement_pointer: *const u8,
+    canonical_application_statement_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let canonical_application_statement_bytes = unsafe {
+        input_bytes(
+            canonical_application_statement_pointer,
+            canonical_application_statement_byte_length,
+        )
+    };
+    let result = (|| {
+        let (statement_authority, terminal_source_handle) =
+            reserve_compact_public_key_verification_source(
+                assembly_handle,
+                canonical_application_statement_bytes,
+            )?;
+        match retain_accepted_setup_compact_public_key_verification_source(
+            statement_authority,
+            terminal_source_handle,
+        ) {
+            Ok(handle) => Ok(handle),
+            Err(error) => {
+                discard_compact_public_key_verification_source(terminal_source_handle)?;
+                Err(error)
+            }
+        }
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
     }
 }
 

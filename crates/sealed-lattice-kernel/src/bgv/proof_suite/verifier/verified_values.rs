@@ -201,7 +201,6 @@ impl VerifiedStatementOwnedTree {
         }
     }
 
-    #[cfg(test)]
     pub(crate) const fn setup_public_polynomial_row_width(&self) -> Option<u32> {
         match &self.tree {
             StatementOwnedProofTreeInput::SetupPolynomial { row_width, .. } => Some(*row_width),

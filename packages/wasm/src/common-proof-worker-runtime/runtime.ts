@@ -204,11 +204,11 @@ export type CompactPublicKeyAlgebraicVerificationCheckpointCustody = Readonly<{
     release(): Promise<void>;
 }>;
 
-type CompactPublicKeyAlgebraicVerificationResume = Readonly<{
+export type CompactPublicKeyAlgebraicVerificationResume = Readonly<{
     checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
 }>;
 
-type CompactPublicKeyAlgebraicVerificationWorkerOptions = Readonly<{
+export type CompactPublicKeyAlgebraicVerificationWorkerOptions = Readonly<{
     checkpointCustody?: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
     maximumWorkUnitCountPerPoll?: number;
     resume?: CompactPublicKeyAlgebraicVerificationResume;

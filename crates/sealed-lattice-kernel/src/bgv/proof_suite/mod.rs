@@ -70,7 +70,6 @@ mod compact_proof_contract;
 )]
 mod compact_proof_wire;
 mod compact_public_key_algebraic_verifier;
-#[cfg(test)]
 mod compact_public_key_statement_correspondence;
 #[cfg(test)]
 mod compact_public_key_static_catalog;
@@ -198,6 +197,9 @@ pub(crate) use committed_material::{
 };
 #[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) use compact_cfw_storage_diagnostic::selected_compact_cfw_storage_diagnostic_schedule;
+pub(in crate::bgv) use compact_public_key_statement_correspondence::{
+    SourceVerifiedCompactPublicKeyProof, VerifiedCompactPublicKeyStatementAuthority,
+};
 pub(crate) use component_material_stream::{
     ComponentMaterialOwnershipBinding, KeySwitchComponentMaterialTopology,
     KeySwitchComponentTraceColumn, VerifiedKeySwitchComponentMaterial,
@@ -395,6 +397,7 @@ pub(crate) use runtime_ffi::preflight_and_consume_verified_common_proof_with_fam
 pub(crate) use runtime_ffi::preflight_generated_common_proof_pending_package;
 pub(crate) use runtime_ffi::preflight_generated_common_proof_pending_statement;
 pub(crate) use runtime_ffi::preflight_verified_common_proof_pending_package;
+pub(in crate::bgv) use runtime_ffi::retain_accepted_setup_compact_public_key_verification_source;
 pub(crate) use runtime_ffi::retain_common_proof_verification_family_adapter_from_upstream;
 pub(crate) use runtime_ffi::retire_generated_common_proof_capabilities;
 pub(crate) use runtime_ffi::runtime_error_status;

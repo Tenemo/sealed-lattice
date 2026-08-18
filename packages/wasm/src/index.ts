@@ -14,6 +14,7 @@ import {
 } from './accepted-setup-key-relation-generation-runtime.js';
 import { beginAcceptedSetupPackageBuilder } from './accepted-setup-package-builder-runtime.js';
 import {
+    verifyAcceptedSetupCompactPublicKeyShareInClosedWorker,
     verifyAcceptedSetupPublicKeyShareInClosedWorker,
     verifyAcceptedSetupSameSecretInClosedWorker,
 } from './accepted-setup-proof-verification-runtime.js';
@@ -181,6 +182,7 @@ export {
     releaseSelectedSuiteRecordSource,
     TranscriptCoreKernelCommandError,
     verifyAcceptedSetupPublicKeyShareInClosedWorker,
+    verifyAcceptedSetupCompactPublicKeyShareInClosedWorker,
     verifyAcceptedSetupRelinearizationRoundOneAggregateInClosedWorker,
     verifyAcceptedSetupRelinearizationRoundOneInClosedWorker,
     verifyAcceptedSetupRelinearizationRoundTwoInClosedWorker,
@@ -200,6 +202,7 @@ export type {
 } from './accepted-setup-assembly-runtime.js';
 export type { AcceptedSetupPackageBuilder } from './accepted-setup-package-builder-runtime.js';
 export type {
+    AcceptedSetupCompactPublicKeyVerificationInput,
     AcceptedSetupProofVerificationInput,
     AcceptedSetupSameSecretProofVerificationInput,
 } from './accepted-setup-proof-verification-runtime.js';

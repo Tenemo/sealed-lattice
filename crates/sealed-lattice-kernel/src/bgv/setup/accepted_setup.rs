@@ -16,6 +16,9 @@ mod verified_public_randomness;
 mod verified_terminals;
 mod vss_qualification;
 
+pub(in crate::bgv) use self::verification_population::{
+    commit_source_verified_compact_public_key_proof, discard_compact_public_key_verification_source,
+};
 pub(in crate::bgv) use self::verified_public_randomness::{
     VerifiedPublicRandomness, verify_public_randomness_board_sources,
 };

@@ -230,7 +230,6 @@ impl VerifiedKeyRelationColumnEvaluator {
     /// Recomputes one complete verifier-sequence trace row from the accepted
     /// public-randomness terminal. The compact emitted-byte correspondence
     /// owner uses this before any proof result can be treated as source-bound.
-    #[cfg(test)]
     pub(in crate::bgv::proof_suite) fn verifier_owned_trace_rows(
         &self,
         column_ordinal: u32,

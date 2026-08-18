@@ -312,9 +312,12 @@ impl VerifiedCompactPublicKeyTransport {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn public_input_view(&self) -> VerifiedCompactPublicInputTransportView<'_> {
         self.public_input.view()
+    }
+
+    pub(crate) fn canonical_proof_bytes(&self) -> &[u8] {
+        &self.canonical_proof_bytes
     }
 
     pub(super) const fn public_input_owner(&self) -> &VerifiedCompactPublicInputTransport {

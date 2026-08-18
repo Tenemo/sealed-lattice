@@ -562,6 +562,11 @@ pub(crate) struct AlgebraicallyVerifiedCompactPublicKeyProof {
 }
 
 impl AlgebraicallyVerifiedCompactPublicKeyProof {
+    #[cfg(test)]
+    pub(crate) const fn transport(&self) -> &VerifiedCompactPublicKeyTransport {
+        &self.transport
+    }
+
     pub(crate) fn into_transport(self) -> VerifiedCompactPublicKeyTransport {
         self.transport
     }

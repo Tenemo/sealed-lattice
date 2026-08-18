@@ -105,20 +105,24 @@ and target release remain incomplete or internal.
   All 122 transported public columns correspond to that accepted statement
   source. This is native prototype evidence for one candidate; it does not
   connect the construction masking theorem to every emitted byte, establish
-  salted-Merkle or EPRO privacy, or mint a capability.
-  Raw release-kernel begin, resume, bounded-poll, cursor-copy, and cancellation
-  functions own the same verifier state. An internal TypeScript closed-worker
-  driver publishes and restores the cursor, suppresses publication during
-  deterministic replay, preserves typed refusals, returns a positive
-  `VerificationResult` only after algebraic completion, and cancels unfinished
-  operations. A concrete protocol adapter binds the verifier's source list and
-  safe-boundary ordinal to the authenticated checkpoint store, retains the
-  previous committed cursor across interrupted replacement, restores after
-  process-local store reconstruction, and fails closed on missing or corrupt
-  state. It deliberately mints no authority and is not yet installed in the
-  production browser-worker flow. Bounded transport and terminal WHIR work,
-  the full equation-invalid hostile corpus, and the capability transition
-  remain absent.
+  salted-Merkle or EPRO privacy.
+  A source-bound accepted-setup release ABI now retains the exact statement
+  authority and same-secret prerequisite, derives all four transport bindings
+  internally, and carries one linear handle through prepared, running, and
+  positively verified states. It can begin or restore, bounded-poll, copy a
+  cursor, cancel, and discard. Only after algebraic verification and complete
+  source correspondence does it expose a proof capability; finishing that
+  capability inserts the exact public-key-share terminal into the accepted
+  setup assembly. The TypeScript closed-worker driver returns `isValid: true`
+  only after that one-shot commit and retires prepared, running, or positive
+  authority on every refusal and cancellation path. A concrete protocol
+  adapter binds the verifier's source list and safe-boundary ordinal to the
+  authenticated checkpoint store, retains the previous committed cursor across
+  interrupted replacement, restores after process-local store reconstruction,
+  and fails closed on missing or corrupt state. It is not yet installed in the
+  production browser-worker flow. Transport revalidation, terminal WHIR work,
+  and the final 122-column source reconstruction remain synchronous; the full
+  equation-invalid hostile corpus and complete durable lifecycle remain open.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -182,17 +186,18 @@ ceremony or supported-phone qualification.
 ### Remaining completion boundary
 
 - No exact suite is frozen or selectable.
-- No production compact generation API, workflow-capability handoff, or complete
-  compact generation and verification ABI exists. The release
+- No production compact generation API, end-to-end workflow-capability handoff,
+  or complete compact generation and verification ABI pair exists. The release
   transport ABI checks canonical structure, transcript chronology, query
-  derivation, and Merkle openings only. A separate raw kernel ABI and internal
-  closed-worker driver can begin or restore, bounded-poll, publish source-bound
-  safe cursors through a custody contract, cancel, and return the terminal
-  algebraic `VerificationResult`. This covers only the bounded CFW accumulator
-  after synchronous transport revalidation. The protocol package now supplies
-  a concrete authenticated-store adapter for those CFW cursors, but it is not
-  connected to the production browser-worker host, complete transported
-  equation-invalid hostile corpus, or capability handoff.
+  derivation, and Merkle openings only. The accepted-setup source-bound ABI can
+  now carry one public-key-share verification through positive capability
+  commit, while its internal closed-worker driver publishes source-bound safe
+  cursors through a custody contract and preserves typed refusals. Its bounded
+  portion still covers only the CFW accumulator after synchronous transport
+  revalidation; terminal WHIR and source-root reconstruction are synchronous.
+  The protocol checkpoint-store adapter is not connected to the production
+  browser-worker host or the complete transported equation-invalid hostile
+  corpus.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the

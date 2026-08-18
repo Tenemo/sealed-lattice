@@ -141,6 +141,28 @@ describe('foundation ceremony Rust/WASM boundary', () => {
         expect(
             commandRuntime.wasmExports.sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count?.(),
         ).toBe(290);
+        for (const acceptedCompactExport of [
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_begin_verification,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_resume_verification,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_verification_poll,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_cancel_verification,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_finish_verification,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_discard_capability,
+        ]) {
+            expect(acceptedCompactExport).toBeTypeOf('function');
+        }
         const compactPublicKeyBindings = {
             suiteIdentifier: new Uint8Array(64).fill(0x11),
             applicationStatementHash: new Uint8Array(64).fill(0x22),
@@ -163,6 +185,12 @@ describe('foundation ceremony Rust/WASM boundary', () => {
                 Uint8Array.of(2),
             ),
         ).toEqual({ kind: 'refused', refusalReason: 'wrongContext' });
+        expect(
+            compactPublicKeyBoundary.prepareAcceptedSetupCompactPublicKeyVerification(
+                1,
+                Uint8Array.of(1),
+            ),
+        ).toEqual({ kind: 'refused', refusalReason: 'consumedState' });
         expect(
             commonProofExportNames.some((exportName) =>
                 permittedOpaqueBindingExports.has(exportName)

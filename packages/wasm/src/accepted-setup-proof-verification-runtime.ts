@@ -1,4 +1,7 @@
-import { refusalReasonCodes } from '@sealed-lattice/types';
+import {
+    refusalReasonCodes,
+    type VerificationResult,
+} from '@sealed-lattice/types';
 
 import {
     requireAcceptedSetupVerificationAssemblyKernelOwner,
@@ -6,11 +9,16 @@ import {
 } from './accepted-setup-assembly-runtime.js';
 import { isUint8Array } from './byte-array.js';
 import {
+    CanonicalStreamCancellationError,
     CanonicalStreamCleanupError,
     CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
 } from './canonical-stream-runtime.js';
+import {
+    CommonProofVerificationKernelBoundary,
+    yieldBrowserWorkerTurn,
+} from './common-proof-worker-runtime/kernel-boundaries.js';
 import {
     applyClosedWorkerGeneratedCommonProofCapability,
     applyClosedWorkerVerifiedCommonProofCapability,
@@ -20,6 +28,8 @@ import {
     type AuthenticatedCommonProofInputStore,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
+    type CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    type CompactPublicKeyAlgebraicVerificationWorkerOptions,
     type CommonProofVerificationWorkerOptions,
 } from './common-proof-worker-runtime/runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
@@ -89,6 +99,15 @@ export type AcceptedSetupSameSecretProofVerificationInput =
         Readonly<{
             vssLowDegreeEvidence: VerifiedVssLowDegreeEvidence;
         }>;
+
+export type AcceptedSetupCompactPublicKeyVerificationInput = Readonly<{
+    assembly: AcceptedSetupVerificationSession;
+    canonicalApplicationStatementBytes: Uint8Array;
+    canonicalProofBytes: Uint8Array;
+    canonicalPublicInputBytes: Uint8Array;
+    kernel: TranscriptCoreKernel;
+    options?: CompactPublicKeyAlgebraicVerificationWorkerOptions;
+}>;
 
 type AcceptedSetupProofVerificationCoreInput = Omit<
     AcceptedSetupProofVerificationInput,
@@ -604,6 +623,360 @@ const verifyAcceptedSetupProofInClosedWorker = async (
     if (operationFailed) {
         throw operationFailure;
     }
+};
+
+const defaultCompactPublicKeyMaximumWorkUnitCountPerPoll = 4_096;
+
+const throwIfCompactPublicKeyVerificationCancelled = (
+    signal: AbortSignal | undefined,
+): void => {
+    if (signal?.aborted === true) {
+        throw new CanonicalStreamCancellationError();
+    }
+};
+
+const restoreCompactPublicKeyVerificationCheckpoint = async (
+    kernel: CommonProofVerificationKernelBoundary,
+    checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+): Promise<
+    Readonly<{
+        canonicalCheckpointBytes: Uint8Array<ArrayBuffer>;
+        safeBoundaryOrdinal: number;
+    }>
+> => {
+    let restoredCheckpoint: Readonly<{
+        canonicalCheckpointBytes: Uint8Array;
+        safeBoundaryOrdinal: number;
+    }>;
+    try {
+        restoredCheckpoint =
+            await checkpointCustody.restoreAuthenticatedCheckpoint();
+    } catch (error) {
+        throw new CanonicalStreamInternalError(
+            'The browser store could not authenticate and restore the accepted-setup compact public-key checkpoint.',
+            error,
+        );
+    }
+    if (typeof restoredCheckpoint !== 'object' || restoredCheckpoint === null) {
+        throw new CanonicalStreamInternalError(
+            'The browser store returned a malformed accepted-setup compact public-key checkpoint record.',
+        );
+    }
+    const canonicalCheckpointBytes =
+        restoredCheckpoint.canonicalCheckpointBytes;
+    const expectedByteLength =
+        kernel.compactPublicKeyAlgebraicVerificationCheckpointByteLength();
+    if (
+        !(canonicalCheckpointBytes instanceof Uint8Array) ||
+        !(canonicalCheckpointBytes.buffer instanceof ArrayBuffer) ||
+        canonicalCheckpointBytes.byteOffset !== 0 ||
+        canonicalCheckpointBytes.byteLength !== expectedByteLength ||
+        canonicalCheckpointBytes.buffer.byteLength !== expectedByteLength
+    ) {
+        if (canonicalCheckpointBytes instanceof Uint8Array) {
+            canonicalCheckpointBytes.fill(0);
+        }
+        throw new CanonicalStreamInternalError(
+            'The browser store returned malformed accepted-setup compact public-key checkpoint bytes.',
+        );
+    }
+    if (
+        !Number.isSafeInteger(restoredCheckpoint.safeBoundaryOrdinal) ||
+        restoredCheckpoint.safeBoundaryOrdinal < 0 ||
+        restoredCheckpoint.safeBoundaryOrdinal >=
+            kernel.compactPublicKeyAlgebraicVerificationSafeBoundaryCount()
+    ) {
+        canonicalCheckpointBytes.fill(0);
+        throw new CanonicalStreamInternalError(
+            'The browser store returned an unassigned accepted-setup compact public-key checkpoint boundary.',
+        );
+    }
+    return Object.freeze({
+        canonicalCheckpointBytes:
+            canonicalCheckpointBytes as Uint8Array<ArrayBuffer>,
+        safeBoundaryOrdinal: restoredCheckpoint.safeBoundaryOrdinal,
+    });
+};
+
+const publishCompactPublicKeyVerificationCheckpoint = async (
+    kernel: CommonProofVerificationKernelBoundary,
+    operationHandle: number,
+    checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    safeBoundaryOrdinal: number,
+): Promise<void> => {
+    const canonicalCheckpointBytes =
+        kernel.copyAcceptedSetupCompactPublicKeyVerificationCheckpoint(
+            operationHandle,
+        );
+    try {
+        try {
+            await checkpointCustody.publishAuthenticatedCheckpoint(
+                canonicalCheckpointBytes,
+                safeBoundaryOrdinal,
+            );
+        } catch (error) {
+            throw new CanonicalStreamInternalError(
+                'The browser store could not atomically publish the accepted-setup compact public-key checkpoint.',
+                error,
+            );
+        }
+    } finally {
+        canonicalCheckpointBytes.fill(0);
+    }
+};
+
+/**
+ * Verifies and inserts one compact public-key-share proof using only bindings
+ * derived from the accepted package. The positive result is returned after
+ * transport, CFW, both WHIR epochs, complete statement correspondence, and
+ * one-shot terminal-slot commit all succeed.
+ */
+export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
+    input: AcceptedSetupCompactPublicKeyVerificationInput,
+): Promise<VerificationResult<undefined>> => {
+    if (typeof globalThis.document !== 'undefined') {
+        throw new CanonicalStreamInternalError(
+            'Accepted-setup compact public-key verification may only run inside the dedicated WASM worker.',
+        );
+    }
+    const context = resolveCommonProofKernelContext(input.kernel);
+    if (context === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The loaded WASM kernel has no common-proof worker context.',
+        );
+    }
+    const assemblyOwner = requireAcceptedSetupVerificationAssemblyKernelOwner(
+        input.assembly,
+        input.kernel,
+        'collecting',
+    );
+    const canonicalApplicationStatementBytes = requireCanonicalBytes(
+        input.canonicalApplicationStatementBytes,
+    );
+    const canonicalProofBytes = requireCanonicalBytes(
+        input.canonicalProofBytes,
+    );
+    const canonicalPublicInputBytes = requireCanonicalBytes(
+        input.canonicalPublicInputBytes,
+    );
+    const options = input.options ?? {};
+    const maximumWorkUnitCountPerPoll =
+        options.maximumWorkUnitCountPerPoll ??
+        defaultCompactPublicKeyMaximumWorkUnitCountPerPoll;
+    if (
+        !Number.isSafeInteger(maximumWorkUnitCountPerPoll) ||
+        maximumWorkUnitCountPerPoll <= 0 ||
+        maximumWorkUnitCountPerPoll > maximumWasm32UnsignedInteger
+    ) {
+        throw new CanonicalStreamResourceError(
+            'The accepted-setup compact public-key work-unit bound must be a positive unsigned 32-bit integer.',
+        );
+    }
+    const signal = options.signal;
+    const yieldControl = options.yieldControl ?? yieldBrowserWorkerTurn;
+    const resume = options.resume;
+    const checkpointCustody =
+        options.checkpointCustody ?? resume?.checkpointCustody;
+    const kernel = new CommonProofVerificationKernelBoundary(context);
+    let preparedHandle = 0;
+    let operationHandle = 0;
+    let verifiedCapabilityHandle = 0;
+    let deterministicReplayComplete = resume === undefined;
+    let expectedResumeSafeBoundaryOrdinal: number | undefined;
+    let operationResult: VerificationResult<undefined> | undefined;
+    let operationFailure: unknown;
+
+    try {
+        throwIfCompactPublicKeyVerificationCancelled(signal);
+        const preparation =
+            kernel.prepareAcceptedSetupCompactPublicKeyVerification(
+                assemblyOwner.handle,
+                canonicalApplicationStatementBytes,
+            );
+        if (preparation.kind === 'refused') {
+            operationResult = Object.freeze({
+                isValid: false,
+                refusalReason: preparation.refusalReason,
+            });
+        } else {
+            preparedHandle = preparation.preparedHandle;
+            const begin =
+                resume === undefined
+                    ? kernel.beginAcceptedSetupCompactPublicKeyVerification(
+                          preparedHandle,
+                          canonicalProofBytes,
+                          canonicalPublicInputBytes,
+                      )
+                    : await (async () => {
+                          const restoredCheckpoint =
+                              await restoreCompactPublicKeyVerificationCheckpoint(
+                                  kernel,
+                                  resume.checkpointCustody,
+                              );
+                          expectedResumeSafeBoundaryOrdinal =
+                              restoredCheckpoint.safeBoundaryOrdinal;
+                          try {
+                              throwIfCompactPublicKeyVerificationCancelled(
+                                  signal,
+                              );
+                              return kernel.resumeAcceptedSetupCompactPublicKeyVerification(
+                                  preparedHandle,
+                                  canonicalProofBytes,
+                                  canonicalPublicInputBytes,
+                                  restoredCheckpoint.canonicalCheckpointBytes,
+                              );
+                          } finally {
+                              restoredCheckpoint.canonicalCheckpointBytes.fill(
+                                  0,
+                              );
+                          }
+                      })();
+            if (begin.kind === 'refused') {
+                operationResult = Object.freeze({
+                    isValid: false,
+                    refusalReason: begin.refusalReason,
+                });
+            } else {
+                preparedHandle = 0;
+                operationHandle = begin.operationHandle;
+                for (;;) {
+                    throwIfCompactPublicKeyVerificationCancelled(signal);
+                    const poll =
+                        kernel.pollAcceptedSetupCompactPublicKeyVerification(
+                            operationHandle,
+                            maximumWorkUnitCountPerPoll,
+                        );
+                    switch (poll.kind) {
+                        case 'progress':
+                            if (
+                                deterministicReplayComplete &&
+                                checkpointCustody !== undefined &&
+                                poll.checkpointSafeBoundaryOrdinal !== undefined
+                            ) {
+                                await publishCompactPublicKeyVerificationCheckpoint(
+                                    kernel,
+                                    operationHandle,
+                                    checkpointCustody,
+                                    poll.checkpointSafeBoundaryOrdinal,
+                                );
+                            }
+                            await yieldControl();
+                            break;
+                        case 'resume-complete':
+                            if (
+                                resume === undefined ||
+                                deterministicReplayComplete ||
+                                poll.checkpointSafeBoundaryOrdinal !==
+                                    expectedResumeSafeBoundaryOrdinal
+                            ) {
+                                throw new CanonicalStreamInternalError(
+                                    'The accepted-setup compact verifier replayed a different checkpoint boundary than authenticated custody restored.',
+                                );
+                            }
+                            deterministicReplayComplete = true;
+                            await yieldControl();
+                            break;
+                        case 'refused':
+                            operationHandle = 0;
+                            operationResult = Object.freeze({
+                                isValid: false,
+                                refusalReason: poll.refusalReason,
+                            });
+                            break;
+                        case 'complete': {
+                            if (!deterministicReplayComplete) {
+                                throw new CanonicalStreamInternalError(
+                                    'The accepted-setup compact verifier completed before deterministic checkpoint replay.',
+                                );
+                            }
+                            operationHandle = 0;
+                            verifiedCapabilityHandle =
+                                poll.verifiedCapabilityHandle;
+                            const refusalReason =
+                                kernel.finishAcceptedSetupCompactPublicKeyVerification(
+                                    verifiedCapabilityHandle,
+                                );
+                            if (refusalReason === undefined) {
+                                verifiedCapabilityHandle = 0;
+                                operationResult = Object.freeze({
+                                    isValid: true,
+                                    value: undefined,
+                                });
+                            } else {
+                                operationResult = Object.freeze({
+                                    isValid: false,
+                                    refusalReason,
+                                });
+                            }
+                            break;
+                        }
+                    }
+                    if (operationResult !== undefined) {
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        operationFailure = error;
+    }
+
+    const cleanupFailures: unknown[] = [];
+    if (verifiedCapabilityHandle !== 0) {
+        try {
+            kernel.discardAcceptedSetupCompactPublicKeyCapability(
+                verifiedCapabilityHandle,
+            );
+        } catch (cleanupFailure) {
+            cleanupFailures.push(cleanupFailure);
+        }
+    }
+    if (operationHandle !== 0) {
+        try {
+            kernel.cancelAcceptedSetupCompactPublicKeyVerification(
+                operationHandle,
+            );
+        } catch (cleanupFailure) {
+            cleanupFailures.push(cleanupFailure);
+        }
+    }
+    if (preparedHandle !== 0) {
+        try {
+            kernel.discardAcceptedSetupCompactPublicKeyPreparedVerification(
+                preparedHandle,
+            );
+        } catch (cleanupFailure) {
+            cleanupFailures.push(cleanupFailure);
+        }
+    }
+    if (checkpointCustody !== undefined) {
+        try {
+            await checkpointCustody.release();
+        } catch (cleanupFailure) {
+            cleanupFailures.push(cleanupFailure);
+        }
+    }
+    if (cleanupFailures.length > 0) {
+        throw new CanonicalStreamInternalError(
+            'Accepted-setup compact public-key verification failed to retire all worker-owned authority.',
+            Object.freeze({ cleanupFailures, operationFailure }),
+        );
+    }
+    if (operationFailure !== undefined) {
+        if (operationFailure instanceof Error) {
+            throw operationFailure;
+        }
+        throw new CanonicalStreamInternalError(
+            'Accepted-setup compact public-key verification failed with a non-error value.',
+            operationFailure,
+        );
+    }
+    if (operationResult === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The accepted-setup compact public-key verifier returned no terminal result.',
+        );
+    }
+    return operationResult;
 };
 
 /** Verifies and inserts one selected same-secret proof into its exact slot. */

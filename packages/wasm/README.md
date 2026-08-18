@@ -40,24 +40,26 @@ WHIR algebra after transport, and guarded native evidence accepts one complete
 selected-size public-key proof. The same guarded owner independently derives
 its verifier statement and checks all 122 transported public columns, including
 rebuilding the four statement-owned setup-polynomial roots. That source
-correspondence is not yet a worker-facing capability. Raw kernel exports can
-begin, bounded-poll, and cancel that verifier state. They can also copy a
-fixed 400-byte source-bound safe cursor and restore only by revalidating the
-exact transported bytes and
-replaying deterministically from genesis. An internal common-proof worker
-driver yields between bounded polls, publishes and restores that cursor through
-an authenticated-custody contract, prevents publication during replay,
-preserves typed refusals, returns a positive `VerificationResult` only at
-algebraic completion, and cancels unfinished operations. The five CFW
+correspondence now gates a source-bound accepted-setup capability. Release
+kernel exports prepare from the accepted package, begin or restore,
+bounded-poll, copy a fixed 400-byte safe cursor, cancel, finish the positive
+capability, and explicitly discard every other linear state. Restoration
+revalidates the exact transported bytes and replays deterministically from
+genesis. An internal common-proof worker driver yields between bounded polls,
+publishes and restores that cursor through an authenticated-custody contract,
+prevents publication during replay, preserves typed refusals, and returns a
+positive `VerificationResult` only after source correspondence and one-shot
+accepted-setup terminal commit. The five CFW
 polynomial transforms are incremental. The kernel exposes 290 fixed cursor
 ordinals at 65,536-work-unit intervals across 19,005,440 of the selected CFW
 phase's 19,038,593 work units; the remaining 33,153 CFW units and terminal WHIR
-work do not yet form another durable boundary. The protocol package supplies a
+work do not yet form another durable boundary, and the final 122-column source
+reconstruction remains synchronous. The protocol package supplies a
 concrete authenticated-store adapter for those cursors, including
 copy-on-write predecessor retention and one-shot restoration after
 checkpoint-store reconstruction, but the production browser-worker host does
-not install it yet. The driver does not mint proof authority. Compact
-generation and proof capabilities are not worker-facing runtime capabilities.
+not install it yet. Compact generation is not a worker-facing runtime
+capability, and no complete generation/verification ABI pair exists.
 
 Test-only proof workbenches and native or desktop results are not an accepted
 ceremony or supported-phone evidence. The repository [README](../../README.md)
