@@ -85,22 +85,33 @@ and target release remain incomplete or internal.
   algebraic verifier then independently derives the structured public CFW
   contribution and verifies the CFW transcript, both WHIR epochs, all six code
   switches, both terminal blinded relations, and the authenticated source and
-  mask spot checks. The verifier exposes a canonical 400-byte safe cursor that
-  binds the four public-input coordinates, complete proof and public-input
-  digests, and cumulative completed work. It contains no opaque transform
-  state: restoration revalidates the transported bytes and deterministically
-  replays from genesis before live work continues. A guarded current-source
-  run destroys the first verifier, restores a fresh verifier from that cursor,
-  reproduces the cursor byte for byte, and accepts the exact emitted proof.
-  This is native prototype evidence only. Raw release-kernel begin, resume,
-  bounded-poll, cursor-copy, and cancellation functions own the same verifier
-  state. An internal TypeScript closed-worker driver publishes and restores the
-  cursor through an authenticated-custody contract, suppresses publication
-  during deterministic replay, preserves typed refusals, returns a positive
+  mask spot checks. All five CFW polynomial transforms are incremental, and the
+  verifier coalesces caller poll slices to kernel-owned boundaries spaced by
+  65,536 work units. The selected CFW phase contains exactly 19,038,593 work
+  units: 290 cursor boundaries cover 19,005,440 units and leave one 33,153-unit
+  terminal CFW segment before the still-synchronous WHIR terminal work. Each
+  boundary exposes a canonical 400-byte safe cursor that binds the four
+  public-input coordinates, complete proof and public-input digests, and
+  cumulative completed work. It contains no opaque transform state:
+  restoration revalidates the transported bytes and deterministically replays
+  from genesis before live work continues. A guarded current-source run
+  destroys the first verifier, restores a fresh verifier from boundary zero,
+  reproduces that cursor byte for byte, observes all 290 safe-boundary
+  ordinals, and accepts the exact emitted proof. This is native prototype
+  evidence only.
+  Raw release-kernel begin, resume, bounded-poll, cursor-copy, and cancellation
+  functions own the same verifier state. An internal TypeScript closed-worker
+  driver publishes and restores the cursor, suppresses publication during
+  deterministic replay, preserves typed refusals, returns a positive
   `VerificationResult` only after algebraic completion, and cancels unfinished
-  operations. It deliberately mints no authority. The full equation-invalid
-  hostile corpus, a concrete durable browser-custody adapter, and the
-  capability transition remain absent.
+  operations. A concrete protocol adapter binds the verifier's source list and
+  safe-boundary ordinal to the authenticated checkpoint store, retains the
+  previous committed cursor across interrupted replacement, restores after
+  process-local store reconstruction, and fails closed on missing or corrupt
+  state. It deliberately mints no authority and is not yet installed in the
+  production browser-worker flow. Bounded transport and terminal WHIR work,
+  the full equation-invalid hostile corpus, and the capability transition
+  remain absent.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -171,9 +182,10 @@ ceremony or supported-phone qualification.
   closed-worker driver can begin or restore, bounded-poll, publish source-bound
   safe cursors through a custody contract, cancel, and return the terminal
   algebraic `VerificationResult`. This covers only the bounded CFW accumulator
-  after synchronous transport revalidation; it has no concrete durable browser
-  store adapter, complete transported equation-invalid hostile corpus, or
-  capability handoff.
+  after synchronous transport revalidation. The protocol package now supplies
+  a concrete authenticated-store adapter for those CFW cursors, but it is not
+  connected to the production browser-worker host, complete transported
+  equation-invalid hostile corpus, or capability handoff.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the
@@ -181,8 +193,9 @@ ceremony or supported-phone qualification.
   applicable SHAKE256 fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
-- Browser custody does not yet provide complete proactive authenticated
-  checkpointing and exact resume for every dominant compact-proof boundary.
+- Browser custody does not yet connect the compact CFW cursor adapter to the
+  production worker host or provide bounded transport, bounded terminal WHIR,
+  and exact resume for every dominant compact-proof boundary.
 - The accepted setup-to-release capability flow is not connected end to end.
 - No compact proof has completed the scalar release-WebAssembly desktop-browser
   evidence path after guarded native generation and independent transport and

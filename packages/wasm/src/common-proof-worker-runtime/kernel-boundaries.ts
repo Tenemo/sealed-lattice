@@ -65,6 +65,7 @@ export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
 const canonicalCompactPublicKeyAlgebraicVerificationCheckpointByteLength = 400;
+const canonicalCompactPublicKeyAlgebraicVerificationSafeBoundaryCount = 290;
 
 const destroyOwnedKernelBoundaryInput = (bytes: Uint8Array): void => {
     if (!(bytes.buffer instanceof ArrayBuffer)) {
@@ -285,10 +286,12 @@ type CompactPublicKeyAlgebraicVerificationKernelBegin =
 
 type CompactPublicKeyAlgebraicVerificationKernelPoll =
     | Readonly<{
+          checkpointSafeBoundaryOrdinal?: number;
           completedWorkUnitCount: number;
           kind: 'progress';
       }>
     | Readonly<{
+          checkpointSafeBoundaryOrdinal: number;
           completedWorkUnitCount: number;
           kind: 'resume-complete';
       }>
@@ -1962,6 +1965,33 @@ export class CommonProofVerificationKernelBoundary {
         );
     }
 
+    public compactPublicKeyAlgebraicVerificationSafeBoundaryCount(): number {
+        return this.#context.runExclusive(
+            'compact public-key algebraic verification safe-boundary count',
+            () =>
+                this.#requireCompactPublicKeyAlgebraicVerificationSafeBoundaryCount(),
+        );
+    }
+
+    #requireCompactPublicKeyAlgebraicVerificationSafeBoundaryCount(): number {
+        const safeBoundaryCount = requireUnsigned32(
+            resolveNumberExport(
+                this.#context.wasmExports,
+                'sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count',
+            )(),
+            'The compact public-key algebraic verification safe-boundary count',
+        );
+        if (
+            safeBoundaryCount !==
+            canonicalCompactPublicKeyAlgebraicVerificationSafeBoundaryCount
+        ) {
+            throw kernelFailure(
+                'The compact public-key algebraic verification checkpoint schedule disagrees with the worker.',
+            );
+        }
+        return safeBoundaryCount;
+    }
+
     #startCompactPublicKeyAlgebraicVerification(
         bindings: CompactPublicKeyTransportBindings,
         proofBytes: Uint8Array,
@@ -2159,8 +2189,10 @@ export class CommonProofVerificationKernelBoundary {
         return this.#context.runExclusive(
             'compact public-key algebraic verification poll',
             () => {
+                const safeBoundaryCount =
+                    this.#requireCompactPublicKeyAlgebraicVerificationSafeBoundaryCount();
                 const metadataPointer =
-                    this.#memoryBoundary.allocateZeroedWords(2);
+                    this.#memoryBoundary.allocateZeroedWords(3);
                 try {
                     const status = resolveNumberExport(
                         this.#context.wasmExports,
@@ -2170,6 +2202,7 @@ export class CommonProofVerificationKernelBoundary {
                         maximumWorkUnitCount,
                         metadataPointer,
                         metadataPointer + wasm32WordByteLength,
+                        metadataPointer + 2 * wasm32WordByteLength,
                     );
                     const refusalReason =
                         decodeCompactPublicKeyAlgebraicVerificationStatus(
@@ -2182,8 +2215,11 @@ export class CommonProofVerificationKernelBoundary {
                             refusalReason,
                         });
                     }
-                    const [pollKind, completedWorkUnitCount] =
-                        this.#memoryBoundary.readWords(metadataPointer, 2);
+                    const [
+                        pollKind,
+                        completedWorkUnitCount,
+                        checkpointSafeBoundaryOrdinal,
+                    ] = this.#memoryBoundary.readWords(metadataPointer, 3);
                     switch (pollKind) {
                         case compactPublicKeyAlgebraicVerificationPollProgress: {
                             if (
@@ -2194,7 +2230,21 @@ export class CommonProofVerificationKernelBoundary {
                                     'The compact public-key algebraic verifier reported invalid bounded progress.',
                                 );
                             }
+                            if (
+                                checkpointSafeBoundaryOrdinal !==
+                                    noSecondPollValue &&
+                                checkpointSafeBoundaryOrdinal >=
+                                    safeBoundaryCount
+                            ) {
+                                throw kernelFailure(
+                                    'The compact public-key algebraic verifier reported an unassigned checkpoint boundary.',
+                                );
+                            }
                             return Object.freeze({
+                                ...(checkpointSafeBoundaryOrdinal ===
+                                noSecondPollValue
+                                    ? {}
+                                    : { checkpointSafeBoundaryOrdinal }),
                                 completedWorkUnitCount,
                                 kind: 'progress',
                             });
@@ -2208,13 +2258,28 @@ export class CommonProofVerificationKernelBoundary {
                                     'The compact public-key algebraic verifier reported invalid bounded replay completion.',
                                 );
                             }
+                            if (
+                                checkpointSafeBoundaryOrdinal ===
+                                    noSecondPollValue ||
+                                checkpointSafeBoundaryOrdinal >=
+                                    safeBoundaryCount
+                            ) {
+                                throw kernelFailure(
+                                    'The compact public-key algebraic verifier reported an unassigned replay checkpoint boundary.',
+                                );
+                            }
                             return Object.freeze({
+                                checkpointSafeBoundaryOrdinal,
                                 completedWorkUnitCount,
                                 kind: 'resume-complete',
                             });
                         }
                         case compactPublicKeyAlgebraicVerificationPollComplete: {
-                            if (completedWorkUnitCount !== 0) {
+                            if (
+                                completedWorkUnitCount !== 0 ||
+                                checkpointSafeBoundaryOrdinal !==
+                                    noSecondPollValue
+                            ) {
                                 throw kernelFailure(
                                     'The completed compact public-key algebraic verifier reported residual work.',
                                 );
@@ -2229,7 +2294,7 @@ export class CommonProofVerificationKernelBoundary {
                 } finally {
                     this.#memoryBoundary.zeroAndDeallocate(
                         metadataPointer,
-                        2 * wasm32WordByteLength,
+                        3 * wasm32WordByteLength,
                     );
                 }
             },

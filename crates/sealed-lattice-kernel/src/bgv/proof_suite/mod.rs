@@ -241,7 +241,10 @@ pub(crate) use galois_source_material::{
     VerifiedGaloisSourceMaterialBatch, VerifiedGaloisSourceMaterialBatchPreflight,
 };
 pub(crate) use merkle::{ProofLeafVisibility, ProofTreeRole, ProofTreeValue};
-pub(crate) use polynomial::{ProofEvaluationDomain, ProofPolynomialError, evaluate_extension_at};
+pub(crate) use polynomial::{
+    BoundedProofPolynomialTransform, ProofEvaluationDomain, ProofPolynomialError,
+    evaluate_extension_at,
+};
 #[cfg(test)]
 pub(crate) use profile::FIRST_PROFILE_APPLICATION_FAMILIES;
 #[cfg(test)]

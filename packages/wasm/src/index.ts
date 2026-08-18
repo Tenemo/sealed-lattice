@@ -328,6 +328,7 @@ export type {
     ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
     ClosedWorkerCommonProofVerificationFamilyAdapter,
     ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
+    CompactPublicKeyAlgebraicVerificationCheckpointCustody,
     CommonProofCanonicalOutputStore,
     CommonProofExternalMemoryOperation,
     CommonProofExternalMemoryReadResult,

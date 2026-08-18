@@ -3195,6 +3195,9 @@ mod tests {
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::CompactPublicInputBindings,
                 compact_public_key_algebraic_verifier::{
+                    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+                    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+                    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
                     CompactPublicKeyAlgebraicVerification,
                     CompactPublicKeyAlgebraicVerificationPoll,
                 },
@@ -3355,6 +3358,7 @@ mod tests {
             {
                 CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
                     completed_work_unit_count,
+                    ..
                 } => {
                     assert!(completed_work_unit_count > 0);
                     algebraic_poll_count += 1;
@@ -7652,7 +7656,11 @@ mod tests {
         {
             CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
                 completed_work_unit_count,
-            } => completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            } => {
+                assert_eq!(checkpoint_safe_boundary_ordinal, Some(0));
+                completed_work_unit_count
+            }
             CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
                 panic!("a fresh verifier cannot complete checkpoint replay")
             }
@@ -7678,22 +7686,47 @@ mod tests {
         )
         .expect("the source-bound safe cursor starts deterministic replay");
         let mut algebraic_poll_count = 0_u64;
+        let mut completed_work_unit_count = 0_u64;
+        let mut next_safe_boundary_ordinal = 1_u32;
+        let mut observed_safe_boundary_count = 1_u32;
         let mut resume_complete_count = 0_u64;
+        let mut terminal_cfw_segment_poll_count = 0_u64;
         let verified_transport = loop {
             match resumed_verification
                 .advance(65_536)
                 .expect("bounded replay and continued algebraic verification succeed")
             {
                 CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
-                    completed_work_unit_count,
+                    completed_work_unit_count: slice_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 } => {
-                    assert!(completed_work_unit_count > 0);
+                    assert!(slice_work_unit_count > 0);
+                    if let Some(safe_boundary_ordinal) = checkpoint_safe_boundary_ordinal {
+                        assert_eq!(safe_boundary_ordinal, next_safe_boundary_ordinal);
+                        next_safe_boundary_ordinal += 1;
+                        observed_safe_boundary_count += 1;
+                    } else {
+                        terminal_cfw_segment_poll_count += 1;
+                        assert_eq!(
+                            slice_work_unit_count,
+                            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
+                                % COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+                        );
+                    }
+                    completed_work_unit_count = completed_work_unit_count
+                        .checked_add(slice_work_unit_count)
+                        .expect("the selected verifier work count fits u64");
                     algebraic_poll_count += 1;
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
-                    completed_work_unit_count,
+                    completed_work_unit_count: replayed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 } => {
-                    assert!(completed_work_unit_count > 0);
+                    assert!(replayed_work_unit_count > 0);
+                    assert_eq!(checkpoint_safe_boundary_ordinal, 0);
+                    completed_work_unit_count = completed_work_unit_count
+                        .checked_add(replayed_work_unit_count)
+                        .expect("the selected verifier work count fits u64");
                     resume_complete_count += 1;
                     assert_eq!(
                         resumed_verification
@@ -7708,14 +7741,34 @@ mod tests {
             }
         };
         assert_eq!(resume_complete_count, 1);
+        assert_eq!(terminal_cfw_segment_poll_count, 1);
+        assert_eq!(
+            observed_safe_boundary_count,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
+        );
+        assert_eq!(
+            next_safe_boundary_ordinal,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
+        );
+        assert_eq!(
+            completed_work_unit_count,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+        );
+        assert_eq!(
+            algebraic_poll_count,
+            u64::from(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT),
+        );
         assert_eq!(
             verified_transport.proof_view().canonical_bytes(),
             canonical_proof_bytes
         );
         println!(
-            "checkpointed compact public-key algebraic verification complete elapsed_milliseconds={} cfw_poll_count={} resume_complete_count={} canonical_proof_byte_length={}",
+            "checkpointed compact public-key algebraic verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} completed_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={}",
             verification_started_at.elapsed().as_millis(),
             algebraic_poll_count,
+            observed_safe_boundary_count,
+            terminal_cfw_segment_poll_count,
+            completed_work_unit_count,
             resume_complete_count,
             canonical_proof_bytes.len(),
         );

@@ -73,12 +73,19 @@ consequences are:
   cancel, and return the terminal algebraic `VerificationResult`. Its fixed
   400-byte safe cursor binds the four public-input coordinates, complete proof
   and public-input digests, and cumulative completed work; it serializes no
-  opaque transform state. Restoration revalidates the transported bytes and
-  deterministically replays from genesis before the custody contract may
-  publish newer state. The driver mints no authority and has no concrete
-  durable browser-store adapter, complete equation-invalid hostile corpus, or
-  capability handoff. Complete generation and verification release ABIs do not
-  exist.
+  opaque transform state. All five CFW polynomial transforms are incremental.
+  Kernel-owned 65,536-work-unit boundaries expose exactly 290 cursor ordinals
+  across 19,005,440 of the selected CFW phase's 19,038,593 work units, leaving
+  a 33,153-unit final CFW segment before the still-synchronous WHIR terminal
+  work. Restoration revalidates the transported bytes and deterministically
+  replays from genesis before newer state may be published. The protocol
+  adapter binds the exact source list and ordinal into authenticated storage,
+  keeps the last committed cursor when replacement is interrupted, restores
+  after process-local store reconstruction, and fails closed on missing or
+  corrupt state. The driver mints no authority, and that adapter is not yet
+  installed in the production browser-worker host. The complete
+  equation-invalid hostile corpus and capability handoff remain absent.
+  Complete generation and verification release ABIs do not exist.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
@@ -213,9 +220,11 @@ that a coherent snapshot is newest.
   schedule plus raw begin, resume, bounded-poll, source-bound cursor-copy, and
   cancellation functions for the internal algebraic verifier. A typed
   closed-worker driver now owns that authority-free verification result and an
-  authenticated-custody callback boundary, but there is no compact generation
-  API, concrete durable browser-store adapter, capability handoff, or final
-  generation and verification ABI pair.
+  authenticated-custody callback boundary. The protocol package now provides a
+  concrete authenticated-store adapter for the 290 bounded CFW cursor
+  ordinals, but it is not installed in the production browser-worker host.
+  There is no compact generation API, capability handoff, or final generation
+  and verification ABI pair.
 - `SEC-020`: Guarded selected-size native evidence covers the public-key
   family's complete response-generation schedule and one cold algebraic restore
   of its exact emitted proof from a source-bound safe cursor. A separate desktop
@@ -223,8 +232,8 @@ that a coherent snapshot is newest.
   exact CFW storage lifecycle and exposes an orders-of-magnitude physical-storage
   amplification. The current proof boundary above owns the candidate's
   acceptance status. These results do not establish release-WebAssembly proof
-  execution, a concrete durable common-worker browser-store integration,
-  complete durable browser custody, or supported-phone feasibility.
+  execution, production common-worker browser-store integration, complete
+  durable browser custody, or supported-phone feasibility.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

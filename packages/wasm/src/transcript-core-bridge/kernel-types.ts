@@ -1491,11 +1491,13 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         maximumWorkUnitCount: number,
         pollKindPointer: number,
         completedWorkUnitCountPointer: number,
+        checkpointSafeBoundaryOrdinalPointer: number,
     ) => number;
     sealed_lattice_compact_public_key_cancel_algebraic_verification?: (
         operationHandle: number,
     ) => number;
     sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length?: () => number;
+    sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count?: () => number;
     sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint?: (
         operationHandle: number,
         outputPointer: number,

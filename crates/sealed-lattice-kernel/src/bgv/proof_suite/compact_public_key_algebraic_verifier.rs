@@ -43,6 +43,12 @@ const INITIAL_WHIR_BATCH: u8 = 0;
 const PRE_CHALLENGE_WHIR_EPOCH: u8 = 1;
 const COMPACT_WHIR_BATCH_COUNT: usize = 4;
 const COMPACT_WHIR_CODE_SWITCH_COUNT: usize = 3;
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL: u64 =
+    65_536;
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT: u64 = 19_038_593;
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT: u32 =
+    (COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
+        / COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL) as u32;
 const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC: [u8; 8] = *b"SLCAVC01";
 pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH: usize =
     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC.len()
@@ -180,7 +186,14 @@ impl CompactPublicKeyAlgebraicVerificationCheckpoint {
         let canonical_public_input_binding = read_checkpoint_array(bytes, &mut cursor)?;
         let completed_work_unit_count =
             u64::from_le_bytes(read_checkpoint_array(bytes, &mut cursor)?);
-        if cursor != bytes.len() || completed_work_unit_count == 0 {
+        if cursor != bytes.len()
+            || completed_work_unit_count == 0
+            || !completed_work_unit_count.is_multiple_of(
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+            )
+            || completed_work_unit_count
+                > maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count()
+        {
             return Err(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint);
         }
         Ok(Self {
@@ -351,6 +364,7 @@ pub(crate) struct CompactPublicKeyCfwVerification {
     parsed: Option<ParsedCompactCfwTranscript>,
     accumulator: CompactStructuredWitnessCovectorAccumulator<CompactFactorOnePublicTransposeSource>,
     public_covector_continuation: Option<CompactCfwPublicMainCovectorContinuation>,
+    complete_handoff: Option<Box<AlgebraicallyVerifiedCompactCfwHandoff>>,
 }
 
 pub(crate) enum CompactPublicKeyCfwVerificationPoll {
@@ -424,6 +438,7 @@ impl CompactPublicKeyCfwVerification {
             parsed: Some(parsed),
             accumulator,
             public_covector_continuation: Some(public_covector_continuation),
+            complete_handoff: None,
         })
     }
 
@@ -432,56 +447,86 @@ impl CompactPublicKeyCfwVerification {
         maximum_work_unit_count: u64,
     ) -> Result<CompactPublicKeyCfwVerificationPoll, CompactPublicKeyAlgebraicVerificationError>
     {
-        match self.accumulator.advance(maximum_work_unit_count)? {
-            CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
-                completed_work_unit_count,
-                ..
-            } => Ok(CompactPublicKeyCfwVerificationPoll::WorkCompleted {
-                completed_work_unit_count,
-            }),
-            CompactStructuredWitnessCovectorAccumulatorPoll::Complete(source_covector) => {
-                let public_contributions = self.accumulator.completed_public_contributions()?;
-                let parsed = self
-                    .parsed
-                    .take()
-                    .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?;
-                let public_weights =
-                    compact_cfw_zero_evader_weights(parsed.joint_constraint_challenge);
-                let weighted_public_contribution = public_contributions
-                    .into_iter()
-                    .zip(public_weights)
-                    .map(|(contribution, weight)| contribution * weight)
-                    .sum::<CompactChallengeField>();
-                let claim_batch = verify_compact_cfw_transcript_with_weighted_public_contribution(
-                    parsed.geometry,
-                    &parsed.transcript,
-                    parsed.constraint_combining_challenge,
-                    &parsed.equality_point,
-                    &parsed.sumcheck_point,
-                    parsed.joint_constraint_challenge,
-                    weighted_public_contribution,
-                )?;
-                let main_relation_target = claim_batch
-                    .main_relation_target_with_masked_cross_epoch_claims(
-                        &parsed.cross_epoch_claims,
-                        parsed.opening_batching_challenge,
-                    )?;
-                let cross_epoch_point = parsed.cross_epoch_claims.point().to_vec();
-                let masked_pre_challenge_target = parsed.cross_epoch_claims.disclosed_values()[0];
-                let public_covectors_after_first_fold = self
-                    .public_covector_continuation
-                    .take()
-                    .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?
-                    .finish_after_matrix_accumulation(source_covector)?;
-                Ok(CompactPublicKeyCfwVerificationPoll::Complete(Box::new(
-                    AlgebraicallyVerifiedCompactCfwHandoff {
-                        main_relation_target,
-                        public_covectors_after_first_fold,
-                        first_main_fold_challenges: parsed.first_main_fold_challenges,
-                        cross_epoch_point,
-                        masked_pre_challenge_target,
-                    },
-                )))
+        if maximum_work_unit_count == 0 {
+            return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+        }
+        let mut total_completed_work_unit_count = 0_u64;
+        loop {
+            if let Some(handoff) = self.complete_handoff.take() {
+                return Ok(CompactPublicKeyCfwVerificationPoll::Complete(handoff));
+            }
+            let remaining_work_unit_count = maximum_work_unit_count
+                .checked_sub(total_completed_work_unit_count)
+                .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+            if remaining_work_unit_count == 0 {
+                return Ok(CompactPublicKeyCfwVerificationPoll::WorkCompleted {
+                    completed_work_unit_count: total_completed_work_unit_count,
+                });
+            }
+            match self.accumulator.advance(remaining_work_unit_count)? {
+                CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                    completed_work_unit_count,
+                    ..
+                } => {
+                    if completed_work_unit_count == 0
+                        || completed_work_unit_count > remaining_work_unit_count
+                    {
+                        return Err(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript);
+                    }
+                    total_completed_work_unit_count = total_completed_work_unit_count
+                        .checked_add(completed_work_unit_count)
+                        .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+                }
+                CompactStructuredWitnessCovectorAccumulatorPoll::Complete(source_covector) => {
+                    let public_contributions = self.accumulator.completed_public_contributions()?;
+                    let parsed = self
+                        .parsed
+                        .take()
+                        .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?;
+                    let public_weights =
+                        compact_cfw_zero_evader_weights(parsed.joint_constraint_challenge);
+                    let weighted_public_contribution = public_contributions
+                        .into_iter()
+                        .zip(public_weights)
+                        .map(|(contribution, weight)| contribution * weight)
+                        .sum::<CompactChallengeField>();
+                    let claim_batch =
+                        verify_compact_cfw_transcript_with_weighted_public_contribution(
+                            parsed.geometry,
+                            &parsed.transcript,
+                            parsed.constraint_combining_challenge,
+                            &parsed.equality_point,
+                            &parsed.sumcheck_point,
+                            parsed.joint_constraint_challenge,
+                            weighted_public_contribution,
+                        )?;
+                    let main_relation_target = claim_batch
+                        .main_relation_target_with_masked_cross_epoch_claims(
+                            &parsed.cross_epoch_claims,
+                            parsed.opening_batching_challenge,
+                        )?;
+                    let cross_epoch_point = parsed.cross_epoch_claims.point().to_vec();
+                    let masked_pre_challenge_target =
+                        parsed.cross_epoch_claims.disclosed_values()[0];
+                    let public_covectors_after_first_fold = self
+                        .public_covector_continuation
+                        .take()
+                        .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?
+                        .finish_after_matrix_accumulation(source_covector)?;
+                    self.complete_handoff =
+                        Some(Box::new(AlgebraicallyVerifiedCompactCfwHandoff {
+                            main_relation_target,
+                            public_covectors_after_first_fold,
+                            first_main_fold_challenges: parsed.first_main_fold_challenges,
+                            cross_epoch_point,
+                            masked_pre_challenge_target,
+                        }));
+                    if total_completed_work_unit_count != 0 {
+                        return Ok(CompactPublicKeyCfwVerificationPoll::WorkCompleted {
+                            completed_work_unit_count: total_completed_work_unit_count,
+                        });
+                    }
+                }
             }
         }
     }
@@ -498,8 +543,14 @@ pub(crate) struct CompactPublicKeyAlgebraicVerification {
 }
 
 pub(crate) enum CompactPublicKeyAlgebraicVerificationPoll {
-    WorkCompleted { completed_work_unit_count: u64 },
-    ResumeComplete { completed_work_unit_count: u64 },
+    WorkCompleted {
+        completed_work_unit_count: u64,
+        checkpoint_safe_boundary_ordinal: Option<u32>,
+    },
+    ResumeComplete {
+        completed_work_unit_count: u64,
+        checkpoint_safe_boundary_ordinal: u32,
+    },
     Complete(Box<AlgebraicallyVerifiedCompactPublicKeyProof>),
 }
 
@@ -553,7 +604,9 @@ impl CompactPublicKeyAlgebraicVerification {
         [u8; COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH],
         CompactPublicKeyAlgebraicVerificationError,
     > {
-        if self.completed_work_unit_count == 0 || self.replay_target_work_unit_count.is_some() {
+        if checkpoint_safe_boundary_ordinal(self.completed_work_unit_count).is_none()
+            || self.replay_target_work_unit_count.is_some()
+        {
             return Err(CompactPublicKeyAlgebraicVerificationError::CheckpointUnavailable);
         }
         let transport = self
@@ -588,7 +641,22 @@ impl CompactPublicKeyAlgebraicVerification {
                     })
             })
             .transpose()?;
-        let bounded_work_unit_count = replay_work_unit_count.unwrap_or(maximum_work_unit_count);
+        let next_checkpoint_work_unit_count = self
+            .completed_work_unit_count
+            .checked_div(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL)
+            .and_then(|completed_boundary_count| completed_boundary_count.checked_add(1))
+            .and_then(|next_boundary_count| {
+                next_boundary_count.checked_mul(
+                    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+                )
+            })
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+        let work_until_next_checkpoint = next_checkpoint_work_unit_count
+            .checked_sub(self.completed_work_unit_count)
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+        let bounded_work_unit_count = replay_work_unit_count
+            .unwrap_or(maximum_work_unit_count)
+            .min(work_until_next_checkpoint);
         if bounded_work_unit_count == 0 {
             return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
         }
@@ -600,6 +668,8 @@ impl CompactPublicKeyAlgebraicVerification {
                     .completed_work_unit_count
                     .checked_add(completed_work_unit_count)
                     .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+                let checkpoint_safe_boundary_ordinal =
+                    checkpoint_safe_boundary_ordinal(self.completed_work_unit_count);
                 if let Some(target_work_unit_count) = self.replay_target_work_unit_count {
                     if self.completed_work_unit_count > target_work_unit_count {
                         return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
@@ -608,16 +678,26 @@ impl CompactPublicKeyAlgebraicVerification {
                         self.replay_target_work_unit_count = None;
                         return Ok(CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
                             completed_work_unit_count,
+                            checkpoint_safe_boundary_ordinal: checkpoint_safe_boundary_ordinal
+                                .ok_or(
+                                    CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint,
+                                )?,
                         });
                     }
                 }
                 Ok(CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
                     completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 })
             }
             CompactPublicKeyCfwVerificationPoll::Complete(handoff) => {
                 if self.replay_target_work_unit_count.is_some() {
                     return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+                }
+                if self.completed_work_unit_count
+                    != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
+                {
+                    return Err(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript);
                 }
                 let transport = self
                     .transport
@@ -635,6 +715,28 @@ impl CompactPublicKeyAlgebraicVerification {
             }
         }
     }
+}
+
+const fn maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count() -> u64 {
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT as u64
+        * COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL
+}
+
+fn checkpoint_safe_boundary_ordinal(completed_work_unit_count: u64) -> Option<u32> {
+    if completed_work_unit_count == 0
+        || !completed_work_unit_count
+            .is_multiple_of(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL)
+        || completed_work_unit_count
+            > maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count()
+    {
+        return None;
+    }
+    u32::try_from(
+        completed_work_unit_count
+            / COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL
+            - 1,
+    )
+    .ok()
 }
 
 fn verify_compact_whir_epochs(
@@ -1424,7 +1526,8 @@ mod tests {
 
     #[test]
     fn algebraic_verification_checkpoint_round_trips_exact_sources_and_safe_cursor() {
-        let checkpoint = checkpoint(65_537);
+        let checkpoint =
+            checkpoint(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL);
         let canonical_bytes = checkpoint.encode();
         assert_eq!(canonical_bytes.len(), 400);
         assert_eq!(
@@ -1445,7 +1548,9 @@ mod tests {
 
     #[test]
     fn algebraic_verification_checkpoint_refuses_malformed_framing_and_genesis() {
-        let canonical_bytes = checkpoint(1).encode();
+        let canonical_bytes =
+            checkpoint(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL)
+                .encode();
         for malformed_bytes in [
             canonical_bytes[..canonical_bytes.len() - 1].to_vec(),
             {
@@ -1459,6 +1564,15 @@ mod tests {
                 bytes
             },
             checkpoint(0).encode().to_vec(),
+            checkpoint(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL - 1)
+                .encode()
+                .to_vec(),
+            checkpoint(
+                maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count()
+                    + COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+            )
+            .encode()
+            .to_vec(),
         ] {
             assert_eq!(
                 CompactPublicKeyAlgebraicVerificationCheckpoint::decode(&malformed_bytes),

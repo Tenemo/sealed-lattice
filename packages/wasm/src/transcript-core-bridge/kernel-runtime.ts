@@ -739,6 +739,7 @@ type NumberExportName =
     | 'sealed_lattice_common_proof_begin_verification'
     | 'sealed_lattice_compact_public_key_algebraic_verification_poll'
     | 'sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length'
+    | 'sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count'
     | 'sealed_lattice_compact_public_key_begin_algebraic_verification'
     | 'sealed_lattice_compact_public_key_cancel_algebraic_verification'
     | 'sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint'

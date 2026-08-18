@@ -190,11 +190,18 @@ type CompactPublicKeyAlgebraicVerificationInput = Readonly<{
  * cursor. Publication must retain an owned copy before resolving; restoration
  * must authenticate the exact bytes before returning a fresh owned copy.
  */
-type CompactPublicKeyAlgebraicVerificationCheckpointCustody = Readonly<{
+export type CompactPublicKeyAlgebraicVerificationCheckpointCustody = Readonly<{
     publishAuthenticatedCheckpoint(
         canonicalCheckpointBytes: Uint8Array<ArrayBuffer>,
+        safeBoundaryOrdinal: number,
     ): Promise<void>;
-    restoreAuthenticatedCheckpoint(): Promise<Uint8Array>;
+    restoreAuthenticatedCheckpoint(): Promise<
+        Readonly<{
+            canonicalCheckpointBytes: Uint8Array;
+            safeBoundaryOrdinal: number;
+        }>
+    >;
+    release(): Promise<void>;
 }>;
 
 type CompactPublicKeyAlgebraicVerificationResume = Readonly<{
@@ -2065,10 +2072,18 @@ const defaultCompactPublicKeyMaximumWorkUnitCountPerPoll = 4_096;
 const restoreCompactPublicKeyAlgebraicVerificationCheckpoint = async (
     kernel: CommonProofVerificationKernelBoundary,
     checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
-): Promise<Uint8Array<ArrayBuffer>> => {
-    let canonicalCheckpointBytes: Uint8Array;
+): Promise<
+    Readonly<{
+        canonicalCheckpointBytes: Uint8Array<ArrayBuffer>;
+        safeBoundaryOrdinal: number;
+    }>
+> => {
+    let restoredCheckpoint: Readonly<{
+        canonicalCheckpointBytes: Uint8Array;
+        safeBoundaryOrdinal: number;
+    }>;
     try {
-        canonicalCheckpointBytes =
+        restoredCheckpoint =
             await checkpointCustody.restoreAuthenticatedCheckpoint();
     } catch (error) {
         throw storageFailure(
@@ -2076,6 +2091,14 @@ const restoreCompactPublicKeyAlgebraicVerificationCheckpoint = async (
             error,
         );
     }
+    if (typeof restoredCheckpoint !== 'object' || restoredCheckpoint === null) {
+        throw new CommonProofWorkerRuntimeError(
+            'WrongStorageResult',
+            'The browser store returned a malformed compact public-key algebraic verification checkpoint record.',
+        );
+    }
+    const canonicalCheckpointBytes =
+        restoredCheckpoint.canonicalCheckpointBytes;
     const expectedByteLength =
         kernel.compactPublicKeyAlgebraicVerificationCheckpointByteLength();
     if (
@@ -2093,13 +2116,30 @@ const restoreCompactPublicKeyAlgebraicVerificationCheckpoint = async (
             'The browser store returned a malformed compact public-key algebraic verification checkpoint.',
         );
     }
-    return canonicalCheckpointBytes as Uint8Array<ArrayBuffer>;
+    if (
+        !Number.isSafeInteger(restoredCheckpoint.safeBoundaryOrdinal) ||
+        restoredCheckpoint.safeBoundaryOrdinal < 0 ||
+        restoredCheckpoint.safeBoundaryOrdinal >=
+            kernel.compactPublicKeyAlgebraicVerificationSafeBoundaryCount()
+    ) {
+        destroyTransferredWorkerBuffer(canonicalCheckpointBytes);
+        throw new CommonProofWorkerRuntimeError(
+            'WrongStorageResult',
+            'The browser store returned an unassigned compact public-key algebraic verification checkpoint boundary.',
+        );
+    }
+    return Object.freeze({
+        canonicalCheckpointBytes:
+            canonicalCheckpointBytes as Uint8Array<ArrayBuffer>,
+        safeBoundaryOrdinal: restoredCheckpoint.safeBoundaryOrdinal,
+    });
 };
 
 const publishCompactPublicKeyAlgebraicVerificationCheckpoint = async (
     kernel: CommonProofVerificationKernelBoundary,
     operationHandle: number,
     checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    safeBoundaryOrdinal: number,
 ): Promise<void> => {
     const canonicalCheckpointBytes =
         kernel.copyCompactPublicKeyAlgebraicVerificationCheckpoint(
@@ -2109,6 +2149,7 @@ const publishCompactPublicKeyAlgebraicVerificationCheckpoint = async (
         try {
             await checkpointCustody.publishAuthenticatedCheckpoint(
                 canonicalCheckpointBytes,
+                safeBoundaryOrdinal,
             );
         } catch (error) {
             throw storageFailure(
@@ -2154,107 +2195,163 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
     let operationHandle: number | undefined;
     let operationTerminal = false;
     let deterministicReplayComplete = resume === undefined;
-    try {
-        throwIfVerificationCancelled(signal);
-        const begin =
-            resume === undefined
-                ? kernel.beginCompactPublicKeyAlgebraicVerification(
-                      input.bindings,
-                      input.proofBytes,
-                      input.publicInputBytes,
-                  )
-                : await (async () => {
-                      const canonicalCheckpointBytes =
-                          await restoreCompactPublicKeyAlgebraicVerificationCheckpoint(
-                              kernel,
-                              resume.checkpointCustody,
-                          );
-                      try {
-                          throwIfVerificationCancelled(signal);
-                          return kernel.resumeCompactPublicKeyAlgebraicVerification(
-                              input.bindings,
-                              input.proofBytes,
-                              input.publicInputBytes,
-                              canonicalCheckpointBytes,
-                          );
-                      } finally {
-                          destroyTransferredWorkerBuffer(
-                              canonicalCheckpointBytes,
-                          );
-                      }
-                  })();
-        if (begin.kind === 'refused') {
-            return Object.freeze({
-                isValid: false,
-                refusalReason: begin.refusalReason,
-            });
-        }
-        operationHandle = begin.operationHandle;
-        for (;;) {
+    let expectedResumeSafeBoundaryOrdinal: number | undefined;
+    const executeVerification = async (): Promise<
+        VerificationResult<undefined>
+    > => {
+        try {
             throwIfVerificationCancelled(signal);
-            const poll = kernel.pollCompactPublicKeyAlgebraicVerification(
-                operationHandle,
-                maximumWorkUnitCountPerPoll,
-            );
-            switch (poll.kind) {
-                case 'progress':
-                    if (!deterministicReplayComplete) {
+            const begin =
+                resume === undefined
+                    ? kernel.beginCompactPublicKeyAlgebraicVerification(
+                          input.bindings,
+                          input.proofBytes,
+                          input.publicInputBytes,
+                      )
+                    : await (async () => {
+                          const restoredCheckpoint =
+                              await restoreCompactPublicKeyAlgebraicVerificationCheckpoint(
+                                  kernel,
+                                  resume.checkpointCustody,
+                              );
+                          const canonicalCheckpointBytes =
+                              restoredCheckpoint.canonicalCheckpointBytes;
+                          expectedResumeSafeBoundaryOrdinal =
+                              restoredCheckpoint.safeBoundaryOrdinal;
+                          try {
+                              throwIfVerificationCancelled(signal);
+                              return kernel.resumeCompactPublicKeyAlgebraicVerification(
+                                  input.bindings,
+                                  input.proofBytes,
+                                  input.publicInputBytes,
+                                  canonicalCheckpointBytes,
+                              );
+                          } finally {
+                              destroyTransferredWorkerBuffer(
+                                  canonicalCheckpointBytes,
+                              );
+                          }
+                      })();
+            if (begin.kind === 'refused') {
+                return Object.freeze({
+                    isValid: false,
+                    refusalReason: begin.refusalReason,
+                });
+            }
+            operationHandle = begin.operationHandle;
+            for (;;) {
+                throwIfVerificationCancelled(signal);
+                const poll = kernel.pollCompactPublicKeyAlgebraicVerification(
+                    operationHandle,
+                    maximumWorkUnitCountPerPoll,
+                );
+                switch (poll.kind) {
+                    case 'progress':
+                        if (!deterministicReplayComplete) {
+                            await yieldControl();
+                            break;
+                        }
+                        if (
+                            checkpointCustody !== undefined &&
+                            poll.checkpointSafeBoundaryOrdinal !== undefined
+                        ) {
+                            await publishCompactPublicKeyAlgebraicVerificationCheckpoint(
+                                kernel,
+                                operationHandle,
+                                checkpointCustody,
+                                poll.checkpointSafeBoundaryOrdinal,
+                            );
+                        }
                         await yieldControl();
                         break;
-                    }
-                    if (checkpointCustody !== undefined) {
-                        await publishCompactPublicKeyAlgebraicVerificationCheckpoint(
-                            kernel,
-                            operationHandle,
-                            checkpointCustody,
-                        );
-                    }
-                    await yieldControl();
-                    break;
-                case 'resume-complete':
-                    if (resume === undefined || deterministicReplayComplete) {
-                        throw kernelFailure(
-                            'The compact public-key algebraic verifier returned an unexpected resume-complete signal.',
-                        );
-                    }
-                    deterministicReplayComplete = true;
-                    await yieldControl();
-                    break;
-                case 'refused':
-                    operationTerminal = true;
-                    return Object.freeze({
-                        isValid: false,
-                        refusalReason: poll.refusalReason,
-                    });
-                case 'complete':
-                    if (!deterministicReplayComplete) {
-                        throw kernelFailure(
-                            'The compact public-key algebraic verifier completed before deterministic checkpoint replay.',
-                        );
-                    }
-                    operationTerminal = true;
-                    return Object.freeze({
-                        isValid: true,
-                        value: undefined,
-                    });
+                    case 'resume-complete':
+                        if (
+                            resume === undefined ||
+                            deterministicReplayComplete
+                        ) {
+                            throw kernelFailure(
+                                'The compact public-key algebraic verifier returned an unexpected resume-complete signal.',
+                            );
+                        }
+                        if (
+                            poll.checkpointSafeBoundaryOrdinal !==
+                            expectedResumeSafeBoundaryOrdinal
+                        ) {
+                            throw kernelFailure(
+                                'The compact public-key algebraic verifier replayed a different checkpoint boundary than authenticated custody restored.',
+                            );
+                        }
+                        deterministicReplayComplete = true;
+                        await yieldControl();
+                        break;
+                    case 'refused':
+                        operationTerminal = true;
+                        return Object.freeze({
+                            isValid: false,
+                            refusalReason: poll.refusalReason,
+                        });
+                    case 'complete':
+                        if (!deterministicReplayComplete) {
+                            throw kernelFailure(
+                                'The compact public-key algebraic verifier completed before deterministic checkpoint replay.',
+                            );
+                        }
+                        operationTerminal = true;
+                        return Object.freeze({
+                            isValid: true,
+                            value: undefined,
+                        });
+                }
             }
+        } catch (error) {
+            let terminalError = error;
+            if (operationHandle !== undefined && !operationTerminal) {
+                try {
+                    kernel.cancelCompactPublicKeyAlgebraicVerification(
+                        operationHandle,
+                    );
+                    operationTerminal = true;
+                } catch (cancellationError) {
+                    terminalError = permanentRetirementFailure(
+                        { cancellationError, operationError: error },
+                        'The compact public-key algebraic verifier failed and could not retire its operation.',
+                    );
+                }
+            }
+            throw terminalError;
         }
+    };
+
+    let operationFailed = false;
+    let operationFailure: unknown;
+    let operationResult: VerificationResult<undefined> | undefined;
+    try {
+        operationResult = await executeVerification();
     } catch (error) {
-        if (operationHandle !== undefined && !operationTerminal) {
-            try {
-                kernel.cancelCompactPublicKeyAlgebraicVerification(
-                    operationHandle,
-                );
-                operationTerminal = true;
-            } catch (cancellationError) {
-                throw permanentRetirementFailure(
-                    { cancellationError, operationError: error },
-                    'The compact public-key algebraic verifier failed and could not retire its operation.',
-                );
-            }
-        }
-        throw error;
+        operationFailed = true;
+        operationFailure = error;
     }
+    if (checkpointCustody !== undefined) {
+        try {
+            await checkpointCustody.release();
+        } catch (releaseFailure) {
+            throw permanentRetirementFailure(
+                operationFailed
+                    ? { operationFailure, releaseFailure }
+                    : releaseFailure,
+                'The compact public-key algebraic verification checkpoint custody could not release its operation identity.',
+            );
+        }
+    }
+    if (operationFailed) {
+        throw operationFailure;
+    }
+    if (operationResult === undefined) {
+        throw kernelFailure(
+            'The compact public-key algebraic verifier returned no terminal result.',
+        );
+    }
+    return operationResult;
 };
 
 const supplyVerificationReadback = async (

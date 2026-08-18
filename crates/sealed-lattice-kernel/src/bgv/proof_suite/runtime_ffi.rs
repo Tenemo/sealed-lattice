@@ -23,6 +23,7 @@ use crate::foundation::{
 use super::compact_proof_wire::CompactPublicInputBindings;
 use super::compact_public_key_algebraic_verifier::{
     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
     CompactPublicKeyAlgebraicVerification, CompactPublicKeyAlgebraicVerificationError,
     CompactPublicKeyAlgebraicVerificationPoll,
 };
@@ -178,6 +179,12 @@ pub const extern "C" fn sealed_lattice_compact_public_key_transport_bindings_byt
 pub const extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length()
 -> u32 {
     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count()
+-> u32 {
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT
 }
 
 fn decode_compact_public_key_transport_bindings(
@@ -406,7 +413,7 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_resume_algebraic_veri
 ///
 /// # Safety
 ///
-/// Both output pointers must name one writable `u32` in WebAssembly linear
+/// All three output pointers must name one writable `u32` in WebAssembly linear
 /// memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_poll(
@@ -414,10 +421,12 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
     maximum_work_unit_count: u32,
     poll_kind_pointer: *mut u32,
     completed_work_unit_count_pointer: *mut u32,
+    checkpoint_safe_boundary_ordinal_pointer: *mut u32,
 ) -> u32 {
     if maximum_work_unit_count == 0
         || poll_kind_pointer.is_null()
         || completed_work_unit_count_pointer.is_null()
+        || checkpoint_safe_boundary_ordinal_pointer.is_null()
     {
         return refusal_status(RefusalReason::WrongTypeOrLength);
     }
@@ -430,6 +439,7 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
         match verification.advance(u64::from(maximum_work_unit_count)) {
             Ok(CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
                 completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
             }) => {
                 let completed_work_unit_count = u32::try_from(completed_work_unit_count)
                     .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
@@ -443,10 +453,12 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
                 Ok((
                     COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
                     completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal.unwrap_or(NO_SECOND_POLL_VALUE),
                 ))
             }
             Ok(CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
                 completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
             }) => {
                 let completed_work_unit_count = u32::try_from(completed_work_unit_count)
                     .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
@@ -460,24 +472,30 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
                 Ok((
                     COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE,
                     completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 ))
             }
             Ok(CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal)) => {
                 drop((*terminal).into_transport());
-                Ok((COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE, 0))
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE,
+                    0,
+                    NO_SECOND_POLL_VALUE,
+                ))
             }
             Err(error) => Err(compact_public_key_algebraic_verification_error_status(
                 error,
             )),
         }
     });
-    let (poll_kind, completed_work_unit_count) = match result {
+    let (poll_kind, completed_work_unit_count, checkpoint_safe_boundary_ordinal) = match result {
         Ok(output) => output,
         Err(status) => return status,
     };
     unsafe {
         poll_kind_pointer.write(poll_kind);
         completed_work_unit_count_pointer.write(completed_work_unit_count);
+        checkpoint_safe_boundary_ordinal_pointer.write(checkpoint_safe_boundary_ordinal);
     }
     0
 }
@@ -3229,6 +3247,10 @@ mod tests {
                 as usize,
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
         );
+        assert_eq!(
+            sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count(),
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
+        );
         let mut checkpoint =
             [0_u8; COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH];
         status = u32::MAX;
@@ -3258,6 +3280,7 @@ mod tests {
 
         let mut poll_kind = u32::MAX;
         let mut completed_work_unit_count = u32::MAX;
+        let mut checkpoint_safe_boundary_ordinal = u32::MAX;
         assert_eq!(
             unsafe {
                 sealed_lattice_compact_public_key_algebraic_verification_poll(
@@ -3265,6 +3288,7 @@ mod tests {
                     0,
                     &mut poll_kind,
                     &mut completed_work_unit_count,
+                    &mut checkpoint_safe_boundary_ordinal,
                 )
             },
             refusal_status(RefusalReason::WrongTypeOrLength),
@@ -3276,12 +3300,14 @@ mod tests {
                     1,
                     &mut poll_kind,
                     &mut completed_work_unit_count,
+                    &mut checkpoint_safe_boundary_ordinal,
                 )
             },
             refusal_status(RefusalReason::ConsumedState),
         );
         assert_eq!(poll_kind, u32::MAX);
         assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(checkpoint_safe_boundary_ordinal, u32::MAX);
         assert_eq!(
             unsafe {
                 sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint(

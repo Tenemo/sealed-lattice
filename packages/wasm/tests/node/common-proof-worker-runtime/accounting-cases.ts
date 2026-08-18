@@ -428,6 +428,7 @@ describe('Compact public-key algebraic verification worker', () => {
                 maximumWorkUnitCount,
                 pollKindPointer,
                 completedWorkUnitCountPointer,
+                checkpointSafeBoundaryOrdinalPointer,
             ) => {
                 expect(operationHandle).toBe(91);
                 expect(maximumWorkUnitCount).toBe(17);
@@ -441,6 +442,11 @@ describe('Compact public-key algebraic verification worker', () => {
                     memory,
                     completedWorkUnitCountPointer,
                     pollCount === 1 ? 17 : 0,
+                );
+                writeUnsigned32(
+                    memory,
+                    checkpointSafeBoundaryOrdinalPointer,
+                    0xffff_ffff,
                 );
                 return 0;
             },
@@ -473,6 +479,7 @@ describe('Compact public-key algebraic verification worker', () => {
         const canonicalCheckpointBytes = new Uint8Array(400).fill(0x71);
         let copiedCheckpointCount = 0;
         let publishedCheckpointBytes: Uint8Array | undefined;
+        let publishedSafeBoundaryOrdinal: number | undefined;
         let pollCount = 0;
         const runtime = createMockKernelRuntime((memory) => ({
             sealed_lattice_compact_public_key_transport_bindings_byte_length:
@@ -496,6 +503,7 @@ describe('Compact public-key algebraic verification worker', () => {
                 _maximumWorkUnitCount,
                 pollKindPointer,
                 completedWorkUnitCountPointer,
+                checkpointSafeBoundaryOrdinalPointer,
             ) => {
                 expect(operationHandle).toBe(95);
                 pollCount += 1;
@@ -508,6 +516,11 @@ describe('Compact public-key algebraic verification worker', () => {
                     memory,
                     completedWorkUnitCountPointer,
                     pollCount === 1 ? 9 : 0,
+                );
+                writeUnsigned32(
+                    memory,
+                    checkpointSafeBoundaryOrdinalPointer,
+                    pollCount === 1 ? 0 : 0xffff_ffff,
                 );
                 return 0;
             },
@@ -535,10 +548,13 @@ describe('Compact public-key algebraic verification worker', () => {
                 { bindings, proofBytes, publicInputBytes },
                 {
                     checkpointCustody: {
+                        release: () => Promise.resolve(),
                         publishAuthenticatedCheckpoint: (
                             checkpointBytes: Uint8Array<ArrayBuffer>,
+                            safeBoundaryOrdinal: number,
                         ) => {
                             publishedCheckpointBytes = checkpointBytes.slice();
+                            publishedSafeBoundaryOrdinal = safeBoundaryOrdinal;
                             return Promise.resolve();
                         },
                         restoreAuthenticatedCheckpoint: () => {
@@ -553,6 +569,7 @@ describe('Compact public-key algebraic verification worker', () => {
         ).resolves.toEqual({ isValid: true, value: undefined });
         expect(copiedCheckpointCount).toBe(1);
         expect(publishedCheckpointBytes).toEqual(canonicalCheckpointBytes);
+        expect(publishedSafeBoundaryOrdinal).toBe(0);
     });
 
     it('restores at genesis, replays without publishing, and resumes live checkpointing', async () => {
@@ -562,6 +579,7 @@ describe('Compact public-key algebraic verification worker', () => {
         let copiedCheckpointCount = 0;
         let pollCount = 0;
         let publishedCheckpointBytes: Uint8Array | undefined;
+        let publishedSafeBoundaryOrdinal: number | undefined;
         let yieldCount = 0;
         const runtime = createMockKernelRuntime((memory) => ({
             sealed_lattice_compact_public_key_transport_bindings_byte_length:
@@ -600,6 +618,7 @@ describe('Compact public-key algebraic verification worker', () => {
                 maximumWorkUnitCount,
                 pollKindPointer,
                 completedWorkUnitCountPointer,
+                checkpointSafeBoundaryOrdinalPointer,
             ) => {
                 expect(operationHandle).toBe(96);
                 expect(maximumWorkUnitCount).toBe(5);
@@ -611,6 +630,11 @@ describe('Compact public-key algebraic verification worker', () => {
                     memory,
                     completedWorkUnitCountPointer,
                     completedWorkUnitCount,
+                );
+                writeUnsigned32(
+                    memory,
+                    checkpointSafeBoundaryOrdinalPointer,
+                    [0xffff_ffff, 0, 1, 0xffff_ffff][pollCount - 1],
                 );
                 return 0;
             },
@@ -639,15 +663,23 @@ describe('Compact public-key algebraic verification worker', () => {
                     maximumWorkUnitCountPerPoll: 5,
                     resume: {
                         checkpointCustody: {
+                            release: () => Promise.resolve(),
                             publishAuthenticatedCheckpoint: (
                                 checkpointBytes: Uint8Array<ArrayBuffer>,
+                                safeBoundaryOrdinal: number,
                             ) => {
                                 publishedCheckpointBytes =
                                     checkpointBytes.slice();
+                                publishedSafeBoundaryOrdinal =
+                                    safeBoundaryOrdinal;
                                 return Promise.resolve();
                             },
                             restoreAuthenticatedCheckpoint: () =>
-                                Promise.resolve(restoredCheckpointBytes),
+                                Promise.resolve({
+                                    canonicalCheckpointBytes:
+                                        restoredCheckpointBytes,
+                                    safeBoundaryOrdinal: 0,
+                                }),
                         },
                     },
                     yieldControl: () => {
@@ -661,6 +693,7 @@ describe('Compact public-key algebraic verification worker', () => {
         expect(copiedCheckpointCount).toBe(1);
         expect(pollCount).toBe(4);
         expect(publishedCheckpointBytes).toEqual(nextCheckpointBytes);
+        expect(publishedSafeBoundaryOrdinal).toBe(1);
         expect(restoredCheckpointBytes.byteLength).toBe(0);
         expect(yieldCount).toBe(3);
     });
@@ -684,10 +717,15 @@ describe('Compact public-key algebraic verification worker', () => {
                 {
                     resume: {
                         checkpointCustody: {
+                            release: () => Promise.resolve(),
                             publishAuthenticatedCheckpoint: () =>
                                 Promise.resolve(),
                             restoreAuthenticatedCheckpoint: () =>
-                                Promise.resolve(restoredCheckpointBytes),
+                                Promise.resolve({
+                                    canonicalCheckpointBytes:
+                                        restoredCheckpointBytes,
+                                    safeBoundaryOrdinal: 0,
+                                }),
                         },
                     },
                 },
@@ -726,10 +764,15 @@ describe('Compact public-key algebraic verification worker', () => {
                 {
                     resume: {
                         checkpointCustody: {
+                            release: () => Promise.resolve(),
                             publishAuthenticatedCheckpoint: () =>
                                 Promise.resolve(),
                             restoreAuthenticatedCheckpoint: () =>
-                                Promise.resolve(restoredCheckpointBytes),
+                                Promise.resolve({
+                                    canonicalCheckpointBytes:
+                                        restoredCheckpointBytes,
+                                    safeBoundaryOrdinal: 0,
+                                }),
                         },
                     },
                 },
@@ -766,9 +809,15 @@ describe('Compact public-key algebraic verification worker', () => {
                 _maximumWorkUnitCount,
                 pollKindPointer,
                 completedWorkUnitCountPointer,
+                checkpointSafeBoundaryOrdinalPointer,
             ) => {
                 writeUnsigned32(memory, pollKindPointer, 1);
                 writeUnsigned32(memory, completedWorkUnitCountPointer, 1);
+                writeUnsigned32(
+                    memory,
+                    checkpointSafeBoundaryOrdinalPointer,
+                    0,
+                );
                 return 0;
             },
             sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint:
@@ -797,6 +846,7 @@ describe('Compact public-key algebraic verification worker', () => {
                 { bindings, proofBytes, publicInputBytes },
                 {
                     checkpointCustody: {
+                        release: () => Promise.resolve(),
                         publishAuthenticatedCheckpoint: (
                             checkpointBytes: Uint8Array<ArrayBuffer>,
                         ) => {
@@ -906,11 +956,17 @@ describe('Compact public-key algebraic verification worker', () => {
                 _maximumWorkUnitCount,
                 pollKindPointer,
                 completedWorkUnitCountPointer,
+                checkpointSafeBoundaryOrdinalPointer,
             ) => {
                 expect(operationHandle).toBe(93);
                 pollCount += 1;
                 writeUnsigned32(memory, pollKindPointer, 1);
                 writeUnsigned32(memory, completedWorkUnitCountPointer, 1);
+                writeUnsigned32(
+                    memory,
+                    checkpointSafeBoundaryOrdinalPointer,
+                    0xffff_ffff,
+                );
                 return 0;
             },
             sealed_lattice_compact_public_key_cancel_algebraic_verification: (
@@ -962,9 +1018,15 @@ describe('Compact public-key algebraic verification worker', () => {
                 _maximumWorkUnitCount,
                 pollKindPointer,
                 completedWorkUnitCountPointer,
+                checkpointSafeBoundaryOrdinalPointer,
             ) => {
                 writeUnsigned32(memory, pollKindPointer, 1);
                 writeUnsigned32(memory, completedWorkUnitCountPointer, 2);
+                writeUnsigned32(
+                    memory,
+                    checkpointSafeBoundaryOrdinalPointer,
+                    0xffff_ffff,
+                );
                 return 0;
             },
             sealed_lattice_compact_public_key_cancel_algebraic_verification:

@@ -44,9 +44,16 @@ replaying deterministically from genesis. An internal common-proof worker
 driver yields between bounded polls, publishes and restores that cursor through
 an authenticated-custody contract, prevents publication during replay,
 preserves typed refusals, returns a positive `VerificationResult` only at
-algebraic completion, and cancels unfinished operations. It does not mint proof
-authority. Compact generation, a concrete durable browser-custody adapter, and
-proof capabilities are not worker-facing runtime capabilities.
+algebraic completion, and cancels unfinished operations. The five CFW
+polynomial transforms are incremental. The kernel exposes 290 fixed cursor
+ordinals at 65,536-work-unit intervals across 19,005,440 of the selected CFW
+phase's 19,038,593 work units; the remaining 33,153 CFW units and terminal WHIR
+work do not yet form another durable boundary. The protocol package supplies a
+concrete authenticated-store adapter for those cursors, including
+copy-on-write predecessor retention and one-shot restoration after
+checkpoint-store reconstruction, but the production browser-worker host does
+not install it yet. The driver does not mint proof authority. Compact
+generation and proof capabilities are not worker-facing runtime capabilities.
 
 Test-only proof workbenches and native or desktop results are not an accepted
 ceremony or supported-phone evidence. The repository [README](../../README.md)

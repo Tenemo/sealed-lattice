@@ -10,7 +10,8 @@
 use zeroize::Zeroizing;
 
 use crate::bgv::proof_suite::{
-    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
+    BoundedProofPolynomialTransform, ProofBaseFieldElement, ProofChallengeExtensionElement,
+    ProofEvaluationDomain,
     compact_cfw::{
         COMPACT_CFW_MATRIX_COUNT, CompactCfwClaimCombinationContinuation,
         CompactCfwCombinedRelation, CompactCfwError, CompactCfwMatrixClaimCombination,
@@ -927,6 +928,9 @@ where
     lookup_prefix_products: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     public_transform: Option<Zeroizing<Vec<ProofBaseFieldElement>>>,
     product_transform: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+    active_base_transform: Option<BoundedProofPolynomialTransform<ProofBaseFieldElement>>,
+    active_extension_transform:
+        Option<BoundedProofPolynomialTransform<ProofChallengeExtensionElement>>,
     transform_domain: ProofEvaluationDomain,
     phase: AccumulatorPhase,
 }
@@ -1148,6 +1152,8 @@ where
             lookup_prefix_products: None,
             public_transform: None,
             product_transform: None,
+            active_base_transform: None,
+            active_extension_transform: None,
             transform_domain,
             phase: if projected {
                 AccumulatorPhase::BuildDestinationProjection
@@ -1653,32 +1659,46 @@ where
                     );
                 }
                 AccumulatorPhase::CoefficientEqualityForwardTransform => {
-                    self.transform_domain
-                        .evaluate_extension_polynomial_in_place(
-                            self.coefficient_equality
-                                .as_mut()
-                                .ok_or(CommonProofProverError::InvalidInput)?,
-                        )?;
-                    self.phase = if self.destination_block_fold.is_some() {
-                        self.product_transform = Some(fallible_zeroed_extension_vector(
-                            self.plan.transform_domain_size,
-                        )?);
-                        AccumulatorPhase::ProjectedPublicAdjointFill {
-                            task_ordinal: 0,
-                            next_coefficient_ordinal: 0,
-                        }
-                    } else {
-                        AccumulatorPhase::PublicAdjointFill {
-                            task_ordinal: 0,
-                            next_coefficient_ordinal: 0,
-                        }
-                    };
+                    if self.active_extension_transform.is_none() {
+                        self.active_extension_transform = Some(
+                            self.transform_domain.begin_bounded_extension_evaluation(
+                                self.coefficient_equality
+                                    .take()
+                                    .ok_or(CommonProofProverError::InvalidInput)?,
+                            )?,
+                        );
+                    }
+                    let poll = self
+                        .active_extension_transform
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?
+                        .advance(maximum_element_count)?;
+                    if poll.is_complete {
+                        self.coefficient_equality = Some(
+                            self.active_extension_transform
+                                .take()
+                                .ok_or(CommonProofProverError::InvalidInput)?
+                                .into_values()?,
+                        );
+                        self.phase = if self.destination_block_fold.is_some() {
+                            self.product_transform = Some(fallible_zeroed_extension_vector(
+                                self.plan.transform_domain_size,
+                            )?);
+                            AccumulatorPhase::ProjectedPublicAdjointFill {
+                                task_ordinal: 0,
+                                next_coefficient_ordinal: 0,
+                            }
+                        } else {
+                            AccumulatorPhase::PublicAdjointFill {
+                                task_ordinal: 0,
+                                next_coefficient_ordinal: 0,
+                            }
+                        };
+                    }
                     return Ok(
                         CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
                             step: CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform,
-                            completed_work_unit_count: transform_butterfly_count(
-                                self.plan.transform_domain_size,
-                            )?,
+                            completed_work_unit_count: poll.completed_work_unit_count,
                         },
                     );
                 }
@@ -1745,23 +1765,38 @@ where
                     );
                 }
                 AccumulatorPhase::PublicPolynomialForwardTransform { task_ordinal } => {
-                    self.transform_domain.evaluate_base_polynomial_in_place(
-                        self.public_transform
-                            .as_mut()
-                            .ok_or(CommonProofProverError::InvalidInput)?,
-                    )?;
-                    self.product_transform =
-                        Some(fallible_extension_vector(self.plan.transform_domain_size)?);
-                    self.phase = AccumulatorPhase::PointwiseProduct {
-                        task_ordinal,
-                        next_evaluation_ordinal: 0,
-                    };
+                    if self.active_base_transform.is_none() {
+                        self.active_base_transform = Some(
+                            self.transform_domain.begin_bounded_base_evaluation(
+                                self.public_transform
+                                    .take()
+                                    .ok_or(CommonProofProverError::InvalidInput)?,
+                            )?,
+                        );
+                    }
+                    let poll = self
+                        .active_base_transform
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?
+                        .advance(maximum_element_count)?;
+                    if poll.is_complete {
+                        self.public_transform = Some(
+                            self.active_base_transform
+                                .take()
+                                .ok_or(CommonProofProverError::InvalidInput)?
+                                .into_values()?,
+                        );
+                        self.product_transform =
+                            Some(fallible_extension_vector(self.plan.transform_domain_size)?);
+                        self.phase = AccumulatorPhase::PointwiseProduct {
+                            task_ordinal,
+                            next_evaluation_ordinal: 0,
+                        };
+                    }
                     return Ok(
                         CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
                             step: CompactStructuredWitnessCovectorAccumulatorStep::PublicPolynomialForwardTransform,
-                            completed_work_unit_count: transform_butterfly_count(
-                                self.plan.transform_domain_size,
-                            )?,
+                            completed_work_unit_count: poll.completed_work_unit_count,
                         },
                     );
                 }
@@ -1815,23 +1850,38 @@ where
                     );
                 }
                 AccumulatorPhase::ProductPolynomialInverseTransform { task_ordinal } => {
-                    self.transform_domain
-                        .interpolate_extension_polynomial_in_place(
-                            self.product_transform
-                                .as_mut()
-                                .ok_or(CommonProofProverError::InvalidInput)?,
-                        )?;
-                    self.public_transform = None;
-                    self.phase = AccumulatorPhase::NegacyclicProductFold {
-                        task_ordinal,
-                        next_coefficient_ordinal: 0,
-                    };
+                    if self.active_extension_transform.is_none() {
+                        self.active_extension_transform = Some(
+                            self.transform_domain
+                                .begin_bounded_extension_interpolation(
+                                    self.product_transform
+                                        .take()
+                                        .ok_or(CommonProofProverError::InvalidInput)?,
+                                )?,
+                        );
+                    }
+                    let poll = self
+                        .active_extension_transform
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?
+                        .advance(maximum_element_count)?;
+                    if poll.is_complete {
+                        self.product_transform = Some(
+                            self.active_extension_transform
+                                .take()
+                                .ok_or(CommonProofProverError::InvalidInput)?
+                                .into_values()?,
+                        );
+                        self.public_transform = None;
+                        self.phase = AccumulatorPhase::NegacyclicProductFold {
+                            task_ordinal,
+                            next_coefficient_ordinal: 0,
+                        };
+                    }
                     return Ok(
                         CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
                             step: CompactStructuredWitnessCovectorAccumulatorStep::ProductPolynomialInverseTransform,
-                            completed_work_unit_count: transform_butterfly_count(
-                                self.plan.transform_domain_size,
-                            )?,
+                            completed_work_unit_count: poll.completed_work_unit_count,
                         },
                     );
                 }
@@ -1966,21 +2016,35 @@ where
                     );
                 }
                 AccumulatorPhase::ProjectedPublicPolynomialForwardTransform => {
-                    self.transform_domain
-                        .evaluate_extension_polynomial_in_place(
-                            self.product_transform
-                                .as_mut()
-                                .ok_or(CommonProofProverError::InvalidInput)?,
-                        )?;
-                    self.phase = AccumulatorPhase::ProjectedPointwiseProduct {
-                        next_evaluation_ordinal: 0,
-                    };
+                    if self.active_extension_transform.is_none() {
+                        self.active_extension_transform = Some(
+                            self.transform_domain.begin_bounded_extension_evaluation(
+                                self.product_transform
+                                    .take()
+                                    .ok_or(CommonProofProverError::InvalidInput)?,
+                            )?,
+                        );
+                    }
+                    let poll = self
+                        .active_extension_transform
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?
+                        .advance(maximum_element_count)?;
+                    if poll.is_complete {
+                        self.product_transform = Some(
+                            self.active_extension_transform
+                                .take()
+                                .ok_or(CommonProofProverError::InvalidInput)?
+                                .into_values()?,
+                        );
+                        self.phase = AccumulatorPhase::ProjectedPointwiseProduct {
+                            next_evaluation_ordinal: 0,
+                        };
+                    }
                     return Ok(
                         CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
                             step: CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicPolynomialForwardTransform,
-                            completed_work_unit_count: transform_butterfly_count(
-                                self.plan.transform_domain_size,
-                            )?,
+                            completed_work_unit_count: poll.completed_work_unit_count,
                         },
                     );
                 }
@@ -2025,21 +2089,36 @@ where
                     );
                 }
                 AccumulatorPhase::ProjectedProductPolynomialInverseTransform => {
-                    self.transform_domain
-                        .interpolate_extension_polynomial_in_place(
-                            self.product_transform
-                                .as_mut()
-                                .ok_or(CommonProofProverError::InvalidInput)?,
-                        )?;
-                    self.phase = AccumulatorPhase::ProjectedNegacyclicProductFold {
-                        next_coefficient_ordinal: 0,
-                    };
+                    if self.active_extension_transform.is_none() {
+                        self.active_extension_transform = Some(
+                            self.transform_domain
+                                .begin_bounded_extension_interpolation(
+                                    self.product_transform
+                                        .take()
+                                        .ok_or(CommonProofProverError::InvalidInput)?,
+                                )?,
+                        );
+                    }
+                    let poll = self
+                        .active_extension_transform
+                        .as_mut()
+                        .ok_or(CommonProofProverError::InvalidInput)?
+                        .advance(maximum_element_count)?;
+                    if poll.is_complete {
+                        self.product_transform = Some(
+                            self.active_extension_transform
+                                .take()
+                                .ok_or(CommonProofProverError::InvalidInput)?
+                                .into_values()?,
+                        );
+                        self.phase = AccumulatorPhase::ProjectedNegacyclicProductFold {
+                            next_coefficient_ordinal: 0,
+                        };
+                    }
                     return Ok(
                         CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
                             step: CompactStructuredWitnessCovectorAccumulatorStep::ProjectedProductPolynomialInverseTransform,
-                            completed_work_unit_count: transform_butterfly_count(
-                                self.plan.transform_domain_size,
-                            )?,
+                            completed_work_unit_count: poll.completed_work_unit_count,
                         },
                     );
                 }
@@ -2342,13 +2421,6 @@ fn step_completed(
                 .map_err(|_| CommonProofProverError::CountOverflow)?,
         },
     )
-}
-
-fn transform_butterfly_count(transform_domain_size: u64) -> Result<u64, CommonProofProverError> {
-    transform_domain_size
-        .checked_div(2)
-        .and_then(|count| count.checked_mul(u64::from(transform_domain_size.ilog2())))
-        .ok_or(CommonProofProverError::CountOverflow)
 }
 
 fn fallible_extension_vector(
@@ -2871,11 +2943,11 @@ mod tests {
                 (CompactStructuredWitnessCovectorAccumulatorStep::LookupTablePrefixProduct, 4),
                 (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableProductInversion, 1),
                 (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableReversePass, 4),
-                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform, 32),
                 (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicAdjointFill, 12),
-                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicPolynomialForwardTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPublicPolynomialForwardTransform, 28),
                 (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedPointwiseProduct, 8),
-                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedProductPolynomialInverseTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedProductPolynomialInverseTransform, 38),
                 (CompactStructuredWitnessCovectorAccumulatorStep::ProjectedNegacyclicProductFold, 4),
             ])
         );
@@ -2888,11 +2960,11 @@ mod tests {
                 (CompactStructuredWitnessCovectorAccumulatorStep::LookupTablePrefixProduct, 4),
                 (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableProductInversion, 1),
                 (CompactStructuredWitnessCovectorAccumulatorStep::LookupTableReversePass, 4),
-                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform, 12),
+                (CompactStructuredWitnessCovectorAccumulatorStep::CoefficientEqualityForwardTransform, 32),
                 (CompactStructuredWitnessCovectorAccumulatorStep::PublicAdjointFill, 12),
-                (CompactStructuredWitnessCovectorAccumulatorStep::PublicPolynomialForwardTransform, 36),
+                (CompactStructuredWitnessCovectorAccumulatorStep::PublicPolynomialForwardTransform, 96),
                 (CompactStructuredWitnessCovectorAccumulatorStep::PointwiseProduct, 24),
-                (CompactStructuredWitnessCovectorAccumulatorStep::ProductPolynomialInverseTransform, 36),
+                (CompactStructuredWitnessCovectorAccumulatorStep::ProductPolynomialInverseTransform, 114),
                 (CompactStructuredWitnessCovectorAccumulatorStep::NegacyclicProductFold, 12),
             ])
         );

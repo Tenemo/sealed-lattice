@@ -11,6 +11,9 @@ not a separately supported public voting API.
   from canonical inputs.
 - Coordinate canonical board state, authenticated mailbox delivery,
   browser-local encrypted custody, checkpoints, and state witnessing.
+- Bind compact public-key algebraic-verifier cursors to exact source digests
+  and kernel-assigned safe boundaries in the authenticated checkpoint store,
+  retaining the previous committed cursor across interrupted replacement.
 - Assemble inputs for setup, ballot, aggregation, evaluator, finality, and
   target-release verification without reimplementing certified cryptography in
   TypeScript.
