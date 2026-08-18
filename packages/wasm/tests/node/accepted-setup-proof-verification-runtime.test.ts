@@ -877,6 +877,55 @@ describe('accepted-setup compact public-key verification', () => {
         expect(runtime.allocations.size).toBe(0);
     });
 
+    it('refuses split checkpoint custody before preparing verification and releases both identities', async () => {
+        const runtime = createFakeRuntime();
+        const freshRelease = vi.fn(() => Promise.resolve());
+        const resumedRelease = vi.fn(() => Promise.resolve());
+        const freshCheckpointCustody = {
+            publishAuthenticatedCheckpoint: vi.fn(() => Promise.resolve()),
+            release: freshRelease,
+            restoreAuthenticatedCheckpoint: vi.fn(() =>
+                Promise.reject(new Error('fresh custody cannot restore')),
+            ),
+        };
+        const resumedCheckpointCustody = {
+            publishAuthenticatedCheckpoint: vi.fn(() => Promise.resolve()),
+            release: resumedRelease,
+            restoreAuthenticatedCheckpoint: vi.fn(() =>
+                Promise.resolve({
+                    canonicalCheckpointBytes: new Uint8Array(404),
+                    safeBoundaryOrdinal: 291,
+                }),
+            ),
+        };
+        const input = compactPublicKeyVerificationInput(runtime.kernel);
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker({
+                ...input,
+                options: {
+                    ...input.options,
+                    checkpointCustody: freshCheckpointCustody,
+                    resume: { checkpointCustody: resumedCheckpointCustody },
+                },
+            } as never),
+        ).rejects.toThrow(/never both/u);
+
+        expect(freshRelease).toHaveBeenCalledOnce();
+        expect(resumedRelease).toHaveBeenCalledOnce();
+        expect(
+            freshCheckpointCustody.publishAuthenticatedCheckpoint,
+        ).not.toHaveBeenCalled();
+        expect(
+            resumedCheckpointCustody.restoreAuthenticatedCheckpoint,
+        ).not.toHaveBeenCalled();
+        expect(runtime.preparedStatements).toEqual([]);
+        expect(runtime.compactPublicKey.cancelledOperationHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedPreparedHandles).toEqual([]);
+        expect(runtime.compactPublicKey.discardedCapabilityHandles).toEqual([]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
     it('discards the restored prepared authority after a begin refusal', async () => {
         const runtime = createFakeRuntime();
         runtime.compactPublicKey.beginStatus = refusalReasonCodes.wrongContext;

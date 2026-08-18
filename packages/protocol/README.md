@@ -11,9 +11,12 @@ not a separately supported public voting API.
   from canonical inputs.
 - Coordinate canonical board state, authenticated mailbox delivery,
   browser-local encrypted custody, checkpoints, and state witnessing.
-- Bind compact public-key algebraic-verifier cursors to exact source digests
-  and kernel-assigned safe boundaries in the authenticated checkpoint store,
-  retaining the previous committed cursor across interrupted replacement.
+- Bind both compact public-key verifier cursor profiles to exact source digests
+  in the authenticated checkpoint store while retaining the previous committed
+  cursor across interrupted replacement. The algebra-only profile uses 400
+  bytes and 290 CFW boundaries. The accepted profile reads its 404-byte,
+  4,509-boundary geometry from the loaded scalar WASM kernel and uses a distinct
+  canonical state-stream domain.
 - Assemble inputs for setup, ballot, aggregation, evaluator, finality, and
   target-release verification without reimplementing certified cryptography in
   TypeScript.

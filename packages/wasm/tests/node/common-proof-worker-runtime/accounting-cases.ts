@@ -1045,4 +1045,44 @@ describe('Compact public-key algebraic verification worker', () => {
         ).rejects.toThrow(/invalid bounded progress/u);
         expect(cancellationCount).toBe(1);
     });
+
+    it('refuses split algebraic checkpoint custody and releases both identities', async () => {
+        let freshReleaseCount = 0;
+        let resumedReleaseCount = 0;
+        const freshCheckpointCustody = {
+            publishAuthenticatedCheckpoint: () => Promise.resolve(),
+            release: () => {
+                freshReleaseCount += 1;
+                return Promise.resolve();
+            },
+            restoreAuthenticatedCheckpoint: () =>
+                Promise.reject(new Error('fresh custody cannot restore')),
+        };
+        const resumedCheckpointCustody = {
+            publishAuthenticatedCheckpoint: () => Promise.resolve(),
+            release: () => {
+                resumedReleaseCount += 1;
+                return Promise.resolve();
+            },
+            restoreAuthenticatedCheckpoint: () =>
+                Promise.resolve({
+                    canonicalCheckpointBytes: new Uint8Array(400),
+                    safeBoundaryOrdinal: 0,
+                }),
+        };
+        const runtime = createMockKernelRuntime(() => ({}));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    checkpointCustody: freshCheckpointCustody,
+                    resume: { checkpointCustody: resumedCheckpointCustody },
+                } as never,
+            ),
+        ).rejects.toThrow(/never both/u);
+        expect(freshReleaseCount).toBe(1);
+        expect(resumedReleaseCount).toBe(1);
+    });
 });

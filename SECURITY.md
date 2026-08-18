@@ -92,22 +92,22 @@ consequences are:
   and one for each of 1,024 evaluation cosets across four statement roots.
   Restoration revalidates the transported bytes and deterministically replays
   from genesis before newer state may be published. A guarded selected-size
-  native owner passed the post-WHIR poll and all 4,218 source work units. Worker
-  tests cover callback publication and restoration at the first source
-  boundary. The concrete protocol authenticated-store adapter still accepts
-  only the separate 400-byte cursor and 290 CFW ordinals, so it cannot custody
-  the 404-byte, 4,509-boundary accepted cursor. In addition, the worker options
-  permit distinct top-level and resume custody objects: restoration uses the
-  resume object while subsequent publication and cleanup can use the top-level
-  object. Distinct objects can therefore leave the restored operation identity
-  live. No invalid-proof acceptance follows, but one-shot lifecycle and resource
-  authority fail. Terminal WHIR itself is also still one synchronous call
-  before the new boundary. At selected pre-challenge geometry, its current first
-  fold has a source-derived minimum overlap of 209,715,200 bytes before other
-  verifier state. Accepted-cursor custody, one-identity cleanup, bounded
-  transport and terminal WHIR, selected actual-byte cold restoration, the
-  complete equation-invalid hostile corpus, and the compact generation release
-  ABI remain absent.
+  native owner passed the post-WHIR poll and all 4,218 source work units. The
+  concrete protocol authenticated-store adapter now separates the 404-byte,
+  4,509-boundary accepted cursor from the 400-byte algebra-only cursor, reads the
+  accepted geometry from kernel exports, and authenticates it under a separate
+  canonical state-stream domain. Fresh and resumed custody are mutually
+  exclusive. A hostile dual-custody input is refused before kernel preparation,
+  every distinct supplied identity is released once, and one adopted identity
+  performs restoration, publication, and cleanup. The concrete cold-restore
+  test uses synthetic cursor bytes, and the adapter is not installed in the
+  production browser worker host. Terminal WHIR itself is also still one
+  synchronous call before the new boundary. At selected pre-challenge geometry,
+  its current first fold has a source-derived minimum overlap of 209,715,200
+  bytes before other verifier state. Production-host custody installation,
+  bounded transport and terminal WHIR, selected actual-byte cold restoration,
+  the complete equation-invalid hostile corpus, and the compact generation
+  release ABI remain absent.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
@@ -239,26 +239,21 @@ that a coherent snapshot is newest.
   not independent production authority or a complete reduction. Its packet
   chronology conflicts with the normative dependency order, and it cannot mint
   a capability or select a suite.
-- `SEC-019`: Reproducible scalar release WebAssembly and SDK bytes
-  establish build identity only. The release artifact contains compact transport
-  validation and public-key response generation through the complete 82-response
-  schedule plus source-bound prepare, begin, resume, bounded-poll, cursor-copy,
-  cancellation, positive-capability finish, and explicit-discard functions for
-  accepted-setup public-key verification. The typed closed-worker driver owns
-  that linear authority and an authenticated-custody callback boundary. The
-  protocol package provides a concrete authenticated-store adapter for the 290
-  bounded CFW cursor ordinals, but it is not installed in the production
-  browser-worker host. There is no compact generation API or final end-to-end
-  generation and verification ABI pair.
-- `SEC-020`: Guarded selected-size native evidence covers the public-key
-  family's complete response-generation schedule and one cold algebraic restore
-  of its exact emitted proof from a source-bound safe cursor. A separate desktop
-  Chromium diagnostic replays its
-  exact CFW storage lifecycle and exposes an orders-of-magnitude physical-storage
-  amplification. The current proof boundary above owns the candidate's
-  acceptance status. These results do not establish release-WebAssembly proof
-  execution, production common-worker browser-store integration, complete
-  durable browser custody, or supported-phone feasibility.
+- `SEC-019`: Reproducible scalar release WebAssembly and SDK bytes establish
+  build identity only. The release artifact contains compact transport and
+  response-generation exports plus source-bound accepted-verification lifecycle
+  exports. Concrete protocol adapters now separate the algebra-only and accepted
+  cursors; the accepted geometry comes from kernel exports, and the worker
+  enforces one custody identity. The production browser-worker host installs
+  neither adapter, and no compact generation ABI completes the pair.
+- `SEC-020`: Guarded selected-size native evidence covers the complete
+  public-key response schedule, source-bound algebraic verification, and one
+  exact emitted-proof restore through the algebra-only cursor. The accepted
+  adapter has synthetic-byte cold-restore coverage. A separate desktop Chromium
+  diagnostic replays the CFW storage lifecycle. Synchronous terminal WHIR and
+  its memory overlap, browser-storage amplification, release-WebAssembly proof
+  execution, selected actual-byte accepted-cursor restoration, and full browser
+  custody remain open.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.
@@ -292,6 +287,10 @@ Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
   at deterministic safe boundaries before browser suspension can lose material
   work. Resume must preserve the same attempt and must not depend on a wake lock,
   visibility callback, freeze callback, or termination callback.
+- One worker invocation must adopt exactly one checkpoint-custody object.
+  Fresh and resumed custody inputs are mutually exclusive, and the same adopted
+  object must own restoration, publication, and release so every operation
+  identity is retired on success, refusal, cancellation, and failure.
 - Durable state admission must request and recheck browser persistence, account
   for quota, qualify eviction behavior, and compare authenticated local state
   with an external recency anchor before accepting it as newest.

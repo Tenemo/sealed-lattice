@@ -101,10 +101,16 @@ export type {
 } from './runtime/durable-state-witness-service.js';
 export { AuthenticatedCheckpointStoreError } from './runtime/authenticated-checkpoint-store.js';
 export { createBallotAggregationCheckpointCustody } from './runtime/ballot-aggregation-checkpoint-custody.js';
-export { openCompactPublicKeyAlgebraicVerificationCheckpointCustody } from './runtime/compact-public-key-algebraic-verification-checkpoint-custody.js';
+export {
+    openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
+    openCompactPublicKeyAlgebraicVerificationCheckpointCustody,
+} from './runtime/compact-public-key-algebraic-verification-checkpoint-custody.js';
 export type {
+    AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyInput,
+    AcceptedSetupCompactPublicKeyVerificationCheckpointResume,
     CompactPublicKeyAlgebraicVerificationCheckpointCustodyInput,
     CompactPublicKeyAlgebraicVerificationCheckpointResume,
+    OpenedAcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
     OpenedCompactPublicKeyAlgebraicVerificationCheckpointCustody,
 } from './runtime/compact-public-key-algebraic-verification-checkpoint-custody.js';
 export {

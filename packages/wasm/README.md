@@ -58,14 +58,15 @@ public columns and all 1,024 cosets of each of four statement roots. The
 post-WHIR cursor does not make terminal WHIR incremental: the selected
 pre-challenge first fold currently retains an 80 MiB source, an 80 MiB clone,
 and a 40 MiB output simultaneously before other live state. The protocol
-package's concrete authenticated-store adapter still accepts only the separate
-400-byte algebraic cursor and its 290 CFW ordinals. Accepted-cursor worker tests
-exercise the callback contract, not a concrete 404-byte protocol adapter. The
-worker options also allow a resume custody object alongside a different
-top-level custody object, so restore can use one identity while publication and
-release use another. Accepted-cursor storage geometry, single-identity custody,
-production browser-worker installation, bounded transport and terminal WHIR,
-and selected actual-byte cold restoration remain open. Compact generation is
+package now owns distinct authenticated-store adapters for the 400-byte
+algebra-only cursor and the accepted cursor. The accepted adapter reads its
+404-byte, 4,509-boundary geometry from kernel exports and uses a separate
+canonical state-stream domain. Worker options make fresh and resumed custody
+mutually exclusive, and the runtime rejects hostile dual-custody input before
+kernel preparation while releasing every distinct identity. The concrete
+cold-restore test uses synthetic cursor bytes. Production browser-worker
+installation, bounded transport and terminal WHIR, and selected actual-byte
+cold restoration remain open. Compact generation is
 not a worker-facing runtime capability, and no complete generation and
 verification ABI pair exists.
 

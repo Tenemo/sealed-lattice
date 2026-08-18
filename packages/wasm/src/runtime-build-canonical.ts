@@ -423,7 +423,7 @@ export const requireCanonicalRuntimePath = (path: string): string => {
 const privateProofSaltPurpose = 0xfffe;
 export const hidingArgumentRandomnessPurpose = 4;
 const sameSecretProofFamilySchemaIdentifier = 0x1211;
-const publicKeyShareProofFamilySchemaIdentifier = 0x1212;
+export const publicKeyShareProofFamilySchemaIdentifier = 0x1212;
 const collectivePublicKeyAggregateProofFamilySchemaIdentifier = 0x1213;
 const relinearizationRoundOneProofFamilySchemaIdentifier = 0x1214;
 const relinearizationRoundOneAggregateProofFamilySchemaIdentifier = 0x1215;

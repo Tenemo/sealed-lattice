@@ -190,7 +190,7 @@ type CompactPublicKeyAlgebraicVerificationInput = Readonly<{
  * cursor. Publication must retain an owned copy before resolving; restoration
  * must authenticate the exact bytes before returning a fresh owned copy.
  */
-export type CompactPublicKeyAlgebraicVerificationCheckpointCustody = Readonly<{
+export type CompactPublicKeyVerificationCheckpointCustody = Readonly<{
     publishAuthenticatedCheckpoint(
         canonicalCheckpointBytes: Uint8Array<ArrayBuffer>,
         safeBoundaryOrdinal: number,
@@ -204,17 +204,34 @@ export type CompactPublicKeyAlgebraicVerificationCheckpointCustody = Readonly<{
     release(): Promise<void>;
 }>;
 
-export type CompactPublicKeyAlgebraicVerificationResume = Readonly<{
+export type CompactPublicKeyAlgebraicVerificationCheckpointCustody =
+    CompactPublicKeyVerificationCheckpointCustody;
+
+export type AcceptedSetupCompactPublicKeyVerificationCheckpointCustody =
+    CompactPublicKeyVerificationCheckpointCustody;
+
+type CompactPublicKeyAlgebraicVerificationResume = Readonly<{
     checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
 }>;
 
-export type CompactPublicKeyAlgebraicVerificationWorkerOptions = Readonly<{
-    checkpointCustody?: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
+type CompactPublicKeyAlgebraicVerificationWorkerSchedulingOptions = Readonly<{
     maximumWorkUnitCountPerPoll?: number;
-    resume?: CompactPublicKeyAlgebraicVerificationResume;
     signal?: AbortSignal;
     yieldControl?: () => Promise<void>;
 }>;
+
+type CompactPublicKeyAlgebraicVerificationWorkerOptions =
+    CompactPublicKeyAlgebraicVerificationWorkerSchedulingOptions &
+        (
+            | Readonly<{
+                  checkpointCustody?: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
+                  resume?: never;
+              }>
+            | Readonly<{
+                  checkpointCustody?: never;
+                  resume: CompactPublicKeyAlgebraicVerificationResume;
+              }>
+        );
 
 /** Opaque generated-proof authority retained in the same WASM worker. */
 export type ClosedWorkerGeneratedCommonProofCapability = Readonly<{
@@ -2187,11 +2204,28 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
     }
 
     const kernel = new CommonProofVerificationKernelBoundary(context);
-    const resume = options.resume;
+    const runtimeCustodyOptions: Readonly<{
+        checkpointCustody?: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
+        resume?: CompactPublicKeyAlgebraicVerificationResume;
+    }> = options;
+    const resume = runtimeCustodyOptions.resume;
     const signal = options.signal;
     const yieldControl = options.yieldControl ?? yieldBrowserWorkerTurn;
     const checkpointCustody =
-        options.checkpointCustody ?? resume?.checkpointCustody;
+        runtimeCustodyOptions.checkpointCustody ?? resume?.checkpointCustody;
+    const suppliedCheckpointCustodies =
+        runtimeCustodyOptions.checkpointCustody === undefined
+            ? resume === undefined
+                ? []
+                : [resume.checkpointCustody]
+            : resume === undefined ||
+                resume.checkpointCustody ===
+                    runtimeCustodyOptions.checkpointCustody
+              ? [runtimeCustodyOptions.checkpointCustody]
+              : [
+                    runtimeCustodyOptions.checkpointCustody,
+                    resume.checkpointCustody,
+                ];
     let operationHandle: number | undefined;
     let operationTerminal = false;
     let deterministicReplayComplete = resume === undefined;
@@ -2200,6 +2234,14 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
         VerificationResult<undefined>
     > => {
         try {
+            if (
+                runtimeCustodyOptions.checkpointCustody !== undefined &&
+                resume !== undefined
+            ) {
+                throw resourceFailure(
+                    'Compact public-key algebraic verification accepts either fresh checkpoint custody or resumed checkpoint custody, never both.',
+                );
+            }
             throwIfVerificationCancelled(signal);
             const begin =
                 resume === undefined
@@ -2209,10 +2251,15 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
                           input.publicInputBytes,
                       )
                     : await (async () => {
+                          if (checkpointCustody === undefined) {
+                              throw kernelFailure(
+                                  'Compact public-key algebraic verification resume has no checkpoint custody.',
+                              );
+                          }
                           const restoredCheckpoint =
                               await restoreCompactPublicKeyAlgebraicVerificationCheckpoint(
                                   kernel,
-                                  resume.checkpointCustody,
+                                  checkpointCustody,
                               );
                           const canonicalCheckpointBytes =
                               restoredCheckpoint.canonicalCheckpointBytes;
@@ -2331,17 +2378,21 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
         operationFailed = true;
         operationFailure = error;
     }
-    if (checkpointCustody !== undefined) {
+    const releaseFailures: unknown[] = [];
+    for (const suppliedCheckpointCustody of suppliedCheckpointCustodies) {
         try {
-            await checkpointCustody.release();
+            await suppliedCheckpointCustody.release();
         } catch (releaseFailure) {
-            throw permanentRetirementFailure(
-                operationFailed
-                    ? { operationFailure, releaseFailure }
-                    : releaseFailure,
-                'The compact public-key algebraic verification checkpoint custody could not release its operation identity.',
-            );
+            releaseFailures.push(releaseFailure);
         }
+    }
+    if (releaseFailures.length > 0) {
+        throw permanentRetirementFailure(
+            operationFailed
+                ? { operationFailure, releaseFailures }
+                : { releaseFailures },
+            'The compact public-key algebraic verification checkpoint custody could not release every supplied operation identity.',
+        );
     }
     if (operationFailed) {
         throw operationFailure;

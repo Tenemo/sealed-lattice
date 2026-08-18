@@ -201,8 +201,12 @@ export type {
     AcceptedSetupVerificationSession,
 } from './accepted-setup-assembly-runtime.js';
 export type { AcceptedSetupPackageBuilder } from './accepted-setup-package-builder-runtime.js';
+export { readAcceptedSetupCompactPublicKeyVerificationCheckpointGeometry } from './accepted-setup-proof-verification-runtime.js';
 export type {
+    AcceptedSetupCompactPublicKeyVerificationCheckpointGeometry,
     AcceptedSetupCompactPublicKeyVerificationInput,
+    AcceptedSetupCompactPublicKeyVerificationResume,
+    AcceptedSetupCompactPublicKeyVerificationWorkerOptions,
     AcceptedSetupProofVerificationInput,
     AcceptedSetupSameSecretProofVerificationInput,
 } from './accepted-setup-proof-verification-runtime.js';
@@ -326,12 +330,14 @@ export type {
     VssShareLinkageGenerationMode,
 } from './vss-share-linkage-generation-runtime.js';
 export type {
+    AcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
     AuthenticatedCommonProofInputStore,
     ClosedWorkerCommonProofGenerationFamilyAdapter,
     ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
     ClosedWorkerCommonProofVerificationFamilyAdapter,
     ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
     CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    CompactPublicKeyVerificationCheckpointCustody,
     CommonProofCanonicalOutputStore,
     CommonProofExternalMemoryOperation,
     CommonProofExternalMemoryReadResult,
@@ -423,6 +429,7 @@ export { decodeCommonProofGenerationCursorManifest } from './common-proof-genera
 export {
     isAssignedRuntimeCheckpointRandomUse,
     isPublicOnlyCommonProofCheckpointFamily,
+    publicKeyShareProofFamilySchemaIdentifier,
 } from './runtime-build-canonical.js';
 export type {
     RuntimeBuildActivation,

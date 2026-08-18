@@ -15,7 +15,13 @@ import {
     openRuntimeTestStore,
     runtimeAuthorityContext,
 } from '#packages/protocol/tests/support/runtime-storage-test-support';
-import { openCompactPublicKeyAlgebraicVerificationCheckpointCustody } from '@sealed-lattice/protocol';
+import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
+import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
+import { createMockKernelRuntime } from '#packages/wasm/tests/node/common-proof-worker-runtime/kernel-fixtures';
+import {
+    openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
+    openCompactPublicKeyAlgebraicVerificationCheckpointCustody,
+} from '@sealed-lattice/protocol';
 
 const storageNamespace = 'compact-public-key-verifier-checkpoint-test';
 
@@ -42,13 +48,33 @@ const sourceDigests = (): readonly Uint8Array[] => [
     hashFilledWith(0x61),
 ];
 
-const checkpointBytes = (seed: number): Uint8Array<ArrayBuffer> => {
-    const bytes = new Uint8Array(400);
+const checkpointBytes = (
+    seed: number,
+    byteLength = 400,
+): Uint8Array<ArrayBuffer> => {
+    const bytes = new Uint8Array(byteLength);
     for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
         bytes[byteIndex] =
             (seed + byteIndex * 113 + Math.floor(byteIndex / 7) * 29) & 0xff;
     }
     return bytes;
+};
+
+const createAcceptedCheckpointGeometryKernel = (
+    checkpointByteLength = 404,
+    safeBoundaryCount = 4_509,
+): TranscriptCoreKernel => {
+    const kernel = Object.freeze({}) as TranscriptCoreKernel;
+    registerCommonProofKernelContext(
+        kernel,
+        createMockKernelRuntime(() => ({
+            sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length:
+                () => checkpointByteLength,
+            sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count:
+                () => safeBoundaryCount,
+        })),
+    );
+    return kernel;
 };
 
 const openCheckpointStore = async (input?: {
@@ -402,6 +428,161 @@ describe('Compact public-key algebraic verification checkpoint custody', () => {
             ).rejects.toMatchObject({ code: 'InvalidInput' });
         } finally {
             await store.close();
+        }
+    });
+});
+
+describe('Accepted-setup compact public-key verification checkpoint custody', () => {
+    it('derives accepted geometry from canonical kernel exports before opening custody', async () => {
+        const { store } = await openCheckpointStore();
+        try {
+            await expect(
+                openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody(
+                    store,
+                    {
+                        kernel: createAcceptedCheckpointGeometryKernel(403),
+                        orderedSourceDigests: sourceDigests(),
+                    },
+                ),
+            ).rejects.toThrow(/geometry disagrees/u);
+            await expect(
+                openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody(
+                    store,
+                    {
+                        kernel: createAcceptedCheckpointGeometryKernel(
+                            404,
+                            4_508,
+                        ),
+                        orderedSourceDigests: sourceDigests(),
+                    },
+                ),
+            ).rejects.toThrow(/schedule disagrees/u);
+
+            const opening =
+                await openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody(
+                    store,
+                    {
+                        kernel: createAcceptedCheckpointGeometryKernel(),
+                        orderedSourceDigests: sourceDigests(),
+                    },
+                );
+            await opening.checkpointCustody.release();
+        } finally {
+            await store.close();
+        }
+    });
+
+    it('cold restores the 404-byte source cursor under its separate authenticated profile', async () => {
+        const firstStoreOpening = await openCheckpointStore();
+        let activeStore = firstStoreOpening.store;
+        const kernel = createAcceptedCheckpointGeometryKernel();
+        try {
+            const opening =
+                await openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody(
+                    activeStore,
+                    { kernel, orderedSourceDigests: sourceDigests() },
+                );
+            const checkpointLineageIdentifier =
+                opening.checkpointLineageIdentifier.slice();
+            const initialCheckpointBytes = checkpointBytes(0x29, 404);
+
+            await expect(
+                opening.checkpointCustody.publishAuthenticatedCheckpoint(
+                    checkpointBytes(0x41, 403),
+                    1,
+                ),
+            ).rejects.toMatchObject({ code: 'InvalidInput' });
+            await expect(
+                opening.checkpointCustody.publishAuthenticatedCheckpoint(
+                    checkpointBytes(0x42, 405),
+                    1,
+                ),
+            ).rejects.toMatchObject({ code: 'InvalidInput' });
+            await expect(
+                opening.checkpointCustody.publishAuthenticatedCheckpoint(
+                    initialCheckpointBytes,
+                    4_509,
+                ),
+            ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+            await opening.checkpointCustody.publishAuthenticatedCheckpoint(
+                initialCheckpointBytes,
+                1,
+            );
+            await opening.checkpointCustody.release();
+            await activeStore.close();
+
+            const secondStoreOpening = await openCheckpointStore({
+                adapter: firstStoreOpening.adapter,
+                encryptionKey: firstStoreOpening.encryptionKey,
+                storageTransactionStore:
+                    firstStoreOpening.storageTransactionStore,
+            });
+            activeStore = secondStoreOpening.store;
+
+            const wrongProfileOpening =
+                await openCompactPublicKeyAlgebraicVerificationCheckpointCustody(
+                    activeStore,
+                    {
+                        orderedSourceDigests: sourceDigests(),
+                        resume: {
+                            checkpointLineageIdentifier,
+                            safeBoundaryOrdinal: 1,
+                        },
+                    },
+                );
+            await expect(
+                wrongProfileOpening.checkpointCustody.restoreAuthenticatedCheckpoint(),
+            ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
+            await wrongProfileOpening.checkpointCustody.release();
+
+            const resumedOpening =
+                await openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody(
+                    activeStore,
+                    {
+                        kernel,
+                        orderedSourceDigests: sourceDigests(),
+                        resume: {
+                            checkpointLineageIdentifier,
+                            safeBoundaryOrdinal: 1,
+                        },
+                    },
+                );
+            const restoredCheckpoint =
+                await resumedOpening.checkpointCustody.restoreAuthenticatedCheckpoint();
+            expect(restoredCheckpoint).toEqual({
+                canonicalCheckpointBytes: initialCheckpointBytes,
+                safeBoundaryOrdinal: 1,
+            });
+
+            const terminalSourceCheckpointBytes = checkpointBytes(0xb7, 404);
+            await resumedOpening.checkpointCustody.publishAuthenticatedCheckpoint(
+                terminalSourceCheckpointBytes,
+                4_508,
+            );
+            await resumedOpening.checkpointCustody.release();
+
+            const terminalOpening =
+                await openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody(
+                    activeStore,
+                    {
+                        kernel,
+                        orderedSourceDigests: sourceDigests(),
+                        resume: {
+                            checkpointLineageIdentifier,
+                            safeBoundaryOrdinal: 4_508,
+                        },
+                    },
+                );
+            await expect(
+                terminalOpening.checkpointCustody.restoreAuthenticatedCheckpoint(),
+            ).resolves.toEqual({
+                canonicalCheckpointBytes: terminalSourceCheckpointBytes,
+                safeBoundaryOrdinal: 4_508,
+            });
+            await terminalOpening.checkpointCustody.release();
+        } finally {
+            await activeStore.close();
         }
     });
 });

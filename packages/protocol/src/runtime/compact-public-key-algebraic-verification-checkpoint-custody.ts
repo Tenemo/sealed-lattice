@@ -1,4 +1,11 @@
-import type { CompactPublicKeyAlgebraicVerificationCheckpointCustody } from '@sealed-lattice/wasm';
+import {
+    publicKeyShareProofFamilySchemaIdentifier,
+    readAcceptedSetupCompactPublicKeyVerificationCheckpointGeometry,
+    type AcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
+    type CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    type CompactPublicKeyVerificationCheckpointCustody,
+    type TranscriptCoreKernel,
+} from '@sealed-lattice/wasm';
 
 import {
     AuthenticatedCheckpointStoreError,
@@ -7,35 +14,28 @@ import {
     type CheckpointOperationIdentity,
     type ResumedCheckpoint,
 } from './authenticated-checkpoint-store.js';
+import {
+    compactPublicKeyVerificationCheckpointStateStreamDomains,
+    createEmptyCompactPublicKeyVerificationPrivateRandomnessCursorManifestBytes,
+} from './compact-public-key-verification-checkpoint-contract.js';
 
 const hashByteLength = 64;
 const checkpointLineageIdentifierByteLength = 32;
-const checkpointByteLength = 400;
-const operationKind = 0x1212;
-const safeBoundaryCount = 290;
-const stateStreamDomain =
-    'sealed-lattice/bgv/compact-public-key-algebraic-verification-checkpoint/v1';
-const emptyPrivateRandomCursorManifestBytes = Uint8Array.of(
-    0x53,
-    0x4c,
-    0x43,
-    0x50,
-    0x43,
-    0x4d,
-    0x30,
-    0x33,
-    0x03,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-    0x00,
-);
+
+type CompactPublicKeyVerificationCheckpointProfile = Readonly<{
+    checkpointByteLength: number;
+    operationDescription: string;
+    safeBoundaryCount: number;
+    stateStreamDomain: string;
+}>;
+
+const compactPublicKeyAlgebraicVerificationCheckpointProfile = Object.freeze({
+    checkpointByteLength: 400,
+    operationDescription: 'compact public-key algebraic verification',
+    safeBoundaryCount: 290,
+    stateStreamDomain:
+        compactPublicKeyVerificationCheckpointStateStreamDomains.algebraic,
+}) satisfies CompactPublicKeyVerificationCheckpointProfile;
 
 export type CompactPublicKeyAlgebraicVerificationCheckpointResume = Readonly<{
     checkpointLineageIdentifier: Uint8Array;
@@ -55,6 +55,42 @@ export type OpenedCompactPublicKeyAlgebraicVerificationCheckpointCustody =
         checkpointLineageIdentifier: Uint8Array;
     }>;
 
+export type AcceptedSetupCompactPublicKeyVerificationCheckpointResume =
+    Readonly<{
+        checkpointLineageIdentifier: Uint8Array;
+        safeBoundaryOrdinal: number;
+    }>;
+
+export type AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyInput =
+    Readonly<{
+        orderedSourceDigests: readonly Uint8Array[];
+        kernel: TranscriptCoreKernel;
+        resume?: AcceptedSetupCompactPublicKeyVerificationCheckpointResume;
+        signal?: AbortSignal;
+    }>;
+
+export type OpenedAcceptedSetupCompactPublicKeyVerificationCheckpointCustody =
+    Readonly<{
+        checkpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
+        checkpointLineageIdentifier: Uint8Array;
+    }>;
+
+type CompactPublicKeyVerificationCheckpointResume = Readonly<{
+    checkpointLineageIdentifier: Uint8Array;
+    safeBoundaryOrdinal: number;
+}>;
+
+type CompactPublicKeyVerificationCheckpointCustodyInput = Readonly<{
+    orderedSourceDigests: readonly Uint8Array[];
+    resume?: CompactPublicKeyVerificationCheckpointResume;
+    signal?: AbortSignal;
+}>;
+
+type OpenedCompactPublicKeyVerificationCheckpointCustody = Readonly<{
+    checkpointCustody: CompactPublicKeyVerificationCheckpointCustody;
+    checkpointLineageIdentifier: Uint8Array;
+}>;
+
 type ActiveCustodyState = {
     operationIdentity: CheckpointOperationIdentity;
     releasePromise?: Promise<void>;
@@ -65,16 +101,20 @@ type ActiveCustodyState = {
 
 const createCancellationError = (
     signal: AbortSignal,
+    profile: CompactPublicKeyVerificationCheckpointProfile,
 ): AuthenticatedCheckpointStoreError =>
     new AuthenticatedCheckpointStoreError(
         'InvalidState',
-        'Compact public-key algebraic verification checkpoint custody was cancelled.',
+        `The ${profile.operationDescription} checkpoint custody was cancelled.`,
         signal.reason,
     );
 
-const throwIfAborted = (signal?: AbortSignal): void => {
+const throwIfAborted = (
+    profile: CompactPublicKeyVerificationCheckpointProfile,
+    signal?: AbortSignal,
+): void => {
     if (signal?.aborted === true) {
-        throw createCancellationError(signal);
+        throw createCancellationError(signal, profile);
     }
 };
 
@@ -90,6 +130,7 @@ const createCleanupFailure = (
 
 const copySourceDigests = (
     orderedSourceDigests: readonly Uint8Array[],
+    profile: CompactPublicKeyVerificationCheckpointProfile,
 ): readonly Uint8Array[] => {
     if (
         !Array.isArray(orderedSourceDigests) ||
@@ -97,7 +138,7 @@ const copySourceDigests = (
     ) {
         throw new AuthenticatedCheckpointStoreError(
             'InvalidInput',
-            'Compact public-key algebraic verification checkpoint custody requires verified source digests.',
+            `The ${profile.operationDescription} checkpoint custody requires verified source digests.`,
         );
     }
     return Object.freeze(
@@ -108,7 +149,7 @@ const copySourceDigests = (
             ) {
                 throw new AuthenticatedCheckpointStoreError(
                     'InvalidInput',
-                    'A compact public-key algebraic verification source digest has the wrong byte length.',
+                    `A ${profile.operationDescription} source digest has the wrong byte length.`,
                 );
             }
             return Uint8Array.from(digest);
@@ -116,28 +157,34 @@ const copySourceDigests = (
     );
 };
 
-const requireSafeBoundaryOrdinal = (safeBoundaryOrdinal: number): number => {
+const requireSafeBoundaryOrdinal = (
+    safeBoundaryOrdinal: number,
+    profile: CompactPublicKeyVerificationCheckpointProfile,
+): number => {
     if (
         !Number.isSafeInteger(safeBoundaryOrdinal) ||
         safeBoundaryOrdinal < 0 ||
-        safeBoundaryOrdinal >= safeBoundaryCount
+        safeBoundaryOrdinal >= profile.safeBoundaryCount
     ) {
         throw new AuthenticatedCheckpointStoreError(
             'InvalidInput',
-            'The compact public-key algebraic verification checkpoint boundary is unassigned.',
+            `The ${profile.operationDescription} checkpoint boundary is unassigned.`,
         );
     }
     return safeBoundaryOrdinal;
 };
 
-const copyCheckpointLineageIdentifier = (bytes: Uint8Array): Uint8Array => {
+const copyCheckpointLineageIdentifier = (
+    bytes: Uint8Array,
+    profile: CompactPublicKeyVerificationCheckpointProfile,
+): Uint8Array => {
     if (
         !(bytes instanceof Uint8Array) ||
         bytes.byteLength !== checkpointLineageIdentifierByteLength
     ) {
         throw new AuthenticatedCheckpointStoreError(
             'InvalidInput',
-            'The compact public-key algebraic verification checkpoint lineage is malformed.',
+            `The ${profile.operationDescription} checkpoint lineage is malformed.`,
         );
     }
     return Uint8Array.from(bytes);
@@ -146,16 +193,19 @@ const copyCheckpointLineageIdentifier = (bytes: Uint8Array): Uint8Array => {
 const expectedBoundary = (
     orderedSourceDigests: readonly Uint8Array[],
     safeBoundaryOrdinal: number,
+    profile: CompactPublicKeyVerificationCheckpointProfile,
 ) => ({
-    operationKind,
+    operationKind: publicKeyShareProofFamilySchemaIdentifier,
     orderedSourceDigests,
-    privateRandomCursorManifestBytes: emptyPrivateRandomCursorManifestBytes,
+    privateRandomCursorManifestBytes:
+        createEmptyCompactPublicKeyVerificationPrivateRandomnessCursorManifestBytes(),
     safeBoundaryOrdinal,
-    stateStreamDomain,
+    stateStreamDomain: profile.stateStreamDomain,
 });
 
 const restoreExactCheckpointBytes = async (
     resumedCheckpoint: ResumedCheckpoint,
+    profile: CompactPublicKeyVerificationCheckpointProfile,
 ): Promise<Uint8Array<ArrayBuffer>> => {
     let restoredBytes: Uint8Array<ArrayBuffer> | undefined;
     try {
@@ -165,11 +215,11 @@ const restoreExactCheckpointBytes = async (
                     chunkIndex !== 0 ||
                     restoredBytes !== undefined ||
                     !(chunkBytes.buffer instanceof ArrayBuffer) ||
-                    chunkBytes.byteLength !== checkpointByteLength
+                    chunkBytes.byteLength !== profile.checkpointByteLength
                 ) {
                     throw new AuthenticatedCheckpointStoreError(
                         'AuthenticationFailed',
-                        'Authenticated custody restored a malformed compact public-key algebraic verification checkpoint stream.',
+                        `Authenticated custody restored a malformed ${profile.operationDescription} checkpoint stream.`,
                     );
                 }
                 restoredBytes = Uint8Array.from(chunkBytes);
@@ -184,7 +234,7 @@ const restoreExactCheckpointBytes = async (
     if (restoredBytes === undefined) {
         throw new AuthenticatedCheckpointStoreError(
             'AuthenticationFailed',
-            'Authenticated custody restored no compact public-key algebraic verification checkpoint bytes.',
+            `Authenticated custody restored no ${profile.operationDescription} checkpoint bytes.`,
         );
     }
     return restoredBytes;
@@ -209,200 +259,239 @@ const requireActiveRestoredCheckpoint = (
  * for the lineage, and every replacement boundary is supplied by the Rust
  * verifier rather than by a caller-controlled poll count.
  */
+const openCompactPublicKeyVerificationCheckpointCustody = async (
+    store: AuthenticatedCheckpointStore,
+    input: CompactPublicKeyVerificationCheckpointCustodyInput,
+    profile: CompactPublicKeyVerificationCheckpointProfile,
+): Promise<OpenedCompactPublicKeyVerificationCheckpointCustody> => {
+    const orderedSourceDigests = copySourceDigests(
+        input.orderedSourceDigests,
+        profile,
+    );
+    let operationIdentity: CheckpointOperationIdentity | undefined;
+    let resumedCheckpoint: ResumedCheckpoint | undefined;
+    let checkpointLineageIdentifier: Uint8Array | undefined;
+    try {
+        throwIfAborted(profile, input.signal);
+        if (input.resume === undefined) {
+            operationIdentity = await store.beginOperation();
+        } else {
+            const resumeLineageIdentifier = copyCheckpointLineageIdentifier(
+                input.resume.checkpointLineageIdentifier,
+                profile,
+            );
+            try {
+                resumedCheckpoint = await store.resume({
+                    checkpointLineageIdentifier: resumeLineageIdentifier,
+                    expectedBoundary: expectedBoundary(
+                        orderedSourceDigests,
+                        requireSafeBoundaryOrdinal(
+                            input.resume.safeBoundaryOrdinal,
+                            profile,
+                        ),
+                        profile,
+                    ),
+                });
+            } finally {
+                resumeLineageIdentifier.fill(0);
+            }
+            operationIdentity = resumedCheckpoint.operationIdentity;
+        }
+        throwIfAborted(profile, input.signal);
+        checkpointLineageIdentifier = copyCheckpointLineageIdentifier(
+            operationIdentity.checkpointLineageIdentifier,
+            profile,
+        );
+    } catch (operationFailure) {
+        for (const digest of orderedSourceDigests) digest.fill(0);
+        resumedCheckpoint?.canonicalManifestBytes.fill(0);
+        resumedCheckpoint?.stateStreamDescriptorBytes.fill(0);
+        if (operationIdentity !== undefined) {
+            try {
+                await store.releaseOperationIdentity(operationIdentity);
+            } catch (cleanupFailure) {
+                throw createCleanupFailure(
+                    `The ${profile.operationDescription} checkpoint custody failed to release an incompletely opened identity.`,
+                    operationFailure,
+                    cleanupFailure,
+                );
+            }
+        }
+        throw operationFailure;
+    }
+
+    const activeState: ActiveCustodyState = {
+        operationIdentity,
+        released: false,
+        restoredCheckpoint: resumedCheckpoint,
+        restoredCheckpointConsumed: false,
+    };
+    const requireActive = (): void => {
+        if (activeState.released || activeState.releasePromise !== undefined) {
+            throw new AuthenticatedCheckpointStoreError(
+                'InvalidState',
+                `The ${profile.operationDescription} checkpoint custody identity is no longer active.`,
+            );
+        }
+        throwIfAborted(profile, input.signal);
+    };
+
+    const checkpointCustody: CompactPublicKeyVerificationCheckpointCustody =
+        Object.freeze({
+            publishAuthenticatedCheckpoint: async (
+                canonicalCheckpointBytes,
+                untrustedSafeBoundaryOrdinal,
+            ) => {
+                requireActive();
+                const safeBoundaryOrdinal = requireSafeBoundaryOrdinal(
+                    untrustedSafeBoundaryOrdinal,
+                    profile,
+                );
+                if (
+                    !(canonicalCheckpointBytes instanceof Uint8Array) ||
+                    canonicalCheckpointBytes.byteLength !==
+                        profile.checkpointByteLength
+                ) {
+                    throw new AuthenticatedCheckpointStoreError(
+                        'InvalidInput',
+                        `The ${profile.operationDescription} checkpoint has the wrong byte length.`,
+                    );
+                }
+                const stateStreamDescriptorBytes =
+                    describeAuthenticatedCheckpointStateStream({
+                        stateBytes: canonicalCheckpointBytes,
+                        stateStreamDomain: profile.stateStreamDomain,
+                    });
+                try {
+                    const stateChunks = function* () {
+                        requireActive();
+                        yield canonicalCheckpointBytes;
+                        requireActive();
+                    };
+                    try {
+                        const canonicalManifestBytes = await store.publish({
+                            boundary: {
+                                ...expectedBoundary(
+                                    orderedSourceDigests,
+                                    safeBoundaryOrdinal,
+                                    profile,
+                                ),
+                                stateStreamDescriptorBytes,
+                            },
+                            identity: activeState.operationIdentity,
+                            stateChunks: stateChunks(),
+                        });
+                        canonicalManifestBytes.fill(0);
+                        requireActive();
+                    } catch (publicationFailure) {
+                        try {
+                            await store.repair(
+                                activeState.operationIdentity
+                                    .checkpointLineageIdentifier,
+                            );
+                        } catch (cleanupFailure) {
+                            throw createCleanupFailure(
+                                `The ${profile.operationDescription} checkpoint custody could not repair a rejected replacement publication.`,
+                                publicationFailure,
+                                cleanupFailure,
+                            );
+                        }
+                        throw publicationFailure;
+                    }
+                } finally {
+                    stateStreamDescriptorBytes.fill(0);
+                }
+            },
+            release: async () => {
+                if (activeState.released) return;
+                if (activeState.releasePromise !== undefined) {
+                    return await activeState.releasePromise;
+                }
+                const releasePromise = store
+                    .releaseOperationIdentity(activeState.operationIdentity)
+                    .then(() => {
+                        activeState.released = true;
+                        activeState.restoredCheckpoint?.canonicalManifestBytes.fill(
+                            0,
+                        );
+                        activeState.restoredCheckpoint?.stateStreamDescriptorBytes.fill(
+                            0,
+                        );
+                        for (const digest of orderedSourceDigests)
+                            digest.fill(0);
+                    })
+                    .finally(() => {
+                        activeState.releasePromise = undefined;
+                    });
+                activeState.releasePromise = releasePromise;
+                return await releasePromise;
+            },
+            restoreAuthenticatedCheckpoint: async () => {
+                requireActive();
+                if (
+                    activeState.restoredCheckpoint === undefined ||
+                    input.resume === undefined ||
+                    activeState.restoredCheckpointConsumed
+                ) {
+                    throw new AuthenticatedCheckpointStoreError(
+                        'InvalidState',
+                        `No unconsumed ${profile.operationDescription} checkpoint is available for restoration.`,
+                    );
+                }
+                activeState.restoredCheckpointConsumed = true;
+                const canonicalCheckpointBytes =
+                    requireActiveRestoredCheckpoint(
+                        await restoreExactCheckpointBytes(
+                            activeState.restoredCheckpoint,
+                            profile,
+                        ),
+                        requireActive,
+                    );
+                return Object.freeze({
+                    canonicalCheckpointBytes,
+                    safeBoundaryOrdinal: requireSafeBoundaryOrdinal(
+                        input.resume.safeBoundaryOrdinal,
+                        profile,
+                    ),
+                });
+            },
+        });
+
+    return Object.freeze({
+        checkpointCustody,
+        checkpointLineageIdentifier,
+    });
+};
+
 export const openCompactPublicKeyAlgebraicVerificationCheckpointCustody =
     async (
         store: AuthenticatedCheckpointStore,
         input: CompactPublicKeyAlgebraicVerificationCheckpointCustodyInput,
-    ): Promise<OpenedCompactPublicKeyAlgebraicVerificationCheckpointCustody> => {
-        const orderedSourceDigests = copySourceDigests(
-            input.orderedSourceDigests,
+    ): Promise<OpenedCompactPublicKeyAlgebraicVerificationCheckpointCustody> =>
+        await openCompactPublicKeyVerificationCheckpointCustody(
+            store,
+            input,
+            compactPublicKeyAlgebraicVerificationCheckpointProfile,
         );
-        let operationIdentity: CheckpointOperationIdentity | undefined;
-        let resumedCheckpoint: ResumedCheckpoint | undefined;
-        let checkpointLineageIdentifier: Uint8Array | undefined;
-        try {
-            throwIfAborted(input.signal);
-            if (input.resume === undefined) {
-                operationIdentity = await store.beginOperation();
-            } else {
-                const resumeLineageIdentifier = copyCheckpointLineageIdentifier(
-                    input.resume.checkpointLineageIdentifier,
-                );
-                try {
-                    resumedCheckpoint = await store.resume({
-                        checkpointLineageIdentifier: resumeLineageIdentifier,
-                        expectedBoundary: expectedBoundary(
-                            orderedSourceDigests,
-                            requireSafeBoundaryOrdinal(
-                                input.resume.safeBoundaryOrdinal,
-                            ),
-                        ),
-                    });
-                } finally {
-                    resumeLineageIdentifier.fill(0);
-                }
-                operationIdentity = resumedCheckpoint.operationIdentity;
-            }
-            throwIfAborted(input.signal);
-            checkpointLineageIdentifier = copyCheckpointLineageIdentifier(
-                operationIdentity.checkpointLineageIdentifier,
+
+export const openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody =
+    async (
+        store: AuthenticatedCheckpointStore,
+        input: AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyInput,
+    ): Promise<OpenedAcceptedSetupCompactPublicKeyVerificationCheckpointCustody> => {
+        const checkpointGeometry =
+            readAcceptedSetupCompactPublicKeyVerificationCheckpointGeometry(
+                input.kernel,
             );
-        } catch (operationFailure) {
-            for (const digest of orderedSourceDigests) digest.fill(0);
-            resumedCheckpoint?.canonicalManifestBytes.fill(0);
-            resumedCheckpoint?.stateStreamDescriptorBytes.fill(0);
-            if (operationIdentity !== undefined) {
-                try {
-                    await store.releaseOperationIdentity(operationIdentity);
-                } catch (cleanupFailure) {
-                    throw createCleanupFailure(
-                        'Compact public-key algebraic verification checkpoint custody failed to release an incompletely opened identity.',
-                        operationFailure,
-                        cleanupFailure,
-                    );
-                }
-            }
-            throw operationFailure;
-        }
-
-        const activeState: ActiveCustodyState = {
-            operationIdentity,
-            released: false,
-            restoredCheckpoint: resumedCheckpoint,
-            restoredCheckpointConsumed: false,
-        };
-        const requireActive = (): void => {
-            if (
-                activeState.released ||
-                activeState.releasePromise !== undefined
-            ) {
-                throw new AuthenticatedCheckpointStoreError(
-                    'InvalidState',
-                    'The compact public-key algebraic verification checkpoint custody identity is no longer active.',
-                );
-            }
-            throwIfAborted(input.signal);
-        };
-
-        const checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody =
+        return await openCompactPublicKeyVerificationCheckpointCustody(
+            store,
+            input,
             Object.freeze({
-                publishAuthenticatedCheckpoint: async (
-                    canonicalCheckpointBytes,
-                    untrustedSafeBoundaryOrdinal,
-                ) => {
-                    requireActive();
-                    const safeBoundaryOrdinal = requireSafeBoundaryOrdinal(
-                        untrustedSafeBoundaryOrdinal,
-                    );
-                    if (
-                        !(canonicalCheckpointBytes instanceof Uint8Array) ||
-                        canonicalCheckpointBytes.byteLength !==
-                            checkpointByteLength
-                    ) {
-                        throw new AuthenticatedCheckpointStoreError(
-                            'InvalidInput',
-                            'The compact public-key algebraic verification checkpoint has the wrong byte length.',
-                        );
-                    }
-                    const stateStreamDescriptorBytes =
-                        describeAuthenticatedCheckpointStateStream({
-                            stateBytes: canonicalCheckpointBytes,
-                            stateStreamDomain,
-                        });
-                    try {
-                        const stateChunks = function* () {
-                            requireActive();
-                            yield canonicalCheckpointBytes;
-                            requireActive();
-                        };
-                        try {
-                            const canonicalManifestBytes = await store.publish({
-                                boundary: {
-                                    ...expectedBoundary(
-                                        orderedSourceDigests,
-                                        safeBoundaryOrdinal,
-                                    ),
-                                    stateStreamDescriptorBytes,
-                                },
-                                identity: activeState.operationIdentity,
-                                stateChunks: stateChunks(),
-                            });
-                            canonicalManifestBytes.fill(0);
-                            requireActive();
-                        } catch (publicationFailure) {
-                            try {
-                                await store.repair(
-                                    activeState.operationIdentity
-                                        .checkpointLineageIdentifier,
-                                );
-                            } catch (cleanupFailure) {
-                                throw createCleanupFailure(
-                                    'Compact public-key algebraic verification checkpoint custody could not repair a rejected replacement publication.',
-                                    publicationFailure,
-                                    cleanupFailure,
-                                );
-                            }
-                            throw publicationFailure;
-                        }
-                    } finally {
-                        stateStreamDescriptorBytes.fill(0);
-                    }
-                },
-                release: async () => {
-                    if (activeState.released) return;
-                    if (activeState.releasePromise !== undefined) {
-                        return await activeState.releasePromise;
-                    }
-                    const releasePromise = store
-                        .releaseOperationIdentity(activeState.operationIdentity)
-                        .then(() => {
-                            activeState.released = true;
-                            activeState.restoredCheckpoint?.canonicalManifestBytes.fill(
-                                0,
-                            );
-                            activeState.restoredCheckpoint?.stateStreamDescriptorBytes.fill(
-                                0,
-                            );
-                            for (const digest of orderedSourceDigests)
-                                digest.fill(0);
-                        })
-                        .finally(() => {
-                            activeState.releasePromise = undefined;
-                        });
-                    activeState.releasePromise = releasePromise;
-                    return await releasePromise;
-                },
-                restoreAuthenticatedCheckpoint: async () => {
-                    requireActive();
-                    if (
-                        activeState.restoredCheckpoint === undefined ||
-                        input.resume === undefined ||
-                        activeState.restoredCheckpointConsumed
-                    ) {
-                        throw new AuthenticatedCheckpointStoreError(
-                            'InvalidState',
-                            'No unconsumed compact public-key algebraic verification checkpoint is available for restoration.',
-                        );
-                    }
-                    activeState.restoredCheckpointConsumed = true;
-                    const canonicalCheckpointBytes =
-                        requireActiveRestoredCheckpoint(
-                            await restoreExactCheckpointBytes(
-                                activeState.restoredCheckpoint,
-                            ),
-                            requireActive,
-                        );
-                    return Object.freeze({
-                        canonicalCheckpointBytes,
-                        safeBoundaryOrdinal: requireSafeBoundaryOrdinal(
-                            input.resume.safeBoundaryOrdinal,
-                        ),
-                    });
-                },
-            });
-
-        return Object.freeze({
-            checkpointCustody,
-            checkpointLineageIdentifier,
-        });
+                ...checkpointGeometry,
+                operationDescription:
+                    'accepted-setup compact public-key verification',
+                stateStreamDomain:
+                    compactPublicKeyVerificationCheckpointStateStreamDomains.acceptedSetup,
+            }),
+        );
     };

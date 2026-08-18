@@ -123,24 +123,25 @@ and target release remain incomplete or internal.
   authority on every refusal and cancellation path. A guarded selected-size
   native run observed one post-WHIR poll and exactly 4,218 source work units
   while reproducing all four roots and accepting the same 23,815,474 proof
-  bytes. Worker tests publish and restore the first post-WHIR source boundary
-  through a callback contract. The concrete protocol adapter, however, still
-  accepts only the 400-byte algebra-only cursor and 290 CFW ordinals; no
-  authenticated-store adapter yet accepts the 404-byte, 4,509-boundary cursor.
-  The worker options also permit different top-level and resume custody
-  objects: restoration uses the resume object while later publication and
-  release can use the top-level object, leaving the restored operation identity
-  unreleased. This is a lifecycle and resource-authority defect, not a known
-  invalid-proof acceptance path. Fresh and resumed custody must become mutually
-  exclusive and one adopted object must own restore, publication, and release.
+  bytes. A concrete protocol adapter now publishes and cold-restores the
+  404-byte cursor across all 4,509 accepted-verifier ordinals under a state-stream
+  domain distinct from the 400-byte algebra-only cursor. It reads its byte length
+  and boundary count from the loaded scalar WASM kernel and takes its operation
+  kind, empty randomness cursor, and state-stream domains from canonical owners.
+  Fresh and resumed custody are mutually exclusive in the worker API. A runtime
+  hostile-input guard refuses both fields before kernel preparation, releases
+  every distinct supplied identity once, and uses one adopted object for
+  restoration, later publication, and final release. The concrete cold-restore
+  test uses synthetic cursor bytes; the adapter is not yet installed in the
+  production browser worker host.
   Terminal WHIR is still one synchronous, uninterruptible call before its
   post-WHIR boundary.
   At selected pre-challenge geometry, the current fold retains an 80 MiB input,
   an 80 MiB clone, and a 40 MiB first-fold output simultaneously: a
   209,715,200-byte source-derived minimum before other live verifier state.
-  Transport revalidation, accepted-cursor custody, selected actual-byte cold
-  restoration, the full equation-invalid hostile corpus, and the complete
-  durable lifecycle remain open.
+  Bounded transport, selected actual-byte cold restoration, the full
+  equation-invalid hostile corpus, production-host installation, and the
+  complete durable lifecycle remain open.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -214,12 +215,13 @@ ceremony or supported-phone qualification.
   schedule covers CFW, one point after terminal WHIR, all public-column
   reconstruction, and each statement-root coset after synchronous transport
   revalidation. Terminal WHIR itself remains synchronous and has the
-  209,715,200-byte minimum transient overlap described above. The only concrete
-  protocol checkpoint-store adapter still accepts the separate 400-byte,
-  290-boundary algebraic cursor, and the worker can split restoration from
-  publication and release across two custody objects. Accepted-cursor browser
-  custody, selected actual-byte cold restoration, and the complete transported
-  equation-invalid hostile corpus are absent.
+  209,715,200-byte minimum transient overlap described above. The concrete
+  protocol checkpoint-store adapters now separate the 400-byte, 290-boundary
+  algebraic cursor from the kernel-derived 404-byte, 4,509-boundary accepted
+  cursor. The worker refuses split custody before kernel preparation and retires
+  every supplied identity. Production browser-host installation, selected
+  actual-byte cold restoration, and the complete transported equation-invalid
+  hostile corpus are absent.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the
@@ -227,9 +229,10 @@ ceremony or supported-phone qualification.
   applicable SHAKE256 fixed-tape and QROM theorem chain.
 - Production setup, ballot-validity, and target-release call sites have not
   been cut over to the compact proof.
-- Browser custody does not yet connect the compact CFW cursor adapter to the
-  production worker host or provide bounded transport, bounded terminal WHIR,
-  and exact resume for every dominant compact-proof boundary.
+- Browser custody does not yet install the single-identity accepted-cursor
+  adapter in the production worker host or supply bounded transport and terminal
+  WHIR, selected actual-byte cold-resume evidence for every compact-proof
+  boundary, or reconciled browser-origin storage reclamation.
 - The accepted setup-to-release capability flow is not connected end to end.
 - No compact proof has completed the scalar release-WebAssembly desktop-browser
   evidence path after guarded native generation and independent transport and

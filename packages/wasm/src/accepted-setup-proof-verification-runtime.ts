@@ -26,10 +26,9 @@ import {
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type AuthenticatedCommonProofInputStore,
+    type AcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
-    type CompactPublicKeyAlgebraicVerificationCheckpointCustody,
-    type CompactPublicKeyAlgebraicVerificationWorkerOptions,
     type CommonProofVerificationWorkerOptions,
 } from './common-proof-worker-runtime/runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
@@ -106,8 +105,57 @@ export type AcceptedSetupCompactPublicKeyVerificationInput = Readonly<{
     canonicalProofBytes: Uint8Array;
     canonicalPublicInputBytes: Uint8Array;
     kernel: TranscriptCoreKernel;
-    options?: CompactPublicKeyAlgebraicVerificationWorkerOptions;
+    options?: AcceptedSetupCompactPublicKeyVerificationWorkerOptions;
 }>;
+
+export type AcceptedSetupCompactPublicKeyVerificationResume = Readonly<{
+    checkpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
+}>;
+
+type AcceptedSetupCompactPublicKeyVerificationSchedulingOptions = Readonly<{
+    maximumWorkUnitCountPerPoll?: number;
+    signal?: AbortSignal;
+    yieldControl?: () => Promise<void>;
+}>;
+
+export type AcceptedSetupCompactPublicKeyVerificationWorkerOptions =
+    AcceptedSetupCompactPublicKeyVerificationSchedulingOptions &
+        (
+            | Readonly<{
+                  checkpointCustody?: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
+                  resume?: never;
+              }>
+            | Readonly<{
+                  checkpointCustody?: never;
+                  resume: AcceptedSetupCompactPublicKeyVerificationResume;
+              }>
+        );
+
+export type AcceptedSetupCompactPublicKeyVerificationCheckpointGeometry =
+    Readonly<{
+        checkpointByteLength: number;
+        safeBoundaryCount: number;
+    }>;
+
+export const readAcceptedSetupCompactPublicKeyVerificationCheckpointGeometry = (
+    kernel: TranscriptCoreKernel,
+): AcceptedSetupCompactPublicKeyVerificationCheckpointGeometry => {
+    const context = resolveCommonProofKernelContext(kernel);
+    if (context === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The loaded WASM kernel has no common-proof worker context.',
+        );
+    }
+    const verificationKernel = new CommonProofVerificationKernelBoundary(
+        context,
+    );
+    return Object.freeze({
+        checkpointByteLength:
+            verificationKernel.acceptedSetupCompactPublicKeyVerificationCheckpointByteLength(),
+        safeBoundaryCount:
+            verificationKernel.acceptedSetupCompactPublicKeyVerificationSafeBoundaryCount(),
+    });
+};
 
 type AcceptedSetupProofVerificationCoreInput = Omit<
     AcceptedSetupProofVerificationInput,
@@ -637,7 +685,7 @@ const throwIfCompactPublicKeyVerificationCancelled = (
 
 const restoreCompactPublicKeyVerificationCheckpoint = async (
     kernel: CommonProofVerificationKernelBoundary,
-    checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    checkpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
 ): Promise<
     Readonly<{
         canonicalCheckpointBytes: Uint8Array<ArrayBuffer>;
@@ -701,7 +749,7 @@ const restoreCompactPublicKeyVerificationCheckpoint = async (
 const publishCompactPublicKeyVerificationCheckpoint = async (
     kernel: CommonProofVerificationKernelBoundary,
     operationHandle: number,
-    checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    checkpointCustody: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
     safeBoundaryOrdinal: number,
 ): Promise<void> => {
     const canonicalCheckpointBytes =
@@ -774,9 +822,26 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
     }
     const signal = options.signal;
     const yieldControl = options.yieldControl ?? yieldBrowserWorkerTurn;
-    const resume = options.resume;
+    const runtimeCustodyOptions: Readonly<{
+        checkpointCustody?: AcceptedSetupCompactPublicKeyVerificationCheckpointCustody;
+        resume?: AcceptedSetupCompactPublicKeyVerificationResume;
+    }> = options;
+    const resume = runtimeCustodyOptions.resume;
     const checkpointCustody =
-        options.checkpointCustody ?? resume?.checkpointCustody;
+        runtimeCustodyOptions.checkpointCustody ?? resume?.checkpointCustody;
+    const suppliedCheckpointCustodies =
+        runtimeCustodyOptions.checkpointCustody === undefined
+            ? resume === undefined
+                ? []
+                : [resume.checkpointCustody]
+            : resume === undefined ||
+                resume.checkpointCustody ===
+                    runtimeCustodyOptions.checkpointCustody
+              ? [runtimeCustodyOptions.checkpointCustody]
+              : [
+                    runtimeCustodyOptions.checkpointCustody,
+                    resume.checkpointCustody,
+                ];
     const kernel = new CommonProofVerificationKernelBoundary(context);
     let preparedHandle = 0;
     let operationHandle = 0;
@@ -787,6 +852,14 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
     let operationFailure: unknown;
 
     try {
+        if (
+            runtimeCustodyOptions.checkpointCustody !== undefined &&
+            resume !== undefined
+        ) {
+            throw new CanonicalStreamResourceError(
+                'Accepted-setup compact public-key verification accepts either fresh checkpoint custody or resumed checkpoint custody, never both.',
+            );
+        }
         throwIfCompactPublicKeyVerificationCancelled(signal);
         const preparation =
             kernel.prepareAcceptedSetupCompactPublicKeyVerification(
@@ -808,10 +881,15 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
                           canonicalPublicInputBytes,
                       )
                     : await (async () => {
+                          if (checkpointCustody === undefined) {
+                              throw new CanonicalStreamInternalError(
+                                  'Accepted-setup compact public-key verification resume has no checkpoint custody.',
+                              );
+                          }
                           const restoredCheckpoint =
                               await restoreCompactPublicKeyVerificationCheckpoint(
                                   kernel,
-                                  resume.checkpointCustody,
+                                  checkpointCustody,
                               );
                           expectedResumeSafeBoundaryOrdinal =
                               restoredCheckpoint.safeBoundaryOrdinal;
@@ -949,9 +1027,9 @@ export const verifyAcceptedSetupCompactPublicKeyShareInClosedWorker = async (
             cleanupFailures.push(cleanupFailure);
         }
     }
-    if (checkpointCustody !== undefined) {
+    for (const suppliedCheckpointCustody of suppliedCheckpointCustodies) {
         try {
-            await checkpointCustody.release();
+            await suppliedCheckpointCustody.release();
         } catch (cleanupFailure) {
             cleanupFailures.push(cleanupFailure);
         }
