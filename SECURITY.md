@@ -86,19 +86,28 @@ consequences are:
   opaque transform state. All five CFW polynomial transforms are incremental.
   Kernel-owned 65,536-work-unit boundaries expose exactly 290 cursor ordinals
   across 19,005,440 of the selected CFW phase's 19,038,593 work units, leaving
-  a 33,153-unit final CFW segment before the still-synchronous WHIR terminal
-  work. Restoration revalidates the transported bytes and deterministically
-  replays from genesis before newer state may be published. The protocol
-  adapter binds the exact source list and ordinal into authenticated storage,
-  keeps the last committed cursor when replacement is interrupted, restores
-  after process-local store reconstruction, and fails closed on missing or
-  corrupt state. The source-bound driver returns `isValid: true` only after the
-  positive capability commits, and retires every other live authority on
-  refusal or cancellation. That adapter is not yet installed in the production
-  browser-worker host. Transport revalidation, terminal WHIR, and the final
-  122-column source reconstruction remain synchronous. The complete
-  equation-invalid hostile corpus and compact generation release ABI remain
-  absent.
+  a 33,153-unit final CFW segment. The accepted source-bound verifier uses a
+  distinct 404-byte cursor and adds one durable point after terminal WHIR plus
+  4,218 source-correspondence boundaries: one for each of 122 public columns
+  and one for each of 1,024 evaluation cosets across four statement roots.
+  Restoration revalidates the transported bytes and deterministically replays
+  from genesis before newer state may be published. A guarded selected-size
+  native owner passed the post-WHIR poll and all 4,218 source work units. Worker
+  tests cover callback publication and restoration at the first source
+  boundary. The concrete protocol authenticated-store adapter still accepts
+  only the separate 400-byte cursor and 290 CFW ordinals, so it cannot custody
+  the 404-byte, 4,509-boundary accepted cursor. In addition, the worker options
+  permit distinct top-level and resume custody objects: restoration uses the
+  resume object while subsequent publication and cleanup can use the top-level
+  object. Distinct objects can therefore leave the restored operation identity
+  live. No invalid-proof acceptance follows, but one-shot lifecycle and resource
+  authority fail. Terminal WHIR itself is also still one synchronous call
+  before the new boundary. At selected pre-challenge geometry, its current first
+  fold has a source-derived minimum overlap of 209,715,200 bytes before other
+  verifier state. Accepted-cursor custody, one-identity cleanup, bounded
+  transport and terminal WHIR, selected actual-byte cold restoration, the
+  complete equation-invalid hostile corpus, and the compact generation release
+  ABI remain absent.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is

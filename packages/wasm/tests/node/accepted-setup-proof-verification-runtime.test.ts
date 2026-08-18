@@ -103,6 +103,7 @@ type FakeAcceptedSetupProofVerificationRuntime = Readonly<{
         discardedCapabilityHandles: number[];
         discardedPreparedHandles: number[];
         finishStatus: number;
+        observedCheckpointBytes: number[];
         observedProofBytes: number[];
         observedPublicInputBytes: number[];
         pollOutcomes: Array<
@@ -165,6 +166,7 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
             discardedCapabilityHandles: [],
             discardedPreparedHandles: [],
             finishStatus: 0,
+            observedCheckpointBytes: [],
             observedProofBytes: [],
             observedPublicInputBytes: [],
             pollOutcomes: [
@@ -328,6 +330,21 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
             compactPublicKey.cancelledOperationHandles.push(handle);
             return 0;
         },
+        sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint:
+            (
+                operationHandle: number,
+                outputPointer: number,
+                outputByteLength: number,
+            ) => {
+                expect(operationHandle).toBe(81);
+                expect(outputByteLength).toBe(404);
+                new Uint8Array(
+                    memory.buffer,
+                    outputPointer,
+                    outputByteLength,
+                ).fill(0x5c);
+                return 0;
+            },
         sealed_lattice_accepted_setup_compact_public_key_discard_capability: (
             handle: number,
         ) => {
@@ -344,6 +361,37 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
         ) => {
             expect(handle).toBe(81);
             return compactPublicKey.finishStatus;
+        },
+        sealed_lattice_accepted_setup_compact_public_key_resume_verification: (
+            preparedHandle: number,
+            proofPointer: number,
+            proofByteLength: number,
+            publicInputPointer: number,
+            publicInputByteLength: number,
+            checkpointPointer: number,
+            checkpointByteLength: number,
+            statusPointer: number,
+        ) => {
+            expect(preparedHandle).toBe(81);
+            compactPublicKey.observedProofBytes = Array.from(
+                new Uint8Array(memory.buffer, proofPointer, proofByteLength),
+            );
+            compactPublicKey.observedPublicInputBytes = Array.from(
+                new Uint8Array(
+                    memory.buffer,
+                    publicInputPointer,
+                    publicInputByteLength,
+                ),
+            );
+            compactPublicKey.observedCheckpointBytes = Array.from(
+                new Uint8Array(
+                    memory.buffer,
+                    checkpointPointer,
+                    checkpointByteLength,
+                ),
+            );
+            writeStatus(memory, statusPointer, compactPublicKey.beginStatus);
+            return compactPublicKey.beginStatus === 0 ? 81 : 0;
         },
         sealed_lattice_accepted_setup_compact_public_key_verification_poll: (
             operationHandle: number,
@@ -411,6 +459,10 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
             () => 400,
         sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count:
             () => 290,
+        sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length:
+            () => 404,
+        sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count:
+            () => 4_509,
         sealed_lattice_accepted_setup_public_key_share_discard_terminal_source:
             (handle: number) => {
                 discardedTerminalSources.push(handle);
@@ -710,6 +762,118 @@ describe('accepted-setup compact public-key verification', () => {
                 family: 'publicKeyShare',
             },
         ]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('publishes a source-correspondence checkpoint beyond the algebra-only schedule', async () => {
+        const runtime = createFakeRuntime();
+        runtime.compactPublicKey.pollOutcomes[0] = {
+            checkpointSafeBoundaryOrdinal: 291,
+            completedWorkUnitCount: 1,
+            pollKind: 1,
+            status: 0,
+            verifiedCapabilityHandle: 0,
+        };
+        const publishedCheckpoints: Array<{
+            bytes: number[];
+            safeBoundaryOrdinal: number;
+        }> = [];
+        const release = vi.fn(() => Promise.resolve());
+        const checkpointCustody = {
+            publishAuthenticatedCheckpoint: vi.fn(
+                (
+                    canonicalCheckpointBytes: Uint8Array,
+                    safeBoundaryOrdinal: number,
+                ) => {
+                    publishedCheckpoints.push({
+                        bytes: Array.from(canonicalCheckpointBytes),
+                        safeBoundaryOrdinal,
+                    });
+                    return Promise.resolve();
+                },
+            ),
+            release,
+            restoreAuthenticatedCheckpoint: vi.fn(() =>
+                Promise.reject(
+                    new Error(
+                        'fresh verification must not restore a checkpoint',
+                    ),
+                ),
+            ),
+        };
+        const input = compactPublicKeyVerificationInput(runtime.kernel);
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker({
+                ...input,
+                options: {
+                    ...input.options,
+                    checkpointCustody,
+                },
+            } as never),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+
+        expect(publishedCheckpoints).toEqual([
+            {
+                bytes: Array.from({ length: 404 }, () => 0x5c),
+                safeBoundaryOrdinal: 291,
+            },
+        ]);
+        expect(release).toHaveBeenCalledOnce();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('restores a source-correspondence cursor and requires its exact replay boundary', async () => {
+        const runtime = createFakeRuntime();
+        runtime.compactPublicKey.pollOutcomes.splice(
+            0,
+            2,
+            {
+                checkpointSafeBoundaryOrdinal: 291,
+                completedWorkUnitCount: 1,
+                pollKind: 7,
+                status: 0,
+                verifiedCapabilityHandle: 0,
+            },
+            {
+                checkpointSafeBoundaryOrdinal: 0xffff_ffff,
+                completedWorkUnitCount: 0,
+                pollKind: 5,
+                status: 0,
+                verifiedCapabilityHandle: 81,
+            },
+        );
+        const restoredBytes = new Uint8Array(404).fill(0x6d);
+        const release = vi.fn(() => Promise.resolve());
+        const checkpointCustody = {
+            publishAuthenticatedCheckpoint: vi.fn(() => Promise.resolve()),
+            release,
+            restoreAuthenticatedCheckpoint: vi.fn(() =>
+                Promise.resolve({
+                    canonicalCheckpointBytes: restoredBytes.slice(),
+                    safeBoundaryOrdinal: 291,
+                }),
+            ),
+        };
+        const input = compactPublicKeyVerificationInput(runtime.kernel);
+
+        await expect(
+            verifyAcceptedSetupCompactPublicKeyShareInClosedWorker({
+                ...input,
+                options: {
+                    ...input.options,
+                    resume: { checkpointCustody },
+                },
+            } as never),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+
+        expect(runtime.compactPublicKey.observedCheckpointBytes).toEqual(
+            Array.from(restoredBytes),
+        );
+        expect(
+            checkpointCustody.publishAuthenticatedCheckpoint,
+        ).not.toHaveBeenCalled();
+        expect(release).toHaveBeenCalledOnce();
         expect(runtime.allocations.size).toBe(0);
     });
 

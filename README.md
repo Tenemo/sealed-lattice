@@ -104,25 +104,43 @@ and target release remain incomplete or internal.
   four statement-owned setup-polynomial roots from the remaining 58 columns.
   All 122 transported public columns correspond to that accepted statement
   source. This is native prototype evidence for one candidate; it does not
-  connect the construction masking theorem to every emitted byte, establish
+  connect the construction masking theorem to every emitted byte or establish
   salted-Merkle or EPRO privacy.
   A source-bound accepted-setup release ABI now retains the exact statement
   authority and same-secret prerequisite, derives all four transport bindings
   internally, and carries one linear handle through prepared, running, and
-  positively verified states. It can begin or restore, bounded-poll, copy a
-  cursor, cancel, and discard. Only after algebraic verification and complete
-  source correspondence does it expose a proof capability; finishing that
-  capability inserts the exact public-key-share terminal into the accepted
-  setup assembly. The TypeScript closed-worker driver returns `isValid: true`
-  only after that one-shot commit and retires prepared, running, or positive
-  authority on every refusal and cancellation path. A concrete protocol
-  adapter binds the verifier's source list and safe-boundary ordinal to the
-  authenticated checkpoint store, retains the previous committed cursor across
-  interrupted replacement, restores after process-local store reconstruction,
-  and fails closed on missing or corrupt state. It is not yet installed in the
-  production browser-worker flow. Transport revalidation, terminal WHIR work,
-  and the final 122-column source reconstruction remain synchronous; the full
-  equation-invalid hostile corpus and complete durable lifecycle remain open.
+  positively verified states. Its fixed 404-byte cursor extends the separate
+  400-byte algebra-only cursor without serializing opaque runtime state. It
+  covers the 290 CFW boundaries, one durable boundary after terminal WHIR
+  returns, and 4,218 source boundaries: all 122 public columns plus 1,024
+  evaluation cosets for each of four statement roots. It can begin or restore,
+  bounded-poll, copy a cursor, cancel, and discard. Only after algebraic
+  verification and complete source correspondence does it expose a proof
+  capability; finishing that capability inserts the exact public-key-share
+  terminal into the accepted setup assembly.
+  The TypeScript closed-worker driver returns `isValid: true` only after that
+  one-shot commit and retires its prepared, running, or positive kernel
+  authority on every refusal and cancellation path. A guarded selected-size
+  native run observed one post-WHIR poll and exactly 4,218 source work units
+  while reproducing all four roots and accepting the same 23,815,474 proof
+  bytes. Worker tests publish and restore the first post-WHIR source boundary
+  through a callback contract. The concrete protocol adapter, however, still
+  accepts only the 400-byte algebra-only cursor and 290 CFW ordinals; no
+  authenticated-store adapter yet accepts the 404-byte, 4,509-boundary cursor.
+  The worker options also permit different top-level and resume custody
+  objects: restoration uses the resume object while later publication and
+  release can use the top-level object, leaving the restored operation identity
+  unreleased. This is a lifecycle and resource-authority defect, not a known
+  invalid-proof acceptance path. Fresh and resumed custody must become mutually
+  exclusive and one adopted object must own restore, publication, and release.
+  Terminal WHIR is still one synchronous, uninterruptible call before its
+  post-WHIR boundary.
+  At selected pre-challenge geometry, the current fold retains an 80 MiB input,
+  an 80 MiB clone, and a 40 MiB first-fold output simultaneously: a
+  209,715,200-byte source-derived minimum before other live verifier state.
+  Transport revalidation, accepted-cursor custody, selected actual-byte cold
+  restoration, the full equation-invalid hostile corpus, and the complete
+  durable lifecycle remain open.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -192,12 +210,16 @@ ceremony or supported-phone qualification.
   derivation, and Merkle openings only. The accepted-setup source-bound ABI can
   now carry one public-key-share verification through positive capability
   commit, while its internal closed-worker driver publishes source-bound safe
-  cursors through a custody contract and preserves typed refusals. Its bounded
-  portion still covers only the CFW accumulator after synchronous transport
-  revalidation; terminal WHIR and source-root reconstruction are synchronous.
-  The protocol checkpoint-store adapter is not connected to the production
-  browser-worker host or the complete transported equation-invalid hostile
-  corpus.
+  cursors through a custody contract and preserves typed refusals. Its durable
+  schedule covers CFW, one point after terminal WHIR, all public-column
+  reconstruction, and each statement-root coset after synchronous transport
+  revalidation. Terminal WHIR itself remains synchronous and has the
+  209,715,200-byte minimum transient overlap described above. The only concrete
+  protocol checkpoint-store adapter still accepts the separate 400-byte,
+  290-boundary algebraic cursor, and the worker can split restoration from
+  publication and release across two custody objects. Accepted-cursor browser
+  custody, selected actual-byte cold restoration, and the complete transported
+  equation-invalid hostile corpus are absent.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the

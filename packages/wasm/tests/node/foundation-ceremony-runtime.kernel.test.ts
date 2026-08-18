@@ -141,7 +141,17 @@ describe('foundation ceremony Rust/WASM boundary', () => {
         expect(
             commandRuntime.wasmExports.sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count?.(),
         ).toBe(290);
+        expect(
+            commandRuntime.wasmExports.sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length?.(),
+        ).toBe(404);
+        expect(
+            commandRuntime.wasmExports.sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count?.(),
+        ).toBe(4_509);
         for (const acceptedCompactExport of [
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length,
+            commandRuntime.wasmExports
+                .sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count,
             commandRuntime.wasmExports
                 .sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification,
             commandRuntime.wasmExports

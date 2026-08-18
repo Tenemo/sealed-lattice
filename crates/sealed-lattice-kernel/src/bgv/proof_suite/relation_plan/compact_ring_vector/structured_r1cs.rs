@@ -3195,6 +3195,7 @@ mod tests {
                 compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::CompactPublicInputBindings,
+                compact_public_key_accepted_verifier::ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
                 compact_public_key_algebraic_verifier::{
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
@@ -3202,6 +3203,7 @@ mod tests {
                     CompactPublicKeyAlgebraicVerification,
                     CompactPublicKeyAlgebraicVerificationPoll,
                 },
+                compact_public_key_statement_correspondence::CompactPublicKeyStatementCorrespondenceVerificationPoll,
                 compact_public_key_verifier::{
                     VerifiedCompactPublicKeyTransport, verify_selected_compact_public_key_transport,
                 },
@@ -3366,6 +3368,12 @@ mod tests {
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
                     panic!("a fresh compact algebraic verification cannot complete replay")
+                }
+                CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert_eq!(completed_work_unit_count, 1);
+                    algebraic_poll_count += 1;
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => break *terminal,
             }
@@ -7665,6 +7673,9 @@ mod tests {
             CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
                 panic!("a fresh verifier cannot complete checkpoint replay")
             }
+            CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted { .. } => {
+                panic!("one bounded slice cannot reach terminal WHIR verification")
+            }
             CompactPublicKeyAlgebraicVerificationPoll::Complete(_) => {
                 panic!("one bounded slice cannot complete the selected verifier")
             }
@@ -7692,6 +7703,7 @@ mod tests {
         let mut observed_safe_boundary_count = 1_u32;
         let mut resume_complete_count = 0_u64;
         let mut terminal_cfw_segment_poll_count = 0_u64;
+        let mut whir_verification_poll_count = 0_u64;
         let algebraically_verified_proof = loop {
             match resumed_verification
                 .advance(65_536)
@@ -7736,6 +7748,12 @@ mod tests {
                         canonical_verification_checkpoint,
                     );
                 }
+                CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert_eq!(completed_work_unit_count, 1);
+                    whir_verification_poll_count += 1;
+                }
                 CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => {
                     break *terminal;
                 }
@@ -7743,6 +7761,7 @@ mod tests {
         };
         assert_eq!(resume_complete_count, 1);
         assert_eq!(terminal_cfw_segment_poll_count, 1);
+        assert_eq!(whir_verification_poll_count, 1);
         assert_eq!(
             observed_safe_boundary_count,
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
@@ -7836,23 +7855,51 @@ mod tests {
                 setup_polynomial_prerequisite,
             )
             .expect("the accepted compact public-key statement authority derives");
-        let source_verified_proof = statement_authority
-            .bind_algebraically_verified_proof(algebraically_verified_proof)
-            .expect(
-                "every emitted compact public value corresponds to its accepted statement source",
-            );
+        let mut correspondence_verification = statement_authority
+            .begin_binding_algebraically_verified_proof(algebraically_verified_proof)
+            .expect("the source-correspondence verifier begins from the algebraic terminal");
+        let mut correspondence_work_unit_count = 0_u32;
+        let source_verified_proof = loop {
+            match correspondence_verification
+                .advance(1)
+                .expect("each source-correspondence boundary verifies")
+            {
+                CompactPublicKeyStatementCorrespondenceVerificationPoll::WorkCompleted {
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                } => {
+                    assert_eq!(completed_work_unit_count, 1);
+                    assert_eq!(
+                        checkpoint_safe_boundary_ordinal,
+                        correspondence_work_unit_count,
+                    );
+                    correspondence_work_unit_count = correspondence_work_unit_count
+                        .checked_add(1)
+                        .expect("the selected correspondence work count fits u32");
+                }
+                CompactPublicKeyStatementCorrespondenceVerificationPoll::Complete(proof) => {
+                    break *proof;
+                }
+            }
+        };
+        assert_eq!(
+            correspondence_work_unit_count,
+            ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
+        );
         let correspondence = source_verified_proof.correspondence();
         assert_eq!(correspondence.public_ring_vector_count(), 61);
         assert_eq!(correspondence.verified_column_count(), 122);
         assert!(correspondence.verifier_sequence_column_count() > 0);
         assert_eq!(correspondence.statement_tree_count(), 4);
         println!(
-            "checkpointed compact public-key algebraic and statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} completed_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
+            "checkpointed compact public-key algebraic and statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} whir_verification_poll_count={} completed_work_unit_count={} correspondence_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
             verification_started_at.elapsed().as_millis(),
             algebraic_poll_count,
             observed_safe_boundary_count,
             terminal_cfw_segment_poll_count,
+            whir_verification_poll_count,
             completed_work_unit_count,
+            correspondence_work_unit_count,
             resume_complete_count,
             canonical_proof_bytes.len(),
             correspondence.verified_column_count(),

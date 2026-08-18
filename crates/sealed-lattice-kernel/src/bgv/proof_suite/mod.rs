@@ -69,6 +69,7 @@ mod compact_proof_contract;
     )
 )]
 mod compact_proof_wire;
+mod compact_public_key_accepted_verifier;
 mod compact_public_key_algebraic_verifier;
 mod compact_public_key_statement_correspondence;
 #[cfg(test)]
@@ -197,6 +198,12 @@ pub(crate) use committed_material::{
 };
 #[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) use compact_cfw_storage_diagnostic::selected_compact_cfw_storage_diagnostic_schedule;
+pub(in crate::bgv) use compact_public_key_accepted_verifier::{
+    ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+    ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_SAFE_BOUNDARY_COUNT,
+    AcceptedCompactPublicKeyVerification, AcceptedCompactPublicKeyVerificationPoll,
+    PreparedAcceptedCompactPublicKeyVerification,
+};
 pub(in crate::bgv) use compact_public_key_statement_correspondence::{
     SourceVerifiedCompactPublicKeyProof, VerifiedCompactPublicKeyStatementAuthority,
 };
@@ -436,6 +443,7 @@ pub(crate) use setup_key_relation_runtime::{
 };
 pub(crate) use setup_public_polynomial::{
     SetupPublicPolynomialContext, SetupPublicPolynomialError, SetupPublicPolynomialRootBuilder,
+    SetupPublicPolynomialRootConstruction, SetupPublicPolynomialRootConstructionPoll,
     SetupPublicPolynomialRootRole, SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput,
     setup_public_polynomial_wasm_compact_root_memory_plan,
 };

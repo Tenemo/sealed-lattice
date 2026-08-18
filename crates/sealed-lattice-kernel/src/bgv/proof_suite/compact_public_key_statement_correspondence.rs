@@ -1,7 +1,8 @@
 use crate::{
     bgv::{
         proof_suite::{
-            SetupPublicPolynomialRootBuilder, ValidatedRelationPlanArtifact,
+            SetupPublicPolynomialRootBuilder, SetupPublicPolynomialRootConstruction,
+            SetupPublicPolynomialRootConstructionPoll, ValidatedRelationPlanArtifact,
             VerifiedCommonProofStatementSource, VerifiedKeyRelationColumnEvaluator,
             VerifiedStatementOwnedTree, compile_public_key_share_relation_with_source_layout,
             selected_public_key_share_relation_plan_input, selected_relation_plan_check_context,
@@ -154,6 +155,45 @@ pub(in crate::bgv) struct VerifiedCompactPublicKeyStatementAuthority {
     relation: CompactPublicKeyRelationCatalog,
     expected_public_input_bindings: CompactPublicInputBindings,
     terminal_source: VerifiedCompactPublicKeyAcceptedTerminalSource,
+}
+
+struct ActiveStatementTreeCorrespondence {
+    expected_root: [u8; Hash512::BYTE_LENGTH],
+    public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
+    expected_root_source_ordinal: u32,
+    ordered_column_ordinals: Vec<u32>,
+    next_column_index: usize,
+    root_builder: Option<SetupPublicPolynomialRootBuilder>,
+    root_construction: Option<SetupPublicPolynomialRootConstruction>,
+}
+
+/// Pollable verifier-owned reconstruction of every transported public column.
+/// Each work unit is one complete verifier-sequence column, one bound-tree
+/// source column, or one setup-polynomial evaluation coset. All are safe
+/// deterministic replay boundaries over the retained canonical inputs.
+pub(in crate::bgv) struct CompactPublicKeyStatementCorrespondenceVerification {
+    statement_authority: Option<VerifiedCompactPublicKeyStatementAuthority>,
+    transport: Option<VerifiedCompactPublicKeyTransport>,
+    trace_domain_size: usize,
+    evaluation_domain_size: usize,
+    public_input_offset_by_column: Vec<Option<usize>>,
+    consumed_public_columns: Vec<bool>,
+    next_verifier_column_index: usize,
+    next_tree_descriptor_index: usize,
+    active_statement_tree: Option<ActiveStatementTreeCorrespondence>,
+    verifier_sequence_columns_complete: bool,
+    completed_work_unit_count: u32,
+    verifier_sequence_column_count: u32,
+    statement_tree_count: u32,
+    complete_proof: Option<Box<SourceVerifiedCompactPublicKeyProof>>,
+}
+
+pub(in crate::bgv) enum CompactPublicKeyStatementCorrespondenceVerificationPoll {
+    WorkCompleted {
+        completed_work_unit_count: u32,
+        checkpoint_safe_boundary_ordinal: u32,
+    },
+    Complete(Box<SourceVerifiedCompactPublicKeyProof>),
 }
 
 /// Positive compact proof terminal. Its accepted-setup source can be released
@@ -330,41 +370,13 @@ impl VerifiedCompactPublicKeyStatementAuthority {
     /// checked statement source. Verifier-sequence columns are regenerated
     /// from accepted public randomness, while setup-polynomial columns are
     /// accepted only when they reproduce the exact four statement-owned roots.
-    pub(in crate::bgv) fn bind_algebraically_verified_proof(
+    pub(in crate::bgv) fn begin_binding_algebraically_verified_proof(
         self,
         algebraically_verified_proof: AlgebraicallyVerifiedCompactPublicKeyProof,
-    ) -> Result<SourceVerifiedCompactPublicKeyProof, RefusalReason> {
+    ) -> Result<CompactPublicKeyStatementCorrespondenceVerification, RefusalReason> {
         let transport = algebraically_verified_proof.into_transport();
-        let correspondence = self
-            .verify_transport_correspondence(&transport)?
-            .require_complete(
-                self.relation.public_input_ring_vector_count(),
-                self.relation
-                    .ordered_public_vectors()
-                    .len()
-                    .checked_mul(2)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-                self.statement_trees.len(),
-            )?;
-        #[cfg(not(test))]
-        let _ = correspondence;
-        Ok(SourceVerifiedCompactPublicKeyProof {
-            _statement_source: self.statement_source,
-            _transport: transport,
-            #[cfg(test)]
-            correspondence,
-            terminal_source: self.terminal_source,
-        })
-    }
-
-    fn verify_transport_correspondence(
-        &self,
-        transport: &VerifiedCompactPublicKeyTransport,
-    ) -> Result<CompactPublicKeyStatementCorrespondence, RefusalReason> {
         let statement_source = &self.statement_source;
         let relation = &self.relation;
-        let statement_trees = &self.statement_trees;
-        let verified_column_evaluator = &self.verified_column_evaluator;
         let independently_selected_variant = statement_source
             .selected_relation_variant()
             .map_err(|_| RefusalReason::WrongContext)?;
@@ -429,32 +441,213 @@ impl VerifiedCompactPublicKeyStatementAuthority {
             }
         }
 
-        let mut consumed_public_columns = vec![false; ordered_columns.len()];
-        let mut verifier_sequence_column_count = 0_u32;
-        for (column_index, first_element) in public_input_offset_by_column.iter().enumerate() {
-            let Some(first_element) = *first_element else {
+        Ok(CompactPublicKeyStatementCorrespondenceVerification {
+            consumed_public_columns: vec![false; ordered_columns.len()],
+            statement_authority: Some(self),
+            transport: Some(transport),
+            trace_domain_size,
+            evaluation_domain_size,
+            public_input_offset_by_column,
+            next_verifier_column_index: 0,
+            next_tree_descriptor_index: 0,
+            active_statement_tree: None,
+            verifier_sequence_columns_complete: false,
+            completed_work_unit_count: 0,
+            verifier_sequence_column_count: 0,
+            statement_tree_count: 0,
+            complete_proof: None,
+        })
+    }
+}
+
+impl CompactPublicKeyStatementCorrespondenceVerification {
+    pub(in crate::bgv) fn advance(
+        &mut self,
+        maximum_work_unit_count: u32,
+    ) -> Result<CompactPublicKeyStatementCorrespondenceVerificationPoll, RefusalReason> {
+        if maximum_work_unit_count == 0 {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let mut completed_work_unit_count = 0_u32;
+        loop {
+            if self.complete_proof.is_some() {
+                if completed_work_unit_count != 0 {
+                    return self.progress(completed_work_unit_count);
+                }
+                return Ok(
+                    CompactPublicKeyStatementCorrespondenceVerificationPoll::Complete(
+                        self.complete_proof
+                            .take()
+                            .ok_or(RefusalReason::ConsumedState)?,
+                    ),
+                );
+            }
+            if completed_work_unit_count == maximum_work_unit_count {
+                return self.progress(completed_work_unit_count);
+            }
+
+            if !self.verifier_sequence_columns_complete {
+                if self.verify_next_verifier_sequence_column()? {
+                    completed_work_unit_count = completed_work_unit_count
+                        .checked_add(1)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    self.completed_work_unit_count = self
+                        .completed_work_unit_count
+                        .checked_add(1)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    continue;
+                }
+                self.verifier_sequence_columns_complete = true;
+            }
+
+            if self.active_statement_tree.is_none()
+                && !self.prepare_next_statement_tree_correspondence()?
+            {
+                self.finish_correspondence()?;
+                continue;
+            }
+
+            let next_column = self.active_statement_tree.as_ref().and_then(|active| {
+                active
+                    .ordered_column_ordinals
+                    .get(active.next_column_index)
+                    .copied()
+            });
+            if let Some(column_ordinal) = next_column {
+                self.absorb_statement_tree_column(column_ordinal)?;
+                completed_work_unit_count = completed_work_unit_count
+                    .checked_add(1)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                self.completed_work_unit_count = self
+                    .completed_work_unit_count
+                    .checked_add(1)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                continue;
+            }
+
+            let active_statement_tree = self
+                .active_statement_tree
+                .as_mut()
+                .ok_or(RefusalReason::ConsumedState)?;
+            if active_statement_tree.root_construction.is_none() {
+                active_statement_tree.root_construction = Some(
+                    active_statement_tree
+                        .root_builder
+                        .take()
+                        .ok_or(RefusalReason::ConsumedState)?
+                        .begin_root_construction()
+                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
+                );
+            }
+            let remaining_work_unit_count = maximum_work_unit_count
+                .checked_sub(completed_work_unit_count)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            match active_statement_tree
+                .root_construction
+                .as_mut()
+                .ok_or(RefusalReason::ConsumedState)?
+                .advance(remaining_work_unit_count)
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
+            {
+                SetupPublicPolynomialRootConstructionPoll::WorkCompleted {
+                    completed_coset_count,
+                } => {
+                    completed_work_unit_count = completed_work_unit_count
+                        .checked_add(completed_coset_count)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    self.completed_work_unit_count = self
+                        .completed_work_unit_count
+                        .checked_add(completed_coset_count)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                }
+                SetupPublicPolynomialRootConstructionPoll::Complete((
+                    recomputed_context_hash,
+                    recomputed_root,
+                )) => {
+                    if recomputed_root != active_statement_tree.expected_root
+                        || recomputed_context_hash
+                            != active_statement_tree.public_polynomial_context_hash
+                    {
+                        return Err(RefusalReason::WrongHashOrRoot);
+                    }
+                    self.statement_tree_count = self
+                        .statement_tree_count
+                        .checked_add(1)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    self.active_statement_tree = None;
+                }
+            }
+        }
+    }
+
+    fn progress(
+        &self,
+        completed_work_unit_count: u32,
+    ) -> Result<CompactPublicKeyStatementCorrespondenceVerificationPoll, RefusalReason> {
+        if completed_work_unit_count == 0 {
+            return Err(RefusalReason::ConsumedState);
+        }
+        Ok(
+            CompactPublicKeyStatementCorrespondenceVerificationPoll::WorkCompleted {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal: self
+                    .completed_work_unit_count
+                    .checked_sub(1)
+                    .ok_or(RefusalReason::ConsumedState)?,
+            },
+        )
+    }
+
+    fn verify_next_verifier_sequence_column(&mut self) -> Result<bool, RefusalReason> {
+        while self.next_verifier_column_index < self.public_input_offset_by_column.len() {
+            let column_index = self.next_verifier_column_index;
+            self.next_verifier_column_index = self
+                .next_verifier_column_index
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            let Some(first_element) = self.public_input_offset_by_column[column_index] else {
                 continue;
             };
-            let descriptor = &ordered_columns[column_index];
+            let statement_authority = self
+                .statement_authority
+                .as_ref()
+                .ok_or(RefusalReason::ConsumedState)?;
+            let relation_variant = statement_authority
+                .statement_source
+                .selected_relation_variant()
+                .map_err(|_| RefusalReason::WrongContext)?;
+            let descriptor = relation_variant
+                .ordered_columns()
+                .get(column_index)
+                .ok_or(RefusalReason::InvalidArithmeticRelation)?;
             match descriptor.origin() {
                 RelationColumnOrigin::VerifierSequence { .. } => {
                     if descriptor.value_type() != RelationColumnValueType::BaseField {
                         return Err(RefusalReason::InvalidArithmeticRelation);
                     }
-                    let expected_rows = verified_column_evaluator.verifier_owned_trace_rows(
-                        u32::try_from(column_index)
-                            .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
-                    )?;
+                    let expected_rows = statement_authority
+                        .verified_column_evaluator
+                        .verifier_owned_trace_rows(
+                            u32::try_from(column_index)
+                                .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                        )?;
+                    let transport = self
+                        .transport
+                        .as_ref()
+                        .ok_or(RefusalReason::ConsumedState)?;
+                    let public_input_view = transport.public_input_view();
                     compare_public_input_trace_row(
                         public_input_view.canonical_bytes(),
                         public_input_view.decoded(),
                         first_element,
                         &expected_rows,
                     )?;
-                    consumed_public_columns[column_index] = true;
-                    verifier_sequence_column_count = verifier_sequence_column_count
+                    self.consumed_public_columns[column_index] = true;
+                    self.verifier_sequence_column_count = self
+                        .verifier_sequence_column_count
                         .checked_add(1)
                         .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    return Ok(true);
                 }
                 RelationColumnOrigin::BoundTree { .. } => {}
                 RelationColumnOrigin::Prover => {
@@ -462,13 +655,30 @@ impl VerifiedCompactPublicKeyStatementAuthority {
                 }
             }
         }
+        Ok(false)
+    }
 
-        let mut statement_tree_count = 0_u32;
-        for (ordered_tree_ordinal, descriptor) in independently_selected_variant
-            .ordered_trees()
-            .iter()
-            .enumerate()
-        {
+    fn prepare_next_statement_tree_correspondence(&mut self) -> Result<bool, RefusalReason> {
+        loop {
+            let statement_authority = self
+                .statement_authority
+                .as_ref()
+                .ok_or(RefusalReason::ConsumedState)?;
+            let relation_variant = statement_authority
+                .statement_source
+                .selected_relation_variant()
+                .map_err(|_| RefusalReason::WrongContext)?;
+            let Some(descriptor) = relation_variant
+                .ordered_trees()
+                .get(self.next_tree_descriptor_index)
+            else {
+                return Ok(false);
+            };
+            let ordered_tree_ordinal = self.next_tree_descriptor_index;
+            self.next_tree_descriptor_index = self
+                .next_tree_descriptor_index
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
             let RelationTreeDescriptor::BoundPublic {
                 construction_kind: BoundTreeConstructionKind::SetupPolynomial,
                 expected_root_source_ordinal,
@@ -478,7 +688,10 @@ impl VerifiedCompactPublicKeyStatementAuthority {
             else {
                 continue;
             };
-            let statement_tree = statement_trees
+            let expected_root_source_ordinal = *expected_root_source_ordinal;
+            let ordered_column_ordinals = ordered_column_ordinals.clone();
+            let statement_tree = statement_authority
+                .statement_trees
                 .iter()
                 .find(|tree| {
                     usize::try_from(tree.ordered_tree_ordinal()).ok() == Some(ordered_tree_ordinal)
@@ -489,93 +702,162 @@ impl VerifiedCompactPublicKeyStatementAuthority {
             let public_polynomial_context_hash = statement_tree
                 .public_polynomial_context_hash()
                 .ok_or(RefusalReason::WrongContext)?;
-            if statement_tree.expected_root_source_ordinal() != *expected_root_source_ordinal
+            if statement_tree.expected_root_source_ordinal() != expected_root_source_ordinal
                 || statement_tree.setup_public_polynomial_row_width() != Some(expected_row_width)
                 || statement_tree.ordered_canonical_residue_moduli().len()
                     != ordered_column_ordinals.len()
             {
                 return Err(RefusalReason::WrongContext);
             }
-            let mut root_builder =
-                SetupPublicPolynomialRootBuilder::from_verifier_owned_context_hash(
-                    public_polynomial_context_hash,
-                    evaluation_domain_size,
-                    trace_domain_size,
-                    expected_row_width,
-                )
-                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-            for column_ordinal in ordered_column_ordinals {
-                let column_index = usize::try_from(*column_ordinal)
-                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-                let first_element = public_input_offset_by_column
-                    .get(column_index)
-                    .copied()
-                    .flatten()
-                    .ok_or(RefusalReason::InvalidArithmeticRelation)?;
-                let descriptor = ordered_columns
-                    .get(column_index)
-                    .ok_or(RefusalReason::InvalidArithmeticRelation)?;
-                if consumed_public_columns[column_index]
-                    || !matches!(
-                        descriptor.origin(),
-                        RelationColumnOrigin::BoundTree {
-                            expected_root_source_ordinal: column_root_source_ordinal,
-                        } if column_root_source_ordinal == expected_root_source_ordinal
-                    )
-                    || descriptor.value_type() != RelationColumnValueType::BaseField
-                {
-                    return Err(RefusalReason::InvalidArithmeticRelation);
-                }
-                let trace_row = decode_public_input_trace_row(
-                    public_input_view.canonical_bytes(),
-                    public_input_view.decoded(),
-                    first_element,
-                    trace_domain_size,
-                )?;
-                root_builder
-                    .absorb_trace_row(&trace_row)
-                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-                consumed_public_columns[column_index] = true;
-            }
-            let (recomputed_context_hash, recomputed_root) = root_builder
-                .finish()
-                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-            if recomputed_root != statement_tree.expected_root()
-                || recomputed_context_hash != public_polynomial_context_hash
-            {
-                return Err(RefusalReason::WrongHashOrRoot);
-            }
-            statement_tree_count = statement_tree_count
-                .checked_add(1)
-                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            let root_builder = SetupPublicPolynomialRootBuilder::from_verifier_owned_context_hash(
+                public_polynomial_context_hash,
+                self.evaluation_domain_size,
+                self.trace_domain_size,
+                expected_row_width,
+            )
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+            self.active_statement_tree = Some(ActiveStatementTreeCorrespondence {
+                expected_root: statement_tree.expected_root(),
+                public_polynomial_context_hash,
+                expected_root_source_ordinal,
+                ordered_column_ordinals,
+                next_column_index: 0,
+                root_builder: Some(root_builder),
+                root_construction: None,
+            });
+            return Ok(true);
         }
+    }
 
-        let verified_column_count = consumed_public_columns
+    fn absorb_statement_tree_column(&mut self, column_ordinal: u32) -> Result<(), RefusalReason> {
+        let column_index =
+            usize::try_from(column_ordinal).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let first_element = self
+            .public_input_offset_by_column
+            .get(column_index)
+            .copied()
+            .flatten()
+            .ok_or(RefusalReason::InvalidArithmeticRelation)?;
+        let expected_root_source_ordinal = self
+            .active_statement_tree
+            .as_ref()
+            .ok_or(RefusalReason::ConsumedState)?
+            .expected_root_source_ordinal;
+        let statement_authority = self
+            .statement_authority
+            .as_ref()
+            .ok_or(RefusalReason::ConsumedState)?;
+        let relation_variant = statement_authority
+            .statement_source
+            .selected_relation_variant()
+            .map_err(|_| RefusalReason::WrongContext)?;
+        let descriptor = relation_variant
+            .ordered_columns()
+            .get(column_index)
+            .ok_or(RefusalReason::InvalidArithmeticRelation)?;
+        if self.consumed_public_columns[column_index]
+            || !matches!(
+                descriptor.origin(),
+                RelationColumnOrigin::BoundTree {
+                    expected_root_source_ordinal: column_root_source_ordinal,
+                } if *column_root_source_ordinal == expected_root_source_ordinal
+            )
+            || descriptor.value_type() != RelationColumnValueType::BaseField
+        {
+            return Err(RefusalReason::InvalidArithmeticRelation);
+        }
+        let transport = self
+            .transport
+            .as_ref()
+            .ok_or(RefusalReason::ConsumedState)?;
+        let public_input_view = transport.public_input_view();
+        let trace_row = decode_public_input_trace_row(
+            public_input_view.canonical_bytes(),
+            public_input_view.decoded(),
+            first_element,
+            self.trace_domain_size,
+        )?;
+        let active_statement_tree = self
+            .active_statement_tree
+            .as_mut()
+            .ok_or(RefusalReason::ConsumedState)?;
+        active_statement_tree
+            .root_builder
+            .as_mut()
+            .ok_or(RefusalReason::ConsumedState)?
+            .absorb_trace_row(&trace_row)
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        active_statement_tree.next_column_index = active_statement_tree
+            .next_column_index
+            .checked_add(1)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        self.consumed_public_columns[column_index] = true;
+        Ok(())
+    }
+
+    fn finish_correspondence(&mut self) -> Result<(), RefusalReason> {
+        let statement_authority = self
+            .statement_authority
+            .as_ref()
+            .ok_or(RefusalReason::ConsumedState)?;
+        let verified_column_count = self
+            .consumed_public_columns
             .iter()
             .filter(|consumed| **consumed)
             .count();
-        if consumed_public_columns
+        if self
+            .consumed_public_columns
             .iter()
-            .zip(&public_input_offset_by_column)
+            .zip(&self.public_input_offset_by_column)
             .any(|(consumed, offset)| *consumed != offset.is_some())
             || verified_column_count
-                != relation
+                != statement_authority
+                    .relation
                     .ordered_public_vectors()
                     .len()
                     .checked_mul(2)
                     .ok_or(RefusalReason::OutsideSupportedProfile)?
-            || usize::try_from(statement_tree_count).ok() != Some(statement_trees.len())
+            || usize::try_from(self.statement_tree_count).ok()
+                != Some(statement_authority.statement_trees.len())
         {
             return Err(RefusalReason::InvalidArithmeticRelation);
         }
-
-        Ok(CompactPublicKeyStatementCorrespondence {
-            public_ring_vector_count: relation.public_input_ring_vector_count(),
+        let correspondence = CompactPublicKeyStatementCorrespondence {
+            public_ring_vector_count: statement_authority
+                .relation
+                .public_input_ring_vector_count(),
             verified_column_count: u32::try_from(verified_column_count)
                 .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
-            verifier_sequence_column_count,
-            statement_tree_count,
-        })
+            verifier_sequence_column_count: self.verifier_sequence_column_count,
+            statement_tree_count: self.statement_tree_count,
+        }
+        .require_complete(
+            statement_authority
+                .relation
+                .public_input_ring_vector_count(),
+            statement_authority
+                .relation
+                .ordered_public_vectors()
+                .len()
+                .checked_mul(2)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            statement_authority.statement_trees.len(),
+        )?;
+        let statement_authority = self
+            .statement_authority
+            .take()
+            .ok_or(RefusalReason::ConsumedState)?;
+        let transport = self.transport.take().ok_or(RefusalReason::ConsumedState)?;
+        #[cfg(not(test))]
+        let _ = correspondence;
+        self.complete_proof = Some(Box::new(SourceVerifiedCompactPublicKeyProof {
+            _statement_source: statement_authority.statement_source,
+            _transport: transport,
+            #[cfg(test)]
+            correspondence,
+            terminal_source: statement_authority.terminal_source,
+        }));
+        Ok(())
     }
 }
 

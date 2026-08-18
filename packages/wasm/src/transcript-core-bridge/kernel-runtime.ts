@@ -570,6 +570,8 @@ type NumberExportName =
     | 'sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification'
     | 'sealed_lattice_accepted_setup_compact_public_key_finish_verification'
     | 'sealed_lattice_accepted_setup_compact_public_key_resume_verification'
+    | 'sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length'
+    | 'sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count'
     | 'sealed_lattice_accepted_setup_compact_public_key_verification_poll'
     | 'sealed_lattice_accepted_setup_same_secret_finish_generated_verification'
     | 'sealed_lattice_accepted_setup_verification_begin_from_package_builder'

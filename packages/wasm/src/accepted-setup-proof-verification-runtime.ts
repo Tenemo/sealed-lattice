@@ -665,7 +665,7 @@ const restoreCompactPublicKeyVerificationCheckpoint = async (
     const canonicalCheckpointBytes =
         restoredCheckpoint.canonicalCheckpointBytes;
     const expectedByteLength =
-        kernel.compactPublicKeyAlgebraicVerificationCheckpointByteLength();
+        kernel.acceptedSetupCompactPublicKeyVerificationCheckpointByteLength();
     if (
         !(canonicalCheckpointBytes instanceof Uint8Array) ||
         !(canonicalCheckpointBytes.buffer instanceof ArrayBuffer) ||
@@ -684,7 +684,7 @@ const restoreCompactPublicKeyVerificationCheckpoint = async (
         !Number.isSafeInteger(restoredCheckpoint.safeBoundaryOrdinal) ||
         restoredCheckpoint.safeBoundaryOrdinal < 0 ||
         restoredCheckpoint.safeBoundaryOrdinal >=
-            kernel.compactPublicKeyAlgebraicVerificationSafeBoundaryCount()
+            kernel.acceptedSetupCompactPublicKeyVerificationSafeBoundaryCount()
     ) {
         canonicalCheckpointBytes.fill(0);
         throw new CanonicalStreamInternalError(

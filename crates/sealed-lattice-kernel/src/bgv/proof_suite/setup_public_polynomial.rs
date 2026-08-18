@@ -332,6 +332,33 @@ pub(crate) struct SetupPublicPolynomialRootBuilder {
     source_polynomial_coefficients: Vec<Vec<ProofBaseFieldElement>>,
 }
 
+pub(crate) enum SetupPublicPolynomialRootConstructionPoll {
+    WorkCompleted { completed_coset_count: u32 },
+    Complete(([u8; 64], [u8; 64])),
+}
+
+/// Incremental form of the setup-polynomial root construction. One work unit
+/// owns exactly one evaluation coset, including every column evaluation and
+/// the corresponding salted leaf hashes. The retained source coefficients and
+/// Merkle frontiers are verifier-owned runtime state; durable restoration
+/// replays them from canonical source bytes rather than serializing them.
+pub(crate) struct SetupPublicPolynomialRootConstruction {
+    public_polynomial_context_hash: [u8; 64],
+    evaluation_domain: ProofEvaluationDomain,
+    source_polynomial_degree_bound_exclusive: usize,
+    row_width: u32,
+    source_polynomial_coefficients: Vec<Vec<ProofBaseFieldElement>>,
+    coset_count: usize,
+    coset_leaf_count: usize,
+    expected_coset_generator: ProofBaseFieldElement,
+    next_coset_index: usize,
+    merkle_frontiers: Option<SetupPublicPolynomialCosetMerkleFrontiers>,
+    evaluation_workspace: Vec<ProofBaseFieldElement>,
+    complete_root: Option<([u8; 64], [u8; 64])>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    root_construction_started_at: std::time::Instant,
+}
+
 impl SetupPublicPolynomialRootBuilder {
     pub(crate) fn new(
         context: &SetupPublicPolynomialContext,
@@ -480,7 +507,9 @@ impl SetupPublicPolynomialRootBuilder {
         self.absorb_source_polynomial_coefficients(coefficients)
     }
 
-    pub(crate) fn finish(mut self) -> Result<([u8; 64], [u8; 64]), SetupPublicPolynomialError> {
+    pub(crate) fn begin_root_construction(
+        self,
+    ) -> Result<SetupPublicPolynomialRootConstruction, SetupPublicPolynomialError> {
         if self.source_polynomial_coefficients.len() != self.expected_column_count {
             return Err(SetupPublicPolynomialError::InvalidInput);
         }
@@ -505,7 +534,7 @@ impl SetupPublicPolynomialRootBuilder {
         println!(
             "setup public-polynomial root: domain {evaluation_domain_size}, source degree {coset_domain_size}, columns {row_width}, cosets {coset_count}",
         );
-        let mut merkle_frontiers = SetupPublicPolynomialCosetMerkleFrontiers::new(
+        let merkle_frontiers = SetupPublicPolynomialCosetMerkleFrontiers::new(
             self.public_polynomial_context_hash,
             coset_count,
             coset_leaf_count,
@@ -518,41 +547,116 @@ impl SetupPublicPolynomialRootBuilder {
         let expected_coset_generator = evaluation_domain_generator.power(
             u64::try_from(coset_count).map_err(|_| SetupPublicPolynomialError::CountOverflow)?,
         );
+        Ok(SetupPublicPolynomialRootConstruction {
+            public_polynomial_context_hash: self.public_polynomial_context_hash,
+            evaluation_domain: self.evaluation_domain,
+            source_polynomial_degree_bound_exclusive: self.source_polynomial_degree_bound_exclusive,
+            row_width,
+            source_polynomial_coefficients: self.source_polynomial_coefficients,
+            coset_count,
+            coset_leaf_count,
+            expected_coset_generator,
+            next_coset_index: 0,
+            merkle_frontiers: Some(merkle_frontiers),
+            evaluation_workspace,
+            complete_root: None,
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            root_construction_started_at,
+        })
+    }
+
+    pub(crate) fn finish(self) -> Result<([u8; 64], [u8; 64]), SetupPublicPolynomialError> {
+        let mut construction = self.begin_root_construction()?;
+        loop {
+            match construction.advance(u32::MAX)? {
+                SetupPublicPolynomialRootConstructionPoll::WorkCompleted { .. } => {}
+                SetupPublicPolynomialRootConstructionPoll::Complete(root) => return Ok(root),
+            }
+        }
+    }
+}
+
+impl SetupPublicPolynomialRootConstruction {
+    pub(crate) fn advance(
+        &mut self,
+        maximum_coset_count: u32,
+    ) -> Result<SetupPublicPolynomialRootConstructionPoll, SetupPublicPolynomialError> {
+        if maximum_coset_count == 0 {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
+        if let Some(root) = self.complete_root.take() {
+            return Ok(SetupPublicPolynomialRootConstructionPoll::Complete(root));
+        }
+        let remaining_coset_count = self
+            .coset_count
+            .checked_sub(self.next_coset_index)
+            .ok_or(SetupPublicPolynomialError::CountOverflow)?;
+        let requested_coset_count = usize::try_from(maximum_coset_count)
+            .map_err(|_| SetupPublicPolynomialError::CountOverflow)?;
+        let completed_coset_count = remaining_coset_count.min(requested_coset_count);
+        if completed_coset_count == 0 {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
+
         // Write N = E K. Coset r evaluates exactly the full-domain positions
         // r + E t. Its two K/2-point halves therefore form natural Merkle
         // leaf r + E t and its opposite-domain point. The coordinate
         // frontiers transpose those strided leaves back into the original
         // contiguous order without changing any leaf or parent hash.
-        for coset_index in 0..coset_count {
+        let end_coset_index = self
+            .next_coset_index
+            .checked_add(completed_coset_count)
+            .ok_or(SetupPublicPolynomialError::CountOverflow)?;
+        for coset_index in self.next_coset_index..end_coset_index {
             let coset_offset = self.evaluation_domain.point(coset_index)?;
-            let coset_domain =
-                ProofEvaluationDomain::new(coset_domain_size, coset_offset.canonical())?;
-            if coset_domain.generator() != expected_coset_generator {
+            let coset_domain = ProofEvaluationDomain::new(
+                self.source_polynomial_degree_bound_exclusive,
+                coset_offset.canonical(),
+            )?;
+            if coset_domain.generator() != self.expected_coset_generator {
                 return Err(SetupPublicPolynomialError::InvalidInput);
             }
             let mut leaf_hash_arena = SetupPublicPolynomialLeafHashArena::new_strided(
                 self.public_polynomial_context_hash,
-                coset_leaf_count,
-                row_width,
+                self.coset_leaf_count,
+                self.row_width,
                 coset_index,
-                coset_count,
+                self.coset_count,
             )?;
             for source_coefficients in &self.source_polynomial_coefficients {
-                evaluation_workspace.clear();
-                evaluation_workspace.extend_from_slice(source_coefficients);
-                coset_domain.evaluate_base_polynomial_in_place(&mut evaluation_workspace)?;
-                leaf_hash_arena.absorb_extension_column(&evaluation_workspace)?;
+                self.evaluation_workspace.clear();
+                self.evaluation_workspace
+                    .extend_from_slice(source_coefficients);
+                coset_domain.evaluate_base_polynomial_in_place(&mut self.evaluation_workspace)?;
+                leaf_hash_arena.absorb_extension_column(&self.evaluation_workspace)?;
             }
-            merkle_frontiers.absorb_coset_leaf_hashes(leaf_hash_arena)?;
+            self.merkle_frontiers
+                .as_mut()
+                .ok_or(SetupPublicPolynomialError::InvalidInput)?
+                .absorb_coset_leaf_hashes(leaf_hash_arena)?;
         }
-        let root = merkle_frontiers.finish()?;
-        #[cfg(all(test, not(target_arch = "wasm32")))]
-        println!(
-            "setup public-polynomial root complete: domain {evaluation_domain_size}, source degree {coset_domain_size}, columns {row_width} ({:?})",
-            root_construction_started_at.elapsed(),
-        );
-        self.source_polynomial_coefficients.clear();
-        Ok((self.public_polynomial_context_hash, root))
+        self.next_coset_index = end_coset_index;
+        if self.next_coset_index == self.coset_count {
+            let root = self
+                .merkle_frontiers
+                .take()
+                .ok_or(SetupPublicPolynomialError::InvalidInput)?
+                .finish()?;
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            println!(
+                "setup public-polynomial root complete: domain {}, source degree {}, columns {} ({:?})",
+                self.evaluation_domain.size(),
+                self.source_polynomial_degree_bound_exclusive,
+                self.row_width,
+                self.root_construction_started_at.elapsed(),
+            );
+            self.source_polynomial_coefficients.clear();
+            self.complete_root = Some((self.public_polynomial_context_hash, root));
+        }
+        Ok(SetupPublicPolynomialRootConstructionPoll::WorkCompleted {
+            completed_coset_count: u32::try_from(completed_coset_count)
+                .map_err(|_| SetupPublicPolynomialError::CountOverflow)?,
+        })
     }
 }
 
@@ -1749,6 +1853,54 @@ mod tests {
             source_polynomial_degree_bound_exclusive: 4,
             ordered_trace_rows: &ordered_trace_rows,
         })
+    }
+
+    #[test]
+    fn incremental_root_construction_preserves_bytes_at_each_coset_boundary() {
+        let context = public_key_share_context();
+        let ordered_trace_rows = [[3_u64, 5, 0, 1], [7_u64, 11, 13, 17]];
+        let mut one_shot_builder = SetupPublicPolynomialRootBuilder::new(&context, 8, 4, 2)
+            .expect("the reference root builder derives");
+        let mut incremental_builder = SetupPublicPolynomialRootBuilder::new(&context, 8, 4, 2)
+            .expect("the incremental root builder derives");
+        for trace_row in &ordered_trace_rows {
+            one_shot_builder
+                .absorb_canonical_trace_row(trace_row)
+                .expect("the reference trace row is canonical");
+            incremental_builder
+                .absorb_canonical_trace_row(trace_row)
+                .expect("the incremental trace row is canonical");
+        }
+        let expected_root = one_shot_builder
+            .finish()
+            .expect("the reference root derives");
+        let mut construction = incremental_builder
+            .begin_root_construction()
+            .expect("the incremental root construction begins");
+        assert!(matches!(
+            construction.advance(0),
+            Err(SetupPublicPolynomialError::InvalidInput)
+        ));
+        for _ in 0..2 {
+            assert!(matches!(
+                construction.advance(1),
+                Ok(SetupPublicPolynomialRootConstructionPoll::WorkCompleted {
+                    completed_coset_count: 1,
+                })
+            ));
+        }
+        assert_eq!(
+            match construction
+                .advance(1)
+                .expect("the completed incremental root is available")
+            {
+                SetupPublicPolynomialRootConstructionPoll::Complete(root) => root,
+                SetupPublicPolynomialRootConstructionPoll::WorkCompleted { .. } => {
+                    panic!("the two-coset construction must already be complete")
+                }
+            },
+            expected_root,
+        );
     }
 
     fn extension_columns_for_test(

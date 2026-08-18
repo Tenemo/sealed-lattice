@@ -42,24 +42,32 @@ its verifier statement and checks all 122 transported public columns, including
 rebuilding the four statement-owned setup-polynomial roots. That source
 correspondence now gates a source-bound accepted-setup capability. Release
 kernel exports prepare from the accepted package, begin or restore,
-bounded-poll, copy a fixed 400-byte safe cursor, cancel, finish the positive
-capability, and explicitly discard every other linear state. Restoration
-revalidates the exact transported bytes and replays deterministically from
-genesis. An internal common-proof worker driver yields between bounded polls,
+bounded-poll, copy a fixed 404-byte accepted-verifier cursor, cancel, finish the
+positive capability, and explicitly discard every other linear state. This is
+distinct from the 400-byte algebra-only cursor. Restoration revalidates the
+exact transported bytes and replays deterministically from genesis. An
+internal common-proof worker driver yields between bounded polls,
 publishes and restores that cursor through an authenticated-custody contract,
 prevents publication during replay, preserves typed refusals, and returns a
 positive `VerificationResult` only after source correspondence and one-shot
-accepted-setup terminal commit. The five CFW
-polynomial transforms are incremental. The kernel exposes 290 fixed cursor
-ordinals at 65,536-work-unit intervals across 19,005,440 of the selected CFW
-phase's 19,038,593 work units; the remaining 33,153 CFW units and terminal WHIR
-work do not yet form another durable boundary, and the final 122-column source
-reconstruction remains synchronous. The protocol package supplies a
-concrete authenticated-store adapter for those cursors, including
-copy-on-write predecessor retention and one-shot restoration after
-checkpoint-store reconstruction, but the production browser-worker host does
-not install it yet. Compact generation is not a worker-facing runtime
-capability, and no complete generation/verification ABI pair exists.
+accepted-setup terminal commit. The five CFW polynomial transforms are
+incremental. The accepted verifier exposes 4,509 fixed cursor ordinals: 290 at
+65,536-work-unit intervals across 19,005,440 of the selected CFW phase's
+19,038,593 work units, one after terminal WHIR returns, and 4,218 across all 122
+public columns and all 1,024 cosets of each of four statement roots. The
+post-WHIR cursor does not make terminal WHIR incremental: the selected
+pre-challenge first fold currently retains an 80 MiB source, an 80 MiB clone,
+and a 40 MiB output simultaneously before other live state. The protocol
+package's concrete authenticated-store adapter still accepts only the separate
+400-byte algebraic cursor and its 290 CFW ordinals. Accepted-cursor worker tests
+exercise the callback contract, not a concrete 404-byte protocol adapter. The
+worker options also allow a resume custody object alongside a different
+top-level custody object, so restore can use one identity while publication and
+release use another. Accepted-cursor storage geometry, single-identity custody,
+production browser-worker installation, bounded transport and terminal WHIR,
+and selected actual-byte cold restoration remain open. Compact generation is
+not a worker-facing runtime capability, and no complete generation and
+verification ABI pair exists.
 
 Test-only proof workbenches and native or desktop results are not an accepted
 ceremony or supported-phone evidence. The repository [README](../../README.md)

@@ -66,6 +66,8 @@ export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
 const canonicalCompactPublicKeyAlgebraicVerificationCheckpointByteLength = 400;
 const canonicalCompactPublicKeyAlgebraicVerificationSafeBoundaryCount = 290;
+const canonicalAcceptedCompactPublicKeyVerificationCheckpointByteLength = 404;
+const canonicalAcceptedCompactPublicKeyVerificationSafeBoundaryCount = 4_509;
 
 const destroyOwnedKernelBoundaryInput = (bytes: Uint8Array): void => {
     if (!(bytes.buffer instanceof ArrayBuffer)) {
@@ -2431,6 +2433,57 @@ export class CommonProofVerificationKernelBoundary {
         );
     }
 
+    public acceptedSetupCompactPublicKeyVerificationCheckpointByteLength(): number {
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key verification checkpoint length',
+            () => {
+                const byteLength = requireUnsigned32(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length',
+                    )(),
+                    'The accepted-setup compact public-key verification checkpoint byte length',
+                );
+                if (
+                    byteLength !==
+                    canonicalAcceptedCompactPublicKeyVerificationCheckpointByteLength
+                ) {
+                    throw kernelFailure(
+                        'The accepted-setup compact public-key verification checkpoint geometry disagrees with the worker.',
+                    );
+                }
+                return byteLength;
+            },
+        );
+    }
+
+    #requireAcceptedSetupCompactPublicKeyVerificationSafeBoundaryCount(): number {
+        const safeBoundaryCount = requireUnsigned32(
+            resolveNumberExport(
+                this.#context.wasmExports,
+                'sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count',
+            )(),
+            'The accepted-setup compact public-key verification safe-boundary count',
+        );
+        if (
+            safeBoundaryCount !==
+            canonicalAcceptedCompactPublicKeyVerificationSafeBoundaryCount
+        ) {
+            throw kernelFailure(
+                'The accepted-setup compact public-key verification checkpoint schedule disagrees with the worker.',
+            );
+        }
+        return safeBoundaryCount;
+    }
+
+    public acceptedSetupCompactPublicKeyVerificationSafeBoundaryCount(): number {
+        return this.#context.runExclusive(
+            'accepted-setup compact public-key verification safe-boundary count',
+            () =>
+                this.#requireAcceptedSetupCompactPublicKeyVerificationSafeBoundaryCount(),
+        );
+    }
+
     public beginAcceptedSetupCompactPublicKeyVerification(
         preparedHandle: number,
         proofBytes: Uint8Array,
@@ -2452,7 +2505,7 @@ export class CommonProofVerificationKernelBoundary {
         if (
             !(canonicalCheckpointBytes instanceof Uint8Array) ||
             canonicalCheckpointBytes.byteLength !==
-                this.compactPublicKeyAlgebraicVerificationCheckpointByteLength()
+                this.acceptedSetupCompactPublicKeyVerificationCheckpointByteLength()
         ) {
             throw resourceFailure(
                 'The accepted-setup compact public-key verification checkpoint has the wrong byte length.',
@@ -2584,7 +2637,7 @@ export class CommonProofVerificationKernelBoundary {
             'The accepted-setup compact public-key verification operation handle',
         );
         const checkpointByteLength =
-            this.compactPublicKeyAlgebraicVerificationCheckpointByteLength();
+            this.acceptedSetupCompactPublicKeyVerificationCheckpointByteLength();
         return this.#context.runExclusive(
             'accepted-setup compact public-key verification checkpoint copy',
             () => {
@@ -2641,7 +2694,7 @@ export class CommonProofVerificationKernelBoundary {
             'accepted-setup compact public-key verification poll',
             () => {
                 const safeBoundaryCount =
-                    this.#requireCompactPublicKeyAlgebraicVerificationSafeBoundaryCount();
+                    this.#requireAcceptedSetupCompactPublicKeyVerificationSafeBoundaryCount();
                 const metadataPointer =
                     this.#memoryBoundary.allocateZeroedWords(4);
                 try {

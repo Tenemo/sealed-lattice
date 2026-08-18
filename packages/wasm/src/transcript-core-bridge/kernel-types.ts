@@ -1527,6 +1527,8 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         checkpointByteLength: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length?: () => number;
+    sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count?: () => number;
     sealed_lattice_accepted_setup_compact_public_key_verification_poll?: (
         operationHandle: number,
         maximumWorkUnitCount: number,
