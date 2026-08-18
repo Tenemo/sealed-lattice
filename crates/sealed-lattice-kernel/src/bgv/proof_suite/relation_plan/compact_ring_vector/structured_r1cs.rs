@@ -3192,6 +3192,10 @@ mod tests {
             proof_suite::{
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
                 VerifiedCommonProofStatementSource, VerifiedCompactPublicKeyStatementAuthority,
+                compact_corpus_accounting::{
+                    derive_selected_compact_corpus_rollup,
+                    derive_selected_public_key_share_emitted_size_evidence,
+                },
                 compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::CompactPublicInputBindings,
@@ -7595,6 +7599,35 @@ mod tests {
         assert_eq!(
             actual_byte_census.shared_hash_graph.total_hash_count,
             emitted_cdhz_measurement.observed_nrdx_verifier_q_v
+        );
+        let emitted_size_evidence =
+            derive_selected_public_key_share_emitted_size_evidence(&response_generation_output)
+                .expect("the completed production generator owns a nonempty proof size");
+        let compact_corpus_rollup = derive_selected_compact_corpus_rollup(&[emitted_size_evidence])
+            .expect("the emitted production size feeds the selected corpus roll-up");
+        let public_key_share_corpus_entry = compact_corpus_rollup
+            .families
+            .iter()
+            .find(|family| {
+                family.application_statement_schema_identifier
+                    == emitted_size_evidence.application_statement_schema_identifier
+            })
+            .expect("the selected corpus contains the public-key-share family");
+        assert_eq!(
+            public_key_share_corpus_entry.candidate_canonical_proof_byte_length,
+            Some(emitted_size_evidence.canonical_proof_byte_length),
+        );
+        assert_eq!(
+            public_key_share_corpus_entry.candidate_physical_corpus_byte_length,
+            emitted_size_evidence
+                .canonical_proof_byte_length
+                .checked_mul(u64::from(
+                    public_key_share_corpus_entry.physical_proof_count,
+                )),
+        );
+        assert_eq!(
+            compact_corpus_rollup.accepted_canonical_corpus_byte_length,
+            None,
         );
         let algebraic_verification_started_at = Instant::now();
         let (verified_transport, algebraic_poll_count) =

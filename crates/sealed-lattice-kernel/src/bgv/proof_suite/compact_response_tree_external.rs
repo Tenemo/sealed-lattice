@@ -1198,11 +1198,7 @@ mod tests {
 
         assert_eq!(verifier_inputs.response_merkle_geometries.len(), 82);
         assert_eq!(current_retained_response_tree_byte_length, 0);
-        assert!(
-            maximum_transient_response_tree_byte_length
-                > post_lookup_retained_response_tree_byte_length
-                    .expect("the post-lookup retained-tree boundary is visited")
-        );
+        assert_eq!(maximum_transient_response_tree_byte_length, 52_952_832);
         assert_eq!(
             post_lookup_retained_response_tree_byte_length,
             Some(50_331_520)

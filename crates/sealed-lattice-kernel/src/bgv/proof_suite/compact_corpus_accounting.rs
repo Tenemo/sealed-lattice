@@ -6,7 +6,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::selected_accounting::derive_selected_proof_family_application_inventory;
+use super::{
+    compact_response_generation::CompactResponseGenerationOutput,
+    selected_accounting::derive_selected_proof_family_application_inventory,
+};
+
+const SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1212;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactFamilySizeEvidenceStatus {
@@ -55,6 +60,26 @@ pub(crate) enum CompactCorpusAccountingError {
     UnknownFamilyEvidence,
     ZeroByteLength,
     ArithmeticOverflow,
+}
+
+/// Bridges the canonical bytes owned by the completed production generator
+/// into the test-only selected-family corpus ledger. The bridge deliberately
+/// carries transport-candidate status: byte emission alone does not establish
+/// algebraic verification or any stronger proof claim.
+pub(crate) fn derive_selected_public_key_share_emitted_size_evidence(
+    generated_proof: &CompactResponseGenerationOutput,
+) -> Result<CompactFamilySizeEvidence, CompactCorpusAccountingError> {
+    let canonical_proof_byte_length = u64::try_from(generated_proof.canonical_proof_bytes().len())
+        .map_err(|_| CompactCorpusAccountingError::ArithmeticOverflow)?;
+    if canonical_proof_byte_length == 0 {
+        return Err(CompactCorpusAccountingError::ZeroByteLength);
+    }
+    Ok(CompactFamilySizeEvidence {
+        application_statement_schema_identifier:
+            SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+        canonical_proof_byte_length,
+        status: CompactFamilySizeEvidenceStatus::TransportCandidate,
+    })
 }
 
 pub(crate) fn derive_selected_compact_corpus_rollup(
@@ -169,10 +194,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selected_rollup_keeps_the_transport_candidate_and_unknown_sizes_blocking() {
+    fn selected_rollup_keeps_a_transport_candidate_and_unknown_sizes_blocking() {
         let rollup = derive_selected_compact_corpus_rollup(&[CompactFamilySizeEvidence {
-            application_statement_schema_identifier: 0x1212,
-            canonical_proof_byte_length: 23_815_474,
+            application_statement_schema_identifier:
+                SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+            canonical_proof_byte_length: 17,
             status: CompactFamilySizeEvidenceStatus::TransportCandidate,
         }])
         .expect("selected compact corpus roll-up derives");
@@ -185,17 +211,20 @@ mod tests {
         let public_key_share = rollup
             .families
             .iter()
-            .find(|family| family.application_statement_schema_identifier == 0x1212)
+            .find(|family| {
+                family.application_statement_schema_identifier
+                    == SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER
+            })
             .expect("public-key-share family is inventoried");
         assert_eq!(public_key_share.physical_proof_count, 10);
         assert_eq!(public_key_share.logical_relation_instance_count, 10);
         assert_eq!(
             public_key_share.candidate_canonical_proof_byte_length,
-            Some(23_815_474)
+            Some(17)
         );
         assert_eq!(
             public_key_share.candidate_physical_corpus_byte_length,
-            Some(238_154_740)
+            Some(170)
         );
         assert_eq!(public_key_share.accepted_canonical_proof_byte_length, None);
         assert_eq!(public_key_share.accepted_physical_corpus_byte_length, None);
@@ -249,7 +278,8 @@ mod tests {
     #[test]
     fn invalid_size_evidence_refuses_before_any_total_is_reported() {
         let valid = CompactFamilySizeEvidence {
-            application_statement_schema_identifier: 0x1212,
+            application_statement_schema_identifier:
+                SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
             canonical_proof_byte_length: 1,
             status: CompactFamilySizeEvidenceStatus::TransportCandidate,
         };

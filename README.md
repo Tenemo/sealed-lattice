@@ -192,14 +192,17 @@ and target release remain incomplete or internal.
   premises have no production constructors, so this instrumentation produces
   neither an accepted proof nor a security-bit claim.
 - The selected lifecycle inventory remains 103 physical proof objects and 159
-  logical relation instances. A compact corpus roll-up records the public-key
-  share's 23,815,474-byte object only as a transport candidate, keeps that row
-  and all eleven other family sizes explicitly blocked, and therefore reports
-  no accepted ceremony-wide byte total.
-- A source assertion now derives 50,331,520 live retained-response-tree bytes
-  at the post-lookup release boundary. This is distinct from the
-  transient-inclusive 52,952,832-byte response-storage peak and is geometry
-  evidence, not a browser runtime measurement.
+  logical relation instances. A guarded owner emitted a 23,815,474-byte
+  public-key-share candidate, and the completed production generator now feeds
+  that byte length directly into the compact corpus roll-up. The proof remains
+  a transport candidate rather than an accepted family size; that row and all
+  eleven unknown family sizes stay blocked, so no accepted ceremony-wide byte
+  total exists.
+- A source assertion derives exactly 50,331,520 live retained-response-tree
+  bytes at the post-lookup release boundary and separately pins the exact
+  transient-inclusive 52,952,832-byte response-storage peak. Both values derive
+  from all 82 production response geometries; neither is a browser runtime
+  measurement.
 - The WebAssembly producer and SDK copy have a byte-for-byte reproducibility
   gate. Reproducibility establishes build identity only.
 

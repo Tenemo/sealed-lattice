@@ -125,13 +125,15 @@ consequences are:
   still have no production constructors. No security level or proof capability
   follows from this arithmetic.
 - The selected 103-physical-proof, 159-logical-instance corpus roll-up remains
-  incomplete. The 23,815,474-byte public-key-share transport candidate is not
-  an accepted family size, the other eleven family sizes are unknown, and no
-  ceremony-wide compact byte total exists.
-- Source geometry now pins 50,331,520 retained-response-tree bytes at the
-  post-lookup release boundary, separately from the 52,952,832-byte
-  transient-inclusive response-storage peak. Neither number is browser
-  lifecycle or supported-phone evidence.
+  incomplete. A guarded owner emitted the 23,815,474-byte public-key-share
+  candidate, and the completed production generator feeds its byte length
+  directly into the roll-up. The row is still not an accepted family size, the
+  other eleven family sizes are unknown, and no ceremony-wide compact byte
+  total exists.
+- Source geometry and an exact assertion pin 50,331,520 retained-response-tree
+  bytes at the post-lookup release boundary and the separate 52,952,832-byte
+  transient-inclusive response-storage peak. Both derive from all 82 response
+  geometries. Neither number is browser lifecycle or supported-phone evidence.
 - The guarded CFW run reconciles 4,926 logical storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   stored bytes. A separate nonqualifying desktop Chromium replay used the exact
