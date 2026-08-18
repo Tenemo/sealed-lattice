@@ -81,23 +81,27 @@ consequences are:
   `isValid` or mint a proof capability. A separate raw release-kernel ABI and
   internal TypeScript closed-worker driver begin or restore, bounded-poll,
   cancel, and return the terminal algebraic `VerificationResult`. Its fixed
-  400-byte safe cursor binds the four public-input coordinates, complete proof
-  and public-input digests, and cumulative completed work; it serializes no
+  408-byte safe cursor binds the four public-input coordinates, complete proof
+  and public-input digests, and cumulative CFW and WHIR work; it serializes no
   opaque transform state. All five CFW polynomial transforms and the seven WHIR
   folds remaining after the CFW handoff are incremental. Kernel-owned
-  65,536-work-unit boundaries expose exactly 290 cursor ordinals across
+  65,536-work-unit boundaries expose exactly 290 CFW cursor ordinals across
   19,005,440 of the selected CFW phase's 19,038,593 work units, leaving a
   33,153-unit final CFW segment. Contract geometry derives 2,129,904 remaining
-  WHIR fold work units, and the current transported candidate completes them in
+  WHIR fold work units. Thirty-two interval boundaries plus terminal WHIR add
+  33 durable ordinals, and the current transported candidate completes them in
   33 polls of at most 65,536 units. The accepted source-bound verifier uses a
-  distinct 404-byte cursor and adds one durable point after terminal WHIR plus
-  4,218 source-correspondence boundaries: one for each of 122 public columns
+  distinct 412-byte cursor and adds 4,218 source-correspondence boundaries: one
+  for each of 122 public columns
   and one for each of 1,024 evaluation cosets across four statement roots.
   Restoration revalidates the transported bytes and deterministically replays
   from genesis before newer state may be published. A guarded selected-size
-  native owner passed the post-WHIR poll and all 4,218 source work units. The
-  concrete protocol authenticated-store adapter now separates the 404-byte,
-  4,509-boundary accepted cursor from the 400-byte algebra-only cursor, reads the
+  native owner passed all 323 algebraic boundaries and all 4,218 source work
+  units. It cold-restored the actual proof first from a CFW cursor and then from
+  the first WHIR cursor, replaying canonical inputs from genesis and reproducing
+  both cursor encodings exactly. The concrete protocol authenticated-store
+  adapter now separates the 412-byte, 4,541-boundary accepted cursor from the
+  408-byte algebra-only cursor, reads the
   accepted geometry from kernel exports, and authenticates it under a separate
   canonical state-stream domain. Fresh and resumed custody are mutually
   exclusive. A hostile dual-custody input is refused before kernel preparation,
@@ -114,12 +118,12 @@ consequences are:
   source allocation, so the prior clone-plus-output overlap is removed. The
   verifier-derived public-covector replay still drains the shared primitive
   synchronously. The six code switches and two base cases execute between fold
-  polls and are not separately work-metered. The accepted cursor publishes no
-  intermediate WHIR state, so those 33 polls are yield and cancellation
-  surfaces rather than durable restore points. This is source-ownership and
-  native equivalence evidence, not a live browser memory measurement.
-  Dedicated-worker invocation, durable WHIR boundaries, bounded transport,
-  selected actual-byte cold restoration, the complete equation-invalid hostile
+  polls and are not separately work-metered. The accepted cursor publishes 32
+  intermediate WHIR interval boundaries and terminal WHIR. Guarded native
+  execution cold-restores the actual proof at the first such interval. This is
+  source-ownership and native lifecycle evidence, not a live browser memory
+  measurement. Dedicated-worker invocation, bounded transport, scalar
+  release-WASM actual-byte restoration, the complete equation-invalid hostile
   corpus, and the compact generation release ABI remain absent.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
@@ -264,17 +268,17 @@ that a coherent snapshot is newest.
   current coverage is same-realm, the algebra-only adapter is not installed,
   and no compact generation ABI completes the pair.
 - `SEC-020`: Guarded selected-size native evidence covers the complete
-  public-key response schedule, source-bound algebraic verification, and one
-  exact emitted-proof restore through the algebra-only cursor. The accepted
+  public-key response schedule, source-bound algebraic verification, and exact
+  emitted-proof restores through one CFW and one WHIR algebraic cursor. The accepted
   adapter has same-realm synthetic-byte host resume coverage, including
   wrong-source refusal and terminal checkpoint eviction. A separate desktop
   Chromium diagnostic replays the CFW storage lifecycle. The remaining seven
-  WHIR folds now have bounded outer polls, but no intermediate durable cursor.
-  Dedicated-worker loss, separately metered WHIR transition checks, live browser
-  memory measurement, browser-storage amplification, release-WebAssembly proof
-  execution, selected actual-byte accepted-cursor restoration, and full browser
-  custody remain open. The source-covector fold itself now reuses its original
-  allocation.
+  WHIR folds now have bounded outer polls and 32 intermediate durable interval
+  cursors. Dedicated-worker loss, separately metered WHIR transition checks,
+  live browser memory measurement, browser-storage amplification,
+  release-WebAssembly proof execution, selected actual-byte accepted-cursor
+  restoration, and full browser custody remain open. The source-covector fold
+  itself now reuses its original allocation.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

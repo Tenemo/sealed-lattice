@@ -56,7 +56,7 @@ const sourceDigests = (): readonly Uint8Array[] => [
 
 const checkpointBytes = (
     seed: number,
-    byteLength = 400,
+    byteLength = 408,
 ): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(byteLength);
     for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
@@ -67,8 +67,8 @@ const checkpointBytes = (
 };
 
 const createAcceptedCheckpointGeometryKernel = (
-    checkpointByteLength = 404,
-    safeBoundaryCount = 4_509,
+    checkpointByteLength = 412,
+    safeBoundaryCount = 4_541,
 ): TranscriptCoreKernel => {
     const kernel = Object.freeze({}) as TranscriptCoreKernel;
     registerCommonProofKernelContext(
@@ -277,14 +277,14 @@ describe('Compact public-key algebraic verification checkpoint custody', () => {
                 opening.checkpointLineageIdentifier.slice();
             await expect(
                 opening.checkpointCustody.publishAuthenticatedCheckpoint(
-                    new Uint8Array(399),
+                    new Uint8Array(407),
                     0,
                 ),
             ).rejects.toMatchObject({ code: 'InvalidInput' });
             await expect(
                 opening.checkpointCustody.publishAuthenticatedCheckpoint(
                     checkpointBytes(0x33),
-                    290,
+                    323,
                 ),
             ).rejects.toMatchObject({ code: 'InvalidInput' });
 
@@ -449,7 +449,7 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
             orderedSourceDigests: sourceDigests(),
             privateRandomCursorManifestBytes:
                 createEmptyCompactPublicKeyVerificationPrivateRandomnessCursorManifestBytes(),
-            safeBoundaryOrdinal: 4_508,
+            safeBoundaryOrdinal: 4_540,
             stateStreamDomain:
                 compactPublicKeyVerificationCheckpointStateStreamDomains.acceptedSetup,
         };
@@ -480,7 +480,7 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
                 ...validBoundary,
                 privateRandomnessStreamAttemptIdentifier: new Uint8Array(32),
             },
-            { ...validBoundary, safeBoundaryOrdinal: 4_509 },
+            { ...validBoundary, safeBoundaryOrdinal: 4_541 },
             { ...validBoundary, safeBoundaryOrdinal: -1 },
             { ...validBoundary, stateStreamDomain: 'wrong-domain' },
         ]) {
@@ -512,8 +512,8 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
                     store,
                     {
                         kernel: createAcceptedCheckpointGeometryKernel(
-                            404,
-                            4_508,
+                            412,
+                            4_540,
                         ),
                         orderedSourceDigests: sourceDigests(),
                     },
@@ -534,7 +534,7 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
         }
     });
 
-    it('cold restores the 404-byte source cursor under its separate authenticated profile', async () => {
+    it('cold restores the 412-byte source cursor under its separate authenticated profile', async () => {
         const firstStoreOpening = await openCheckpointStore();
         let activeStore = firstStoreOpening.store;
         const kernel = createAcceptedCheckpointGeometryKernel();
@@ -546,7 +546,7 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
                 );
             const checkpointLineageIdentifier =
                 opening.checkpointLineageIdentifier.slice();
-            const initialCheckpointBytes = checkpointBytes(0x29, 404);
+            const initialCheckpointBytes = checkpointBytes(0x29, 412);
 
             await expect(
                 opening.checkpointCustody.publishAuthenticatedCheckpoint(
@@ -563,7 +563,7 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
             await expect(
                 opening.checkpointCustody.publishAuthenticatedCheckpoint(
                     initialCheckpointBytes,
-                    4_509,
+                    4_541,
                 ),
             ).rejects.toMatchObject({ code: 'InvalidInput' });
 
@@ -617,10 +617,10 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
                 safeBoundaryOrdinal: 1,
             });
 
-            const terminalSourceCheckpointBytes = checkpointBytes(0xb7, 404);
+            const terminalSourceCheckpointBytes = checkpointBytes(0xb7, 412);
             await resumedOpening.checkpointCustody.publishAuthenticatedCheckpoint(
                 terminalSourceCheckpointBytes,
-                4_508,
+                4_540,
             );
             await resumedOpening.checkpointCustody.release();
 
@@ -632,7 +632,7 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
                         orderedSourceDigests: sourceDigests(),
                         resume: {
                             checkpointLineageIdentifier,
-                            safeBoundaryOrdinal: 4_508,
+                            safeBoundaryOrdinal: 4_540,
                         },
                     },
                 );
@@ -640,7 +640,7 @@ describe('Accepted-setup compact public-key verification checkpoint custody', ()
                 terminalOpening.checkpointCustody.restoreAuthenticatedCheckpoint(),
             ).resolves.toEqual({
                 canonicalCheckpointBytes: terminalSourceCheckpointBytes,
-                safeBoundaryOrdinal: 4_508,
+                safeBoundaryOrdinal: 4_540,
             });
             await terminalOpening.checkpointCustody.release();
         } finally {

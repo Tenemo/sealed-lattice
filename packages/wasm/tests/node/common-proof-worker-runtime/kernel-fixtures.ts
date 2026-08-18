@@ -92,7 +92,7 @@ export const createMockKernelRuntime = (
         sealed_lattice_common_proof_generation_external_memory_accounting_byte_length:
             () => 160,
         sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count:
-            () => 290,
+            () => 323,
         sealed_lattice_deallocate: deallocate,
         ...createCommonProofExports(memory),
     };

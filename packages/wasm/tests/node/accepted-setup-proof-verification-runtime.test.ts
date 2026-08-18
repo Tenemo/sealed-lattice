@@ -342,7 +342,7 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
                 outputByteLength: number,
             ) => {
                 expect(operationHandle).toBe(81);
-                expect(outputByteLength).toBe(404);
+                expect(outputByteLength).toBe(412);
                 new Uint8Array(
                     memory.buffer,
                     outputPointer,
@@ -461,13 +461,13 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
                 return compactPublicKey.preparationStatus === 0 ? 81 : 0;
             },
         sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
-            () => 400,
+            () => 408,
         sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count:
-            () => 290,
+            () => 323,
         sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length:
-            () => 404,
+            () => 412,
         sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count:
-            () => 4_509,
+            () => 4_541,
         sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests:
             (
                 preparedHandle: number,
@@ -790,7 +790,7 @@ describe('accepted-setup compact public-key verification', () => {
     it('publishes a source-correspondence checkpoint beyond the algebra-only schedule', async () => {
         const runtime = createFakeRuntime();
         runtime.compactPublicKey.pollOutcomes[0] = {
-            checkpointSafeBoundaryOrdinal: 291,
+            checkpointSafeBoundaryOrdinal: 323,
             completedWorkUnitCount: 1,
             pollKind: 1,
             status: 0,
@@ -837,8 +837,8 @@ describe('accepted-setup compact public-key verification', () => {
 
         expect(publishedCheckpoints).toEqual([
             {
-                bytes: Array.from({ length: 404 }, () => 0x5c),
-                safeBoundaryOrdinal: 291,
+                bytes: Array.from({ length: 412 }, () => 0x5c),
+                safeBoundaryOrdinal: 323,
             },
         ]);
         expect(release).toHaveBeenCalledOnce();
@@ -934,7 +934,7 @@ describe('accepted-setup compact public-key verification', () => {
             0,
             2,
             {
-                checkpointSafeBoundaryOrdinal: 291,
+                checkpointSafeBoundaryOrdinal: 323,
                 completedWorkUnitCount: 1,
                 pollKind: 7,
                 status: 0,
@@ -948,7 +948,7 @@ describe('accepted-setup compact public-key verification', () => {
                 verifiedCapabilityHandle: 81,
             },
         );
-        const restoredBytes = new Uint8Array(404).fill(0x6d);
+        const restoredBytes = new Uint8Array(412).fill(0x6d);
         const release = vi.fn(() => Promise.resolve());
         const checkpointCustody = {
             publishAuthenticatedCheckpoint: vi.fn(() => Promise.resolve()),
@@ -956,7 +956,7 @@ describe('accepted-setup compact public-key verification', () => {
             restoreAuthenticatedCheckpoint: vi.fn(() =>
                 Promise.resolve({
                     canonicalCheckpointBytes: restoredBytes.slice(),
-                    safeBoundaryOrdinal: 291,
+                    safeBoundaryOrdinal: 323,
                 }),
             ),
         };
@@ -998,8 +998,8 @@ describe('accepted-setup compact public-key verification', () => {
             release: resumedRelease,
             restoreAuthenticatedCheckpoint: vi.fn(() =>
                 Promise.resolve({
-                    canonicalCheckpointBytes: new Uint8Array(404),
-                    safeBoundaryOrdinal: 291,
+                    canonicalCheckpointBytes: new Uint8Array(412),
+                    safeBoundaryOrdinal: 323,
                 }),
             ),
         };

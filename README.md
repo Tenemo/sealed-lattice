@@ -92,15 +92,18 @@ and target release remain incomplete or internal.
   boundaries cover 19,005,440 units and leave one 33,153-unit terminal CFW
   segment. Contract geometry independently derives 2,129,904 remaining WHIR
   fold work units, and the current transported candidate completes them in 33
-  polls of at most 65,536 units. Each CFW boundary exposes a canonical 400-byte
-  safe cursor that binds the four
+  polls of at most 65,536 units. The 290 CFW interval boundaries, 32 WHIR
+  interval boundaries, and terminal WHIR boundary expose 323 canonical
+  408-byte safe cursors that bind the four
   public-input coordinates, complete proof and public-input digests, and
-  cumulative completed work. It contains no opaque transform state:
+  cumulative CFW and WHIR work. They contain no opaque transform state:
   restoration revalidates the transported bytes and deterministically replays
   from genesis before live work continues. A guarded current-source run
   destroys the first verifier, restores a fresh verifier from boundary zero,
-  reproduces that cursor byte for byte, observes all 290 safe-boundary
-  ordinals, and accepts the exact emitted proof. The same guarded owner derives
+  then destroys it again at the first WHIR boundary and replays all CFW plus
+  exactly 65,536 WHIR work units. It reproduces both cursors byte for byte,
+  observes all 323 safe-boundary ordinals, and accepts the exact emitted proof.
+  The same guarded owner derives
   the public-key statement source independently from verified setup
   randomness, checks the canonical proof-stream descriptor and all 61 public
   ring vectors, regenerates 64 verifier-sequence columns, and rebuilds the
@@ -112,10 +115,10 @@ and target release remain incomplete or internal.
   A source-bound accepted-setup release ABI now retains the exact statement
   authority and same-secret prerequisite, derives all four transport bindings
   internally, and carries one linear handle through prepared, running, and
-  positively verified states. Its fixed 404-byte cursor extends the separate
-  400-byte algebra-only cursor without serializing opaque runtime state. It
-  covers the 290 CFW boundaries, one durable boundary after terminal WHIR
-  returns, and 4,218 source boundaries: all 122 public columns plus 1,024
+  positively verified states. Its fixed 412-byte cursor extends the separate
+  408-byte algebra-only cursor without serializing opaque runtime state. It
+  covers the same 323 algebraic boundaries and 4,218 source boundaries: all
+  122 public columns plus 1,024
   evaluation cosets for each of four statement roots. It can begin or restore,
   bounded-poll, copy a cursor, cancel, and discard. Only after algebraic
   verification and complete source correspondence does it expose a proof
@@ -128,8 +131,8 @@ and target release remain incomplete or internal.
   and exactly 4,218 source work units while reproducing all four roots and
   accepting the same 23,815,474 proof bytes. A concrete protocol adapter now
   publishes and cold-restores the
-  404-byte cursor across all 4,509 accepted-verifier ordinals under a state-stream
-  domain distinct from the 400-byte algebra-only cursor. It reads its byte length
+  412-byte cursor across all 4,541 accepted-verifier ordinals under a state-stream
+  domain distinct from the 408-byte algebra-only cursor. It reads its byte length
   and boundary count from the loaded scalar WASM kernel and takes its operation
   kind, empty randomness cursor, and state-stream domains from canonical owners.
   Fresh and resumed custody are mutually exclusive in the worker API. A runtime
@@ -152,13 +155,13 @@ and target release remain incomplete or internal.
   irregular poll budgets, every compact folding factor, nontrivial column
   lengths, invalid geometry, zero budgets, and terminal reuse. The six code
   switches and two base cases execute between fold polls and are not separately
-  work-metered. The accepted cursor still publishes only one durable boundary
-  after both WHIR epochs, so the 33 fold polls are yield and cancellation
-  surfaces rather than cold-restore points. This removes the prior three-buffer
-  source overlap, but it is ownership evidence rather than a browser memory
-  measurement. Durable WHIR boundaries, bounded transport, selected
-  actual-byte cold restoration, the full equation-invalid hostile corpus, and
-  the complete durable lifecycle remain open.
+  work-metered. The accepted cursor publishes 32 intermediate WHIR interval
+  boundaries and terminal WHIR. Guarded native execution cold-restores the
+  actual proof at the first such interval, but this remains ownership and
+  native lifecycle evidence rather than a browser memory measurement. Bounded
+  transport, scalar release-WASM actual-byte restoration, the full
+  equation-invalid hostile corpus, and the complete browser lifecycle remain
+  open.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -232,20 +235,21 @@ ceremony or supported-phone qualification.
   now carry one public-key-share verification through positive capability
   commit, while its internal closed-worker driver publishes source-bound safe
   cursors through a custody contract and preserves typed refusals. Its durable
-  schedule covers CFW, one point after both WHIR epochs, all public-column
-  reconstruction, and each statement-root coset after synchronous transport
-  revalidation. The seven remaining WHIR folds are externally pollable, but
-  their intermediate states are not durable cursor boundaries and their
+  schedule covers CFW, 32 intermediate WHIR fold boundaries, terminal WHIR,
+  all public-column reconstruction, and each statement-root coset after
+  synchronous transport revalidation. The seven remaining WHIR folds are
+  externally pollable and durably replayable; their code-switch and base-case
   transition checks are not separately work-metered. The production covector
   owners reuse the input allocation rather than retaining clone and output
   buffers. The concrete
-  protocol checkpoint-store adapters now separate the 400-byte, 290-boundary
-  algebraic cursor from the kernel-derived 404-byte, 4,509-boundary accepted
+  protocol checkpoint-store adapters now separate the 408-byte, 323-boundary
+  algebraic cursor from the kernel-derived 412-byte, 4,541-boundary accepted
   cursor. The worker refuses split custody before kernel preparation and retires
   every supplied identity. The custody-worker host installs the accepted
-  adapter and evicts terminal state, but dedicated-worker invocation and
-  destruction, selected actual-byte cold restoration, and the complete
-  transported equation-invalid hostile corpus are absent.
+  adapter and evicts terminal state. Selected actual-byte cold restoration is
+  proven only in guarded native execution; dedicated-browser-worker invocation
+  and destruction, scalar release-WASM restoration of those bytes, and the
+  complete transported equation-invalid hostile corpus are absent.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the
@@ -256,8 +260,8 @@ ceremony or supported-phone qualification.
 - Browser custody installs the single-identity accepted-cursor adapter in the
   production worker-host implementation, but has only same-realm synthetic
   resume coverage. It does not yet supply dedicated-worker destruction and
-  recreation, bounded transport, durable WHIR restoration, selected actual-byte
-  cold-resume evidence for every compact-proof boundary, or reconciled
+  recreation, bounded transport, scalar release-WASM selected actual-byte
+  cold-resume evidence across the compact-proof boundaries, or reconciled
   browser-origin storage reclamation.
 - The accepted setup-to-release capability flow is not connected end to end.
 - No compact proof has completed the scalar release-WebAssembly desktop-browser

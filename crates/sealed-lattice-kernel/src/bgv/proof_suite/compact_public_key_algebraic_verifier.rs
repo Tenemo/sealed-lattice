@@ -47,14 +47,22 @@ const COMPACT_WHIR_CODE_SWITCH_COUNT: usize = 3;
 pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL: u64 =
     65_536;
 pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT: u64 = 19_038_593;
-pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT: u32 =
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT: u64 = 2_129_904;
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT: u32 =
     (COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
         / COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL) as u32;
-const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC: [u8; 8] = *b"SLCAVC01";
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_INTERVAL_SAFE_BOUNDARY_COUNT: u32 =
+    (COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+        / COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL) as u32;
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT: u32 =
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT
+        + COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_INTERVAL_SAFE_BOUNDARY_COUNT
+        + 1;
+const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC: [u8; 8] = *b"SLCAVC03";
 pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH: usize =
     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC.len()
         + 6 * Hash512::BYTE_LENGTH
-        + size_of::<u64>();
+        + 2 * size_of::<u64>();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CompactPublicKeyAlgebraicVerificationError {
@@ -138,7 +146,8 @@ struct CompactPublicKeyAlgebraicVerificationCheckpoint {
     public_input_bindings: CompactPublicInputBindings,
     canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
     canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
-    completed_work_unit_count: u64,
+    completed_cfw_work_unit_count: u64,
+    completed_whir_work_unit_count: u64,
 }
 
 impl CompactPublicKeyAlgebraicVerificationCheckpoint {
@@ -162,7 +171,12 @@ impl CompactPublicKeyAlgebraicVerificationCheckpoint {
         write_checkpoint_bytes(
             &mut bytes,
             &mut cursor,
-            &self.completed_work_unit_count.to_le_bytes(),
+            &self.completed_cfw_work_unit_count.to_le_bytes(),
+        );
+        write_checkpoint_bytes(
+            &mut bytes,
+            &mut cursor,
+            &self.completed_whir_work_unit_count.to_le_bytes(),
         );
         debug_assert_eq!(cursor, bytes.len());
         bytes
@@ -185,15 +199,16 @@ impl CompactPublicKeyAlgebraicVerificationCheckpoint {
         );
         let canonical_proof_binding = read_checkpoint_array(bytes, &mut cursor)?;
         let canonical_public_input_binding = read_checkpoint_array(bytes, &mut cursor)?;
-        let completed_work_unit_count =
+        let completed_cfw_work_unit_count =
+            u64::from_le_bytes(read_checkpoint_array(bytes, &mut cursor)?);
+        let completed_whir_work_unit_count =
             u64::from_le_bytes(read_checkpoint_array(bytes, &mut cursor)?);
         if cursor != bytes.len()
-            || completed_work_unit_count == 0
-            || !completed_work_unit_count.is_multiple_of(
-                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+            || compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                completed_cfw_work_unit_count,
+                completed_whir_work_unit_count,
             )
-            || completed_work_unit_count
-                > maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count()
+            .is_none()
         {
             return Err(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint);
         }
@@ -201,7 +216,8 @@ impl CompactPublicKeyAlgebraicVerificationCheckpoint {
             public_input_bindings,
             canonical_proof_binding,
             canonical_public_input_binding,
-            completed_work_unit_count,
+            completed_cfw_work_unit_count,
+            completed_whir_work_unit_count,
         })
     }
 }
@@ -1059,7 +1075,8 @@ pub(crate) struct CompactPublicKeyAlgebraicVerification {
     completed_work_unit_count: u64,
     replay_target_work_unit_count: Option<u64>,
     whir_verification: Option<CompactPublicKeyWhirVerification>,
-    whir_verified: bool,
+    completed_whir_work_unit_count: u64,
+    whir_replay_target_work_unit_count: Option<u64>,
 }
 
 pub(crate) enum CompactPublicKeyAlgebraicVerificationPoll {
@@ -1073,9 +1090,15 @@ pub(crate) enum CompactPublicKeyAlgebraicVerificationPoll {
     },
     WhirWorkCompleted {
         completed_work_unit_count: u64,
+        checkpoint_safe_boundary_ordinal: Option<u32>,
+    },
+    WhirResumeComplete {
+        completed_work_unit_count: u64,
+        checkpoint_safe_boundary_ordinal: u32,
     },
     WhirCompleted {
         completed_work_unit_count: u64,
+        checkpoint_safe_boundary_ordinal: u32,
     },
     Complete(Box<AlgebraicallyVerifiedCompactPublicKeyProof>),
 }
@@ -1109,7 +1132,8 @@ impl CompactPublicKeyAlgebraicVerification {
             completed_work_unit_count: 0,
             replay_target_work_unit_count: None,
             whir_verification: None,
-            whir_verified: false,
+            completed_whir_work_unit_count: 0,
+            whir_replay_target_work_unit_count: None,
         })
     }
 
@@ -1126,20 +1150,32 @@ impl CompactPublicKeyAlgebraicVerification {
         {
             return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
         }
-        Self::resume_to_work_unit_count(transport, checkpoint.completed_work_unit_count)
+        Self::resume_to_work_unit_counts(
+            transport,
+            checkpoint.completed_cfw_work_unit_count,
+            checkpoint.completed_whir_work_unit_count,
+        )
     }
 
-    pub(crate) fn resume_to_work_unit_count(
+    pub(crate) fn resume_to_work_unit_counts(
         transport: VerifiedCompactPublicKeyTransport,
-        completed_work_unit_count: u64,
+        completed_cfw_work_unit_count: u64,
+        completed_whir_work_unit_count: u64,
     ) -> Result<Self, CompactPublicKeyAlgebraicVerificationError> {
-        if compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(completed_work_unit_count)
-            .is_none()
+        if compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+            completed_cfw_work_unit_count,
+            completed_whir_work_unit_count,
+        )
+        .is_none()
         {
             return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
         }
         let mut verification = Self::begin(transport)?;
-        verification.replay_target_work_unit_count = Some(completed_work_unit_count);
+        if completed_whir_work_unit_count == 0 {
+            verification.replay_target_work_unit_count = Some(completed_cfw_work_unit_count);
+        } else {
+            verification.whir_replay_target_work_unit_count = Some(completed_whir_work_unit_count);
+        }
         Ok(verification)
     }
 
@@ -1151,9 +1187,11 @@ impl CompactPublicKeyAlgebraicVerification {
     > {
         if compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
             self.completed_work_unit_count,
+            self.completed_whir_work_unit_count,
         )
         .is_none()
             || self.replay_target_work_unit_count.is_some()
+            || self.whir_replay_target_work_unit_count.is_some()
         {
             return Err(CompactPublicKeyAlgebraicVerificationError::CheckpointUnavailable);
         }
@@ -1165,7 +1203,8 @@ impl CompactPublicKeyAlgebraicVerification {
             public_input_bindings: transport.public_input_bindings(),
             canonical_proof_binding: transport.canonical_proof_binding(),
             canonical_public_input_binding: transport.canonical_public_input_binding(),
-            completed_work_unit_count: self.completed_work_unit_count,
+            completed_cfw_work_unit_count: self.completed_work_unit_count,
+            completed_whir_work_unit_count: self.completed_whir_work_unit_count,
         }
         .encode())
     }
@@ -1178,7 +1217,9 @@ impl CompactPublicKeyAlgebraicVerification {
         if maximum_work_unit_count == 0 {
             return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
         }
-        if self.whir_verified {
+        if self.completed_whir_work_unit_count
+            == COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+        {
             return Ok(CompactPublicKeyAlgebraicVerificationPoll::Complete(
                 Box::new(AlgebraicallyVerifiedCompactPublicKeyProof {
                     transport: self
@@ -1229,10 +1270,16 @@ impl CompactPublicKeyAlgebraicVerification {
                     .completed_work_unit_count
                     .checked_add(completed_work_unit_count)
                     .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
-                let checkpoint_safe_boundary_ordinal =
-                    compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
-                        self.completed_work_unit_count,
-                    );
+                let checkpoint_safe_boundary_ordinal = self
+                    .whir_replay_target_work_unit_count
+                    .is_none()
+                    .then(|| {
+                        compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                            self.completed_work_unit_count,
+                            self.completed_whir_work_unit_count,
+                        )
+                    })
+                    .flatten();
                 if let Some(target_work_unit_count) = self.replay_target_work_unit_count {
                     if self.completed_work_unit_count > target_work_unit_count {
                         return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
@@ -1279,6 +1326,41 @@ impl CompactPublicKeyAlgebraicVerification {
         maximum_work_unit_count: u64,
     ) -> Result<CompactPublicKeyAlgebraicVerificationPoll, CompactPublicKeyAlgebraicVerificationError>
     {
+        let replay_work_unit_count = self
+            .whir_replay_target_work_unit_count
+            .map(|target_work_unit_count| {
+                target_work_unit_count
+                    .checked_sub(self.completed_whir_work_unit_count)
+                    .ok_or(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint)
+                    .map(|remaining_work_unit_count| {
+                        remaining_work_unit_count.min(maximum_work_unit_count)
+                    })
+            })
+            .transpose()?;
+        let next_checkpoint_work_unit_count = self
+            .completed_whir_work_unit_count
+            .checked_div(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL)
+            .and_then(|completed_boundary_count| completed_boundary_count.checked_add(1))
+            .and_then(|next_boundary_count| {
+                next_boundary_count.checked_mul(
+                    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+                )
+            })
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+        let work_until_next_checkpoint = next_checkpoint_work_unit_count
+            .checked_sub(self.completed_whir_work_unit_count)
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+        let remaining_whir_work_unit_count =
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+                .checked_sub(self.completed_whir_work_unit_count)
+                .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?;
+        let bounded_work_unit_count = replay_work_unit_count
+            .unwrap_or(maximum_work_unit_count)
+            .min(work_until_next_checkpoint)
+            .min(remaining_whir_work_unit_count);
+        if bounded_work_unit_count == 0 {
+            return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+        }
         let poll = self
             .whir_verification
             .as_mut()
@@ -1287,55 +1369,148 @@ impl CompactPublicKeyAlgebraicVerification {
                 self.transport
                     .as_ref()
                     .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?,
-                maximum_work_unit_count,
+                bounded_work_unit_count,
             )?;
         match poll {
             CompactPublicKeyWhirVerificationPoll::WorkCompleted {
                 completed_work_unit_count,
             } => {
-                validate_whir_poll_work_count(completed_work_unit_count, maximum_work_unit_count)?;
+                validate_whir_poll_work_count(completed_work_unit_count, bounded_work_unit_count)?;
+                self.completed_whir_work_unit_count = self
+                    .completed_whir_work_unit_count
+                    .checked_add(completed_work_unit_count)
+                    .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+                let checkpoint_safe_boundary_ordinal =
+                    compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                        self.completed_work_unit_count,
+                        self.completed_whir_work_unit_count,
+                    );
+                if let Some(target_work_unit_count) = self.whir_replay_target_work_unit_count {
+                    if self.completed_whir_work_unit_count > target_work_unit_count {
+                        return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+                    }
+                    if self.completed_whir_work_unit_count == target_work_unit_count {
+                        self.whir_replay_target_work_unit_count = None;
+                        return Ok(
+                            CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete {
+                                completed_work_unit_count,
+                                checkpoint_safe_boundary_ordinal: checkpoint_safe_boundary_ordinal
+                                    .ok_or(
+                                        CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint,
+                                    )?,
+                            },
+                        );
+                    }
+                }
                 Ok(
                     CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
                         completed_work_unit_count,
+                        checkpoint_safe_boundary_ordinal: self
+                            .whir_replay_target_work_unit_count
+                            .is_none()
+                            .then_some(checkpoint_safe_boundary_ordinal)
+                            .flatten(),
                     },
                 )
             }
             CompactPublicKeyWhirVerificationPoll::Complete {
                 completed_work_unit_count,
             } => {
-                validate_whir_poll_work_count(completed_work_unit_count, maximum_work_unit_count)?;
+                validate_whir_poll_work_count(completed_work_unit_count, bounded_work_unit_count)?;
+                self.completed_whir_work_unit_count = self
+                    .completed_whir_work_unit_count
+                    .checked_add(completed_work_unit_count)
+                    .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+                if self.completed_whir_work_unit_count
+                    != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+                {
+                    return Err(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript);
+                }
                 self.whir_verification = None;
-                self.whir_verified = true;
+                let checkpoint_safe_boundary_ordinal =
+                    compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                        self.completed_work_unit_count,
+                        self.completed_whir_work_unit_count,
+                    )
+                    .ok_or(CompactPublicKeyAlgebraicVerificationError::InvalidTranscript)?;
+                if let Some(target_work_unit_count) = self.whir_replay_target_work_unit_count {
+                    if target_work_unit_count != self.completed_whir_work_unit_count {
+                        return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+                    }
+                    self.whir_replay_target_work_unit_count = None;
+                    return Ok(
+                        CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete {
+                            completed_work_unit_count,
+                            checkpoint_safe_boundary_ordinal,
+                        },
+                    );
+                }
                 Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                     completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 })
             }
         }
     }
 }
 
-const fn maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count() -> u64 {
-    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT as u64
+const fn maximum_compact_public_key_algebraic_verification_cfw_checkpoint_work_unit_count() -> u64 {
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT as u64
+        * COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL
+}
+
+const fn maximum_compact_public_key_algebraic_verification_whir_interval_checkpoint_work_unit_count()
+-> u64 {
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_INTERVAL_SAFE_BOUNDARY_COUNT as u64
         * COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL
 }
 
 pub(crate) fn compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
-    completed_work_unit_count: u64,
+    completed_cfw_work_unit_count: u64,
+    completed_whir_work_unit_count: u64,
 ) -> Option<u32> {
-    if completed_work_unit_count == 0
-        || !completed_work_unit_count
-            .is_multiple_of(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL)
-        || completed_work_unit_count
-            > maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count()
+    if completed_whir_work_unit_count == 0 {
+        if completed_cfw_work_unit_count == 0
+            || !completed_cfw_work_unit_count.is_multiple_of(
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+            )
+            || completed_cfw_work_unit_count
+                > maximum_compact_public_key_algebraic_verification_cfw_checkpoint_work_unit_count()
+        {
+            return None;
+        }
+        return u32::try_from(
+            completed_cfw_work_unit_count
+                / COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL
+                - 1,
+        )
+        .ok();
+    }
+    if completed_cfw_work_unit_count
+        != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
     {
         return None;
     }
-    u32::try_from(
-        completed_work_unit_count
+    if completed_whir_work_unit_count
+        == COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+    {
+        return COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT.checked_sub(1);
+    }
+    if !completed_whir_work_unit_count.is_multiple_of(
+        COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+    ) || completed_whir_work_unit_count
+        > maximum_compact_public_key_algebraic_verification_whir_interval_checkpoint_work_unit_count()
+    {
+        return None;
+    }
+    let whir_boundary_ordinal = u32::try_from(
+        completed_whir_work_unit_count
             / COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL
             - 1,
     )
-    .ok()
+    .ok()?;
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT
+        .checked_add(whir_boundary_ordinal)
 }
 
 fn verify_compact_whir_code_switch(
@@ -1953,7 +2128,8 @@ mod tests {
     use crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract;
 
     fn checkpoint(
-        completed_work_unit_count: u64,
+        completed_cfw_work_unit_count: u64,
+        completed_whir_work_unit_count: u64,
     ) -> CompactPublicKeyAlgebraicVerificationCheckpoint {
         CompactPublicKeyAlgebraicVerificationCheckpoint {
             public_input_bindings: CompactPublicInputBindings::new(
@@ -1964,22 +2140,28 @@ mod tests {
             ),
             canonical_proof_binding: [0x55; Hash512::BYTE_LENGTH],
             canonical_public_input_binding: [0x66; Hash512::BYTE_LENGTH],
-            completed_work_unit_count,
+            completed_cfw_work_unit_count,
+            completed_whir_work_unit_count,
         }
     }
 
     #[test]
     fn algebraic_verification_checkpoint_round_trips_exact_sources_and_safe_cursor() {
-        let checkpoint =
-            checkpoint(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL);
+        let checkpoint = checkpoint(
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+            0,
+        );
         let canonical_bytes = checkpoint.encode();
-        assert_eq!(canonical_bytes.len(), 400);
+        assert_eq!(
+            canonical_bytes.len(),
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH
+        );
         assert_eq!(
             CompactPublicKeyAlgebraicVerificationCheckpoint::decode(&canonical_bytes),
             Ok(checkpoint)
         );
 
-        for changed_byte_offset in [8, 72, 136, 200, 264, 328] {
+        for changed_byte_offset in [8, 72, 136, 200, 264, 328, 392, 400] {
             let mut changed_bytes = canonical_bytes;
             changed_bytes[changed_byte_offset] ^= 1;
             assert_ne!(
@@ -1992,9 +2174,11 @@ mod tests {
 
     #[test]
     fn algebraic_verification_checkpoint_refuses_malformed_framing_and_genesis() {
-        let canonical_bytes =
-            checkpoint(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL)
-                .encode();
+        let canonical_bytes = checkpoint(
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+            0,
+        )
+        .encode();
         for malformed_bytes in [
             canonical_bytes[..canonical_bytes.len() - 1].to_vec(),
             {
@@ -2007,13 +2191,29 @@ mod tests {
                 bytes[0] ^= 1;
                 bytes
             },
-            checkpoint(0).encode().to_vec(),
-            checkpoint(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL - 1)
-                .encode()
-                .to_vec(),
+            checkpoint(0, 0).encode().to_vec(),
             checkpoint(
-                maximum_compact_public_key_algebraic_verification_checkpoint_work_unit_count()
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL - 1,
+                0,
+            )
+            .encode()
+            .to_vec(),
+            checkpoint(
+                maximum_compact_public_key_algebraic_verification_cfw_checkpoint_work_unit_count()
                     + COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+                0,
+            )
+            .encode()
+            .to_vec(),
+            checkpoint(
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL - 1,
+            )
+            .encode()
+            .to_vec(),
+            checkpoint(
+                maximum_compact_public_key_algebraic_verification_cfw_checkpoint_work_unit_count(),
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
             )
             .encode()
             .to_vec(),
@@ -2032,6 +2232,31 @@ mod tests {
         let completed_work_unit_count =
             compact_public_key_whir_fold_work_unit_count(contract.verifier_inputs())
                 .expect("the selected WHIR work census derives");
-        assert_eq!(completed_work_unit_count, 2_129_904);
+        assert_eq!(
+            completed_work_unit_count,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+        );
+    }
+
+    #[test]
+    fn algebraic_verification_checkpoint_numbers_cfw_whir_and_terminal_boundaries() {
+        assert_eq!(
+            compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(65_536, 0),
+            Some(0)
+        );
+        assert_eq!(
+            compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+                65_536,
+            ),
+            Some(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT)
+        );
+        assert_eq!(
+            compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT,
+            ),
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT.checked_sub(1)
+        );
     }
 }

@@ -476,7 +476,7 @@ describe('Compact public-key algebraic verification worker', () => {
     });
 
     it('publishes the exact source-bound cursor after live bounded progress', async () => {
-        const canonicalCheckpointBytes = new Uint8Array(400).fill(0x71);
+        const canonicalCheckpointBytes = new Uint8Array(408).fill(0x71);
         let copiedCheckpointCount = 0;
         let publishedCheckpointBytes: Uint8Array | undefined;
         let publishedSafeBoundaryOrdinal: number | undefined;
@@ -531,7 +531,7 @@ describe('Compact public-key algebraic verification worker', () => {
                     outputByteLength: number,
                 ) => {
                     expect(operationHandle).toBe(95);
-                    expect(outputByteLength).toBe(400);
+                    expect(outputByteLength).toBe(408);
                     copiedCheckpointCount += 1;
                     memoryBytes(memory, outputPointer, outputByteLength).set(
                         canonicalCheckpointBytes,
@@ -573,8 +573,8 @@ describe('Compact public-key algebraic verification worker', () => {
     });
 
     it('restores at genesis, replays without publishing, and resumes live checkpointing', async () => {
-        const restoredCheckpointBytes = new Uint8Array(400).fill(0x72);
-        const nextCheckpointBytes = new Uint8Array(400).fill(0x73);
+        const restoredCheckpointBytes = new Uint8Array(408).fill(0x72);
+        const nextCheckpointBytes = new Uint8Array(408).fill(0x73);
         let beginCount = 0;
         let copiedCheckpointCount = 0;
         let pollCount = 0;
@@ -585,7 +585,7 @@ describe('Compact public-key algebraic verification worker', () => {
             sealed_lattice_compact_public_key_transport_bindings_byte_length:
                 () => 256,
             sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
-                () => 400,
+                () => 408,
             sealed_lattice_compact_public_key_begin_algebraic_verification:
                 () => {
                     beginCount += 1;
@@ -602,7 +602,7 @@ describe('Compact public-key algebraic verification worker', () => {
                 checkpointByteLength: number,
                 statusPointer: number,
             ) => {
-                expect(checkpointByteLength).toBe(400);
+                expect(checkpointByteLength).toBe(408);
                 expect(
                     memoryBytes(
                         memory,
@@ -699,15 +699,15 @@ describe('Compact public-key algebraic verification worker', () => {
     });
 
     it('refuses a restored checkpoint that is not one exact owned canonical buffer', async () => {
-        const oversizedBackingBuffer = new ArrayBuffer(401);
+        const oversizedBackingBuffer = new ArrayBuffer(409);
         const restoredCheckpointBytes = new Uint8Array(
             oversizedBackingBuffer,
             1,
-            400,
+            408,
         ).fill(0x74);
         const runtime = createMockKernelRuntime(() => ({
             sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
-                () => 400,
+                () => 408,
         }));
 
         await expect(
@@ -731,16 +731,16 @@ describe('Compact public-key algebraic verification worker', () => {
                 },
             ),
         ).rejects.toMatchObject({ code: 'WrongStorageResult' });
-        expect(restoredCheckpointBytes).toEqual(new Uint8Array(400));
+        expect(restoredCheckpointBytes).toEqual(new Uint8Array(408));
     });
 
     it('returns a checkpoint-binding refusal as a typed verification result', async () => {
-        const restoredCheckpointBytes = new Uint8Array(400).fill(0x74);
+        const restoredCheckpointBytes = new Uint8Array(408).fill(0x74);
         const runtime = createMockKernelRuntime((memory) => ({
             sealed_lattice_compact_public_key_transport_bindings_byte_length:
                 () => 256,
             sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
-                () => 400,
+                () => 408,
             sealed_lattice_compact_public_key_resume_algebraic_verification: (
                 _bindingsPointer,
                 _bindingsByteLength,
@@ -791,7 +791,7 @@ describe('Compact public-key algebraic verification worker', () => {
             sealed_lattice_compact_public_key_transport_bindings_byte_length:
                 () => 256,
             sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
-                () => 400,
+                () => 408,
             sealed_lattice_compact_public_key_begin_algebraic_verification: (
                 _bindingsPointer,
                 _bindingsByteLength,
@@ -1066,7 +1066,7 @@ describe('Compact public-key algebraic verification worker', () => {
             },
             restoreAuthenticatedCheckpoint: () =>
                 Promise.resolve({
-                    canonicalCheckpointBytes: new Uint8Array(400),
+                    canonicalCheckpointBytes: new Uint8Array(408),
                     safeBoundaryOrdinal: 0,
                 }),
         };

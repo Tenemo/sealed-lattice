@@ -1,7 +1,7 @@
 //! Source-bound accepted-setup compact public-key verification lifecycle.
 //!
 //! The durable cursor binds canonical inputs and logical safe boundaries only.
-//! CFW state, terminal WHIR state, decoded columns, Fourier
+//! CFW and WHIR fold state, decoded columns, Fourier
 //! workspaces, and Merkle frontiers are reconstructed deterministically from
 //! genesis after worker replacement.
 
@@ -13,6 +13,7 @@ use super::{
     compact_public_key_algebraic_verifier::{
         COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
         COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
+        COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT,
         CompactPublicKeyAlgebraicVerification, CompactPublicKeyAlgebraicVerificationError,
         CompactPublicKeyAlgebraicVerificationPoll,
         compact_public_key_algebraic_checkpoint_safe_boundary_ordinal,
@@ -21,12 +22,11 @@ use super::{
     compact_public_key_verifier::VerifiedCompactPublicKeyTransport,
 };
 
-const ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_MAGIC: [u8; 8] = *b"SLCAVC02";
-const ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_POST_WHIR_FLAG: u32 = 1 << 31;
+const ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_MAGIC: [u8; 8] = *b"SLCAVC04";
 pub(crate) const ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH: usize =
     ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_MAGIC.len()
         + 6 * Hash512::BYTE_LENGTH
-        + size_of::<u64>()
+        + 2 * size_of::<u64>()
         + size_of::<u32>();
 const SELECTED_COMPACT_PUBLIC_KEY_PUBLIC_COLUMN_COUNT: u32 = 122;
 const SELECTED_COMPACT_PUBLIC_KEY_STATEMENT_TREE_COUNT: u32 = 4;
@@ -37,7 +37,6 @@ pub(crate) const ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT:
             * SELECTED_COMPACT_PUBLIC_KEY_STATEMENT_TREE_COSET_COUNT;
 pub(crate) const ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_SAFE_BOUNDARY_COUNT: u32 =
     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT
-        + 1
         + ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +45,7 @@ struct AcceptedCompactPublicKeyVerificationCheckpoint {
     canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
     canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
     completed_cfw_work_unit_count: u64,
-    whir_verified: bool,
+    completed_whir_work_unit_count: u64,
     completed_correspondence_work_unit_count: u32,
 }
 
@@ -73,20 +72,15 @@ impl AcceptedCompactPublicKeyVerificationCheckpoint {
             &mut cursor,
             &self.completed_cfw_work_unit_count.to_le_bytes(),
         );
-        debug_assert!(
-            self.completed_correspondence_work_unit_count
-                < ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_POST_WHIR_FLAG
-        );
-        let encoded_correspondence_state = self.completed_correspondence_work_unit_count
-            | if self.whir_verified {
-                ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_POST_WHIR_FLAG
-            } else {
-                0
-            };
         write_checkpoint_bytes(
             &mut bytes,
             &mut cursor,
-            &encoded_correspondence_state.to_le_bytes(),
+            &self.completed_whir_work_unit_count.to_le_bytes(),
+        );
+        write_checkpoint_bytes(
+            &mut bytes,
+            &mut cursor,
+            &self.completed_correspondence_work_unit_count.to_le_bytes(),
         );
         debug_assert_eq!(cursor, bytes.len());
         bytes
@@ -112,31 +106,29 @@ impl AcceptedCompactPublicKeyVerificationCheckpoint {
         let canonical_public_input_binding = read_checkpoint_array(bytes, &mut cursor)?;
         let completed_cfw_work_unit_count =
             u64::from_le_bytes(read_checkpoint_array(bytes, &mut cursor)?);
-        let encoded_correspondence_state =
+        let completed_whir_work_unit_count =
+            u64::from_le_bytes(read_checkpoint_array(bytes, &mut cursor)?);
+        let completed_correspondence_work_unit_count =
             u32::from_le_bytes(read_checkpoint_array(bytes, &mut cursor)?);
         let checkpoint = Self {
             public_input_bindings,
             canonical_proof_binding,
             canonical_public_input_binding,
             completed_cfw_work_unit_count,
-            whir_verified: encoded_correspondence_state
-                & ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_POST_WHIR_FLAG
-                != 0,
-            completed_correspondence_work_unit_count: encoded_correspondence_state
-                & !ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_POST_WHIR_FLAG,
+            completed_whir_work_unit_count,
+            completed_correspondence_work_unit_count,
         };
         if cursor != bytes.len()
-            || (!checkpoint.whir_verified
-                && (checkpoint.completed_correspondence_work_unit_count != 0
-                    || compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
-                        checkpoint.completed_cfw_work_unit_count,
-                    )
-                    .is_none()))
-            || (checkpoint.whir_verified
-                && (checkpoint.completed_cfw_work_unit_count
-                    != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
-                    || checkpoint.completed_correspondence_work_unit_count
-                        > ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT))
+            || compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                checkpoint.completed_cfw_work_unit_count,
+                checkpoint.completed_whir_work_unit_count,
+            )
+            .is_none()
+            || (checkpoint.completed_whir_work_unit_count
+                != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+                && checkpoint.completed_correspondence_work_unit_count != 0)
+            || checkpoint.completed_correspondence_work_unit_count
+                > ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT
         {
             return Err(RefusalReason::MalformedEncoding);
         }
@@ -144,17 +136,22 @@ impl AcceptedCompactPublicKeyVerificationCheckpoint {
     }
 
     const fn is_source_correspondence_checkpoint(self) -> bool {
-        self.whir_verified
+        self.completed_whir_work_unit_count
+            == COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
     }
 
     fn safe_boundary_ordinal(self) -> Result<u32, RefusalReason> {
         if self.is_source_correspondence_checkpoint() {
             return COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT
-                .checked_add(self.completed_correspondence_work_unit_count)
+                .checked_sub(1)
+                .and_then(|whir_terminal_ordinal| {
+                    whir_terminal_ordinal.checked_add(self.completed_correspondence_work_unit_count)
+                })
                 .ok_or(RefusalReason::OutsideSupportedProfile);
         }
         compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
             self.completed_cfw_work_unit_count,
+            self.completed_whir_work_unit_count,
         )
         .ok_or(RefusalReason::WrongContext)
     }
@@ -215,12 +212,11 @@ impl PreparedAcceptedCompactPublicKeyVerification {
             return Err(RefusalReason::WrongContext);
         }
         let algebraic_verification = match checkpoint {
-            Some(checkpoint) if !checkpoint.is_source_correspondence_checkpoint() => {
-                CompactPublicKeyAlgebraicVerification::resume_to_work_unit_count(
-                    transport,
-                    checkpoint.completed_cfw_work_unit_count,
-                )
-            }
+            Some(checkpoint) => CompactPublicKeyAlgebraicVerification::resume_to_work_unit_counts(
+                transport,
+                checkpoint.completed_cfw_work_unit_count,
+                checkpoint.completed_whir_work_unit_count,
+            ),
             _ => CompactPublicKeyAlgebraicVerification::begin(transport),
         }
         .map_err(CompactPublicKeyAlgebraicVerificationError::refusal_reason)?;
@@ -248,8 +244,8 @@ pub(in crate::bgv) struct AcceptedCompactPublicKeyVerification {
     canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
     canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
     completed_cfw_work_unit_count: u64,
+    completed_whir_work_unit_count: u64,
     completed_correspondence_work_unit_count: u32,
-    whir_verified: bool,
     resume_target: Option<AcceptedCompactPublicKeyVerificationCheckpoint>,
 }
 
@@ -279,8 +275,8 @@ impl AcceptedCompactPublicKeyVerification {
             canonical_proof_binding: prepared.canonical_proof_binding,
             canonical_public_input_binding: prepared.canonical_public_input_binding,
             completed_cfw_work_unit_count: 0,
+            completed_whir_work_unit_count: 0,
             completed_correspondence_work_unit_count: 0,
-            whir_verified: false,
             resume_target: prepared.resume_target,
         }
     }
@@ -292,30 +288,24 @@ impl AcceptedCompactPublicKeyVerification {
         if self.stage.is_none() || self.resume_target.is_some() {
             return Err(RefusalReason::ConsumedState);
         }
-        if self.whir_verified {
-            return Ok(AcceptedCompactPublicKeyVerificationCheckpoint {
-                public_input_bindings: self.public_input_bindings,
-                canonical_proof_binding: self.canonical_proof_binding,
-                canonical_public_input_binding: self.canonical_public_input_binding,
-                completed_cfw_work_unit_count:
-                    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
-                whir_verified: true,
-                completed_correspondence_work_unit_count: self
-                    .completed_correspondence_work_unit_count,
-            }
-            .encode());
-        }
         compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
             self.completed_cfw_work_unit_count,
+            self.completed_whir_work_unit_count,
         )
         .ok_or(RefusalReason::ConsumedState)?;
+        if self.completed_whir_work_unit_count
+            != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+            && self.completed_correspondence_work_unit_count != 0
+        {
+            return Err(RefusalReason::ConsumedState);
+        }
         Ok(AcceptedCompactPublicKeyVerificationCheckpoint {
             public_input_bindings: self.public_input_bindings,
             canonical_proof_binding: self.canonical_proof_binding,
             canonical_public_input_binding: self.canonical_public_input_binding,
             completed_cfw_work_unit_count: self.completed_cfw_work_unit_count,
-            whir_verified: false,
-            completed_correspondence_work_unit_count: 0,
+            completed_whir_work_unit_count: self.completed_whir_work_unit_count,
+            completed_correspondence_work_unit_count: self.completed_correspondence_work_unit_count,
         }
         .encode())
     }
@@ -349,20 +339,7 @@ impl AcceptedCompactPublicKeyVerification {
                             self.stage = Some(
                                 AcceptedCompactPublicKeyVerificationStage::Algebraic(verification),
                             );
-                            if let Some(target) = self.resume_target {
-                                if !target.is_source_correspondence_checkpoint()
-                                    && self.completed_cfw_work_unit_count
-                                        == target.completed_cfw_work_unit_count
-                                {
-                                    self.resume_target = None;
-                                    return Ok(
-                                        AcceptedCompactPublicKeyVerificationPoll::ResumeComplete {
-                                            completed_work_unit_count,
-                                            checkpoint_safe_boundary_ordinal: target
-                                                .safe_boundary_ordinal()?,
-                                        },
-                                    );
-                                }
+                            if self.resume_target.is_some() {
                                 return Ok(
                                     AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
                                         completed_work_unit_count,
@@ -390,7 +367,9 @@ impl AcceptedCompactPublicKeyVerification {
                                 .resume_target
                                 .take()
                                 .ok_or(RefusalReason::WrongContext)?;
-                            if target.is_source_correspondence_checkpoint()
+                            if target.completed_whir_work_unit_count != 0
+                                || self.completed_cfw_work_unit_count
+                                    != target.completed_cfw_work_unit_count
                                 || checkpoint_safe_boundary_ordinal
                                     != target.safe_boundary_ordinal()?
                             {
@@ -406,6 +385,7 @@ impl AcceptedCompactPublicKeyVerification {
                         }
                         CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
                             completed_work_unit_count,
+                            checkpoint_safe_boundary_ordinal,
                         } => {
                             if self.completed_cfw_work_unit_count
                                 != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
@@ -418,9 +398,64 @@ impl AcceptedCompactPublicKeyVerification {
                             if completed_work_unit_count == 0 {
                                 return Err(RefusalReason::InvalidProof);
                             }
+                            self.completed_whir_work_unit_count = self
+                                .completed_whir_work_unit_count
+                                .checked_add(u64::from(completed_work_unit_count))
+                                .ok_or(RefusalReason::OutsideSupportedProfile)?;
                             self.stage = Some(
                                 AcceptedCompactPublicKeyVerificationStage::Algebraic(verification),
                             );
+                            return Ok(AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
+                                completed_work_unit_count,
+                                checkpoint_safe_boundary_ordinal: self
+                                    .resume_target
+                                    .is_none()
+                                    .then_some(checkpoint_safe_boundary_ordinal)
+                                    .flatten(),
+                            });
+                        }
+                        CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete {
+                            completed_work_unit_count,
+                            checkpoint_safe_boundary_ordinal,
+                        } => {
+                            if self.completed_cfw_work_unit_count
+                                != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT
+                            {
+                                return Err(RefusalReason::InvalidProof);
+                            }
+                            let completed_work_unit_count =
+                                u32::try_from(completed_work_unit_count)
+                                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+                            self.completed_whir_work_unit_count = self
+                                .completed_whir_work_unit_count
+                                .checked_add(u64::from(completed_work_unit_count))
+                                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                            let target = self.resume_target.ok_or(RefusalReason::WrongContext)?;
+                            if self.completed_whir_work_unit_count
+                                != target.completed_whir_work_unit_count
+                                || checkpoint_safe_boundary_ordinal
+                                    != compact_public_key_algebraic_checkpoint_safe_boundary_ordinal(
+                                        target.completed_cfw_work_unit_count,
+                                        target.completed_whir_work_unit_count,
+                                    )
+                                    .ok_or(RefusalReason::WrongContext)?
+                            {
+                                return Err(RefusalReason::WrongContext);
+                            }
+                            self.stage = Some(
+                                AcceptedCompactPublicKeyVerificationStage::Algebraic(verification),
+                            );
+                            if !target.is_source_correspondence_checkpoint()
+                                || target.completed_correspondence_work_unit_count == 0
+                            {
+                                self.resume_target = None;
+                                return Ok(
+                                    AcceptedCompactPublicKeyVerificationPoll::ResumeComplete {
+                                        completed_work_unit_count,
+                                        checkpoint_safe_boundary_ordinal,
+                                    },
+                                );
+                            }
                             return Ok(AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
                                 completed_work_unit_count,
                                 checkpoint_safe_boundary_ordinal: None,
@@ -428,6 +463,7 @@ impl AcceptedCompactPublicKeyVerification {
                         }
                         CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                             completed_work_unit_count,
+                            checkpoint_safe_boundary_ordinal,
                         } => {
                             if completed_work_unit_count == 0
                                 || self.completed_cfw_work_unit_count
@@ -438,36 +474,32 @@ impl AcceptedCompactPublicKeyVerification {
                             let completed_work_unit_count =
                                 u32::try_from(completed_work_unit_count)
                                     .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-                            self.whir_verified = true;
+                            self.completed_whir_work_unit_count = self
+                                .completed_whir_work_unit_count
+                                .checked_add(u64::from(completed_work_unit_count))
+                                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                            if self.completed_whir_work_unit_count
+                                != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+                                || self.resume_target.is_some()
+                            {
+                                return Err(RefusalReason::InvalidProof);
+                            }
                             self.stage = Some(
                                 AcceptedCompactPublicKeyVerificationStage::Algebraic(verification),
                             );
-                            let whir_boundary_ordinal =
-                                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT;
-                            if let Some(target) = self.resume_target
-                                && target.is_source_correspondence_checkpoint()
-                                && target.completed_correspondence_work_unit_count == 0
-                            {
-                                self.resume_target = None;
-                                return Ok(
-                                    AcceptedCompactPublicKeyVerificationPoll::ResumeComplete {
-                                        completed_work_unit_count,
-                                        checkpoint_safe_boundary_ordinal: whir_boundary_ordinal,
-                                    },
-                                );
-                            }
                             return Ok(AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
                                 completed_work_unit_count,
-                                checkpoint_safe_boundary_ordinal: self
-                                    .resume_target
-                                    .is_none()
-                                    .then_some(whir_boundary_ordinal),
+                                checkpoint_safe_boundary_ordinal: Some(
+                                    checkpoint_safe_boundary_ordinal,
+                                ),
                             });
                         }
                         CompactPublicKeyAlgebraicVerificationPoll::Complete(
                             algebraically_verified_proof,
                         ) => {
-                            if !self.whir_verified {
+                            if self.completed_whir_work_unit_count
+                                != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT
+                            {
                                 return Err(RefusalReason::InvalidProof);
                             }
                             let correspondence = self
@@ -527,11 +559,7 @@ impl AcceptedCompactPublicKeyVerification {
                             );
                             let global_safe_boundary_ordinal =
                                 COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT
-                                    .checked_add(1)
-                                    .and_then(|first_correspondence_boundary| {
-                                        first_correspondence_boundary
-                                            .checked_add(checkpoint_safe_boundary_ordinal)
-                                    })
+                                    .checked_add(checkpoint_safe_boundary_ordinal)
                                     .ok_or(RefusalReason::OutsideSupportedProfile)?;
                             if let Some(target) = self.resume_target
                                 && target.is_source_correspondence_checkpoint()
@@ -583,7 +611,7 @@ mod tests {
 
     fn sample_checkpoint(
         completed_cfw_work_unit_count: u64,
-        whir_verified: bool,
+        completed_whir_work_unit_count: u64,
         completed_correspondence_work_unit_count: u32,
     ) -> AcceptedCompactPublicKeyVerificationCheckpoint {
         AcceptedCompactPublicKeyVerificationCheckpoint {
@@ -596,21 +624,30 @@ mod tests {
             canonical_proof_binding: [5; Hash512::BYTE_LENGTH],
             canonical_public_input_binding: [6; Hash512::BYTE_LENGTH],
             completed_cfw_work_unit_count,
-            whir_verified,
+            completed_whir_work_unit_count,
             completed_correspondence_work_unit_count,
         }
     }
 
     #[test]
     fn accepted_verifier_checkpoint_round_trips_cfw_and_correspondence_boundaries() {
-        let cfw = sample_checkpoint(65_536, false, 0);
+        let cfw = sample_checkpoint(65_536, 0, 0);
         assert_eq!(
             AcceptedCompactPublicKeyVerificationCheckpoint::decode(&cfw.encode()),
             Ok(cfw)
         );
+        let whir = sample_checkpoint(
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+            65_536,
+            0,
+        );
+        assert_eq!(
+            AcceptedCompactPublicKeyVerificationCheckpoint::decode(&whir.encode()),
+            Ok(whir)
+        );
         let correspondence = sample_checkpoint(
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
-            true,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT,
             ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
         );
         assert_eq!(
@@ -625,14 +662,14 @@ mod tests {
 
     #[test]
     fn accepted_verifier_checkpoint_refuses_impossible_phase_combinations() {
-        let mut malformed = sample_checkpoint(65_536, false, 1).encode();
+        let mut malformed = sample_checkpoint(65_536, 0, 1).encode();
         assert_eq!(
             AcceptedCompactPublicKeyVerificationCheckpoint::decode(&malformed),
             Err(RefusalReason::MalformedEncoding)
         );
         malformed = sample_checkpoint(
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
-            true,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT,
             ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT + 1,
         )
         .encode();
@@ -651,12 +688,12 @@ mod tests {
     fn accepted_verifier_checkpoint_refuses_the_non_checkpointed_terminal_cfw_remainder() {
         let final_cfw = sample_checkpoint(
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
-            false,
+            0,
             0,
         );
         let post_whir = sample_checkpoint(
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
-            true,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT,
             0,
         );
         assert_ne!(final_cfw.encode(), post_whir.encode());
@@ -670,7 +707,7 @@ mod tests {
         );
         assert_eq!(
             post_whir.safe_boundary_ordinal(),
-            Ok(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT)
+            Ok(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT - 1)
         );
     }
 }

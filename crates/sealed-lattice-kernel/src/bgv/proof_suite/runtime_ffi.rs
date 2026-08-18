@@ -510,6 +510,7 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
             }
             Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
                 completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
             }) => {
                 let completed_work_unit_count = u32::try_from(completed_work_unit_count)
                     .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
@@ -523,11 +524,31 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
                 Ok((
                     COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
                     completed_work_unit_count,
-                    NO_SECOND_POLL_VALUE,
+                    checkpoint_safe_boundary_ordinal.unwrap_or(NO_SECOND_POLL_VALUE),
+                ))
+            }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 ))
             }
             Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                 completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
             }) => {
                 let completed_work_unit_count = u32::try_from(completed_work_unit_count)
                     .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
@@ -541,7 +562,7 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
                 Ok((
                     COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
                     completed_work_unit_count,
-                    NO_SECOND_POLL_VALUE,
+                    checkpoint_safe_boundary_ordinal,
                 ))
             }
             Ok(CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal)) => {

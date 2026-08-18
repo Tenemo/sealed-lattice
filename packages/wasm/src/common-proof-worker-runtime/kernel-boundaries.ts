@@ -64,10 +64,10 @@ const compactPublicKeyAlgebraicVerificationPollResumeComplete = 7;
 export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
-const canonicalCompactPublicKeyAlgebraicVerificationCheckpointByteLength = 400;
-const canonicalCompactPublicKeyAlgebraicVerificationSafeBoundaryCount = 290;
-const canonicalAcceptedCompactPublicKeyVerificationCheckpointByteLength = 404;
-const canonicalAcceptedCompactPublicKeyVerificationSafeBoundaryCount = 4_509;
+const canonicalCompactPublicKeyAlgebraicVerificationCheckpointByteLength = 408;
+const canonicalCompactPublicKeyAlgebraicVerificationSafeBoundaryCount = 323;
+const canonicalAcceptedCompactPublicKeyVerificationCheckpointByteLength = 412;
+const canonicalAcceptedCompactPublicKeyVerificationSafeBoundaryCount = 4_541;
 
 const destroyOwnedKernelBoundaryInput = (bytes: Uint8Array): void => {
     if (!(bytes.buffer instanceof ArrayBuffer)) {

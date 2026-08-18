@@ -3201,6 +3201,7 @@ mod tests {
                 compact_proof_wire::CompactPublicInputBindings,
                 compact_public_key_accepted_verifier::ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
                 compact_public_key_algebraic_verifier::{
+                    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT,
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
@@ -3374,14 +3375,19 @@ mod tests {
                 CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
                     panic!("a fresh compact algebraic verification cannot complete replay")
                 }
+                CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete { .. } => {
+                    panic!("a fresh compact WHIR verification cannot complete replay")
+                }
                 CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
                     completed_work_unit_count,
+                    ..
                 } => {
                     assert!((1..=65_536).contains(&completed_work_unit_count));
                     algebraic_poll_count += 1;
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
                     completed_work_unit_count,
+                    ..
                 } => {
                     assert!((1..=65_536).contains(&completed_work_unit_count));
                     algebraic_poll_count += 1;
@@ -7716,6 +7722,9 @@ mod tests {
             CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
                 panic!("a fresh verifier cannot complete checkpoint replay")
             }
+            CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete { .. } => {
+                panic!("a fresh verifier cannot complete WHIR checkpoint replay")
+            }
             CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted { .. } => {
                 panic!("one bounded slice cannot reach terminal WHIR work")
             }
@@ -7735,7 +7744,7 @@ mod tests {
         let resumed_transport = verify_selected_compact_public_key_transport(
             public_input_bindings,
             canonical_proof_bytes.clone().into_boxed_slice(),
-            canonical_public_input_bytes.into_boxed_slice(),
+            canonical_public_input_bytes.clone().into_boxed_slice(),
         )
         .expect("cold restoration revalidates the exact compact transport");
         let mut resumed_verification = CompactPublicKeyAlgebraicVerification::resume(
@@ -7743,7 +7752,7 @@ mod tests {
             &canonical_verification_checkpoint,
         )
         .expect("the source-bound safe cursor starts deterministic replay");
-        let mut algebraic_poll_count = 0_u64;
+        let mut cfw_verification_poll_count = 0_u64;
         let mut completed_work_unit_count = 0_u64;
         let mut next_safe_boundary_ordinal = 1_u32;
         let mut observed_safe_boundary_count = 1_u32;
@@ -7751,6 +7760,13 @@ mod tests {
         let mut terminal_cfw_segment_poll_count = 0_u64;
         let mut whir_verification_poll_count = 0_u64;
         let mut completed_whir_work_unit_count = 0_u64;
+        let mut whir_checkpoint_restart_count = 0_u64;
+        let mut whir_resume_complete_count = 0_u64;
+        let mut whir_replay_in_progress = false;
+        let mut replayed_cfw_work_unit_count = 0_u64;
+        let mut replayed_whir_work_unit_count = 0_u64;
+        let mut canonical_whir_checkpoint = None;
+        let mut whir_checkpoint_safe_boundary_ordinal = None;
         let algebraically_verified_proof = loop {
             match resumed_verification
                 .advance(65_536)
@@ -7761,6 +7777,13 @@ mod tests {
                     checkpoint_safe_boundary_ordinal,
                 } => {
                     assert!(slice_work_unit_count > 0);
+                    if whir_replay_in_progress {
+                        assert_eq!(checkpoint_safe_boundary_ordinal, None);
+                        replayed_cfw_work_unit_count = replayed_cfw_work_unit_count
+                            .checked_add(slice_work_unit_count)
+                            .expect("the selected CFW replay work count fits u64");
+                        continue;
+                    }
                     if let Some(safe_boundary_ordinal) = checkpoint_safe_boundary_ordinal {
                         assert_eq!(safe_boundary_ordinal, next_safe_boundary_ordinal);
                         next_safe_boundary_ordinal += 1;
@@ -7776,7 +7799,7 @@ mod tests {
                     completed_work_unit_count = completed_work_unit_count
                         .checked_add(slice_work_unit_count)
                         .expect("the selected verifier work count fits u64");
-                    algebraic_poll_count += 1;
+                    cfw_verification_poll_count += 1;
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
                     completed_work_unit_count: replayed_work_unit_count,
@@ -7797,21 +7820,82 @@ mod tests {
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
                     completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 } => {
                     assert!((1..=65_536).contains(&completed_work_unit_count));
+                    if whir_replay_in_progress {
+                        assert_eq!(checkpoint_safe_boundary_ordinal, None);
+                        replayed_whir_work_unit_count = replayed_whir_work_unit_count
+                            .checked_add(completed_work_unit_count)
+                            .expect("the selected WHIR replay work count fits u64");
+                        continue;
+                    }
+                    if let Some(safe_boundary_ordinal) = checkpoint_safe_boundary_ordinal {
+                        assert_eq!(safe_boundary_ordinal, next_safe_boundary_ordinal);
+                        next_safe_boundary_ordinal += 1;
+                        observed_safe_boundary_count += 1;
+                    }
+                    completed_whir_work_unit_count = completed_whir_work_unit_count
+                        .checked_add(completed_work_unit_count)
+                        .expect("the selected WHIR work count fits u64");
+                    whir_verification_poll_count += 1;
+                    if checkpoint_safe_boundary_ordinal.is_some()
+                        && whir_checkpoint_restart_count == 0
+                    {
+                        let checkpoint = resumed_verification
+                            .canonical_checkpoint_bytes()
+                            .expect("the first WHIR fold boundary has a canonical checkpoint");
+                        let restored_transport = verify_selected_compact_public_key_transport(
+                            public_input_bindings,
+                            canonical_proof_bytes.clone().into_boxed_slice(),
+                            canonical_public_input_bytes.clone().into_boxed_slice(),
+                        )
+                        .expect("WHIR cold restoration revalidates the exact compact transport");
+                        resumed_verification = CompactPublicKeyAlgebraicVerification::resume(
+                            restored_transport,
+                            &checkpoint,
+                        )
+                        .expect("the WHIR safe cursor starts deterministic genesis replay");
+                        canonical_whir_checkpoint = Some(checkpoint);
+                        whir_checkpoint_safe_boundary_ordinal = checkpoint_safe_boundary_ordinal;
+                        whir_checkpoint_restart_count += 1;
+                        whir_replay_in_progress = true;
+                    }
+                }
+                CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                } => {
+                    assert!((1..=65_536).contains(&completed_work_unit_count));
+                    assert_eq!(checkpoint_safe_boundary_ordinal, next_safe_boundary_ordinal);
+                    next_safe_boundary_ordinal += 1;
+                    observed_safe_boundary_count += 1;
                     completed_whir_work_unit_count = completed_whir_work_unit_count
                         .checked_add(completed_work_unit_count)
                         .expect("the selected WHIR work count fits u64");
                     whir_verification_poll_count += 1;
                 }
-                CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
+                CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete {
                     completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
                 } => {
-                    assert!((1..=65_536).contains(&completed_work_unit_count));
-                    completed_whir_work_unit_count = completed_whir_work_unit_count
+                    assert!(whir_replay_in_progress);
+                    replayed_whir_work_unit_count = replayed_whir_work_unit_count
                         .checked_add(completed_work_unit_count)
-                        .expect("the selected WHIR work count fits u64");
-                    whir_verification_poll_count += 1;
+                        .expect("the selected WHIR replay work count fits u64");
+                    assert_eq!(
+                        Some(checkpoint_safe_boundary_ordinal),
+                        whir_checkpoint_safe_boundary_ordinal
+                    );
+                    assert_eq!(
+                        resumed_verification
+                            .canonical_checkpoint_bytes()
+                            .expect("replayed WHIR state reproduces its safe cursor"),
+                        canonical_whir_checkpoint
+                            .expect("the first WHIR checkpoint was retained for comparison"),
+                    );
+                    whir_replay_in_progress = false;
+                    whir_resume_complete_count += 1;
                 }
                 CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => {
                     break *terminal;
@@ -7819,6 +7903,17 @@ mod tests {
             }
         };
         assert_eq!(resume_complete_count, 1);
+        assert_eq!(whir_checkpoint_restart_count, 1);
+        assert_eq!(whir_resume_complete_count, 1);
+        assert!(!whir_replay_in_progress);
+        assert_eq!(
+            replayed_cfw_work_unit_count,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+        );
+        assert_eq!(
+            replayed_whir_work_unit_count,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
+        );
         assert_eq!(terminal_cfw_segment_poll_count, 1);
         assert!(whir_verification_poll_count > 1);
         assert_eq!(
@@ -7838,8 +7933,8 @@ mod tests {
             COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
         );
         assert_eq!(
-            algebraic_poll_count,
-            u64::from(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT),
+            cfw_verification_poll_count,
+            u64::from(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT),
         );
         assert_eq!(
             algebraically_verified_proof
@@ -7957,7 +8052,7 @@ mod tests {
         println!(
             "checkpointed compact public-key algebraic and statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} whir_verification_poll_count={} completed_work_unit_count={} whir_work_unit_count={} correspondence_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
             verification_started_at.elapsed().as_millis(),
-            algebraic_poll_count,
+            cfw_verification_poll_count,
             observed_safe_boundary_count,
             terminal_cfw_segment_poll_count,
             whir_verification_poll_count,

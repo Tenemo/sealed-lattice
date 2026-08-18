@@ -50,8 +50,8 @@ vi.mock('@sealed-lattice/wasm', async (importOriginal) => {
                 try {
                     if (opened.mode === 'fresh') {
                         await opened.checkpointCustody.publishAuthenticatedCheckpoint(
-                            new Uint8Array(404).fill(0x57),
-                            291,
+                            new Uint8Array(412).fill(0x57),
+                            323,
                         );
                         throw new Error(
                             'Injected operation interruption after an authenticated checkpoint.',
@@ -60,8 +60,8 @@ vi.mock('@sealed-lattice/wasm', async (importOriginal) => {
                     const restored =
                         await opened.checkpointCustody.restoreAuthenticatedCheckpoint();
                     if (
-                        restored.safeBoundaryOrdinal !== 291 ||
-                        restored.canonicalCheckpointBytes.byteLength !== 404 ||
+                        restored.safeBoundaryOrdinal !== 323 ||
+                        restored.canonicalCheckpointBytes.byteLength !== 412 ||
                         restored.canonicalCheckpointBytes.some(
                             (byte) => byte !== 0x57,
                         )
@@ -73,8 +73,8 @@ vi.mock('@sealed-lattice/wasm', async (importOriginal) => {
                     }
                     restored.canonicalCheckpointBytes.fill(0);
                     await opened.checkpointCustody.publishAuthenticatedCheckpoint(
-                        new Uint8Array(404).fill(0x68),
-                        292,
+                        new Uint8Array(412).fill(0x68),
+                        324,
                     );
                     return Object.freeze({ isValid: true, value: undefined });
                 } finally {
@@ -101,9 +101,9 @@ const createAcceptedCheckpointGeometryKernel = (): TranscriptCoreKernel => {
         kernel,
         createMockKernelRuntime(() => ({
             sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length:
-                () => 404,
+                () => 412,
             sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count:
-                () => 4_509,
+                () => 4_541,
         })),
     );
     return kernel;
@@ -144,7 +144,7 @@ describe('Installed accepted-setup compact public-key checkpoint custody', () =>
                 ),
             ).rejects.toThrow(/operation interruption/u);
             expect(publishedCheckpoints).toHaveLength(1);
-            expect(publishedCheckpoints[0]?.safeBoundaryOrdinal).toBe(291);
+            expect(publishedCheckpoints[0]?.safeBoundaryOrdinal).toBe(323);
 
             const resumeDescription = publishedCheckpoints[0];
             if (resumeDescription === undefined) {
@@ -189,7 +189,7 @@ describe('Installed accepted-setup compact public-key checkpoint custody', () =>
                 publishedCheckpoints.map(
                     ({ safeBoundaryOrdinal }) => safeBoundaryOrdinal,
                 ),
-            ).toEqual([291, 292]);
+            ).toEqual([323, 324]);
             const terminalDescription = publishedCheckpoints[1];
             if (terminalDescription === undefined) {
                 throw new Error(

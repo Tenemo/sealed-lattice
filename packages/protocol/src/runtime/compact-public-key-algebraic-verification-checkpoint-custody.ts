@@ -34,9 +34,9 @@ type CompactPublicKeyVerificationCheckpointProfile = Readonly<{
 }>;
 
 const compactPublicKeyAlgebraicVerificationCheckpointProfile = Object.freeze({
-    checkpointByteLength: 400,
+    checkpointByteLength: 408,
     operationDescription: 'compact public-key algebraic verification',
-    safeBoundaryCount: 290,
+    safeBoundaryCount: 323,
     stateStreamDomain:
         compactPublicKeyVerificationCheckpointStateStreamDomains.algebraic,
 }) satisfies CompactPublicKeyVerificationCheckpointProfile;
