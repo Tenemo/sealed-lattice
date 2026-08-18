@@ -139,14 +139,18 @@ and target release remain incomplete or internal.
   evicts the terminal checkpoint. Current host coverage is same-realm; it does
   not destroy and recreate a dedicated browser `Worker` or restore selected
   actual proof bytes.
-  Terminal WHIR is still one synchronous, uninterruptible call before its
-  post-WHIR boundary.
-  At selected pre-challenge geometry, the current fold retains an 80 MiB input,
-  an 80 MiB clone, and a 40 MiB first-fold output simultaneously: a
-  209,715,200-byte source-derived minimum before other live verifier state.
-  Bounded transport, selected actual-byte cold restoration, the full
-  equation-invalid hostile corpus, production-host installation, and the
-  complete durable lifecycle remain open.
+  Terminal WHIR still drains one bounded in-place primitive synchronously
+  before its post-WHIR boundary. At selected pre-challenge geometry, both the
+  algebraic verifier and verifier-derived public-covector replay now fold the
+  `2^21` 40-byte source elements inside the original allocation and truncate it
+  without allocating a clone or separate output. Equivalence tests cover
+  irregular poll budgets, every compact folding factor, nontrivial column
+  lengths, invalid geometry, zero budgets, and terminal reuse. This removes the
+  prior three-buffer source overlap, but it is ownership evidence rather than a
+  browser memory measurement. Outer polling and durable WHIR boundaries,
+  bounded transport, selected actual-byte cold restoration, the full
+  equation-invalid hostile corpus, and the complete durable lifecycle remain
+  open.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -222,8 +226,9 @@ ceremony or supported-phone qualification.
   cursors through a custody contract and preserves typed refusals. Its durable
   schedule covers CFW, one point after terminal WHIR, all public-column
   reconstruction, and each statement-root coset after synchronous transport
-  revalidation. Terminal WHIR itself remains synchronous and has the
-  209,715,200-byte minimum transient overlap described above. The concrete
+  revalidation. Terminal WHIR itself remains synchronous, although its
+  production covector owners now reuse the input allocation rather than
+  retaining clone and output buffers. The concrete
   protocol checkpoint-store adapters now separate the 400-byte, 290-boundary
   algebraic cursor from the kernel-derived 404-byte, 4,509-boundary accepted
   cursor. The worker refuses split custody before kernel preparation and retires

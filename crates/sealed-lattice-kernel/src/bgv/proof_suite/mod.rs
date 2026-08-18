@@ -105,6 +105,7 @@ mod compact_response_tree_external;
 mod compact_transcript;
 mod compact_whir;
 mod compact_whir_algebraic_verifier;
+mod compact_whir_covector_fold;
 mod compact_whir_geometry;
 mod component_material_stream;
 mod component_public_polynomial_runtime;

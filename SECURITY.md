@@ -105,13 +105,15 @@ consequences are:
   profile, obtains its four source digests from the prepared Rust verifier,
   publishes resume coordinates only after durable commit, and evicts terminal
   state. That host coverage remains same-realm; it does not establish
-  dedicated-worker destruction and recreation. Terminal WHIR itself is also
-  still one synchronous call before the new boundary. At selected pre-challenge
-  geometry, its current first fold has a source-derived minimum overlap of
-  209,715,200 bytes before other verifier state. Dedicated-worker invocation,
-  bounded transport and terminal WHIR, selected actual-byte cold restoration,
-  the complete equation-invalid hostile corpus, and the compact generation
-  release ABI remain absent.
+  dedicated-worker destruction and recreation. Terminal WHIR itself still
+  drains its bounded in-place fold synchronously before the new boundary. Both
+  production covector consumers now reuse and truncate the original source
+  allocation, so the prior clone-plus-output overlap is removed. This is
+  source-ownership and equivalence evidence, not a live browser memory
+  measurement. Dedicated-worker invocation, outer polling and durable WHIR
+  boundaries, bounded transport, selected actual-byte cold restoration, the
+  complete equation-invalid hostile corpus, and the compact generation release
+  ABI remain absent.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
@@ -260,9 +262,10 @@ that a coherent snapshot is newest.
   adapter has same-realm synthetic-byte host resume coverage, including
   wrong-source refusal and terminal checkpoint eviction. A separate desktop
   Chromium diagnostic replays the CFW storage lifecycle. Dedicated-worker loss,
-  synchronous terminal WHIR and its memory overlap, browser-storage
-  amplification, release-WebAssembly proof execution, selected actual-byte
-  accepted-cursor restoration, and full browser custody remain open.
+  outer terminal-WHIR polling and live browser memory measurement,
+  browser-storage amplification, release-WebAssembly proof execution, selected
+  actual-byte accepted-cursor restoration, and full browser custody remain
+  open. The source-covector fold itself now reuses its original allocation.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

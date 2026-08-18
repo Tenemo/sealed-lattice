@@ -28,6 +28,9 @@ use super::compact_public_key_verifier::{
 use super::compact_reed_solomon_domain::{
     CompactReedSolomonDomainError, canonical_reed_solomon_domain_evaluation_points,
 };
+use super::compact_whir_covector_fold::{
+    CompactWhirCovectorFoldError, fold_compact_whir_covector_in_place,
+};
 use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
 use super::prover::CommonProofProverError;
@@ -80,6 +83,19 @@ impl From<CompactProofWireError> for CompactFactorOnePublicCovectorError {
 impl From<CompactProofContractError> for CompactFactorOnePublicCovectorError {
     fn from(_: CompactProofContractError) -> Self {
         Self::InvalidContract
+    }
+}
+
+const fn compact_whir_covector_fold_error(
+    error: CompactWhirCovectorFoldError,
+) -> CompactFactorOnePublicCovectorError {
+    match error {
+        CompactWhirCovectorFoldError::ArithmeticOverflow => {
+            CompactFactorOnePublicCovectorError::ArithmeticOverflow
+        }
+        CompactWhirCovectorFoldError::InvalidGeometry => {
+            CompactFactorOnePublicCovectorError::InvalidCovector
+        }
     }
 }
 
@@ -716,16 +732,12 @@ fn reduce_whir_epoch(
             return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
         }
         if batch_ordinal >= already_folded_batch_count {
-            state.source = fold_flattened_covector(
-                &state.source,
-                1_usize
-                    .checked_shl(
-                        u32::try_from(fold_count)
-                            .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?,
-                    )
-                    .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?,
+            state.source = fold_compact_whir_covector_in_place(
+                core::mem::take(&mut state.source),
+                fold_count,
                 &batch.folding_challenges,
-            )?;
+            )
+            .map_err(compact_whir_covector_fold_error)?;
         }
         scale_in_place(&mut state.source, batch.combining_challenge);
         let mask_scale = batch.combining_challenge * compact_power_of_two(fold_count).inverse();
@@ -872,38 +884,6 @@ fn multilinear_equality_covector(
         return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
     }
     Ok(weights)
-}
-
-fn fold_flattened_covector(
-    flattened: &[CompactChallengeField],
-    width: usize,
-    challenges: &[CompactChallengeField],
-) -> Result<Vec<CompactChallengeField>, CompactFactorOnePublicCovectorError> {
-    if width == 0 || flattened.is_empty() || !flattened.len().is_multiple_of(width) {
-        return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
-    }
-    let column_length = flattened.len() / width;
-    let mut columns = flattened
-        .chunks_exact(column_length)
-        .map(<[CompactChallengeField]>::to_vec)
-        .collect::<Vec<_>>();
-    for &challenge in challenges {
-        if columns.len() < 2 || !columns.len().is_multiple_of(2) {
-            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
-        }
-        let half = columns.len() / 2;
-        let one_minus = CompactChallengeField::ONE - challenge;
-        columns = (0..half)
-            .map(|ordinal| {
-                columns[ordinal]
-                    .iter()
-                    .zip(&columns[half + ordinal])
-                    .map(|(&zero, &one)| one_minus * zero + challenge * one)
-                    .collect()
-            })
-            .collect();
-    }
-    Ok(columns.into_iter().flatten().collect())
 }
 
 fn compact_powers(value: CompactChallengeField, count: usize) -> Vec<CompactChallengeField> {

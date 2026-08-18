@@ -12,6 +12,9 @@ use super::compact_cfw::{CompactCfwPublicMainCovectors, CompactChallengeField};
 use super::compact_proof_contract::{
     CompactWhirEpochContract, CompactWhirFoldContract, CompactWhirMaskGroupContract,
 };
+use super::compact_whir_covector_fold::{
+    CompactWhirCovectorFoldError, fold_compact_whir_covector_in_place,
+};
 
 const COMPACT_WHIR_BATCH_COUNT: usize = 4;
 const COMPACT_WHIR_SUMCHECK_MESSAGE_LENGTH: usize = 3;
@@ -24,6 +27,19 @@ pub(crate) enum CompactWhirAlgebraicVerifierError {
     InvalidSumcheck,
     InvalidCodeSwitch,
     InvalidBaseCase,
+}
+
+const fn compact_whir_covector_fold_error(
+    error: CompactWhirCovectorFoldError,
+) -> CompactWhirAlgebraicVerifierError {
+    match error {
+        CompactWhirCovectorFoldError::ArithmeticOverflow => {
+            CompactWhirAlgebraicVerifierError::ArithmeticOverflow
+        }
+        CompactWhirCovectorFoldError::InvalidGeometry => {
+            CompactWhirAlgebraicVerifierError::InvalidRelation
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,11 +177,12 @@ impl CompactWhirAlgebraicRelation {
         }
 
         if !source_was_already_folded {
-            self.source_covector = fold_flattened_covector(
-                &self.source_covector,
+            self.source_covector = fold_compact_whir_covector_in_place(
+                core::mem::take(&mut self.source_covector),
                 folding_factor,
                 transcript.round_challenges,
-            )?;
+            )
+            .map_err(compact_whir_covector_fold_error)?;
         }
         if self.source_covector.len() != expected_output_length {
             return Err(CompactWhirAlgebraicVerifierError::InvalidRelation);
@@ -515,48 +532,6 @@ fn validate_blinded_mask_reveal(
         return Err(CompactWhirAlgebraicVerifierError::InvalidBaseCase);
     }
     Ok(())
-}
-
-fn fold_flattened_covector(
-    flattened: &[CompactChallengeField],
-    folding_factor: usize,
-    challenges: &[CompactChallengeField],
-) -> Result<Vec<CompactChallengeField>, CompactWhirAlgebraicVerifierError> {
-    let width = 1_usize
-        .checked_shl(
-            u32::try_from(folding_factor)
-                .map_err(|_| CompactWhirAlgebraicVerifierError::ArithmeticOverflow)?,
-        )
-        .ok_or(CompactWhirAlgebraicVerifierError::ArithmeticOverflow)?;
-    if challenges.len() != folding_factor
-        || width == 0
-        || flattened.is_empty()
-        || !flattened.len().is_multiple_of(width)
-    {
-        return Err(CompactWhirAlgebraicVerifierError::InvalidRelation);
-    }
-    let column_length = flattened.len() / width;
-    let mut columns = flattened
-        .chunks_exact(column_length)
-        .map(<[CompactChallengeField]>::to_vec)
-        .collect::<Vec<_>>();
-    for challenge in challenges {
-        if columns.len() < 2 || !columns.len().is_multiple_of(2) {
-            return Err(CompactWhirAlgebraicVerifierError::InvalidRelation);
-        }
-        let half = columns.len() / 2;
-        let one_minus_challenge = CompactChallengeField::ONE - *challenge;
-        columns = (0..half)
-            .map(|ordinal| {
-                columns[ordinal]
-                    .iter()
-                    .zip(&columns[half + ordinal])
-                    .map(|(&zero, &one)| one_minus_challenge * zero + *challenge * one)
-                    .collect()
-            })
-            .collect();
-    }
-    Ok(columns.into_iter().flatten().collect())
 }
 
 fn multilinear_equality_covector(

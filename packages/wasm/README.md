@@ -55,9 +55,11 @@ incremental. The accepted verifier exposes 4,509 fixed cursor ordinals: 290 at
 65,536-work-unit intervals across 19,005,440 of the selected CFW phase's
 19,038,593 work units, one after terminal WHIR returns, and 4,218 across all 122
 public columns and all 1,024 cosets of each of four statement roots. The
-post-WHIR cursor does not make terminal WHIR incremental: the selected
-pre-challenge first fold currently retains an 80 MiB source, an 80 MiB clone,
-and a 40 MiB output simultaneously before other live state. The protocol
+post-WHIR cursor does not make terminal WHIR incremental. Its bounded fold now
+reuses and truncates the original source allocation in both production
+covector consumers instead of retaining a clone and separate output, but the
+outer verifier still drains that primitive synchronously and has no live
+browser memory measurement. The protocol
 package now owns distinct authenticated-store adapters for the 400-byte
 algebra-only cursor and the accepted cursor. The accepted adapter reads its
 404-byte, 4,509-boundary geometry from kernel exports and uses a separate
