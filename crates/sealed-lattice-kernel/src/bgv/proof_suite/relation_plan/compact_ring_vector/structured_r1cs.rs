@@ -3359,6 +3359,9 @@ mod tests {
                     assert!(completed_work_unit_count > 0);
                     algebraic_poll_count += 1;
                 }
+                CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
+                    panic!("a fresh compact algebraic verification cannot complete replay")
+                }
                 CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => break *terminal,
             }
         };
@@ -7634,20 +7637,86 @@ mod tests {
         let public_input_bindings =
             decode_compact_public_key_algebraic_checkpoint_bindings(&context_bytes);
         let verification_started_at = Instant::now();
-        let (verified_transport, algebraic_poll_count) =
-            verify_compact_public_key_bytes_algebraically(
-                public_input_bindings,
-                canonical_proof_bytes.clone().into_boxed_slice(),
-                canonical_public_input_bytes.into_boxed_slice(),
-            );
+        let initial_transport = verify_selected_compact_public_key_transport(
+            public_input_bindings,
+            canonical_proof_bytes.clone().into_boxed_slice(),
+            canonical_public_input_bytes.clone().into_boxed_slice(),
+        )
+        .expect("the checkpoint source passes independent compact transport verification");
+        let mut initial_verification =
+            CompactPublicKeyAlgebraicVerification::begin(initial_transport)
+                .expect("the compact algebraic verifier accepts the checkpoint source");
+        let first_completed_work_unit_count = match initial_verification
+            .advance(65_536)
+            .expect("the initial compact algebraic verifier slice succeeds")
+        {
+            CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                completed_work_unit_count,
+            } => completed_work_unit_count,
+            CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
+                panic!("a fresh verifier cannot complete checkpoint replay")
+            }
+            CompactPublicKeyAlgebraicVerificationPoll::Complete(_) => {
+                panic!("one bounded slice cannot complete the selected verifier")
+            }
+        };
+        assert!(first_completed_work_unit_count > 0);
+        let canonical_verification_checkpoint = initial_verification
+            .canonical_checkpoint_bytes()
+            .expect("the first safe verifier boundary has a canonical checkpoint");
+        drop(initial_verification);
+
+        let resumed_transport = verify_selected_compact_public_key_transport(
+            public_input_bindings,
+            canonical_proof_bytes.clone().into_boxed_slice(),
+            canonical_public_input_bytes.into_boxed_slice(),
+        )
+        .expect("cold restoration revalidates the exact compact transport");
+        let mut resumed_verification = CompactPublicKeyAlgebraicVerification::resume(
+            resumed_transport,
+            &canonical_verification_checkpoint,
+        )
+        .expect("the source-bound safe cursor starts deterministic replay");
+        let mut algebraic_poll_count = 0_u64;
+        let mut resume_complete_count = 0_u64;
+        let verified_transport = loop {
+            match resumed_verification
+                .advance(65_536)
+                .expect("bounded replay and continued algebraic verification succeed")
+            {
+                CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert!(completed_work_unit_count > 0);
+                    algebraic_poll_count += 1;
+                }
+                CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
+                    completed_work_unit_count,
+                } => {
+                    assert!(completed_work_unit_count > 0);
+                    resume_complete_count += 1;
+                    assert_eq!(
+                        resumed_verification
+                            .canonical_checkpoint_bytes()
+                            .expect("replayed state reproduces its safe cursor"),
+                        canonical_verification_checkpoint,
+                    );
+                }
+                CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal) => {
+                    break (*terminal).into_transport();
+                }
+            }
+        };
+        assert_eq!(resume_complete_count, 1);
         assert_eq!(
             verified_transport.proof_view().canonical_bytes(),
             canonical_proof_bytes
         );
         println!(
-            "checkpointed compact public-key algebraic verification complete elapsed_milliseconds={} cfw_poll_count={} canonical_proof_byte_length={}",
+            "checkpointed compact public-key algebraic verification complete elapsed_milliseconds={} cfw_poll_count={} resume_complete_count={} canonical_proof_byte_length={}",
             verification_started_at.elapsed().as_millis(),
             algebraic_poll_count,
+            resume_complete_count,
             canonical_proof_bytes.len(),
         );
     }

@@ -127,6 +127,17 @@ describe('foundation ceremony Rust/WASM boundary', () => {
             commandRuntime.wasmExports
                 .sealed_lattice_compact_public_key_cancel_algebraic_verification,
         ).toBeTypeOf('function');
+        expect(
+            commandRuntime.wasmExports
+                .sealed_lattice_compact_public_key_resume_algebraic_verification,
+        ).toBeTypeOf('function');
+        expect(
+            commandRuntime.wasmExports
+                .sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint,
+        ).toBeTypeOf('function');
+        expect(
+            commandRuntime.wasmExports.sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length?.(),
+        ).toBe(400);
         const compactPublicKeyBindings = {
             suiteIdentifier: new Uint8Array(64).fill(0x11),
             applicationStatementHash: new Uint8Array(64).fill(0x22),

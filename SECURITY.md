@@ -66,14 +66,19 @@ consequences are:
   epochs, all six code switches, both terminal blinded relations, and the
   authenticated source and mask spot checks. The candidate is still not an
   accepted proof: the complete equation-invalid hostile corpus, final public
-  verification result, and capability transition remain open.
+  SDK handoff, and capability transition remain open.
 - The compact transport ABI returns typed refusals but does not return
   `isValid` or mint a proof capability. A separate raw release-kernel ABI and
-  internal TypeScript closed-worker driver begin, bounded-poll, cancel, and
-  return the terminal algebraic `VerificationResult`. The driver mints no
-  authority and has no checkpoint codec, authenticated browser custody,
-  complete equation-invalid hostile corpus, or capability handoff. Complete
-  generation and verification release ABIs do not exist.
+  internal TypeScript closed-worker driver begin or restore, bounded-poll,
+  cancel, and return the terminal algebraic `VerificationResult`. Its fixed
+  400-byte safe cursor binds the four public-input coordinates, complete proof
+  and public-input digests, and cumulative completed work; it serializes no
+  opaque transform state. Restoration revalidates the transported bytes and
+  deterministically replays from genesis before the custody contract may
+  publish newer state. The driver mints no authority and has no concrete
+  durable browser-store adapter, complete equation-invalid hostile corpus, or
+  capability handoff. Complete generation and verification release ABIs do not
+  exist.
 - Test-only instrumentation derives the exact 165-event interactive ledger and
   15 composition boundaries from executable owners while preserving the
   maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
@@ -205,20 +210,21 @@ that a coherent snapshot is newest.
 - `SEC-019`: Reproducible scalar release WebAssembly and SDK bytes
   establish build identity only. The release artifact contains compact transport
   validation and public-key response generation through the complete 82-response
-  schedule plus raw begin, bounded-poll, and cancellation functions for the
-  internal algebraic verifier. A typed closed-worker driver now owns that
-  authority-free verification result, but there is no compact generation API,
-  checkpointable authenticated browser custody, capability handoff, or final
+  schedule plus raw begin, resume, bounded-poll, source-bound cursor-copy, and
+  cancellation functions for the internal algebraic verifier. A typed
+  closed-worker driver now owns that authority-free verification result and an
+  authenticated-custody callback boundary, but there is no compact generation
+  API, concrete durable browser-store adapter, capability handoff, or final
   generation and verification ABI pair.
 - `SEC-020`: Guarded selected-size native evidence covers the public-key
-  family's complete response-generation schedule and one fresh algebraic replay
-  of its exact emitted proof. A separate desktop Chromium diagnostic replays its
+  family's complete response-generation schedule and one cold algebraic restore
+  of its exact emitted proof from a source-bound safe cursor. A separate desktop
+  Chromium diagnostic replays its
   exact CFW storage lifecycle and exposes an orders-of-magnitude physical-storage
   amplification. The current proof boundary above owns the candidate's
-  acceptance status. These results do not establish a final
-  `VerificationResult`, release-WebAssembly proof execution, cold common-worker
-  restoration, complete durable browser custody, or supported-phone
-  feasibility.
+  acceptance status. These results do not establish release-WebAssembly proof
+  execution, a concrete durable common-worker browser-store integration,
+  complete durable browser custody, or supported-phone feasibility.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

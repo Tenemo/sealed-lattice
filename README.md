@@ -85,15 +85,22 @@ and target release remain incomplete or internal.
   algebraic verifier then independently derives the structured public CFW
   contribution and verifies the CFW transcript, both WHIR epochs, all six code
   switches, both terminal blinded relations, and the authenticated source and
-  mask spot checks. A guarded current-source replay accepts the exact emitted
-  proof from checkpointed transported bytes. This is native prototype evidence
-  only. Raw release-kernel begin, bounded poll, and cancellation functions own
-  the same verifier state. An internal TypeScript closed-worker driver now
-  yields between bounded polls, preserves typed refusals, returns a positive
+  mask spot checks. The verifier exposes a canonical 400-byte safe cursor that
+  binds the four public-input coordinates, complete proof and public-input
+  digests, and cumulative completed work. It contains no opaque transform
+  state: restoration revalidates the transported bytes and deterministically
+  replays from genesis before live work continues. A guarded current-source
+  run destroys the first verifier, restores a fresh verifier from that cursor,
+  reproduces the cursor byte for byte, and accepts the exact emitted proof.
+  This is native prototype evidence only. Raw release-kernel begin, resume,
+  bounded-poll, cursor-copy, and cancellation functions own the same verifier
+  state. An internal TypeScript closed-worker driver publishes and restores the
+  cursor through an authenticated-custody contract, suppresses publication
+  during deterministic replay, preserves typed refusals, returns a positive
   `VerificationResult` only after algebraic completion, and cancels unfinished
   operations. It deliberately mints no authority. The full equation-invalid
-  hostile corpus, state codec, authenticated browser custody, and capability
-  transition remain absent.
+  hostile corpus, a concrete durable browser-custody adapter, and the
+  capability transition remain absent.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
   logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
@@ -161,10 +168,12 @@ ceremony or supported-phone qualification.
   compact generation and verification ABI exists. The release
   transport ABI checks canonical structure, transcript chronology, query
   derivation, and Merkle openings only. A separate raw kernel ABI and internal
-  closed-worker driver can begin, bounded-poll, cancel, and return the terminal
-  algebraic `VerificationResult`, but they have no checkpoint codec,
-  authenticated browser custody, complete transported equation-invalid hostile
-  corpus, or capability handoff.
+  closed-worker driver can begin or restore, bounded-poll, publish source-bound
+  safe cursors through a custody contract, cancel, and return the terminal
+  algebraic `VerificationResult`. This covers only the bounded CFW accumulator
+  after synchronous transport revalidation; it has no concrete durable browser
+  store adapter, complete transported equation-invalid hostile corpus, or
+  capability handoff.
 - The compact successor still requires correspondence between the completed
   single-attempt construction-level masking theorem and every emitted proof
   byte, the actual salted-Merkle and EPRO privacy games, and composition of the

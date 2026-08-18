@@ -7,7 +7,7 @@
 
 use p3_field::PrimeCharacteristicRing;
 
-use crate::foundation::RefusalReason;
+use crate::foundation::{Hash512, RefusalReason};
 
 use super::compact_cfw::{
     COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError,
@@ -21,6 +21,7 @@ use super::compact_masking_public_covector::{
     CompactFactorOnePublicCovectorAuthority, CompactFactorOnePublicCovectorError,
     CompactFactorOnePublicTransposeSource,
 };
+use super::compact_proof_wire::CompactPublicInputBindings;
 use super::compact_public_key_verifier::{
     CompactPublicKeyTransportError, VerifiedCompactPublicKeyTransport,
 };
@@ -42,6 +43,11 @@ const INITIAL_WHIR_BATCH: u8 = 0;
 const PRE_CHALLENGE_WHIR_EPOCH: u8 = 1;
 const COMPACT_WHIR_BATCH_COUNT: usize = 4;
 const COMPACT_WHIR_CODE_SWITCH_COUNT: usize = 3;
+const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC: [u8; 8] = *b"SLCAVC01";
+pub(crate) const COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH: usize =
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC.len()
+        + 6 * Hash512::BYTE_LENGTH
+        + size_of::<u64>();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CompactPublicKeyAlgebraicVerificationError {
@@ -57,6 +63,9 @@ pub(crate) enum CompactPublicKeyAlgebraicVerificationError {
     },
     InvalidTranscript,
     ArithmeticOverflow,
+    CheckpointUnavailable,
+    MalformedCheckpoint,
+    WrongCheckpoint,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,8 +119,105 @@ impl CompactPublicKeyAlgebraicVerificationError {
             Self::Whir { error, .. } => compact_whir_algebraic_refusal_reason(error),
             Self::InvalidTranscript => RefusalReason::InvalidProof,
             Self::ArithmeticOverflow => RefusalReason::OutsideSupportedProfile,
+            Self::CheckpointUnavailable => RefusalReason::ConsumedState,
+            Self::MalformedCheckpoint => RefusalReason::MalformedEncoding,
+            Self::WrongCheckpoint => RefusalReason::WrongContext,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompactPublicKeyAlgebraicVerificationCheckpoint {
+    public_input_bindings: CompactPublicInputBindings,
+    canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
+    canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
+    completed_work_unit_count: u64,
+}
+
+impl CompactPublicKeyAlgebraicVerificationCheckpoint {
+    fn encode(self) -> [u8; COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH] {
+        let mut bytes = [0_u8; COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH];
+        let mut cursor = 0_usize;
+        write_checkpoint_bytes(
+            &mut bytes,
+            &mut cursor,
+            &COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC,
+        );
+        for binding in self.public_input_bindings.ordered_hashes() {
+            write_checkpoint_bytes(&mut bytes, &mut cursor, binding.as_bytes());
+        }
+        write_checkpoint_bytes(&mut bytes, &mut cursor, &self.canonical_proof_binding);
+        write_checkpoint_bytes(
+            &mut bytes,
+            &mut cursor,
+            &self.canonical_public_input_binding,
+        );
+        write_checkpoint_bytes(
+            &mut bytes,
+            &mut cursor,
+            &self.completed_work_unit_count.to_le_bytes(),
+        );
+        debug_assert_eq!(cursor, bytes.len());
+        bytes
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self, CompactPublicKeyAlgebraicVerificationError> {
+        if bytes.len() != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH {
+            return Err(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint);
+        }
+        let mut cursor = 0_usize;
+        let magic = read_checkpoint_array::<8>(bytes, &mut cursor)?;
+        if magic != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_MAGIC {
+            return Err(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint);
+        }
+        let public_input_bindings = CompactPublicInputBindings::new(
+            Hash512::from_bytes(read_checkpoint_array(bytes, &mut cursor)?),
+            Hash512::from_bytes(read_checkpoint_array(bytes, &mut cursor)?),
+            Hash512::from_bytes(read_checkpoint_array(bytes, &mut cursor)?),
+            Hash512::from_bytes(read_checkpoint_array(bytes, &mut cursor)?),
+        );
+        let canonical_proof_binding = read_checkpoint_array(bytes, &mut cursor)?;
+        let canonical_public_input_binding = read_checkpoint_array(bytes, &mut cursor)?;
+        let completed_work_unit_count =
+            u64::from_le_bytes(read_checkpoint_array(bytes, &mut cursor)?);
+        if cursor != bytes.len() || completed_work_unit_count == 0 {
+            return Err(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint);
+        }
+        Ok(Self {
+            public_input_bindings,
+            canonical_proof_binding,
+            canonical_public_input_binding,
+            completed_work_unit_count,
+        })
+    }
+}
+
+fn write_checkpoint_bytes<const BYTE_LENGTH: usize>(
+    output: &mut [u8],
+    cursor: &mut usize,
+    bytes: &[u8; BYTE_LENGTH],
+) {
+    let end = cursor
+        .checked_add(BYTE_LENGTH)
+        .expect("the fixed checkpoint geometry fits usize");
+    output[*cursor..end].copy_from_slice(bytes);
+    *cursor = end;
+}
+
+fn read_checkpoint_array<const BYTE_LENGTH: usize>(
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> Result<[u8; BYTE_LENGTH], CompactPublicKeyAlgebraicVerificationError> {
+    let end = cursor
+        .checked_add(BYTE_LENGTH)
+        .ok_or(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint)?;
+    let value = bytes
+        .get(*cursor..end)
+        .ok_or(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint)?
+        .try_into()
+        .map_err(|_| CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint)?;
+    *cursor = end;
+    Ok(value)
 }
 
 const fn compact_cfw_refusal_reason(error: CompactCfwError) -> RefusalReason {
@@ -387,10 +493,13 @@ impl CompactPublicKeyCfwVerification {
 pub(crate) struct CompactPublicKeyAlgebraicVerification {
     transport: Option<VerifiedCompactPublicKeyTransport>,
     cfw_verification: CompactPublicKeyCfwVerification,
+    completed_work_unit_count: u64,
+    replay_target_work_unit_count: Option<u64>,
 }
 
 pub(crate) enum CompactPublicKeyAlgebraicVerificationPoll {
     WorkCompleted { completed_work_unit_count: u64 },
+    ResumeComplete { completed_work_unit_count: u64 },
     Complete(Box<AlgebraicallyVerifiedCompactPublicKeyProof>),
 }
 
@@ -415,7 +524,49 @@ impl CompactPublicKeyAlgebraicVerification {
         Ok(Self {
             transport: Some(transport),
             cfw_verification,
+            completed_work_unit_count: 0,
+            replay_target_work_unit_count: None,
         })
+    }
+
+    pub(crate) fn resume(
+        transport: VerifiedCompactPublicKeyTransport,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<Self, CompactPublicKeyAlgebraicVerificationError> {
+        let checkpoint =
+            CompactPublicKeyAlgebraicVerificationCheckpoint::decode(canonical_checkpoint_bytes)?;
+        if checkpoint.public_input_bindings != transport.public_input_bindings()
+            || checkpoint.canonical_proof_binding != transport.canonical_proof_binding()
+            || checkpoint.canonical_public_input_binding
+                != transport.canonical_public_input_binding()
+        {
+            return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+        }
+        let mut verification = Self::begin(transport)?;
+        verification.replay_target_work_unit_count = Some(checkpoint.completed_work_unit_count);
+        Ok(verification)
+    }
+
+    pub(crate) fn canonical_checkpoint_bytes(
+        &self,
+    ) -> Result<
+        [u8; COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH],
+        CompactPublicKeyAlgebraicVerificationError,
+    > {
+        if self.completed_work_unit_count == 0 || self.replay_target_work_unit_count.is_some() {
+            return Err(CompactPublicKeyAlgebraicVerificationError::CheckpointUnavailable);
+        }
+        let transport = self
+            .transport
+            .as_ref()
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::CheckpointUnavailable)?;
+        Ok(CompactPublicKeyAlgebraicVerificationCheckpoint {
+            public_input_bindings: transport.public_input_bindings(),
+            canonical_proof_binding: transport.canonical_proof_binding(),
+            canonical_public_input_binding: transport.canonical_public_input_binding(),
+            completed_work_unit_count: self.completed_work_unit_count,
+        }
+        .encode())
     }
 
     pub(crate) fn advance(
@@ -423,13 +574,51 @@ impl CompactPublicKeyAlgebraicVerification {
         maximum_work_unit_count: u64,
     ) -> Result<CompactPublicKeyAlgebraicVerificationPoll, CompactPublicKeyAlgebraicVerificationError>
     {
-        match self.cfw_verification.advance(maximum_work_unit_count)? {
+        if maximum_work_unit_count == 0 {
+            return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+        }
+        let replay_work_unit_count = self
+            .replay_target_work_unit_count
+            .map(|target_work_unit_count| {
+                target_work_unit_count
+                    .checked_sub(self.completed_work_unit_count)
+                    .ok_or(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint)
+                    .map(|remaining_work_unit_count| {
+                        remaining_work_unit_count.min(maximum_work_unit_count)
+                    })
+            })
+            .transpose()?;
+        let bounded_work_unit_count = replay_work_unit_count.unwrap_or(maximum_work_unit_count);
+        if bounded_work_unit_count == 0 {
+            return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+        }
+        match self.cfw_verification.advance(bounded_work_unit_count)? {
             CompactPublicKeyCfwVerificationPoll::WorkCompleted {
                 completed_work_unit_count,
-            } => Ok(CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
-                completed_work_unit_count,
-            }),
+            } => {
+                self.completed_work_unit_count = self
+                    .completed_work_unit_count
+                    .checked_add(completed_work_unit_count)
+                    .ok_or(CompactPublicKeyAlgebraicVerificationError::ArithmeticOverflow)?;
+                if let Some(target_work_unit_count) = self.replay_target_work_unit_count {
+                    if self.completed_work_unit_count > target_work_unit_count {
+                        return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+                    }
+                    if self.completed_work_unit_count == target_work_unit_count {
+                        self.replay_target_work_unit_count = None;
+                        return Ok(CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
+                            completed_work_unit_count,
+                        });
+                    }
+                }
+                Ok(CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                    completed_work_unit_count,
+                })
+            }
             CompactPublicKeyCfwVerificationPoll::Complete(handoff) => {
+                if self.replay_target_work_unit_count.is_some() {
+                    return Err(CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint);
+                }
                 let transport = self
                     .transport
                     .as_ref()
@@ -1211,4 +1400,70 @@ fn required_complete_response_role(
         .into_iter()
         .map(compact_challenge_from_production)
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checkpoint(
+        completed_work_unit_count: u64,
+    ) -> CompactPublicKeyAlgebraicVerificationCheckpoint {
+        CompactPublicKeyAlgebraicVerificationCheckpoint {
+            public_input_bindings: CompactPublicInputBindings::new(
+                Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x44; Hash512::BYTE_LENGTH]),
+            ),
+            canonical_proof_binding: [0x55; Hash512::BYTE_LENGTH],
+            canonical_public_input_binding: [0x66; Hash512::BYTE_LENGTH],
+            completed_work_unit_count,
+        }
+    }
+
+    #[test]
+    fn algebraic_verification_checkpoint_round_trips_exact_sources_and_safe_cursor() {
+        let checkpoint = checkpoint(65_537);
+        let canonical_bytes = checkpoint.encode();
+        assert_eq!(canonical_bytes.len(), 400);
+        assert_eq!(
+            CompactPublicKeyAlgebraicVerificationCheckpoint::decode(&canonical_bytes),
+            Ok(checkpoint)
+        );
+
+        for changed_byte_offset in [8, 72, 136, 200, 264, 328] {
+            let mut changed_bytes = canonical_bytes;
+            changed_bytes[changed_byte_offset] ^= 1;
+            assert_ne!(
+                CompactPublicKeyAlgebraicVerificationCheckpoint::decode(&changed_bytes),
+                Ok(checkpoint),
+                "source coordinate at byte offset {changed_byte_offset} must remain load-bearing"
+            );
+        }
+    }
+
+    #[test]
+    fn algebraic_verification_checkpoint_refuses_malformed_framing_and_genesis() {
+        let canonical_bytes = checkpoint(1).encode();
+        for malformed_bytes in [
+            canonical_bytes[..canonical_bytes.len() - 1].to_vec(),
+            {
+                let mut bytes = canonical_bytes.to_vec();
+                bytes.push(0);
+                bytes
+            },
+            {
+                let mut bytes = canonical_bytes.to_vec();
+                bytes[0] ^= 1;
+                bytes
+            },
+            checkpoint(0).encode().to_vec(),
+        ] {
+            assert_eq!(
+                CompactPublicKeyAlgebraicVerificationCheckpoint::decode(&malformed_bytes),
+                Err(CompactPublicKeyAlgebraicVerificationError::MalformedCheckpoint)
+            );
+        }
+    }
 }

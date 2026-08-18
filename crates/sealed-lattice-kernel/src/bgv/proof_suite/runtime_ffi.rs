@@ -22,6 +22,7 @@ use crate::foundation::{
 
 use super::compact_proof_wire::CompactPublicInputBindings;
 use super::compact_public_key_algebraic_verifier::{
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
     CompactPublicKeyAlgebraicVerification, CompactPublicKeyAlgebraicVerificationError,
     CompactPublicKeyAlgebraicVerificationPoll,
 };
@@ -72,6 +73,7 @@ const COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH: usize =
     COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT * Hash512::BYTE_LENGTH;
 const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS: u32 = 1;
 const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE: u32 = 5;
+const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE: u32 = 7;
 
 fn write_diagnostic_u64(output: &mut [u8], word_index: usize, value: u64) {
     let offset = word_index * size_of::<u64>();
@@ -172,6 +174,12 @@ pub const extern "C" fn sealed_lattice_compact_public_key_transport_bindings_byt
     COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH as u32
 }
 
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length()
+-> u32 {
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH as u32
+}
+
 fn decode_compact_public_key_transport_bindings(
     canonical_bindings: &[u8],
 ) -> Result<CompactPublicInputBindings, RefusalReason> {
@@ -243,6 +251,29 @@ fn copy_compact_public_key_verification_input(input: &[u8]) -> Result<Box<[u8]>,
     Ok(owned.into_boxed_slice())
 }
 
+fn prepare_compact_public_key_algebraic_verification(
+    canonical_bindings: &[u8],
+    canonical_proof_bytes: &[u8],
+    canonical_public_input_bytes: &[u8],
+    canonical_checkpoint_bytes: Option<&[u8]>,
+) -> Result<CompactPublicKeyAlgebraicVerification, u32> {
+    let bindings =
+        decode_compact_public_key_transport_bindings(canonical_bindings).map_err(refusal_status)?;
+    let proof = copy_compact_public_key_verification_input(canonical_proof_bytes)
+        .map_err(refusal_status)?;
+    let public_input = copy_compact_public_key_verification_input(canonical_public_input_bytes)
+        .map_err(refusal_status)?;
+    let transport = verify_selected_compact_public_key_transport(bindings, proof, public_input)
+        .map_err(|error| refusal_status(error.refusal_reason()))?;
+    match canonical_checkpoint_bytes {
+        Some(checkpoint_bytes) => {
+            CompactPublicKeyAlgebraicVerification::resume(transport, checkpoint_bytes)
+        }
+        None => CompactPublicKeyAlgebraicVerification::begin(transport),
+    }
+    .map_err(compact_public_key_algebraic_verification_error_status)
+}
+
 /// Begins positive algebraic verification after strict compact transport
 /// validation. The returned handle owns the exact proof and public-input bytes
 /// until completion, cancellation, or a terminal refusal.
@@ -279,15 +310,73 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_begin_algebraic_verif
     let proof = unsafe { input_bytes(proof_pointer, proof_byte_length) };
     let public_input = unsafe { input_bytes(public_input_pointer, public_input_byte_length) };
     let result = (|| {
-        let bindings =
-            decode_compact_public_key_transport_bindings(bindings).map_err(refusal_status)?;
-        let proof = copy_compact_public_key_verification_input(proof).map_err(refusal_status)?;
-        let public_input =
-            copy_compact_public_key_verification_input(public_input).map_err(refusal_status)?;
-        let transport = verify_selected_compact_public_key_transport(bindings, proof, public_input)
-            .map_err(|error| refusal_status(error.refusal_reason()))?;
-        let verification = CompactPublicKeyAlgebraicVerification::begin(transport)
-            .map_err(compact_public_key_algebraic_verification_error_status)?;
+        let verification =
+            prepare_compact_public_key_algebraic_verification(bindings, proof, public_input, None)?;
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .retain_compact_public_key_verification(verification)
+                .map_err(runtime_error_status)
+        })
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe {
+                write_status(status_pointer, 0);
+            }
+            handle
+        }
+        Err(status) => {
+            unsafe {
+                write_status(status_pointer, status);
+            }
+            0
+        }
+    }
+}
+
+/// Restores one authenticated safe-boundary cursor by revalidating the exact
+/// transported bytes and retaining a fresh verifier at genesis. Subsequent
+/// bounded polls replay deterministically to the cursor before live work can
+/// continue.
+///
+/// # Safety
+///
+/// Each input pointer must either be null with a zero byte length or name its
+/// full readable byte range. A non-null status pointer must name one writable
+/// `u32` in WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_resume_algebraic_verification(
+    bindings_pointer: *const u8,
+    bindings_byte_length: usize,
+    proof_pointer: *const u8,
+    proof_byte_length: usize,
+    public_input_pointer: *const u8,
+    public_input_byte_length: usize,
+    checkpoint_pointer: *const u8,
+    checkpoint_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let capacity_result = COMMON_PROOF_WASM_RUNTIME_REGISTRY
+        .with(|registry| registry.borrow().require_new_entry_capacity(true));
+    if let Err(error) = capacity_result {
+        unsafe {
+            write_status(status_pointer, runtime_error_status(error));
+        }
+        return 0;
+    }
+
+    let bindings = unsafe { input_bytes(bindings_pointer, bindings_byte_length) };
+    let proof = unsafe { input_bytes(proof_pointer, proof_byte_length) };
+    let public_input = unsafe { input_bytes(public_input_pointer, public_input_byte_length) };
+    let checkpoint = unsafe { input_bytes(checkpoint_pointer, checkpoint_byte_length) };
+    let result = (|| {
+        let verification = prepare_compact_public_key_algebraic_verification(
+            bindings,
+            proof,
+            public_input,
+            Some(checkpoint),
+        )?;
         COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
             registry
                 .borrow_mut()
@@ -356,6 +445,23 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
                     completed_work_unit_count,
                 ))
             }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
+                completed_work_unit_count,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE,
+                    completed_work_unit_count,
+                ))
+            }
             Ok(CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal)) => {
                 drop((*terminal).into_transport());
                 Ok((COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE, 0))
@@ -372,6 +478,43 @@ pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verificatio
     unsafe {
         poll_kind_pointer.write(poll_kind);
         completed_work_unit_count_pointer.write(completed_work_unit_count);
+    }
+    0
+}
+
+/// Copies the canonical source-bound safe cursor for one live verifier. The
+/// bytes contain no opaque transform state and can restore only by deterministic
+/// replay from genesis.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the reported checkpoint byte length in
+/// writable WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let checkpoint = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .compact_public_key_verifications
+            .get(&operation_handle)
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::CheckpointUnavailable)?
+            .canonical_checkpoint_bytes()
+    });
+    let checkpoint = match checkpoint {
+        Ok(checkpoint) => checkpoint,
+        Err(error) => return compact_public_key_algebraic_verification_error_status(error),
+    };
+    unsafe {
+        output_pointer.copy_from_nonoverlapping(checkpoint.as_ptr(), checkpoint.len());
     }
     0
 }
@@ -3081,6 +3224,29 @@ mod tests {
         };
         assert_eq!(handle, 0);
         assert_eq!(status, refusal_status(RefusalReason::MalformedEncoding));
+        assert_eq!(
+            sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length()
+                as usize,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+        );
+        let mut checkpoint =
+            [0_u8; COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH];
+        status = u32::MAX;
+        let resumed_handle = unsafe {
+            sealed_lattice_compact_public_key_resume_algebraic_verification(
+                canonical_bindings.as_ptr(),
+                canonical_bindings.len(),
+                malformed_proof.as_ptr(),
+                malformed_proof.len(),
+                malformed_public_input.as_ptr(),
+                malformed_public_input.len(),
+                checkpoint.as_ptr(),
+                checkpoint.len(),
+                &mut status,
+            )
+        };
+        assert_eq!(resumed_handle, 0);
+        assert_eq!(status, refusal_status(RefusalReason::MalformedEncoding));
         COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
             assert!(
                 registry
@@ -3116,6 +3282,26 @@ mod tests {
         );
         assert_eq!(poll_kind, u32::MAX);
         assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint(
+                    17,
+                    checkpoint.as_mut_ptr(),
+                    checkpoint.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint(
+                    17,
+                    checkpoint.as_mut_ptr(),
+                    checkpoint.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
         assert_eq!(
             sealed_lattice_compact_public_key_cancel_algebraic_verification(17),
             refusal_status(RefusalReason::ConsumedState),

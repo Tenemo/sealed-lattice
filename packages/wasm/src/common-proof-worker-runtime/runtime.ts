@@ -185,8 +185,26 @@ type CompactPublicKeyAlgebraicVerificationInput = Readonly<{
     publicInputBytes: Uint8Array;
 }>;
 
+/**
+ * Browser-owned authenticated custody for one source-bound algebraic-verifier
+ * cursor. Publication must retain an owned copy before resolving; restoration
+ * must authenticate the exact bytes before returning a fresh owned copy.
+ */
+type CompactPublicKeyAlgebraicVerificationCheckpointCustody = Readonly<{
+    publishAuthenticatedCheckpoint(
+        canonicalCheckpointBytes: Uint8Array<ArrayBuffer>,
+    ): Promise<void>;
+    restoreAuthenticatedCheckpoint(): Promise<Uint8Array>;
+}>;
+
+type CompactPublicKeyAlgebraicVerificationResume = Readonly<{
+    checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
+}>;
+
 type CompactPublicKeyAlgebraicVerificationWorkerOptions = Readonly<{
+    checkpointCustody?: CompactPublicKeyAlgebraicVerificationCheckpointCustody;
     maximumWorkUnitCountPerPoll?: number;
+    resume?: CompactPublicKeyAlgebraicVerificationResume;
     signal?: AbortSignal;
     yieldControl?: () => Promise<void>;
 }>;
@@ -2044,6 +2062,65 @@ const throwIfVerificationCancelled = (signal?: AbortSignal): void => {
 
 const defaultCompactPublicKeyMaximumWorkUnitCountPerPoll = 4_096;
 
+const restoreCompactPublicKeyAlgebraicVerificationCheckpoint = async (
+    kernel: CommonProofVerificationKernelBoundary,
+    checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+): Promise<Uint8Array<ArrayBuffer>> => {
+    let canonicalCheckpointBytes: Uint8Array;
+    try {
+        canonicalCheckpointBytes =
+            await checkpointCustody.restoreAuthenticatedCheckpoint();
+    } catch (error) {
+        throw storageFailure(
+            'The browser store could not authenticate and restore the compact public-key algebraic verification checkpoint.',
+            error,
+        );
+    }
+    const expectedByteLength =
+        kernel.compactPublicKeyAlgebraicVerificationCheckpointByteLength();
+    if (
+        !(canonicalCheckpointBytes instanceof Uint8Array) ||
+        !(canonicalCheckpointBytes.buffer instanceof ArrayBuffer) ||
+        canonicalCheckpointBytes.byteOffset !== 0 ||
+        canonicalCheckpointBytes.byteLength !== expectedByteLength ||
+        canonicalCheckpointBytes.buffer.byteLength !== expectedByteLength
+    ) {
+        if (canonicalCheckpointBytes instanceof Uint8Array) {
+            destroyTransferredWorkerBuffer(canonicalCheckpointBytes);
+        }
+        throw new CommonProofWorkerRuntimeError(
+            'WrongStorageResult',
+            'The browser store returned a malformed compact public-key algebraic verification checkpoint.',
+        );
+    }
+    return canonicalCheckpointBytes as Uint8Array<ArrayBuffer>;
+};
+
+const publishCompactPublicKeyAlgebraicVerificationCheckpoint = async (
+    kernel: CommonProofVerificationKernelBoundary,
+    operationHandle: number,
+    checkpointCustody: CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+): Promise<void> => {
+    const canonicalCheckpointBytes =
+        kernel.copyCompactPublicKeyAlgebraicVerificationCheckpoint(
+            operationHandle,
+        );
+    try {
+        try {
+            await checkpointCustody.publishAuthenticatedCheckpoint(
+                canonicalCheckpointBytes,
+            );
+        } catch (error) {
+            throw storageFailure(
+                'The browser store could not atomically publish the compact public-key algebraic verification checkpoint.',
+                error,
+            );
+        }
+    } finally {
+        destroyTransferredWorkerBuffer(canonicalCheckpointBytes);
+    }
+};
+
 /**
  * Verifies the exact compact public-key transport and every production CFW and
  * WHIR equation through bounded scalar WASM polls. This genuine verification
@@ -2069,17 +2146,43 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
     }
 
     const kernel = new CommonProofVerificationKernelBoundary(context);
+    const resume = options.resume;
     const signal = options.signal;
     const yieldControl = options.yieldControl ?? yieldBrowserWorkerTurn;
+    const checkpointCustody =
+        options.checkpointCustody ?? resume?.checkpointCustody;
     let operationHandle: number | undefined;
     let operationTerminal = false;
+    let deterministicReplayComplete = resume === undefined;
     try {
         throwIfVerificationCancelled(signal);
-        const begin = kernel.beginCompactPublicKeyAlgebraicVerification(
-            input.bindings,
-            input.proofBytes,
-            input.publicInputBytes,
-        );
+        const begin =
+            resume === undefined
+                ? kernel.beginCompactPublicKeyAlgebraicVerification(
+                      input.bindings,
+                      input.proofBytes,
+                      input.publicInputBytes,
+                  )
+                : await (async () => {
+                      const canonicalCheckpointBytes =
+                          await restoreCompactPublicKeyAlgebraicVerificationCheckpoint(
+                              kernel,
+                              resume.checkpointCustody,
+                          );
+                      try {
+                          throwIfVerificationCancelled(signal);
+                          return kernel.resumeCompactPublicKeyAlgebraicVerification(
+                              input.bindings,
+                              input.proofBytes,
+                              input.publicInputBytes,
+                              canonicalCheckpointBytes,
+                          );
+                      } finally {
+                          destroyTransferredWorkerBuffer(
+                              canonicalCheckpointBytes,
+                          );
+                      }
+                  })();
         if (begin.kind === 'refused') {
             return Object.freeze({
                 isValid: false,
@@ -2095,6 +2198,26 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
             );
             switch (poll.kind) {
                 case 'progress':
+                    if (!deterministicReplayComplete) {
+                        await yieldControl();
+                        break;
+                    }
+                    if (checkpointCustody !== undefined) {
+                        await publishCompactPublicKeyAlgebraicVerificationCheckpoint(
+                            kernel,
+                            operationHandle,
+                            checkpointCustody,
+                        );
+                    }
+                    await yieldControl();
+                    break;
+                case 'resume-complete':
+                    if (resume === undefined || deterministicReplayComplete) {
+                        throw kernelFailure(
+                            'The compact public-key algebraic verifier returned an unexpected resume-complete signal.',
+                        );
+                    }
+                    deterministicReplayComplete = true;
                     await yieldControl();
                     break;
                 case 'refused':
@@ -2104,6 +2227,11 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
                         refusalReason: poll.refusalReason,
                     });
                 case 'complete':
+                    if (!deterministicReplayComplete) {
+                        throw kernelFailure(
+                            'The compact public-key algebraic verifier completed before deterministic checkpoint replay.',
+                        );
+                    }
                     operationTerminal = true;
                     return Object.freeze({
                         isValid: true,

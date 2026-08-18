@@ -60,9 +60,11 @@ const verificationPollQueryTreeAccepted = 4;
 const verificationPollComplete = 5;
 const compactPublicKeyAlgebraicVerificationPollProgress = 1;
 const compactPublicKeyAlgebraicVerificationPollComplete = 5;
+const compactPublicKeyAlgebraicVerificationPollResumeComplete = 7;
 export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
+const canonicalCompactPublicKeyAlgebraicVerificationCheckpointByteLength = 400;
 
 const destroyOwnedKernelBoundaryInput = (bytes: Uint8Array): void => {
     if (!(bytes.buffer instanceof ArrayBuffer)) {
@@ -285,6 +287,10 @@ type CompactPublicKeyAlgebraicVerificationKernelPoll =
     | Readonly<{
           completedWorkUnitCount: number;
           kind: 'progress';
+      }>
+    | Readonly<{
+          completedWorkUnitCount: number;
+          kind: 'resume-complete';
       }>
     | Readonly<{ kind: 'complete' }>
     | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
@@ -1897,6 +1903,71 @@ export class CommonProofVerificationKernelBoundary {
         proofBytes: Uint8Array,
         publicInputBytes: Uint8Array,
     ): CompactPublicKeyAlgebraicVerificationKernelBegin {
+        return this.#startCompactPublicKeyAlgebraicVerification(
+            bindings,
+            proofBytes,
+            publicInputBytes,
+        );
+    }
+
+    /**
+     * Revalidates the exact transported bytes and retains a fresh verifier at
+     * genesis. Bounded polls replay to the authenticated safe cursor before
+     * live work can continue.
+     */
+    public resumeCompactPublicKeyAlgebraicVerification(
+        bindings: CompactPublicKeyTransportBindings,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+        canonicalCheckpointBytes: Uint8Array,
+    ): CompactPublicKeyAlgebraicVerificationKernelBegin {
+        if (
+            !(canonicalCheckpointBytes instanceof Uint8Array) ||
+            canonicalCheckpointBytes.byteLength !==
+                this.compactPublicKeyAlgebraicVerificationCheckpointByteLength()
+        ) {
+            throw resourceFailure(
+                'The compact public-key algebraic verification checkpoint has the wrong byte length.',
+            );
+        }
+        return this.#startCompactPublicKeyAlgebraicVerification(
+            bindings,
+            proofBytes,
+            publicInputBytes,
+            canonicalCheckpointBytes,
+        );
+    }
+
+    public compactPublicKeyAlgebraicVerificationCheckpointByteLength(): number {
+        return this.#context.runExclusive(
+            'compact public-key algebraic verification checkpoint length',
+            () => {
+                const byteLength = requireUnsigned32(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length',
+                    )(),
+                    'The compact public-key algebraic verification checkpoint byte length',
+                );
+                if (
+                    byteLength !==
+                    canonicalCompactPublicKeyAlgebraicVerificationCheckpointByteLength
+                ) {
+                    throw kernelFailure(
+                        'The compact public-key algebraic verification checkpoint geometry disagrees with the worker.',
+                    );
+                }
+                return byteLength;
+            },
+        );
+    }
+
+    #startCompactPublicKeyAlgebraicVerification(
+        bindings: CompactPublicKeyTransportBindings,
+        proofBytes: Uint8Array,
+        publicInputBytes: Uint8Array,
+        canonicalCheckpointBytes?: Uint8Array,
+    ): CompactPublicKeyAlgebraicVerificationKernelBegin {
         const canonicalBindings = this.#copyCompactPublicKeyTransportBindings(
             bindings,
             proofBytes,
@@ -1910,6 +1981,7 @@ export class CommonProofVerificationKernelBoundary {
                     let bindingsPointer: number | undefined;
                     let proofPointer: number | undefined;
                     let publicInputPointer: number | undefined;
+                    let checkpointPointer: number | undefined;
                     let statusPointer: number | undefined;
                     try {
                         bindingsPointer =
@@ -1917,20 +1989,41 @@ export class CommonProofVerificationKernelBoundary {
                         proofPointer = this.#memoryBoundary.copy(proofBytes);
                         publicInputPointer =
                             this.#memoryBoundary.copy(publicInputBytes);
+                        if (canonicalCheckpointBytes !== undefined) {
+                            checkpointPointer = this.#memoryBoundary.copy(
+                                canonicalCheckpointBytes,
+                            );
+                        }
                         statusPointer =
                             this.#memoryBoundary.allocateZeroedWords(1);
-                        const operationHandle = resolveNumberExport(
-                            this.#context.wasmExports,
-                            'sealed_lattice_compact_public_key_begin_algebraic_verification',
-                        )(
-                            bindingsPointer,
-                            canonicalBindings.byteLength,
-                            proofPointer,
-                            proofBytes.byteLength,
-                            publicInputPointer,
-                            publicInputBytes.byteLength,
-                            statusPointer,
-                        );
+                        const operationHandle =
+                            canonicalCheckpointBytes === undefined
+                                ? resolveNumberExport(
+                                      this.#context.wasmExports,
+                                      'sealed_lattice_compact_public_key_begin_algebraic_verification',
+                                  )(
+                                      bindingsPointer,
+                                      canonicalBindings.byteLength,
+                                      proofPointer,
+                                      proofBytes.byteLength,
+                                      publicInputPointer,
+                                      publicInputBytes.byteLength,
+                                      statusPointer,
+                                  )
+                                : resolveNumberExport(
+                                      this.#context.wasmExports,
+                                      'sealed_lattice_compact_public_key_resume_algebraic_verification',
+                                  )(
+                                      bindingsPointer,
+                                      canonicalBindings.byteLength,
+                                      proofPointer,
+                                      proofBytes.byteLength,
+                                      publicInputPointer,
+                                      publicInputBytes.byteLength,
+                                      checkpointPointer!,
+                                      canonicalCheckpointBytes.byteLength,
+                                      statusPointer,
+                                  );
                         const [status] = this.#memoryBoundary.readWords(
                             statusPointer,
                             1,
@@ -1965,6 +2058,15 @@ export class CommonProofVerificationKernelBoundary {
                                 wasm32WordByteLength,
                             );
                         }
+                        if (
+                            checkpointPointer !== undefined &&
+                            canonicalCheckpointBytes !== undefined
+                        ) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                checkpointPointer,
+                                canonicalCheckpointBytes.byteLength,
+                            );
+                        }
                         if (publicInputPointer !== undefined) {
                             this.#memoryBoundary.zeroAndDeallocate(
                                 publicInputPointer,
@@ -1989,6 +2091,51 @@ export class CommonProofVerificationKernelBoundary {
         } finally {
             canonicalBindings.fill(0);
         }
+    }
+
+    /** Copies the source-bound cursor for the latest completed safe slice. */
+    public copyCompactPublicKeyAlgebraicVerificationCheckpoint(
+        operationHandle: number,
+    ): Uint8Array<ArrayBuffer> {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key algebraic verification operation handle',
+        );
+        const checkpointByteLength =
+            this.compactPublicKeyAlgebraicVerificationCheckpointByteLength();
+        return this.#context.runExclusive(
+            'compact public-key algebraic verification checkpoint copy',
+            () => {
+                const outputPointer =
+                    this.#memoryBoundary.allocate(checkpointByteLength);
+                try {
+                    const status = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint',
+                    )(operationHandle, outputPointer, checkpointByteLength);
+                    const refusalReason =
+                        decodeCompactPublicKeyAlgebraicVerificationStatus(
+                            status,
+                            'algebraic verification checkpoint copy',
+                        );
+                    if (refusalReason !== undefined) {
+                        throw kernelFailure(
+                            `The compact public-key algebraic verifier refused checkpoint copy with ${refusalReason}.`,
+                        );
+                    }
+                    return new Uint8Array(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        checkpointByteLength,
+                    ).slice();
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        checkpointByteLength,
+                    );
+                }
+            },
+        );
     }
 
     /** Advances one bounded algebraic-verifier slice without minting authority. */
@@ -2050,6 +2197,20 @@ export class CommonProofVerificationKernelBoundary {
                             return Object.freeze({
                                 completedWorkUnitCount,
                                 kind: 'progress',
+                            });
+                        }
+                        case compactPublicKeyAlgebraicVerificationPollResumeComplete: {
+                            if (
+                                completedWorkUnitCount === 0 ||
+                                completedWorkUnitCount > maximumWorkUnitCount
+                            ) {
+                                throw kernelFailure(
+                                    'The compact public-key algebraic verifier reported invalid bounded replay completion.',
+                                );
+                            }
+                            return Object.freeze({
+                                completedWorkUnitCount,
+                                kind: 'resume-complete',
                             });
                         }
                         case compactPublicKeyAlgebraicVerificationPollComplete: {

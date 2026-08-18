@@ -124,6 +124,7 @@ impl CompactPublicKeyTransportError {
 /// outside this type's guarantee.
 pub(crate) struct VerifiedCompactPublicKeyTransport {
     canonical_proof_bytes: Box<[u8]>,
+    canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
     decoded_proof: DecodedCompactProofWire,
     public_input: VerifiedCompactPublicInputTransport,
     verifier_messages: Box<[DecodedFixedUniformVerifierMessage]>,
@@ -263,6 +264,7 @@ impl VerifiedCompactPublicInputTransport {
         bindings: CompactPublicInputBindings,
         canonical_bytes: Box<[u8]>,
         decoded: DecodedCompactPublicInput,
+        binding: [u8; Hash512::BYTE_LENGTH],
     ) -> Result<Self, CompactPublicKeyTransportError> {
         let verifier_inputs = contract.verifier_inputs();
         if bindings.relation_plan_hash().into_bytes()
@@ -271,11 +273,6 @@ impl VerifiedCompactPublicInputTransport {
         {
             return Err(CompactPublicKeyTransportError::InvalidResponseRegistry);
         }
-        let binding = transport_byte_digest(
-            COMPACT_TRANSPORT_PUBLIC_INPUT_DIGEST_DOMAIN,
-            &canonical_bytes,
-        )
-        .into_bytes();
         Ok(Self {
             contract,
             bindings,
@@ -322,6 +319,18 @@ impl VerifiedCompactPublicKeyTransport {
 
     pub(super) const fn public_input_owner(&self) -> &VerifiedCompactPublicInputTransport {
         &self.public_input
+    }
+
+    pub(crate) const fn public_input_bindings(&self) -> CompactPublicInputBindings {
+        self.public_input.bindings()
+    }
+
+    pub(crate) const fn canonical_proof_binding(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.canonical_proof_binding
+    }
+
+    pub(crate) fn canonical_public_input_binding(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_input.view().binding()
     }
 
     #[cfg(test)]
@@ -596,11 +605,14 @@ pub(crate) fn validate_selected_compact_public_input_transport(
         public_input_bindings,
         &canonical_public_input_bytes,
     )?;
+    let public_input_binding =
+        compact_public_input_transport_binding(&canonical_public_input_bytes);
     VerifiedCompactPublicInputTransport::from_selected_decoded(
         contract,
         public_input_bindings,
         canonical_public_input_bytes,
         decoded,
+        public_input_binding,
     )
 }
 
@@ -636,7 +648,7 @@ pub(crate) fn verify_selected_compact_public_key_transport(
     canonical_proof_bytes: Box<[u8]>,
     canonical_public_input_bytes: Box<[u8]>,
 ) -> Result<VerifiedCompactPublicKeyTransport, CompactPublicKeyTransportError> {
-    let (decoded_proof, decoded_public_input, verifier_messages) =
+    let (decoded_proof, decoded_public_input, verifier_messages, proof_digest, public_input_digest) =
         validate_selected_compact_public_key_transport_components(
             public_input_bindings,
             &canonical_proof_bytes,
@@ -645,12 +657,14 @@ pub(crate) fn verify_selected_compact_public_key_transport(
     let contract = CompactPublicKeyProofContract::decode_selected()?;
     Ok(VerifiedCompactPublicKeyTransport {
         canonical_proof_bytes,
+        canonical_proof_binding: proof_digest.into_bytes(),
         decoded_proof,
         public_input: VerifiedCompactPublicInputTransport::from_selected_decoded(
             contract,
             public_input_bindings,
             canonical_public_input_bytes,
             decoded_public_input,
+            public_input_digest.into_bytes(),
         )?,
         verifier_messages: verifier_messages.into_boxed_slice(),
     })
@@ -660,6 +674,8 @@ type CompactPublicKeyTransportComponents = (
     DecodedCompactProofWire,
     DecodedCompactPublicInput,
     Vec<DecodedFixedUniformVerifierMessage>,
+    Hash512,
+    Hash512,
 );
 
 fn validate_selected_compact_public_key_transport_components(
@@ -720,6 +736,8 @@ fn validate_selected_compact_public_key_transport_components(
                     state.decoded_proof,
                     state.decoded_public_input,
                     state.verifier_messages,
+                    proof_digest,
+                    public_input_digest,
                 ));
             }
         }

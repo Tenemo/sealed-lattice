@@ -1475,6 +1475,17 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         publicInputByteLength: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_compact_public_key_resume_algebraic_verification?: (
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        checkpointPointer: number,
+        checkpointByteLength: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_compact_public_key_algebraic_verification_poll?: (
         operationHandle: number,
         maximumWorkUnitCount: number,
@@ -1483,6 +1494,12 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     ) => number;
     sealed_lattice_compact_public_key_cancel_algebraic_verification?: (
         operationHandle: number,
+    ) => number;
+    sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length?: () => number;
+    sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
     ) => number;
     sealed_lattice_common_proof_begin_generation?: (
         preparedGenerationHandle: number,

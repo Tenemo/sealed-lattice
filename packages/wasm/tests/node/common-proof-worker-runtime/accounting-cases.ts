@@ -469,6 +469,356 @@ describe('Compact public-key algebraic verification worker', () => {
         expect(cancellationCount).toBe(0);
     });
 
+    it('publishes the exact source-bound cursor after live bounded progress', async () => {
+        const canonicalCheckpointBytes = new Uint8Array(400).fill(0x71);
+        let copiedCheckpointCount = 0;
+        let publishedCheckpointBytes: Uint8Array | undefined;
+        let pollCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
+                () => canonicalCheckpointBytes.byteLength,
+            sealed_lattice_compact_public_key_begin_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                statusPointer,
+            ) => {
+                writeUnsigned32(memory, statusPointer, 0);
+                return 95;
+            },
+            sealed_lattice_compact_public_key_algebraic_verification_poll: (
+                operationHandle,
+                _maximumWorkUnitCount,
+                pollKindPointer,
+                completedWorkUnitCountPointer,
+            ) => {
+                expect(operationHandle).toBe(95);
+                pollCount += 1;
+                writeUnsigned32(
+                    memory,
+                    pollKindPointer,
+                    pollCount === 1 ? 1 : 5,
+                );
+                writeUnsigned32(
+                    memory,
+                    completedWorkUnitCountPointer,
+                    pollCount === 1 ? 9 : 0,
+                );
+                return 0;
+            },
+            sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint:
+                (
+                    operationHandle: number,
+                    outputPointer: number,
+                    outputByteLength: number,
+                ) => {
+                    expect(operationHandle).toBe(95);
+                    expect(outputByteLength).toBe(400);
+                    copiedCheckpointCount += 1;
+                    memoryBytes(memory, outputPointer, outputByteLength).set(
+                        canonicalCheckpointBytes,
+                    );
+                    return 0;
+                },
+            sealed_lattice_compact_public_key_cancel_algebraic_verification:
+                () => 0,
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    checkpointCustody: {
+                        publishAuthenticatedCheckpoint: (
+                            checkpointBytes: Uint8Array<ArrayBuffer>,
+                        ) => {
+                            publishedCheckpointBytes = checkpointBytes.slice();
+                            return Promise.resolve();
+                        },
+                        restoreAuthenticatedCheckpoint: () => {
+                            throw new Error(
+                                'Fresh verification must not restore.',
+                            );
+                        },
+                    },
+                    maximumWorkUnitCountPerPoll: 9,
+                },
+            ),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+        expect(copiedCheckpointCount).toBe(1);
+        expect(publishedCheckpointBytes).toEqual(canonicalCheckpointBytes);
+    });
+
+    it('restores at genesis, replays without publishing, and resumes live checkpointing', async () => {
+        const restoredCheckpointBytes = new Uint8Array(400).fill(0x72);
+        const nextCheckpointBytes = new Uint8Array(400).fill(0x73);
+        let beginCount = 0;
+        let copiedCheckpointCount = 0;
+        let pollCount = 0;
+        let publishedCheckpointBytes: Uint8Array | undefined;
+        let yieldCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
+                () => 400,
+            sealed_lattice_compact_public_key_begin_algebraic_verification:
+                () => {
+                    beginCount += 1;
+                    return 0;
+                },
+            sealed_lattice_compact_public_key_resume_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                checkpointPointer: number,
+                checkpointByteLength: number,
+                statusPointer: number,
+            ) => {
+                expect(checkpointByteLength).toBe(400);
+                expect(
+                    memoryBytes(
+                        memory,
+                        checkpointPointer,
+                        checkpointByteLength,
+                    ),
+                ).toEqual(restoredCheckpointBytes);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 96;
+            },
+            sealed_lattice_compact_public_key_algebraic_verification_poll: (
+                operationHandle,
+                maximumWorkUnitCount,
+                pollKindPointer,
+                completedWorkUnitCountPointer,
+            ) => {
+                expect(operationHandle).toBe(96);
+                expect(maximumWorkUnitCount).toBe(5);
+                pollCount += 1;
+                const pollKind = [1, 7, 1, 5][pollCount - 1];
+                const completedWorkUnitCount = [5, 3, 2, 0][pollCount - 1];
+                writeUnsigned32(memory, pollKindPointer, pollKind);
+                writeUnsigned32(
+                    memory,
+                    completedWorkUnitCountPointer,
+                    completedWorkUnitCount,
+                );
+                return 0;
+            },
+            sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint:
+                (
+                    operationHandle: number,
+                    outputPointer: number,
+                    outputByteLength: number,
+                ) => {
+                    expect(operationHandle).toBe(96);
+                    copiedCheckpointCount += 1;
+                    memoryBytes(memory, outputPointer, outputByteLength).set(
+                        nextCheckpointBytes,
+                    );
+                    return 0;
+                },
+            sealed_lattice_compact_public_key_cancel_algebraic_verification:
+                () => 0,
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    maximumWorkUnitCountPerPoll: 5,
+                    resume: {
+                        checkpointCustody: {
+                            publishAuthenticatedCheckpoint: (
+                                checkpointBytes: Uint8Array<ArrayBuffer>,
+                            ) => {
+                                publishedCheckpointBytes =
+                                    checkpointBytes.slice();
+                                return Promise.resolve();
+                            },
+                            restoreAuthenticatedCheckpoint: () =>
+                                Promise.resolve(restoredCheckpointBytes),
+                        },
+                    },
+                    yieldControl: () => {
+                        yieldCount += 1;
+                        return Promise.resolve();
+                    },
+                },
+            ),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+        expect(beginCount).toBe(0);
+        expect(copiedCheckpointCount).toBe(1);
+        expect(pollCount).toBe(4);
+        expect(publishedCheckpointBytes).toEqual(nextCheckpointBytes);
+        expect(restoredCheckpointBytes.byteLength).toBe(0);
+        expect(yieldCount).toBe(3);
+    });
+
+    it('refuses a restored checkpoint that is not one exact owned canonical buffer', async () => {
+        const oversizedBackingBuffer = new ArrayBuffer(401);
+        const restoredCheckpointBytes = new Uint8Array(
+            oversizedBackingBuffer,
+            1,
+            400,
+        ).fill(0x74);
+        const runtime = createMockKernelRuntime(() => ({
+            sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
+                () => 400,
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    resume: {
+                        checkpointCustody: {
+                            publishAuthenticatedCheckpoint: () =>
+                                Promise.resolve(),
+                            restoreAuthenticatedCheckpoint: () =>
+                                Promise.resolve(restoredCheckpointBytes),
+                        },
+                    },
+                },
+            ),
+        ).rejects.toMatchObject({ code: 'WrongStorageResult' });
+        expect(restoredCheckpointBytes).toEqual(new Uint8Array(400));
+    });
+
+    it('returns a checkpoint-binding refusal as a typed verification result', async () => {
+        const restoredCheckpointBytes = new Uint8Array(400).fill(0x74);
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
+                () => 400,
+            sealed_lattice_compact_public_key_resume_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                _checkpointPointer,
+                _checkpointByteLength,
+                statusPointer: number,
+            ) => {
+                writeUnsigned32(memory, statusPointer, 0x0004);
+                return 0;
+            },
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    resume: {
+                        checkpointCustody: {
+                            publishAuthenticatedCheckpoint: () =>
+                                Promise.resolve(),
+                            restoreAuthenticatedCheckpoint: () =>
+                                Promise.resolve(restoredCheckpointBytes),
+                        },
+                    },
+                },
+            ),
+        ).resolves.toEqual({
+            isValid: false,
+            refusalReason: 'wrongContext',
+        });
+        expect(restoredCheckpointBytes.byteLength).toBe(0);
+    });
+
+    it('retires the live verifier when authenticated checkpoint publication fails', async () => {
+        let cancellationCount = 0;
+        let publishedInput: Uint8Array | undefined;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                () => 256,
+            sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length:
+                () => 400,
+            sealed_lattice_compact_public_key_begin_algebraic_verification: (
+                _bindingsPointer,
+                _bindingsByteLength,
+                _proofPointer,
+                _proofByteLength,
+                _publicInputPointer,
+                _publicInputByteLength,
+                statusPointer,
+            ) => {
+                writeUnsigned32(memory, statusPointer, 0);
+                return 97;
+            },
+            sealed_lattice_compact_public_key_algebraic_verification_poll: (
+                _operationHandle,
+                _maximumWorkUnitCount,
+                pollKindPointer,
+                completedWorkUnitCountPointer,
+            ) => {
+                writeUnsigned32(memory, pollKindPointer, 1);
+                writeUnsigned32(memory, completedWorkUnitCountPointer, 1);
+                return 0;
+            },
+            sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint:
+                (
+                    _operationHandle: number,
+                    outputPointer: number,
+                    outputByteLength: number,
+                ) => {
+                    memoryBytes(memory, outputPointer, outputByteLength).fill(
+                        0x75,
+                    );
+                    return 0;
+                },
+            sealed_lattice_compact_public_key_cancel_algebraic_verification: (
+                operationHandle,
+            ) => {
+                expect(operationHandle).toBe(97);
+                cancellationCount += 1;
+                return 0;
+            },
+        }));
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                { bindings, proofBytes, publicInputBytes },
+                {
+                    checkpointCustody: {
+                        publishAuthenticatedCheckpoint: (
+                            checkpointBytes: Uint8Array<ArrayBuffer>,
+                        ) => {
+                            publishedInput = checkpointBytes;
+                            return Promise.reject(
+                                new Error('simulated publication failure'),
+                            );
+                        },
+                        restoreAuthenticatedCheckpoint: () => {
+                            throw new Error(
+                                'Fresh verification must not restore.',
+                            );
+                        },
+                    },
+                    maximumWorkUnitCountPerPoll: 1,
+                },
+            ),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        expect(cancellationCount).toBe(1);
+        expect(publishedInput?.byteLength).toBe(0);
+    });
+
     it('returns begin and poll refusals as typed verification results', async () => {
         const beginRefusalRuntime = createMockKernelRuntime((memory) => ({
             sealed_lattice_compact_public_key_transport_bindings_byte_length:

@@ -38,12 +38,15 @@ response-tree custody, and response checkpoints compile into the release
 kernel. The internal pollable verifier independently checks the compact CFW and
 WHIR algebra after transport, and guarded native evidence accepts one complete
 selected-size public-key proof. Raw kernel exports can begin, bounded-poll, and
-cancel that verifier state. An internal common-proof worker driver yields
-between bounded polls, preserves typed refusals, returns a positive
-`VerificationResult` only at algebraic completion, and cancels unfinished
-operations. It does not mint proof authority. Compact generation, authenticated
-checkpoint restoration, and proof capabilities are not worker-facing runtime
-capabilities.
+cancel that verifier state. They can also copy a fixed 400-byte source-bound
+safe cursor and restore only by revalidating the exact transported bytes and
+replaying deterministically from genesis. An internal common-proof worker
+driver yields between bounded polls, publishes and restores that cursor through
+an authenticated-custody contract, prevents publication during replay,
+preserves typed refusals, returns a positive `VerificationResult` only at
+algebraic completion, and cancels unfinished operations. It does not mint proof
+authority. Compact generation, a concrete durable browser-custody adapter, and
+proof capabilities are not worker-facing runtime capabilities.
 
 Test-only proof workbenches and native or desktop results are not an accepted
 ceremony or supported-phone evidence. The repository [README](../../README.md)
