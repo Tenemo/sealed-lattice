@@ -1182,8 +1182,11 @@ export const createInstalledCommonProofGenerationFixture = (
         options.checkpointLineageIdentifier.slice();
     const binding = installedCommonProofGenerationBindingHash.slice();
     const objectBytes = Uint8Array.from([4, 2, 1, 7, 9, 3, 8, 5]);
+    const maximumStorageTransactionPayloadByteLength = BigInt(
+        objectBytes.byteLength,
+    );
     const createStorageRequest = encodeRequest({
-        maximumPayloadByteLength: 1n,
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 1,
@@ -1197,7 +1200,7 @@ export const createInstalledCommonProofGenerationFixture = (
         runtimeBindingHash: binding,
     });
     const appendStorageRequest = encodeRequest({
-        maximumPayloadByteLength: BigInt(objectBytes.byteLength),
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 2,
@@ -1212,7 +1215,7 @@ export const createInstalledCommonProofGenerationFixture = (
         runtimeBindingHash: binding,
     });
     const sealStorageRequest = encodeRequest({
-        maximumPayloadByteLength: 1n,
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 3,
@@ -1226,7 +1229,7 @@ export const createInstalledCommonProofGenerationFixture = (
         runtimeBindingHash: binding,
     });
     const readStorageRequest = encodeRequest({
-        maximumPayloadByteLength: BigInt(objectBytes.byteLength),
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 4,

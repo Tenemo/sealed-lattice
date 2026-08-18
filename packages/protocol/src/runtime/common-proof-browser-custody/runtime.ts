@@ -476,6 +476,10 @@ export const openCommonProofBrowserCustody = (
             sealed !== (object.sealedContentDigest !== undefined) ||
             object.appendedByteLength < 0n ||
             object.appendedByteLength > object.exactByteLength ||
+            !Number.isSafeInteger(object.maximumAppendByteLength) ||
+            object.maximumAppendByteLength <= 0 ||
+            object.maximumAppendByteLength >
+                maximumCanonicalDataChunkByteLength ||
             !isSafeUnsigned32(expectedNextChunkOrdinal) ||
             object.nextChunkOrdinal !== expectedNextChunkOrdinal ||
             !isSafeUnsigned32(object.nextChunkOrdinal)
@@ -493,6 +497,7 @@ export const openCommonProofBrowserCustody = (
             unsigned16Bytes(externalMemoryProtectionCode(object.protection)),
             unsigned64Bytes(object.exactByteLength),
             unsigned64Bytes(object.appendedByteLength),
+            unsigned32Bytes(object.maximumAppendByteLength),
             unsigned32Bytes(object.nextChunkOrdinal),
             unsigned16Bytes(sealed ? 1 : 0),
             object.contentDigest,
@@ -1998,6 +2003,7 @@ export const openCommonProofBrowserCustody = (
             { readonly operationKind: 'create' }
         >,
         shadow: ExternalMemoryShadowState,
+        maximumAppendByteLength: number,
     ): Promise<void> => {
         if (
             shadow.objects.has(operation.objectOrdinal) ||
@@ -2043,6 +2049,7 @@ export const openCommonProofBrowserCustody = (
             }),
             exactByteLength: operation.exactByteLength,
             header,
+            maximumAppendByteLength,
             nextChunkOrdinal: 1,
             protection: operation.protection,
         });
@@ -2055,17 +2062,19 @@ export const openCommonProofBrowserCustody = (
         >,
         shadow: ExternalMemoryShadowState,
         payloadLedger: CommonProofPayloadBufferOwnershipLedger,
+        maximumAppendByteLength: number,
     ): Promise<void> => {
         const object = requireObject(shadow.objects, operation.objectOrdinal);
         const remainingByteLength =
             object.exactByteLength - object.appendedByteLength;
         const expectedAppendByteLength = Number(
-            remainingByteLength < BigInt(maximumCanonicalDataChunkByteLength)
+            remainingByteLength < BigInt(object.maximumAppendByteLength)
                 ? remainingByteLength
-                : BigInt(maximumCanonicalDataChunkByteLength),
+                : BigInt(object.maximumAppendByteLength),
         );
         if (
             object.sealMarker !== undefined ||
+            maximumAppendByteLength !== object.maximumAppendByteLength ||
             operation.expectedOffset !== object.appendedByteLength ||
             operation.bytes.byteLength !== expectedAppendByteLength ||
             object.appendedByteLength + BigInt(operation.bytes.byteLength) >
@@ -2386,6 +2395,20 @@ export const openCommonProofBrowserCustody = (
         }
         const firstOperationKind = request.operations[0]?.operationKind;
         if (
+            typeof request.maximumPayloadByteLength !== 'bigint' ||
+            request.maximumPayloadByteLength <= 0n ||
+            request.maximumPayloadByteLength >
+                BigInt(maximumCanonicalDataChunkByteLength)
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'A common-proof request has an invalid maximum payload byte length.',
+            );
+        }
+        const maximumAppendByteLength = Number(
+            request.maximumPayloadByteLength,
+        );
+        if (
             firstOperationKind === undefined ||
             (request.operations.length > 1 &&
                 (firstOperationKind !== 'delete' ||
@@ -2449,10 +2472,19 @@ export const openCommonProofBrowserCustody = (
             for (const operation of request.operations) {
                 switch (operation.operationKind) {
                     case 'create':
-                        await createObject(operation, shadow);
+                        await createObject(
+                            operation,
+                            shadow,
+                            maximumAppendByteLength,
+                        );
                         break;
                     case 'append':
-                        await appendObject(operation, shadow, payloadLedger);
+                        await appendObject(
+                            operation,
+                            shadow,
+                            payloadLedger,
+                            maximumAppendByteLength,
+                        );
                         break;
                     case 'seal':
                         await sealObject(operation, shadow);

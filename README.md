@@ -86,11 +86,20 @@ and target release remain incomplete or internal.
   not an accepted proof and mints no capability.
 - That guarded native run reconciles 4,926 CFW storage transactions,
   1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
-  stored bytes. The peak is 2.1875 times the 268,435,456-byte scratch planning
-  target and above its 50% automatic-variance band, so it still requires an
-  explicit engineering disposition. It remains below the 1,073,741,824-byte
-  absolute scratch bound. None of these numbers is release-WebAssembly,
-  IndexedDB, browser-process, or phone evidence.
+  logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
+  replayed that exact compiler-derived schedule through the production browser
+  custody and strict-durability IndexedDB adapter with 655,360-byte chunks. It
+  observed all 4,926 transactions and all 1,713 authenticated seals over
+  1,006,633,461 plaintext bytes in about 105.6 minutes. Physical accounting
+  reached a 588,382,522-byte stored peak, 1,393,676,030 bytes written, and
+  1,335,448,998,100 bytes read across 4,148,340 storage transactions. The
+  logical peak is 2.1875 times the 268,435,456-byte scratch planning target,
+  while the namespace-wide capacity rescans cause orders-of-magnitude read and
+  transaction amplification. Both results require explicit redesign and
+  engineering disposition, although the logical peak remains below the
+  1,073,741,824-byte absolute scratch bound. The diagnostic also exercised
+  scalar release-mode WebAssembly butterfly and salted-leaf kernels, but it is
+  not proof execution, complete browser lifecycle evidence, or phone evidence.
 - Release generation redecodes its canonical public input, derives the
   coefficient-to-view maps, enforces the single-proof KMAC call census, and uses
   coordinate-separated KMAC256 streams for field samples, private leaf salts,

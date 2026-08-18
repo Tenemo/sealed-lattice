@@ -4,6 +4,8 @@
         ".": {
             "entry": [
                 "tests/**/*.test.ts",
+                "tools/ci/desktop-browser-compact-cfw-storage-diagnostic-host.ts",
+                "tools/ci/desktop-browser-compact-cfw-storage-diagnostic-worker.ts",
                 "tools/ci/desktop-browser-primitive-measurement-page.ts",
                 "tools/ci/packed-package-smoke.mjs",
                 "tools/ci/sdk-package-tsdown.config.ts",

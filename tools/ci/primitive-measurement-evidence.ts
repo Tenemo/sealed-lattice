@@ -3024,7 +3024,7 @@ export const validateDesktopBrowserBoundaryCopyMeasurement = (
     return measurement;
 };
 
-const validateDesktopBrowserPrimitiveCaseMeasurement = (
+export const validateDesktopBrowserPrimitiveCaseMeasurement = (
     value: unknown,
 ): DesktopBrowserPrimitiveCaseMeasurement => {
     if (!isJsonObject(value)) {

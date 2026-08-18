@@ -40,6 +40,8 @@ mod compact_cfw_external;
 )]
 mod compact_cfw_external_prover;
 mod compact_cfw_geometry;
+#[cfg(any(test, feature = "primitive-measurement-evidence"))]
+mod compact_cfw_storage_diagnostic;
 #[cfg(test)]
 mod compact_emitted_cdhz;
 #[cfg(test)]
@@ -188,6 +190,8 @@ pub(crate) use committed_material::{
     CommittedMaterialPrivateDerivationDescription,
     committed_material_private_derivation_description,
 };
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) use compact_cfw_storage_diagnostic::selected_compact_cfw_storage_diagnostic_schedule;
 pub(crate) use component_material_stream::{
     ComponentMaterialOwnershipBinding, KeySwitchComponentMaterialTopology,
     KeySwitchComponentTraceColumn, VerifiedKeySwitchComponentMaterial,

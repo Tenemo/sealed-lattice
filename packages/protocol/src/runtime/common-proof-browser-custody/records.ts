@@ -74,6 +74,7 @@ export type ExternalMemoryObjectState = {
     contentDigest: Uint8Array<ArrayBuffer>;
     exactByteLength: bigint;
     header: ExternalMemoryRecordDescriptor;
+    maximumAppendByteLength: number;
     nextChunkOrdinal: number;
     protection: 'public-integrity' | 'secret-authenticated-encryption';
     sealedContentDigest?: Uint8Array<ArrayBuffer>;

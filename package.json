@@ -38,6 +38,7 @@
         "test:browser:built": "vitest --project chromium-desktop --run",
         "test:browser": "pnpm run build && pnpm run test:browser:built",
         "test:browser:primitive-measurements": "tsx ./tools/ci/run-desktop-browser-primitive-measurements.ts",
+        "test:browser:compact-cfw-storage-diagnostic": "tsx ./tools/ci/run-desktop-browser-compact-cfw-storage-diagnostic.ts",
         "test:browser:proof-evidence": "tsx ./tools/ci/run-desktop-browser-proof-evidence.ts",
         "test": "pnpm run build && pnpm run test:node:built && pnpm run test:browser:built",
         "smoke:pack:npm": "pnpm run build && tsx ./tools/ci/verify-packed-package.ts",

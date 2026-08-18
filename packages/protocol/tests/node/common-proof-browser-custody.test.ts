@@ -173,10 +173,11 @@ const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
 const request = (
     operations: readonly CommonProofExternalMemoryOperation[],
     requestSequence = 1n,
+    maximumPayloadByteLength = 1_048_576n,
 ): CommonProofExternalMemoryRequest =>
     Object.freeze({
         maximumOperationCount: 4_096,
-        maximumPayloadByteLength: 1_048_576n,
+        maximumPayloadByteLength,
         operations: Object.freeze(operations),
         requestDigest: new Uint8Array(64).fill(0x88),
         requestSequence,
@@ -216,12 +217,13 @@ const canonicalAppendRequests = (
     objectOrdinal: number,
     bytes: Uint8Array,
     firstRequestSequence = 1n,
+    maximumPayloadByteLength: number = maximumCanonicalDataChunkByteLength,
 ): readonly CommonProofExternalMemoryRequest[] => {
     const requests: CommonProofExternalMemoryRequest[] = [];
     let byteOffset = 0;
     while (byteOffset < bytes.byteLength) {
         const chunkByteLength = Math.min(
-            maximumCanonicalDataChunkByteLength,
+            maximumPayloadByteLength,
             bytes.byteLength - byteOffset,
         );
         requests.push(
@@ -234,6 +236,7 @@ const canonicalAppendRequests = (
                     ),
                 ],
                 firstRequestSequence + BigInt(requests.length),
+                BigInt(maximumPayloadByteLength),
             ),
         );
         byteOffset += chunkByteLength;
@@ -668,6 +671,81 @@ describe('Common-proof browser custody', () => {
             request([deleteOperation(9)]),
         );
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
+    });
+
+    it('uses the executor-bound payload ceiling as the canonical append chunk size', async () => {
+        const { custody } = await openFixture({
+            maximumExternalMemoryByteLength: 5_242_880n,
+        });
+        const compactCfwChunkByteLength = 655_360;
+        const objectBytes = Uint8Array.from(
+            { length: compactCfwChunkByteLength * 2 + 40 },
+            (_unused, byteOrdinal) => (byteOrdinal * 43 + 29) & 0xff,
+        );
+        const maximumPayloadByteLength = BigInt(compactCfwChunkByteLength);
+        await custody.externalMemory.executeTransaction(
+            request(
+                [createOperation(24, BigInt(objectBytes.byteLength))],
+                1n,
+                maximumPayloadByteLength,
+            ),
+        );
+
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request(
+                    [
+                        appendOperation(
+                            24,
+                            objectBytes.slice(0, compactCfwChunkByteLength - 1),
+                        ),
+                    ],
+                    2n,
+                    BigInt(compactCfwChunkByteLength - 1),
+                ),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+
+        for (const appendRequest of canonicalAppendRequests(
+            24,
+            objectBytes,
+            3n,
+            compactCfwChunkByteLength,
+        )) {
+            await custody.externalMemory.executeTransaction(appendRequest);
+        }
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(24)], 6n, maximumPayloadByteLength),
+        );
+        const reads = await custody.externalMemory.executeTransaction(
+            request(
+                [
+                    readOperation(
+                        24,
+                        BigInt(compactCfwChunkByteLength - 13),
+                        compactCfwChunkByteLength,
+                    ),
+                ],
+                7n,
+                maximumPayloadByteLength,
+            ),
+        );
+        expect(reads).toHaveLength(1);
+        expect(reads[0]?.bytes).toEqual(
+            objectBytes.slice(
+                compactCfwChunkByteLength - 13,
+                compactCfwChunkByteLength * 2 - 13,
+            ),
+        );
+        const accounting =
+            custody.externalMemory.copyBrowserStorageAccounting?.();
+        expect(accounting).toMatchObject({
+            secretRecordSealByteLength: BigInt(objectBytes.byteLength + 9),
+            secretRecordSealCount: 5n,
+        });
+        await custody.externalMemory.executeTransaction(
+            request([deleteOperation(24)], 8n, maximumPayloadByteLength),
+        );
     });
 
     it('reports authenticated physical storage, buffer custody, and terminal cleanup from production owners', async () => {

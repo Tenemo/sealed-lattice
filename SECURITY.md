@@ -67,12 +67,19 @@ consequences are:
   `isValid`, mint a proof capability, or supply the final algebraic
   `VerificationResult`. Complete generation and verification release ABIs do
   not exist.
-- The guarded CFW run reconciles 4,926 storage transactions, 1,006,632,840 bytes
-  written, 2,013,265,440 bytes read, and 587,202,560 peak stored bytes. That peak
-  is 2.1875 times the 268,435,456-byte scratch planning target and therefore
-  awaits explicit engineering review, although it remains below the
-  1,073,741,824-byte absolute bound. It is native development evidence, not
-  release-WebAssembly, IndexedDB, browser-process, or phone evidence.
+- The guarded CFW run reconciles 4,926 logical storage transactions,
+  1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
+  stored bytes. A separate nonqualifying desktop Chromium replay used the exact
+  compiler-derived schedule, 655,360-byte chunks, production authenticated
+  custody, and strict-durability IndexedDB transactions. It matched the logical
+  census and all 1,713 seals, but the storage layer recorded 1,335,448,998,100
+  physical read bytes and 4,148,340 physical transactions. The dominant cause
+  is a namespace-wide stored-value capacity scan during each lease and repair
+  publication. This orders-of-magnitude amplification and the logical peak's
+  2.1875-times variance over the scratch planning target require redesign and
+  engineering review. The logical peak remains below the 1,073,741,824-byte
+  absolute bound. This is desktop development evidence, not an accepted proof,
+  complete browser lifecycle evidence, or phone evidence.
 
 ### Masking and zero-knowledge boundary
 
@@ -166,11 +173,13 @@ that a coherent snapshot is newest.
   schedule, but it has no compact generation API, complete algebraic
   verification, or final generation and verification ABIs.
 - `SEC-020`: Guarded selected-size native evidence covers the public-key
-  family's complete response-generation schedule and reconciles its CFW storage
-  lifecycle. The current proof boundary above owns its acceptance status. This
-  evidence does not establish a final `VerificationResult`, cold common-worker
-  restoration, release-WebAssembly or browser execution, durable browser
-  custody, or supported-phone feasibility.
+  family's complete response-generation schedule. A separate desktop Chromium
+  diagnostic replays its exact CFW storage lifecycle and exposes an
+  orders-of-magnitude physical-storage amplification. The current proof
+  boundary above owns the candidate's acceptance status. These results do not
+  establish a final `VerificationResult`, release-WebAssembly proof execution,
+  cold common-worker restoration, complete durable browser custody, or
+  supported-phone feasibility.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without persistence admission, quota and eviction qualification, and
   externally anchored rollback detection.

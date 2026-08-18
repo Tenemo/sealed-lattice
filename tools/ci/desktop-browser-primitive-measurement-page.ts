@@ -9,6 +9,10 @@ import {
 } from '../../packages/protocol/src/runtime/untrusted-storage-transaction-store.js';
 
 import {
+    validateCompactCfwStorageDiagnosticSchedule,
+    type CompactCfwStorageDiagnosticSchedule,
+} from './compact-cfw-storage-diagnostic-evidence.js';
+import {
     desktopBrowserBoundaryCopyIterationCount,
     primitiveMeasurementCaseCatalog,
     requireCompletePrimitiveMeasurementCatalog,
@@ -25,6 +29,10 @@ type PrimitiveMeasurementWasmExports = Readonly<{
     memory: WebAssembly.Memory;
     sealed_lattice_allocate(length: number): number;
     sealed_lattice_deallocate(pointer: number, length: number): void;
+    sealed_lattice_compact_cfw_storage_diagnostic_schedule_with_length(
+        outputLengthPointer: number,
+        outputStatusPointer: number,
+    ): number;
     sealed_lattice_primitive_measurement_with_length(
         caseIdentifier: number,
         outputLengthPointer: number,
@@ -76,6 +84,14 @@ const instantiateMeasurementKernel = async (
             exports,
             'sealed_lattice_deallocate',
         ),
+        sealed_lattice_compact_cfw_storage_diagnostic_schedule_with_length:
+            requireNumberExport(
+                exports,
+                'sealed_lattice_compact_cfw_storage_diagnostic_schedule_with_length',
+            ) as (
+                outputLengthPointer: number,
+                outputStatusPointer: number,
+            ) => number,
         sealed_lattice_primitive_measurement_with_length: requireNumberExport(
             exports,
             'sealed_lattice_primitive_measurement_with_length',
@@ -83,7 +99,7 @@ const instantiateMeasurementKernel = async (
     });
 };
 
-const runPrimitiveCase = async (
+export const runDesktopBrowserPrimitiveCase = async (
     wasmBytes: ArrayBuffer,
     caseIdentifier: number,
 ): Promise<DesktopBrowserPrimitiveCaseMeasurement> => {
@@ -159,6 +175,91 @@ const runPrimitiveCase = async (
             wasmMemoryByteLengthAfter: kernel.memory.buffer.byteLength,
             wasmMemoryByteLengthBefore,
         });
+    } finally {
+        if (outputPointer !== 0 && outputLength !== 0) {
+            kernel.sealed_lattice_deallocate(outputPointer, outputLength);
+        }
+        kernel.sealed_lattice_deallocate(
+            outputLengthPointer,
+            wasm32UsizeByteLength,
+        );
+        kernel.sealed_lattice_deallocate(
+            outputStatusPointer,
+            wasm32UsizeByteLength,
+        );
+    }
+};
+
+export const readCompactCfwStorageDiagnosticSchedule = async (
+    wasmBytes: ArrayBuffer,
+): Promise<CompactCfwStorageDiagnosticSchedule> => {
+    const kernel = await instantiateMeasurementKernel(wasmBytes);
+    const outputLengthPointer = kernel.sealed_lattice_allocate(
+        wasm32UsizeByteLength,
+    );
+    const outputStatusPointer = kernel.sealed_lattice_allocate(
+        wasm32UsizeByteLength,
+    );
+    if (outputLengthPointer === 0 || outputStatusPointer === 0) {
+        if (outputLengthPointer !== 0) {
+            kernel.sealed_lattice_deallocate(
+                outputLengthPointer,
+                wasm32UsizeByteLength,
+            );
+        }
+        if (outputStatusPointer !== 0) {
+            kernel.sealed_lattice_deallocate(
+                outputStatusPointer,
+                wasm32UsizeByteLength,
+            );
+        }
+        throw new Error(
+            'Compact CFW diagnostic schedule refused its result framing.',
+        );
+    }
+    let outputPointer = 0;
+    let outputLength = 0;
+    try {
+        outputPointer =
+            kernel.sealed_lattice_compact_cfw_storage_diagnostic_schedule_with_length(
+                outputLengthPointer,
+                outputStatusPointer,
+            );
+        const outputView = new DataView(kernel.memory.buffer);
+        outputLength = outputView.getUint32(outputLengthPointer, true);
+        const outputStatus = outputView.getUint32(outputStatusPointer, true);
+        if (
+            outputPointer === 0 ||
+            outputLength === 0 ||
+            outputLength > 65_536
+        ) {
+            throw new Error(
+                'Compact CFW diagnostic schedule returned an invalid result extent.',
+            );
+        }
+        const resultBytes = new Uint8Array(
+            kernel.memory.buffer,
+            outputPointer,
+            outputLength,
+        ).slice();
+        if (outputStatus === 1) {
+            const refusal = textDecoder.decode(resultBytes);
+            resultBytes.fill(0);
+            throw new Error(
+                `Compact CFW diagnostic schedule refused: ${refusal}`,
+            );
+        }
+        if (outputStatus !== 0) {
+            resultBytes.fill(0);
+            throw new Error(
+                `Compact CFW diagnostic schedule returned unsupported status ${String(outputStatus)}.`,
+            );
+        }
+        const schedule = validateCompactCfwStorageDiagnosticSchedule(
+            JSON.parse(textDecoder.decode(resultBytes)) as unknown,
+        );
+        resultBytes.fill(0);
+        return schedule;
     } finally {
         if (outputPointer !== 0 && outputLength !== 0) {
             kernel.sealed_lattice_deallocate(outputPointer, outputLength);
@@ -634,7 +735,10 @@ export const runDesktopBrowserPrimitiveMeasurements = async (input: {
     const primitiveCases: DesktopBrowserPrimitiveCaseMeasurement[] = [];
     for (const catalogEntry of primitiveMeasurementCaseCatalog) {
         primitiveCases.push(
-            await runPrimitiveCase(wasmBytes, catalogEntry.caseIdentifier),
+            await runDesktopBrowserPrimitiveCase(
+                wasmBytes,
+                catalogEntry.caseIdentifier,
+            ),
         );
     }
     requireCompletePrimitiveMeasurementCatalog(
@@ -709,7 +813,10 @@ export const runDesktopBrowserFocusedPrimitiveMeasurements = async (input: {
     }
     const evidence: DesktopBrowserFocusedPrimitiveMeasurementEvidence[] = [];
     for (const caseIdentifier of input.caseIdentifiers) {
-        const primitiveCase = await runPrimitiveCase(wasmBytes, caseIdentifier);
+        const primitiveCase = await runDesktopBrowserPrimitiveCase(
+            wasmBytes,
+            caseIdentifier,
+        );
         if (primitiveCase.record.caseIdentifier !== caseIdentifier) {
             throw new Error(
                 `Focused primitive-measurement WASM returned case ${String(primitiveCase.record.caseIdentifier)} instead of case ${String(caseIdentifier)}.`,

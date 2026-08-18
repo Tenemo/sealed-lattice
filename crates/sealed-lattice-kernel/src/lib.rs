@@ -63,7 +63,9 @@ use foundation::{
 pub use encoding::run_transcript_core_command;
 
 #[cfg(feature = "primitive-measurement-evidence")]
-use bgv::proof_suite::run_primitive_measurement;
+use bgv::proof_suite::{
+    run_primitive_measurement, selected_compact_cfw_storage_diagnostic_schedule,
+};
 
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
     Box::into_raw(bytes.into_boxed_slice()) as *mut u8
@@ -108,6 +110,41 @@ pub unsafe extern "C" fn sealed_lattice_primitive_measurement_with_length(
     output_status_pointer: *mut u32,
 ) -> *mut u8 {
     let (output, status) = match run_primitive_measurement(case_identifier) {
+        Ok(output) => (output, 0_u32),
+        Err(error) => (error.into_bytes(), 1_u32),
+    };
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    if !output_status_pointer.is_null() {
+        unsafe {
+            output_status_pointer.write(status);
+        }
+    }
+    leak_bytes(output)
+}
+
+/// Returns the compiler-derived selected compact CFW browser-storage schedule.
+///
+/// The export exists only in the opt-in measurement artifact and grants no
+/// proof, verification, activation, capability, or qualification authority.
+/// Status zero returns canonical JSON. Status one returns the refusal text.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or point to writable memory for one
+/// `usize` value in this WebAssembly module's linear memory.
+/// `output_status_pointer` must be null or point to writable memory for one
+/// `u32` value in this WebAssembly module's linear memory.
+#[cfg(feature = "primitive-measurement-evidence")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_cfw_storage_diagnostic_schedule_with_length(
+    output_length_pointer: *mut usize,
+    output_status_pointer: *mut u32,
+) -> *mut u8 {
+    let (output, status) = match selected_compact_cfw_storage_diagnostic_schedule() {
         Ok(output) => (output, 0_u32),
         Err(error) => (error.into_bytes(), 1_u32),
     };
