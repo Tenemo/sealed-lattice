@@ -3252,11 +3252,11 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn write_or_validate_compact_public_key_algebraic_checkpoint_file(
+        directory: &Path,
         file_name: &str,
         expected_bytes: &[u8],
     ) {
-        let directory = compact_public_key_algebraic_checkpoint_directory();
-        fs::create_dir_all(&directory).expect("the algebraic checkpoint directory is available");
+        fs::create_dir_all(directory).expect("the algebraic checkpoint directory is available");
         let path = directory.join(file_name);
         match fs::read(&path) {
             Ok(existing_bytes) => assert_eq!(
@@ -5307,8 +5307,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual retained compact public-key assignment gate"]
-    fn heavy_rust_kernel_retained_public_key_authority_prepares_main_whir_sumcheck() {
+    #[ignore = "manual checkpointed compact public-key proof round trip"]
+    fn heavy_rust_kernel_checkpointed_compact_public_key_proof_round_trip() {
         let authority = populate_compact_public_key_development_evidence_authority(0x43)
             .expect("standalone production-derived public-key authority populates");
         let action_private_randomness = authority.action_private_randomness;
@@ -7599,15 +7599,19 @@ mod tests {
             source_replay_binding,
             private_coin_derivation_binding_hash,
         );
+        let checkpoint_directory = compact_public_key_algebraic_checkpoint_directory();
         write_or_validate_compact_public_key_algebraic_checkpoint_file(
+            &checkpoint_directory,
             "generated-proof.bin",
             response_generation_output.canonical_proof_bytes(),
         );
         write_or_validate_compact_public_key_algebraic_checkpoint_file(
+            &checkpoint_directory,
             "public-input.bin",
             &canonical_public_input_bytes,
         );
         write_or_validate_compact_public_key_algebraic_checkpoint_file(
+            &checkpoint_directory,
             "binding-and-context.bin",
             &checkpoint_context,
         );
@@ -7696,12 +7700,12 @@ mod tests {
                 .external_memory_usage()
                 .peak_stored_byte_length(),
         );
+        drop(response_generation_output);
+        verify_checkpointed_compact_public_key_proof_algebraically(&checkpoint_directory);
     }
 
-    #[test]
-    #[ignore = "manual checkpointed compact public-key algebraic verification gate"]
-    fn heavy_rust_kernel_checkpointed_compact_public_key_proof_verifies_algebraically() {
-        let checkpoint_directory = compact_public_key_algebraic_checkpoint_directory();
+    #[cfg(not(target_arch = "wasm32"))]
+    fn verify_checkpointed_compact_public_key_proof_algebraically(checkpoint_directory: &Path) {
         let canonical_proof_bytes = fs::read(checkpoint_directory.join("generated-proof.bin"))
             .expect("the generated compact proof checkpoint exists");
         let canonical_public_input_bytes = fs::read(checkpoint_directory.join("public-input.bin"))
