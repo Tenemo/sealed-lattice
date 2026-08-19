@@ -1,9 +1,11 @@
 //! Canonical foundation data shared by protocol verification paths.
 
-/// Queries available to an adversary in the declared classical model.
+/// Maximum adversarial random-oracle query count used by the classical and
+/// quantum reduction ledgers.
 ///
 /// Every proof-family ledger uses the same `2^80 - 1` budget rather than
-/// selecting a family-local value.
+/// selecting a family-local value. This is distinct from verifier proof-query
+/// complexity such as `qPi`.
 pub(crate) const DECLARED_ADVERSARIAL_QUERY_BUDGET: u128 = (1_u128 << 80) - 1;
 
 mod authenticated_mailbox;

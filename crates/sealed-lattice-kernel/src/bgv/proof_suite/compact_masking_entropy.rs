@@ -26,7 +26,7 @@ use super::compact_masking_coefficient_maps::{
 use super::compact_masking_prefix::{CompactMaskingAttemptIdentity, CompactMaskingSemanticPrefix};
 use super::compact_masking_public_covector::{
     CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorAuthority,
-    CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorPoll,
+    CompactFactorOnePublicCovectorDerivation,
 };
 use super::compact_proof_contract::{
     CompactPublicKeyVerifierInputs, CompactResponseComponentRoleContract,
@@ -1416,52 +1416,7 @@ pub(crate) fn verify_selected_compact_whir_source_query_masking(
     authority.verify_coefficient_image_output(source_query_step, &[], None, query_outputs)
 }
 
-/// Replays the selected first-epoch relation covectors from canonical public
-/// input and the exact authenticated verifier prefix, then authorizes its fresh
-/// base-case claim against the production conditional-entropy owner. The main
-/// epoch uses the bounded begin/finish API below.
-pub(crate) fn derive_selected_compact_pre_challenge_base_covector(
-    inputs: CompactPublicKeyVerifierInputs<'_>,
-    coefficient_maps: &CompactMaskingCoefficientMapCertificate,
-    identity: CompactMaskingAttemptIdentity,
-    public_covector_authority: &CompactFactorOnePublicCovectorAuthority<'_>,
-    canonical_exposed_proof_prefix: &[u8],
-    completed_messages: &[DecodedFixedUniformVerifierMessage],
-) -> Result<CompactVerifiedWhirBaseCovector, CompactMaskingEntropyError> {
-    let [pre_challenge_epoch, _main_epoch] = inputs.whir_epochs else {
-        return Err(CompactMaskingEntropyError::InvalidContract);
-    };
-    let epoch = pre_challenge_epoch.epoch;
-    let mut derivation = begin_selected_compact_whir_base_covector_derivation(
-        &inputs,
-        identity,
-        public_covector_authority,
-        canonical_exposed_proof_prefix,
-        completed_messages,
-        epoch,
-    )?;
-    let authorization = match derivation
-        .advance(1)
-        .map_err(|_| CompactMaskingEntropyError::InvalidCoefficientVector)?
-    {
-        CompactFactorOnePublicCovectorPoll::Complete(authorization) => authorization,
-        CompactFactorOnePublicCovectorPoll::WorkCompleted { .. } => {
-            return Err(CompactMaskingEntropyError::InvalidCoefficientVector);
-        }
-    };
-    finish_selected_compact_whir_base_covector_derivation(
-        inputs,
-        coefficient_maps,
-        identity,
-        public_covector_authority,
-        canonical_exposed_proof_prefix,
-        completed_messages,
-        None,
-        epoch,
-        authorization,
-    )
-}
-
+/// Begins bounded public-only covector replay for either selected WHIR epoch.
 pub(crate) fn begin_selected_compact_whir_base_covector_derivation(
     inputs: &CompactPublicKeyVerifierInputs<'_>,
     identity: CompactMaskingAttemptIdentity,

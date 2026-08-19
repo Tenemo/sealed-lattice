@@ -62,11 +62,14 @@ consequences are:
   theorem composition, and browser resource evidence. The other eleven proof
   families remain unported.
 - Small source-bound cursors now cover CFW, WHIR, and public-source
-  correspondence. Restore revalidates canonical inputs and deterministically
-  replays from genesis. The open obligation is to bound cold-resume time, lost
-  work, restart traffic, synchronous transport, transition work, and storage
-  transactions in the release browser path; it is not to claim that no WHIR
-  cursor exists or to require serialization of the full live verifier state.
+  correspondence. Both verifier-derived WHIR public-covector epochs use bounded
+  in-place fold polls, and only the resulting fresh positive verification can
+  mint the one-shot masking capability. Restore revalidates canonical inputs
+  and deterministically replays from genesis. The open obligation is to bound
+  cold-resume time, lost work, restart traffic, synchronous transport,
+  transition work, and storage transactions in the release browser path; it is
+  not to claim that no WHIR cursor exists or to require serialization of the
+  full live verifier state.
 - Strict-durability desktop Chromium storage evidence exposed
   orders-of-magnitude read and transaction amplification from repeated
   namespace-wide capacity scans. Browser-reported origin usage also remained

@@ -4926,10 +4926,7 @@ mod tests {
                 prepared_main_epoch.main_whir_base_blinded_response_ready(),
             ),
         };
-        assert_eq!(
-            fresh_claim_masking_verified,
-            epoch_owner == SelectedWhirEpochOwner::PreChallenge
-        );
+        assert!(!fresh_claim_masking_verified);
         assert!(!blinded_response_ready);
 
         let mut base_prepared_count = 0_u64;
@@ -4950,20 +4947,37 @@ mod tests {
             .expect("the selected WHIR base fresh response advances");
             match (epoch_owner, poll) {
                 (
+                    SelectedWhirEpochOwner::PreChallenge,
+                    CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorStepCompleted {
+                        completed_work_unit_count,
+                    },
+                )
+                | (
                     SelectedWhirEpochOwner::Main,
                     CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted {
                         completed_work_unit_count,
                     },
                 ) => {
-                    assert!(completed_work_unit_count > 0);
+                    assert!((1..=8_192).contains(&completed_work_unit_count));
                     covector_poll_count += 1;
                     covector_work_unit_count += completed_work_unit_count;
                 }
                 (
+                    SelectedWhirEpochOwner::PreChallenge,
+                    CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorsPrepared,
+                )
+                | (
                     SelectedWhirEpochOwner::Main,
                     CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared,
                 ) => {
-                    assert!(prepared_main_epoch.main_whir_base_fresh_claim_masking_verified());
+                    let masking_verified = match epoch_owner {
+                        SelectedWhirEpochOwner::PreChallenge => prepared_main_epoch
+                            .pre_challenge_whir_base_fresh_claim_masking_verified(),
+                        SelectedWhirEpochOwner::Main => {
+                            prepared_main_epoch.main_whir_base_fresh_claim_masking_verified()
+                        }
+                    };
+                    assert!(masking_verified);
                     covectors_prepared_count += 1;
                 }
                 (
@@ -5026,18 +5040,9 @@ mod tests {
             }
         }
         assert_eq!(base_prepared_count, 1);
-        match epoch_owner {
-            SelectedWhirEpochOwner::PreChallenge => {
-                assert_eq!(covector_poll_count, 0);
-                assert_eq!(covector_work_unit_count, 0);
-                assert_eq!(covectors_prepared_count, 0);
-            }
-            SelectedWhirEpochOwner::Main => {
-                assert!(covector_poll_count > 0);
-                assert!(covector_work_unit_count > 0);
-                assert_eq!(covectors_prepared_count, 1);
-            }
-        }
+        assert!(covector_poll_count > 0);
+        assert!(covector_work_unit_count > 0);
+        assert_eq!(covectors_prepared_count, 1);
         assert!(fresh_source_arithmetic_poll_count > 0);
         assert_eq!(
             fresh_response_leaf_count,
@@ -5903,6 +5908,8 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchSourceStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchRelationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseFreshSourceStepCompleted { .. }
@@ -6078,6 +6085,8 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchSourceStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchRelationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseFreshSourceStepCompleted { .. }
@@ -6273,6 +6282,8 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchSourceStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchRelationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseFreshSourceStepCompleted { .. }
@@ -6541,6 +6552,8 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchSourceStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchRelationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseFreshSourceStepCompleted { .. }
@@ -6717,6 +6730,8 @@ mod tests {
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchSourceStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchResponseCheckpointReady { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirCodeSwitchRelationStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorStepCompleted { .. }
+                | CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted { .. }
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared
                 | CompactPublicKeyMainEpochPoll::MainWhirBaseFreshSourceStepCompleted { .. }

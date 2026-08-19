@@ -29,7 +29,8 @@ use super::compact_reed_solomon_domain::{
     CompactReedSolomonDomainError, canonical_reed_solomon_domain_evaluation_points,
 };
 use super::compact_whir_covector_fold::{
-    CompactWhirCovectorFoldError, fold_compact_whir_covector_in_place,
+    CompactWhirCovectorFoldError, CompactWhirInPlaceCovectorFold,
+    CompactWhirInPlaceCovectorFoldPoll,
 };
 use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
@@ -290,9 +291,9 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
         let fold_contracts = *epoch_folds(&self.verifier_inputs, epoch)?;
         if epoch == 1 {
             let initial = pre_challenge_initial_covectors(&epoch_contract, &parsed)?;
-            let output = reduce_whir_epoch(
-                &epoch_contract,
-                &fold_contracts,
+            let reduction = CompactFactorOneWhirCovectorReduction::new(
+                epoch_contract,
+                fold_contracts,
                 parsed,
                 initial,
                 0,
@@ -300,9 +301,9 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
                 self.public_input.binding(),
             )?;
             return Ok(CompactFactorOnePublicCovectorDerivation {
-                state: CompactFactorOnePublicCovectorDerivationState::Complete(Some(Box::new(
-                    output,
-                ))),
+                state: CompactFactorOnePublicCovectorDerivationState::WhirReduction(Box::new(
+                    reduction,
+                )),
             });
         }
         if epoch != 2 {
@@ -380,8 +381,13 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
 }
 
 pub(crate) enum CompactFactorOnePublicCovectorPoll {
-    WorkCompleted { completed_work_unit_count: u64 },
-    Complete(Box<CompactFactorOneCarriedCovector>),
+    WorkCompleted {
+        completed_work_unit_count: u64,
+    },
+    Complete {
+        completed_work_unit_count: u64,
+        authorization: Box<CompactFactorOneCarriedCovector>,
+    },
 }
 
 pub(crate) struct CompactFactorOnePublicCovectorDerivation {
@@ -389,8 +395,8 @@ pub(crate) struct CompactFactorOnePublicCovectorDerivation {
 }
 
 enum CompactFactorOnePublicCovectorDerivationState {
-    Complete(Option<Box<CompactFactorOneCarriedCovector>>),
     MainTranspose(Box<CompactFactorOneMainTransposeState>),
+    WhirReduction(Box<CompactFactorOneWhirCovectorReduction>),
 }
 
 struct CompactFactorOneMainTransposeState {
@@ -401,6 +407,18 @@ struct CompactFactorOneMainTransposeState {
     epoch_contract: CompactWhirEpochContract,
     fold_contracts: [CompactWhirFoldContract; WHIR_BATCH_COUNT],
     public_input_binding: [u8; 64],
+}
+
+struct CompactFactorOneWhirCovectorReduction {
+    active_fold: Option<CompactWhirInPlaceCovectorFold>,
+    already_folded_batch_count: usize,
+    batch_ordinal: usize,
+    epoch_contract: CompactWhirEpochContract,
+    fold_contracts: [CompactWhirFoldContract; WHIR_BATCH_COUNT],
+    parsed: ParsedVerifierPrefix,
+    prefix: Option<CompactMaskingSemanticPrefix>,
+    public_input_binding: [u8; 64],
+    state: Option<PublicCovectorState>,
 }
 
 pub(super) struct CompactFactorOnePublicTransposeSource {
@@ -462,50 +480,107 @@ impl CompactFactorOnePublicCovectorDerivation {
         &mut self,
         maximum_element_count: u64,
     ) -> Result<CompactFactorOnePublicCovectorPoll, CompactFactorOnePublicCovectorError> {
-        match &mut self.state {
-            CompactFactorOnePublicCovectorDerivationState::Complete(output) => output
-                .take()
-                .map(CompactFactorOnePublicCovectorPoll::Complete)
-                .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector),
-            CompactFactorOnePublicCovectorDerivationState::MainTranspose(state) => {
-                match state.accumulator.advance(maximum_element_count)? {
-                    CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
-                        completed_work_unit_count,
-                        ..
-                    } => Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
-                        completed_work_unit_count,
-                    }),
-                    CompactStructuredWitnessCovectorAccumulatorPoll::Complete(source_covector) => {
-                        let public_main = state
-                            .continuation
-                            .take()
-                            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
-                            .finish_after_matrix_accumulation(source_covector)?;
-                        let parsed = state
-                            .parsed
-                            .take()
-                            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
-                        let initial = main_initial_covectors(public_main);
-                        let prefix = state
-                            .prefix
-                            .take()
-                            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
-                        let output = reduce_whir_epoch(
-                            &state.epoch_contract,
-                            &state.fold_contracts,
-                            parsed,
-                            initial,
-                            1,
-                            prefix,
-                            state.public_input_binding,
-                        )?;
-                        Ok(CompactFactorOnePublicCovectorPoll::Complete(Box::new(
-                            output,
-                        )))
+        if maximum_element_count == 0 {
+            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+        }
+        loop {
+            let next_reduction = match &mut self.state {
+                CompactFactorOnePublicCovectorDerivationState::WhirReduction(reduction) => {
+                    return reduction.advance(maximum_element_count);
+                }
+                CompactFactorOnePublicCovectorDerivationState::MainTranspose(state) => {
+                    match state.accumulator.advance(maximum_element_count)? {
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            completed_work_unit_count,
+                            ..
+                        } => {
+                            if completed_work_unit_count == 0
+                                || completed_work_unit_count > maximum_element_count
+                            {
+                                return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+                            }
+                            return Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                                completed_work_unit_count,
+                            });
+                        }
+                        CompactStructuredWitnessCovectorAccumulatorPoll::Complete(
+                            source_covector,
+                        ) => {
+                            let public_main = state
+                                .continuation
+                                .take()
+                                .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                                .finish_after_matrix_accumulation(source_covector)?;
+                            let parsed = state
+                                .parsed
+                                .take()
+                                .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
+                            let initial = main_initial_covectors(public_main);
+                            let prefix = state
+                                .prefix
+                                .take()
+                                .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
+                            CompactFactorOneWhirCovectorReduction::new(
+                                state.epoch_contract.clone(),
+                                state.fold_contracts,
+                                parsed,
+                                initial,
+                                1,
+                                prefix,
+                                state.public_input_binding,
+                            )?
+                        }
                     }
                 }
-            }
+            };
+            self.state = CompactFactorOnePublicCovectorDerivationState::WhirReduction(Box::new(
+                next_reduction,
+            ));
         }
+    }
+}
+
+#[cfg(test)]
+impl CompactFactorOnePublicCovectorDerivation {
+    pub(crate) fn finish_with_whole_operation_reference(
+        self,
+    ) -> Result<CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorError> {
+        let reduction = match self.state {
+            CompactFactorOnePublicCovectorDerivationState::WhirReduction(reduction) => *reduction,
+            CompactFactorOnePublicCovectorDerivationState::MainTranspose(mut state) => {
+                let source_covector = loop {
+                    match state.accumulator.advance(u64::MAX)? {
+                        CompactStructuredWitnessCovectorAccumulatorPoll::StepCompleted {
+                            ..
+                        } => {}
+                        CompactStructuredWitnessCovectorAccumulatorPoll::Complete(
+                            source_covector,
+                        ) => break source_covector,
+                    }
+                };
+                let public_main = state
+                    .continuation
+                    .take()
+                    .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                    .finish_after_matrix_accumulation(source_covector)?;
+                CompactFactorOneWhirCovectorReduction::new(
+                    state.epoch_contract,
+                    state.fold_contracts,
+                    state
+                        .parsed
+                        .take()
+                        .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?,
+                    main_initial_covectors(public_main),
+                    1,
+                    state
+                        .prefix
+                        .take()
+                        .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?,
+                    state.public_input_binding,
+                )?
+            }
+        };
+        reduce_whir_epoch_with_whole_operation_reference(reduction)
     }
 }
 
@@ -703,42 +778,167 @@ fn main_initial_covectors(public_main: CompactCfwPublicMainCovectors) -> PublicC
     }
 }
 
-fn reduce_whir_epoch(
-    epoch: &CompactWhirEpochContract,
-    folds: &[CompactWhirFoldContract; WHIR_BATCH_COUNT],
-    parsed: ParsedVerifierPrefix,
-    mut state: PublicCovectorState,
-    already_folded_batch_count: usize,
-    prefix: CompactMaskingSemanticPrefix,
-    public_input_binding: [u8; 64],
-) -> Result<CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorError> {
-    if epoch.epoch != parsed.epoch
-        || folds.iter().enumerate().any(|(batch_ordinal, fold)| {
-            fold.epoch != parsed.epoch || usize::from(fold.batch_ordinal) != batch_ordinal
-        })
-    {
-        return Err(CompactFactorOnePublicCovectorError::InvalidContract);
-    }
-    if parsed.whir_batches.len() != WHIR_BATCH_COUNT {
-        return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
-    }
-    if already_folded_batch_count > parsed.whir_batches.len() {
-        return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
-    }
-    for (batch_ordinal, batch) in parsed.whir_batches.iter().enumerate() {
-        let fold_count = usize::try_from(epoch.folding_schedule[batch_ordinal])
-            .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
-        if batch.folding_challenges.len() != fold_count {
+impl CompactFactorOneWhirCovectorReduction {
+    fn new(
+        epoch_contract: CompactWhirEpochContract,
+        fold_contracts: [CompactWhirFoldContract; WHIR_BATCH_COUNT],
+        parsed: ParsedVerifierPrefix,
+        state: PublicCovectorState,
+        already_folded_batch_count: usize,
+        prefix: CompactMaskingSemanticPrefix,
+        public_input_binding: [u8; 64],
+    ) -> Result<Self, CompactFactorOnePublicCovectorError> {
+        if epoch_contract.epoch != parsed.epoch
+            || fold_contracts
+                .iter()
+                .enumerate()
+                .any(|(batch_ordinal, fold)| {
+                    fold.epoch != parsed.epoch || usize::from(fold.batch_ordinal) != batch_ordinal
+                })
+        {
+            return Err(CompactFactorOnePublicCovectorError::InvalidContract);
+        }
+        if parsed.whir_batches.len() != WHIR_BATCH_COUNT {
             return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
         }
-        if batch_ordinal >= already_folded_batch_count {
-            state.source = fold_compact_whir_covector_in_place(
-                core::mem::take(&mut state.source),
-                fold_count,
-                &batch.folding_challenges,
-            )
-            .map_err(compact_whir_covector_fold_error)?;
+        if already_folded_batch_count >= parsed.whir_batches.len() {
+            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
         }
+        for (batch_ordinal, batch) in parsed.whir_batches.iter().enumerate() {
+            let fold_count = usize::try_from(epoch_contract.folding_schedule[batch_ordinal])
+                .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+            if batch.folding_challenges.len() != fold_count {
+                return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
+            }
+        }
+        Ok(Self {
+            active_fold: None,
+            already_folded_batch_count,
+            batch_ordinal: 0,
+            epoch_contract,
+            fold_contracts,
+            parsed,
+            prefix: Some(prefix),
+            public_input_binding,
+            state: Some(state),
+        })
+    }
+
+    fn advance(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactFactorOnePublicCovectorPoll, CompactFactorOnePublicCovectorError> {
+        if maximum_work_unit_count == 0 {
+            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+        }
+        loop {
+            if self.batch_ordinal == self.parsed.whir_batches.len() {
+                return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+            }
+            if self.batch_ordinal < self.already_folded_batch_count {
+                self.finish_current_batch()?;
+                self.batch_ordinal = self
+                    .batch_ordinal
+                    .checked_add(1)
+                    .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+                continue;
+            }
+            if self.active_fold.is_none() {
+                let batch = self
+                    .parsed
+                    .whir_batches
+                    .get(self.batch_ordinal)
+                    .ok_or(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix)?;
+                let folding_factor =
+                    usize::try_from(self.epoch_contract.folding_schedule[self.batch_ordinal])
+                        .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+                let source = core::mem::take(
+                    &mut self
+                        .state
+                        .as_mut()
+                        .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                        .source,
+                );
+                self.active_fold = Some(
+                    CompactWhirInPlaceCovectorFold::new(
+                        source,
+                        folding_factor,
+                        &batch.folding_challenges,
+                    )
+                    .map_err(compact_whir_covector_fold_error)?,
+                );
+            }
+            match self
+                .active_fold
+                .as_mut()
+                .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                .advance(maximum_work_unit_count)
+                .map_err(compact_whir_covector_fold_error)?
+            {
+                CompactWhirInPlaceCovectorFoldPoll::WorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    if completed_work_unit_count == 0
+                        || completed_work_unit_count > maximum_work_unit_count
+                    {
+                        return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+                    }
+                    return Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                        completed_work_unit_count,
+                    });
+                }
+                CompactWhirInPlaceCovectorFoldPoll::Complete {
+                    completed_work_unit_count,
+                    values,
+                } => {
+                    if completed_work_unit_count == 0
+                        || completed_work_unit_count > maximum_work_unit_count
+                    {
+                        return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+                    }
+                    self.active_fold = None;
+                    self.state
+                        .as_mut()
+                        .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                        .source = values;
+                    self.finish_current_batch()?;
+                    self.batch_ordinal = self
+                        .batch_ordinal
+                        .checked_add(1)
+                        .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+                    if self.batch_ordinal == self.parsed.whir_batches.len() {
+                        return Ok(CompactFactorOnePublicCovectorPoll::Complete {
+                            completed_work_unit_count,
+                            authorization: Box::new(self.finish()?),
+                        });
+                    }
+                    return Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                        completed_work_unit_count,
+                    });
+                }
+            }
+        }
+    }
+
+    fn finish_current_batch(&mut self) -> Result<(), CompactFactorOnePublicCovectorError> {
+        let batch = self
+            .parsed
+            .whir_batches
+            .get(self.batch_ordinal)
+            .cloned()
+            .ok_or(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix)?;
+        let fold_count = usize::try_from(
+            *self
+                .epoch_contract
+                .folding_schedule
+                .get(self.batch_ordinal)
+                .ok_or(CompactFactorOnePublicCovectorError::InvalidContract)?,
+        )
+        .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
         scale_in_place(&mut state.source, batch.combining_challenge);
         let mask_scale = batch.combining_challenge * compact_power_of_two(fold_count).inverse();
         for group in &mut state.mask_groups {
@@ -754,61 +954,160 @@ fn reduce_whir_epoch(
         }
         state.mask_groups.push(sumcheck_group);
 
-        match (&batch.code_switch, folds.get(batch_ordinal + 1)) {
-            (Some(code_switch), Some(output_fold)) => {
-                apply_code_switch(&mut state, folds[batch_ordinal], *output_fold, code_switch)?
-            }
-            (None, None) => {}
-            _ => return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix),
+        match (
+            &batch.code_switch,
+            self.fold_contracts.get(self.batch_ordinal + 1),
+        ) {
+            (Some(code_switch), Some(output_fold)) => apply_code_switch(
+                state,
+                self.fold_contracts[self.batch_ordinal],
+                *output_fold,
+                code_switch,
+            ),
+            (None, None) => Ok(()),
+            _ => Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix),
         }
     }
-    let expected_groups = epoch
-        .external_mask_groups
-        .iter()
-        .chain(&epoch.internal_mask_groups)
-        .collect::<Vec<_>>();
-    if state.source.len()
-        != 1_usize
-            .checked_shl(epoch.final_variable_count)
-            .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?
-        || state.mask_groups.len() != expected_groups.len()
-        || state
+
+    fn finish(
+        &mut self,
+    ) -> Result<CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorError> {
+        if self.active_fold.is_some() {
+            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+        }
+        let state = self
+            .state
+            .take()
+            .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?;
+        let expected_groups = self
+            .epoch_contract
+            .external_mask_groups
+            .iter()
+            .chain(&self.epoch_contract.internal_mask_groups)
+            .collect::<Vec<_>>();
+        if state.source.len()
+            != 1_usize
+                .checked_shl(self.epoch_contract.final_variable_count)
+                .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?
+            || state.mask_groups.len() != expected_groups.len()
+            || state
+                .mask_groups
+                .iter()
+                .zip(expected_groups)
+                .any(|(actual, expected)| {
+                    u64::try_from(actual.len()).ok()
+                        != expected.width.checked_mul(expected.message_length)
+                })
+        {
+            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+        }
+        let coefficient_count = state
             .mask_groups
             .iter()
-            .zip(expected_groups)
-            .any(|(actual, expected)| {
-                u64::try_from(actual.len()).ok()
-                    != expected.width.checked_mul(expected.message_length)
+            .try_fold(state.source.len(), |count, group| {
+                count.checked_add(group.len())
             })
+            .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+        let expected_count = match self.parsed.epoch {
+            1 => PRE_CHALLENGE_ROLE18_COEFFICIENT_COUNT,
+            2 => MAIN_ROLE18_COEFFICIENT_COUNT,
+            _ => return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix),
+        };
+        if coefficient_count != expected_count {
+            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+        }
+        let mut coefficients = state.source;
+        for group in state.mask_groups {
+            coefficients.extend(group);
+        }
+        Ok(CompactFactorOneCarriedCovector {
+            pending: Some(CompactFactorOneBoundCarriedCovector {
+                prefix: self
+                    .prefix
+                    .take()
+                    .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?,
+                public_input_binding: self.public_input_binding,
+                coefficients,
+            }),
+        })
+    }
+}
+
+#[cfg(test)]
+fn reduce_whir_epoch_with_whole_operation_reference(
+    mut reduction: CompactFactorOneWhirCovectorReduction,
+) -> Result<CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorError> {
+    while reduction.batch_ordinal < reduction.parsed.whir_batches.len() {
+        if reduction.batch_ordinal >= reduction.already_folded_batch_count {
+            let folding_factor =
+                usize::try_from(reduction.epoch_contract.folding_schedule[reduction.batch_ordinal])
+                    .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+            let challenges =
+                &reduction.parsed.whir_batches[reduction.batch_ordinal].folding_challenges;
+            let source = core::mem::take(
+                &mut reduction
+                    .state
+                    .as_mut()
+                    .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                    .source,
+            );
+            reduction
+                .state
+                .as_mut()
+                .ok_or(CompactFactorOnePublicCovectorError::InvalidCovector)?
+                .source =
+                fold_whir_covector_with_allocation_reference(source, folding_factor, challenges)?;
+        }
+        reduction.finish_current_batch()?;
+        reduction.batch_ordinal = reduction
+            .batch_ordinal
+            .checked_add(1)
+            .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+    }
+    reduction.finish()
+}
+
+#[cfg(test)]
+fn fold_whir_covector_with_allocation_reference(
+    flattened: Vec<CompactChallengeField>,
+    folding_factor: usize,
+    challenges: &[CompactChallengeField],
+) -> Result<Vec<CompactChallengeField>, CompactFactorOnePublicCovectorError> {
+    let width = 1_usize
+        .checked_shl(
+            u32::try_from(folding_factor)
+                .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?,
+        )
+        .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+    if challenges.len() != folding_factor
+        || width == 0
+        || flattened.is_empty()
+        || !flattened.len().is_multiple_of(width)
     {
         return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
     }
-    let coefficient_count = state
-        .mask_groups
-        .iter()
-        .try_fold(state.source.len(), |count, group| {
-            count.checked_add(group.len())
-        })
-        .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
-    let expected_count = match parsed.epoch {
-        1 => PRE_CHALLENGE_ROLE18_COEFFICIENT_COUNT,
-        2 => MAIN_ROLE18_COEFFICIENT_COUNT,
-        _ => return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix),
-    };
-    if coefficient_count != expected_count {
-        return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+    let column_length = flattened.len() / width;
+    let mut columns = flattened
+        .chunks_exact(column_length)
+        .map(<[CompactChallengeField]>::to_vec)
+        .collect::<Vec<_>>();
+    for &challenge in challenges {
+        let output_column_count = columns.len() / 2;
+        if output_column_count == 0 || columns.len() != output_column_count * 2 {
+            return Err(CompactFactorOnePublicCovectorError::InvalidCovector);
+        }
+        let one_minus_challenge = CompactChallengeField::ONE - challenge;
+        columns = (0..output_column_count)
+            .map(|column_ordinal| {
+                columns[column_ordinal]
+                    .iter()
+                    .zip(&columns[output_column_count + column_ordinal])
+                    .map(|(&zero, &one)| one_minus_challenge * zero + challenge * one)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
     }
-    let mut coefficients = state.source;
-    for group in state.mask_groups {
-        coefficients.extend(group);
-    }
-    Ok(CompactFactorOneCarriedCovector {
-        pending: Some(CompactFactorOneBoundCarriedCovector {
-            prefix,
-            public_input_binding,
-            coefficients,
-        }),
-    })
+    Ok(columns.into_iter().flatten().collect())
 }
 
 fn apply_code_switch(

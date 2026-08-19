@@ -45,7 +45,6 @@ use crate::bgv::proof_suite::{
         CompactMaskingEntropyError, CompactMaskingQueryLeaf, CompactVerifiedBaseMaskingPrefix,
         CompactVerifiedBaseRevealMasking, CompactVerifiedWhirBaseCovector,
         CompactWhirSumcheckBatchCoordinate, begin_selected_compact_whir_base_covector_derivation,
-        derive_selected_compact_pre_challenge_base_covector,
         finish_selected_compact_whir_base_covector_derivation,
         verify_selected_compact_cfw_finish_masking, verify_selected_compact_cfw_round_masking,
         verify_selected_compact_cross_epoch_masking_prefix,
@@ -58,8 +57,9 @@ use crate::bgv::proof_suite::{
     compact_masking_kmac::{CompactMaskingKmacError, derive_selected_compact_masking_kmac_bridge},
     compact_masking_prefix::CompactMaskingAttemptIdentity,
     compact_masking_public_covector::{
-        CompactFactorOnePublicCovectorAuthority, CompactFactorOnePublicCovectorDerivation,
-        CompactFactorOnePublicCovectorError, CompactFactorOnePublicCovectorPoll,
+        CompactFactorOneCarriedCovector, CompactFactorOnePublicCovectorAuthority,
+        CompactFactorOnePublicCovectorDerivation, CompactFactorOnePublicCovectorError,
+        CompactFactorOnePublicCovectorPoll,
     },
     compact_proof_contract::{
         CompactProofContractError, CompactPublicKeyProofContract, CompactPublicKeyVerifierInputs,
@@ -457,6 +457,10 @@ pub(crate) enum CompactPublicKeyMainEpochPoll {
         processed_work_unit_count: u64,
         relation_complete: bool,
     },
+    PreChallengeWhirBaseCovectorStepCompleted {
+        completed_work_unit_count: u64,
+    },
+    PreChallengeWhirBaseCovectorsPrepared,
     PreChallengeWhirBaseFreshSourceStepCompleted {
         processed_work_unit_count: u64,
     },
@@ -692,9 +696,15 @@ struct CompactPublicKeyPostLookupMaterial {
     main_whir_relation_preparation: Option<CompactWhirMainRelationPreparation>,
     main_whir_sumcheck_batches: Vec<CompactPublicKeyWhirSumcheckBatch>,
     main_whir_code_switches: Vec<CompactPublicKeyWhirCodeSwitch>,
-    main_whir_base_covector_derivation: Option<CompactFactorOnePublicCovectorDerivation>,
+    whir_base_covector_derivation: Option<CompactPublicKeyWhirBaseCovectorDerivation>,
     main_whir_base_case: Option<CompactPublicKeyWhirBaseCase>,
     main_source_queries: Option<CompactPublicKeyRetainedSourceQueries>,
+}
+
+struct CompactPublicKeyWhirBaseCovectorDerivation {
+    epoch_owner: CompactPublicKeyWhirEpoch,
+    derivation: Option<CompactFactorOnePublicCovectorDerivation>,
+    authorization: Option<Box<CompactFactorOneCarriedCovector>>,
 }
 
 struct CompactPublicKeyWhirSumcheckBatch {
@@ -1071,6 +1081,31 @@ impl CompactPublicKeyWhirEpoch {
             Self::Main => CompactPublicKeyMainEpochPoll::MainWhirBaseFreshSourceStepCompleted {
                 processed_work_unit_count,
             },
+        }
+    }
+
+    fn base_covector_step_poll(
+        self,
+        completed_work_unit_count: u64,
+    ) -> CompactPublicKeyMainEpochPoll {
+        match self {
+            Self::PreChallenge => {
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorStepCompleted {
+                    completed_work_unit_count,
+                }
+            }
+            Self::Main => CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted {
+                completed_work_unit_count,
+            },
+        }
+    }
+
+    fn base_covectors_prepared_poll(self) -> CompactPublicKeyMainEpochPoll {
+        match self {
+            Self::PreChallenge => {
+                CompactPublicKeyMainEpochPoll::PreChallengeWhirBaseCovectorsPrepared
+            }
+            Self::Main => CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared,
         }
     }
 
@@ -4324,7 +4359,7 @@ impl PreparedCompactPublicKeyMainEpoch {
         let final_batch_ordinal = u8::try_from(code_switch_count)
             .map_err(|_| CompactPublicKeyMainEpochPreparationError::InvalidGeometry)?;
         if material.whir_base_case(epoch_owner).is_some()
-            || material.main_whir_base_covector_derivation.is_some()
+            || material.whir_base_covector_derivation.is_some()
             || material.whir_sumcheck_batches(epoch_owner).len() != batch_count
             || material.whir_code_switches(epoch_owner).len() != code_switch_count
             || !material
@@ -4369,8 +4404,9 @@ impl PreparedCompactPublicKeyMainEpoch {
         let masking_attempt_identity = material
             .masking_attempt_identity
             .ok_or(CompactPublicKeyMainEpochPreparationError::WrongPhase)?;
-        if epoch_owner == CompactPublicKeyWhirEpoch::Main {
-            material.main_whir_base_covector_derivation = Some(
+        material.whir_base_covector_derivation = Some(CompactPublicKeyWhirBaseCovectorDerivation {
+            epoch_owner,
+            derivation: Some(
                 begin_selected_compact_whir_base_covector_derivation(
                     &contract.verifier_inputs(),
                     masking_attempt_identity,
@@ -4380,26 +4416,10 @@ impl PreparedCompactPublicKeyMainEpoch {
                     epoch.epoch,
                 )
                 .map_err(CompactPublicKeyMainEpochPreparationError::WhirBaseFreshMasking)?,
-            );
-            return Ok(());
-        }
-        let verified_covector = derive_selected_compact_pre_challenge_base_covector(
-            contract.verifier_inputs(),
-            &material.masking_coefficient_maps,
-            masking_attempt_identity,
-            &public_covector_authority,
-            response_generation_state.canonical_proof_prefix_bytes(),
-            response_generation_state.verifier_messages(),
-        )
-        .map_err(CompactPublicKeyMainEpochPreparationError::WhirBaseFreshMasking)?;
-        Self::finish_whir_base_case_preparation(
-            family_material,
-            response_generation_state,
-            material,
-            &contract,
-            epoch_owner,
-            verified_covector,
-        )
+            ),
+            authorization: None,
+        });
+        Ok(())
     }
 
     fn finish_whir_base_case_preparation(
@@ -4576,76 +4596,87 @@ impl PreparedCompactPublicKeyMainEpoch {
                 CompactPublicKeyMainEpochPreparationError::WrongPhase,
             ),
         )?;
-        if epoch_owner == CompactPublicKeyWhirEpoch::Main
-            && material.main_whir_base_covector_derivation.is_some()
-        {
-            let covector_poll = material
-                .main_whir_base_covector_derivation
-                .as_mut()
-                .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+        if let Some(active_derivation) = material.whir_base_covector_derivation.as_mut() {
+            if active_derivation.epoch_owner != epoch_owner {
+                return Err(CompactPublicKeyMainEpochPollError::Preparation(
                     CompactPublicKeyMainEpochPreparationError::WrongPhase,
-                ))?
-                .advance(maximum_work_unit_count)
+                ));
+            }
+            if active_derivation.authorization.is_none() {
+                let covector_poll = active_derivation
+                    .derivation
+                    .as_mut()
+                    .ok_or(CompactPublicKeyMainEpochPollError::Preparation(
+                        CompactPublicKeyMainEpochPreparationError::WrongPhase,
+                    ))?
+                    .advance(maximum_work_unit_count)
+                    .map_err(CompactPublicKeyMainEpochPreparationError::from)
+                    .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+                let completed_work_unit_count = match covector_poll {
+                    CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                        completed_work_unit_count,
+                    } => completed_work_unit_count,
+                    CompactFactorOnePublicCovectorPoll::Complete {
+                        completed_work_unit_count,
+                        authorization,
+                    } => {
+                        active_derivation.derivation = None;
+                        active_derivation.authorization = Some(authorization);
+                        completed_work_unit_count
+                    }
+                };
+                return Ok(epoch_owner.base_covector_step_poll(completed_work_unit_count));
+            }
+            let authorization = active_derivation.authorization.take().ok_or(
+                CompactPublicKeyMainEpochPollError::Preparation(
+                    CompactPublicKeyMainEpochPreparationError::WrongPhase,
+                ),
+            )?;
+            material.whir_base_covector_derivation = None;
+            let contract = selected_compact_public_key_proof_contract()
                 .map_err(CompactPublicKeyMainEpochPreparationError::from)
                 .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-            match covector_poll {
-                CompactFactorOnePublicCovectorPoll::WorkCompleted {
-                    completed_work_unit_count,
-                } => {
-                    return Ok(
-                        CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorStepCompleted {
-                            completed_work_unit_count,
-                        },
-                    );
-                }
-                CompactFactorOnePublicCovectorPoll::Complete(authorization) => {
-                    material.main_whir_base_covector_derivation = None;
-                    let contract = selected_compact_public_key_proof_contract()
-                        .map_err(CompactPublicKeyMainEpochPreparationError::from)
-                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    let epoch = epoch_owner
-                        .contract(&contract.verifier_inputs())
-                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    let public_covector_authority =
-                        CompactFactorOnePublicCovectorAuthority::from_canonical_public_input(
-                            contract.verifier_inputs(),
-                            family_material.public_input_bindings(),
-                            family_material.canonical_public_input_bytes(),
-                            family_material.decoded_public_input(),
-                        )
-                        .map_err(CompactPublicKeyMainEpochPreparationError::from)
-                        .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    let verified_covector = finish_selected_compact_whir_base_covector_derivation(
-                        contract.verifier_inputs(),
-                        &material.masking_coefficient_maps,
-                        material.masking_attempt_identity.ok_or(
-                            CompactPublicKeyMainEpochPollError::Preparation(
-                                CompactPublicKeyMainEpochPreparationError::WrongPhase,
-                            ),
-                        )?,
-                        &public_covector_authority,
-                        response_generation_state.canonical_proof_prefix_bytes(),
-                        response_generation_state.verifier_messages(),
-                        material
-                            .verified_base_masking_prefix(epoch_owner)
-                            .map_err(CompactPublicKeyMainEpochPollError::Preparation)?,
-                        epoch.epoch,
-                        authorization,
-                    )
-                    .map_err(CompactPublicKeyMainEpochPreparationError::WhirBaseFreshMasking)
-                    .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    Self::finish_whir_base_case_preparation(
-                        family_material,
-                        response_generation_state,
-                        material,
-                        &contract,
-                        epoch_owner,
-                        verified_covector,
-                    )
-                    .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
-                    return Ok(CompactPublicKeyMainEpochPoll::MainWhirBaseCovectorsPrepared);
-                }
-            }
+            let epoch = epoch_owner
+                .contract(&contract.verifier_inputs())
+                .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+            let public_covector_authority =
+                CompactFactorOnePublicCovectorAuthority::from_canonical_public_input(
+                    contract.verifier_inputs(),
+                    family_material.public_input_bindings(),
+                    family_material.canonical_public_input_bytes(),
+                    family_material.decoded_public_input(),
+                )
+                .map_err(CompactPublicKeyMainEpochPreparationError::from)
+                .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+            let verified_covector = finish_selected_compact_whir_base_covector_derivation(
+                contract.verifier_inputs(),
+                &material.masking_coefficient_maps,
+                material.masking_attempt_identity.ok_or(
+                    CompactPublicKeyMainEpochPollError::Preparation(
+                        CompactPublicKeyMainEpochPreparationError::WrongPhase,
+                    ),
+                )?,
+                &public_covector_authority,
+                response_generation_state.canonical_proof_prefix_bytes(),
+                response_generation_state.verifier_messages(),
+                material
+                    .verified_base_masking_prefix(epoch_owner)
+                    .map_err(CompactPublicKeyMainEpochPollError::Preparation)?,
+                epoch.epoch,
+                authorization,
+            )
+            .map_err(CompactPublicKeyMainEpochPreparationError::WhirBaseFreshMasking)
+            .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+            Self::finish_whir_base_case_preparation(
+                family_material,
+                response_generation_state,
+                material,
+                &contract,
+                epoch_owner,
+                verified_covector,
+            )
+            .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+            return Ok(epoch_owner.base_covectors_prepared_poll());
         }
         let base_case = material.whir_base_case_mut(epoch_owner).ok_or(
             CompactPublicKeyMainEpochPollError::Preparation(
@@ -7691,7 +7722,7 @@ fn prepare_post_lookup_material(
         main_whir_relation_preparation: None,
         main_whir_sumcheck_batches: Vec::new(),
         main_whir_code_switches: Vec::new(),
-        main_whir_base_covector_derivation: None,
+        whir_base_covector_derivation: None,
         main_whir_base_case: None,
         main_source_queries: None,
     };
@@ -8479,7 +8510,7 @@ fn validate_retained_post_lookup_material(
         || material.main_whir_relation_preparation.is_some()
         || !material.main_whir_sumcheck_batches.is_empty()
         || !material.main_whir_code_switches.is_empty()
-        || material.main_whir_base_covector_derivation.is_some()
+        || material.whir_base_covector_derivation.is_some()
         || material.main_whir_base_case.is_some()
         || material.main_source_queries.is_some()
     {

@@ -87,10 +87,13 @@ and target release remain incomplete or internal.
   CFW and WHIR boundaries and reproduces the cursor bytes.
 - The five CFW transforms and seven post-CFW WHIR folds use bounded outer
   polling, and both production covector consumers reuse and truncate the source
-  allocation instead of retaining a clone and separate output. Completion of
-  bounded verifier-derived public-covector replay, synchronous transport work,
-  and transition metering still requires focused verification and browser
-  evidence.
+  allocation instead of retaining a clone and separate output. Verifier-derived
+  pre-challenge and main WHIR public covectors now use the same budget-accounted
+  fold primitive, with positive bounded work on every work and terminal poll.
+  Guarded native tests match both epochs byte for byte against the prior
+  allocation-based whole-operation replay and exercise the production owner.
+  Synchronous transport revalidation, separately metered transition work, and
+  release-WebAssembly and browser evidence remain open.
 - Protocol custody adapters obtain cursor geometry and source digests from the
   kernel, separate fresh from resumed custody, publish only after durable
   commit, preserve typed refusals, and evict terminal state. Current host

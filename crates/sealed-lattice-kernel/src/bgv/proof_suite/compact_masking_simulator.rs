@@ -1972,6 +1972,7 @@ fn copy_verifier_inputs<'contract>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::compact_cfw::compact_challenge_to_production;
     use super::super::compact_masking_coefficient_maps::derive_compact_masking_coefficient_map_certificate;
     use super::super::compact_masking_entropy::selected_test_compact_masking_entropy_certificate;
     use super::super::compact_masking_public_covector::CompactFactorOnePublicCovectorPoll;
@@ -2230,14 +2231,92 @@ mod tests {
                 CompactFactorOnePublicCovectorPoll::WorkCompleted {
                     completed_work_unit_count,
                 } => {
-                    assert!(completed_work_unit_count > 0);
+                    assert!((1..=65_536).contains(&completed_work_unit_count));
                     work_boundary_count += 1;
                 }
-                CompactFactorOnePublicCovectorPoll::Complete(authorization) => {
+                CompactFactorOnePublicCovectorPoll::Complete {
+                    completed_work_unit_count,
+                    authorization,
+                } => {
+                    assert!((1..=65_536).contains(&completed_work_unit_count));
+                    work_boundary_count += 1;
                     return (*authorization, work_boundary_count);
                 }
             }
         }
+    }
+
+    fn derive_role18_authorization_with_varied_budgets(
+        simulator: &CompactAdaptiveMaskingSimulator<'_>,
+        work_budgets: &[u64],
+    ) -> (CompactFactorOneCarriedCovector, usize) {
+        assert!(!work_budgets.is_empty());
+        assert!(work_budgets.iter().all(|budget| *budget > 0));
+        let mut derivation = simulator
+            .begin_role18_covector_derivation()
+            .expect("role-18 semantic derivation begins from simulator prefix");
+        assert!(matches!(
+            derivation.advance(0),
+            Err(CompactFactorOnePublicCovectorError::InvalidCovector)
+        ));
+        let mut poll_ordinal = 0_usize;
+        let authorization = loop {
+            let work_budget = work_budgets[poll_ordinal % work_budgets.len()];
+            poll_ordinal += 1;
+            match derivation
+                .advance(work_budget)
+                .expect("varied-budget role-18 semantic work advances")
+            {
+                CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                    completed_work_unit_count,
+                } => {
+                    assert!((1..=work_budget).contains(&completed_work_unit_count));
+                }
+                CompactFactorOnePublicCovectorPoll::Complete {
+                    completed_work_unit_count,
+                    authorization,
+                } => {
+                    assert!((1..=work_budget).contains(&completed_work_unit_count));
+                    break *authorization;
+                }
+            }
+        };
+        assert!(matches!(
+            derivation.advance(1),
+            Err(CompactFactorOnePublicCovectorError::InvalidCovector)
+        ));
+        (authorization, poll_ordinal)
+    }
+
+    fn derive_role18_authorization_with_whole_operation_reference(
+        simulator: &CompactAdaptiveMaskingSimulator<'_>,
+    ) -> CompactFactorOneCarriedCovector {
+        let prefix = simulator
+            .mint_semantic_prefix()
+            .expect("the role-18 reference prefix is valid");
+        simulator
+            .public_covector_authority
+            .as_ref()
+            .expect("the simulator owns its public-covector authority")
+            .begin_prefix_derivation(prefix)
+            .expect("the whole-operation reference derivation begins")
+            .finish_with_whole_operation_reference()
+            .expect("the whole-operation reference derivation completes")
+    }
+
+    fn role18_covector_canonical_bytes(authorization: &CompactFactorOneCarriedCovector) -> Vec<u8> {
+        authorization
+            .coefficients()
+            .expect("the role-18 authorization remains pending")
+            .iter()
+            .flat_map(|coefficient| {
+                compact_challenge_to_production(*coefficient)
+                    .expect("the role-18 coefficient is canonical")
+                    .canonical_coordinates()
+                    .into_iter()
+                    .flat_map(u64::to_le_bytes)
+            })
+            .collect()
     }
 
     fn advance_to_terminal_prefix(
@@ -2627,6 +2706,117 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "guarded selected pre-challenge and main role-18 covector equivalence"]
+    fn heavy_rust_kernel_selected_role18_bounded_covectors_match_whole_operation_reference() {
+        let private_key = [0x8c; 64];
+        let (contract, maps) = selected_simulator(private_key);
+        let verified_public_input =
+            selected_verified_public_input(&contract, ProofBaseFieldElement::ZERO, false);
+        let public_covector_authority =
+            CompactFactorOnePublicCovectorAuthority::from_verified_public_input(
+                &verified_public_input,
+            )
+            .expect("selected public-input authority");
+        let mut simulator = CompactAdaptiveMaskingSimulator::new_with_public_covector_authority(
+            contract.verifier_inputs(),
+            &maps,
+            [0x71; 32],
+            [0x81; 64],
+            private_key,
+            public_covector_authority,
+        )
+        .expect("authority-bound selected simulator");
+        let role18_moves = contract
+            .verifier_inputs()
+            .verifier_moves
+            .iter()
+            .filter_map(|verifier_move| {
+                verifier_move
+                    .role_coordinates
+                    .iter()
+                    .find(|role| role.role_tag == 10)
+                    .map(|role| (verifier_move.ordinal, role.epoch))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(role18_moves.len(), 2);
+        assert_eq!(
+            role18_moves
+                .iter()
+                .map(|(_, epoch)| *epoch)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        let mut selected_verifier = SelectedAdversarialVerifier;
+        for (move_ordinal, epoch) in role18_moves {
+            advance_to_move_count(
+                &mut simulator,
+                &mut selected_verifier,
+                usize::try_from(move_ordinal).expect("selected role-18 ordinal fits usize"),
+            );
+            assert_eq!(
+                simulator.advance(&mut selected_verifier),
+                Err(CompactMaskingSimulatorError::Role18AuthorizationRequired)
+            );
+
+            let valid_prefix = simulator
+                .mint_semantic_prefix()
+                .expect("selected role-18 semantic prefix");
+            let wrong_epoch = if epoch == 1 { 2 } else { 1 };
+            let wrong_epoch_prefix = CompactMaskingSemanticPrefix::from_validated_transcript(
+                valid_prefix.attempt_identity(),
+                valid_prefix.verifier_move_ordinal(),
+                wrong_epoch,
+                valid_prefix.contract_source_hash(),
+                valid_prefix
+                    .canonical_exposed_move_prefix()
+                    .to_vec()
+                    .into_boxed_slice(),
+                valid_prefix
+                    .completed_messages()
+                    .to_vec()
+                    .into_boxed_slice(),
+            )
+            .expect("the wrong epoch remains chronologically encodable");
+            assert!(matches!(
+                simulator
+                    .public_covector_authority
+                    .as_ref()
+                    .expect("selected public-covector authority")
+                    .begin_prefix_derivation(wrong_epoch_prefix),
+                Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix)
+            ));
+
+            let mut premature_derivation = simulator
+                .begin_role18_covector_derivation()
+                .expect("selected role-18 premature derivation begins");
+            assert!(matches!(
+                premature_derivation.advance(1),
+                Ok(CompactFactorOnePublicCovectorPoll::WorkCompleted {
+                    completed_work_unit_count: 1
+                })
+            ));
+
+            let reference_authorization =
+                derive_role18_authorization_with_whole_operation_reference(&simulator);
+            let (mut bounded_authorization, poll_count) =
+                derive_role18_authorization_with_varied_budgets(&simulator, &[1, 7, 257, 8_192]);
+            assert!(poll_count > 1);
+            assert_eq!(bounded_authorization.epoch(), Some(epoch));
+            assert_eq!(
+                role18_covector_canonical_bytes(&bounded_authorization),
+                role18_covector_canonical_bytes(&reference_authorization),
+                "bounded epoch-{epoch} covector bytes diverged from the prior whole-operation replay"
+            );
+            assert_eq!(
+                simulator.advance_role18(&mut selected_verifier, &mut bounded_authorization),
+                Ok(move_ordinal)
+            );
+            assert_eq!(bounded_authorization.epoch(), None);
+        }
+    }
+
+    #[test]
     #[ignore = "guarded selected pre-challenge role-18 public-covector lifecycle"]
     fn heavy_rust_kernel_selected_pre_role18_covector_is_prefix_bound_transactional_and_one_shot() {
         const PRE_ROLE18_MOVE_ORDINAL: u32 = 52;
@@ -2665,7 +2855,7 @@ mod tests {
         );
         let (mut prefix_a_authorization, prefix_a_work_boundary_count) =
             derive_role18_authorization(&prefix_a);
-        assert_eq!(prefix_a_work_boundary_count, 0);
+        assert!(prefix_a_work_boundary_count > 0);
         assert_eq!(prefix_a_authorization.epoch(), Some(1));
         assert_eq!(
             prefix_a_authorization
@@ -2727,7 +2917,7 @@ mod tests {
 
         let (mut stale_authorization, stale_work_boundary_count) =
             derive_role18_authorization(&simulator);
-        assert_eq!(stale_work_boundary_count, 0);
+        assert!(stale_work_boundary_count > 0);
         let reset_ordinal_before_rewind = simulator.attempt.reset_ordinal;
         simulator
             .rewind_security_game_suffix(rewind_checkpoint)
@@ -2757,7 +2947,7 @@ mod tests {
 
         let (mut pre_authorization, pre_work_boundary_count) =
             derive_role18_authorization(&simulator);
-        assert_eq!(pre_work_boundary_count, 0);
+        assert!(pre_work_boundary_count > 0);
         assert_eq!(pre_authorization.epoch(), Some(1));
         assert_eq!(
             pre_authorization

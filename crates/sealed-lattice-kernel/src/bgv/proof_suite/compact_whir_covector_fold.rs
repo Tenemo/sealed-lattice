@@ -145,20 +145,6 @@ impl CompactWhirInPlaceCovectorFold {
     }
 }
 
-pub(crate) fn fold_compact_whir_covector_in_place(
-    flattened: Vec<CompactChallengeField>,
-    folding_factor: usize,
-    challenges: &[CompactChallengeField],
-) -> Result<Vec<CompactChallengeField>, CompactWhirCovectorFoldError> {
-    let mut fold = CompactWhirInPlaceCovectorFold::new(flattened, folding_factor, challenges)?;
-    loop {
-        match fold.advance(u64::MAX)? {
-            CompactWhirInPlaceCovectorFoldPoll::WorkCompleted { .. } => {}
-            CompactWhirInPlaceCovectorFoldPoll::Complete { values, .. } => return Ok(values),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
