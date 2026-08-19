@@ -381,6 +381,10 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         return Err(RefusalReason::UnsupportedVersionOrSuite);
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!("setup generation phase: sample common secret");
     let common_secret_coefficients = sample_common_secret_coefficients(
         selected_suite,
         &action_private_randomness,
@@ -388,6 +392,13 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         bindings.setup_attempt_identifier,
         ring_degree,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "setup generation phase complete: sample common secret elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("setup generation phase: construct anchor openings");
     let (anchor_commitment_roots, anchor_openings) = construct_anchor_openings(
@@ -399,6 +410,13 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
     )?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "setup generation phase complete: construct anchor openings elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("setup generation phase: construct VSS material");
     let vss_material = construct_vss_material(
         selected_suite,
@@ -406,6 +424,13 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         &bindings,
         &common_secret_coefficients,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "setup generation phase complete: construct VSS material elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("setup generation phase: construct public-key share");
     let public_key_share = construct_public_key_share(
@@ -417,6 +442,13 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
     )?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "setup generation phase complete: construct public-key share elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("setup generation phase: construct relinearization material");
     let relinearization_material = construct_relinearization_material(
         selected_suite,
@@ -427,6 +459,13 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         &common_secret_coefficients,
     )?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "setup generation phase complete: construct relinearization material elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("setup generation phase: construct Galois material");
     let ordered_galois_entries = construct_galois_entries(
         selected_suite,
@@ -434,34 +473,48 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         &bindings,
         &common_secret_coefficients,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "setup generation phase complete: construct Galois material elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
     let [galois_batch_schedule_position] = selected_galois_key_share_batch_schedule();
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
+    let phase_started_at = Instant::now();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("setup generation phase: retain browser-owned authority");
-    retain_browser_owned_setup_generation_authority(SetupGenerationAuthorityInput {
-        suite_identifier: bindings.suite_identifier,
-        manifest_hash: bindings.manifest_hash,
-        ceremony_context_hash: bindings.ceremony_context_hash,
-        action_context_hash: bindings.action_context_hash,
-        roster_hash: bindings.roster_hash,
-        ordered_roster: bindings.ordered_roster,
-        setup_proof_context_hash: bindings.setup_proof_context_hash,
-        source_setup_intent_object_hash: bindings.source_setup_intent_object_hash,
-        participant_identity: bindings.participant_identity,
-        roster_position: bindings.roster_position,
-        setup_attempt_identifier: *bindings.setup_attempt_identifier.as_bytes(),
-        action_randomness_authorization_hash: bindings.action_randomness_authorization_hash,
-        action_private_randomness,
-        public_setup_seed: bindings.public_setup_seed,
-        anchor_commitment_roots,
-        anchor_openings,
-        common_secret_coefficients,
-        public_key_share,
-        vss_material,
-        relinearization_material,
-        galois_batch_schedule_position,
-        ordered_galois_entries,
-    })
+    let retained_authority =
+        retain_browser_owned_setup_generation_authority(SetupGenerationAuthorityInput {
+            suite_identifier: bindings.suite_identifier,
+            manifest_hash: bindings.manifest_hash,
+            ceremony_context_hash: bindings.ceremony_context_hash,
+            action_context_hash: bindings.action_context_hash,
+            roster_hash: bindings.roster_hash,
+            ordered_roster: bindings.ordered_roster,
+            setup_proof_context_hash: bindings.setup_proof_context_hash,
+            source_setup_intent_object_hash: bindings.source_setup_intent_object_hash,
+            participant_identity: bindings.participant_identity,
+            roster_position: bindings.roster_position,
+            setup_attempt_identifier: *bindings.setup_attempt_identifier.as_bytes(),
+            action_randomness_authorization_hash: bindings.action_randomness_authorization_hash,
+            action_private_randomness,
+            public_setup_seed: bindings.public_setup_seed,
+            anchor_commitment_roots,
+            anchor_openings,
+            common_secret_coefficients,
+            public_key_share,
+            vss_material,
+            relinearization_material,
+            galois_batch_schedule_position,
+            ordered_galois_entries,
+        });
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    println!(
+        "setup generation phase complete: retain browser-owned authority elapsed_milliseconds={}",
+        phase_started_at.elapsed().as_millis()
+    );
+    retained_authority
 }
 
 fn construct_public_key_share(
@@ -814,6 +867,8 @@ fn construct_vss_material(
     let mut recipient_payload_limbs = (0..participant_count)
         .map(|_| Vec::with_capacity(relation_input.sharing_data_modulus_indices.len()))
         .collect::<Vec<_>>();
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let mut completed_material_count = 0_usize;
 
     for sharing_limb_index in relation_input.sharing_data_modulus_indices.iter().copied() {
         let modulus = selected_suite
@@ -875,13 +930,25 @@ fn construct_vss_material(
                 material_context_hash,
                 bindings.setup_attempt_identifier,
             )?;
-            ordered_coefficient_materials.push(construct_committed_material(
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            let material_started_at = Instant::now();
+            let committed_material = construct_committed_material(
                 committed_material_profile,
                 material_context_hash,
                 *material_seed,
                 coefficients,
                 modulus,
-            )?);
+            )?;
+            ordered_coefficient_materials.push(committed_material);
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            {
+                completed_material_count += 1;
+                println!(
+                    "setup VSS material progress: {completed_material_count}/{}, role=coefficient, sharing_limb_index={sharing_limb_index}, coefficient_index={coefficient_index}, elapsed_milliseconds={}",
+                    coefficient_material_count + recipient_material_count,
+                    material_started_at.elapsed().as_millis(),
+                );
+            }
         }
 
         for (recipient_roster_position, recipient_payload_limb_list) in
@@ -913,13 +980,25 @@ fn construct_vss_material(
                 material_context_hash,
                 bindings.setup_attempt_identifier,
             )?;
-            ordered_recipient_share_materials.push(construct_committed_material(
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            let material_started_at = Instant::now();
+            let committed_material = construct_committed_material(
                 committed_material_profile,
                 material_context_hash,
                 *material_seed,
                 &canonical_share_coefficients,
                 modulus,
-            )?);
+            )?;
+            ordered_recipient_share_materials.push(committed_material);
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            {
+                completed_material_count += 1;
+                println!(
+                    "setup VSS material progress: {completed_material_count}/{}, role=recipient-share, sharing_limb_index={sharing_limb_index}, recipient_roster_position={recipient_roster_position}, elapsed_milliseconds={}",
+                    coefficient_material_count + recipient_material_count,
+                    material_started_at.elapsed().as_millis(),
+                );
+            }
             recipient_payload_limb_list.push(RecipientPayloadLimb {
                 sharing_limb_index,
                 canonical_share_coefficients,

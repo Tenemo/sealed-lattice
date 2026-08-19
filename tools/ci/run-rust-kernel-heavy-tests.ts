@@ -19,10 +19,14 @@ import {
 } from './rust-kernel-test-arguments.js';
 
 export type ParsedRustKernelHeavyArguments = Readonly<{
+    resumeCheckpoints: boolean;
     testFilter: string;
 }>;
 
-const usage = 'Usage: run-rust-kernel-heavy-tests.ts [<heavy Rust test name>].';
+export const rustKernelHeavyCheckpointResumeEnvironmentVariable =
+    'SEALED_LATTICE_RUST_HEAVY_CHECKPOINT_RESUME';
+const usage =
+    'Usage: run-rust-kernel-heavy-tests.ts [--resume-checkpoints] [<heavy Rust test name>].';
 let rustKernelHeavyProcessMemoryGuard: ProcessMemoryGuard | undefined;
 
 const getRustKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
@@ -37,8 +41,16 @@ export const parseRustKernelHeavyArguments = (
     commandArguments: readonly string[],
 ): ParsedRustKernelHeavyArguments => {
     const positionalArguments: string[] = [];
+    let resumeCheckpoints = false;
     for (const argument of commandArguments) {
         if (argument === '--') {
+            continue;
+        }
+        if (argument === '--resume-checkpoints') {
+            if (resumeCheckpoints) {
+                throw new Error(`Duplicate --resume-checkpoints. ${usage}`);
+            }
+            resumeCheckpoints = true;
             continue;
         }
         if (argument.startsWith('-')) {
@@ -56,7 +68,7 @@ export const parseRustKernelHeavyArguments = (
         positionalFilter === undefined
             ? heavyRustKernelTestNamePrefix
             : normalizeRustTestFilter(positionalFilter);
-    return { testFilter };
+    return { resumeCheckpoints, testFilter };
 };
 
 export const buildRustKernelHeavyTestCommand = (
@@ -76,6 +88,8 @@ export const buildRustKernelHeavyTestCommand = (
                 CARGO_INCREMENTAL: '0',
                 RAYON_NUM_THREADS: '1',
                 RUST_BACKTRACE: 'full',
+                [rustKernelHeavyCheckpointResumeEnvironmentVariable]:
+                    parsedArguments.resumeCheckpoints ? '1' : '0',
                 SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
             },
             logFileSlug: 'cargo-test-rust-kernel-heavy',

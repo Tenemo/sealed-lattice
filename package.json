@@ -24,7 +24,7 @@
         "evidence:lattice-security:refresh": "tsx ./tools/ci/run-selected-lattice-security-evidence.ts --write-record",
         "release:version": "tsx ./tools/ci/release-version.ts",
         "test:rust:kernel": "tsx ./tools/ci/run-rust-kernel-tests.ts",
-        "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",
+        "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts --resume-checkpoints",
         "test:rust:kernel:full-profile-evidence": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-full-profile-evidence",
         "test:rust:kernel:measurements": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-measurements",
         "test:rust:kernel:phase-liveness-evidence": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-phase-liveness-evidence",

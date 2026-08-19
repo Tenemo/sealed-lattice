@@ -135,10 +135,14 @@ ceremony or supported-phone qualification.
 - No exact suite is frozen or selectable. Suite selection correctly remains
   fail-closed rather than accepting a producer-supplied status or qualification
   field.
-- The evidence baseline is not clean while a guarded heavy Rust consumer
-  depends on a generated proof fixture produced by a later test and the exact
-  aggregate proof phase exceeds the current job budget. Both runner ownership
-  and bounded execution evidence must be repaired before closure.
+- The guarded heavy Rust proof fixture is now produced and consumed by one
+  owning test, so clean execution no longer depends on lexical test order or a
+  prior run. The evidence baseline is still not clean because exact aggregate
+  source preparation performs 112 synchronous committed-material constructions
+  before reaching the first resumable proof boundary and exceeds the current
+  job budget. The heavy runner now owns durable common-proof checkpoint replay,
+  including a profile-separated exact aggregate namespace, but a complete run
+  has not yet reached and exercised that namespace.
 - There is no complete production compact generation-and-verification
   release-WebAssembly ABI pair. The release transport validator checks
   canonical structure, transcript chronology, derived queries, and Merkle

@@ -1490,7 +1490,6 @@ fn production_vss_prerequisite_sources() -> Result<ProductionVssPrerequisiteEvid
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSources, String> {
-    let (relation_plan, _, _) = production_same_secret_relation()?;
     let authority_population_started_at = std::time::Instant::now();
     println!("exact same-secret phase: populate browser-owned setup authority");
     let authority =
@@ -1500,79 +1499,112 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
         "exact same-secret phase complete: browser-owned setup authority ({:?})",
         authority_population_started_at.elapsed(),
     );
-    let sources = (|| {
-        let checkpoint_schedule_digest = relation_plan
-            .checkpoint_schedule_digest()
-            .map_err(|error| format!("derive production checkpoint schedule: {error:?}"))?;
-        let preparation_source = resolve_setup_generation_key_relation_preparation_source(
-            &authority.authority_handle,
-            SetupKeyRelationProofFamily::SameSecret,
-        )
-        .map_err(|error| format!("resolve production same-secret statement: {error:?}"))?;
-        let statement_schema_identifier =
-            SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
-        let application_slot = ProofApplicationSlot::new(
-            Hash512::from_bytes(preparation_source.suite_identifier()),
-            Hash512::from_bytes(preparation_source.ceremony_context_hash()),
-            Hash512::from_bytes(preparation_source.action_context_hash()),
-            statement_schema_identifier,
-            Some(preparation_source.roster_position()),
-            None,
-            None,
-        )
-        .map_err(|error| format!("construct production proof application slot: {error:?}"))?;
-        let application_statement_hash = Hash512::from_bytes(verified_application_statement_hash(
-            preparation_source.protocol_version(),
-            preparation_source.suite_identifier(),
-            statement_schema_identifier,
-            preparation_source.canonical_application_statement_bytes(),
-        ));
-        let prepared_attempt = prepare_exact_same_secret_evidence_attempt(
-            &authority.action_private_randomness,
+    let vss_prerequisite = ProductionVssPrerequisiteEvidenceSources {
+        authority_handle: authority.authority_handle,
+        action_private_randomness: authority.action_private_randomness,
+        verified_public_randomness: authority.verified_public_randomness,
+    };
+    let sources = prepare_production_same_secret_sources(
+        &vss_prerequisite.authority_handle,
+        &vss_prerequisite.action_private_randomness,
+        None,
+    );
+    match sources {
+        Ok(sources) => Ok(ProductionSameSecretEvidenceSources {
+            sources,
+            vss_prerequisite,
+        }),
+        Err(error) => {
+            release_production_same_secret_authority(vss_prerequisite.authority_handle)?;
+            Err(error)
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn prepare_production_same_secret_sources(
+    authority_handle: &SetupGenerationAuthorityHandle,
+    action_private_randomness: &std::rc::Rc<crate::foundation::ActionPrivateRandomness>,
+    checkpoint_continuation: Option<AuthenticatedCheckpointContinuationSource>,
+) -> Result<PreparedExactSameSecretGenerationSources, String> {
+    let (relation_plan, _, _) = production_same_secret_relation()?;
+    let checkpoint_schedule_digest = relation_plan
+        .checkpoint_schedule_digest()
+        .map_err(|error| format!("derive production checkpoint schedule: {error:?}"))?;
+    let preparation_source = resolve_setup_generation_key_relation_preparation_source(
+        authority_handle,
+        SetupKeyRelationProofFamily::SameSecret,
+    )
+    .map_err(|error| format!("resolve production same-secret statement: {error:?}"))?;
+    let statement_schema_identifier =
+        SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
+    let application_slot = ProofApplicationSlot::new(
+        Hash512::from_bytes(preparation_source.suite_identifier()),
+        Hash512::from_bytes(preparation_source.ceremony_context_hash()),
+        Hash512::from_bytes(preparation_source.action_context_hash()),
+        statement_schema_identifier,
+        Some(preparation_source.roster_position()),
+        None,
+        None,
+    )
+    .map_err(|error| format!("construct production proof application slot: {error:?}"))?;
+    let application_statement_hash = Hash512::from_bytes(verified_application_statement_hash(
+        preparation_source.protocol_version(),
+        preparation_source.suite_identifier(),
+        statement_schema_identifier,
+        preparation_source.canonical_application_statement_bytes(),
+    ));
+    let prepared_attempt = match checkpoint_continuation {
+        None => prepare_exact_same_secret_evidence_attempt(
+            action_private_randomness,
             application_slot,
             application_statement_hash,
             EXACT_SAME_SECRET_CHECKPOINT_LINEAGE_IDENTIFIER,
             checkpoint_schedule_digest,
-        )
-        .map_err(|error| format!("bind production proof attempt: {error:?}"))?;
-        let decoded_statement = decode_selected_same_secret_statement(
-            preparation_source.canonical_application_statement_bytes(),
-            SelectedApplicationStatementContext::new(
-                preparation_source.protocol_version(),
-                preparation_source.suite_identifier(),
-                None,
-                None,
-            ),
-        )
-        .map_err(|error| format!("decode production same-secret statement: {error:?}"))?;
-        let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
-            SetupKeyRelationProofFamily::SameSecret,
-            prepared_attempt,
-            preparation_source.canonical_application_statement_bytes(),
-            decoded_statement.setup_proof_context_hash(),
-            preparation_source.roster_hash(),
-            preparation_source.participant_identity(),
-            preparation_source.roster_position(),
-        );
-        with_setup_generation_key_relation(&authority.authority_handle, &application, |source| {
-            source.prepare_exact_same_secret_generation_sources(relation_plan)
-        })
-        .map_err(|error| format!("prepare production same-secret sources: {error:?}"))
-    })();
-    match sources {
-        Ok(sources) => Ok(ProductionSameSecretEvidenceSources {
-            sources,
-            vss_prerequisite: ProductionVssPrerequisiteEvidenceSources {
-                authority_handle: authority.authority_handle,
-                action_private_randomness: authority.action_private_randomness,
-                verified_public_randomness: authority.verified_public_randomness,
-            },
-        }),
-        Err(error) => {
-            release_production_same_secret_authority(authority.authority_handle)?;
-            Err(error)
+        ),
+        Some(checkpoint_continuation) => {
+            if checkpoint_continuation.checkpoint_lineage_identifier()
+                != EXACT_SAME_SECRET_CHECKPOINT_LINEAGE_IDENTIFIER
+                || checkpoint_continuation.checkpoint_schedule_digest()
+                    != checkpoint_schedule_digest
+            {
+                return Err(
+                    "the retained exact aggregate checkpoint lineage or schedule is stale"
+                        .to_owned(),
+                );
+            }
+            prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+                action_private_randomness,
+                application_slot,
+                application_statement_hash,
+                checkpoint_continuation,
+            )
         }
     }
+    .map_err(|error| format!("bind production proof attempt: {error:?}"))?;
+    let decoded_statement = decode_selected_same_secret_statement(
+        preparation_source.canonical_application_statement_bytes(),
+        SelectedApplicationStatementContext::new(
+            preparation_source.protocol_version(),
+            preparation_source.suite_identifier(),
+            None,
+            None,
+        ),
+    )
+    .map_err(|error| format!("decode production same-secret statement: {error:?}"))?;
+    let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
+        SetupKeyRelationProofFamily::SameSecret,
+        prepared_attempt,
+        preparation_source.canonical_application_statement_bytes(),
+        decoded_statement.setup_proof_context_hash(),
+        preparation_source.roster_hash(),
+        preparation_source.participant_identity(),
+        preparation_source.roster_position(),
+    );
+    with_setup_generation_key_relation(authority_handle, &application, |source| {
+        source.prepare_exact_same_secret_generation_sources(relation_plan)
+    })
+    .map_err(|error| format!("prepare production same-secret sources: {error:?}"))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

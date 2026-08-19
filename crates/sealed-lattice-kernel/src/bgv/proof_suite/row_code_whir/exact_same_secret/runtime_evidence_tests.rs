@@ -35,13 +35,16 @@ use crate::{
 
 const VSS_PREREQUISITE_CHECKPOINT_DIRECTORY_NAME: &str =
     "selected-vss-prerequisite-proof-generation-v1";
+const EXACT_AGGREGATE_CHECKPOINT_DIRECTORY_NAME: &str =
+    "exact-aggregate-wide-same-secret-proof-generation-v1";
 const VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC: [u8; 8] = *b"SLVSSCP1";
-const VSS_PREREQUISITE_CHECKPOINT_SEAL_VERSION: u16 = 1;
-const VSS_PREREQUISITE_CHECKPOINT_FILE_PREFIX: &str = "checkpoint-";
-const VSS_PREREQUISITE_CHECKPOINT_STATE_SUFFIX: &str = ".state";
-const VSS_PREREQUISITE_CHECKPOINT_CURSOR_SUFFIX: &str = ".cursor";
-const VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX: &str = ".seal";
-const VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH: usize = VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC
+const EXACT_AGGREGATE_CHECKPOINT_SEAL_MAGIC: [u8; 8] = *b"SLEXACP1";
+const COMMON_PROOF_CHECKPOINT_SEAL_VERSION: u16 = 1;
+const COMMON_PROOF_CHECKPOINT_FILE_PREFIX: &str = "checkpoint-";
+const COMMON_PROOF_CHECKPOINT_STATE_SUFFIX: &str = ".state";
+const COMMON_PROOF_CHECKPOINT_CURSOR_SUFFIX: &str = ".cursor";
+const COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX: &str = ".seal";
+const COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH: usize = VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC
     .len()
     + size_of::<u16>()
     + size_of::<u32>()
@@ -54,6 +57,35 @@ const VSS_PREREQUISITE_CHECKPOINT_STATE_HASH_DOMAIN: &str =
     "sealed-lattice/test-evidence/vss-prerequisite-checkpoint-state/v1";
 const VSS_PREREQUISITE_CHECKPOINT_CURSOR_HASH_DOMAIN: &str =
     "sealed-lattice/test-evidence/vss-prerequisite-checkpoint-cursor/v1";
+const EXACT_AGGREGATE_CHECKPOINT_STATE_HASH_DOMAIN: &str =
+    "sealed-lattice/test-evidence/exact-aggregate-wide-checkpoint-state/v1";
+const EXACT_AGGREGATE_CHECKPOINT_CURSOR_HASH_DOMAIN: &str =
+    "sealed-lattice/test-evidence/exact-aggregate-wide-checkpoint-cursor/v1";
+const RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_RUST_HEAVY_CHECKPOINT_RESUME";
+
+#[derive(Clone, Copy)]
+struct DurableCommonProofCheckpointProfile {
+    directory_name: &'static str,
+    seal_magic: [u8; 8],
+    state_hash_domain: &'static str,
+    cursor_hash_domain: &'static str,
+}
+
+const VSS_PREREQUISITE_CHECKPOINT_PROFILE: DurableCommonProofCheckpointProfile =
+    DurableCommonProofCheckpointProfile {
+        directory_name: VSS_PREREQUISITE_CHECKPOINT_DIRECTORY_NAME,
+        seal_magic: VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC,
+        state_hash_domain: VSS_PREREQUISITE_CHECKPOINT_STATE_HASH_DOMAIN,
+        cursor_hash_domain: VSS_PREREQUISITE_CHECKPOINT_CURSOR_HASH_DOMAIN,
+    };
+const EXACT_AGGREGATE_CHECKPOINT_PROFILE: DurableCommonProofCheckpointProfile =
+    DurableCommonProofCheckpointProfile {
+        directory_name: EXACT_AGGREGATE_CHECKPOINT_DIRECTORY_NAME,
+        seal_magic: EXACT_AGGREGATE_CHECKPOINT_SEAL_MAGIC,
+        state_hash_domain: EXACT_AGGREGATE_CHECKPOINT_STATE_HASH_DOMAIN,
+        cursor_hash_domain: EXACT_AGGREGATE_CHECKPOINT_CURSOR_HASH_DOMAIN,
+    };
 
 #[derive(Debug)]
 struct FileBackedObject {
@@ -71,25 +103,29 @@ struct FileBackedExternalMemory {
     maximum_declared_byte_length: u64,
 }
 
-struct DurableVssPrerequisiteCheckpoint {
+struct DurableCommonProofCheckpoint {
     authenticated: AuthenticatedCommonProofGenerationCheckpoint,
     boundary_ordinal: u32,
     state: Vec<u8>,
     cursor_manifest: Vec<u8>,
 }
 
-struct DurableVssPrerequisiteCheckpointStore {
+struct DurableCommonProofCheckpointStore {
     directory: PathBuf,
+    profile: DurableCommonProofCheckpointProfile,
     stable_attempt_binding_hash: [u8; Hash512::BYTE_LENGTH],
     checkpoint_lineage_identifier: [u8; 32],
 }
 
-impl DurableVssPrerequisiteCheckpointStore {
-    fn open(prepared: &PreparedCommonProofGeneration) -> Result<Self, String> {
+impl DurableCommonProofCheckpointStore {
+    fn open(
+        prepared: &PreparedCommonProofGeneration,
+        profile: DurableCommonProofCheckpointProfile,
+    ) -> Result<Self, String> {
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(Path::parent)
-            .ok_or_else(|| "resolve repository root for VSS checkpoint custody".to_owned())?;
+            .ok_or_else(|| "resolve repository root for proof checkpoint custody".to_owned())?;
         let stable_attempt_binding_hash = prepared.runtime_binding_hash();
         let binding_directory_name = stable_attempt_binding_hash
             .iter()
@@ -98,41 +134,41 @@ impl DurableVssPrerequisiteCheckpointStore {
         let directory = repository_root
             .join("temp")
             .join("test-checkpoints")
-            .join(VSS_PREREQUISITE_CHECKPOINT_DIRECTORY_NAME)
+            .join(profile.directory_name)
             .join(binding_directory_name);
         fs::create_dir_all(&directory)
-            .map_err(|error| format!("create VSS checkpoint custody directory: {error}"))?;
+            .map_err(|error| format!("create proof checkpoint custody directory: {error}"))?;
         Ok(Self {
             directory,
+            profile,
             stable_attempt_binding_hash,
             checkpoint_lineage_identifier: prepared.checkpoint_lineage_identifier(),
         })
     }
 
-    fn load_latest(&self) -> Result<Option<DurableVssPrerequisiteCheckpoint>, String> {
+    fn load_latest(&self) -> Result<Option<DurableCommonProofCheckpoint>, String> {
         let mut latest_boundary_ordinal = None;
         for entry in fs::read_dir(&self.directory)
-            .map_err(|error| format!("enumerate retained VSS checkpoints: {error}"))?
+            .map_err(|error| format!("enumerate retained proof checkpoints: {error}"))?
         {
             let entry =
-                entry.map_err(|error| format!("read retained VSS checkpoint entry: {error}"))?;
+                entry.map_err(|error| format!("read retained proof checkpoint entry: {error}"))?;
             if !entry
                 .file_type()
-                .map_err(|error| format!("classify retained VSS checkpoint entry: {error}"))?
+                .map_err(|error| format!("classify retained proof checkpoint entry: {error}"))?
                 .is_file()
             {
-                return Err("VSS checkpoint custody contains a non-file entry".to_owned());
+                return Err("proof checkpoint custody contains a non-file entry".to_owned());
             }
-            let file_name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| "VSS checkpoint custody contains a non-Unicode filename".to_owned())?;
-            if !file_name.ends_with(VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX) {
+            let file_name = entry.file_name().into_string().map_err(|_| {
+                "proof checkpoint custody contains a non-Unicode filename".to_owned()
+            })?;
+            if !file_name.ends_with(COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX) {
                 continue;
             }
-            let boundary_ordinal = parse_vss_prerequisite_checkpoint_boundary(&file_name)
-                .ok_or_else(|| {
-                    format!("VSS checkpoint custody contains malformed seal {file_name}")
+            let boundary_ordinal =
+                parse_common_proof_checkpoint_boundary(&file_name).ok_or_else(|| {
+                    format!("proof checkpoint custody contains malformed seal {file_name}")
                 })?;
             latest_boundary_ordinal = Some(
                 latest_boundary_ordinal.map_or(boundary_ordinal, |current: u32| {
@@ -145,35 +181,39 @@ impl DurableVssPrerequisiteCheckpointStore {
             .transpose()
     }
 
-    fn load(&self, boundary_ordinal: u32) -> Result<DurableVssPrerequisiteCheckpoint, String> {
+    fn load(&self, boundary_ordinal: u32) -> Result<DurableCommonProofCheckpoint, String> {
         let state = read_exact_bounded_file(
-            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_STATE_SUFFIX),
+            &self.checkpoint_path(boundary_ordinal, COMMON_PROOF_CHECKPOINT_STATE_SUFFIX),
             COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH,
             COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH,
-            "VSS checkpoint state",
+            "proof checkpoint state",
         )?;
         let cursor_manifest = read_exact_bounded_file(
-            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_CURSOR_SUFFIX),
+            &self.checkpoint_path(boundary_ordinal, COMMON_PROOF_CHECKPOINT_CURSOR_SUFFIX),
             1,
             MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH,
-            "VSS checkpoint cursor manifest",
+            "proof checkpoint cursor manifest",
         )?;
         let seal = read_exact_bounded_file(
-            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX),
-            VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH,
-            VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH,
-            "VSS checkpoint seal",
+            &self.checkpoint_path(boundary_ordinal, COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX),
+            COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH,
+            COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH,
+            "proof checkpoint seal",
         )?;
         let authenticated =
             AuthenticatedCommonProofGenerationCheckpoint::decode(&state, &cursor_manifest)
-                .map_err(|error| format!("decode retained VSS checkpoint: {error:?}"))?;
+                .map_err(|error| format!("decode retained proof checkpoint: {error:?}"))?;
         self.require_checkpoint_binding(&authenticated, boundary_ordinal)?;
-        let expected_seal =
-            encode_vss_prerequisite_checkpoint_seal(&authenticated, &state, &cursor_manifest);
+        let expected_seal = encode_common_proof_checkpoint_seal(
+            self.profile,
+            &authenticated,
+            &state,
+            &cursor_manifest,
+        );
         if seal != expected_seal {
-            return Err("retained VSS checkpoint seal is stale or malformed".to_owned());
+            return Err("retained proof checkpoint seal is stale or malformed".to_owned());
         }
-        Ok(DurableVssPrerequisiteCheckpoint {
+        Ok(DurableCommonProofCheckpoint {
             authenticated,
             boundary_ordinal,
             state,
@@ -191,27 +231,32 @@ impl DurableVssPrerequisiteCheckpointStore {
             || cursor_manifest.is_empty()
             || cursor_manifest.len() > MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH
         {
-            return Err("pending VSS checkpoint exceeds its canonical custody bounds".to_owned());
+            return Err("pending proof checkpoint exceeds its canonical custody bounds".to_owned());
         }
         let authenticated =
             AuthenticatedCommonProofGenerationCheckpoint::decode(state, cursor_manifest)
-                .map_err(|error| format!("decode pending VSS checkpoint: {error:?}"))?;
+                .map_err(|error| format!("decode pending proof checkpoint: {error:?}"))?;
         self.require_checkpoint_binding(&authenticated, boundary_ordinal)?;
         persist_exact_file_once(
-            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_STATE_SUFFIX),
+            &self.checkpoint_path(boundary_ordinal, COMMON_PROOF_CHECKPOINT_STATE_SUFFIX),
             state,
-            "VSS checkpoint state",
+            "proof checkpoint state",
         )?;
         persist_exact_file_once(
-            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_CURSOR_SUFFIX),
+            &self.checkpoint_path(boundary_ordinal, COMMON_PROOF_CHECKPOINT_CURSOR_SUFFIX),
             cursor_manifest,
-            "VSS checkpoint cursor manifest",
+            "proof checkpoint cursor manifest",
         )?;
-        let seal = encode_vss_prerequisite_checkpoint_seal(&authenticated, state, cursor_manifest);
+        let seal = encode_common_proof_checkpoint_seal(
+            self.profile,
+            &authenticated,
+            state,
+            cursor_manifest,
+        );
         persist_exact_file_once(
-            &self.checkpoint_path(boundary_ordinal, VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX),
+            &self.checkpoint_path(boundary_ordinal, COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX),
             &seal,
-            "VSS checkpoint seal",
+            "proof checkpoint seal",
         )
     }
 
@@ -225,7 +270,7 @@ impl DurableVssPrerequisiteCheckpointStore {
             || checkpoint.safe_boundary_ordinal() != boundary_ordinal
         {
             return Err(
-                "retained VSS checkpoint differs from the exact proof attempt or boundary"
+                "retained proof checkpoint differs from the exact proof attempt or boundary"
                     .to_owned(),
             );
         }
@@ -234,19 +279,33 @@ impl DurableVssPrerequisiteCheckpointStore {
 
     fn checkpoint_path(&self, boundary_ordinal: u32, suffix: &str) -> PathBuf {
         self.directory.join(format!(
-            "{VSS_PREREQUISITE_CHECKPOINT_FILE_PREFIX}{boundary_ordinal:08}{suffix}"
+            "{COMMON_PROOF_CHECKPOINT_FILE_PREFIX}{boundary_ordinal:08}{suffix}"
         ))
     }
 }
 
-fn parse_vss_prerequisite_checkpoint_boundary(file_name: &str) -> Option<u32> {
+fn parse_common_proof_checkpoint_boundary(file_name: &str) -> Option<u32> {
     let digits = file_name
-        .strip_prefix(VSS_PREREQUISITE_CHECKPOINT_FILE_PREFIX)?
-        .strip_suffix(VSS_PREREQUISITE_CHECKPOINT_SEAL_SUFFIX)?;
+        .strip_prefix(COMMON_PROOF_CHECKPOINT_FILE_PREFIX)?
+        .strip_suffix(COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX)?;
     if digits.len() != 8 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
     digits.parse().ok()
+}
+
+fn runner_enabled_checkpoint_resume() -> Result<bool, String> {
+    match std::env::var(RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE) {
+        Ok(value) if value == "1" => Ok(true),
+        Ok(value) if value == "0" => Ok(false),
+        Ok(value) => Err(format!(
+            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} has unsupported value {value:?}"
+        )),
+        Err(std::env::VarError::NotPresent) => Ok(false),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} is not Unicode"
+        )),
+    }
 }
 
 fn read_exact_bounded_file(
@@ -300,27 +359,25 @@ fn persist_exact_file_once(path: &Path, bytes: &[u8], label: &str) -> Result<(),
     }
 }
 
-fn encode_vss_prerequisite_checkpoint_seal(
+fn encode_common_proof_checkpoint_seal(
+    profile: DurableCommonProofCheckpointProfile,
     checkpoint: &AuthenticatedCommonProofGenerationCheckpoint,
     state: &[u8],
     cursor_manifest: &[u8],
 ) -> Vec<u8> {
-    let mut seal = Vec::with_capacity(VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH);
-    seal.extend_from_slice(&VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC);
-    seal.extend_from_slice(&VSS_PREREQUISITE_CHECKPOINT_SEAL_VERSION.to_le_bytes());
+    let mut seal = Vec::with_capacity(COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH);
+    seal.extend_from_slice(&profile.seal_magic);
+    seal.extend_from_slice(&COMMON_PROOF_CHECKPOINT_SEAL_VERSION.to_le_bytes());
     seal.extend_from_slice(&checkpoint.safe_boundary_ordinal().to_le_bytes());
     seal.extend_from_slice(&checkpoint.stable_attempt_binding_hash());
     seal.extend_from_slice(&checkpoint.checkpoint_lineage_identifier());
     seal.extend_from_slice(&checkpoint.checkpoint_schedule_digest().into_bytes());
+    seal.extend_from_slice(&hash_framed_parts_512(profile.state_hash_domain, &[state]));
     seal.extend_from_slice(&hash_framed_parts_512(
-        VSS_PREREQUISITE_CHECKPOINT_STATE_HASH_DOMAIN,
-        &[state],
-    ));
-    seal.extend_from_slice(&hash_framed_parts_512(
-        VSS_PREREQUISITE_CHECKPOINT_CURSOR_HASH_DOMAIN,
+        profile.cursor_hash_domain,
         &[cursor_manifest],
     ));
-    debug_assert_eq!(seal.len(), VSS_PREREQUISITE_CHECKPOINT_SEAL_BYTE_LENGTH);
+    debug_assert_eq!(seal.len(), COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH);
     seal
 }
 
@@ -689,8 +746,8 @@ fn generate_prepared_common_proof(
     schedule_position: Option<u32>,
     transcript_prefix: Option<ExactTranscriptPrefixEvidence<'_>>,
     family_label: &str,
-    durable_checkpoint_store: Option<&DurableVssPrerequisiteCheckpointStore>,
-    resume_checkpoint: Option<&DurableVssPrerequisiteCheckpoint>,
+    durable_checkpoint_store: Option<&DurableCommonProofCheckpointStore>,
+    resume_checkpoint: Option<&DurableCommonProofCheckpoint>,
 ) -> Result<GeneratedCommonProofEvidence, String> {
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = match resume_checkpoint {
@@ -765,6 +822,11 @@ fn generate_prepared_common_proof(
                     if let Some(store) = durable_checkpoint_store {
                         store.persist(boundary_ordinal, &checkpoint_state, &cursor_manifest)?;
                     }
+                    eprintln!(
+                        "{family_label} authenticated checkpoint boundary {boundary_ordinal} at stage {stage:?}, persisted={}, {:?}",
+                        durable_checkpoint_store.is_some(),
+                        started_at.elapsed(),
+                    );
                     checkpoint_count += 1;
                     registry
                         .acknowledge_generation_checkpoint(operation)
@@ -895,10 +957,71 @@ fn generate_prepared_common_proof(
 }
 
 fn generate_exact_same_secret_proof(
-    sources: PreparedExactSameSecretGenerationSources,
+    authority_handle: &SetupGenerationAuthorityHandle,
+    action_private_randomness: &std::rc::Rc<crate::foundation::ActionPrivateRandomness>,
+    fresh_sources: PreparedExactSameSecretGenerationSources,
     prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
+    checkpoint_resume_enabled: bool,
 ) -> Result<GeneratedCommonProofEvidence, String> {
     let prefix_relation_plan = production_same_secret_relation()?.0;
+    let (fresh_prepared, canonical_application_statement_bytes, roster_position) =
+        prepare_exact_same_secret_common_proof(fresh_sources)?;
+    let checkpoint_store = checkpoint_resume_enabled
+        .then(|| {
+            DurableCommonProofCheckpointStore::open(
+                &fresh_prepared,
+                EXACT_AGGREGATE_CHECKPOINT_PROFILE,
+            )
+        })
+        .transpose()?;
+    let retained_checkpoint = checkpoint_store
+        .as_ref()
+        .map(DurableCommonProofCheckpointStore::load_latest)
+        .transpose()?
+        .flatten();
+    let prepared = match retained_checkpoint.as_ref() {
+        Some(checkpoint) => {
+            let checkpoint_continuation = checkpoint.authenticated.continuation_source();
+            drop(fresh_prepared);
+            let resumed_sources = prepare_production_same_secret_sources(
+                authority_handle,
+                action_private_randomness,
+                Some(checkpoint_continuation),
+            )?;
+            let (resumed_prepared, resumed_statement_bytes, resumed_roster_position) =
+                prepare_exact_same_secret_common_proof(resumed_sources)?;
+            if resumed_statement_bytes != canonical_application_statement_bytes
+                || resumed_roster_position != roster_position
+                || !resumed_prepared.matches_authenticated_checkpoint(&checkpoint.authenticated)
+            {
+                return Err(
+                    "resumed exact aggregate preparation differs from its authenticated checkpoint"
+                        .to_owned(),
+                );
+            }
+            resumed_prepared
+        }
+        None => fresh_prepared,
+    };
+    generate_prepared_common_proof(
+        prepared,
+        &canonical_application_statement_bytes,
+        SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier(),
+        Some(roster_position),
+        None,
+        Some(ExactTranscriptPrefixEvidence {
+            prerequisite,
+            relation_plan: &prefix_relation_plan,
+        }),
+        "exact aggregate-wide same-secret proof",
+        checkpoint_store.as_ref(),
+        retained_checkpoint.as_ref(),
+    )
+}
+
+fn prepare_exact_same_secret_common_proof(
+    sources: PreparedExactSameSecretGenerationSources,
+) -> Result<(PreparedCommonProofGeneration, Vec<u8>, u16), String> {
     let limits = CommonProofRuntimeLimits::new(
         AUTOMATIC_ROW_CODE_WHIR_PROOF_ACCEPTANCE_BYTE_LENGTH,
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
@@ -938,29 +1061,32 @@ fn generate_exact_same_secret_proof(
         CommonProofGenerationSources::new(private_coins, source_polynomials),
     )
     .map_err(|error| format!("prepare exact runtime generation: {error:?}"))?;
-    generate_prepared_common_proof(
+    Ok((
         prepared,
-        &canonical_application_statement_bytes,
-        SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier(),
-        Some(roster_position),
-        None,
-        Some(ExactTranscriptPrefixEvidence {
-            prerequisite,
-            relation_plan: &prefix_relation_plan,
-        }),
-        "exact aggregate-wide same-secret proof",
-        None,
-        None,
-    )
+        canonical_application_statement_bytes,
+        roster_position,
+    ))
 }
 
 fn generate_vss_prerequisite_proof(
     evidence_sources: &ProductionVssPrerequisiteEvidenceSources,
+    checkpoint_resume_enabled: bool,
 ) -> Result<(GeneratedCommonProofEvidence, Vec<u8>), String> {
     let (fresh_prepared, canonical_application_statement_bytes) =
         prepare_production_vss_prerequisite_generation(evidence_sources)?;
-    let checkpoint_store = DurableVssPrerequisiteCheckpointStore::open(&fresh_prepared)?;
-    let retained_checkpoint = checkpoint_store.load_latest()?;
+    let checkpoint_store = checkpoint_resume_enabled
+        .then(|| {
+            DurableCommonProofCheckpointStore::open(
+                &fresh_prepared,
+                VSS_PREREQUISITE_CHECKPOINT_PROFILE,
+            )
+        })
+        .transpose()?;
+    let retained_checkpoint = checkpoint_store
+        .as_ref()
+        .map(DurableCommonProofCheckpointStore::load_latest)
+        .transpose()?
+        .flatten();
     let prepared = match retained_checkpoint.as_ref() {
         Some(checkpoint) => {
             let checkpoint_continuation = checkpoint.authenticated.continuation_source();
@@ -1000,7 +1126,7 @@ fn generate_vss_prerequisite_proof(
         None,
         None,
         "selected VSS prerequisite proof",
-        Some(&checkpoint_store),
+        checkpoint_store.as_ref(),
         retained_checkpoint.as_ref(),
     )?;
     Ok((generated, canonical_application_statement_bytes))
@@ -1468,10 +1594,12 @@ fn run_exact_context_hostile_cases(
 #[ignore = "manual focused production VSS prerequisite proof round trip"]
 fn heavy_rust_kernel_exact_vss_prerequisite_proof_round_trip() {
     let started_at = Instant::now();
+    let checkpoint_resume_enabled =
+        runner_enabled_checkpoint_resume().expect("read guarded checkpoint-resume ownership");
     let evidence_sources =
         production_vss_prerequisite_sources().expect("production VSS prerequisite runtime source");
     let (generated_proof, canonical_application_statement_bytes) =
-        generate_vss_prerequisite_proof(&evidence_sources)
+        generate_vss_prerequisite_proof(&evidence_sources, checkpoint_resume_enabled)
             .expect("generate production VSS prerequisite proof");
     eprintln!(
         "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, resumed from {:?}, {:?}",
@@ -1511,16 +1639,21 @@ fn heavy_rust_kernel_exact_vss_prerequisite_proof_round_trip() {
 #[ignore = "manual exact aggregate-wide production proof round trip"]
 fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     let started_at = Instant::now();
+    let checkpoint_resume_enabled =
+        runner_enabled_checkpoint_resume().expect("read guarded checkpoint-resume ownership");
     let evidence_sources =
         production_same_secret_sources().expect("production exact runtime source");
-    let (vss_proof, vss_canonical_application_statement_bytes) =
-        generate_vss_prerequisite_proof(&evidence_sources.vss_prerequisite)
-            .expect("generate production VSS prerequisite proof");
+    let (vss_proof, vss_canonical_application_statement_bytes) = generate_vss_prerequisite_proof(
+        &evidence_sources.vss_prerequisite,
+        checkpoint_resume_enabled,
+    )
+    .expect("generate production VSS prerequisite proof");
     eprintln!(
-        "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, {:?}",
+        "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, resumed from {:?}, {:?}",
         vss_proof.canonical_proof_bytes.len(),
         vss_proof.maximum_external_memory_byte_length,
         vss_proof.checkpoint_count,
+        vss_proof.resumed_from_checkpoint_boundary,
         started_at.elapsed(),
     );
     let verified_vss_proof = verify_vss_prerequisite_proof(
@@ -1535,7 +1668,7 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
         vss_prerequisite:
             ProductionVssPrerequisiteEvidenceSources {
                 authority_handle,
-                action_private_randomness: _,
+                action_private_randomness,
                 verified_public_randomness,
             },
     } = evidence_sources;
@@ -1562,13 +1695,20 @@ fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
     )
     .expect("exact verification context");
 
-    let generated_proof = generate_exact_same_secret_proof(sources, &prerequisite)
-        .expect("generate exact aggregate-wide same-secret proof");
+    let generated_proof = generate_exact_same_secret_proof(
+        &authority_handle,
+        &action_private_randomness,
+        sources,
+        &prerequisite,
+        checkpoint_resume_enabled,
+    )
+    .expect("generate exact aggregate-wide same-secret proof");
     let proof = &generated_proof.canonical_proof_bytes;
     eprintln!(
-        "exact aggregate-wide proof generated: {} bytes, {} peak declared external bytes, {checkpoint_count} checkpoints, {:?}",
+        "exact aggregate-wide proof generated: {} bytes, {} peak declared external bytes, {checkpoint_count} checkpoints, resumed from {:?}, {:?}",
         proof.len(),
         generated_proof.maximum_external_memory_byte_length,
+        generated_proof.resumed_from_checkpoint_boundary,
         started_at.elapsed(),
         checkpoint_count = generated_proof.checkpoint_count,
     );
