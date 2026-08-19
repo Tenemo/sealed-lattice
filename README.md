@@ -43,7 +43,8 @@ The protocol-family schemas cover `3 <= n <= 20` participants and
 `2 <= optionCount <= 20` options. General validators and deterministic
 compilers derive those ranges, but the sole cryptographic, integration, and
 supported-phone target is `n = 10`, `optionCount = 10`. Other sizes are
-unqualified.
+unqualified. Browser qualification is Chrome-only: desktop Chromium supplies
+development evidence, and the selected physical-phone profile uses Chrome.
 
 Every participant-facing setup, proof, verification, aggregation, evaluation,
 finality, and target-release operation must retain a single-worker mobile
@@ -59,217 +60,105 @@ and target release remain incomplete or internal.
 
 ### Implemented development boundary
 
-- Canonical source compilers and structural validators derive the supported
-  schema ranges while the selected source profile binds the exact ten-option
-  target.
-- The release Rust/WebAssembly kernel supplies canonical foundation decoding,
-  bindings, typed wrappers, and package integration. The canonical participant
-  build remains scalar-capable.
-- The rejected row-code/WHIR proof body remains only as a fail-closed
-  implementation and comparison oracle until its replacement accepts the same
-  transported production relations and hostile corpus.
-- The compact successor's release transport boundary strictly decodes proof and
-  public-input bytes, derives the verifier transcript and response-query
-  schedule, validates every salted Merkle opening, and returns typed refusals.
-  That transport boundary does not verify the CFW or WHIR equations and cannot
-  mint a proof or workflow capability.
-- Release code also owns the scalar CFW mechanics, bounded external storage,
-  assignment and structured-row preparation, transcript and proof assembly,
-  response-tree custody, and authenticated response checkpoints. For the
-  public-key-share family, guarded selected-size native execution now reaches
-  the final checkpoint after all 82 responses, including both WHIR epochs and
-  every live conditional-image gate. The release-state finisher emits one
-  23,815,474-byte canonical compact-proof candidate, and the independent
-  transport check accepts its canonical structure, transcript chronology,
-  verifier queries, and salted Merkle openings. A release-owned pollable
-  algebraic verifier then independently derives the structured public CFW
-  contribution and verifies the CFW transcript, both WHIR epochs, all six code
-  switches, both terminal blinded relations, and the authenticated source and
-  mask spot checks. All five CFW polynomial transforms and the seven WHIR folds
-  remaining after the CFW handoff are incremental. The verifier coalesces CFW
-  caller slices to kernel-owned boundaries spaced by 65,536 work units. The
-  selected CFW phase contains exactly 19,038,593 work units: 290 cursor
-  boundaries cover 19,005,440 units and leave one 33,153-unit terminal CFW
-  segment. Contract geometry independently derives 2,129,904 remaining WHIR
-  fold work units, and the current transported candidate completes them in 33
-  polls of at most 65,536 units. The 290 CFW interval boundaries, 32 WHIR
-  interval boundaries, and terminal WHIR boundary expose 323 canonical
-  408-byte safe cursors that bind the four
-  public-input coordinates, complete proof and public-input digests, and
-  cumulative CFW and WHIR work. They contain no opaque transform state:
-  restoration revalidates the transported bytes and deterministically replays
-  from genesis before live work continues. A guarded current-source run
-  destroys the first verifier, restores a fresh verifier from boundary zero,
-  then destroys it again at the first WHIR boundary and replays all CFW plus
-  exactly 65,536 WHIR work units. It reproduces both cursors byte for byte,
-  observes all 323 safe-boundary ordinals, and accepts the exact emitted proof.
-  The same guarded owner derives
-  the public-key statement source independently from verified setup
-  randomness, checks the canonical proof-stream descriptor and all 61 public
-  ring vectors, regenerates 64 verifier-sequence columns, and rebuilds the
-  four statement-owned setup-polynomial roots from the remaining 58 columns.
-  All 122 transported public columns correspond to that accepted statement
-  source. This is native prototype evidence for one candidate; it does not
-  connect the construction masking theorem to every emitted byte or establish
-  salted-Merkle or EPRO privacy.
-  A source-bound accepted-setup release ABI now retains the exact statement
-  authority and same-secret prerequisite, derives all four transport bindings
-  internally, and carries one linear handle through prepared, running, and
-  positively verified states. Its fixed 412-byte cursor extends the separate
-  408-byte algebra-only cursor without serializing opaque runtime state. It
-  covers the same 323 algebraic boundaries and 4,218 source boundaries: all
-  122 public columns plus 1,024
-  evaluation cosets for each of four statement roots. It can begin or restore,
-  bounded-poll, copy a cursor, cancel, and discard. Only after algebraic
-  verification and complete source correspondence does it expose a proof
-  capability; finishing that capability inserts the exact public-key-share
-  terminal into the accepted setup assembly.
-  The TypeScript closed-worker driver returns `isValid: true` only after that
-  one-shot commit and retires its prepared, running, or positive kernel
-  authority on every refusal and cancellation path. A guarded selected-size
-  native run observed 33 bounded WHIR fold polls totaling 2,129,904 work units
-  and exactly 4,218 source work units while reproducing all four roots and
-  accepting the same 23,815,474 proof bytes. A concrete protocol adapter now
-  publishes and cold-restores the
-  412-byte cursor across all 4,541 accepted-verifier ordinals under a state-stream
-  domain distinct from the 408-byte algebra-only cursor. It reads its byte length
-  and boundary count from the loaded scalar WASM kernel and takes its operation
-  kind, empty randomness cursor, and state-stream domains from canonical owners.
-  Fresh and resumed custody are mutually exclusive in the worker API. A runtime
-  hostile-input guard refuses both fields before kernel preparation, releases
-  every distinct supplied identity once, and uses one adopted object for
-  restoration, later publication, and final release. The concrete cold-restore
-  test uses synthetic cursor bytes. The production custody-worker host now
-  installs the accepted adapter, routes its deterministic checkpoint profile
-  through a strict policy, obtains all four source digests from the prepared
-  Rust verifier, publishes resume coordinates only after durable commit, and
-  evicts the terminal checkpoint. Current host coverage is same-realm; it does
-  not destroy and recreate a dedicated browser `Worker` or restore selected
-  actual proof bytes.
-  The algebraic verifier now surfaces deterministic outer polls for all seven
-  WHIR folds remaining after the CFW handoff. At selected pre-challenge
-  geometry, both it and verifier-derived public-covector replay fold the `2^21`
-  40-byte source elements inside the original allocation and truncate it
-  without allocating a clone or separate output. The public-covector replay
-  still drains the shared primitive synchronously. Equivalence tests cover
-  irregular poll budgets, every compact folding factor, nontrivial column
-  lengths, invalid geometry, zero budgets, and terminal reuse. The six code
-  switches and two base cases execute between fold polls and are not separately
-  work-metered. The accepted cursor publishes 32 intermediate WHIR interval
-  boundaries and terminal WHIR. Guarded native execution cold-restores the
-  actual proof at the first such interval, but this remains ownership and
-  native lifecycle evidence rather than a browser memory measurement. Bounded
-  transport, scalar release-WASM actual-byte restoration, the full
-  equation-invalid hostile corpus, and the complete browser lifecycle remain
-  open.
-- That guarded native run reconciles 4,926 CFW storage transactions,
-  1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
-  logically stored bytes. A separate nonqualifying desktop Chromium diagnostic
-  replayed that exact compiler-derived schedule through the production browser
-  custody and strict-durability IndexedDB adapter with 655,360-byte chunks. It
-  observed all 4,926 transactions and all 1,713 authenticated seals over
-  1,006,633,461 plaintext bytes in about 105.6 minutes. Physical accounting
-  reached a 588,382,522-byte stored peak, 1,393,676,030 bytes written, and
-  1,335,448,998,100 bytes read across 4,148,340 storage transactions. The
-  logical peak is 2.1875 times the 268,435,456-byte scratch planning target,
-  while the namespace-wide capacity rescans cause orders-of-magnitude read and
-  transaction amplification. Both results require explicit redesign and
-  engineering disposition, although the logical peak remains below the
-  1,073,741,824-byte absolute scratch bound. The diagnostic also exercised
-  scalar release-mode WebAssembly butterfly and salted-leaf kernels, but it is
-  not proof execution, complete browser lifecycle evidence, or phone evidence.
-- Release generation redecodes its canonical public input, derives the
-  coefficient-to-view maps, enforces the single-proof KMAC call census, and uses
-  coordinate-separated KMAC256 streams for field samples, private leaf salts,
-  and Fiat-Shamir salts. Its release bridge carries three symbolic quantum-PRF
-  hops and the named compatible fixed-KMAC256/fixed-SHAKE256 shared-Keccak
-  assumption. That assumption remains unproved and has no assigned numeric
-  advantage.
-- The guarded security-game owner covers the checked 82-move factor-one
-  schedule, all 45 abstract construction commitments, and adaptive overlapping
-  queries. It derives the Real-game conditional ranks independently from the
-  compiler and compares them with the witness-free Ideal simulator's consumed
-  coordinates at every disclosure. The resulting pathwise statistical distance
-  is exactly zero for one fresh canonical construction attempt. This is
-  construction-level theorem evidence, not an emitted-byte argument,
-  salted-Merkle/EPRO privacy result, production proof, or runtime result.
-- Test-only noninteractive instrumentation now derives the 165 bad-transition
-  events as eight executable-owner regions (`2`, `26`, `8`, `74`, `12`, `22`,
-  `10`, and `11`), derives all 15 composition boundaries, and retains the
-  maximum error owned by one verifier move rather than summing the chronology.
-  Its decoded actual-byte owner binds the proof/public-input pair and inventories
-  response tuples, verifier messages, commitments, openings, queries, salts,
-  frontier nodes, transcript absorptions, consumer edges, and the shared
-  fixed-SHAKE256 verifier hash graph. The conditional Appendix A.1 calculator
-  requires separate semantic, masking-correspondence, emitted-byte,
-  Merkle-privacy-correspondence, and SHAKE premises and derives its relaxed-RBR
-  headroom from the complete `2^-80` partition. The correspondence and SHAKE
-  premises have no production constructors, so this instrumentation produces
-  neither an accepted proof nor a security-bit claim.
-- The selected lifecycle inventory remains 103 physical proof objects and 159
-  logical relation instances. A guarded owner emitted a 23,815,474-byte
-  public-key-share candidate, and the completed production generator now feeds
-  that byte length directly into the compact corpus roll-up. The proof remains
-  a transport candidate rather than an accepted family size; that row and all
-  eleven unknown family sizes stay blocked, so no accepted ceremony-wide byte
-  total exists.
-- A source assertion derives exactly 50,331,520 live retained-response-tree
-  bytes at the post-lookup release boundary and separately pins the exact
-  transient-inclusive 52,952,832-byte response-storage peak. Both values derive
-  from all 82 production response geometries; neither is a browser runtime
-  measurement.
-- The WebAssembly producer and SDK copy have a byte-for-byte reproducibility
-  gate. Reproducibility establishes build identity only.
+- Canonical compilers and validators derive the admitted participant and option
+  ranges. The exact evidence profile derives `f = 3`, `r = 4`,
+  `q_final = q_state = 7`, 45 unordered option pairs, and ten evaluator
+  streams.
+- The release Rust/WebAssembly kernel provides canonical foundation decoding,
+  typed bindings, package integration, reproducible kernel-to-SDK byte copying,
+  and a scalar-capable participant build. Reproducibility establishes build
+  identity only.
+- The rejected row-code proof body remains fail-closed until a successor
+  accepts the same production corpus and hostile cases. It is not an approved
+  mobile proving backend or a fallback to preserve after cutover.
+- For the public-key-share family, a guarded native owner generated one
+  23,815,474-byte canonical compact-proof candidate. Independent code validated
+  its transport, verified the CFW and both WHIR epochs, checked all code
+  switches and live masking gates, reconstructed all 122 public columns and
+  four statement-owned roots, and minted a source-bound accepted-setup
+  capability only after positive completion. This is one native vertical slice,
+  not a selected proof backend or accepted ceremony.
+- The algebraic verifier exposes a 408-byte cursor over 323 durable CFW and
+  WHIR boundaries. The source-bound accepted verifier exposes a distinct
+  412-byte cursor over 4,541 boundaries, adding all public-column and
+  statement-root correspondence work. Restoration revalidates canonical source
+  bytes and replays deterministically from genesis; the cursors contain no
+  opaque transform state. Guarded native execution restores the exact proof at
+  CFW and WHIR boundaries and reproduces the cursor bytes.
+- The five CFW transforms and seven post-CFW WHIR folds use bounded outer
+  polling, and both production covector consumers reuse and truncate the source
+  allocation instead of retaining a clone and separate output. Completion of
+  bounded verifier-derived public-covector replay, synchronous transport work,
+  and transition metering still requires focused verification and browser
+  evidence.
+- Protocol custody adapters obtain cursor geometry and source digests from the
+  kernel, separate fresh from resumed custody, publish only after durable
+  commit, preserve typed refusals, and evict terminal state. Current host
+  coverage is same-realm and synthetic; it does not yet destroy and recreate a
+  dedicated browser worker around the exact candidate proof bytes.
+- The current compact-CFW desktop Chromium storage diagnostic reproduced the
+  compiler-derived logical schedule: 4,926 transactions,
+  1,006,632,840 bytes written, 2,013,265,440 bytes read, and a
+  587,202,560-byte logical peak. Repeated namespace-wide capacity scans inflated
+  physical accounting to 4,148,340 transactions and
+  1,335,448,998,100 bytes read over about 105.55 minutes. This is an
+  implementation defect in storage accounting, not an estimate of required
+  cryptographic work.
+- Browser-reported usage rose to 1,009,837,865 bytes and remained
+  1,009,702,372 bytes after logical cleanup reached 206 bytes. The discrepancy
+  may be delayed backing-store compaction, but it remains unexplained and needs
+  close, reopen, quota, and delayed-reclamation evidence. Strict IndexedDB
+  durability remains required.
+- A construction-level ideal-uniform masking game covers the complete
+  82-response schedule and reports zero statistical distance for one fresh
+  canonical attempt. It does not establish emitted-byte zero knowledge,
+  salted-Merkle or EPRO privacy, reset or reused-randomness security,
+  shared-oracle composition, or ceremony-wide security.
+- The action inventory contains 103 physical proof objects and 159 logical
+  relation instances. The production generator feeds the generated
+  public-key-share proof length into the corpus roll-up, but that row is not an
+  accepted family size and all eleven other family sizes remain unknown. No
+  accepted ceremony-wide byte, transfer, storage, restart, or time total exists.
+- Source assertions derive a 50,331,520-byte retained response-tree live set
+  and a 52,952,832-byte transient-inclusive peak for all 82 response
+  geometries. These are source-level bounds, not browser memory measurements.
 
-These items are development evidence only. Test-only, fixture-backed, native,
+All of this is development evidence. Test-only, fixture-backed, native,
 Node.js, desktop-browser, and emulated results do not establish an accepted
 ceremony or supported-phone qualification.
 
 ### Remaining completion boundary
 
-- No exact suite is frozen or selectable.
-- No production compact generation API, end-to-end workflow-capability handoff,
-  or complete compact generation and verification ABI pair exists. The release
-  transport ABI checks canonical structure, transcript chronology, query
-  derivation, and Merkle openings only. The accepted-setup source-bound ABI can
-  now carry one public-key-share verification through positive capability
-  commit, while its internal closed-worker driver publishes source-bound safe
-  cursors through a custody contract and preserves typed refusals. Its durable
-  schedule covers CFW, 32 intermediate WHIR fold boundaries, terminal WHIR,
-  all public-column reconstruction, and each statement-root coset after
-  synchronous transport revalidation. The seven remaining WHIR folds are
-  externally pollable and durably replayable; their code-switch and base-case
-  transition checks are not separately work-metered. The production covector
-  owners reuse the input allocation rather than retaining clone and output
-  buffers. The concrete
-  protocol checkpoint-store adapters now separate the 408-byte, 323-boundary
-  algebraic cursor from the kernel-derived 412-byte, 4,541-boundary accepted
-  cursor. The worker refuses split custody before kernel preparation and retires
-  every supplied identity. The custody-worker host installs the accepted
-  adapter and evicts terminal state. Selected actual-byte cold restoration is
-  proven only in guarded native execution; dedicated-browser-worker invocation
-  and destruction, scalar release-WASM restoration of those bytes, and the
-  complete transported equation-invalid hostile corpus are absent.
-- The compact successor still requires correspondence between the completed
-  single-attempt construction-level masking theorem and every emitted proof
-  byte, the actual salted-Merkle and EPRO privacy games, and composition of the
-  live KMAC bridge under its unproved joint fixed-Keccak assumption with the
-  applicable SHAKE256 fixed-tape and QROM theorem chain.
-- Production setup, ballot-validity, and target-release call sites have not
-  been cut over to the compact proof.
-- Browser custody installs the single-identity accepted-cursor adapter in the
-  production worker-host implementation, but has only same-realm synthetic
-  resume coverage. It does not yet supply dedicated-worker destruction and
-  recreation, bounded transport, scalar release-WASM selected actual-byte
-  cold-resume evidence across the compact-proof boundaries, or reconciled
-  browser-origin storage reclamation.
-- The accepted setup-to-release capability flow is not connected end to end.
-- No compact proof has completed the scalar release-WebAssembly desktop-browser
-  evidence path after guarded native generation and independent transport and
-  algebraic verification.
-- No physical-phone profile is qualified. Supported-phone evidence must use the
-  same frozen bytes and remains independent from cryptographic completion.
-- No connected ten-participant mobile rehearsal exists.
+- No exact suite is frozen or selectable. Suite selection correctly remains
+  fail-closed rather than accepting a producer-supplied status or qualification
+  field.
+- The evidence baseline is not clean while a guarded heavy Rust consumer
+  depends on a generated proof fixture produced by a later test and the exact
+  aggregate proof phase exceeds the current job budget. Both runner ownership
+  and bounded execution evidence must be repaired before closure.
+- There is no complete production compact generation-and-verification
+  release-WebAssembly ABI pair. The release transport validator checks
+  canonical structure, transcript chronology, derived queries, and Merkle
+  openings only; it is not algebraic proof verification.
+- The exact public-key-share slice still needs the complete transported
+  equation-invalid hostile corpus, exact emitted-byte masking and Merkle-privacy
+  composition, fixed-tape shared-QRO mapping, symbolic shared-Keccak reduction,
+  bounded transport and cold resume, and real dedicated-worker lifecycle in
+  desktop Chromium. See SECURITY for the cryptographic consequences.
+- Key-switch topology, joint lattice exposure, malicious threshold behavior,
+  auxiliary inputs, and the reductions to named cyclotomic-RLWE and BGV
+  circular or key-dependent-message assumptions remain provisional. Diagnostic
+  estimator results are not reductions.
+- The remaining eleven proof families have not been ported through generation,
+  verification, source correspondence, hostile inputs, browser custody, and
+  application capability consumption.
+- Production setup, ballot-validity, aggregation, evaluator, finality, and
+  target-release paths have not been connected end to end through participant
+  browser/WebAssembly generation and verification.
+- No physical-phone Chrome profile is qualified and no connected
+  ten-participant rehearsal exists. Phone qualification must use the same
+  frozen suite and scalar bytes and remains independent from cryptographic
+  validity.
 
 Phone planning targets are engineering goals, not verifier inputs or suite
 validity rules. Reasonable variance is recorded without weakening cryptographic
@@ -294,9 +183,9 @@ pnpm add sealed-lattice
 
 ## Usage
 
-The public validator admits `2..20` options. This example uses the sole selected
-prototype profile of ten options; admission alone does not qualify any other
-option count.
+The public validator admits `2..20` options. This example uses the sole
+ten-option evidence target; admission alone does not qualify any other option
+count or mean that a suite has been selected.
 
 ```typescript
 import { createCanonicalManifest, validatePollSpec } from "sealed-lattice";

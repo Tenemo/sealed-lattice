@@ -25,7 +25,7 @@ profiles are structurally admitted only and carry no cryptographic or runtime
 claim.
 
 Cryptographic implementation completion and supported-phone qualification are
-independent statuses for the same exact bytes:
+independent results for the same exact bytes:
 
 - **Cryptographic implementation:** incomplete. No canonical suite currently
   has a complete participant-operated setup, ballot, aggregation, evaluator,
@@ -48,165 +48,89 @@ testing, evidence, release, or support.
 The current executable ledger is kept in [README.md](README.md). Its security
 consequences are:
 
-- Production setup, ballot, and target-proof call sites still invoke the
-  rejected row-code/WHIR implementation. The suite remains unselectable, and
-  that implementation cannot create an accepted workflow capability.
-- The compact release path owns canonical proof and public-input decoding,
-  transcript and query derivation, salted Merkle opening validation, scalar CFW
-  mechanics, bounded external storage, proof assembly, response-tree custody,
-  and authenticated response checkpoints.
-- For the public-key-share family, guarded selected-size native execution now
-  reaches the final checkpoint after all 82 responses and enforces the live
-  conditional-image gates across both WHIR epochs. Its finisher emits a
-  23,815,474-byte canonical compact-proof candidate. The independent transport
-  check accepts its canonical structure, transcript chronology, verifier
-  queries, and salted Merkle openings. A release-owned pollable algebraic
-  verifier independently derives the structured public CFW contribution and
-  accepts the exact emitted proof after checking the CFW transcript, both WHIR
-  epochs, all six code switches, both terminal blinded relations, and the
-  authenticated source and mask spot checks. The same guarded owner derives
-  the verifier-owned statement source independently, matches the proof-stream
-  descriptor and all 64 verifier-sequence columns, and rebuilds the four
-  statement-owned setup-polynomial roots from the other 58 public columns.
-  Thus all 122 transported public columns correspond to the accepted source
-  for this candidate. The source-bound accepted-setup release ABI now derives
-  the transport bindings from that retained authority and mints a positive
-  proof capability only after algebraic verification and source
-  correspondence; its finisher commits the exact public-key-share terminal to
-  the accepted setup assembly. This is not cryptographic closure for the
-  candidate: it does not compose the masking theorem with every emitted byte or
-  establish salted-Merkle/EPRO privacy, and the complete equation-invalid
-  hostile corpus and final public SDK workflow remain open.
-- The compact transport ABI returns typed refusals but does not return
-  `isValid` or mint a proof capability. A separate raw release-kernel ABI and
-  internal TypeScript closed-worker driver begin or restore, bounded-poll,
-  cancel, and return the terminal algebraic `VerificationResult`. Its fixed
-  408-byte safe cursor binds the four public-input coordinates, complete proof
-  and public-input digests, and cumulative CFW and WHIR work; it serializes no
-  opaque transform state. All five CFW polynomial transforms and the seven WHIR
-  folds remaining after the CFW handoff are incremental. Kernel-owned
-  65,536-work-unit boundaries expose exactly 290 CFW cursor ordinals across
-  19,005,440 of the selected CFW phase's 19,038,593 work units, leaving a
-  33,153-unit final CFW segment. Contract geometry derives 2,129,904 remaining
-  WHIR fold work units. Thirty-two interval boundaries plus terminal WHIR add
-  33 durable ordinals, and the current transported candidate completes them in
-  33 polls of at most 65,536 units. The accepted source-bound verifier uses a
-  distinct 412-byte cursor and adds 4,218 source-correspondence boundaries: one
-  for each of 122 public columns
-  and one for each of 1,024 evaluation cosets across four statement roots.
-  Restoration revalidates the transported bytes and deterministically replays
-  from genesis before newer state may be published. A guarded selected-size
-  native owner passed all 323 algebraic boundaries and all 4,218 source work
-  units. It cold-restored the actual proof first from a CFW cursor and then from
-  the first WHIR cursor, replaying canonical inputs from genesis and reproducing
-  both cursor encodings exactly. The concrete protocol authenticated-store
-  adapter now separates the 412-byte, 4,541-boundary accepted cursor from the
-  408-byte algebra-only cursor, reads the
-  accepted geometry from kernel exports, and authenticates it under a separate
-  canonical state-stream domain. Fresh and resumed custody are mutually
-  exclusive. A hostile dual-custody input is refused before kernel preparation,
-  every distinct supplied identity is released once, and one adopted identity
-  performs restoration, publication, and cleanup. The concrete cold-restore
-  test uses synthetic cursor bytes. The production custody-worker host now
-  installs the accepted adapter, routes only its exact deterministic checkpoint
-  profile, obtains its four source digests from the prepared Rust verifier,
-  publishes resume coordinates only after durable commit, and evicts terminal
-  state. That host coverage remains same-realm; it does not establish
-  dedicated-worker destruction and recreation. The algebraic verifier now
-  surfaces deterministic outer polling for all seven WHIR folds remaining after
-  CFW, and both production covector consumers reuse and truncate the original
-  source allocation, so the prior clone-plus-output overlap is removed. The
-  verifier-derived public-covector replay still drains the shared primitive
-  synchronously. The six code switches and two base cases execute between fold
-  polls and are not separately work-metered. The accepted cursor publishes 32
-  intermediate WHIR interval boundaries and terminal WHIR. Guarded native
-  execution cold-restores the actual proof at the first such interval. This is
-  source-ownership and native lifecycle evidence, not a live browser memory
-  measurement. Dedicated-worker invocation, bounded transport, scalar
-  release-WASM actual-byte restoration, the complete equation-invalid hostile
-  corpus, and the compact generation release ABI remain absent.
-- Test-only instrumentation derives the exact 165-event interactive ledger and
-  15 composition boundaries from executable owners while preserving the
-  maximum-per-verifier-move relaxed-RBR bound. A decoded actual-byte census is
-  bound to the canonical proof/public-input pair and covers response tuples,
-  commitments, openings, queries, salts, frontier nodes, transcript
-  absorptions, verifier consumers, and fixed-SHAKE256 hash calls. The
-  conditional Appendix A.1 calculator refuses unless semantic,
-  masking-correspondence, emitted-byte, Merkle-privacy-correspondence, and SHAKE
-  premises are all present and byte-bound. It derives relaxed-RBR headroom from
-  the complete `2^-80` partition, but the correspondence and SHAKE premises
-  still have no production constructors. No security level or proof capability
-  follows from this arithmetic.
-- The selected 103-physical-proof, 159-logical-instance corpus roll-up remains
-  incomplete. A guarded owner emitted the 23,815,474-byte public-key-share
-  candidate, and the completed production generator feeds its byte length
-  directly into the roll-up. The row is still not an accepted family size, the
-  other eleven family sizes are unknown, and no ceremony-wide compact byte
-  total exists.
-- Source geometry and an exact assertion pin 50,331,520 retained-response-tree
-  bytes at the post-lookup release boundary and the separate 52,952,832-byte
-  transient-inclusive response-storage peak. Both derive from all 82 response
-  geometries. Neither number is browser lifecycle or supported-phone evidence.
-- The guarded CFW run reconciles 4,926 logical storage transactions,
-  1,006,632,840 bytes written, 2,013,265,440 bytes read, and 587,202,560 peak
-  stored bytes. A separate nonqualifying desktop Chromium replay used the exact
-  compiler-derived schedule, 655,360-byte chunks, production authenticated
-  custody, and strict-durability IndexedDB transactions. It matched the logical
-  census and all 1,713 seals, but the storage layer recorded 1,335,448,998,100
-  physical read bytes and 4,148,340 physical transactions. The dominant cause
-  is a namespace-wide stored-value capacity scan during each lease and repair
-  publication. This orders-of-magnitude amplification and the logical peak's
-  2.1875-times variance over the scratch planning target require redesign and
-  engineering review. The logical peak remains below the 1,073,741,824-byte
-  absolute bound. This is desktop development evidence, not an accepted proof,
-  complete browser lifecycle evidence, or phone evidence.
+- Production setup, ballot, and target-proof call sites still use the rejected
+  proof body. No suite is selectable, and that implementation cannot create an
+  accepted workflow capability.
+- The compact successor can generate, transport-validate, algebraically
+  verify, and source-check one exact public-key-share proof in guarded native
+  execution. Only the completed source-correspondent verifier can mint its
+  internal accepted-setup capability. The narrower transport validator checks
+  canonical structure and openings but is not proof verification.
+- This vertical slice does not close the backend. It lacks the complete
+  transported equation-invalid hostile corpus, release-WebAssembly generation
+  and verification pair, real dedicated-worker lifecycle, complete emitted-byte
+  theorem composition, and browser resource evidence. The other eleven proof
+  families remain unported.
+- Small source-bound cursors now cover CFW, WHIR, and public-source
+  correspondence. Restore revalidates canonical inputs and deterministically
+  replays from genesis. The open obligation is to bound cold-resume time, lost
+  work, restart traffic, synchronous transport, transition work, and storage
+  transactions in the release browser path; it is not to claim that no WHIR
+  cursor exists or to require serialization of the full live verifier state.
+- Strict-durability desktop Chromium storage evidence exposed
+  orders-of-magnitude read and transaction amplification from repeated
+  namespace-wide capacity scans. Browser-reported origin usage also remained
+  near one gigabyte after logical cleanup reached 206 bytes. Incremental
+  authenticated accounting, close/reopen testing, quota handling, and delayed
+  reclamation evidence remain required.
 
 ### Masking and zero-knowledge boundary
 
 Release generation independently redecodes the canonical public input, derives
-the coefficient-to-view maps, and enforces the live conditional-image gates
-before each covered disclosure. The initial code switch folds 25,344
-base-field encoding-randomness coordinates into 396 extension-field source
-coordinates, then independently samples 6,912 next-source randomness elements
-and 399 switch-mask randomness elements. Those three quantities are distinct.
+coefficient-to-view maps, and enforces live conditional-image gates before each
+covered disclosure. The guarded construction game covers one fresh canonical
+82-response attempt and reports exact statistical distance zero between its
+Real and witness-free Ideal path laws.
 
-The guarded construction security game covers the complete 82-move lifecycle,
-all 45 abstract construction commitments, and adaptive overlapping queries. At
-each disclosure it independently derives the Real-game conditional rank from
-the compiler-owned map and compares that rank with the witness-free Ideal
-simulator's consumed coordinates. The two path laws are identical, so the
-single-fresh-attempt ideal-uniform construction has exact statistical distance
-zero. The theorem binds the verified public input and refuses reset, retry,
-reused-randomness, multi-proof, family, ceremony, shared-oracle, EPRO, QROM, and
-canonical emitted-byte scope extensions. Salted-Merkle privacy and
-correspondence with one complete emitted production proof remain open.
+That result is deliberately narrow. It does not cover reset, retry,
+reused-randomness, multi-proof, family, ceremony, shared-oracle, EPRO, QROM, or
+canonical emitted-byte composition. The emitted proof has 82 response Merkle
+roots. Its 45 construction commitments are typed ranges embedded inside those
+responses, not 45 additional roots. The 79,310 private leaf salts occupy
+10,151,680 proof bytes, so the salted-Merkle privacy game is both a security
+obligation and a material resource owner.
 
-The release coin bridge accounts for three symbolic quantum-PRF replacements
-and the exact known sampler and collision terms. It now states the compatible
-joint assumption: within the declared quantum-query budget, simultaneous use of
-the domain-separated keyed KMAC256 interfaces and fixed SHAKE256 is replaced by
-the named per-key random functions and one ideal quantum random oracle, with the
-explicit qPRF terms plus one symbolic shared-Keccak-f[1600] interface advantage.
-Domain separation does not make that advantage zero. The assumption remains
-unproved and has no numeric instantiation.
+Browser proof coins derive from the browser CSPRNG and domain-separated
+KMAC256 streams. The current hybrid includes explicit quantum-PRF terms plus a
+symbolic shared-Keccak-f[1600] joint-interface advantage for simultaneous
+KMAC256 and fixed SHAKE256 use. Domain separation does not make that advantage
+zero. It has no numeric instantiation.
 
 ### Emitted-byte and QROM boundary
 
-One guarded native candidate now has exact source correspondence for its proof
-descriptor and all 122 transported public columns, including reproduction of
-the four statement-owned roots. No complete production proof yet assigns every
-byte, salt, frontier, transcript message, query, and verifier consumer to the
-construction masking theorem and privacy games. Reduced fixtures, static
-maxima, transport validation, and public-column correspondence cannot
-substitute for that complete composition.
+Source correspondence for the proof descriptor, all 122 transported public
+columns, and the four statement-owned roots does not by itself establish
+zero knowledge or noninteractive soundness. A complete proof must assign every
+emitted byte, salt, frontier, opening, transcript message, query, and verifier
+consumer to the exact simulator, Merkle-privacy game, programming step, and
+shared-oracle theorem.
 
-The Appendix A.1 arithmetic derives `qPi = 79,310` but still requires a
-production theorem premise connecting the predecessor-linked SHAKE256 graph to
-independently sampled fixed verifier tapes in the shared quantum random oracle.
-Any constructor for that premise must add its positive distinguishing loss to
-the complete ledger. Framing, slot exhaustion, and classical equidistribution
-cannot supply it. No adaptive-soundness certificate or security bit count is
-authorized until the premise and complete emitted-proof composition close.
+The Appendix A.1 value `qPi = 79,310` is the IOR verifier's proof-query
+complexity. It is not an adversary QRO-query bound and must not be squared or
+inserted into an unrelated measure-and-reprogram loss. It enters the applicable
+vector-commitment extraction accounting only where that theorem defines it.
+
+The predecessor-linked SHAKE256 seed-and-block graph still needs a production
+premise connecting it to the independent fixed verifier tapes required by the
+applicable shared-QRO theorem. Framing, slot exhaustion, classical
+equidistribution, or domain separation cannot supply that premise. The
+project-specific `24 / |F|` initial CFW transition claim also needs its own
+reviewed lemma rather than substitution into a source theorem. No soundness
+certificate, adaptive-security certificate, or security-bit count is
+authorized until the complete emitted-proof and assumption composition closes.
+
+### Lattice-assumption boundary
+
+The current source uses key-switch block width three and three special primes,
+but that topology is not frozen. Every proof, noise, quotient, carry, resource,
+and security input must use the same selected topology before suite activation.
+
+The exact joint public exposure, correlated keys and errors, malicious
+participant contributions, threshold behavior, auxiliary inputs, and protocol
+hybrid to named ordinary cyclotomic-RLWE and BGV circular or
+key-dependent-message assumptions remain open. Noise checks, parameter
+estimators, and scalar-LWE diagnostics are useful engineering evidence but are
+not those reductions.
 
 ### Participant workflow boundary
 
@@ -232,23 +156,28 @@ that a coherent snapshot is newest.
   flow, or local proof that a coherent snapshot is newest. Lost or
   unauthenticated state retires that participant from the action.
 - `SEC-004`: The production proof backend is rejected for mobile proving. The
-  compact successor remains incomplete and cannot generate or verify one
-  accepted production proof or select a suite.
+  compact successor can generate and source-correspondently verify one guarded
+  native candidate, but it still lacks the complete theorem and privacy
+  composition, hostile corpus, release-WebAssembly pair, browser lifecycle, and
+  remaining proof families required for suite selection.
 - `SEC-005`: Emitted-byte correspondence, salted-Merkle and EPRO privacy, the
-  symbolic joint fixed-Keccak assumption, fixed-tape shared-QRO premise, and
-  exact Appendix A.1/Merkle/QROM composition remain open. No soundness
-  certificate or security bit count is authorized.
-- `SEC-006`: The participant bridge does not connect the complete verifier-
-  minted capability and checkpoint chain from setup through release.
+  symbolic joint fixed-Keccak assumption, fixed-tape shared-QRO premise, exact
+  initial-transition lemma, and complete Merkle/QROM composition remain open.
+  `qPi` is proof-query complexity, not the adversary's QRO-query count. No
+  security bit count is authorized.
+- `SEC-006`: The participant bridge does not connect the complete
+  verifier-minted capability and checkpoint chain from setup through release.
 - `SEC-007`: Direct encrypted-ballot creation, proof generation, transport, and
   acceptance are incomplete. Real ballots must not be cast or collected.
 - `SEC-008`: No physical Chrome profile has completed every participant
   operation. Phone qualification remains independent from cryptographic
   completion.
 - `SEC-010`: BGV, VSS commitment, and proof parameters remain provisional. The
-  complete structured and joint exposure surface lacks a reviewed reduction.
-- `SEC-011`: Evaluation-key material relies on circular or key-dependent-message
-  assumptions, and malicious collective-setup composition remains incomplete.
+  source topology and complete structured and joint exposure surface lack a
+  reviewed reduction.
+- `SEC-011`: Evaluation-key material relies on circular or
+  key-dependent-message assumptions, and malicious collective-setup
+  composition remains incomplete.
 - `SEC-016`: Target-bound release lacks its complete production proof,
   correctness and privacy closure, participant finality producer, checkpoint
   lifecycle, and public workflow.
@@ -259,29 +188,19 @@ that a coherent snapshot is newest.
   chronology conflicts with the normative dependency order, and it cannot mint
   a capability or select a suite.
 - `SEC-019`: Reproducible scalar release WebAssembly and SDK bytes establish
-  build identity only. The release artifact contains compact transport and
-  response-generation exports plus source-bound accepted-verification lifecycle
-  exports. Concrete protocol adapters now separate the algebra-only and accepted
-  cursors; the accepted geometry comes from kernel exports, and the worker
-  enforces one custody identity. The custody-worker host installs the accepted
-  adapter with verifier-derived source bindings and terminal eviction, but its
-  current coverage is same-realm, the algebra-only adapter is not installed,
-  and no compact generation ABI completes the pair.
-- `SEC-020`: Guarded selected-size native evidence covers the complete
-  public-key response schedule, source-bound algebraic verification, and exact
-  emitted-proof restores through one CFW and one WHIR algebraic cursor. The accepted
-  adapter has same-realm synthetic-byte host resume coverage, including
-  wrong-source refusal and terminal checkpoint eviction. A separate desktop
-  Chromium diagnostic replays the CFW storage lifecycle. The remaining seven
-  WHIR folds now have bounded outer polls and 32 intermediate durable interval
-  cursors. Dedicated-worker loss, separately metered WHIR transition checks,
-  live browser memory measurement, browser-storage amplification,
-  release-WebAssembly proof execution, selected actual-byte accepted-cursor
-  restoration, and full browser custody remain open. The source-covector fold
-  itself now reuses its original allocation.
+  build identity only. Source-bound verification lifecycle exports and
+  kernel-derived cursor adapters exist, but no compact generation ABI completes
+  the release pair and current worker-host coverage is same-realm.
+- `SEC-020`: Guarded native evidence covers the exact candidate public-key proof,
+  source-bound verification, bounded CFW and WHIR polls, and exact-proof restore
+  from CFW and WHIR cursors. Dedicated-worker loss, bounded synchronous work,
+  live browser memory, storage amplification, release-WebAssembly proof
+  execution, exact candidate-byte browser restore, and full browser custody
+  remain open.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
-  custody without persistence admission, quota and eviction qualification, and
-  externally anchored rollback detection.
+  custody without incremental authenticated capacity accounting, persistence
+  admission, quota and eviction qualification, externally anchored rollback
+  detection, and reconciliation of origin usage after logical cleanup.
 
 Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
 `SEC-015` were retired and remain withdrawn.
@@ -312,8 +231,8 @@ Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
   at deterministic safe boundaries before browser suspension can lose material
   work. Resume must preserve the same attempt and must not depend on a wake lock,
   visibility callback, freeze callback, or termination callback.
-- One worker invocation must adopt exactly one checkpoint-custody object.
-  Fresh and resumed custody inputs are mutually exclusive, and the same adopted
+- One worker invocation must adopt exactly one checkpoint-custody object. Fresh
+  and resumed custody inputs are mutually exclusive, and the same adopted
   object must own restoration, publication, and release so every operation
   identity is retired on success, refusal, cancellation, and failure.
 - Durable state admission must request and recheck browser persistence, account

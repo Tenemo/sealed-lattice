@@ -11,17 +11,11 @@ not a separately supported public voting API.
   from canonical inputs.
 - Coordinate canonical board state, authenticated mailbox delivery,
   browser-local encrypted custody, checkpoints, and state witnessing.
-- Bind both compact public-key verifier cursor profiles to exact source digests
-  in the authenticated checkpoint store while retaining the previous committed
-  cursor across interrupted replacement. The algebra-only profile uses 408
-  bytes and 323 CFW/WHIR boundaries. The accepted profile reads its 412-byte,
-  4,541-boundary geometry from the loaded scalar WASM kernel and uses a distinct
-  canonical state-stream domain. The custody-worker host routes that profile
-  through a strict policy, takes all four source digests from the prepared Rust
-  verifier, reports resume coordinates only after durable publication, and
-  evicts terminal state. Current host coverage is same-realm and synthetic;
-  dedicated-worker loss and scalar release-WASM selected actual-byte
-  restoration remain open.
+- Bind kernel-owned verifier cursor profiles to exact source digests in the
+  authenticated checkpoint store, preserve the previous committed cursor until
+  replacement is durable, and keep fresh and resumed custody mutually
+  exclusive. Cursor sizes, boundary counts, source coordinates, and state
+  domains come from canonical kernel owners rather than TypeScript copies.
 - Assemble inputs for setup, ballot, aggregation, evaluator, finality, and
   target-release verification without reimplementing certified cryptography in
   TypeScript.
