@@ -794,6 +794,29 @@ impl SetupGeneratedCommittedMaterial {
         })
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn from_authenticated_evidence_record_and_canonical_message(
+        profile: crate::bgv::proof_suite::CommittedMaterialProfile,
+        material_context_hash: [u8; Hash512::BYTE_LENGTH],
+        material_seed: [u8; Hash512::BYTE_LENGTH],
+        root: [u8; Hash512::BYTE_LENGTH],
+        canonical_message: Zeroizing<Box<[u64]>>,
+        canonical_modulus: u64,
+    ) -> Result<Self, RefusalReason> {
+        Ok(Self {
+            authenticated_source:
+                AuthenticatedCompactCommittedMaterialSource::from_authenticated_evidence_record_and_canonical_message(
+                    profile,
+                    material_context_hash,
+                    material_seed,
+                    root,
+                    canonical_message,
+                    canonical_modulus,
+                )
+                .map_err(|_| RefusalReason::WrongHashOrRoot)?,
+        })
+    }
+
     pub(crate) fn compact_source(&self) -> &CompactCommittedMaterialSource {
         self.authenticated_source.compact_source()
     }

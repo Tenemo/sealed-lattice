@@ -119,6 +119,9 @@ const SOURCE_CATALOG_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/sou
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 4;
 #[cfg(all(test, not(target_arch = "wasm32")))]
+const RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_RUST_HEAVY_CHECKPOINT_RESUME";
+#[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_SAME_SECRET_CHECKPOINT_LINEAGE_IDENTIFIER: [u8; 32] = [0x71; 32];
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const VSS_PREREQUISITE_CHECKPOINT_LINEAGE_IDENTIFIER: [u8; 32] = [0x73; 32];
@@ -1470,13 +1473,31 @@ fn release_production_same_secret_authority(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+fn exact_same_secret_evidence_checkpoint_resume_enabled() -> Result<bool, String> {
+    match std::env::var(RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE) {
+        Ok(value) if value == "1" => Ok(true),
+        Ok(value) if value == "0" => Ok(false),
+        Ok(value) => Err(format!(
+            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} has unsupported value {value:?}"
+        )),
+        Err(std::env::VarError::NotPresent) => Ok(false),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} is not Unicode"
+        )),
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 fn production_vss_prerequisite_sources() -> Result<ProductionVssPrerequisiteEvidenceSources, String>
 {
+    let checkpoint_resume_enabled = exact_same_secret_evidence_checkpoint_resume_enabled()?;
     let authority_population_started_at = std::time::Instant::now();
     println!("VSS prerequisite phase: populate browser-owned setup authority");
-    let authority =
-        populate_exact_same_secret_evidence_authority(EXACT_SAME_SECRET_EVIDENCE_REVISION)
-            .map_err(|error| format!("populate production setup authority: {error:?}"))?;
+    let authority = populate_exact_same_secret_evidence_authority(
+        EXACT_SAME_SECRET_EVIDENCE_REVISION,
+        checkpoint_resume_enabled,
+    )
+    .map_err(|error| format!("populate production setup authority: {error}"))?;
     println!(
         "VSS prerequisite phase complete: browser-owned setup authority ({:?})",
         authority_population_started_at.elapsed(),
@@ -1490,11 +1511,14 @@ fn production_vss_prerequisite_sources() -> Result<ProductionVssPrerequisiteEvid
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSources, String> {
+    let checkpoint_resume_enabled = exact_same_secret_evidence_checkpoint_resume_enabled()?;
     let authority_population_started_at = std::time::Instant::now();
     println!("exact same-secret phase: populate browser-owned setup authority");
-    let authority =
-        populate_exact_same_secret_evidence_authority(EXACT_SAME_SECRET_EVIDENCE_REVISION)
-            .map_err(|error| format!("populate production setup authority: {error:?}"))?;
+    let authority = populate_exact_same_secret_evidence_authority(
+        EXACT_SAME_SECRET_EVIDENCE_REVISION,
+        checkpoint_resume_enabled,
+    )
+    .map_err(|error| format!("populate production setup authority: {error}"))?;
     println!(
         "exact same-secret phase complete: browser-owned setup authority ({:?})",
         authority_population_started_at.elapsed(),

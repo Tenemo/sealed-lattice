@@ -539,6 +539,51 @@ impl AuthenticatedCompactCommittedMaterialSource {
         })
     }
 
+    /// Restores the compact source after a native evidence runner has opened
+    /// an authenticated local-storage record that was written only after the
+    /// complete tree positively authenticated these deterministic inputs.
+    ///
+    /// This constructor is deliberately unavailable to production and Wasm
+    /// builds. The browser-owned construction path must obtain the same
+    /// authority through its encrypted custody protocol rather than accepting
+    /// a caller-supplied root.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn from_authenticated_evidence_record_and_canonical_message(
+        profile: CommittedMaterialProfile,
+        material_context_hash: [u8; 64],
+        material_seed: [u8; 64],
+        root: [u8; 64],
+        canonical_message: Zeroizing<Box<[u64]>>,
+        canonical_modulus: u64,
+    ) -> Result<Self, CommittedMaterialError> {
+        profile.validate()?;
+        let expected_message_length = profile
+            .trace_domain_size
+            .checked_mul(2)
+            .ok_or(CommittedMaterialError::CountOverflow)?;
+        if canonical_modulus <= 1
+            || canonical_message.len() != expected_message_length
+            || canonical_message
+                .iter()
+                .any(|coefficient| *coefficient >= canonical_modulus)
+            || u128::from(canonical_modulus - 1)
+                >= u128::from(MATERIAL_DIGIT_RADIX) * u128::from(MATERIAL_DIGIT_RADIX)
+            || root == [0_u8; 64]
+        {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+        Ok(Self {
+            compact_source: Arc::new(CompactCommittedMaterialSource {
+                profile,
+                material_context_hash,
+                material_seed: Zeroizing::new(material_seed),
+                root,
+            }),
+            canonical_message: Arc::new(canonical_message),
+            canonical_modulus,
+        })
+    }
+
     pub(crate) fn compact_source(&self) -> &CompactCommittedMaterialSource {
         &self.compact_source
     }

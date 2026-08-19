@@ -61,8 +61,6 @@ const EXACT_AGGREGATE_CHECKPOINT_STATE_HASH_DOMAIN: &str =
     "sealed-lattice/test-evidence/exact-aggregate-wide-checkpoint-state/v1";
 const EXACT_AGGREGATE_CHECKPOINT_CURSOR_HASH_DOMAIN: &str =
     "sealed-lattice/test-evidence/exact-aggregate-wide-checkpoint-cursor/v1";
-const RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE: &str =
-    "SEALED_LATTICE_RUST_HEAVY_CHECKPOINT_RESUME";
 
 #[derive(Clone, Copy)]
 struct DurableCommonProofCheckpointProfile {
@@ -295,17 +293,7 @@ fn parse_common_proof_checkpoint_boundary(file_name: &str) -> Option<u32> {
 }
 
 fn runner_enabled_checkpoint_resume() -> Result<bool, String> {
-    match std::env::var(RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE) {
-        Ok(value) if value == "1" => Ok(true),
-        Ok(value) if value == "0" => Ok(false),
-        Ok(value) => Err(format!(
-            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} has unsupported value {value:?}"
-        )),
-        Err(std::env::VarError::NotPresent) => Ok(false),
-        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
-            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} is not Unicode"
-        )),
-    }
+    exact_same_secret_evidence_checkpoint_resume_enabled()
 }
 
 fn read_exact_bounded_file(

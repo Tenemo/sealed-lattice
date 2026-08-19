@@ -7,6 +7,8 @@ mod finalization;
 mod generation_authority;
 mod generation_population;
 mod generation_relinearization;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod generation_vss_evidence_checkpoint;
 mod prepackage_evaluator_source_catalog;
 mod setup_parameters;
 mod verification_assembly;

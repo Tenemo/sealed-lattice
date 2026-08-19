@@ -60,6 +60,9 @@ use crate::bgv::setup::sampling::negacyclic_product_mod;
 use super::verified_public_randomness::VerifiedSetupVerificationContext;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+use super::generation_vss_evidence_checkpoint::SetupVssEvidenceCheckpointStore;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
     ParticipantIdentity, StateDurableBinding, selected_suite_capability_for_tests,
@@ -88,20 +91,44 @@ const GALOIS_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
 const PUBLIC_KEY_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
 const MATERIAL_SEED_BYTE_LENGTH: usize = 64;
 
-struct SetupGenerationBindings {
-    suite_identifier: [u8; Hash512::BYTE_LENGTH],
-    manifest_hash: [u8; Hash512::BYTE_LENGTH],
-    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
-    action_context_hash: [u8; Hash512::BYTE_LENGTH],
-    roster_hash: [u8; Hash512::BYTE_LENGTH],
-    ordered_roster: Box<[[u8; Hash512::BYTE_LENGTH]]>,
-    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
-    source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
-    participant_identity: [u8; Hash512::BYTE_LENGTH],
-    roster_position: u16,
-    setup_attempt_identifier: PrivateRandomnessAttemptIdentifier,
-    action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
-    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+pub(super) struct SetupGenerationBindings {
+    pub(super) suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    pub(super) manifest_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(super) ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(super) action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(super) roster_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(super) ordered_roster: Box<[[u8; Hash512::BYTE_LENGTH]]>,
+    pub(super) setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(super) source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(super) participant_identity: [u8; Hash512::BYTE_LENGTH],
+    pub(super) roster_position: u16,
+    pub(super) setup_attempt_identifier: PrivateRandomnessAttemptIdentifier,
+    pub(super) action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(super) public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[derive(Debug)]
+enum SetupGenerationEvidenceError {
+    Refusal(RefusalReason),
+    Checkpoint(String),
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl From<RefusalReason> for SetupGenerationEvidenceError {
+    fn from(refusal_reason: RefusalReason) -> Self {
+        Self::Refusal(refusal_reason)
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl core::fmt::Display for SetupGenerationEvidenceError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Refusal(refusal_reason) => write!(formatter, "{refusal_reason:?}"),
+            Self::Checkpoint(message) => formatter.write_str(message),
+        }
+    }
 }
 
 struct RecipientPayloadLimb {
@@ -211,19 +238,40 @@ fn exact_setup_generation_evidence_inputs(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn populate_exact_same_secret_evidence_authority(
     evidence_revision: u8,
-) -> Result<ExactSameSecretEvidenceAuthority, RefusalReason> {
+    checkpoint_resume_enabled: bool,
+) -> Result<ExactSameSecretEvidenceAuthority, String> {
     let ExactSetupGenerationEvidenceInputs {
         selected_suite,
         verified_public_randomness,
         action_private_randomness,
         verified_reservation_binding,
-    } = exact_setup_generation_evidence_inputs(evidence_revision)?;
-    let authority_handle = populate_browser_owned_setup_generation_authority(
+    } = exact_setup_generation_evidence_inputs(evidence_revision)
+        .map_err(|error| format!("derive exact setup-generation inputs: {error:?}"))?;
+    let authority_handle = populate_browser_owned_setup_generation_authority_with_vss_constructor(
         &selected_suite,
         &verified_public_randomness,
         Rc::clone(&action_private_randomness),
         verified_reservation_binding,
-    )?;
+        |selected_suite, action_private_randomness, bindings, common_secret_coefficients| {
+            if checkpoint_resume_enabled {
+                construct_vss_material_with_evidence_checkpoints(
+                    selected_suite,
+                    action_private_randomness,
+                    bindings,
+                    common_secret_coefficients,
+                )
+            } else {
+                construct_vss_material(
+                    selected_suite,
+                    action_private_randomness,
+                    bindings,
+                    common_secret_coefficients,
+                )
+                .map_err(SetupGenerationEvidenceError::from)
+            }
+        },
+    )
+    .map_err(|error: SetupGenerationEvidenceError| error.to_string())?;
     Ok(ExactSameSecretEvidenceAuthority {
         action_private_randomness,
         authority_handle,
@@ -364,6 +412,34 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
     action_private_randomness: Rc<ActionPrivateRandomness>,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
 ) -> Result<SetupGenerationAuthorityHandle, RefusalReason> {
+    populate_browser_owned_setup_generation_authority_with_vss_constructor(
+        selected_suite,
+        verified_public_randomness,
+        action_private_randomness,
+        verified_reservation_binding,
+        construct_vss_material,
+    )
+}
+
+fn populate_browser_owned_setup_generation_authority_with_vss_constructor<
+    PopulationError,
+    ConstructVssMaterial,
+>(
+    selected_suite: &SelectedSuiteCapability,
+    verified_public_randomness: &VerifiedPublicRandomness,
+    action_private_randomness: Rc<ActionPrivateRandomness>,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+    construct_vss_material: ConstructVssMaterial,
+) -> Result<SetupGenerationAuthorityHandle, PopulationError>
+where
+    PopulationError: From<RefusalReason>,
+    ConstructVssMaterial: FnOnce(
+        &SelectedSuiteCapability,
+        &ActionPrivateRandomness,
+        &SetupGenerationBindings,
+        &[i8],
+    ) -> Result<SetupGeneratedVssMaterial, PopulationError>,
+{
     let bindings = validate_setup_generation_bindings(
         selected_suite,
         verified_public_randomness,
@@ -378,7 +454,7 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         || relation_input.participant_count != FOUNDATION_PROFILE.participant_count
         || relation_input.threshold != FOUNDATION_PROFILE.reconstruction_threshold
     {
-        return Err(RefusalReason::UnsupportedVersionOrSuite);
+        return Err(RefusalReason::UnsupportedVersionOrSuite.into());
     }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -514,7 +590,7 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         "setup generation phase complete: retain browser-owned authority elapsed_milliseconds={}",
         phase_started_at.elapsed().as_millis()
     );
-    retained_authority
+    Ok(retained_authority?)
 }
 
 fn construct_public_key_share(
@@ -837,6 +913,96 @@ fn construct_vss_material(
     bindings: &SetupGenerationBindings,
     common_secret_coefficients: &[i8],
 ) -> Result<SetupGeneratedVssMaterial, RefusalReason> {
+    construct_vss_material_with_resolver(
+        selected_suite,
+        action_private_randomness,
+        bindings,
+        common_secret_coefficients,
+        |_,
+         committed_material_profile,
+         material_context_hash,
+         material_seed,
+         canonical_message,
+         canonical_modulus| {
+            construct_committed_material(
+                committed_material_profile,
+                material_context_hash,
+                material_seed,
+                canonical_message,
+                canonical_modulus,
+            )
+        },
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn construct_vss_material_with_evidence_checkpoints(
+    selected_suite: &SelectedSuiteCapability,
+    action_private_randomness: &ActionPrivateRandomness,
+    bindings: &SetupGenerationBindings,
+    common_secret_coefficients: &[i8],
+) -> Result<SetupGeneratedVssMaterial, SetupGenerationEvidenceError> {
+    let committed_material_profile = selected_committed_material_profile()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    let checkpoint_store = SetupVssEvidenceCheckpointStore::open(
+        bindings,
+        action_private_randomness,
+        committed_material_profile,
+    )
+    .map_err(SetupGenerationEvidenceError::Checkpoint)?;
+    construct_vss_material_with_resolver(
+        selected_suite,
+        action_private_randomness,
+        bindings,
+        common_secret_coefficients,
+        |material_ordinal,
+         committed_material_profile,
+         material_context_hash,
+         material_seed,
+         canonical_message,
+         canonical_modulus| {
+            checkpoint_store
+                .restore_or_construct(
+                    material_ordinal,
+                    committed_material_profile,
+                    material_context_hash,
+                    material_seed,
+                    canonical_message,
+                    canonical_modulus,
+                    || {
+                        construct_committed_material(
+                            committed_material_profile,
+                            material_context_hash,
+                            material_seed,
+                            canonical_message,
+                            canonical_modulus,
+                        )
+                    },
+                )
+                .map_err(SetupGenerationEvidenceError::Checkpoint)
+        },
+    )
+}
+
+fn construct_vss_material_with_resolver<PopulationError, ResolveCommittedMaterial>(
+    selected_suite: &SelectedSuiteCapability,
+    action_private_randomness: &ActionPrivateRandomness,
+    bindings: &SetupGenerationBindings,
+    common_secret_coefficients: &[i8],
+    mut resolve_committed_material: ResolveCommittedMaterial,
+) -> Result<SetupGeneratedVssMaterial, PopulationError>
+where
+    PopulationError: From<RefusalReason>,
+    ResolveCommittedMaterial: FnMut(
+        u32,
+        crate::bgv::proof_suite::CommittedMaterialProfile,
+        [u8; Hash512::BYTE_LENGTH],
+        [u8; MATERIAL_SEED_BYTE_LENGTH],
+        &[u64],
+        u64,
+    )
+        -> Result<SetupGeneratedCommittedMaterial, PopulationError>,
+{
     let relation_input = selected_committed_material_relation_plan_input()
         .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
     let committed_material_profile = selected_committed_material_profile()
@@ -849,7 +1015,7 @@ fn construct_vss_material(
         .point_stride()
         .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
     if common_secret_coefficients.len() != ring_degree {
-        return Err(RefusalReason::WrongTypeOrLength);
+        return Err(RefusalReason::WrongTypeOrLength.into());
     }
 
     let coefficient_material_count = relation_input
@@ -870,7 +1036,12 @@ fn construct_vss_material(
     #[cfg(all(test, not(target_arch = "wasm32")))]
     let mut completed_material_count = 0_usize;
 
-    for sharing_limb_index in relation_input.sharing_data_modulus_indices.iter().copied() {
+    for (sharing_limb_position, sharing_limb_index) in relation_input
+        .sharing_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
+    {
         let modulus = selected_suite
             .ordered_data_primes()
             .get(usize::from(sharing_limb_index))
@@ -932,7 +1103,13 @@ fn construct_vss_material(
             )?;
             #[cfg(all(test, not(target_arch = "wasm32")))]
             let material_started_at = Instant::now();
-            let committed_material = construct_committed_material(
+            let material_ordinal = sharing_limb_position
+                .checked_mul(threshold)
+                .and_then(|offset| offset.checked_add(coefficient_index))
+                .and_then(|ordinal| u32::try_from(ordinal).ok())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            let committed_material = resolve_committed_material(
+                material_ordinal,
                 committed_material_profile,
                 material_context_hash,
                 *material_seed,
@@ -982,7 +1159,17 @@ fn construct_vss_material(
             )?;
             #[cfg(all(test, not(target_arch = "wasm32")))]
             let material_started_at = Instant::now();
-            let committed_material = construct_committed_material(
+            let material_ordinal = coefficient_material_count
+                .checked_add(
+                    sharing_limb_position
+                        .checked_mul(participant_count)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?,
+                )
+                .and_then(|offset| offset.checked_add(recipient_roster_position))
+                .and_then(|ordinal| u32::try_from(ordinal).ok())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            let committed_material = resolve_committed_material(
+                material_ordinal,
                 committed_material_profile,
                 material_context_hash,
                 *material_seed,
@@ -1034,11 +1221,11 @@ fn construct_vss_material(
         );
     }
 
-    SetupGeneratedVssMaterial::from_browser_owned_material(
+    Ok(SetupGeneratedVssMaterial::from_browser_owned_material(
         ordered_coefficient_materials,
         ordered_recipient_share_materials,
         recipient_private_payloads,
-    )
+    )?)
 }
 
 fn construct_committed_material(
@@ -1679,5 +1866,240 @@ mod tests {
         assert_eq!(centered_i64_residue(-1, 17), 16);
         assert_eq!(centered_i64_residue(0, 17), 0);
         assert_eq!(centered_i64_residue(18, 17), 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn encrypted_vss_material_checkpoint_restores_the_exact_compact_source() {
+        let ExactSetupGenerationEvidenceInputs {
+            selected_suite,
+            verified_public_randomness,
+            action_private_randomness,
+            verified_reservation_binding,
+        } = exact_setup_generation_evidence_inputs(0x91)
+            .expect("derive checkpoint evidence inputs");
+        let bindings = validate_setup_generation_bindings(
+            &selected_suite,
+            &verified_public_randomness,
+            &action_private_randomness,
+            verified_reservation_binding,
+        )
+        .expect("validate checkpoint evidence bindings");
+        let profile = crate::bgv::proof_suite::CommittedMaterialProfile::selected(8)
+            .expect("small committed-material profile");
+        let checkpoint_store = SetupVssEvidenceCheckpointStore::from_binding_without_filesystem(
+            &bindings,
+            &action_private_randomness,
+            profile,
+        )
+        .expect("construct in-memory checkpoint store");
+        let material_context_hash = [0x71; Hash512::BYTE_LENGTH];
+        let material_seed = [0x72; MATERIAL_SEED_BYTE_LENGTH];
+        let canonical_modulus = DATA_PRIMES[0];
+        let canonical_message = [
+            0,
+            1,
+            canonical_modulus - 1,
+            7,
+            19,
+            canonical_modulus / 2,
+            31,
+            63,
+        ];
+        let material = construct_committed_material(
+            profile,
+            material_context_hash,
+            material_seed,
+            &canonical_message,
+            canonical_modulus,
+        )
+        .expect("construct checkpoint source material");
+        let encoded = checkpoint_store
+            .seal_checkpoint_record(
+                &material,
+                17,
+                profile,
+                material_context_hash,
+                material_seed,
+                &canonical_message,
+                canonical_modulus,
+            )
+            .expect("seal checkpoint record");
+        assert_eq!(
+            checkpoint_store
+                .seal_checkpoint_record(
+                    &material,
+                    17,
+                    profile,
+                    material_context_hash,
+                    material_seed,
+                    &canonical_message,
+                    canonical_modulus,
+                )
+                .expect("deterministically reseal checkpoint record"),
+            encoded
+        );
+
+        let restored = checkpoint_store
+            .restore_checkpoint_record(
+                &encoded,
+                17,
+                profile,
+                material_context_hash,
+                material_seed,
+                &canonical_message,
+                canonical_modulus,
+            )
+            .expect("restore authenticated checkpoint record");
+        assert_eq!(
+            restored.compact_source().root(),
+            material.compact_source().root()
+        );
+        let original_source = material.owned_authenticated_source();
+        let restored_source = restored.owned_authenticated_source();
+        for physical_column_ordinal in 0..4 {
+            assert_eq!(
+                restored_source
+                    .regenerate_masked_coefficients(physical_column_ordinal)
+                    .expect("restore masked source column"),
+                original_source
+                    .regenerate_masked_coefficients(physical_column_ordinal)
+                    .expect("regenerate original masked source column")
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn encrypted_vss_material_checkpoint_refuses_tampering_and_source_mismatch() {
+        let ExactSetupGenerationEvidenceInputs {
+            selected_suite,
+            verified_public_randomness,
+            action_private_randomness,
+            verified_reservation_binding,
+        } = exact_setup_generation_evidence_inputs(0x92)
+            .expect("derive hostile checkpoint evidence inputs");
+        let bindings = validate_setup_generation_bindings(
+            &selected_suite,
+            &verified_public_randomness,
+            &action_private_randomness,
+            verified_reservation_binding,
+        )
+        .expect("validate hostile checkpoint evidence bindings");
+        let profile = crate::bgv::proof_suite::CommittedMaterialProfile::selected(8)
+            .expect("small committed-material profile");
+        let checkpoint_store = SetupVssEvidenceCheckpointStore::from_binding_without_filesystem(
+            &bindings,
+            &action_private_randomness,
+            profile,
+        )
+        .expect("construct hostile checkpoint store");
+        let material_context_hash = [0x81; Hash512::BYTE_LENGTH];
+        let material_seed = [0x82; MATERIAL_SEED_BYTE_LENGTH];
+        let canonical_modulus = DATA_PRIMES[0];
+        let canonical_message = [0, 1, 2, 3, 5, 8, 13, canonical_modulus - 1];
+        let material = construct_committed_material(
+            profile,
+            material_context_hash,
+            material_seed,
+            &canonical_message,
+            canonical_modulus,
+        )
+        .expect("construct hostile checkpoint source material");
+        let encoded = checkpoint_store
+            .seal_checkpoint_record(
+                &material,
+                23,
+                profile,
+                material_context_hash,
+                material_seed,
+                &canonical_message,
+                canonical_modulus,
+            )
+            .expect("seal hostile checkpoint record");
+
+        let mut tampered = encoded.clone();
+        let tampered_offset = tampered.len() / 2;
+        tampered[tampered_offset] ^= 1;
+        assert!(
+            checkpoint_store
+                .restore_checkpoint_record(
+                    &tampered,
+                    23,
+                    profile,
+                    material_context_hash,
+                    material_seed,
+                    &canonical_message,
+                    canonical_modulus,
+                )
+                .is_err()
+        );
+
+        let mut wrong_message = canonical_message;
+        wrong_message[3] += 1;
+        assert!(
+            checkpoint_store
+                .restore_checkpoint_record(
+                    &encoded,
+                    23,
+                    profile,
+                    material_context_hash,
+                    material_seed,
+                    &wrong_message,
+                    canonical_modulus,
+                )
+                .err()
+                .expect("wrong canonical message must refuse")
+                .contains("deterministic source")
+        );
+        assert!(
+            checkpoint_store
+                .restore_checkpoint_record(
+                    &encoded,
+                    24,
+                    profile,
+                    material_context_hash,
+                    material_seed,
+                    &canonical_message,
+                    canonical_modulus,
+                )
+                .err()
+                .expect("wrong material ordinal must refuse")
+                .contains("deterministic source")
+        );
+        let mut wrong_context_hash = material_context_hash;
+        wrong_context_hash[0] ^= 1;
+        assert!(
+            checkpoint_store
+                .restore_checkpoint_record(
+                    &encoded,
+                    23,
+                    profile,
+                    wrong_context_hash,
+                    material_seed,
+                    &canonical_message,
+                    canonical_modulus,
+                )
+                .err()
+                .expect("wrong material context must refuse")
+                .contains("authenticate")
+        );
+        let wrong_profile = crate::bgv::proof_suite::CommittedMaterialProfile::selected(16)
+            .expect("different committed-material profile");
+        assert!(
+            checkpoint_store
+                .restore_checkpoint_record(
+                    &encoded,
+                    23,
+                    wrong_profile,
+                    material_context_hash,
+                    material_seed,
+                    &canonical_message,
+                    canonical_modulus,
+                )
+                .err()
+                .expect("wrong committed-material profile must refuse")
+                .contains("deterministic source")
+        );
     }
 }

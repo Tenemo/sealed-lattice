@@ -137,12 +137,17 @@ ceremony or supported-phone qualification.
   field.
 - The guarded heavy Rust proof fixture is now produced and consumed by one
   owning test, so clean execution no longer depends on lexical test order or a
-  prior run. The evidence baseline is still not clean because exact aggregate
-  source preparation performs 112 synchronous committed-material constructions
-  before reaching the first resumable proof boundary and exceeds the current
-  job budget. The heavy runner now owns durable common-proof checkpoint replay,
-  including a profile-separated exact aggregate namespace, but a complete run
-  has not yet reached and exercised that namespace.
+  prior run. Exact aggregate source preparation still contains 112 expensive
+  VSS committed-material constructions, but the native heavy-evidence runner
+  now seals each completed material in an encrypted, deterministic,
+  source-bound checkpoint after positive authentication. An interrupted exact
+  selected-profile run restored its first two completed materials in 0 ms each
+  and constructed the next in 51,763 ms, so a completed VSS checkpoint boundary
+  limits replay to at most the in-progress material. The three anchor roots
+  still rebuild synchronously in about 48 seconds, only the first three of 112
+  VSS materials have been exercised through this path, and a complete run has
+  not yet reached the runner-owned common-proof checkpoint namespace or fit the
+  current job budget. The evidence baseline therefore remains open.
 - There is no complete production compact generation-and-verification
   release-WebAssembly ABI pair. The release transport validator checks
   canonical structure, transcript chronology, derived queries, and Merkle
