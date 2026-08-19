@@ -16,6 +16,9 @@
                 "sealed-lattice",
                 // The Wasm kernel build resolves binaryen's wasm-opt script by path.
                 "binaryen",
+                // The root browser harness resolves these deep-import optimizer entries from string-valued Vitest configuration.
+                "@noble/hashes",
+                "@noble/post-quantum",
             ],
         },
         "packages/sdk": {

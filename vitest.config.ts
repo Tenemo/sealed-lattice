@@ -93,7 +93,9 @@ for (const diagnosticDirectoryPath of [
 const browserOptimizedDependencies = [
     '@noble/hashes/hkdf.js',
     '@noble/hashes/sha2.js',
+    '@noble/hashes/sha3.js',
     '@noble/hashes/utils.js',
+    '@noble/post-quantum/ml-dsa.js',
     '@noble/post-quantum/ml-kem.js',
 ] as const;
 
@@ -186,6 +188,9 @@ const makeBrowserProject = ({
             ? undefined
             : path.join(testAttachmentDirectoryPath, projectName);
     return {
+        optimizeDeps: {
+            include: [...browserOptimizedDependencies],
+        },
         resolve: testResolve,
         test: {
             name: projectName,
@@ -240,9 +245,6 @@ const makeBrowserProject = ({
 };
 
 export default defineConfig({
-    optimizeDeps: {
-        include: [...browserOptimizedDependencies],
-    },
     resolve: testResolve,
     test: {
         ...(testResultFilePath === undefined

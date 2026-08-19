@@ -7,7 +7,7 @@ import {
     type DesktopBrowserProofEvidenceCaseIdentifier,
     type DesktopBrowserProofTransportGenerationCaseIdentifier,
     type DesktopBrowserProofTransportVerificationCaseIdentifier,
-} from '#tests/support/desktop-browser-proof-evidence-catalog';
+} from '../../../../tests/support/desktop-browser-proof-evidence-catalog.js';
 
 const transportManifestSchemaIdentifier =
     'sealed-lattice/desktop-browser-proof-evidence-transport/v1';
