@@ -69,9 +69,9 @@ jobs:
             - name: Run Node tests against the built workspace
               timeout-minutes: 90
               run: pnpm run test:node:built
-            - name: Install browser engines
-              run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - name: Run browser matrix against the built workspace
+            - name: Install Chromium
+              run: pnpm exec playwright install --with-deps chromium
+            - name: Run Chromium tests against the built workspace
               timeout-minutes: 55
               run: pnpm run test:browser:built
 

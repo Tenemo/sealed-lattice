@@ -294,7 +294,7 @@ describe('Compact CFW storage diagnostic evidence', () => {
         ).toEqual({ reuseWasm: true });
         expect(() =>
             parseDesktopBrowserCompactCfwStorageDiagnosticArguments([
-                'firefox',
+                'unsupported-browser',
             ]),
         ).toThrow(/only an optional reuse-wasm/u);
         expect(() =>
