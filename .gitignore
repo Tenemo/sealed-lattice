@@ -27,6 +27,7 @@ logs/
 temp/
 temp.txt
 *.diff
+*.zip
 
 # env
 .env
