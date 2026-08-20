@@ -197,7 +197,10 @@ pub(crate) use quotient::{
     common_proof_quotient_materialization_liveness,
 };
 #[cfg(test)]
-pub(crate) use quotient::{construct_composed_quotient_polynomial, decompose_composed_quotient};
+pub(crate) use quotient::{
+    CommonProofConstraintStreamQuotientCheckpoint, construct_composed_quotient_polynomial,
+    decompose_composed_quotient,
+};
 #[cfg(test)]
 pub(crate) use relation_columns::construct_pre_challenge_relation_columns;
 pub(crate) use relation_columns::{

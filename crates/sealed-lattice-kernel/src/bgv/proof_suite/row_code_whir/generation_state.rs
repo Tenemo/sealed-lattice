@@ -197,6 +197,86 @@ const ROW_CODE_WHIR_TRANSCRIPT_PREFIX_AUTHORITY_BINDING_DOMAIN: &str =
     "sealed-lattice/row-code-whir/transcript-prefix-authority-binding/v1";
 const SAME_SECRET_SOURCE_REPLAY_IDENTITY_HASH_DOMAIN: &str =
     "sealed-lattice/row-code-whir/same-secret-source-replay-identity/v1";
+#[cfg(test)]
+const ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC: [u8; 8] = *b"SLQCS001";
+#[cfg(test)]
+const ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_VERSION: u16 = 1;
+#[cfg(test)]
+const ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH: usize =
+    ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC.len()
+        + 2 * size_of::<u16>()
+        + size_of::<u64>()
+        + 4 * size_of::<u32>()
+        + 3 * HASH_BYTE_LENGTH
+        + 4 * size_of::<u64>()
+        + 2 * size_of::<u32>()
+        + size_of::<u64>();
+
+#[cfg(test)]
+struct RowCodeWhirQuotientConstraintCheckpointReader<'bytes> {
+    bytes: &'bytes [u8],
+    next_offset: usize,
+}
+
+#[cfg(test)]
+impl<'bytes> RowCodeWhirQuotientConstraintCheckpointReader<'bytes> {
+    const fn new(bytes: &'bytes [u8]) -> Self {
+        Self {
+            bytes,
+            next_offset: 0,
+        }
+    }
+
+    fn read_exact(&mut self, byte_length: usize) -> Result<&'bytes [u8], CommonProofProverError> {
+        let end = self
+            .next_offset
+            .checked_add(byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let bytes = self
+            .bytes
+            .get(self.next_offset..end)
+            .ok_or(CommonProofProverError::CanonicalEncoding)?;
+        self.next_offset = end;
+        Ok(bytes)
+    }
+
+    fn read_u16(&mut self) -> Result<u16, CommonProofProverError> {
+        Ok(u16::from_le_bytes(
+            self.read_exact(size_of::<u16>())?
+                .try_into()
+                .expect("fixed quotient state checkpoint integer"),
+        ))
+    }
+
+    fn read_u32(&mut self) -> Result<u32, CommonProofProverError> {
+        Ok(u32::from_le_bytes(
+            self.read_exact(size_of::<u32>())?
+                .try_into()
+                .expect("fixed quotient state checkpoint integer"),
+        ))
+    }
+
+    fn read_u64(&mut self) -> Result<u64, CommonProofProverError> {
+        Ok(u64::from_le_bytes(
+            self.read_exact(size_of::<u64>())?
+                .try_into()
+                .expect("fixed quotient state checkpoint integer"),
+        ))
+    }
+
+    fn read_hash(&mut self) -> Result<[u8; HASH_BYTE_LENGTH], CommonProofProverError> {
+        self.read_exact(HASH_BYTE_LENGTH)?
+            .try_into()
+            .map_err(|_| CommonProofProverError::CanonicalEncoding)
+    }
+
+    fn finish(self) -> Result<(), CommonProofProverError> {
+        if self.next_offset != self.bytes.len() {
+            return Err(CommonProofProverError::CanonicalEncoding);
+        }
+        Ok(())
+    }
+}
 
 type RowCodeWhirGenerationPollResult<StorageError, CoinError, SinkError> = Result<
     CommonProofGenerationPoll,
@@ -3563,6 +3643,237 @@ impl RowCodeWhirGenerationStateMachine {
         self.next_phase_row_index = phase_geometry.row_count;
         self.next_phase_logical_chunk_index = 0;
         self.phase_lane_completion_pending = true;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_quotient_constraint_checkpoint_coordinates(
+        &self,
+    ) -> Result<Option<u32>, CommonProofProverError> {
+        if self.phase != RowCodeWhirGenerationPhase::ConstructingQuotient
+            || self.active_quotient_transform.is_some()
+            || self.pending_quotient_evaluation_read.is_some()
+            || self.pending_replay_polynomial.is_some()
+            || self.active_replay_polynomial_writer.is_some()
+        {
+            return Ok(None);
+        }
+        let completed_constraint_count = match self
+            .quotient_materialization
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .completed_constraint_checkpoint_count()?
+        {
+            Some(completed_constraint_count) => completed_constraint_count,
+            None => return Ok(None),
+        };
+        let completed_constraint_count_u32 = u32::try_from(completed_constraint_count)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        if self.quotient_transform_plans.keys().any(|transform_key| {
+            transform_key.constraint_ordinal() < completed_constraint_count_u32
+        }) {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        Ok(Some(completed_constraint_count_u32))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn quotient_constraint_checkpoint_bytes(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofProverError> {
+        let completed_constraint_count = self
+            .pending_quotient_constraint_checkpoint_coordinates()?
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let materialization_checkpoint = self
+            .quotient_materialization
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .canonical_constraint_checkpoint_bytes()?;
+        let external_memory_executor = self
+            .external_memory_executor
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        let external_memory_usage = external_memory_executor.usage();
+        let source_replay_identity_digest = self
+            .source_replay_identity_digest
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        let materialization_checkpoint_byte_length =
+            u64::try_from(materialization_checkpoint.len())
+                .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let total_byte_length = ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH
+            .checked_add(materialization_checkpoint.len())
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let mut output = Vec::new();
+        output
+            .try_reserve_exact(total_byte_length)
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        output.extend_from_slice(&ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC);
+        output
+            .extend_from_slice(&ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_VERSION.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(
+            &u64::try_from(total_byte_length)
+                .map_err(|_| CommonProofProverError::CountOverflow)?
+                .to_le_bytes(),
+        );
+        output.extend_from_slice(&completed_constraint_count.to_le_bytes());
+        output.extend_from_slice(&0_u32.to_le_bytes());
+        output.extend_from_slice(&external_memory_executor.current_step().to_le_bytes());
+        output.extend_from_slice(&0_u32.to_le_bytes());
+        output.extend_from_slice(&self.construction_plan_identity_hash);
+        output.extend_from_slice(&source_replay_identity_digest);
+        output.extend_from_slice(&self.source_request_context.stable_generation_binding_hash());
+        output.extend_from_slice(
+            &external_memory_usage
+                .total_written_byte_length
+                .to_le_bytes(),
+        );
+        output.extend_from_slice(&external_memory_usage.total_read_byte_length.to_le_bytes());
+        output.extend_from_slice(&external_memory_usage.peak_stored_byte_length.to_le_bytes());
+        output.extend_from_slice(&external_memory_usage.transaction_count.to_le_bytes());
+        output.extend_from_slice(&external_memory_usage.deleted_object_count.to_le_bytes());
+        output.extend_from_slice(&0_u32.to_le_bytes());
+        output.extend_from_slice(&materialization_checkpoint_byte_length.to_le_bytes());
+        debug_assert_eq!(
+            output.len(),
+            ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH
+        );
+        output.extend_from_slice(&materialization_checkpoint);
+        if output.len() != total_byte_length {
+            return Err(CommonProofProverError::CanonicalEncoding);
+        }
+        Ok(output)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn quotient_constraint_checkpoint_restore_target(
+        &self,
+    ) -> Result<bool, CommonProofProverError> {
+        if self.phase != RowCodeWhirGenerationPhase::ConstructingQuotient
+            || self.active_quotient_transform.is_some()
+            || self.pending_quotient_evaluation_read.is_some()
+            || self.pending_replay_polynomial.is_some()
+            || self.active_replay_polynomial_writer.is_some()
+        {
+            return Ok(false);
+        }
+        let materialization = self
+            .quotient_materialization
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let external_memory_executor = self
+            .external_memory_executor
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        Ok(materialization.is_fresh_constraint_stream()?
+            && external_memory_executor.current_step() == FIRST_QUOTIENT_TRANSFORM_STEP)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_quotient_constraint_checkpoint(
+        &mut self,
+        completed_constraint_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofProverError> {
+        if completed_constraint_count == 0
+            || !self.quotient_constraint_checkpoint_restore_target()?
+            || canonical_checkpoint_bytes.len()
+                < ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let mut reader =
+            RowCodeWhirQuotientConstraintCheckpointReader::new(canonical_checkpoint_bytes);
+        if reader.read_exact(ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC.len())?
+            != ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC
+            || reader.read_u16()? != ROW_CODE_WHIR_QUOTIENT_CONSTRAINT_CHECKPOINT_VERSION
+            || reader.read_u16()? != 0
+        {
+            return Err(CommonProofProverError::CanonicalEncoding);
+        }
+        let declared_total_byte_length = usize::try_from(reader.read_u64()?)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let encoded_completed_constraint_count = reader.read_u32()?;
+        let first_reserved_word = reader.read_u32()?;
+        let restored_executor_step = reader.read_u32()?;
+        let second_reserved_word = reader.read_u32()?;
+        let construction_plan_identity_hash = reader.read_hash()?;
+        let source_replay_identity_digest = reader.read_hash()?;
+        let stable_generation_binding_hash = reader.read_hash()?;
+        let restored_usage = ProofExternalMemoryUsage {
+            total_written_byte_length: reader.read_u64()?,
+            total_read_byte_length: reader.read_u64()?,
+            peak_stored_byte_length: reader.read_u64()?,
+            transaction_count: reader.read_u64()?,
+            deleted_object_count: reader.read_u32()?,
+        };
+        let third_reserved_word = reader.read_u32()?;
+        let materialization_checkpoint_byte_length = usize::try_from(reader.read_u64()?)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let materialization_checkpoint =
+            reader.read_exact(materialization_checkpoint_byte_length)?;
+        reader.finish()?;
+        if declared_total_byte_length != canonical_checkpoint_bytes.len()
+            || encoded_completed_constraint_count != completed_constraint_count
+            || first_reserved_word != 0
+            || second_reserved_word != 0
+            || third_reserved_word != 0
+            || construction_plan_identity_hash != self.construction_plan_identity_hash
+            || source_replay_identity_digest
+                != self
+                    .source_replay_identity_digest
+                    .ok_or(CommonProofProverError::InvalidInput)?
+            || stable_generation_binding_hash
+                != self.source_request_context.stable_generation_binding_hash()
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+
+        let materialization = self
+            .quotient_materialization
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let decoded_checkpoint =
+            materialization.decode_constraint_checkpoint(materialization_checkpoint)?;
+        if u32::try_from(decoded_checkpoint.completed_constraint_count())
+            .map_err(|_| CommonProofProverError::CountOverflow)?
+            != completed_constraint_count
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+
+        let prefix_transform_count = self
+            .quotient_transform_plans
+            .keys()
+            .filter(|transform_key| transform_key.constraint_ordinal() < completed_constraint_count)
+            .count();
+        let expected_restored_executor_step = FIRST_QUOTIENT_TRANSFORM_STEP
+            .checked_add(
+                u32::try_from(prefix_transform_count)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .and_then(|step| step.checked_add(completed_constraint_count))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        if restored_executor_step != expected_restored_executor_step {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+
+        // Authenticated prefix replay has already reconstructed the retained
+        // private-coin operations. Relation-polynomial replay restarts and
+        // checks each coordinate stream without advancing its live cursor, so
+        // this accumulator restore must not install or advance coin state.
+        self.external_memory_executor
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidInput)?
+            .restore_completed_constraint_step_prefix(restored_executor_step, restored_usage)
+            .map_err(|_| CommonProofProverError::InvalidQuotient)?;
+        self.quotient_materialization
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .restore_constraint_checkpoint(decoded_checkpoint)?;
+        self.quotient_transform_plans.retain(|transform_key, _| {
+            transform_key.constraint_ordinal() >= completed_constraint_count
+        });
         Ok(())
     }
 

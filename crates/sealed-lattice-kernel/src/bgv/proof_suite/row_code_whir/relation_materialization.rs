@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 use zeroize::Zeroizing;
 
+#[cfg(test)]
+use crate::bgv::proof_suite::prover::CommonProofConstraintStreamQuotientCheckpoint;
 use crate::bgv::proof_suite::{
     CommonProofPrivateCoinSource, CommonProofProverError, CommonProofSourcePolynomial,
     ProofChallengeExtensionElement, ProofEvaluationDomain, RelationApplicationChallengeAssignment,
@@ -196,6 +198,89 @@ impl RowCodeWhirQuotientMaterialization {
             outstanding_action: None,
             completion_emitted: false,
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn completed_constraint_checkpoint_count(
+        &self,
+    ) -> Result<Option<usize>, CommonProofProverError> {
+        if self.quotient_component_cursor.is_some()
+            || self.outstanding_action.is_some()
+            || self.completion_emitted
+        {
+            return Ok(None);
+        }
+        self.quotient_builder
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .completed_constraint_checkpoint_count()
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_fresh_constraint_stream(&self) -> Result<bool, CommonProofProverError> {
+        if self.quotient_component_cursor.is_some()
+            || self.outstanding_action.is_some()
+            || self.completion_emitted
+        {
+            return Ok(false);
+        }
+        Ok(self
+            .quotient_builder
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .is_fresh_constraint_stream()?
+            && self.next_component_ordinal == 0)
+    }
+
+    #[cfg(test)]
+    pub(super) fn canonical_constraint_checkpoint_bytes(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofProverError> {
+        if self.quotient_component_cursor.is_some()
+            || self.outstanding_action.is_some()
+            || self.completion_emitted
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        self.quotient_builder
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .canonical_constraint_checkpoint_bytes()
+    }
+
+    #[cfg(test)]
+    pub(super) fn decode_constraint_checkpoint(
+        &self,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<CommonProofConstraintStreamQuotientCheckpoint, CommonProofProverError> {
+        if self.quotient_component_cursor.is_some()
+            || self.outstanding_action.is_some()
+            || self.completion_emitted
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        self.quotient_builder
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .decode_constraint_checkpoint(canonical_checkpoint_bytes)
+    }
+
+    #[cfg(test)]
+    pub(super) fn restore_constraint_checkpoint(
+        &mut self,
+        checkpoint: CommonProofConstraintStreamQuotientCheckpoint,
+    ) -> Result<(), CommonProofProverError> {
+        if self.quotient_component_cursor.is_some()
+            || self.outstanding_action.is_some()
+            || self.completion_emitted
+            || self.next_component_ordinal != 0
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        self.quotient_builder
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+            .restore_constraint_checkpoint(checkpoint)
     }
 
     pub(super) fn next_action<Coins>(
@@ -826,8 +911,8 @@ mod tests {
             &relation_context,
             evaluation_domain,
             BTreeMap::new(),
-            application_challenges,
-            composition_challenges,
+            application_challenges.clone(),
+            composition_challenges.clone(),
             8,
         )
         .expect("the checked quotient cursor initializes");
@@ -856,6 +941,7 @@ mod tests {
         let mut evaluation_read_count = 0_usize;
         let mut progress_count = 0_usize;
         let mut completed = false;
+        let mut first_constraint_checkpoint = None;
 
         for _ in 0..100_000 {
             match materialization
@@ -957,6 +1043,18 @@ mod tests {
                     materialization
                         .acknowledge_completed_constraint_storage_step()
                         .expect("the completed constraint storage step is acknowledged");
+                    if first_constraint_checkpoint.is_none()
+                        && materialization
+                            .completed_constraint_checkpoint_count()
+                            .expect("the completed constraint boundary is checked")
+                            == Some(1)
+                    {
+                        first_constraint_checkpoint = Some(
+                            materialization
+                                .canonical_constraint_checkpoint_bytes()
+                                .expect("the first constraint boundary is canonical"),
+                        );
+                    }
                     assert_eq!(
                         materialization.acknowledge_completed_constraint_storage_step(),
                         Err(CommonProofProverError::InvalidQuotient),
@@ -1019,5 +1117,180 @@ mod tests {
                 CommonProofProverError::InvalidInput
             ))
         ));
+
+        let first_constraint_checkpoint = first_constraint_checkpoint
+            .expect("the compact relation exposes a resumable nonterminal constraint boundary");
+        let mut restored_materialization = RowCodeWhirQuotientMaterialization::new(
+            variant,
+            &relation_context,
+            evaluation_domain,
+            BTreeMap::new(),
+            application_challenges,
+            composition_challenges,
+            8,
+        )
+        .expect("a fresh quotient cursor initializes for restoration");
+        assert!(
+            restored_materialization
+                .canonical_constraint_checkpoint_bytes()
+                .is_err(),
+            "a fresh cursor cannot emit a completed-constraint checkpoint",
+        );
+        let mut hostile_checkpoints = vec![
+            (
+                "truncated state",
+                first_constraint_checkpoint[..first_constraint_checkpoint.len() - 1].to_vec(),
+            ),
+            ("trailing state", {
+                let mut trailing = first_constraint_checkpoint.clone();
+                trailing.push(0);
+                trailing
+            }),
+            ("noncanonical field value", {
+                let mut noncanonical_field_value = first_constraint_checkpoint.clone();
+                let final_coordinate_start =
+                    noncanonical_field_value.len() - core::mem::size_of::<u64>();
+                noncanonical_field_value[final_coordinate_start..]
+                    .copy_from_slice(&u64::MAX.to_le_bytes());
+                noncanonical_field_value
+            }),
+        ];
+        for (field_name, field_start) in [
+            ("magic", 0),
+            ("version", 8),
+            ("reserved word", 10),
+            ("declared byte length", 12),
+            ("evaluation domain size", 20),
+            ("evaluation domain generator", 28),
+            ("evaluation domain coset", 36),
+            ("trace domain size", 44),
+            ("trace rotation stride", 52),
+            ("constraint count", 60),
+            ("column count", 68),
+            ("completed constraint count", 76),
+        ] {
+            let mut changed_field = first_constraint_checkpoint.clone();
+            changed_field[field_start] ^= 1;
+            hostile_checkpoints.push((field_name, changed_field));
+        }
+        for (hostile_case, hostile_checkpoint) in hostile_checkpoints {
+            assert!(
+                restored_materialization
+                    .decode_constraint_checkpoint(&hostile_checkpoint)
+                    .is_err(),
+                "the {hostile_case} checkpoint must refuse",
+            );
+        }
+        let decoded_checkpoint = restored_materialization
+            .decode_constraint_checkpoint(&first_constraint_checkpoint)
+            .expect("the independent fresh cursor decodes the canonical checkpoint");
+        assert_eq!(decoded_checkpoint.completed_constraint_count(), 1);
+        restored_materialization
+            .restore_constraint_checkpoint(decoded_checkpoint)
+            .expect("the first completed constraint restores exactly once");
+        assert_eq!(
+            restored_materialization
+                .completed_constraint_checkpoint_count()
+                .expect("the restored coordinate remains checked"),
+            Some(1),
+        );
+        assert_eq!(
+            restored_materialization
+                .canonical_constraint_checkpoint_bytes()
+                .expect("the restored accumulator re-encodes canonically"),
+            first_constraint_checkpoint,
+            "the restored checkpoint state must be byte-for-byte canonical",
+        );
+        assert!(
+            restored_materialization
+                .decode_constraint_checkpoint(&first_constraint_checkpoint)
+                .is_err(),
+            "an advanced cursor cannot consume the same checkpoint twice",
+        );
+
+        let mut restored_components = Vec::new();
+        let mut restored_transformed_evaluations_by_object = BTreeMap::new();
+        let mut restored_next_external_object_ordinal = 10_000_u32;
+        let mut restored_coins = DeterministicZeroCoinSource;
+        let mut restored_complete = false;
+        for _ in 0..100_000 {
+            match restored_materialization
+                .next_action(
+                    variant,
+                    &relation_context,
+                    &mut restored_coins,
+                    relation_context.maximum_fiat_shamir_candidate_draws_per_output,
+                )
+                .expect("the restored quotient action succeeds")
+            {
+                RowCodeWhirQuotientMaterializationAction::TransformColumn(transform_key) => {
+                    let vector = ExternalPolynomialVector::new(
+                        ProofExternalMemoryObject::new(restored_next_external_object_ordinal),
+                        RelationColumnValueType::BaseField,
+                        evaluation_domain.size(),
+                    )
+                    .expect("the restored transformed vector is valid");
+                    restored_transformed_evaluations_by_object.insert(
+                        vector.object(),
+                        transformed_column_evaluations
+                            .get(
+                                usize::try_from(transform_key.column_ordinal())
+                                    .expect("the restored column ordinal fits usize"),
+                            )
+                            .expect("the restored column exists")
+                            .clone(),
+                    );
+                    restored_next_external_object_ordinal = restored_next_external_object_ordinal
+                        .checked_add(1)
+                        .expect("the restored object ordinal remains bounded");
+                    restored_materialization
+                        .supply_transformed_column(transform_key, vector)
+                        .expect("the restored transform is accepted");
+                }
+                RowCodeWhirQuotientMaterializationAction::ReadEvaluationRange(read_request) => {
+                    restored_materialization
+                        .supply_evaluation_values(
+                            read_request,
+                            Zeroizing::new(
+                                restored_transformed_evaluations_by_object
+                                    .get(&read_request.vector().object())
+                                    .expect("the restored transform exists")
+                                    [read_request.element_offset()
+                                        ..read_request.element_offset()
+                                            + read_request.element_count()]
+                                    .to_vec(),
+                            ),
+                        )
+                        .expect("the restored evaluation range is accepted");
+                }
+                RowCodeWhirQuotientMaterializationAction::Progressed => {}
+                RowCodeWhirQuotientMaterializationAction::ConstraintCompleted => {
+                    restored_materialization
+                        .acknowledge_completed_constraint_storage_step()
+                        .expect("the restored constraint storage step is acknowledged");
+                }
+                RowCodeWhirQuotientMaterializationAction::PersistQuotientComponent {
+                    component_ordinal,
+                    polynomial,
+                } => {
+                    restored_components.push(polynomial);
+                    restored_materialization
+                        .acknowledge_persisted_component(component_ordinal)
+                        .expect("the restored component is acknowledged");
+                }
+                RowCodeWhirQuotientMaterializationAction::Complete => {
+                    restored_complete = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            restored_complete,
+            "the restored quotient cursor must terminate"
+        );
+        assert_eq!(
+            restored_components, expected_components,
+            "restoration must reproduce the independent whole-operation oracle byte for byte",
+        );
     }
 }

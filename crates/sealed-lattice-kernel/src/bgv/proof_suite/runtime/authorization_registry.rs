@@ -773,6 +773,59 @@ impl CommonProofRuntimeRegistry {
             )
     }
 
+    #[cfg(test)]
+    pub(crate) fn generation_quotient_constraint_checkpoint_coordinates(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Option<u32>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .pending_quotient_constraint_checkpoint_coordinates()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_quotient_constraint_checkpoint_bytes(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .quotient_constraint_checkpoint_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_quotient_constraint_checkpoint_restore_target(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<bool, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .quotient_constraint_checkpoint_restore_target()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_generation_quotient_constraint_checkpoint(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        completed_constraint_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .restore_quotient_constraint_checkpoint(
+                completed_constraint_count,
+                canonical_checkpoint_bytes,
+            )
+    }
+
     pub(crate) fn generation_checkpoint_safe_boundary_ordinal(
         &self,
         handle: CommonProofGenerationOperationHandle,

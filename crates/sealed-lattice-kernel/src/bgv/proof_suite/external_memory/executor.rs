@@ -127,6 +127,101 @@ impl ProofExternalMemoryExecutor {
         self.usage
     }
 
+    /// Restores a test-evidence constraint boundary after deterministic replay
+    /// has recreated every long-lived source object. Constraint-local output
+    /// lifecycles before `restored_step` are absent from the fresh store and
+    /// become consumed; future lifecycles remain unissued.
+    #[cfg(test)]
+    pub(crate) fn restore_completed_constraint_step_prefix(
+        &mut self,
+        restored_step: u32,
+        restored_usage: ProofExternalMemoryUsage,
+    ) -> Result<(), ProofExternalMemoryError> {
+        self.require_active()?;
+        let replayed_step = self.current_step;
+        if restored_step <= replayed_step || restored_step >= self.plan.step_count {
+            return Err(ProofExternalMemoryError::WrongStep);
+        }
+
+        let mut skipped_object_count = 0_u32;
+        let mut skipped_written_byte_length = 0_u64;
+        for (plan_index, object_plan) in self.plan.objects.iter().copied().enumerate() {
+            let state = self.state(plan_index)?;
+            if object_plan.last_use_step < replayed_step {
+                if state != ProofExternalMemoryObjectState::Consumed {
+                    return Err(ProofExternalMemoryError::InvalidLifecycle);
+                }
+            } else if object_plan.issued_step >= replayed_step
+                && object_plan.last_use_step < restored_step
+            {
+                if state != ProofExternalMemoryObjectState::Issued
+                    || object_plan.issued_step >= restored_step
+                {
+                    return Err(ProofExternalMemoryError::InvalidLifecycle);
+                }
+                skipped_written_byte_length = skipped_written_byte_length
+                    .checked_add(object_plan.exact_byte_length)
+                    .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+                skipped_object_count = skipped_object_count
+                    .checked_add(1)
+                    .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+            } else if object_plan.issued_step < restored_step
+                && object_plan.last_use_step >= restored_step
+            {
+                if !matches!(
+                    state,
+                    ProofExternalMemoryObjectState::Sealed
+                        | ProofExternalMemoryObjectState::Claimed
+                ) {
+                    return Err(ProofExternalMemoryError::InvalidLifecycle);
+                }
+            } else if object_plan.issued_step >= restored_step {
+                if state != ProofExternalMemoryObjectState::Issued {
+                    return Err(ProofExternalMemoryError::InvalidLifecycle);
+                }
+            } else {
+                return Err(ProofExternalMemoryError::InvalidLifecycle);
+            }
+        }
+
+        let expected_total_written_byte_length = self
+            .usage
+            .total_written_byte_length
+            .checked_add(skipped_written_byte_length)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let expected_deleted_object_count = self
+            .usage
+            .deleted_object_count
+            .checked_add(skipped_object_count)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        if restored_usage.total_written_byte_length != expected_total_written_byte_length
+            || restored_usage.total_written_byte_length
+                > self.plan.maximum_total_written_byte_length
+            || restored_usage.total_read_byte_length < self.usage.total_read_byte_length
+            || restored_usage.total_read_byte_length > self.plan.maximum_total_read_byte_length
+            || restored_usage.peak_stored_byte_length < self.usage.peak_stored_byte_length
+            || restored_usage.peak_stored_byte_length < self.current_stored_byte_length
+            || restored_usage.peak_stored_byte_length > self.plan.maximum_stored_byte_length
+            || restored_usage.transaction_count < self.usage.transaction_count
+            || restored_usage.transaction_count > self.plan.maximum_transaction_count
+            || restored_usage.deleted_object_count != expected_deleted_object_count
+        {
+            return Err(ProofExternalMemoryError::ResourceLimitExceeded);
+        }
+
+        for (plan_index, object_plan) in self.plan.objects.iter().copied().enumerate() {
+            if object_plan.issued_step >= replayed_step
+                && object_plan.issued_step < restored_step
+                && object_plan.last_use_step < restored_step
+            {
+                self.states[plan_index] = ProofExternalMemoryObjectState::Consumed;
+            }
+        }
+        self.current_step = restored_step;
+        self.usage = restored_usage;
+        Ok(())
+    }
+
     pub(crate) fn begin_object<Storage: ProofExternalMemory>(
         &mut self,
         storage: &mut Storage,

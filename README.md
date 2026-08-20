@@ -148,25 +148,35 @@ ceremony or supported-phone qualification.
   in 5,857.496 seconds. A later run authenticated and restored all 112 material
   checkpoints in 324--329 ms, but rebuilding the three anchor roots and the
   public-key root still made setup take 154.7--156.2 seconds.
-- The restored run then spent about 49.0 seconds preparing proof inputs. An
-  instrumented 32.8-second prefix of selected VSS base materialization
-  completed 1,544 source replays without any worker poll reaching one second;
-  the production-derived base schedule contains 576,576 source replays. The
-  work is poll-bounded, but it did not reach a common-proof checkpoint within
-  the current 110-minute job budget, and the exact aggregate proof did not
-  start.
+- A cold native resume rebuilt setup in 155.215 seconds, prepared proof inputs
+  in 48.550 seconds, and restored a 33,554,617-byte selected VSS base-lane
+  checkpoint in 1.089 seconds. Continuing from that state completed the base
+  commitment in 5,365.987 seconds of generation time. Four-lane foreground
+  segments were about 758--760 seconds, and retained lane states ranged from
+  266 bytes at the terminal lane to 100,663,481 bytes for the three-carry-plane
+  geometry.
+- The same run completed all 3,767 exact VSS quotient constraints in
+  28,283.700 seconds, then completed quotient-tree materialization and sealed
+  authenticated proof boundary 2 at 33,835.883 seconds of generation time.
+  The guarded job observed a 757,501,952-byte peak job allocation and a
+  568,115,200-byte peak process-tree resident set without crossing its memory
+  ceiling. The run was deliberately stopped at that authenticated boundary;
+  proof finalization and the exact aggregate proof have not completed.
 - Current source pauses after every completed initial base, auxiliary, and
-  quotient commitment lane. The manual native evidence runner can retain the
-  newest state every four lanes under an integrity seal bound to the exact
-  runtime attempt and checkpoint lineage, and can restore it only into the
-  fresh matching phase. Small-geometry tests cover canonical re-encoding,
-  every carry-plane shape, final commitment equivalence, wrong context,
-  malformed geometry and framing, truncation, trailing bytes, replacement,
-  and changed retained state. No production heavy run has yet persisted and
-  restored one of these lane states, so its checkpoint size, elapsed segment,
-  cold-resume time, and complete job budget remain unmeasured. This is a
-  test-only native evidence boundary, not a release-WebAssembly or browser
-  checkpoint. The evidence baseline remains open.
+  quotient commitment lane. It also encodes the quotient accumulator at a
+  completed-constraint boundary and lets the manual native evidence runner
+  retain the newest state every 64 constraints under an integrity seal bound
+  to the exact runtime attempt and checkpoint lineage. Restoration rebuilds
+  relation catalogs, transcript-derived challenges, source objects, private
+  coin operations, and external-memory lifecycles before installing the
+  accumulator. Focused tests cover byte-for-byte equivalence with the
+  whole-operation quotient oracle, one-shot restore, malformed geometry and
+  framing, noncanonical fields, wrong custody bindings, supersession by a
+  later authenticated boundary, and exact external-memory continuation. No
+  production run has yet persisted and restored a quotient-constraint state.
+  These are test-only native evidence boundaries, not release-WebAssembly or
+  browser checkpoints. The evidence baseline remains open, and the measured
+  multi-hour phases cannot remain in the 110-minute routine heavy job.
 - There is no complete production compact generation-and-verification
   release-WebAssembly ABI pair. The release transport validator checks
   canonical structure, transcript chronology, derived queries, and Merkle

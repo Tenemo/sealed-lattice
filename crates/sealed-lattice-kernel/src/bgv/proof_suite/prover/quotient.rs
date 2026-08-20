@@ -13,6 +13,19 @@ use super::{
     CommonProofSourcePolynomial, ProofExternalMemoryObject,
     relation_columns::CommonProofColumnEvaluations,
 };
+#[cfg(test)]
+use crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE;
+
+#[cfg(test)]
+const COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC: [u8; 8] = *b"SLQCQB01";
+#[cfg(test)]
+const COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_VERSION: u16 = 1;
+#[cfg(test)]
+const COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH: usize =
+    COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC.len()
+        + core::mem::size_of::<u16>()
+        + core::mem::size_of::<u16>()
+        + 9 * core::mem::size_of::<u64>();
 
 fn quotient_evaluation_trace_rotation_stride(
     variant: &RelationPlanVariant,
@@ -617,6 +630,88 @@ pub(crate) enum CommonProofQuotientEvaluationProgress {
     ConstraintComplete,
 }
 
+#[cfg(test)]
+pub(crate) struct CommonProofConstraintStreamQuotientCheckpoint {
+    completed_constraint_count: usize,
+    quotient_evaluations: Zeroizing<Vec<ProofChallengeExtensionElement>>,
+}
+
+#[cfg(test)]
+impl CommonProofConstraintStreamQuotientCheckpoint {
+    pub(crate) fn completed_constraint_count(&self) -> usize {
+        self.completed_constraint_count
+    }
+}
+
+#[cfg(test)]
+struct CommonProofQuotientConstraintCheckpointReader<'bytes> {
+    bytes: &'bytes [u8],
+    next_offset: usize,
+}
+
+#[cfg(test)]
+impl<'bytes> CommonProofQuotientConstraintCheckpointReader<'bytes> {
+    const fn new(bytes: &'bytes [u8]) -> Self {
+        Self {
+            bytes,
+            next_offset: 0,
+        }
+    }
+
+    fn read_exact(&mut self, byte_length: usize) -> Result<&'bytes [u8], CommonProofProverError> {
+        let end = self
+            .next_offset
+            .checked_add(byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let bytes = self
+            .bytes
+            .get(self.next_offset..end)
+            .ok_or(CommonProofProverError::CanonicalEncoding)?;
+        self.next_offset = end;
+        Ok(bytes)
+    }
+
+    fn read_u16(&mut self) -> Result<u16, CommonProofProverError> {
+        Ok(u16::from_le_bytes(
+            self.read_exact(core::mem::size_of::<u16>())?
+                .try_into()
+                .expect("fixed quotient checkpoint integer"),
+        ))
+    }
+
+    fn read_u64(&mut self) -> Result<u64, CommonProofProverError> {
+        Ok(u64::from_le_bytes(
+            self.read_exact(core::mem::size_of::<u64>())?
+                .try_into()
+                .expect("fixed quotient checkpoint integer"),
+        ))
+    }
+
+    fn read_usize(&mut self) -> Result<usize, CommonProofProverError> {
+        usize::try_from(self.read_u64()?).map_err(|_| CommonProofProverError::CountOverflow)
+    }
+
+    fn finish(self) -> Result<(), CommonProofProverError> {
+        if self.next_offset != self.bytes.len() {
+            return Err(CommonProofProverError::CanonicalEncoding);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+fn append_common_proof_quotient_checkpoint_usize(
+    output: &mut Vec<u8>,
+    value: usize,
+) -> Result<(), CommonProofProverError> {
+    output.extend_from_slice(
+        &u64::try_from(value)
+            .map_err(|_| CommonProofProverError::CountOverflow)?
+            .to_le_bytes(),
+    );
+    Ok(())
+}
+
 pub(crate) struct CommonProofConstraintStreamQuotientBuilder {
     evaluation_domain: ProofEvaluationDomain,
     trace_domain_size: usize,
@@ -729,6 +824,231 @@ impl CommonProofConstraintStreamQuotientBuilder {
             checked_application_challenges,
             composition_challenges,
         })
+    }
+
+    #[cfg(test)]
+    fn remaining_constraint_use_counts_from(
+        &self,
+        first_constraint_ordinal: usize,
+    ) -> Result<BTreeMap<u32, usize>, CommonProofProverError> {
+        if first_constraint_ordinal > self.constraint_columns.len() {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let mut remaining_constraint_use_counts = BTreeMap::new();
+        for columns in self
+            .constraint_columns
+            .get(first_constraint_ordinal..)
+            .ok_or(CommonProofProverError::InvalidQuotient)?
+        {
+            for column_ordinal in columns {
+                let remaining_use_count = remaining_constraint_use_counts
+                    .entry(*column_ordinal)
+                    .or_insert(0_usize);
+                *remaining_use_count = remaining_use_count
+                    .checked_add(1)
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+            }
+        }
+        Ok(remaining_constraint_use_counts)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn completed_constraint_checkpoint_count(
+        &self,
+    ) -> Result<Option<usize>, CommonProofProverError> {
+        if self.current_constraint_ordinal == 0
+            || self.current_constraint_ordinal >= self.constraint_columns.len()
+        {
+            return Ok(None);
+        }
+        if self.next_transform_column_index != 0
+            || !self.transformed_columns.is_empty()
+            || self.block_start != 0
+            || self.next_query_ordinal != 0
+            || self.next_query_logical_value_offset != 0
+            || !self.block_values_by_query.is_empty()
+            || self.quotient_evaluations.len() != self.evaluation_domain.size()
+            || self.remaining_constraint_use_counts
+                != self.remaining_constraint_use_counts_from(self.current_constraint_ordinal)?
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        Ok(Some(self.current_constraint_ordinal))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_fresh_constraint_stream(&self) -> Result<bool, CommonProofProverError> {
+        Ok(self.current_constraint_ordinal == 0
+            && self.next_transform_column_index == 0
+            && self.transformed_columns.is_empty()
+            && self.block_start == 0
+            && self.next_query_ordinal == 0
+            && self.next_query_logical_value_offset == 0
+            && self.block_values_by_query.is_empty()
+            && self.quotient_evaluations.len() == self.evaluation_domain.size()
+            && self
+                .quotient_evaluations
+                .iter()
+                .all(|evaluation| *evaluation == ProofChallengeExtensionElement::ZERO)
+            && self.remaining_constraint_use_counts
+                == self.remaining_constraint_use_counts_from(0)?)
+    }
+
+    /// Encodes the accumulated quotient at a completed-constraint boundary.
+    /// Constraint catalogs, challenges, and transformed columns are rebuilt
+    /// from the checked relation and authenticated source on restore.
+    #[cfg(test)]
+    pub(crate) fn canonical_constraint_checkpoint_bytes(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofProverError> {
+        let completed_constraint_count = self
+            .completed_constraint_checkpoint_count()?
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let evaluation_byte_length = self
+            .quotient_evaluations
+            .len()
+            .checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE)
+            .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let total_byte_length = COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH
+            .checked_add(evaluation_byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let mut output = Vec::new();
+        output
+            .try_reserve_exact(total_byte_length)
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        output.extend_from_slice(&COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC);
+        output
+            .extend_from_slice(&COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_VERSION.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        for value in [total_byte_length, self.evaluation_domain.size()] {
+            append_common_proof_quotient_checkpoint_usize(&mut output, value)?;
+        }
+        output.extend_from_slice(&self.evaluation_domain.generator().canonical().to_le_bytes());
+        output.extend_from_slice(
+            &self
+                .evaluation_domain
+                .coset_offset()
+                .canonical()
+                .to_le_bytes(),
+        );
+        for value in [
+            self.trace_domain_size,
+            self.trace_rotation_stride,
+            self.constraint_columns.len(),
+            self.column_value_types.len(),
+            completed_constraint_count,
+        ] {
+            append_common_proof_quotient_checkpoint_usize(&mut output, value)?;
+        }
+        debug_assert_eq!(
+            output.len(),
+            COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH
+        );
+        for evaluation in self.quotient_evaluations.iter().copied() {
+            for coordinate in evaluation.canonical_coordinates() {
+                output.extend_from_slice(&coordinate.to_le_bytes());
+            }
+        }
+        if output.len() != total_byte_length {
+            return Err(CommonProofProverError::CanonicalEncoding);
+        }
+        Ok(output)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn decode_constraint_checkpoint(
+        &self,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<CommonProofConstraintStreamQuotientCheckpoint, CommonProofProverError> {
+        if !self.is_fresh_constraint_stream()?
+            || canonical_checkpoint_bytes.len()
+                < COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let mut reader =
+            CommonProofQuotientConstraintCheckpointReader::new(canonical_checkpoint_bytes);
+        if reader.read_exact(COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC.len())?
+            != COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_MAGIC
+            || reader.read_u16()? != COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_VERSION
+            || reader.read_u16()? != 0
+        {
+            return Err(CommonProofProverError::CanonicalEncoding);
+        }
+        let declared_byte_length = reader.read_usize()?;
+        let evaluation_domain_size = reader.read_usize()?;
+        let evaluation_domain_generator = reader.read_u64()?;
+        let evaluation_domain_coset_offset = reader.read_u64()?;
+        let trace_domain_size = reader.read_usize()?;
+        let trace_rotation_stride = reader.read_usize()?;
+        let constraint_count = reader.read_usize()?;
+        let column_value_type_count = reader.read_usize()?;
+        let completed_constraint_count = reader.read_usize()?;
+        let expected_evaluation_byte_length = self
+            .evaluation_domain
+            .size()
+            .checked_mul(PROOF_CHALLENGE_EXTENSION_DEGREE)
+            .and_then(|count| count.checked_mul(core::mem::size_of::<u64>()))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let expected_total_byte_length =
+            COMMON_PROOF_QUOTIENT_CONSTRAINT_CHECKPOINT_PREFIX_BYTE_LENGTH
+                .checked_add(expected_evaluation_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        if declared_byte_length != canonical_checkpoint_bytes.len()
+            || declared_byte_length != expected_total_byte_length
+            || evaluation_domain_size != self.evaluation_domain.size()
+            || evaluation_domain_generator != self.evaluation_domain.generator().canonical()
+            || evaluation_domain_coset_offset != self.evaluation_domain.coset_offset().canonical()
+            || trace_domain_size != self.trace_domain_size
+            || trace_rotation_stride != self.trace_rotation_stride
+            || constraint_count != self.constraint_columns.len()
+            || column_value_type_count != self.column_value_types.len()
+            || completed_constraint_count == 0
+            || completed_constraint_count >= self.constraint_columns.len()
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+
+        let mut quotient_evaluations = Zeroizing::new(Vec::new());
+        quotient_evaluations
+            .try_reserve_exact(self.evaluation_domain.size())
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        for _ in 0..self.evaluation_domain.size() {
+            let mut coordinates = [0_u64; PROOF_CHALLENGE_EXTENSION_DEGREE];
+            for coordinate in &mut coordinates {
+                *coordinate = reader.read_u64()?;
+            }
+            quotient_evaluations.push(
+                ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
+                    .map_err(CommonProofProverError::Field)?,
+            );
+        }
+        reader.finish()?;
+        Ok(CommonProofConstraintStreamQuotientCheckpoint {
+            completed_constraint_count,
+            quotient_evaluations,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_constraint_checkpoint(
+        &mut self,
+        checkpoint: CommonProofConstraintStreamQuotientCheckpoint,
+    ) -> Result<(), CommonProofProverError> {
+        if !self.is_fresh_constraint_stream()?
+            || checkpoint.completed_constraint_count == 0
+            || checkpoint.completed_constraint_count >= self.constraint_columns.len()
+            || checkpoint.quotient_evaluations.len() != self.evaluation_domain.size()
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let remaining_constraint_use_counts =
+            self.remaining_constraint_use_counts_from(checkpoint.completed_constraint_count)?;
+        self.current_constraint_ordinal = checkpoint.completed_constraint_count;
+        self.remaining_constraint_use_counts = remaining_constraint_use_counts;
+        self.quotient_evaluations = checkpoint.quotient_evaluations;
+        Ok(())
     }
 
     pub(crate) fn next_transform_key(

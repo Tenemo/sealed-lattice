@@ -855,6 +855,139 @@ fn executor_reuses_one_physical_ordinal_across_non_overlapping_lifecycles() {
 }
 
 #[test]
+fn executor_restores_only_completed_constraint_local_lifecycles() {
+    let retained_source = ProofExternalMemoryObject::new(20);
+    let reusable_transform = ProofExternalMemoryObject::new(21);
+    let checkpoint_plan = || {
+        ProofExternalMemoryPlan::new(
+            6,
+            4,
+            4,
+            2,
+            8,
+            12,
+            64,
+            64,
+            vec![
+                ProofExternalMemoryObjectPlan::new(
+                    retained_source,
+                    ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                    4,
+                    0,
+                    0,
+                    5,
+                ),
+                ProofExternalMemoryObjectPlan::new(
+                    reusable_transform,
+                    ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                    4,
+                    1,
+                    1,
+                    2,
+                ),
+                ProofExternalMemoryObjectPlan::new(
+                    reusable_transform,
+                    ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                    4,
+                    3,
+                    3,
+                    4,
+                ),
+            ],
+        )
+        .expect("the checkpoint plan has disjoint transform lifecycles")
+    };
+    let prepare_replayed_prefix = || {
+        let mut executor = ProofExternalMemoryExecutor::new(checkpoint_plan());
+        let mut storage = TestStorage::default();
+        executor
+            .begin_object(&mut storage, retained_source)
+            .expect("the retained source begins");
+        executor
+            .append_object_bytes(&mut storage, retained_source, &[1, 2, 3, 4])
+            .expect("the retained source writes");
+        executor
+            .seal_object(&mut storage, retained_source)
+            .expect("the retained source seals");
+        executor
+            .complete_step(&mut storage)
+            .expect("deterministic source replay reaches quotient construction");
+        (executor, storage)
+    };
+    let restored_usage = ProofExternalMemoryUsage {
+        total_written_byte_length: 8,
+        total_read_byte_length: 8,
+        peak_stored_byte_length: 8,
+        transaction_count: 9,
+        deleted_object_count: 1,
+    };
+
+    let (mut hostile_executor, _) = prepare_replayed_prefix();
+    let mut wrong_written_usage = restored_usage;
+    wrong_written_usage.total_written_byte_length -= 1;
+    assert_eq!(
+        hostile_executor.restore_completed_constraint_step_prefix(3, wrong_written_usage),
+        Err(ProofExternalMemoryError::ResourceLimitExceeded),
+    );
+    let mut wrong_deleted_usage = restored_usage;
+    wrong_deleted_usage.deleted_object_count = 0;
+    assert_eq!(
+        hostile_executor.restore_completed_constraint_step_prefix(3, wrong_deleted_usage),
+        Err(ProofExternalMemoryError::ResourceLimitExceeded),
+    );
+    assert_eq!(
+        hostile_executor.restore_completed_constraint_step_prefix(2, restored_usage),
+        Err(ProofExternalMemoryError::InvalidLifecycle),
+    );
+
+    let (mut executor, mut storage) = prepare_replayed_prefix();
+    executor
+        .restore_completed_constraint_step_prefix(3, restored_usage)
+        .expect("the authenticated completed constraint prefix restores");
+    assert_eq!(executor.current_step(), 3);
+    assert_eq!(executor.usage(), restored_usage);
+    assert_eq!(storage.committed_object_count(), 1);
+
+    executor
+        .begin_object(&mut storage, reusable_transform)
+        .expect("the reused transform ordinal begins without a stale object");
+    executor
+        .append_object_bytes(&mut storage, reusable_transform, &[5, 6, 7, 8])
+        .expect("the future transform lifecycle writes");
+    executor
+        .seal_object(&mut storage, reusable_transform)
+        .expect("the future transform lifecycle seals");
+    executor
+        .complete_step(&mut storage)
+        .expect("the transform step completes");
+    let mut transformed = [0_u8; 4];
+    executor
+        .read_object_bytes(&mut storage, reusable_transform, 0, &mut transformed)
+        .expect("the restored continuation reads the future transform");
+    assert_eq!(transformed, [5, 6, 7, 8]);
+    let mut retained = [0_u8; 4];
+    executor
+        .read_object_bytes(&mut storage, retained_source, 0, &mut retained)
+        .expect("the source reconstructed by deterministic replay remains live");
+    assert_eq!(retained, [1, 2, 3, 4]);
+    executor
+        .complete_step(&mut storage)
+        .expect("the future transform retires at its exact last use");
+    executor
+        .read_object_bytes(&mut storage, retained_source, 0, &mut retained)
+        .expect("the retained source remains readable through its final step");
+    executor
+        .complete_step(&mut storage)
+        .expect("the retained source retires at terminal completion");
+    let terminal_usage = executor.finish().expect("the restored executor terminates");
+    assert_eq!(terminal_usage.total_written_byte_length(), 12);
+    assert_eq!(terminal_usage.total_read_byte_length(), 20);
+    assert_eq!(terminal_usage.peak_stored_byte_length(), 8);
+    assert_eq!(terminal_usage.deleted_object_count(), 3);
+    assert!(storage.committed.is_empty());
+}
+
+#[test]
 fn executor_accepts_only_full_intermediate_chunks_and_the_exact_declared_tail() {
     let object = ProofExternalMemoryObject::new(0);
     let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 10));

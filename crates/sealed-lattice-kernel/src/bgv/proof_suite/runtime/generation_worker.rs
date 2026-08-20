@@ -990,6 +990,45 @@ impl CommonProofGenerationExecutionState {
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
     }
 
+    #[cfg(test)]
+    fn pending_quotient_constraint_checkpoint_coordinates(
+        &self,
+    ) -> Result<Option<u32>, CommonProofRuntimeError> {
+        self.0
+            .pending_quotient_constraint_checkpoint_coordinates()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    #[cfg(test)]
+    fn quotient_constraint_checkpoint_bytes(&self) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        self.0
+            .quotient_constraint_checkpoint_bytes()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    #[cfg(test)]
+    fn quotient_constraint_checkpoint_restore_target(
+        &self,
+    ) -> Result<bool, CommonProofRuntimeError> {
+        self.0
+            .quotient_constraint_checkpoint_restore_target()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    #[cfg(test)]
+    fn restore_quotient_constraint_checkpoint(
+        &mut self,
+        completed_constraint_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.0
+            .restore_quotient_constraint_checkpoint(
+                completed_constraint_count,
+                canonical_checkpoint_bytes,
+            )
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+    }
+
     fn restore_authenticated_checkpoint_transcript_cursor(
         &mut self,
         canonical_cursor_bytes: &[u8],
@@ -2094,6 +2133,80 @@ impl CommonProofGenerationWorker {
         self.state.restore_initial_phase_commitment_lane_checkpoint(
             phase_ordinal,
             completed_lane_count,
+            canonical_checkpoint_bytes,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn pending_quotient_constraint_checkpoint_coordinates(
+        &self,
+    ) -> Result<Option<u32>, CommonProofRuntimeError> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return Ok(None);
+        }
+        self.state
+            .pending_quotient_constraint_checkpoint_coordinates()
+    }
+
+    #[cfg(test)]
+    pub(super) fn quotient_constraint_checkpoint_bytes(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.state.quotient_constraint_checkpoint_bytes()
+    }
+
+    #[cfg(test)]
+    pub(super) fn quotient_constraint_checkpoint_restore_target(
+        &self,
+    ) -> Result<bool, CommonProofRuntimeError> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return Ok(false);
+        }
+        self.state.quotient_constraint_checkpoint_restore_target()
+    }
+
+    #[cfg(test)]
+    pub(super) fn restore_quotient_constraint_checkpoint(
+        &mut self,
+        completed_constraint_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.state.restore_quotient_constraint_checkpoint(
+            completed_constraint_count,
             canonical_checkpoint_bytes,
         )
     }

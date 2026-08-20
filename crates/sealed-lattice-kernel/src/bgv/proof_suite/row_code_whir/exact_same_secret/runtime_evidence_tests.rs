@@ -61,6 +61,21 @@ const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_BYTE_LENGTH: usize =
         + Hash512::BYTE_LENGTH;
 const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_HASH_ROLE: &[u8] =
     b"initial-phase-commitment-lane-checkpoint";
+const QUOTIENT_CONSTRAINT_CHECKPOINT_FILE_PREFIX: &str = "quotient-constraint-";
+const QUOTIENT_CONSTRAINT_CHECKPOINT_STATE_SUFFIX: &str = ".state";
+const QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_SUFFIX: &str = ".seal";
+const QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_MAGIC: [u8; 8] = *b"SLQCNCP1";
+const QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_VERSION: u16 = 1;
+const QUOTIENT_CONSTRAINT_CHECKPOINT_INTERVAL: u32 = 64;
+const MAXIMUM_QUOTIENT_CONSTRAINT_CHECKPOINT_BYTE_LENGTH: usize = 16 * 1_024 * 1_024;
+const QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_BYTE_LENGTH: usize =
+    QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_MAGIC.len()
+        + 2 * size_of::<u16>()
+        + size_of::<u32>()
+        + Hash512::BYTE_LENGTH
+        + 32
+        + Hash512::BYTE_LENGTH;
+const QUOTIENT_CONSTRAINT_CHECKPOINT_HASH_ROLE: &[u8] = b"quotient-constraint-checkpoint";
 const COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH: usize = VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC
     .len()
     + size_of::<u16>()
@@ -131,6 +146,11 @@ struct DurableInitialPhaseCommitmentLaneCheckpoint {
     state: Vec<u8>,
 }
 
+struct DurableQuotientConstraintCheckpoint {
+    completed_constraint_count: u32,
+    state: Vec<u8>,
+}
+
 struct DurableCommonProofCheckpointStore {
     directory: PathBuf,
     profile: DurableCommonProofCheckpointProfile,
@@ -185,6 +205,9 @@ impl DurableCommonProofCheckpointStore {
                 "proof checkpoint custody contains a non-Unicode filename".to_owned()
             })?;
             if file_name.starts_with(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX) {
+                continue;
+            }
+            if file_name.starts_with(QUOTIENT_CONSTRAINT_CHECKPOINT_FILE_PREFIX) {
                 continue;
             }
             if !file_name.ends_with(COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX) {
@@ -477,6 +500,223 @@ impl DurableCommonProofCheckpointStore {
         seal
     }
 
+    fn load_latest_quotient_constraint_checkpoint(
+        &self,
+    ) -> Result<Option<DurableQuotientConstraintCheckpoint>, String> {
+        let mut latest_completed_constraint_count = None;
+        for entry in fs::read_dir(&self.directory)
+            .map_err(|error| format!("enumerate retained quotient checkpoints: {error}"))?
+        {
+            let entry = entry
+                .map_err(|error| format!("read retained quotient checkpoint entry: {error}"))?;
+            if !entry
+                .file_type()
+                .map_err(|error| format!("classify retained quotient checkpoint entry: {error}"))?
+                .is_file()
+            {
+                return Err("proof checkpoint custody contains a non-file entry".to_owned());
+            }
+            let file_name = entry.file_name().into_string().map_err(|_| {
+                "proof checkpoint custody contains a non-Unicode filename".to_owned()
+            })?;
+            if !file_name.starts_with(QUOTIENT_CONSTRAINT_CHECKPOINT_FILE_PREFIX) {
+                continue;
+            }
+            if !file_name.ends_with(QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_SUFFIX) {
+                continue;
+            }
+            let completed_constraint_count =
+                parse_quotient_constraint_checkpoint_coordinate(&file_name).ok_or_else(|| {
+                    format!("proof checkpoint custody contains malformed seal {file_name}")
+                })?;
+            latest_completed_constraint_count = Some(
+                latest_completed_constraint_count
+                    .map_or(completed_constraint_count, |current: u32| {
+                        current.max(completed_constraint_count)
+                    }),
+            );
+        }
+        latest_completed_constraint_count
+            .map(|completed_constraint_count| {
+                self.load_quotient_constraint_checkpoint(completed_constraint_count)
+            })
+            .transpose()
+    }
+
+    fn load_quotient_constraint_checkpoint(
+        &self,
+        completed_constraint_count: u32,
+    ) -> Result<DurableQuotientConstraintCheckpoint, String> {
+        validate_quotient_constraint_checkpoint_coordinate(completed_constraint_count)?;
+        let state = read_exact_bounded_file(
+            &self.quotient_constraint_checkpoint_path(
+                completed_constraint_count,
+                QUOTIENT_CONSTRAINT_CHECKPOINT_STATE_SUFFIX,
+            ),
+            1,
+            MAXIMUM_QUOTIENT_CONSTRAINT_CHECKPOINT_BYTE_LENGTH,
+            "quotient constraint checkpoint state",
+        )?;
+        let seal = read_exact_bounded_file(
+            &self.quotient_constraint_checkpoint_path(
+                completed_constraint_count,
+                QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_SUFFIX,
+            ),
+            QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_BYTE_LENGTH,
+            QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_BYTE_LENGTH,
+            "quotient constraint checkpoint seal",
+        )?;
+        let expected_seal =
+            self.encode_quotient_constraint_checkpoint_seal(completed_constraint_count, &state);
+        if seal != expected_seal {
+            return Err(
+                "retained quotient constraint checkpoint seal is stale or malformed".to_owned(),
+            );
+        }
+        Ok(DurableQuotientConstraintCheckpoint {
+            completed_constraint_count,
+            state,
+        })
+    }
+
+    fn persist_quotient_constraint_checkpoint(
+        &self,
+        completed_constraint_count: u32,
+        state: &[u8],
+    ) -> Result<(), String> {
+        validate_quotient_constraint_checkpoint_coordinate(completed_constraint_count)?;
+        if state.is_empty() || state.len() > MAXIMUM_QUOTIENT_CONSTRAINT_CHECKPOINT_BYTE_LENGTH {
+            return Err("quotient constraint checkpoint exceeds its bound".to_owned());
+        }
+        persist_exact_file_once(
+            &self.quotient_constraint_checkpoint_path(
+                completed_constraint_count,
+                QUOTIENT_CONSTRAINT_CHECKPOINT_STATE_SUFFIX,
+            ),
+            state,
+            "quotient constraint checkpoint state",
+        )?;
+        let seal =
+            self.encode_quotient_constraint_checkpoint_seal(completed_constraint_count, state);
+        persist_exact_file_once(
+            &self.quotient_constraint_checkpoint_path(
+                completed_constraint_count,
+                QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_SUFFIX,
+            ),
+            &seal,
+            "quotient constraint checkpoint seal",
+        )?;
+
+        for entry in fs::read_dir(&self.directory)
+            .map_err(|error| format!("enumerate superseded quotient checkpoints: {error}"))?
+        {
+            let entry = entry
+                .map_err(|error| format!("read superseded quotient checkpoint entry: {error}"))?;
+            let file_name = entry.file_name().into_string().map_err(|_| {
+                "proof checkpoint custody contains a non-Unicode filename".to_owned()
+            })?;
+            let Some(stored_completed_constraint_count) =
+                parse_quotient_constraint_checkpoint_coordinate_from_any_file(&file_name)
+            else {
+                continue;
+            };
+            if stored_completed_constraint_count < completed_constraint_count {
+                fs::remove_file(entry.path()).map_err(|error| {
+                    format!("remove superseded quotient checkpoint {file_name}: {error}")
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn encode_quotient_constraint_checkpoint_seal(
+        &self,
+        completed_constraint_count: u32,
+        state: &[u8],
+    ) -> Vec<u8> {
+        let mut seal = Vec::with_capacity(QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_BYTE_LENGTH);
+        seal.extend_from_slice(&QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_MAGIC);
+        seal.extend_from_slice(&QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_VERSION.to_le_bytes());
+        seal.extend_from_slice(&0_u16.to_le_bytes());
+        seal.extend_from_slice(&completed_constraint_count.to_le_bytes());
+        seal.extend_from_slice(&self.stable_attempt_binding_hash);
+        seal.extend_from_slice(&self.checkpoint_lineage_identifier);
+        seal.extend_from_slice(&hash_framed_parts_512(
+            self.profile.state_hash_domain,
+            &[
+                QUOTIENT_CONSTRAINT_CHECKPOINT_HASH_ROLE,
+                &completed_constraint_count.to_le_bytes(),
+                state,
+            ],
+        ));
+        debug_assert_eq!(seal.len(), QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_BYTE_LENGTH);
+        seal
+    }
+
+    fn remove_phase_local_checkpoints_superseded_by_authenticated_boundary(
+        &self,
+        retained_initial_phase_checkpoints: &BTreeMap<
+            u8,
+            DurableInitialPhaseCommitmentLaneCheckpoint,
+        >,
+        retained_quotient_checkpoint: Option<&DurableQuotientConstraintCheckpoint>,
+    ) -> Result<(), String> {
+        for entry in fs::read_dir(&self.directory)
+            .map_err(|error| format!("enumerate superseded phase-local checkpoints: {error}"))?
+        {
+            let entry = entry.map_err(|error| {
+                format!("read superseded phase-local checkpoint entry: {error}")
+            })?;
+            if !entry
+                .file_type()
+                .map_err(|error| {
+                    format!("classify superseded phase-local checkpoint entry: {error}")
+                })?
+                .is_file()
+            {
+                return Err("proof checkpoint custody contains a non-file entry".to_owned());
+            }
+            let file_name = entry.file_name().into_string().map_err(|_| {
+                "proof checkpoint custody contains a non-Unicode filename".to_owned()
+            })?;
+            let remove_checkpoint = if file_name
+                .starts_with(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX)
+            {
+                let coordinates =
+                    parse_initial_phase_commitment_lane_checkpoint_coordinates_from_any_file(
+                        &file_name,
+                    )
+                    .ok_or_else(|| {
+                        format!(
+                            "proof checkpoint custody contains malformed phase-local file {file_name}"
+                        )
+                    })?;
+                retained_initial_phase_checkpoints
+                    .get(&coordinates.0)
+                    .is_none_or(|checkpoint| checkpoint.completed_lane_count != coordinates.1)
+            } else if file_name.starts_with(QUOTIENT_CONSTRAINT_CHECKPOINT_FILE_PREFIX) {
+                let completed_constraint_count =
+                    parse_quotient_constraint_checkpoint_coordinate_from_any_file(&file_name)
+                        .ok_or_else(|| {
+                            format!(
+                                "proof checkpoint custody contains malformed phase-local file {file_name}"
+                            )
+                        })?;
+                retained_quotient_checkpoint.is_none_or(|checkpoint| {
+                    checkpoint.completed_constraint_count != completed_constraint_count
+                })
+            } else {
+                false
+            };
+            if remove_checkpoint {
+                fs::remove_file(entry.path()).map_err(|error| {
+                    format!("remove superseded phase-local checkpoint {file_name}: {error}")
+                })?;
+            }
+        }
+        Ok(())
+    }
+
     fn require_checkpoint_binding(
         &self,
         checkpoint: &AuthenticatedCommonProofGenerationCheckpoint,
@@ -508,6 +748,16 @@ impl DurableCommonProofCheckpointStore {
     ) -> PathBuf {
         self.directory.join(format!(
             "{INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX}{phase_ordinal:02}-lane-{completed_lane_count:08}{suffix}"
+        ))
+    }
+
+    fn quotient_constraint_checkpoint_path(
+        &self,
+        completed_constraint_count: u32,
+        suffix: &str,
+    ) -> PathBuf {
+        self.directory.join(format!(
+            "{QUOTIENT_CONSTRAINT_CHECKPOINT_FILE_PREFIX}{completed_constraint_count:08}{suffix}"
         ))
     }
 }
@@ -580,6 +830,50 @@ fn parse_initial_phase_commitment_lane_checkpoint_coordinates_with_suffix(
     )
     .ok()?;
     Some((phase_ordinal, completed_lane_count))
+}
+
+fn validate_quotient_constraint_checkpoint_coordinate(
+    completed_constraint_count: u32,
+) -> Result<(), String> {
+    if completed_constraint_count == 0
+        || !completed_constraint_count.is_multiple_of(QUOTIENT_CONSTRAINT_CHECKPOINT_INTERVAL)
+    {
+        return Err("quotient constraint checkpoint has invalid coordinates".to_owned());
+    }
+    Ok(())
+}
+
+fn parse_quotient_constraint_checkpoint_coordinate(file_name: &str) -> Option<u32> {
+    parse_quotient_constraint_checkpoint_coordinate_with_suffix(
+        file_name,
+        QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_SUFFIX,
+    )
+}
+
+fn parse_quotient_constraint_checkpoint_coordinate_from_any_file(file_name: &str) -> Option<u32> {
+    [
+        QUOTIENT_CONSTRAINT_CHECKPOINT_STATE_SUFFIX,
+        QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_SUFFIX,
+    ]
+    .into_iter()
+    .find_map(|suffix| {
+        parse_quotient_constraint_checkpoint_coordinate_with_suffix(file_name, suffix)
+    })
+}
+
+fn parse_quotient_constraint_checkpoint_coordinate_with_suffix(
+    file_name: &str,
+    suffix: &str,
+) -> Option<u32> {
+    let digits = file_name
+        .strip_prefix(QUOTIENT_CONSTRAINT_CHECKPOINT_FILE_PREFIX)?
+        .strip_suffix(suffix)?;
+    if digits.len() != 8 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let completed_constraint_count = digits.parse().ok()?;
+    validate_quotient_constraint_checkpoint_coordinate(completed_constraint_count).ok()?;
+    Some(completed_constraint_count)
 }
 
 fn runner_enabled_checkpoint_resume() -> Result<bool, String> {
@@ -1063,6 +1357,10 @@ fn generate_prepared_common_proof(
         .map(DurableCommonProofCheckpointStore::load_initial_phase_commitment_lane_checkpoints)
         .transpose()?
         .unwrap_or_default();
+    let mut retained_quotient_constraint_checkpoint = durable_checkpoint_store
+        .map(DurableCommonProofCheckpointStore::load_latest_quotient_constraint_checkpoint)
+        .transpose()?
+        .flatten();
     let started_at = Instant::now();
 
     loop {
@@ -1075,6 +1373,7 @@ fn generate_prepared_common_proof(
                 checkpoint_ready,
             } => {
                 let mut restored_lane_checkpoint_coordinates = None;
+                let mut restored_quotient_checkpoint_coordinate = None;
                 if last_stage != Some(stage) {
                     eprintln!(
                         "{family_label} generation stage {stage:?}: {:?}",
@@ -1104,6 +1403,10 @@ fn generate_prepared_common_proof(
                     }
                     if let Some(store) = durable_checkpoint_store {
                         store.persist(boundary_ordinal, &checkpoint_state, &cursor_manifest)?;
+                        store.remove_phase_local_checkpoints_superseded_by_authenticated_boundary(
+                            &retained_initial_phase_commitment_lane_checkpoints,
+                            retained_quotient_constraint_checkpoint.as_ref(),
+                        )?;
                     }
                     eprintln!(
                         "{family_label} authenticated checkpoint boundary {boundary_ordinal} at stage {stage:?}, persisted={}, {:?}",
@@ -1192,6 +1495,73 @@ fn generate_prepared_common_proof(
                                 started_at.elapsed(),
                             );
                         }
+                    }
+
+                    if retained_quotient_constraint_checkpoint.is_some()
+                        && registry
+                            .generation_quotient_constraint_checkpoint_restore_target(operation)
+                            .map_err(|error| {
+                                format!("read quotient constraint restore target: {error:?}")
+                            })?
+                    {
+                        let checkpoint = retained_quotient_constraint_checkpoint
+                            .take()
+                            .ok_or_else(|| {
+                                "quotient constraint restore target lost its retained checkpoint"
+                                    .to_owned()
+                            })?;
+                        let restore_started_at = Instant::now();
+                        registry
+                            .restore_generation_quotient_constraint_checkpoint(
+                                operation,
+                                checkpoint.completed_constraint_count,
+                                &checkpoint.state,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "restore quotient constraint {} checkpoint: {error:?}",
+                                    checkpoint.completed_constraint_count,
+                                )
+                            })?;
+                        restored_quotient_checkpoint_coordinate =
+                            Some(checkpoint.completed_constraint_count);
+                        eprintln!(
+                            "{family_label} restored quotient constraint {} checkpoint ({} bytes) in {:?}, total {:?}",
+                            checkpoint.completed_constraint_count,
+                            checkpoint.state.len(),
+                            restore_started_at.elapsed(),
+                            started_at.elapsed(),
+                        );
+                    }
+
+                    if let Some(completed_constraint_count) = registry
+                        .generation_quotient_constraint_checkpoint_coordinates(operation)
+                        .map_err(|error| {
+                            format!("read quotient constraint checkpoint coordinates: {error:?}")
+                        })?
+                        && completed_constraint_count
+                            .is_multiple_of(QUOTIENT_CONSTRAINT_CHECKPOINT_INTERVAL)
+                        && restored_quotient_checkpoint_coordinate
+                            != Some(completed_constraint_count)
+                    {
+                        let checkpoint_state = registry
+                            .generation_quotient_constraint_checkpoint_bytes(operation)
+                            .map_err(|error| {
+                                format!(
+                                    "encode quotient constraint {completed_constraint_count} checkpoint: {error:?}"
+                                )
+                            })?;
+                        let persist_started_at = Instant::now();
+                        store.persist_quotient_constraint_checkpoint(
+                            completed_constraint_count,
+                            &checkpoint_state,
+                        )?;
+                        eprintln!(
+                            "{family_label} persisted quotient constraint {completed_constraint_count} checkpoint ({} bytes) in {:?}, total {:?}",
+                            checkpoint_state.len(),
+                            persist_started_at.elapsed(),
+                            started_at.elapsed(),
+                        );
                     }
                 }
             }
@@ -1292,6 +1662,12 @@ fn generate_prepared_common_proof(
     if !retained_initial_phase_commitment_lane_checkpoints.is_empty() {
         return Err(
             "exact generation completed without reaching every retained initial phase lane checkpoint"
+                .to_owned(),
+        );
+    }
+    if retained_quotient_constraint_checkpoint.is_some() {
+        return Err(
+            "exact generation completed without reaching its retained quotient constraint checkpoint"
                 .to_owned(),
         );
     }
@@ -2139,6 +2515,200 @@ fn initial_phase_commitment_lane_checkpoint_custody_replaces_and_binds_state() {
     assert!(
         store.load_latest().is_err(),
         "an unknown custody seal must remain a loud failure",
+    );
+}
+
+#[test]
+fn quotient_constraint_checkpoint_names_are_canonical_and_bounded() {
+    for (file_name, expected) in [
+        ("quotient-constraint-00000064.seal", Some(64)),
+        ("quotient-constraint-00000128.seal", Some(128)),
+        ("quotient-constraint-99999936.seal", Some(99_999_936)),
+        ("quotient-constraint-00000000.seal", None),
+        ("quotient-constraint-00000065.seal", None),
+        ("quotient-constraint-0000064.seal", None),
+        ("quotient-constraint-00000064.state", None),
+        ("quotient-constraint-00000064.seal.trailing", None),
+    ] {
+        assert_eq!(
+            parse_quotient_constraint_checkpoint_coordinate(file_name),
+            expected,
+            "unexpected quotient checkpoint filename result for {file_name}",
+        );
+    }
+    assert_eq!(
+        parse_quotient_constraint_checkpoint_coordinate_from_any_file(
+            "quotient-constraint-00000192.state"
+        ),
+        Some(192),
+    );
+    assert_eq!(
+        validate_quotient_constraint_checkpoint_coordinate(64),
+        Ok(())
+    );
+    assert!(validate_quotient_constraint_checkpoint_coordinate(0).is_err());
+    assert!(validate_quotient_constraint_checkpoint_coordinate(63).is_err());
+}
+
+#[test]
+fn authenticated_boundary_removes_only_superseded_phase_local_checkpoints() {
+    let directory = ScopedPhaseCheckpointTestDirectory::new("phase-local-supersession");
+    let store = phase_checkpoint_test_store(&directory, 0x60);
+    store
+        .persist_initial_phase_commitment_lane_checkpoint(0, 4, &[0x41; 17])
+        .expect("the retained initial phase checkpoint persists");
+    store
+        .persist_quotient_constraint_checkpoint(64, &[0x42; 19])
+        .expect("the retained quotient checkpoint persists");
+    let retained_initial_phase_checkpoint = store
+        .load_initial_phase_commitment_lane_checkpoint(0, 4)
+        .expect("the retained initial phase checkpoint loads");
+    let retained_quotient_checkpoint = store
+        .load_quotient_constraint_checkpoint(64)
+        .expect("the retained quotient checkpoint loads");
+    let retained_initial_phase_checkpoints = BTreeMap::from([(
+        retained_initial_phase_checkpoint.phase_ordinal,
+        retained_initial_phase_checkpoint,
+    )]);
+
+    store
+        .remove_phase_local_checkpoints_superseded_by_authenticated_boundary(
+            &retained_initial_phase_checkpoints,
+            Some(&retained_quotient_checkpoint),
+        )
+        .expect("future retained phase-local checkpoints remain available");
+    assert_eq!(
+        store
+            .load_initial_phase_commitment_lane_checkpoints()
+            .expect("the preserved initial phase checkpoint remains readable")
+            .len(),
+        1,
+    );
+    assert!(
+        store
+            .load_latest_quotient_constraint_checkpoint()
+            .expect("the preserved quotient checkpoint remains readable")
+            .is_some(),
+    );
+
+    store
+        .remove_phase_local_checkpoints_superseded_by_authenticated_boundary(&BTreeMap::new(), None)
+        .expect("the authenticated boundary removes superseded local checkpoints");
+    assert!(
+        store
+            .load_initial_phase_commitment_lane_checkpoints()
+            .expect("no superseded initial phase checkpoint remains")
+            .is_empty(),
+    );
+    assert!(
+        store
+            .load_latest_quotient_constraint_checkpoint()
+            .expect("no superseded quotient checkpoint remains")
+            .is_none(),
+    );
+}
+
+#[test]
+fn quotient_constraint_checkpoint_custody_replaces_and_binds_state() {
+    let directory = ScopedPhaseCheckpointTestDirectory::new("quotient-custody");
+    let store = phase_checkpoint_test_store(&directory, 0x61);
+    let constraint_sixty_four_state = vec![0x64; 5_193];
+    let constraint_one_hundred_twenty_eight_state =
+        (0_u8..=250).cycle().take(7_211).collect::<Vec<_>>();
+
+    store
+        .persist_quotient_constraint_checkpoint(64, &constraint_sixty_four_state)
+        .expect("the first quotient checkpoint persists");
+    store
+        .persist_quotient_constraint_checkpoint(128, &constraint_one_hundred_twenty_eight_state)
+        .expect("the replacement quotient checkpoint persists");
+    for suffix in [
+        QUOTIENT_CONSTRAINT_CHECKPOINT_STATE_SUFFIX,
+        QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_SUFFIX,
+    ] {
+        assert!(
+            !store
+                .quotient_constraint_checkpoint_path(64, suffix)
+                .exists(),
+            "the superseded constraint-sixty-four {suffix} file must be removed",
+        );
+    }
+    let loaded = store
+        .load_latest_quotient_constraint_checkpoint()
+        .expect("the newest quotient checkpoint loads")
+        .expect("one quotient checkpoint is retained");
+    assert!(
+        store
+            .load_latest()
+            .expect("a quotient checkpoint seal does not masquerade as a standard checkpoint")
+            .is_none()
+    );
+    assert_eq!(loaded.completed_constraint_count, 128);
+    assert_eq!(loaded.state, constraint_one_hundred_twenty_eight_state);
+
+    store
+        .persist_quotient_constraint_checkpoint(128, &loaded.state)
+        .expect("deterministic replay may persist the same quotient checkpoint again");
+    let mut different_same_coordinate = loaded.state.clone();
+    different_same_coordinate[0] ^= 1;
+    assert!(
+        store
+            .persist_quotient_constraint_checkpoint(128, &different_same_coordinate)
+            .is_err(),
+        "the same quotient coordinate cannot be rebound to different state",
+    );
+
+    let wrong_attempt_store = phase_checkpoint_test_store(&directory, 0x62);
+    assert!(
+        wrong_attempt_store
+            .load_latest_quotient_constraint_checkpoint()
+            .is_err(),
+        "another proof attempt cannot restore retained quotient state",
+    );
+    let wrong_profile_store = DurableCommonProofCheckpointStore {
+        directory: directory.path.clone(),
+        profile: EXACT_AGGREGATE_CHECKPOINT_PROFILE,
+        stable_attempt_binding_hash: store.stable_attempt_binding_hash,
+        checkpoint_lineage_identifier: store.checkpoint_lineage_identifier,
+    };
+    assert!(
+        wrong_profile_store
+            .load_latest_quotient_constraint_checkpoint()
+            .is_err(),
+        "another proof profile cannot restore retained quotient state",
+    );
+    let wrong_lineage_store = DurableCommonProofCheckpointStore {
+        directory: directory.path.clone(),
+        profile: store.profile,
+        stable_attempt_binding_hash: store.stable_attempt_binding_hash,
+        checkpoint_lineage_identifier: [0x71; 32],
+    };
+    assert!(
+        wrong_lineage_store
+            .load_latest_quotient_constraint_checkpoint()
+            .is_err(),
+        "another checkpoint lineage cannot restore retained quotient state",
+    );
+
+    let state_path =
+        store.quotient_constraint_checkpoint_path(128, QUOTIENT_CONSTRAINT_CHECKPOINT_STATE_SUFFIX);
+    let mut tampered_state = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&state_path)
+        .expect("the retained quotient state opens for hostile mutation");
+    tampered_state
+        .seek(SeekFrom::Start(0))
+        .expect("the hostile quotient mutation seeks to the first byte");
+    tampered_state
+        .write_all(&[0x63])
+        .expect("the hostile quotient mutation changes one retained byte");
+    tampered_state
+        .sync_all()
+        .expect("the hostile quotient mutation reaches durable storage");
+    assert!(
+        store.load_quotient_constraint_checkpoint(128).is_err(),
+        "a changed quotient state must fail its retained seal",
     );
 }
 
