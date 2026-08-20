@@ -717,6 +717,62 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
+    #[cfg(test)]
+    pub(crate) fn generation_initial_phase_commitment_lane_checkpoint_coordinates(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Option<(u8, u32)>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .pending_initial_phase_commitment_lane_checkpoint_coordinates()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_initial_phase_commitment_lane_checkpoint_bytes(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .initial_phase_commitment_lane_checkpoint_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_initial_phase_commitment_lane_restore_target(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Option<u8>, CommonProofRuntimeError> {
+        Ok(self
+            .generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .initial_phase_commitment_lane_restore_target())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_generation_initial_phase_commitment_lane_checkpoint(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .restore_initial_phase_commitment_lane_checkpoint(
+                phase_ordinal,
+                completed_lane_count,
+                canonical_checkpoint_bytes,
+            )
+    }
+
     pub(crate) fn generation_checkpoint_safe_boundary_ordinal(
         &self,
         handle: CommonProofGenerationOperationHandle,

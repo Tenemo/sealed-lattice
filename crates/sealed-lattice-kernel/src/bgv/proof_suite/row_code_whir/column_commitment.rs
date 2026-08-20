@@ -13,6 +13,8 @@ use tiny_keccak::keccakf;
 use zeroize::Zeroizing;
 
 use crate::bgv::proof_suite::ProofBaseFieldElement;
+#[cfg(test)]
+use crate::hashing::hash_framed_parts_512;
 
 use super::private_leaf_salt::{
     PRIVATE_LEAF_SALT_BYTE_LENGTH, PrivateLeafSalt, derive_private_leaf_salt,
@@ -28,6 +30,23 @@ const SHAKE256_STATE_WORD_LENGTH: usize = 25;
 const SHAKE256_RATE_WORD_LENGTH: usize = 17;
 const SHAKE256_DELIMITER: u64 = 0x1f;
 const SHAKE256_FINAL_RATE_BYTE: u64 = 0x80_u64 << 56;
+#[cfg(test)]
+const INTERLEAVED_COMMITMENT_CHECKPOINT_MAGIC: [u8; 8] = *b"SLICCP01";
+#[cfg(test)]
+const INTERLEAVED_COMMITMENT_CHECKPOINT_VERSION: u16 = 1;
+#[cfg(test)]
+const INTERLEAVED_COMMITMENT_CHECKPOINT_PRIVATE_SALT_FLAG: u16 = 1;
+#[cfg(test)]
+const INTERLEAVED_COMMITMENT_CHECKPOINT_SALT_BINDING_DOMAIN: &str =
+    "sealed-lattice/interleaved-commitment-checkpoint-salt/v1";
+#[cfg(test)]
+const INTERLEAVED_COMMITMENT_CHECKPOINT_PREFIX_BYTE_LENGTH: usize =
+    INTERLEAVED_COMMITMENT_CHECKPOINT_MAGIC.len()
+        + size_of::<u16>()
+        + size_of::<u16>()
+        + size_of::<u64>()
+        + 64
+        + 12 * size_of::<u64>();
 
 #[cfg(feature = "primitive-measurement-evidence")]
 pub(super) fn salted_phase_column_leaf_keccak_permutation_count(
@@ -77,6 +96,14 @@ impl PrivateColumnLeafSaltContext {
             logical_leaf_width,
             0,
             leaf_index,
+        )
+    }
+
+    #[cfg(test)]
+    fn checkpoint_binding(&self) -> [u8; 64] {
+        hash_framed_parts_512(
+            INTERLEAVED_COMMITMENT_CHECKPOINT_SALT_BINDING_DOMAIN,
+            &[self.private_seed.as_slice(), self.commitment_role],
         )
     }
 }
@@ -575,6 +602,92 @@ pub(super) struct InterleavedColumnCommitmentBuilder {
     upper_merkle_builder: StreamingMerkleBuilder,
 }
 
+#[cfg(test)]
+struct InterleavedCommitmentCheckpointReader<'bytes> {
+    bytes: &'bytes [u8],
+    next_offset: usize,
+}
+
+#[cfg(test)]
+impl<'bytes> InterleavedCommitmentCheckpointReader<'bytes> {
+    const fn new(bytes: &'bytes [u8]) -> Self {
+        Self {
+            bytes,
+            next_offset: 0,
+        }
+    }
+
+    fn read_exact(&mut self, byte_length: usize) -> Result<&'bytes [u8], String> {
+        let end = self
+            .next_offset
+            .checked_add(byte_length)
+            .ok_or_else(|| "interleaved checkpoint offset overflowed".to_owned())?;
+        let bytes = self
+            .bytes
+            .get(self.next_offset..end)
+            .ok_or_else(|| "interleaved checkpoint ended prematurely".to_owned())?;
+        self.next_offset = end;
+        Ok(bytes)
+    }
+
+    fn read_u8(&mut self) -> Result<u8, String> {
+        Ok(self.read_exact(1)?[0])
+    }
+
+    fn read_u16(&mut self) -> Result<u16, String> {
+        Ok(u16::from_le_bytes(
+            self.read_exact(size_of::<u16>())?
+                .try_into()
+                .expect("fixed-width checkpoint integer"),
+        ))
+    }
+
+    fn read_u64(&mut self) -> Result<u64, String> {
+        Ok(u64::from_le_bytes(
+            self.read_exact(size_of::<u64>())?
+                .try_into()
+                .expect("fixed-width checkpoint integer"),
+        ))
+    }
+
+    fn read_usize(&mut self) -> Result<usize, String> {
+        usize::try_from(self.read_u64()?)
+            .map_err(|_| "interleaved checkpoint coordinate exceeds usize".to_owned())
+    }
+
+    fn read_digest(&mut self) -> Result<ColumnDigest, String> {
+        let mut digest = [0_u64; COLUMN_DIGEST_WORD_LENGTH];
+        for word in &mut digest {
+            *word = self.read_u64()?;
+        }
+        Ok(digest)
+    }
+
+    fn finish(self) -> Result<(), String> {
+        if self.next_offset != self.bytes.len() {
+            return Err("interleaved checkpoint contains trailing bytes".to_owned());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+fn append_interleaved_checkpoint_usize(output: &mut Vec<u8>, value: usize) -> Result<(), String> {
+    output.extend_from_slice(
+        &u64::try_from(value)
+            .map_err(|_| "interleaved checkpoint coordinate exceeds u64".to_owned())?
+            .to_le_bytes(),
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+fn append_interleaved_checkpoint_digest(output: &mut Vec<u8>, digest: &ColumnDigest) {
+    for word in digest {
+        output.extend_from_slice(&word.to_le_bytes());
+    }
+}
+
 impl InterleavedColumnCommitmentBuilder {
     pub(super) fn new_with_opened_columns_and_private_salt(
         expected_row_count: usize,
@@ -664,6 +777,312 @@ impl InterleavedColumnCommitmentBuilder {
         } else {
             None
         }
+    }
+
+    #[cfg(test)]
+    pub(super) const fn completed_lane_count(&self) -> usize {
+        self.next_lane_ordinal
+    }
+
+    /// Encodes a completed-lane scheduler boundary without retaining an
+    /// in-progress column hash. The next lane hasher is reconstructed from the
+    /// same private salt context on restore; only Merkle digests and canonical
+    /// coordinates cross the checkpoint boundary.
+    #[cfg(test)]
+    pub(super) fn canonical_checkpoint_bytes(&self) -> Result<Vec<u8>, String> {
+        if self.next_lane_ordinal > self.lane_count
+            || self.active_lane_hasher.as_ref().is_some_and(|hasher| {
+                hasher.absorbed_row_count != 0
+                    || hasher.expected_row_count != self.expected_row_count
+            })
+            || (self.next_lane_ordinal < self.lane_count) != self.active_lane_hasher.is_some()
+        {
+            return Err("interleaved commitment is not at a completed-lane boundary".to_owned());
+        }
+        let (flags, private_salt_binding) =
+            self.private_leaf_salt
+                .as_ref()
+                .map_or((0_u16, [0_u8; 64]), |private_leaf_salt| {
+                    (
+                        INTERLEAVED_COMMITMENT_CHECKPOINT_PRIVATE_SALT_FLAG,
+                        private_leaf_salt.checkpoint_binding(),
+                    )
+                });
+        let mut output = Vec::new();
+        output.extend_from_slice(&INTERLEAVED_COMMITMENT_CHECKPOINT_MAGIC);
+        output.extend_from_slice(&INTERLEAVED_COMMITMENT_CHECKPOINT_VERSION.to_le_bytes());
+        output.extend_from_slice(&flags.to_le_bytes());
+        let total_byte_length_offset = output.len();
+        output.extend_from_slice(&0_u64.to_le_bytes());
+        output.extend_from_slice(&private_salt_binding);
+        for coordinate in [
+            self.expected_row_count,
+            self.encoded_column_count,
+            self.lane_column_count,
+            self.lane_count,
+            self.next_lane_ordinal,
+            self.opened_column_indices.len(),
+            self.lower_subtree_digest_planes.len(),
+            self.lower_frontier_by_level_and_index.len(),
+            self.expected_frontier_node_count,
+            self.upper_merkle_builder.stack.len(),
+            self.upper_merkle_builder.frontier_by_level_and_index.len(),
+            self.upper_merkle_builder.next_leaf_index,
+        ] {
+            append_interleaved_checkpoint_usize(&mut output, coordinate)?;
+        }
+        debug_assert_eq!(
+            output.len(),
+            INTERLEAVED_COMMITMENT_CHECKPOINT_PREFIX_BYTE_LENGTH
+        );
+
+        for column_index in &self.opened_column_indices {
+            append_interleaved_checkpoint_usize(&mut output, *column_index)?;
+        }
+        for plane in &self.lower_subtree_digest_planes {
+            output.push(u8::from(plane.is_some()));
+            if let Some(plane) = plane {
+                if plane.len() != self.lane_column_count {
+                    return Err(
+                        "interleaved commitment checkpoint plane has the wrong size".to_owned()
+                    );
+                }
+                for digest in plane {
+                    append_interleaved_checkpoint_digest(&mut output, digest);
+                }
+            }
+        }
+        for (level, index, digest) in &self.lower_frontier_by_level_and_index {
+            append_interleaved_checkpoint_usize(&mut output, *level)?;
+            append_interleaved_checkpoint_usize(&mut output, *index)?;
+            append_interleaved_checkpoint_digest(&mut output, digest);
+        }
+        for node in &self.upper_merkle_builder.stack {
+            append_interleaved_checkpoint_usize(&mut output, node.level)?;
+            append_interleaved_checkpoint_usize(&mut output, node.index)?;
+            output.push(u8::from(node.contains_opened_column));
+            append_interleaved_checkpoint_digest(&mut output, &node.digest);
+        }
+        for (level, index, digest) in &self.upper_merkle_builder.frontier_by_level_and_index {
+            append_interleaved_checkpoint_usize(&mut output, *level)?;
+            append_interleaved_checkpoint_usize(&mut output, *index)?;
+            append_interleaved_checkpoint_digest(&mut output, digest);
+        }
+        let total_byte_length = u64::try_from(output.len())
+            .map_err(|_| "interleaved checkpoint byte length exceeds u64".to_owned())?;
+        output[total_byte_length_offset..total_byte_length_offset + size_of::<u64>()]
+            .copy_from_slice(&total_byte_length.to_le_bytes());
+        Ok(output)
+    }
+
+    #[cfg(test)]
+    pub(super) fn restore_from_canonical_checkpoint(
+        expected_row_count: usize,
+        encoded_column_count: usize,
+        maximum_lane_column_count: usize,
+        opened_column_indices: &[usize],
+        private_leaf_salt: Option<PrivateColumnLeafSaltContext>,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<Self, String> {
+        if canonical_checkpoint_bytes.len() < INTERLEAVED_COMMITMENT_CHECKPOINT_PREFIX_BYTE_LENGTH {
+            return Err("interleaved checkpoint is shorter than its canonical prefix".to_owned());
+        }
+        let expected_private_salt_binding =
+            private_leaf_salt
+                .as_ref()
+                .map_or((0_u16, [0_u8; 64]), |private_leaf_salt| {
+                    (
+                        INTERLEAVED_COMMITMENT_CHECKPOINT_PRIVATE_SALT_FLAG,
+                        private_leaf_salt.checkpoint_binding(),
+                    )
+                });
+        let mut reader = InterleavedCommitmentCheckpointReader::new(canonical_checkpoint_bytes);
+        if reader.read_exact(INTERLEAVED_COMMITMENT_CHECKPOINT_MAGIC.len())?
+            != INTERLEAVED_COMMITMENT_CHECKPOINT_MAGIC
+            || reader.read_u16()? != INTERLEAVED_COMMITMENT_CHECKPOINT_VERSION
+        {
+            return Err("interleaved checkpoint has the wrong format".to_owned());
+        }
+        let flags = reader.read_u16()?;
+        let declared_byte_length = usize::try_from(reader.read_u64()?)
+            .map_err(|_| "interleaved checkpoint byte length exceeds usize".to_owned())?;
+        let private_salt_binding: [u8; 64] = reader
+            .read_exact(64)?
+            .try_into()
+            .expect("fixed checkpoint salt binding");
+        if flags != expected_private_salt_binding.0
+            || private_salt_binding != expected_private_salt_binding.1
+            || declared_byte_length != canonical_checkpoint_bytes.len()
+        {
+            return Err("interleaved checkpoint has the wrong salt or extent binding".to_owned());
+        }
+
+        let checkpoint_expected_row_count = reader.read_usize()?;
+        let checkpoint_encoded_column_count = reader.read_usize()?;
+        let checkpoint_lane_column_count = reader.read_usize()?;
+        let checkpoint_lane_count = reader.read_usize()?;
+        let next_lane_ordinal = reader.read_usize()?;
+        let opened_column_count = reader.read_usize()?;
+        let lower_plane_catalog_count = reader.read_usize()?;
+        let lower_frontier_count = reader.read_usize()?;
+        let expected_frontier_node_count = reader.read_usize()?;
+        let upper_stack_count = reader.read_usize()?;
+        let upper_frontier_count = reader.read_usize()?;
+        let upper_next_leaf_index = reader.read_usize()?;
+
+        let mut builder = Self::new_with_opened_columns_and_private_salt(
+            expected_row_count,
+            encoded_column_count,
+            maximum_lane_column_count,
+            opened_column_indices,
+            private_leaf_salt,
+        )?;
+        let lower_tree_depth = builder.lower_subtree_digest_planes.len();
+        let upper_tree_depth = builder.lane_column_count.ilog2() as usize;
+        if checkpoint_expected_row_count != builder.expected_row_count
+            || checkpoint_encoded_column_count != builder.encoded_column_count
+            || checkpoint_lane_column_count != builder.lane_column_count
+            || checkpoint_lane_count != builder.lane_count
+            || next_lane_ordinal > builder.lane_count
+            || opened_column_count != builder.opened_column_indices.len()
+            || lower_plane_catalog_count != lower_tree_depth
+            || lower_frontier_count > builder.expected_frontier_node_count
+            || expected_frontier_node_count != builder.expected_frontier_node_count
+            || upper_stack_count > upper_tree_depth + 1
+            || upper_frontier_count > builder.upper_merkle_builder.expected_frontier_node_count
+            || upper_next_leaf_index > builder.lane_column_count
+        {
+            return Err("interleaved checkpoint geometry is inconsistent".to_owned());
+        }
+        for expected_column_index in &builder.opened_column_indices {
+            if reader.read_usize()? != *expected_column_index {
+                return Err("interleaved checkpoint opening indices are inconsistent".to_owned());
+            }
+        }
+
+        let mut lower_subtree_digest_planes = Vec::new();
+        lower_subtree_digest_planes
+            .try_reserve_exact(lower_tree_depth)
+            .map_err(|_| "interleaved checkpoint plane allocation failed".to_owned())?;
+        for level in 0..lower_tree_depth {
+            let plane_is_present = match reader.read_u8()? {
+                0 => false,
+                1 => true,
+                _ => return Err("interleaved checkpoint has a noncanonical plane flag".to_owned()),
+            };
+            let expected_plane_is_present = next_lane_ordinal < builder.lane_count
+                && next_lane_ordinal & (1_usize << level) != 0;
+            if plane_is_present != expected_plane_is_present {
+                return Err("interleaved checkpoint carry planes do not match its lane".to_owned());
+            }
+            let plane = if plane_is_present {
+                let mut digests = allocate_digest_plane(builder.lane_column_count)?;
+                for digest in &mut digests {
+                    *digest = reader.read_digest()?;
+                }
+                Some(digests)
+            } else {
+                None
+            };
+            lower_subtree_digest_planes.push(plane);
+        }
+
+        let mut lower_frontier_by_level_and_index = Vec::new();
+        lower_frontier_by_level_and_index
+            .try_reserve_exact(builder.expected_frontier_node_count)
+            .map_err(|_| "interleaved checkpoint lower-frontier allocation failed".to_owned())?;
+        let mut lower_frontier_coordinates = BTreeSet::new();
+        for _ in 0..lower_frontier_count {
+            let level = reader.read_usize()?;
+            let index = reader.read_usize()?;
+            if level >= lower_tree_depth
+                || index >= builder.encoded_column_count >> level
+                || !lower_frontier_coordinates.insert((level, index))
+            {
+                return Err("interleaved checkpoint lower frontier is noncanonical".to_owned());
+            }
+            lower_frontier_by_level_and_index.push((level, index, reader.read_digest()?));
+        }
+
+        let mut upper_stack = Vec::new();
+        upper_stack
+            .try_reserve_exact(upper_tree_depth + 1)
+            .map_err(|_| "interleaved checkpoint upper-stack allocation failed".to_owned())?;
+        for _ in 0..upper_stack_count {
+            let level = reader.read_usize()?;
+            let index = reader.read_usize()?;
+            let contains_opened_column = match reader.read_u8()? {
+                0 => false,
+                1 => true,
+                _ => return Err("interleaved checkpoint has a noncanonical stack flag".to_owned()),
+            };
+            if level > upper_tree_depth || index >= builder.lane_column_count >> level {
+                return Err("interleaved checkpoint upper stack is noncanonical".to_owned());
+            }
+            upper_stack.push(StreamingMerkleNode {
+                level,
+                index,
+                digest: reader.read_digest()?,
+                contains_opened_column,
+            });
+        }
+
+        let mut upper_frontier_by_level_and_index = Vec::new();
+        upper_frontier_by_level_and_index
+            .try_reserve_exact(builder.upper_merkle_builder.expected_frontier_node_count)
+            .map_err(|_| "interleaved checkpoint upper-frontier allocation failed".to_owned())?;
+        let mut upper_frontier_coordinates = BTreeSet::new();
+        for _ in 0..upper_frontier_count {
+            let level = reader.read_usize()?;
+            let index = reader.read_usize()?;
+            if level >= upper_tree_depth
+                || index >= builder.lane_column_count >> level
+                || !upper_frontier_coordinates.insert((level, index))
+            {
+                return Err("interleaved checkpoint upper frontier is noncanonical".to_owned());
+            }
+            upper_frontier_by_level_and_index.push((level, index, reader.read_digest()?));
+        }
+        reader.finish()?;
+
+        if next_lane_ordinal < builder.lane_count {
+            if upper_next_leaf_index != 0
+                || !upper_stack.is_empty()
+                || !upper_frontier_by_level_and_index.is_empty()
+            {
+                return Err(
+                    "interleaved checkpoint completed upper-tree work prematurely".to_owned(),
+                );
+            }
+        } else if upper_next_leaf_index != builder.lane_column_count
+            || upper_stack.len() != 1
+            || upper_stack[0].level != upper_tree_depth
+            || upper_stack[0].index != 0
+            || upper_frontier_by_level_and_index.len()
+                != builder.upper_merkle_builder.expected_frontier_node_count
+        {
+            return Err("interleaved checkpoint completed upper tree is inconsistent".to_owned());
+        }
+
+        builder.next_lane_ordinal = next_lane_ordinal;
+        builder.active_lane_hasher = if next_lane_ordinal < builder.lane_count {
+            Some(StreamingColumnHasher::new_interleaved_lane(
+                builder.expected_row_count,
+                builder.encoded_column_count,
+                builder.lane_count,
+                next_lane_ordinal,
+                builder.private_leaf_salt.as_ref(),
+            )?)
+        } else {
+            None
+        };
+        builder.lower_subtree_digest_planes = lower_subtree_digest_planes;
+        builder.lower_frontier_by_level_and_index = lower_frontier_by_level_and_index;
+        builder.upper_merkle_builder.stack = upper_stack;
+        builder.upper_merkle_builder.frontier_by_level_and_index =
+            upper_frontier_by_level_and_index;
+        builder.upper_merkle_builder.next_leaf_index = upper_next_leaf_index;
+        Ok(builder)
     }
 
     #[cfg(test)]
@@ -2264,6 +2683,184 @@ mod tests {
                 16,
                 &[8, 7],
                 None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn interleaved_lane_checkpoints_restore_every_carry_shape_byte_for_byte() {
+        const COMMITMENT_ROLE: &[u8] = b"phase/checkpoint-equivalence";
+        let rows = sample_rows(23, 256);
+        let opened_column_indices = [0, 3, 7, 8, 17, 63, 64, 129, 191, 255];
+        let private_seed = [0x6d_u8; 64];
+        let expected = build_privately_salted_striped_commitment(
+            &rows,
+            rows[0].len(),
+            &opened_column_indices,
+            &private_seed,
+            COMMITMENT_ROLE,
+        );
+        let mut builder =
+            InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+                rows.len(),
+                rows[0].len(),
+                16,
+                &opened_column_indices,
+                Some(PrivateColumnLeafSaltContext::new(
+                    &private_seed,
+                    COMMITMENT_ROLE,
+                )),
+            )
+            .expect("valid checkpointed interleaved geometry");
+        let lane_count = builder.lane_count();
+        for expected_lane_ordinal in 0..lane_count {
+            assert_eq!(builder.active_lane_ordinal(), Some(expected_lane_ordinal));
+            for (row_index, row) in rows.iter().enumerate() {
+                let encoded_row_lane = row
+                    .iter()
+                    .skip(expected_lane_ordinal)
+                    .step_by(lane_count)
+                    .copied()
+                    .collect::<Vec<_>>();
+                builder
+                    .absorb_active_lane_row(row_index, &encoded_row_lane)
+                    .expect("checkpointed lane accepts its next row");
+            }
+            let complete = builder
+                .complete_active_lane()
+                .expect("checkpointed lane completes");
+            assert_eq!(complete, expected_lane_ordinal + 1 == lane_count);
+            assert_eq!(builder.completed_lane_count(), expected_lane_ordinal + 1);
+            let first_encoding = builder
+                .canonical_checkpoint_bytes()
+                .expect("completed lane checkpoint encodes");
+            builder = InterleavedColumnCommitmentBuilder::restore_from_canonical_checkpoint(
+                rows.len(),
+                rows[0].len(),
+                16,
+                &opened_column_indices,
+                Some(PrivateColumnLeafSaltContext::new(
+                    &private_seed,
+                    COMMITMENT_ROLE,
+                )),
+                &first_encoding,
+            )
+            .expect("completed lane checkpoint restores");
+            assert_eq!(
+                builder
+                    .canonical_checkpoint_bytes()
+                    .expect("restored lane checkpoint re-encodes"),
+                first_encoding,
+                "lane boundary {} must have one canonical encoding",
+                expected_lane_ordinal + 1,
+            );
+        }
+        assert_eq!(
+            builder
+                .finish_commitment()
+                .expect("restored final lane finishes"),
+            expected,
+        );
+    }
+
+    #[test]
+    fn interleaved_lane_checkpoints_refuse_partial_wrong_context_and_malformed_bytes() {
+        const COMMITMENT_ROLE: &[u8] = b"phase/checkpoint-hostile";
+        let rows = sample_rows(5, 64);
+        let opened_column_indices = [0, 7, 17, 63];
+        let private_seed = [0x93_u8; 64];
+        let mut builder =
+            InterleavedColumnCommitmentBuilder::new_with_opened_columns_and_private_salt(
+                rows.len(),
+                rows[0].len(),
+                8,
+                &opened_column_indices,
+                Some(PrivateColumnLeafSaltContext::new(
+                    &private_seed,
+                    COMMITMENT_ROLE,
+                )),
+            )
+            .expect("valid hostile checkpoint geometry");
+        let lane_count = builder.lane_count();
+        let first_row_lane = rows[0]
+            .iter()
+            .step_by(lane_count)
+            .copied()
+            .collect::<Vec<_>>();
+        builder
+            .absorb_active_lane_row(0, &first_row_lane)
+            .expect("first partial row is accepted");
+        assert!(builder.canonical_checkpoint_bytes().is_err());
+        for (row_index, row) in rows.iter().enumerate().skip(1) {
+            let encoded_row_lane = row.iter().step_by(lane_count).copied().collect::<Vec<_>>();
+            builder
+                .absorb_active_lane_row(row_index, &encoded_row_lane)
+                .expect("remaining lane row is accepted");
+        }
+        assert!(
+            !builder
+                .complete_active_lane()
+                .expect("first lane completes")
+        );
+        let canonical = builder
+            .canonical_checkpoint_bytes()
+            .expect("completed first lane encodes");
+
+        let restore = |bytes: &[u8], seed: &[u8; 64], opened_columns: &[usize]| {
+            InterleavedColumnCommitmentBuilder::restore_from_canonical_checkpoint(
+                rows.len(),
+                rows[0].len(),
+                8,
+                opened_columns,
+                Some(PrivateColumnLeafSaltContext::new(seed, COMMITMENT_ROLE)),
+                bytes,
+            )
+        };
+        let mut wrong_magic = canonical.clone();
+        wrong_magic[0] ^= 1;
+        assert!(restore(&wrong_magic, &private_seed, &opened_column_indices).is_err());
+        let mut wrong_extent = canonical.clone();
+        wrong_extent[12] ^= 1;
+        assert!(restore(&wrong_extent, &private_seed, &opened_column_indices).is_err());
+        let mut noncanonical_plane_flag = canonical.clone();
+        let first_plane_flag_offset = INTERLEAVED_COMMITMENT_CHECKPOINT_PREFIX_BYTE_LENGTH
+            + opened_column_indices.len() * size_of::<u64>();
+        noncanonical_plane_flag[first_plane_flag_offset] = 2;
+        assert!(
+            restore(
+                &noncanonical_plane_flag,
+                &private_seed,
+                &opened_column_indices,
+            )
+            .is_err()
+        );
+        let mut trailing = canonical.clone();
+        trailing.push(0);
+        assert!(restore(&trailing, &private_seed, &opened_column_indices).is_err());
+        assert!(
+            restore(
+                &canonical[..canonical.len() - 1],
+                &private_seed,
+                &opened_column_indices,
+            )
+            .is_err()
+        );
+        let mut wrong_private_seed = private_seed;
+        wrong_private_seed[0] ^= 1;
+        assert!(restore(&canonical, &wrong_private_seed, &opened_column_indices).is_err());
+        assert!(restore(&canonical, &private_seed, &[0, 7, 18, 63]).is_err());
+        assert!(
+            InterleavedColumnCommitmentBuilder::restore_from_canonical_checkpoint(
+                rows.len() + 1,
+                rows[0].len(),
+                8,
+                &opened_column_indices,
+                Some(PrivateColumnLeafSaltContext::new(
+                    &private_seed,
+                    COMMITMENT_ROLE,
+                )),
+                &canonical,
             )
             .is_err()
         );

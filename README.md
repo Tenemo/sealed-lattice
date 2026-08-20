@@ -152,10 +152,21 @@ ceremony or supported-phone qualification.
   instrumented 32.8-second prefix of selected VSS base materialization
   completed 1,544 source replays without any worker poll reaching one second;
   the production-derived base schedule contains 576,576 source replays. The
-  work is poll-bounded, but it has not reached a common-proof checkpoint within
-  the current 110-minute job budget, and the exact aggregate proof has not
-  started. The evidence baseline remains open until this phase has an actual
-  runner-owned resume boundary and a complete evidence-based budget.
+  work is poll-bounded, but it did not reach a common-proof checkpoint within
+  the current 110-minute job budget, and the exact aggregate proof did not
+  start.
+- Current source pauses after every completed initial base, auxiliary, and
+  quotient commitment lane. The manual native evidence runner can retain the
+  newest state every four lanes under an integrity seal bound to the exact
+  runtime attempt and checkpoint lineage, and can restore it only into the
+  fresh matching phase. Small-geometry tests cover canonical re-encoding,
+  every carry-plane shape, final commitment equivalence, wrong context,
+  malformed geometry and framing, truncation, trailing bytes, replacement,
+  and changed retained state. No production heavy run has yet persisted and
+  restored one of these lane states, so its checkpoint size, elapsed segment,
+  cold-resume time, and complete job budget remain unmeasured. This is a
+  test-only native evidence boundary, not a release-WebAssembly or browser
+  checkpoint. The evidence baseline remains open.
 - There is no complete production compact generation-and-verification
   release-WebAssembly ABI pair. The release transport validator checks
   canonical structure, transcript chronology, derived queries, and Merkle

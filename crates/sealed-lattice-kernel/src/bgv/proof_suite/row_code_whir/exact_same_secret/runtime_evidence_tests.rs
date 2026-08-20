@@ -44,6 +44,23 @@ const COMMON_PROOF_CHECKPOINT_FILE_PREFIX: &str = "checkpoint-";
 const COMMON_PROOF_CHECKPOINT_STATE_SUFFIX: &str = ".state";
 const COMMON_PROOF_CHECKPOINT_CURSOR_SUFFIX: &str = ".cursor";
 const COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX: &str = ".seal";
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX: &str = "initial-phase-";
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_STATE_SUFFIX: &str = ".state";
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_SUFFIX: &str = ".seal";
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_MAGIC: [u8; 8] = *b"SLPHLCP1";
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_VERSION: u16 = 1;
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_INTERVAL: u32 = 4;
+const MAXIMUM_INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_BYTE_LENGTH: usize = 256 * 1_024 * 1_024;
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_BYTE_LENGTH: usize =
+    INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_MAGIC.len()
+        + size_of::<u16>()
+        + 2 * size_of::<u8>()
+        + size_of::<u32>()
+        + Hash512::BYTE_LENGTH
+        + 32
+        + Hash512::BYTE_LENGTH;
+const INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_HASH_ROLE: &[u8] =
+    b"initial-phase-commitment-lane-checkpoint";
 const COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH: usize = VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC
     .len()
     + size_of::<u16>()
@@ -108,6 +125,12 @@ struct DurableCommonProofCheckpoint {
     cursor_manifest: Vec<u8>,
 }
 
+struct DurableInitialPhaseCommitmentLaneCheckpoint {
+    phase_ordinal: u8,
+    completed_lane_count: u32,
+    state: Vec<u8>,
+}
+
 struct DurableCommonProofCheckpointStore {
     directory: PathBuf,
     profile: DurableCommonProofCheckpointProfile,
@@ -161,6 +184,9 @@ impl DurableCommonProofCheckpointStore {
             let file_name = entry.file_name().into_string().map_err(|_| {
                 "proof checkpoint custody contains a non-Unicode filename".to_owned()
             })?;
+            if file_name.starts_with(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX) {
+                continue;
+            }
             if !file_name.ends_with(COMMON_PROOF_CHECKPOINT_SEAL_SUFFIX) {
                 continue;
             }
@@ -258,6 +284,199 @@ impl DurableCommonProofCheckpointStore {
         )
     }
 
+    fn load_initial_phase_commitment_lane_checkpoints(
+        &self,
+    ) -> Result<BTreeMap<u8, DurableInitialPhaseCommitmentLaneCheckpoint>, String> {
+        let mut latest_coordinates = BTreeMap::<u8, u32>::new();
+        for entry in fs::read_dir(&self.directory)
+            .map_err(|error| format!("enumerate retained phase checkpoints: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("read retained phase checkpoint entry: {error}"))?;
+            if !entry
+                .file_type()
+                .map_err(|error| format!("classify retained phase checkpoint entry: {error}"))?
+                .is_file()
+            {
+                return Err("proof checkpoint custody contains a non-file entry".to_owned());
+            }
+            let file_name = entry.file_name().into_string().map_err(|_| {
+                "proof checkpoint custody contains a non-Unicode filename".to_owned()
+            })?;
+            if !file_name.starts_with(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX) {
+                continue;
+            }
+            if !file_name.ends_with(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_SUFFIX) {
+                continue;
+            }
+            let (phase_ordinal, completed_lane_count) =
+                parse_initial_phase_commitment_lane_checkpoint_coordinates(&file_name).ok_or_else(
+                    || format!("proof checkpoint custody contains malformed seal {file_name}"),
+                )?;
+            latest_coordinates
+                .entry(phase_ordinal)
+                .and_modify(|current| *current = (*current).max(completed_lane_count))
+                .or_insert(completed_lane_count);
+        }
+        latest_coordinates
+            .into_iter()
+            .map(|(phase_ordinal, completed_lane_count)| {
+                self.load_initial_phase_commitment_lane_checkpoint(
+                    phase_ordinal,
+                    completed_lane_count,
+                )
+                .map(|checkpoint| (phase_ordinal, checkpoint))
+            })
+            .collect()
+    }
+
+    fn load_initial_phase_commitment_lane_checkpoint(
+        &self,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+    ) -> Result<DurableInitialPhaseCommitmentLaneCheckpoint, String> {
+        validate_initial_phase_commitment_lane_checkpoint_coordinates(
+            phase_ordinal,
+            completed_lane_count,
+        )?;
+        let state = read_exact_bounded_file(
+            &self.initial_phase_commitment_lane_checkpoint_path(
+                phase_ordinal,
+                completed_lane_count,
+                INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_STATE_SUFFIX,
+            ),
+            1,
+            MAXIMUM_INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_BYTE_LENGTH,
+            "initial phase commitment lane checkpoint state",
+        )?;
+        let seal = read_exact_bounded_file(
+            &self.initial_phase_commitment_lane_checkpoint_path(
+                phase_ordinal,
+                completed_lane_count,
+                INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_SUFFIX,
+            ),
+            INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_BYTE_LENGTH,
+            INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_BYTE_LENGTH,
+            "initial phase commitment lane checkpoint seal",
+        )?;
+        let expected_seal = self.encode_initial_phase_commitment_lane_checkpoint_seal(
+            phase_ordinal,
+            completed_lane_count,
+            &state,
+        );
+        if seal != expected_seal {
+            return Err(
+                "retained initial phase commitment lane checkpoint seal is stale or malformed"
+                    .to_owned(),
+            );
+        }
+        Ok(DurableInitialPhaseCommitmentLaneCheckpoint {
+            phase_ordinal,
+            completed_lane_count,
+            state,
+        })
+    }
+
+    fn persist_initial_phase_commitment_lane_checkpoint(
+        &self,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        state: &[u8],
+    ) -> Result<(), String> {
+        validate_initial_phase_commitment_lane_checkpoint_coordinates(
+            phase_ordinal,
+            completed_lane_count,
+        )?;
+        if state.is_empty()
+            || state.len() > MAXIMUM_INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_BYTE_LENGTH
+        {
+            return Err("initial phase commitment lane checkpoint exceeds its bound".to_owned());
+        }
+        let state_path = self.initial_phase_commitment_lane_checkpoint_path(
+            phase_ordinal,
+            completed_lane_count,
+            INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_STATE_SUFFIX,
+        );
+        persist_exact_file_once(
+            &state_path,
+            state,
+            "initial phase commitment lane checkpoint state",
+        )?;
+        let seal = self.encode_initial_phase_commitment_lane_checkpoint_seal(
+            phase_ordinal,
+            completed_lane_count,
+            state,
+        );
+        let seal_path = self.initial_phase_commitment_lane_checkpoint_path(
+            phase_ordinal,
+            completed_lane_count,
+            INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_SUFFIX,
+        );
+        persist_exact_file_once(
+            &seal_path,
+            &seal,
+            "initial phase commitment lane checkpoint seal",
+        )?;
+
+        for entry in fs::read_dir(&self.directory)
+            .map_err(|error| format!("enumerate superseded phase checkpoints: {error}"))?
+        {
+            let entry = entry
+                .map_err(|error| format!("read superseded phase checkpoint entry: {error}"))?;
+            let file_name = entry.file_name().into_string().map_err(|_| {
+                "proof checkpoint custody contains a non-Unicode filename".to_owned()
+            })?;
+            let Some((stored_phase_ordinal, stored_completed_lane_count)) =
+                parse_initial_phase_commitment_lane_checkpoint_coordinates_from_any_file(
+                    &file_name,
+                )
+            else {
+                continue;
+            };
+            if stored_phase_ordinal == phase_ordinal
+                && stored_completed_lane_count < completed_lane_count
+            {
+                fs::remove_file(entry.path()).map_err(|error| {
+                    format!("remove superseded phase checkpoint {file_name}: {error}")
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn encode_initial_phase_commitment_lane_checkpoint_seal(
+        &self,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        state: &[u8],
+    ) -> Vec<u8> {
+        let mut seal =
+            Vec::with_capacity(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_BYTE_LENGTH);
+        seal.extend_from_slice(&INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_MAGIC);
+        seal.extend_from_slice(
+            &INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_VERSION.to_le_bytes(),
+        );
+        seal.push(phase_ordinal);
+        seal.push(0);
+        seal.extend_from_slice(&completed_lane_count.to_le_bytes());
+        seal.extend_from_slice(&self.stable_attempt_binding_hash);
+        seal.extend_from_slice(&self.checkpoint_lineage_identifier);
+        seal.extend_from_slice(&hash_framed_parts_512(
+            self.profile.state_hash_domain,
+            &[
+                INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_HASH_ROLE,
+                &[phase_ordinal],
+                &completed_lane_count.to_le_bytes(),
+                state,
+            ],
+        ));
+        debug_assert_eq!(
+            seal.len(),
+            INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_BYTE_LENGTH
+        );
+        seal
+    }
+
     fn require_checkpoint_binding(
         &self,
         checkpoint: &AuthenticatedCommonProofGenerationCheckpoint,
@@ -280,6 +499,17 @@ impl DurableCommonProofCheckpointStore {
             "{COMMON_PROOF_CHECKPOINT_FILE_PREFIX}{boundary_ordinal:08}{suffix}"
         ))
     }
+
+    fn initial_phase_commitment_lane_checkpoint_path(
+        &self,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        suffix: &str,
+    ) -> PathBuf {
+        self.directory.join(format!(
+            "{INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX}{phase_ordinal:02}-lane-{completed_lane_count:08}{suffix}"
+        ))
+    }
 }
 
 fn parse_common_proof_checkpoint_boundary(file_name: &str) -> Option<u32> {
@@ -290,6 +520,66 @@ fn parse_common_proof_checkpoint_boundary(file_name: &str) -> Option<u32> {
         return None;
     }
     digits.parse().ok()
+}
+
+fn validate_initial_phase_commitment_lane_checkpoint_coordinates(
+    phase_ordinal: u8,
+    completed_lane_count: u32,
+) -> Result<(), String> {
+    if phase_ordinal >= 3
+        || completed_lane_count == 0
+        || !completed_lane_count.is_multiple_of(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_INTERVAL)
+    {
+        return Err("initial phase commitment lane checkpoint has invalid coordinates".to_owned());
+    }
+    Ok(())
+}
+
+fn parse_initial_phase_commitment_lane_checkpoint_coordinates(
+    file_name: &str,
+) -> Option<(u8, u32)> {
+    parse_initial_phase_commitment_lane_checkpoint_coordinates_with_suffix(
+        file_name,
+        INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_SUFFIX,
+    )
+}
+
+fn parse_initial_phase_commitment_lane_checkpoint_coordinates_from_any_file(
+    file_name: &str,
+) -> Option<(u8, u32)> {
+    [
+        INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_STATE_SUFFIX,
+        INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_SUFFIX,
+    ]
+    .into_iter()
+    .find_map(|suffix| {
+        parse_initial_phase_commitment_lane_checkpoint_coordinates_with_suffix(file_name, suffix)
+    })
+}
+
+fn parse_initial_phase_commitment_lane_checkpoint_coordinates_with_suffix(
+    file_name: &str,
+    suffix: &str,
+) -> Option<(u8, u32)> {
+    let coordinates = file_name
+        .strip_prefix(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_FILE_PREFIX)?
+        .strip_suffix(suffix)?;
+    let (phase_digits, lane_digits) = coordinates.split_once("-lane-")?;
+    if phase_digits.len() != 2
+        || lane_digits.len() != 8
+        || !phase_digits.bytes().all(|byte| byte.is_ascii_digit())
+        || !lane_digits.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let phase_ordinal = phase_digits.parse().ok()?;
+    let completed_lane_count = lane_digits.parse().ok()?;
+    validate_initial_phase_commitment_lane_checkpoint_coordinates(
+        phase_ordinal,
+        completed_lane_count,
+    )
+    .ok()?;
+    Some((phase_ordinal, completed_lane_count))
 }
 
 fn runner_enabled_checkpoint_resume() -> Result<bool, String> {
@@ -769,6 +1059,10 @@ fn generate_prepared_common_proof(
         .unwrap_or(0);
     let mut resume_completion_observed = resume_checkpoint.is_none();
     let mut last_stage = None;
+    let mut retained_initial_phase_commitment_lane_checkpoints = durable_checkpoint_store
+        .map(DurableCommonProofCheckpointStore::load_initial_phase_commitment_lane_checkpoints)
+        .transpose()?
+        .unwrap_or_default();
     let started_at = Instant::now();
 
     loop {
@@ -780,6 +1074,7 @@ fn generate_prepared_common_proof(
                 stage,
                 checkpoint_ready,
             } => {
+                let mut restored_lane_checkpoint_coordinates = None;
                 if last_stage != Some(stage) {
                     eprintln!(
                         "{family_label} generation stage {stage:?}: {:?}",
@@ -819,6 +1114,85 @@ fn generate_prepared_common_proof(
                     registry
                         .acknowledge_generation_checkpoint(operation)
                         .map_err(|error| format!("advance exact checkpoint: {error:?}"))?;
+                }
+                if let Some(store) = durable_checkpoint_store {
+                    let retained_lane_checkpoint = registry
+                        .generation_initial_phase_commitment_lane_restore_target(operation)
+                        .map_err(|error| {
+                            format!("read initial phase lane restore target: {error:?}")
+                        })?
+                        .and_then(|phase_ordinal| {
+                            retained_initial_phase_commitment_lane_checkpoints
+                                .remove(&phase_ordinal)
+                                .map(|checkpoint| (phase_ordinal, checkpoint))
+                        });
+                    if let Some((phase_ordinal, checkpoint)) = retained_lane_checkpoint {
+                        if checkpoint.phase_ordinal != phase_ordinal {
+                            return Err(
+                                "retained phase checkpoint map has inconsistent coordinates"
+                                    .to_owned(),
+                            );
+                        }
+                        let restore_started_at = Instant::now();
+                        registry
+                            .restore_generation_initial_phase_commitment_lane_checkpoint(
+                                operation,
+                                checkpoint.phase_ordinal,
+                                checkpoint.completed_lane_count,
+                                &checkpoint.state,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "restore initial phase {} lane {} checkpoint: {error:?}",
+                                    checkpoint.phase_ordinal, checkpoint.completed_lane_count,
+                                )
+                            })?;
+                        restored_lane_checkpoint_coordinates =
+                            Some((checkpoint.phase_ordinal, checkpoint.completed_lane_count));
+                        eprintln!(
+                            "{family_label} restored bound initial phase {} lane {} checkpoint ({} bytes) in {:?}, total {:?}",
+                            checkpoint.phase_ordinal,
+                            checkpoint.completed_lane_count,
+                            checkpoint.state.len(),
+                            restore_started_at.elapsed(),
+                            started_at.elapsed(),
+                        );
+                    }
+
+                    if let Some((phase_ordinal, completed_lane_count)) = registry
+                        .generation_initial_phase_commitment_lane_checkpoint_coordinates(operation)
+                        .map_err(|error| {
+                            format!("read initial phase lane checkpoint coordinates: {error:?}")
+                        })?
+                    {
+                        let coordinates = (phase_ordinal, completed_lane_count);
+                        if completed_lane_count
+                            .is_multiple_of(INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_INTERVAL)
+                            && restored_lane_checkpoint_coordinates != Some(coordinates)
+                        {
+                            let checkpoint_state = registry
+                                .generation_initial_phase_commitment_lane_checkpoint_bytes(
+                                    operation,
+                                )
+                                .map_err(|error| {
+                                    format!(
+                                        "encode initial phase {phase_ordinal} lane {completed_lane_count} checkpoint: {error:?}"
+                                    )
+                                })?;
+                            let persist_started_at = Instant::now();
+                            store.persist_initial_phase_commitment_lane_checkpoint(
+                                phase_ordinal,
+                                completed_lane_count,
+                                &checkpoint_state,
+                            )?;
+                            eprintln!(
+                                "{family_label} persisted bound initial phase {phase_ordinal} lane {completed_lane_count} checkpoint ({} bytes) in {:?}, total {:?}",
+                                checkpoint_state.len(),
+                                persist_started_at.elapsed(),
+                                started_at.elapsed(),
+                            );
+                        }
+                    }
                 }
             }
             CommonProofGenerationWorkerPoll::ResumeComplete { stage } => {
@@ -913,6 +1287,12 @@ fn generate_prepared_common_proof(
     if !resume_completion_observed {
         return Err(
             "exact generation completed without reaching its retained checkpoint".to_owned(),
+        );
+    }
+    if !retained_initial_phase_commitment_lane_checkpoints.is_empty() {
+        return Err(
+            "exact generation completed without reaching every retained initial phase lane checkpoint"
+                .to_owned(),
         );
     }
     let generated_proof = registry
@@ -1576,6 +1956,190 @@ fn run_exact_context_hostile_cases(
             &format!("wrong public input root {tree_ordinal}"),
         );
     }
+}
+
+struct ScopedPhaseCheckpointTestDirectory {
+    path: PathBuf,
+}
+
+impl ScopedPhaseCheckpointTestDirectory {
+    fn new(label: &str) -> Self {
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("the checkpoint test repository root resolves");
+        let parent = repository_root.join("temp").join("test-checkpoints");
+        fs::create_dir_all(&parent).expect("the checkpoint test parent exists");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("the checkpoint test clock is after the epoch")
+            .as_nanos();
+        let path = parent.join(format!(
+            "initial-phase-checkpoint-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).expect("the checkpoint test directory is unique");
+        Self { path }
+    }
+}
+
+impl Drop for ScopedPhaseCheckpointTestDirectory {
+    fn drop(&mut self) {
+        match fs::remove_dir_all(&self.path) {
+            Err(error) if self.path.exists() => eprintln!(
+                "failed to remove checkpoint test directory {}: {error}",
+                self.path.display()
+            ),
+            Ok(()) | Err(_) => {}
+        }
+    }
+}
+
+fn phase_checkpoint_test_store(
+    directory: &ScopedPhaseCheckpointTestDirectory,
+    attempt_tag: u8,
+) -> DurableCommonProofCheckpointStore {
+    DurableCommonProofCheckpointStore {
+        directory: directory.path.clone(),
+        profile: VSS_PREREQUISITE_CHECKPOINT_PROFILE,
+        stable_attempt_binding_hash: [attempt_tag; Hash512::BYTE_LENGTH],
+        checkpoint_lineage_identifier: [attempt_tag.wrapping_add(1); 32],
+    }
+}
+
+#[test]
+fn initial_phase_commitment_lane_checkpoint_names_are_canonical_and_bounded() {
+    for (file_name, expected) in [
+        ("initial-phase-00-lane-00000004.seal", Some((0, 4))),
+        ("initial-phase-01-lane-00000012.seal", Some((1, 12))),
+        ("initial-phase-02-lane-99999996.seal", Some((2, 99_999_996))),
+        ("initial-phase-00-lane-00000000.seal", None),
+        ("initial-phase-00-lane-00000005.seal", None),
+        ("initial-phase-03-lane-00000004.seal", None),
+        ("initial-phase-0-lane-00000004.seal", None),
+        ("initial-phase-00-lane-0000004.seal", None),
+        ("initial-phase-00-lane-00000004.state", None),
+        ("initial-phase-00-lane-00000004.seal.trailing", None),
+    ] {
+        assert_eq!(
+            parse_initial_phase_commitment_lane_checkpoint_coordinates(file_name),
+            expected,
+            "unexpected phase checkpoint filename result for {file_name}",
+        );
+    }
+    assert_eq!(
+        parse_initial_phase_commitment_lane_checkpoint_coordinates_from_any_file(
+            "initial-phase-02-lane-00000008.state"
+        ),
+        Some((2, 8)),
+    );
+    assert_eq!(
+        validate_initial_phase_commitment_lane_checkpoint_coordinates(2, 8),
+        Ok(()),
+    );
+    assert!(validate_initial_phase_commitment_lane_checkpoint_coordinates(2, 7).is_err());
+    assert!(validate_initial_phase_commitment_lane_checkpoint_coordinates(3, 8).is_err());
+}
+
+#[test]
+fn initial_phase_commitment_lane_checkpoint_custody_replaces_and_binds_state() {
+    let directory = ScopedPhaseCheckpointTestDirectory::new("custody");
+    let store = phase_checkpoint_test_store(&directory, 0x41);
+    let phase_zero_lane_four_state = vec![0x14; 97];
+    let phase_zero_lane_eight_state = (0_u8..=126).collect::<Vec<_>>();
+    let phase_one_lane_four_state = vec![0x24; 193];
+
+    store
+        .persist_initial_phase_commitment_lane_checkpoint(0, 4, &phase_zero_lane_four_state)
+        .expect("the first phase checkpoint persists");
+    store
+        .persist_initial_phase_commitment_lane_checkpoint(0, 8, &phase_zero_lane_eight_state)
+        .expect("the replacement phase checkpoint persists");
+    store
+        .persist_initial_phase_commitment_lane_checkpoint(1, 4, &phase_one_lane_four_state)
+        .expect("the independent phase checkpoint persists");
+
+    for suffix in [
+        INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_STATE_SUFFIX,
+        INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_SEAL_SUFFIX,
+    ] {
+        assert!(
+            !store
+                .initial_phase_commitment_lane_checkpoint_path(0, 4, suffix)
+                .exists(),
+            "the superseded phase-zero lane-four {suffix} file must be removed",
+        );
+    }
+    let loaded = store
+        .load_initial_phase_commitment_lane_checkpoints()
+        .expect("the newest checkpoint for each phase loads");
+    assert!(
+        store
+            .load_latest()
+            .expect("phase checkpoint seals do not masquerade as standard checkpoints")
+            .is_none()
+    );
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(loaded[&0].phase_ordinal, 0);
+    assert_eq!(loaded[&0].completed_lane_count, 8);
+    assert_eq!(loaded[&0].state, phase_zero_lane_eight_state);
+    assert_eq!(loaded[&1].phase_ordinal, 1);
+    assert_eq!(loaded[&1].completed_lane_count, 4);
+    assert_eq!(loaded[&1].state, phase_one_lane_four_state);
+
+    store
+        .persist_initial_phase_commitment_lane_checkpoint(0, 8, &loaded[&0].state)
+        .expect("deterministic replay may persist the same checkpoint again");
+    let mut different_same_coordinate = loaded[&0].state.clone();
+    different_same_coordinate[0] ^= 1;
+    assert!(
+        store
+            .persist_initial_phase_commitment_lane_checkpoint(0, 8, &different_same_coordinate,)
+            .is_err(),
+        "the same coordinate cannot be rebound to different state",
+    );
+
+    let wrong_attempt_store = phase_checkpoint_test_store(&directory, 0x42);
+    assert!(
+        wrong_attempt_store
+            .load_initial_phase_commitment_lane_checkpoints()
+            .is_err(),
+        "another proof attempt cannot restore retained lane state",
+    );
+
+    let tampered_state_path = store.initial_phase_commitment_lane_checkpoint_path(
+        1,
+        4,
+        INITIAL_PHASE_COMMITMENT_LANE_CHECKPOINT_STATE_SUFFIX,
+    );
+    let mut tampered_state = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&tampered_state_path)
+        .expect("the retained phase-one state opens for hostile mutation");
+    tampered_state
+        .seek(SeekFrom::Start(0))
+        .expect("the hostile mutation seeks to the first byte");
+    tampered_state
+        .write_all(&[0x25])
+        .expect("the hostile mutation changes one retained byte");
+    tampered_state
+        .sync_all()
+        .expect("the hostile mutation reaches durable storage");
+    assert!(
+        store
+            .load_initial_phase_commitment_lane_checkpoint(1, 4)
+            .is_err(),
+        "a changed state must fail its retained seal",
+    );
+
+    let unknown_seal_path = directory.path.join("unexpected.seal");
+    persist_exact_file_once(&unknown_seal_path, &[0x51], "hostile unknown seal")
+        .expect("the hostile unknown seal persists");
+    assert!(
+        store.load_latest().is_err(),
+        "an unknown custody seal must remain a loud failure",
+    );
 }
 
 #[test]

@@ -3014,6 +3014,7 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirGenerationStateMachine {
     active_phase_polynomial_binding: Option<RowCodeWhirPhasePolynomialBinding>,
     phase_row_witness: Zeroizing<Vec<ProofBaseFieldElement>>,
     active_phase_row_dft: Option<BoundedBaseCosetLaneDft>,
+    phase_lane_completion_pending: bool,
     next_phase_row_index: usize,
     next_phase_logical_chunk_index: usize,
     phase_roots: [Option<ColumnDigest>; 3],
@@ -3255,6 +3256,7 @@ impl RowCodeWhirGenerationStateMachine {
             active_phase_polynomial_binding: None,
             phase_row_witness: Zeroizing::new(Vec::new()),
             active_phase_row_dft: None,
+            phase_lane_completion_pending: false,
             next_phase_row_index: 0,
             next_phase_logical_chunk_index: 0,
             phase_roots: [None; 3],
@@ -3370,6 +3372,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
             || self.active_phase_row_dft.is_some()
+            || self.phase_lane_completion_pending
         {
             return Err(CommonProofProverError::InvalidInput);
         }
@@ -3438,6 +3441,129 @@ impl RowCodeWhirGenerationStateMachine {
 
     pub(crate) const fn canonical_output_byte_length(&self) -> Option<usize> {
         self.canonical_output_byte_length
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_initial_phase_commitment_lane_checkpoint_coordinates(
+        &self,
+    ) -> Result<Option<(u8, u32)>, CommonProofProverError> {
+        if !self.phase_lane_completion_pending {
+            return Ok(None);
+        }
+        let phase_role = self
+            .active_phase_commitment
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        if self.active_phase_materialization_purpose
+            != Some(RowCodeWhirPhaseMaterializationPurpose::InitialCommitment)
+            || self.active_phase_authenticated_columns.is_some()
+            || self.active_phase_polynomial_reader.is_some()
+            || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
+            || self.next_phase_row_index != self.phase_row_count(phase_role)?
+            || self.next_phase_logical_chunk_index != 0
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        let builder = self
+            .phase_commitment_builder
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        let completed_lane_count = u32::try_from(builder.completed_lane_count())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        if completed_lane_count == 0 {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Ok(Some((
+            u8::try_from(row_code_whir_phase_index(phase_role))
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+            completed_lane_count,
+        )))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn initial_phase_commitment_lane_checkpoint_bytes(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofProverError> {
+        self.pending_initial_phase_commitment_lane_checkpoint_coordinates()?
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        self.phase_commitment_builder
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidInput)?
+            .canonical_checkpoint_bytes()
+            .map_err(|_| CommonProofProverError::InvalidTree)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn initial_phase_commitment_lane_restore_target(&self) -> Option<u8> {
+        let phase_role = self.active_phase_commitment?;
+        let builder = self.phase_commitment_builder.as_ref()?;
+        if self.phase_lane_completion_pending
+            || self.active_phase_materialization_purpose
+                != Some(RowCodeWhirPhaseMaterializationPurpose::InitialCommitment)
+            || self.active_phase_authenticated_columns.is_some()
+            || self.active_phase_polynomial_reader.is_some()
+            || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
+            || self.next_phase_row_index != 0
+            || self.next_phase_logical_chunk_index != 0
+            || builder.completed_lane_count() != 0
+        {
+            return None;
+        }
+        u8::try_from(row_code_whir_phase_index(phase_role)).ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_initial_phase_commitment_lane_checkpoint(
+        &mut self,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofProverError> {
+        let phase_role = self
+            .active_phase_commitment
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        if usize::from(phase_ordinal) != row_code_whir_phase_index(phase_role)
+            || completed_lane_count == 0
+            || self.phase_lane_completion_pending
+            || self.active_phase_materialization_purpose
+                != Some(RowCodeWhirPhaseMaterializationPurpose::InitialCommitment)
+            || self.active_phase_authenticated_columns.is_some()
+            || self.active_phase_polynomial_reader.is_some()
+            || self.active_phase_polynomial_binding.is_some()
+            || self.active_phase_row_dft.is_some()
+            || self.next_phase_row_index != 0
+            || self.next_phase_logical_chunk_index != 0
+            || self
+                .phase_commitment_builder
+                .as_ref()
+                .is_none_or(|builder| builder.completed_lane_count() != 0)
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        let phase_geometry = self.phase_geometry(phase_role)?;
+        let restored_builder =
+            InterleavedColumnCommitmentBuilder::restore_from_canonical_checkpoint(
+                phase_geometry.row_count,
+                phase_geometry.encoded_column_count,
+                MAXIMUM_PHASE_COMMITMENT_LANE_COLUMN_COUNT,
+                &[],
+                self.private_column_leaf_salt_context(phase_role)?,
+                canonical_checkpoint_bytes,
+            )
+            .map_err(|_| CommonProofProverError::InvalidTree)?;
+        if restored_builder.completed_lane_count()
+            != usize::try_from(completed_lane_count)
+                .map_err(|_| CommonProofProverError::CountOverflow)?
+        {
+            return Err(CommonProofProverError::InvalidTree);
+        }
+        self.phase_commitment_builder = Some(restored_builder);
+        self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
+        self.next_phase_row_index = phase_geometry.row_count;
+        self.next_phase_logical_chunk_index = 0;
+        self.phase_lane_completion_pending = true;
+        Ok(())
     }
 
     /// Reinstalls the authenticated canonical transcript cursor at the exact
@@ -3534,6 +3660,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
             || self.active_phase_row_dft.is_some()
+            || self.phase_lane_completion_pending
             || self.phase_commitment_builder.is_some()
             || self.active_phase_commitment.is_some()
             || self.active_phase_materialization_purpose.is_some()
@@ -5960,6 +6087,7 @@ impl RowCodeWhirGenerationStateMachine {
         self.active_phase_polynomial_reader = None;
         self.active_phase_polynomial_binding = None;
         self.active_phase_row_dft = None;
+        self.phase_lane_completion_pending = false;
         self.authenticated_transcript_prefix = None;
         self.row_code_whir_transcript = None;
         self.opening_points.clear();
@@ -6337,6 +6465,45 @@ impl RowCodeWhirGenerationStateMachine {
         Ok(true)
     }
 
+    #[cfg(test)]
+    fn phase_geometry(
+        &self,
+        phase: RowCodeWhirPhase,
+    ) -> Result<RowEncodingGeometry, CommonProofProverError> {
+        match phase {
+            RowCodeWhirPhase::Base => self
+                .construction_plan
+                .base_phase
+                .as_ref()
+                .map(|phase| phase.geometry),
+            RowCodeWhirPhase::Auxiliary => self
+                .construction_plan
+                .auxiliary_phase
+                .as_ref()
+                .map(|phase| phase.geometry),
+            RowCodeWhirPhase::Quotient => Some(self.construction_plan.quotient_phase.geometry),
+        }
+        .ok_or(CommonProofProverError::InvalidColumn)
+    }
+
+    #[cfg(test)]
+    fn phase_row_count(&self, phase: RowCodeWhirPhase) -> Result<usize, CommonProofProverError> {
+        match phase {
+            RowCodeWhirPhase::Base => self
+                .construction_plan
+                .base_phase
+                .as_ref()
+                .map(|phase| phase.rows.len()),
+            RowCodeWhirPhase::Auxiliary => self
+                .construction_plan
+                .auxiliary_phase
+                .as_ref()
+                .map(|phase| phase.rows.len()),
+            RowCodeWhirPhase::Quotient => Some(self.construction_plan.quotient_phase.rows.len()),
+        }
+        .ok_or(CommonProofProverError::InvalidColumn)
+    }
+
     fn phase_root(&self, phase: RowCodeWhirPhase) -> Option<ColumnDigest> {
         self.phase_roots[row_code_whir_phase_index(phase)]
     }
@@ -6677,6 +6844,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
             || self.active_phase_row_dft.is_some()
+            || self.phase_lane_completion_pending
             || !self.phase_row_witness.is_empty()
             || self.next_phase_row_index != 0
             || self.next_phase_logical_chunk_index != 0
@@ -6868,14 +7036,20 @@ impl RowCodeWhirGenerationStateMachine {
             RowCodeWhirPhase::Quotient => None,
         }
         .ok_or(CommonProofProverError::InvalidColumn)?;
-        if self.next_phase_row_index == phase.rows.len() {
-            let complete = self
+        if self.phase_lane_completion_pending {
+            if self.next_phase_row_index != phase.rows.len()
+                || self.next_phase_logical_chunk_index != 0
+            {
+                return Err(CommonProofProverError::InvalidInput.into());
+            }
+            self.phase_lane_completion_pending = false;
+            if self
                 .phase_commitment_builder
-                .as_mut()
+                .as_ref()
                 .ok_or(CommonProofProverError::InvalidInput)?
-                .complete_active_lane()
-                .map_err(|_| CommonProofProverError::InvalidTree)?;
-            if complete {
+                .active_lane_ordinal()
+                .is_none()
+            {
                 let (purpose, root) =
                     self.finish_active_phase_materialization(phase_role, phase.rows.len())?;
                 match (purpose, phase_role) {
@@ -6923,11 +7097,18 @@ impl RowCodeWhirGenerationStateMachine {
                         return Err(CommonProofProverError::InvalidInput.into());
                     }
                 }
-            } else {
-                self.next_phase_row_index = 0;
-                self.next_phase_logical_chunk_index = 0;
-                self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
+                return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
             }
+            self.next_phase_row_index = 0;
+            self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
+        }
+        if self.next_phase_row_index == phase.rows.len() {
+            self.phase_commitment_builder
+                .as_mut()
+                .ok_or(CommonProofProverError::InvalidInput)?
+                .complete_active_lane()
+                .map_err(|_| CommonProofProverError::InvalidTree)?;
+            self.phase_lane_completion_pending = true;
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
 
@@ -6994,6 +7175,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
             || self.active_phase_row_dft.is_some()
+            || self.phase_lane_completion_pending
             || !self.phase_row_witness.is_empty()
             || self.next_phase_row_index != 0
             || self.next_phase_logical_chunk_index != 0
@@ -7177,14 +7359,20 @@ impl RowCodeWhirGenerationStateMachine {
             return Err(CommonProofProverError::InvalidInput);
         }
         let phase = &self.construction_plan.quotient_phase;
-        if self.next_phase_row_index == phase.rows.len() {
-            let complete = self
+        if self.phase_lane_completion_pending {
+            if self.next_phase_row_index != phase.rows.len()
+                || self.next_phase_logical_chunk_index != 0
+            {
+                return Err(CommonProofProverError::InvalidInput);
+            }
+            self.phase_lane_completion_pending = false;
+            if self
                 .phase_commitment_builder
-                .as_mut()
+                .as_ref()
                 .ok_or(CommonProofProverError::InvalidInput)?
-                .complete_active_lane()
-                .map_err(|_| CommonProofProverError::InvalidTree)?;
-            if complete {
+                .active_lane_ordinal()
+                .is_none()
+            {
                 let (purpose, root) = self.finish_active_phase_materialization(
                     RowCodeWhirPhase::Quotient,
                     phase.rows.len(),
@@ -7202,11 +7390,18 @@ impl RowCodeWhirGenerationStateMachine {
                         self.advance_authenticated_phase_openings(RowCodeWhirPhase::Quotient)?;
                     }
                 }
-            } else {
-                self.next_phase_row_index = 0;
-                self.next_phase_logical_chunk_index = 0;
-                self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
+                return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
             }
+            self.next_phase_row_index = 0;
+            self.phase_row_witness.fill(ProofBaseFieldElement::ZERO);
+        }
+        if self.next_phase_row_index == phase.rows.len() {
+            self.phase_commitment_builder
+                .as_mut()
+                .ok_or(CommonProofProverError::InvalidInput)?
+                .complete_active_lane()
+                .map_err(|_| CommonProofProverError::InvalidTree)?;
+            self.phase_lane_completion_pending = true;
             return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
         }
 
@@ -7496,6 +7691,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_polynomial_reader.is_some()
             || self.active_phase_polynomial_binding.is_some()
             || self.active_phase_row_dft.is_some()
+            || self.phase_lane_completion_pending
             || self.next_phase_row_index != expected_row_count
             || expected_row_count == 0
         {
@@ -7550,6 +7746,7 @@ impl RowCodeWhirGenerationStateMachine {
             }
         }
         self.active_phase_commitment = None;
+        self.phase_lane_completion_pending = false;
         self.phase_row_witness = Zeroizing::new(Vec::new());
         self.next_phase_row_index = 0;
         self.next_phase_logical_chunk_index = 0;
@@ -7565,6 +7762,7 @@ impl RowCodeWhirGenerationStateMachine {
             || self.active_phase_materialization_purpose.is_some()
             || self.active_phase_authenticated_columns.is_some()
             || self.active_phase_row_dft.is_some()
+            || self.phase_lane_completion_pending
         {
             return Err(CommonProofProverError::InvalidInput);
         }

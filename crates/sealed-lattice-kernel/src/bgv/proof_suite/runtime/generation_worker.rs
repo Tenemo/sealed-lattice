@@ -951,6 +951,45 @@ impl CommonProofGenerationExecutionState {
         self.0.checkpoint_boundary()
     }
 
+    #[cfg(test)]
+    fn pending_initial_phase_commitment_lane_checkpoint_coordinates(
+        &self,
+    ) -> Result<Option<(u8, u32)>, CommonProofRuntimeError> {
+        self.0
+            .pending_initial_phase_commitment_lane_checkpoint_coordinates()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    #[cfg(test)]
+    fn initial_phase_commitment_lane_checkpoint_bytes(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        self.0
+            .initial_phase_commitment_lane_checkpoint_bytes()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    #[cfg(test)]
+    fn initial_phase_commitment_lane_restore_target(&self) -> Option<u8> {
+        self.0.initial_phase_commitment_lane_restore_target()
+    }
+
+    #[cfg(test)]
+    fn restore_initial_phase_commitment_lane_checkpoint(
+        &mut self,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.0
+            .restore_initial_phase_commitment_lane_checkpoint(
+                phase_ordinal,
+                completed_lane_count,
+                canonical_checkpoint_bytes,
+            )
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+    }
+
     fn restore_authenticated_checkpoint_transcript_cursor(
         &mut self,
         canonical_cursor_bytes: &[u8],
@@ -1983,6 +2022,80 @@ impl CommonProofGenerationWorker {
 
     pub(super) fn pending_checkpoint(&self) -> Option<&PendingCommonProofGenerationCheckpoint> {
         self.checkpoint_chain.pending_checkpoint()
+    }
+
+    #[cfg(test)]
+    pub(super) fn pending_initial_phase_commitment_lane_checkpoint_coordinates(
+        &self,
+    ) -> Result<Option<(u8, u32)>, CommonProofRuntimeError> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return Ok(None);
+        }
+        self.state
+            .pending_initial_phase_commitment_lane_checkpoint_coordinates()
+    }
+
+    #[cfg(test)]
+    pub(super) fn initial_phase_commitment_lane_checkpoint_bytes(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.state.initial_phase_commitment_lane_checkpoint_bytes()
+    }
+
+    #[cfg(test)]
+    pub(super) fn initial_phase_commitment_lane_restore_target(&self) -> Option<u8> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return None;
+        }
+        self.state.initial_phase_commitment_lane_restore_target()
+    }
+
+    #[cfg(test)]
+    pub(super) fn restore_initial_phase_commitment_lane_checkpoint(
+        &mut self,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        if self.checkpoint_chain.pending_checkpoint().is_some()
+            || self.storage.request_is_pending()
+            || self.pending_authenticated_source_read().is_some()
+            || self.pending_output_chunk().is_some()
+            || self.output.pending_readback_chunk_index().is_some()
+            || self.generation_complete
+            || self.cancellation_requested
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.state.restore_initial_phase_commitment_lane_checkpoint(
+            phase_ordinal,
+            completed_lane_count,
+            canonical_checkpoint_bytes,
+        )
     }
 
     pub(super) fn advance_pending_checkpoint(&mut self) -> Result<(), CommonProofRuntimeError> {
