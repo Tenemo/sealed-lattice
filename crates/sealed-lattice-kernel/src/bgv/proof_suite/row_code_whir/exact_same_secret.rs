@@ -3901,8 +3901,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual exact production-source gate"]
-    fn heavy_rust_kernel_production_authenticated_same_secret_source() {
+    #[ignore = "manual self-owned exact same-secret checkpoint phase gate"]
+    fn heavy_rust_kernel_exact_same_secret_checkpoint_phases_are_self_owned() {
+        generate_exact_production_source_checkpoint();
+        generate_exact_base_and_auxiliary_phase_checkpoints();
+        generate_exact_masked_quotient_phase_checkpoint();
+    }
+
+    fn generate_exact_production_source_checkpoint() {
         let ProductionSameSecretEvidenceSources {
             mut sources,
             vss_prerequisite,
@@ -4081,9 +4087,7 @@ mod tests {
             .expect("release production setup authority");
     }
 
-    #[test]
-    #[ignore = "manual exact base and auxiliary phase commitment gate"]
-    fn heavy_rust_kernel_exact_base_and_auxiliary_phase_commitments() {
+    fn generate_exact_base_and_auxiliary_phase_checkpoints() {
         let ProductionSameSecretEvidenceSources {
             mut sources,
             vss_prerequisite,
@@ -4093,7 +4097,7 @@ mod tests {
         let source_manifest = store
             .read_manifest()
             .expect("read production source manifest")
-            .expect("production source gate must run first");
+            .expect("owning phase sequence did not produce the source checkpoint");
         validate_checkpoint_binding(&sources, &source_manifest);
         let row_pad_seeds =
             derive_exact_row_pad_seeds(&mut sources).expect("derive exact row-pad seeds");
@@ -4309,9 +4313,7 @@ mod tests {
             .expect("release production setup authority");
     }
 
-    #[test]
-    #[ignore = "manual exact quotient phase gate"]
-    fn heavy_rust_kernel_exact_masked_quotient_phase_commitment() {
+    fn generate_exact_masked_quotient_phase_checkpoint() {
         let started_at = Instant::now();
         let ProductionSameSecretEvidenceSources {
             mut sources,
@@ -4322,12 +4324,12 @@ mod tests {
         let source_manifest = store
             .read_manifest()
             .expect("read production source manifest")
-            .expect("production source gate must run first");
+            .expect("owning phase sequence did not produce the source checkpoint");
         validate_checkpoint_binding(&sources, &source_manifest);
         let phase_manifest = store
             .read_phase_manifest()
             .expect("read exact phase manifest")
-            .expect("base and auxiliary phase gate must run first");
+            .expect("owning phase sequence did not produce the phase checkpoint");
         ensure_exact_verifier_sequence_columns(&mut sources, &store);
         let (mut transcript, application_challenges, composition_challenges) =
             exact_transcript_through_composition(&sources, &phase_manifest);

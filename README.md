@@ -135,19 +135,27 @@ ceremony or supported-phone qualification.
 - No exact suite is frozen or selectable. Suite selection correctly remains
   fail-closed rather than accepting a producer-supplied status or qualification
   field.
-- The guarded heavy Rust proof fixture is now produced and consumed by one
-  owning test, so clean execution no longer depends on lexical test order or a
-  prior run. Exact aggregate source preparation still contains 112 expensive
-  VSS committed-material constructions, but the native heavy-evidence runner
-  now seals each completed material in an encrypted, deterministic,
-  source-bound checkpoint after positive authentication. An interrupted exact
-  selected-profile run restored its first two completed materials in 0 ms each
-  and constructed the next in 51,763 ms, so a completed VSS checkpoint boundary
-  limits replay to at most the in-progress material. The three anchor roots
-  still rebuild synchronously in about 48 seconds, only the first three of 112
-  VSS materials have been exercised through this path, and a complete run has
-  not yet reached the runner-owned common-proof checkpoint namespace or fit the
-  current job budget. The evidence baseline therefore remains open.
+- The guarded heavy Rust compact-proof fixture is produced and consumed by one
+  owning test. The native exact same-secret source, base-and-auxiliary, and
+  quotient checkpoint gates are also sequenced explicitly by one owning test,
+  so neither path depends on ignored-test name order or an artifact created by
+  an independently selected test.
+- Exact aggregate source preparation contains 112 expensive VSS
+  committed-material constructions. The native heavy-evidence runner seals
+  each completed material in an encrypted, deterministic, source-bound
+  checkpoint after positive authentication. One uninterrupted source run
+  produced all 112 materials in 5,702,861 ms and completed source preparation
+  in 5,857.496 seconds. A later run authenticated and restored all 112 material
+  checkpoints in 324--329 ms, but rebuilding the three anchor roots and the
+  public-key root still made setup take 154.7--156.2 seconds.
+- The restored run then spent about 49.0 seconds preparing proof inputs. An
+  instrumented 32.8-second prefix of selected VSS base materialization
+  completed 1,544 source replays without any worker poll reaching one second;
+  the production-derived base schedule contains 576,576 source replays. The
+  work is poll-bounded, but it has not reached a common-proof checkpoint within
+  the current 110-minute job budget, and the exact aggregate proof has not
+  started. The evidence baseline remains open until this phase has an actual
+  runner-owned resume boundary and a complete evidence-based budget.
 - There is no complete production compact generation-and-verification
   release-WebAssembly ABI pair. The release transport validator checks
   canonical structure, transcript chronology, derived queries, and Merkle
