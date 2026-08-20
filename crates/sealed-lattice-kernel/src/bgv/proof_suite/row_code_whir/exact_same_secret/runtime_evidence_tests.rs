@@ -18,9 +18,9 @@ use crate::{
         proof_suite::{
             AuthenticatedCommonProofGenerationCheckpoint,
             COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofGenerationSources,
-            CommonProofGenerationWorkerPoll, CommonProofRuntimeLimits, CommonProofRuntimeRegistry,
-            CommonProofVerificationWorkerPoll, ConsumedVerifiedCommonProofCapability,
-            MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+            CommonProofGenerationStage, CommonProofGenerationWorkerPoll, CommonProofRuntimeLimits,
+            CommonProofRuntimeRegistry, CommonProofVerificationWorkerPoll,
+            ConsumedVerifiedCommonProofCapability, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
             MAXIMUM_COMMON_PROOF_GENERATION_CURSOR_MANIFEST_BYTE_LENGTH, ProofExternalMemoryObject,
             ProofExternalMemoryProtection, ProofExternalMemoryTransactionOperation,
@@ -843,6 +843,41 @@ fn validate_quotient_constraint_checkpoint_coordinate(
     Ok(())
 }
 
+fn retain_phase_local_checkpoints_reachable_after_resume(
+    resumed_stage: CommonProofGenerationStage,
+    retained_initial_phase_checkpoints: &mut BTreeMap<
+        u8,
+        DurableInitialPhaseCommitmentLaneCheckpoint,
+    >,
+    retained_quotient_checkpoint: &mut Option<DurableQuotientConstraintCheckpoint>,
+) -> Result<(), String> {
+    let resumed_stage_ordinal = resumed_stage as u8;
+    let mut superseded_initial_phase_ordinals = Vec::new();
+    for &phase_ordinal in retained_initial_phase_checkpoints.keys() {
+        let phase_stage = match phase_ordinal {
+            0 => CommonProofGenerationStage::MaterializingBaseTrees,
+            1 => CommonProofGenerationStage::MaterializingAuxiliaryTrees,
+            2 => CommonProofGenerationStage::MaterializingQuotientTrees,
+            _ => {
+                return Err(
+                    "retained initial phase checkpoint has an unknown phase ordinal".to_owned(),
+                );
+            }
+        };
+        if resumed_stage_ordinal > phase_stage as u8 {
+            superseded_initial_phase_ordinals.push(phase_ordinal);
+        }
+    }
+    for phase_ordinal in superseded_initial_phase_ordinals {
+        retained_initial_phase_checkpoints.remove(&phase_ordinal);
+    }
+    if resumed_stage_ordinal > CommonProofGenerationStage::ConstructingQuotient as u8 {
+        retained_quotient_checkpoint.take();
+    }
+
+    Ok(())
+}
+
 fn parse_quotient_constraint_checkpoint_coordinate(file_name: &str) -> Option<u32> {
     parse_quotient_constraint_checkpoint_coordinate_with_suffix(
         file_name,
@@ -1578,6 +1613,17 @@ fn generate_prepared_common_proof(
                         .ok_or_else(|| "resumed generation has no retained boundary".to_owned())?,
                     started_at.elapsed(),
                 );
+                if let Some(store) = durable_checkpoint_store {
+                    retain_phase_local_checkpoints_reachable_after_resume(
+                        stage,
+                        &mut retained_initial_phase_commitment_lane_checkpoints,
+                        &mut retained_quotient_constraint_checkpoint,
+                    )?;
+                    store.remove_phase_local_checkpoints_superseded_by_authenticated_boundary(
+                        &retained_initial_phase_commitment_lane_checkpoints,
+                        retained_quotient_constraint_checkpoint.as_ref(),
+                    )?;
+                }
                 resume_completion_observed = true;
             }
             CommonProofGenerationWorkerPoll::StorageRequestReady { .. } => {
@@ -2558,23 +2604,33 @@ fn authenticated_boundary_removes_only_superseded_phase_local_checkpoints() {
         .persist_initial_phase_commitment_lane_checkpoint(0, 4, &[0x41; 17])
         .expect("the retained initial phase checkpoint persists");
     store
+        .persist_initial_phase_commitment_lane_checkpoint(1, 4, &[0x43; 23])
+        .expect("the future auxiliary phase checkpoint persists");
+    store
+        .persist_initial_phase_commitment_lane_checkpoint(2, 4, &[0x44; 29])
+        .expect("the future quotient tree phase checkpoint persists");
+    store
         .persist_quotient_constraint_checkpoint(64, &[0x42; 19])
         .expect("the retained quotient checkpoint persists");
-    let retained_initial_phase_checkpoint = store
-        .load_initial_phase_commitment_lane_checkpoint(0, 4)
-        .expect("the retained initial phase checkpoint loads");
-    let retained_quotient_checkpoint = store
-        .load_quotient_constraint_checkpoint(64)
-        .expect("the retained quotient checkpoint loads");
-    let retained_initial_phase_checkpoints = BTreeMap::from([(
-        retained_initial_phase_checkpoint.phase_ordinal,
-        retained_initial_phase_checkpoint,
-    )]);
+    let mut retained_initial_phase_checkpoints = store
+        .load_initial_phase_commitment_lane_checkpoints()
+        .expect("the retained initial phase checkpoints load");
+    let mut retained_quotient_checkpoint = Some(
+        store
+            .load_quotient_constraint_checkpoint(64)
+            .expect("the retained quotient checkpoint loads"),
+    );
 
+    retain_phase_local_checkpoints_reachable_after_resume(
+        CommonProofGenerationStage::MaterializingBaseTrees,
+        &mut retained_initial_phase_checkpoints,
+        &mut retained_quotient_checkpoint,
+    )
+    .expect("same-stage and future local checkpoints remain reachable");
     store
         .remove_phase_local_checkpoints_superseded_by_authenticated_boundary(
             &retained_initial_phase_checkpoints,
-            Some(&retained_quotient_checkpoint),
+            retained_quotient_checkpoint.as_ref(),
         )
         .expect("future retained phase-local checkpoints remain available");
     assert_eq!(
@@ -2582,7 +2638,7 @@ fn authenticated_boundary_removes_only_superseded_phase_local_checkpoints() {
             .load_initial_phase_commitment_lane_checkpoints()
             .expect("the preserved initial phase checkpoint remains readable")
             .len(),
-        1,
+        3,
     );
     assert!(
         store
@@ -2591,9 +2647,46 @@ fn authenticated_boundary_removes_only_superseded_phase_local_checkpoints() {
             .is_some(),
     );
 
+    retain_phase_local_checkpoints_reachable_after_resume(
+        CommonProofGenerationStage::ConstructingQuotient,
+        &mut retained_initial_phase_checkpoints,
+        &mut retained_quotient_checkpoint,
+    )
+    .expect("the quotient stage supersedes both preceding commitment phases");
     store
-        .remove_phase_local_checkpoints_superseded_by_authenticated_boundary(&BTreeMap::new(), None)
-        .expect("the authenticated boundary removes superseded local checkpoints");
+        .remove_phase_local_checkpoints_superseded_by_authenticated_boundary(
+            &retained_initial_phase_checkpoints,
+            retained_quotient_checkpoint.as_ref(),
+        )
+        .expect("the quotient stage removes only preceding local checkpoints");
+    assert_eq!(
+        store
+            .load_initial_phase_commitment_lane_checkpoints()
+            .expect("only the future quotient tree checkpoint remains")
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![2],
+    );
+    assert!(
+        store
+            .load_latest_quotient_constraint_checkpoint()
+            .expect("the same-stage quotient checkpoint remains readable")
+            .is_some(),
+    );
+
+    retain_phase_local_checkpoints_reachable_after_resume(
+        CommonProofGenerationStage::DerivingOutOfDomainOpenings,
+        &mut retained_initial_phase_checkpoints,
+        &mut retained_quotient_checkpoint,
+    )
+    .expect("the later authenticated boundary supersedes every local checkpoint");
+    store
+        .remove_phase_local_checkpoints_superseded_by_authenticated_boundary(
+            &retained_initial_phase_checkpoints,
+            retained_quotient_checkpoint.as_ref(),
+        )
+        .expect("the later authenticated boundary removes superseded local checkpoints");
     assert!(
         store
             .load_initial_phase_commitment_lane_checkpoints()

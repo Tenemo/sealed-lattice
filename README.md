@@ -141,6 +141,13 @@ ceremony or supported-phone qualification.
   proof-evidence registry. Each test owns its prerequisites, so neither path
   depends on ignored-test name order or an artifact created by an independently
   selected test.
+- A clean current-source routine heavy run completed its five-test registry in
+  1,040.800 seconds with a terminal summary and no diagnostic failure. The
+  compact public-key owner generated and positively verified the canonical
+  23,815,474-byte proof, restored one checkpoint, checked all 122 source-derived
+  public columns and four statement-owned roots, and completed the five tests in
+  1,035.05 seconds. The guard observed a 963,194,880-byte peak job allocation and
+  a 966,090,752-byte peak process-tree resident set without a ceiling violation.
 - Exact aggregate source preparation contains 112 expensive VSS
   committed-material constructions. The native proof-evidence runner seals
   each completed material in an encrypted, deterministic, source-bound
@@ -175,6 +182,9 @@ ceremony or supported-phone qualification.
   framing, noncanonical fields, wrong custody bindings, supersession by a
   later authenticated boundary, and exact external-memory continuation. No
   production run has yet persisted and restored a quotient-constraint state.
+  Recovery also validates every retained phase-local file, then discards only
+  those definitively superseded by the authenticated resumed stage; same-stage
+  and future local checkpoints remain eligible for exact restoration.
   These are test-only native evidence boundaries, not release-WebAssembly or
   browser checkpoints. The evidence baseline remains open. The measured
   multi-hour phases are excluded from the 110-minute routine heavy job and are
