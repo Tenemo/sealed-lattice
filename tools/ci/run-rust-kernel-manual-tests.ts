@@ -19,6 +19,7 @@ import {
     proofEvidenceRustTests,
     resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
+    vssPrerequisiteProofEvidenceRustTest,
     vssFusedRadix51ProjectionOwnerRustFilter,
     verifyFocusedRustLaneSelection,
 } from './rust-focused-lane-selection.js';
@@ -36,6 +37,24 @@ export type ManualRustKernelLane = keyof typeof manualRustKernelTests;
 
 export const rustProofEvidenceCheckpointResumeEnvironmentVariable =
     'SEALED_LATTICE_RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME';
+export const rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable =
+    'SEALED_LATTICE_RUST_PROOF_EVIDENCE_STOP_AFTER_QUOTIENT_CONSTRAINT_CHECKPOINT';
+export const stopAfterQuotientConstraintCheckpointArgument =
+    '--stop-after-quotient-constraint-checkpoint';
+export const controlledQuotientConstraintCheckpointStopOutputPrefix =
+    'sealed-lattice-controlled-quotient-constraint-checkpoint-stop ';
+
+export type ControlledQuotientConstraintCheckpointStopRecord = {
+    readonly authenticatedAfterWrite: true;
+    readonly cancellationCompleted: true;
+    readonly checkpointByteLength: number;
+    readonly completedConstraintCount: number;
+    readonly elapsedMilliseconds: number;
+    readonly familyIdentifier: 'selected-vss-prerequisite-proof';
+    readonly maximumDeclaredExternalMemoryByteLength: number;
+    readonly resumedFromAuthenticatedBoundary: number | null;
+    readonly standardCheckpointCount: number;
+};
 
 const laneLabels = {
     'rust-full-profile-evidence': 'Rust full-profile evidence',
@@ -123,16 +142,33 @@ const resolveManualRustKernelTestFilters = (input: {
 export const buildManualRustKernelEnvironment = (input: {
     readonly baseEnvironment?: NodeJS.ProcessEnv;
     readonly lane: ManualRustKernelLane;
+    readonly stopAfterQuotientConstraintCheckpoint?: boolean;
     readonly targetDirectoryPath: string;
 }): NodeJS.ProcessEnv => {
     const baseEnvironment = { ...(input.baseEnvironment ?? process.env) };
     delete baseEnvironment[
         rustProofEvidenceCheckpointResumeEnvironmentVariable
     ];
+    delete baseEnvironment[
+        rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable
+    ];
+    if (
+        input.stopAfterQuotientConstraintCheckpoint === true &&
+        input.lane !== 'rust-proof-evidence'
+    ) {
+        throw new Error(
+            'Only the Rust proof-evidence lane may stop after a quotient-constraint checkpoint.',
+        );
+    }
     if (input.lane === 'rust-proof-evidence') {
         baseEnvironment[rustProofEvidenceCheckpointResumeEnvironmentVariable] =
             '1';
         baseEnvironment.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE = '1';
+        if (input.stopAfterQuotientConstraintCheckpoint === true) {
+            baseEnvironment[
+                rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable
+            ] = '1';
+        }
     }
 
     return buildGuardedRustEnvironment({
@@ -195,11 +231,12 @@ export const preflightAndRunManualRustKernelLane = async (input: {
     await input.runGuardedCommands(testFilters);
 };
 
-const parseArguments = (
+export const parseManualRustKernelArguments = (
     commandArguments: readonly string[],
 ): {
     readonly focusedFilter?: string;
     readonly lane: ManualRustKernelLane;
+    readonly stopAfterQuotientConstraintCheckpoint: boolean;
 } => {
     const [rawLane, ...remainingArguments] = commandArguments.filter(
         (argument) => argument !== '--',
@@ -211,7 +248,17 @@ const parseArguments = (
     }
     const lane = rawLane as ManualRustKernelLane;
     const positionalArguments: string[] = [];
+    let stopAfterQuotientConstraintCheckpoint = false;
     for (const argument of remainingArguments) {
+        if (argument === stopAfterQuotientConstraintCheckpointArgument) {
+            if (stopAfterQuotientConstraintCheckpoint) {
+                throw new Error(
+                    `${stopAfterQuotientConstraintCheckpointArgument} may appear only once.`,
+                );
+            }
+            stopAfterQuotientConstraintCheckpoint = true;
+            continue;
+        }
         if (argument.startsWith('-')) {
             throw new Error(`Unknown argument ${argument}.`);
         }
@@ -232,7 +279,156 @@ const parseArguments = (
         );
     }
 
-    return { focusedFilter, lane };
+    const selectedTestFilters = resolveManualRustKernelTestFilters({
+        configuredTestNames: manualRustKernelTests[lane],
+        ...(focusedFilter === undefined ? {} : { focusedFilter }),
+        lane,
+    });
+    if (
+        stopAfterQuotientConstraintCheckpoint &&
+        (lane !== 'rust-proof-evidence' ||
+            selectedTestFilters.length !== 1 ||
+            selectedTestFilters[0] !== vssPrerequisiteProofEvidenceRustTest)
+    ) {
+        throw new Error(
+            `${stopAfterQuotientConstraintCheckpointArgument} requires the focused production VSS prerequisite proof.`,
+        );
+    }
+
+    return {
+        focusedFilter,
+        lane,
+        stopAfterQuotientConstraintCheckpoint,
+    };
+};
+
+const requireNonnegativeSafeInteger = (
+    value: unknown,
+    fieldName: string,
+): number => {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0
+    ) {
+        throw new Error(
+            `Controlled quotient-constraint checkpoint stop field ${fieldName} must be a nonnegative safe integer.`,
+        );
+    }
+    return value;
+};
+
+export const parseControlledQuotientConstraintCheckpointStopOutput = (
+    output: string,
+): ControlledQuotientConstraintCheckpointStopRecord => {
+    const matchingLines = output
+        .split(/\r?\n/u)
+        .filter((line) =>
+            line.includes(
+                controlledQuotientConstraintCheckpointStopOutputPrefix,
+            ),
+        );
+    if (matchingLines.length !== 1) {
+        throw new Error(
+            'A controlled quotient-constraint checkpoint stop must emit exactly one terminal record.',
+        );
+    }
+    const matchingLine = matchingLines[0] ?? '';
+    const recordStart = matchingLine.indexOf(
+        controlledQuotientConstraintCheckpointStopOutputPrefix,
+    );
+    const encodedRecord = matchingLine
+        .slice(
+            recordStart +
+                controlledQuotientConstraintCheckpointStopOutputPrefix.length,
+        )
+        .trim();
+    let decodedRecord: unknown;
+    try {
+        decodedRecord = JSON.parse(encodedRecord);
+    } catch {
+        throw new Error(
+            'The controlled quotient-constraint checkpoint stop record is not JSON.',
+        );
+    }
+    if (
+        decodedRecord === null ||
+        typeof decodedRecord !== 'object' ||
+        Array.isArray(decodedRecord)
+    ) {
+        throw new Error(
+            'The controlled quotient-constraint checkpoint stop record must be an object.',
+        );
+    }
+    const record = decodedRecord as Record<string, unknown>;
+    const exactFieldNames = [
+        'authenticatedAfterWrite',
+        'cancellationCompleted',
+        'checkpointByteLength',
+        'completedConstraintCount',
+        'elapsedMilliseconds',
+        'familyIdentifier',
+        'maximumDeclaredExternalMemoryByteLength',
+        'resumedFromAuthenticatedBoundary',
+        'standardCheckpointCount',
+    ];
+    if (
+        Object.keys(record).sort().join('\n') !==
+        [...exactFieldNames].sort().join('\n')
+    ) {
+        throw new Error(
+            'The controlled quotient-constraint checkpoint stop record has the wrong fields.',
+        );
+    }
+    if (
+        record.authenticatedAfterWrite !== true ||
+        record.cancellationCompleted !== true ||
+        record.familyIdentifier !== 'selected-vss-prerequisite-proof'
+    ) {
+        throw new Error(
+            'The controlled quotient-constraint checkpoint stop record has the wrong terminal classification.',
+        );
+    }
+    const completedConstraintCount = requireNonnegativeSafeInteger(
+        record.completedConstraintCount,
+        'completedConstraintCount',
+    );
+    const checkpointByteLength = requireNonnegativeSafeInteger(
+        record.checkpointByteLength,
+        'checkpointByteLength',
+    );
+    if (completedConstraintCount === 0 || checkpointByteLength === 0) {
+        throw new Error(
+            'The controlled quotient-constraint checkpoint stop record must identify a nonempty completed checkpoint.',
+        );
+    }
+    const resumedFromAuthenticatedBoundary =
+        record.resumedFromAuthenticatedBoundary === null
+            ? null
+            : requireNonnegativeSafeInteger(
+                  record.resumedFromAuthenticatedBoundary,
+                  'resumedFromAuthenticatedBoundary',
+              );
+    return {
+        authenticatedAfterWrite: true,
+        cancellationCompleted: true,
+        checkpointByteLength,
+        completedConstraintCount,
+        elapsedMilliseconds: requireNonnegativeSafeInteger(
+            record.elapsedMilliseconds,
+            'elapsedMilliseconds',
+        ),
+        familyIdentifier: 'selected-vss-prerequisite-proof',
+        maximumDeclaredExternalMemoryByteLength: requireNonnegativeSafeInteger(
+            record.maximumDeclaredExternalMemoryByteLength,
+            'maximumDeclaredExternalMemoryByteLength',
+        ),
+        resumedFromAuthenticatedBoundary,
+        standardCheckpointCount: requireNonnegativeSafeInteger(
+            record.standardCheckpointCount,
+            'standardCheckpointCount',
+        ),
+    };
 };
 
 export const runRustKernelManualTests = async (): Promise<void> => {
@@ -256,7 +452,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                     : focusedRustLaneScripts[diagnosticLane],
         },
         async (runLog) => {
-            const parsed = parseArguments(rawArguments);
+            const parsed = parseManualRustKernelArguments(rawArguments);
             const label = laneLabels[parsed.lane];
             const targetDirectoryPath = path.resolve(
                 process.cwd(),
@@ -265,6 +461,8 @@ export const runRustKernelManualTests = async (): Promise<void> => {
             );
             const environment = buildManualRustKernelEnvironment({
                 lane: parsed.lane,
+                stopAfterQuotientConstraintCheckpoint:
+                    parsed.stopAfterQuotientConstraintCheckpoint,
                 targetDirectoryPath,
             });
             const processMemoryGuardVerificationExitCode =
@@ -329,6 +527,38 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 runLog,
                 useReleaseProfile: parsed.lane === 'rust-measurements',
             });
+            if (parsed.stopAfterQuotientConstraintCheckpoint) {
+                const controlledStopRecord =
+                    parseControlledQuotientConstraintCheckpointStopOutput(
+                        await readFile(
+                            path.join(runLog.runDirectoryPath, 'output.log'),
+                            'utf8',
+                        ),
+                    );
+                const attachmentDirectoryPath = path.join(
+                    runLog.runDirectoryPath,
+                    'attachments',
+                    'quotient-constraint-checkpoints',
+                );
+                await mkdir(attachmentDirectoryPath, { recursive: true });
+                const attachmentFilePath = path.join(
+                    attachmentDirectoryPath,
+                    'controlled-stop.json',
+                );
+                await writeFile(
+                    attachmentFilePath,
+                    `${JSON.stringify(controlledStopRecord, undefined, 2)}\n`,
+                    'utf8',
+                );
+                runLog.writeEvent({
+                    details: {
+                        attachmentFilePath,
+                        ...controlledStopRecord,
+                    },
+                    eventType:
+                        'controlled-quotient-constraint-checkpoint-stop-completed',
+                });
+            }
             if (parsed.lane === 'rust-measurements') {
                 const focusedFilter = parsed.focusedFilter;
                 const expectedFocusedCaseIdentifiers =

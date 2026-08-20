@@ -76,6 +76,8 @@ const QUOTIENT_CONSTRAINT_CHECKPOINT_SEAL_BYTE_LENGTH: usize =
         + 32
         + Hash512::BYTE_LENGTH;
 const QUOTIENT_CONSTRAINT_CHECKPOINT_HASH_ROLE: &[u8] = b"quotient-constraint-checkpoint";
+const CONTROLLED_QUOTIENT_CONSTRAINT_CHECKPOINT_STOP_OUTPUT_PREFIX: &str =
+    "sealed-lattice-controlled-quotient-constraint-checkpoint-stop ";
 const COMMON_PROOF_CHECKPOINT_SEAL_BYTE_LENGTH: usize = VSS_PREREQUISITE_CHECKPOINT_SEAL_MAGIC
     .len()
     + size_of::<u16>()
@@ -915,6 +917,10 @@ fn runner_enabled_checkpoint_resume() -> Result<bool, String> {
     exact_same_secret_evidence_checkpoint_resume_enabled()
 }
 
+fn runner_requested_stop_after_quotient_constraint_checkpoint() -> Result<bool, String> {
+    exact_same_secret_evidence_stop_after_quotient_constraint_checkpoint_requested()
+}
+
 fn read_exact_bounded_file(
     path: &Path,
     minimum_byte_length: usize,
@@ -1339,6 +1345,32 @@ struct GeneratedCommonProofEvidence {
     resumed_from_checkpoint_boundary: Option<u32>,
 }
 
+struct ControlledQuotientConstraintCheckpointStopEvidence {
+    checkpoint_byte_length: usize,
+    completed_constraint_count: u32,
+    elapsed_milliseconds: u64,
+    maximum_external_memory_byte_length: u64,
+    resumed_from_checkpoint_boundary: Option<u32>,
+    standard_checkpoint_count: usize,
+}
+
+enum CommonProofGenerationEvidenceOutcome {
+    Complete(GeneratedCommonProofEvidence),
+    ControlledQuotientConstraintCheckpointStop(ControlledQuotientConstraintCheckpointStopEvidence),
+}
+
+impl CommonProofGenerationEvidenceOutcome {
+    fn require_complete(self) -> Result<GeneratedCommonProofEvidence, String> {
+        match self {
+            Self::Complete(generated) => Ok(generated),
+            Self::ControlledQuotientConstraintCheckpointStop(_) => Err(
+                "common-proof generation stopped at a quotient checkpoint where completion was required"
+                    .to_owned(),
+            ),
+        }
+    }
+}
+
 struct ExactTranscriptPrefixEvidence<'evidence> {
     prerequisite: &'evidence VerifiedSameSecretLowDegreePrerequisite,
     relation_plan: &'evidence CommonProofRelationPlanCapability,
@@ -1355,7 +1387,8 @@ fn generate_prepared_common_proof(
     family_label: &str,
     durable_checkpoint_store: Option<&DurableCommonProofCheckpointStore>,
     resume_checkpoint: Option<&DurableCommonProofCheckpoint>,
-) -> Result<GeneratedCommonProofEvidence, String> {
+    stop_after_quotient_constraint_checkpoint: bool,
+) -> Result<CommonProofGenerationEvidenceOutcome, String> {
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = match resume_checkpoint {
         Some(checkpoint) => {
@@ -1397,6 +1430,7 @@ fn generate_prepared_common_proof(
         .transpose()?
         .flatten();
     let started_at = Instant::now();
+    let mut controlled_quotient_constraint_checkpoint_stop = None;
 
     loop {
         let poll = registry
@@ -1597,6 +1631,39 @@ fn generate_prepared_common_proof(
                             persist_started_at.elapsed(),
                             started_at.elapsed(),
                         );
+                        if stop_after_quotient_constraint_checkpoint {
+                            let authenticated_checkpoint = store
+                                .load_quotient_constraint_checkpoint(completed_constraint_count)?;
+                            if authenticated_checkpoint.state != checkpoint_state {
+                                return Err(
+                                    "persisted quotient constraint checkpoint did not authenticate to the exact encoded state"
+                                        .to_owned(),
+                                );
+                            }
+                            controlled_quotient_constraint_checkpoint_stop =
+                                Some(ControlledQuotientConstraintCheckpointStopEvidence {
+                                    checkpoint_byte_length: checkpoint_state.len(),
+                                    completed_constraint_count,
+                                    elapsed_milliseconds: u64::try_from(
+                                        started_at.elapsed().as_millis(),
+                                    )
+                                    .map_err(|_| {
+                                        "controlled checkpoint-stop elapsed time exceeds u64"
+                                            .to_owned()
+                                    })?,
+                                    maximum_external_memory_byte_length: storage
+                                        .maximum_declared_byte_length(),
+                                    resumed_from_checkpoint_boundary,
+                                    standard_checkpoint_count: checkpoint_count,
+                                });
+                            registry
+                                .request_generation_cancellation(operation)
+                                .map_err(|error| {
+                                    format!(
+                                        "request controlled quotient checkpoint cancellation: {error:?}"
+                                    )
+                                })?;
+                        }
                     }
                 }
             }
@@ -1693,9 +1760,35 @@ fn generate_prepared_common_proof(
                     .confirm_generation_output_readback(operation, chunk_index as usize, bytes)
                     .map_err(|error| format!("confirm exact output readback: {error:?}"))?;
             }
-            CommonProofGenerationWorkerPoll::Complete => break,
+            CommonProofGenerationWorkerPoll::Complete => {
+                if controlled_quotient_constraint_checkpoint_stop.is_some() {
+                    return Err(
+                        "generation completed after a controlled checkpoint stop was requested"
+                            .to_owned(),
+                    );
+                }
+                break;
+            }
             CommonProofGenerationWorkerPoll::Cancelled => {
-                return Err("active exact generation unexpectedly cancelled".to_owned());
+                let controlled_stop = controlled_quotient_constraint_checkpoint_stop
+                    .take()
+                    .ok_or_else(|| "active exact generation unexpectedly cancelled".to_owned())?;
+                registry
+                    .release_cancelled_generation(operation)
+                    .map_err(|error| {
+                        format!("release controlled cancelled generation: {error:?}")
+                    })?;
+                if storage.retained_secret_object_count() != 0 {
+                    return Err(
+                        "controlled checkpoint cancellation retained secret external-memory objects"
+                            .to_owned(),
+                    );
+                }
+                return Ok(
+                    CommonProofGenerationEvidenceOutcome::ControlledQuotientConstraintCheckpointStop(
+                        controlled_stop,
+                    ),
+                );
             }
         }
     }
@@ -1737,13 +1830,15 @@ fn generate_prepared_common_proof(
             "{family_label} generation retained secret external-memory objects"
         ));
     }
-    Ok(GeneratedCommonProofEvidence {
-        canonical_proof_bytes: output_chunks.into_values().flatten().collect(),
-        stream_descriptor,
-        maximum_external_memory_byte_length: storage.maximum_declared_byte_length(),
-        checkpoint_count,
-        resumed_from_checkpoint_boundary,
-    })
+    Ok(CommonProofGenerationEvidenceOutcome::Complete(
+        GeneratedCommonProofEvidence {
+            canonical_proof_bytes: output_chunks.into_values().flatten().collect(),
+            stream_descriptor,
+            maximum_external_memory_byte_length: storage.maximum_declared_byte_length(),
+            checkpoint_count,
+            resumed_from_checkpoint_boundary,
+        },
+    ))
 }
 
 fn generate_exact_same_secret_proof(
@@ -1806,7 +1901,9 @@ fn generate_exact_same_secret_proof(
         "exact aggregate-wide same-secret proof",
         checkpoint_store.as_ref(),
         retained_checkpoint.as_ref(),
+        false,
     )
+    .and_then(CommonProofGenerationEvidenceOutcome::require_complete)
 }
 
 fn prepare_exact_same_secret_common_proof(
@@ -1861,7 +1958,8 @@ fn prepare_exact_same_secret_common_proof(
 fn generate_vss_prerequisite_proof(
     evidence_sources: &ProductionVssPrerequisiteEvidenceSources,
     checkpoint_resume_enabled: bool,
-) -> Result<(GeneratedCommonProofEvidence, Vec<u8>), String> {
+    stop_after_quotient_constraint_checkpoint: bool,
+) -> Result<(CommonProofGenerationEvidenceOutcome, Vec<u8>), String> {
     let (fresh_prepared, canonical_application_statement_bytes) =
         prepare_production_vss_prerequisite_generation(evidence_sources)?;
     let checkpoint_store = checkpoint_resume_enabled
@@ -1918,6 +2016,7 @@ fn generate_vss_prerequisite_proof(
         "selected VSS prerequisite proof",
         checkpoint_store.as_ref(),
         retained_checkpoint.as_ref(),
+        stop_after_quotient_constraint_checkpoint,
     )?;
     Ok((generated, canonical_application_statement_bytes))
 }
@@ -2828,11 +2927,52 @@ fn exact_vss_prerequisite_proof_round_trip() {
     let started_at = Instant::now();
     let checkpoint_resume_enabled =
         runner_enabled_checkpoint_resume().expect("read guarded checkpoint-resume ownership");
+    let stop_after_quotient_constraint_checkpoint =
+        runner_requested_stop_after_quotient_constraint_checkpoint()
+            .expect("read runner-owned quotient checkpoint stop request");
+    assert!(
+        checkpoint_resume_enabled || !stop_after_quotient_constraint_checkpoint,
+        "a controlled quotient checkpoint stop requires authenticated checkpoint custody",
+    );
     let evidence_sources =
         production_vss_prerequisite_sources().expect("production VSS prerequisite runtime source");
-    let (generated_proof, canonical_application_statement_bytes) =
-        generate_vss_prerequisite_proof(&evidence_sources, checkpoint_resume_enabled)
-            .expect("generate production VSS prerequisite proof");
+    let (generation_outcome, canonical_application_statement_bytes) =
+        generate_vss_prerequisite_proof(
+            &evidence_sources,
+            checkpoint_resume_enabled,
+            stop_after_quotient_constraint_checkpoint,
+        )
+        .expect("generate production VSS prerequisite proof");
+    let generated_proof = match generation_outcome {
+        CommonProofGenerationEvidenceOutcome::Complete(generated_proof) => {
+            assert!(
+                !stop_after_quotient_constraint_checkpoint,
+                "the requested quotient checkpoint stop was not reached",
+            );
+            generated_proof
+        }
+        CommonProofGenerationEvidenceOutcome::ControlledQuotientConstraintCheckpointStop(
+            controlled_stop,
+        ) => {
+            let record = serde_json::json!({
+                "authenticatedAfterWrite": true,
+                "cancellationCompleted": true,
+                "checkpointByteLength": controlled_stop.checkpoint_byte_length,
+                "completedConstraintCount": controlled_stop.completed_constraint_count,
+                "elapsedMilliseconds": controlled_stop.elapsed_milliseconds,
+                "familyIdentifier": "selected-vss-prerequisite-proof",
+                "maximumDeclaredExternalMemoryByteLength": controlled_stop
+                    .maximum_external_memory_byte_length,
+                "resumedFromAuthenticatedBoundary": controlled_stop
+                    .resumed_from_checkpoint_boundary,
+                "standardCheckpointCount": controlled_stop.standard_checkpoint_count,
+            });
+            eprintln!("{CONTROLLED_QUOTIENT_CONSTRAINT_CHECKPOINT_STOP_OUTPUT_PREFIX}{record}");
+            release_production_same_secret_authority(evidence_sources.authority_handle)
+                .expect("release production VSS prerequisite runtime authority after stop");
+            return;
+        }
+    };
     eprintln!(
         "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, resumed from {:?}, {:?}",
         generated_proof.canonical_proof_bytes.len(),
@@ -2878,8 +3018,12 @@ fn exact_aggregate_wide_same_secret_proof_round_trip() {
     let (vss_proof, vss_canonical_application_statement_bytes) = generate_vss_prerequisite_proof(
         &evidence_sources.vss_prerequisite,
         checkpoint_resume_enabled,
+        false,
     )
     .expect("generate production VSS prerequisite proof");
+    let vss_proof = vss_proof
+        .require_complete()
+        .expect("the aggregate prerequisite proof must complete");
     eprintln!(
         "selected VSS prerequisite proof generated: {} bytes, {} peak declared external bytes, {} checkpoints, resumed from {:?}, {:?}",
         vss_proof.canonical_proof_bytes.len(),

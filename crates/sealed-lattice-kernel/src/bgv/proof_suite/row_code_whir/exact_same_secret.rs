@@ -122,6 +122,9 @@ const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 4;
 const RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE: &str =
     "SEALED_LATTICE_RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME";
 #[cfg(all(test, not(target_arch = "wasm32")))]
+const RUST_PROOF_EVIDENCE_STOP_AFTER_QUOTIENT_CONSTRAINT_CHECKPOINT_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_RUST_PROOF_EVIDENCE_STOP_AFTER_QUOTIENT_CONSTRAINT_CHECKPOINT";
+#[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_SAME_SECRET_CHECKPOINT_LINEAGE_IDENTIFIER: [u8; 32] = [0x71; 32];
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const VSS_PREREQUISITE_CHECKPOINT_LINEAGE_IDENTIFIER: [u8; 32] = [0x73; 32];
@@ -1473,18 +1476,35 @@ fn release_production_same_secret_authority(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-fn exact_same_secret_evidence_checkpoint_resume_enabled() -> Result<bool, String> {
-    match std::env::var(RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE) {
+fn exact_same_secret_evidence_runner_boolean(
+    environment_variable_name: &str,
+) -> Result<bool, String> {
+    match std::env::var(environment_variable_name) {
         Ok(value) if value == "1" => Ok(true),
         Ok(value) if value == "0" => Ok(false),
         Ok(value) => Err(format!(
-            "{RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} has unsupported value {value:?}"
+            "{environment_variable_name} has unsupported value {value:?}"
         )),
         Err(std::env::VarError::NotPresent) => Ok(false),
-        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
-            "{RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} is not Unicode"
-        )),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(format!("{environment_variable_name} is not Unicode"))
+        }
     }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn exact_same_secret_evidence_checkpoint_resume_enabled() -> Result<bool, String> {
+    exact_same_secret_evidence_runner_boolean(
+        RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE,
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn exact_same_secret_evidence_stop_after_quotient_constraint_checkpoint_requested()
+-> Result<bool, String> {
+    exact_same_secret_evidence_runner_boolean(
+        RUST_PROOF_EVIDENCE_STOP_AFTER_QUOTIENT_CONSTRAINT_CHECKPOINT_ENVIRONMENT_VARIABLE,
+    )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

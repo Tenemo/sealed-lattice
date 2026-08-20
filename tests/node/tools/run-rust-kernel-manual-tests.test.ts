@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
     buildManualRustKernelEnvironment,
+    controlledQuotientConstraintCheckpointStopOutputPrefix,
+    parseControlledQuotientConstraintCheckpointStopOutput,
+    parseManualRustKernelArguments,
     preflightAndRunManualRustKernelLane,
     rustProofEvidenceCheckpointResumeEnvironmentVariable,
+    rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable,
+    stopAfterQuotientConstraintCheckpointArgument,
 } from '#tools/ci/run-rust-kernel-manual-tests';
 import {
     fullProfileEvidenceRustTests,
@@ -13,6 +18,7 @@ import {
     resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     validateFocusedRustLaneSelection,
+    vssPrerequisiteProofEvidenceRustTest,
     vssFusedRadix51ProjectionOwnerRustFilter,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -224,6 +230,108 @@ describe('manual Rust kernel preflight', () => {
                 targetDirectoryPath: 'phase-liveness-target',
             })[rustProofEvidenceCheckpointResumeEnvironmentVariable],
         ).toBeUndefined();
+        expect(
+            environment[
+                rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable
+            ],
+        ).toBeUndefined();
+    });
+
+    it('owns a controlled quotient-constraint stop only for the focused VSS proof', () => {
+        expect(
+            parseManualRustKernelArguments([
+                'rust-proof-evidence',
+                '--',
+                'exact_vss_prerequisite_proof_round_trip',
+                stopAfterQuotientConstraintCheckpointArgument,
+            ]),
+        ).toEqual({
+            focusedFilter: 'exact_vss_prerequisite_proof_round_trip',
+            lane: 'rust-proof-evidence',
+            stopAfterQuotientConstraintCheckpoint: true,
+        });
+        const environment = buildManualRustKernelEnvironment({
+            baseEnvironment: {
+                [rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable]:
+                    'hostile-inherited-value',
+            },
+            lane: 'rust-proof-evidence',
+            stopAfterQuotientConstraintCheckpoint: true,
+            targetDirectoryPath: 'proof-evidence-target',
+        });
+        expect(environment).toMatchObject({
+            [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '1',
+            [rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable]:
+                '1',
+        });
+        expect(() =>
+            parseManualRustKernelArguments([
+                'rust-proof-evidence',
+                'exact_aggregate_wide_same_secret_proof_round_trip',
+                stopAfterQuotientConstraintCheckpointArgument,
+            ]),
+        ).toThrow('requires the focused production VSS prerequisite proof');
+        expect(() =>
+            parseManualRustKernelArguments([
+                'rust-proof-evidence',
+                stopAfterQuotientConstraintCheckpointArgument,
+            ]),
+        ).toThrow('requires the focused production VSS prerequisite proof');
+        expect(() =>
+            buildManualRustKernelEnvironment({
+                lane: 'rust-measurements',
+                stopAfterQuotientConstraintCheckpoint: true,
+                targetDirectoryPath: 'measurement-target',
+            }),
+        ).toThrow('Only the Rust proof-evidence lane');
+        expect(vssPrerequisiteProofEvidenceRustTest).toContain(
+            'exact_vss_prerequisite_proof_round_trip',
+        );
+    });
+
+    it('requires one authenticated and cancelled controlled-stop record', () => {
+        const record = {
+            authenticatedAfterWrite: true,
+            cancellationCompleted: true,
+            checkpointByteLength: 5_193,
+            completedConstraintCount: 64,
+            elapsedMilliseconds: 81_245,
+            familyIdentifier: 'selected-vss-prerequisite-proof',
+            maximumDeclaredExternalMemoryByteLength: 587_202_560,
+            resumedFromAuthenticatedBoundary: 1,
+            standardCheckpointCount: 2,
+        };
+        const encodedRecord = `${controlledQuotientConstraintCheckpointStopOutputPrefix}${JSON.stringify(record)}`;
+        expect(
+            parseControlledQuotientConstraintCheckpointStopOutput(
+                `timestamp [stdout] ${encodedRecord}\n`,
+            ),
+        ).toEqual(record);
+        expect(() =>
+            parseControlledQuotientConstraintCheckpointStopOutput(
+                `${encodedRecord}\n${encodedRecord}\n`,
+            ),
+        ).toThrow('exactly one terminal record');
+        expect(() =>
+            parseControlledQuotientConstraintCheckpointStopOutput(
+                `${controlledQuotientConstraintCheckpointStopOutputPrefix}${JSON.stringify(
+                    {
+                        ...record,
+                        authenticatedAfterWrite: false,
+                    },
+                )}\n`,
+            ),
+        ).toThrow('wrong terminal classification');
+        expect(() =>
+            parseControlledQuotientConstraintCheckpointStopOutput(
+                `${controlledQuotientConstraintCheckpointStopOutputPrefix}${JSON.stringify(
+                    {
+                        ...record,
+                        trailingProducerClaim: 'ignored',
+                    },
+                )}\n`,
+            ),
+        ).toThrow('wrong fields');
     });
 
     it('expands a broad proof-evidence filter only to registered exact tests', async () => {

@@ -89,9 +89,12 @@ export const phaseLivenessEvidenceRustTests = [
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_row_code_whir_accounting_records_every_soft_variance_and_absolute_headroom',
 ] as const;
 
+export const vssPrerequisiteProofEvidenceRustTest =
+    'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_vss_prerequisite_proof_round_trip';
+
 export const proofEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::exact_same_secret::tests::exact_same_secret_checkpoint_phases_are_self_owned',
-    'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_vss_prerequisite_proof_round_trip',
+    vssPrerequisiteProofEvidenceRustTest,
     'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_aggregate_wide_same_secret_proof_round_trip',
 ] as const;
 
