@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { preflightAndRunManualRustKernelLane } from '#tools/ci/run-rust-kernel-manual-tests';
+import {
+    buildManualRustKernelEnvironment,
+    preflightAndRunManualRustKernelLane,
+    rustProofEvidenceCheckpointResumeEnvironmentVariable,
+} from '#tools/ci/run-rust-kernel-manual-tests';
 import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    proofEvidenceRustTests,
     resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     validateFocusedRustLaneSelection,
@@ -79,6 +84,30 @@ describe('manual Rust kernel preflight', () => {
         expect(guardedExecutorCallCount).toBe(0);
     });
 
+    it('refuses duplicate registry entries before inventory or execution', async () => {
+        const duplicateTestName = proofEvidenceRustTests[0];
+        let guardedExecutorCallCount = 0;
+        let verifierCallCount = 0;
+
+        await expect(
+            preflightAndRunManualRustKernelLane({
+                configuredTestNames: [duplicateTestName, duplicateTestName],
+                lane: 'rust-proof-evidence',
+                runGuardedCommands: () => {
+                    guardedExecutorCallCount += 1;
+                    return Promise.resolve();
+                },
+                verifyLaneSelection: () => {
+                    verifierCallCount += 1;
+                    return Promise.resolve();
+                },
+            }),
+        ).rejects.toThrow('duplicate configured Rust tests');
+
+        expect(verifierCallCount).toBe(0);
+        expect(guardedExecutorCallCount).toBe(0);
+    });
+
     it('refuses a focused filter outside the exact registry before inventory or execution', async () => {
         let guardedExecutorCallCount = 0;
         let verifierCallCount = 0;
@@ -103,7 +132,7 @@ describe('manual Rust kernel preflight', () => {
         expect(guardedExecutorCallCount).toBe(0);
     });
 
-    it('resolves a focused libtest substring from the exact registry without compiling an inventory', async () => {
+    it('resolves a focused substring to its exact registered test without compiling an inventory', async () => {
         const focusedFilter = 'static_resource_accounting_emits_run_attachment';
         const verifiedTestFilters: string[] = [];
         let executedTestFilters: readonly string[] = [];
@@ -123,7 +152,11 @@ describe('manual Rust kernel preflight', () => {
         });
 
         expect(verifiedTestFilters).toEqual([]);
-        expect(executedTestFilters).toEqual([focusedFilter]);
+        expect(executedTestFilters).toEqual([
+            measurementRustTests.find((testName) =>
+                testName.includes(focusedFilter),
+            ),
+        ]);
     });
 
     it('keeps complete phase-liveness closure in its guarded registry', async () => {
@@ -145,6 +178,69 @@ describe('manual Rust kernel preflight', () => {
 
         expect(verifiedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
         expect(executedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
+    });
+
+    it('owns resumable exact proofs in one serialized guarded registry', async () => {
+        const environment = buildManualRustKernelEnvironment({
+            baseEnvironment: {
+                [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '0',
+            },
+            lane: 'rust-proof-evidence',
+            targetDirectoryPath: 'proof-evidence-target',
+        });
+        expect(environment).toMatchObject({
+            CARGO_BUILD_JOBS: '1',
+            CARGO_TARGET_DIR: 'proof-evidence-target',
+            RAYON_NUM_THREADS: '1',
+            [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '1',
+            SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
+        });
+
+        const verifiedTestFilters: string[] = [];
+        let executedTestFilters: readonly string[] = [];
+        await preflightAndRunManualRustKernelLane({
+            configuredTestNames: proofEvidenceRustTests,
+            environment,
+            lane: 'rust-proof-evidence',
+            runGuardedCommands: (testFilters) => {
+                executedTestFilters = testFilters;
+                return Promise.resolve();
+            },
+            verifyLaneSelection: (input) => {
+                verifiedTestFilters.push(input.testFilter);
+                expect(input.environment).toBe(environment);
+                return Promise.resolve();
+            },
+        });
+
+        expect(verifiedTestFilters).toEqual(proofEvidenceRustTests);
+        expect(executedTestFilters).toEqual(proofEvidenceRustTests);
+        expect(
+            buildManualRustKernelEnvironment({
+                baseEnvironment: {
+                    [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '1',
+                },
+                lane: 'rust-phase-liveness-evidence',
+                targetDirectoryPath: 'phase-liveness-target',
+            })[rustProofEvidenceCheckpointResumeEnvironmentVariable],
+        ).toBeUndefined();
+    });
+
+    it('expands a broad proof-evidence filter only to registered exact tests', async () => {
+        let executedTestFilters: readonly string[] = [];
+        await preflightAndRunManualRustKernelLane({
+            configuredTestNames: proofEvidenceRustTests,
+            focusedFilter: 'exact_',
+            lane: 'rust-proof-evidence',
+            runGuardedCommands: (testFilters) => {
+                executedTestFilters = testFilters;
+                return Promise.resolve();
+            },
+            verifyLaneSelection: () =>
+                Promise.reject(new Error('Focused inventory must not run.')),
+        });
+
+        expect(executedTestFilters).toEqual(proofEvidenceRustTests);
     });
 
     it('preflights every theorem test under the theorem-only Cargo feature', async () => {
@@ -225,7 +321,11 @@ describe('manual Rust kernel preflight', () => {
 
         expect(verifierCallCount).toBe(0);
         expect(executedTestFilters).toEqual([
-            'selected_authenticated_scratch_record_codec',
+            measurementRustTests.find((testName) =>
+                testName.includes(
+                    'selected_authenticated_scratch_record_codec',
+                ),
+            ),
         ]);
     });
 

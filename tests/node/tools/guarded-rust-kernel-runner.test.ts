@@ -31,6 +31,7 @@ describe('Guarded Rust kernel runner', () => {
         expect(environment.SEALED_LATTICE_TEST_CHECKPOINT_ROOT).toBeUndefined();
 
         const command = buildGuardedRustKernelCommand('exact_test', {
+            baseEnvironment: { RUNNER_OWNED_BOUNDARY: 'enabled' },
             logFileSlug: 'exact-test',
             progressLabel: 'exact-test',
             runName: 'Exact test',
@@ -38,6 +39,7 @@ describe('Guarded Rust kernel runner', () => {
         });
         expect(command.command.args).toContain('--include-ignored');
         expect(command.command.args).not.toContain('--skip');
+        expect(command.command.env?.RUNNER_OWNED_BOUNDARY).toBe('enabled');
 
         const featureGatedCommand = buildGuardedRustKernelCommand(
             'theorem_test',

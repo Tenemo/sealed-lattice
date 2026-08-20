@@ -136,12 +136,13 @@ ceremony or supported-phone qualification.
   fail-closed rather than accepting a producer-supplied status or qualification
   field.
 - The guarded heavy Rust compact-proof fixture is produced and consumed by one
-  owning test. The native exact same-secret source, base-and-auxiliary, and
-  quotient checkpoint gates are also sequenced explicitly by one owning test,
-  so neither path depends on ignored-test name order or an artifact created by
-  an independently selected test.
+  owning test. The native exact same-secret source, base-and-auxiliary, quotient,
+  VSS prerequisite, and aggregate proof gates have a separate guarded manual
+  proof-evidence registry. Each test owns its prerequisites, so neither path
+  depends on ignored-test name order or an artifact created by an independently
+  selected test.
 - Exact aggregate source preparation contains 112 expensive VSS
-  committed-material constructions. The native heavy-evidence runner seals
+  committed-material constructions. The native proof-evidence runner seals
   each completed material in an encrypted, deterministic, source-bound
   checkpoint after positive authentication. One uninterrupted source run
   produced all 112 materials in 5,702,861 ms and completed source preparation
@@ -175,8 +176,10 @@ ceremony or supported-phone qualification.
   later authenticated boundary, and exact external-memory continuation. No
   production run has yet persisted and restored a quotient-constraint state.
   These are test-only native evidence boundaries, not release-WebAssembly or
-  browser checkpoints. The evidence baseline remains open, and the measured
-  multi-hour phases cannot remain in the 110-minute routine heavy job.
+  browser checkpoints. The evidence baseline remains open. The measured
+  multi-hour phases are excluded from the 110-minute routine heavy job and are
+  owned by `pnpm run test:rust:kernel:proof-evidence`, which enables their
+  authenticated checkpoint-resume protocol explicitly.
 - There is no complete production compact generation-and-verification
   release-WebAssembly ABI pair. The release transport validator checks
   canonical structure, transcript chronology, derived queries, and Merkle
@@ -275,9 +278,10 @@ pnpm run test:rust:kernel
 pnpm run smoke:pack:npm
 ```
 
-Proof-heavy evidence belongs in separate guarded runners and is intended to be
-excluded from routine commands. Multi-minute construction-geometry and theorem
-tests have an explicitly registered, serialized evidence lane. Follow the
+Proof-heavy evidence belongs in separate guarded runners and is excluded from
+routine commands. Multi-minute construction-geometry and theorem tests have
+explicitly registered, serialized evidence lanes. The multi-hour exact native
+proof flow is owned by `pnpm run test:rust:kernel:proof-evidence`; follow the
 repository instructions when changing proof or setup code.
 
 ## License

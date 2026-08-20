@@ -119,8 +119,8 @@ const SOURCE_CATALOG_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/sou
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 4;
 #[cfg(all(test, not(target_arch = "wasm32")))]
-const RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE: &str =
-    "SEALED_LATTICE_RUST_HEAVY_CHECKPOINT_RESUME";
+const RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME";
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const EXACT_SAME_SECRET_CHECKPOINT_LINEAGE_IDENTIFIER: [u8; 32] = [0x71; 32];
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1474,15 +1474,15 @@ fn release_production_same_secret_authority(
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn exact_same_secret_evidence_checkpoint_resume_enabled() -> Result<bool, String> {
-    match std::env::var(RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE) {
+    match std::env::var(RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE) {
         Ok(value) if value == "1" => Ok(true),
         Ok(value) if value == "0" => Ok(false),
         Ok(value) => Err(format!(
-            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} has unsupported value {value:?}"
+            "{RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} has unsupported value {value:?}"
         )),
         Err(std::env::VarError::NotPresent) => Ok(false),
         Err(std::env::VarError::NotUnicode(_)) => Err(format!(
-            "{RUST_HEAVY_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} is not Unicode"
+            "{RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME_ENVIRONMENT_VARIABLE} is not Unicode"
         )),
     }
 }
@@ -3902,7 +3902,7 @@ mod tests {
 
     #[test]
     #[ignore = "manual self-owned exact same-secret checkpoint phase gate"]
-    fn heavy_rust_kernel_exact_same_secret_checkpoint_phases_are_self_owned() {
+    fn exact_same_secret_checkpoint_phases_are_self_owned() {
         generate_exact_production_source_checkpoint();
         generate_exact_base_and_auxiliary_phase_checkpoints();
         generate_exact_masked_quotient_phase_checkpoint();

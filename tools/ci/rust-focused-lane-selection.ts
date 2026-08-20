@@ -89,6 +89,12 @@ export const phaseLivenessEvidenceRustTests = [
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_row_code_whir_accounting_records_every_soft_variance_and_absolute_headroom',
 ] as const;
 
+export const proofEvidenceRustTests = [
+    'bgv::proof_suite::row_code_whir::exact_same_secret::tests::exact_same_secret_checkpoint_phases_are_self_owned',
+    'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_vss_prerequisite_proof_round_trip',
+    'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_aggregate_wide_same_secret_proof_round_trip',
+] as const;
+
 export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::aggregate_wide_hiding::tests::aggregate_wide_masking_certificate_refuses_every_load_bearing_mutation',
     'bgv::proof_suite::row_code_whir::aggregate_wide_hiding::tests::selected_aggregate_wide_masking_certificate_closes_every_generic_obligation',
@@ -133,6 +139,7 @@ type FocusedRustLane =
     | 'rust-kernel-heavy'
     | 'rust-measurements'
     | 'rust-phase-liveness-evidence'
+    | 'rust-proof-evidence'
     | 'rust-theorem-evidence';
 
 export const focusedRustLaneScripts = {
@@ -141,6 +148,7 @@ export const focusedRustLaneScripts = {
     'rust-kernel-heavy': 'test:rust:kernel:heavy',
     'rust-measurements': 'test:rust:kernel:measurements',
     'rust-phase-liveness-evidence': 'test:rust:kernel:phase-liveness-evidence',
+    'rust-proof-evidence': 'test:rust:kernel:proof-evidence',
     'rust-theorem-evidence': 'test:rust:kernel:theorem-evidence',
 } as const satisfies Record<FocusedRustLane, string>;
 
@@ -149,6 +157,7 @@ const measurementTestSet = new Set<string>(measurementRustTests);
 const phaseLivenessEvidenceTestSet = new Set<string>(
     phaseLivenessEvidenceRustTests,
 );
+const proofEvidenceTestSet = new Set<string>(proofEvidenceRustTests);
 const theoremEvidenceTestSet = new Set<string>(theoremEvidenceRustTests);
 const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     const lanes: FocusedRustLane[] = [];
@@ -163,6 +172,9 @@ const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     }
     if (phaseLivenessEvidenceTestSet.has(test.testName)) {
         lanes.push('rust-phase-liveness-evidence');
+    }
+    if (proofEvidenceTestSet.has(test.testName)) {
+        lanes.push('rust-proof-evidence');
     }
     if (theoremEvidenceTestSet.has(test.testName)) {
         lanes.push('rust-theorem-evidence');

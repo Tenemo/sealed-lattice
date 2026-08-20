@@ -103,6 +103,7 @@ const cargoTestArgumentsForGuardedRustFilter = (
 export const buildGuardedRustKernelCommand = (
     testFilter: string,
     input: {
+        readonly baseEnvironment?: NodeJS.ProcessEnv;
         readonly logFileSlug: string;
         readonly progressLabel: string;
         readonly runName: string;
@@ -123,6 +124,9 @@ export const buildGuardedRustKernelCommand = (
             command: 'cargo',
             description: `cargo test ${testFilter} (guarded)`,
             env: buildGuardedRustEnvironment({
+                ...(input.baseEnvironment === undefined
+                    ? {}
+                    : { baseEnvironment: input.baseEnvironment }),
                 targetDirectoryPath: input.targetDirectoryPath,
             }),
             logFileSlug: input.logFileSlug,

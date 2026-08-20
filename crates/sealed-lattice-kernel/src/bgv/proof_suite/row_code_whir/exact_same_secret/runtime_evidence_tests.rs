@@ -2714,7 +2714,7 @@ fn quotient_constraint_checkpoint_custody_replaces_and_binds_state() {
 
 #[test]
 #[ignore = "manual focused production VSS prerequisite proof round trip"]
-fn heavy_rust_kernel_exact_vss_prerequisite_proof_round_trip() {
+fn exact_vss_prerequisite_proof_round_trip() {
     let started_at = Instant::now();
     let checkpoint_resume_enabled =
         runner_enabled_checkpoint_resume().expect("read guarded checkpoint-resume ownership");
@@ -2759,7 +2759,7 @@ fn heavy_rust_kernel_exact_vss_prerequisite_proof_round_trip() {
 
 #[test]
 #[ignore = "manual exact aggregate-wide production proof round trip"]
-fn heavy_rust_kernel_exact_aggregate_wide_same_secret_proof_round_trip() {
+fn exact_aggregate_wide_same_secret_proof_round_trip() {
     let started_at = Instant::now();
     let checkpoint_resume_enabled =
         runner_enabled_checkpoint_resume().expect("read guarded checkpoint-resume ownership");

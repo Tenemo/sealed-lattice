@@ -16,6 +16,7 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    proofEvidenceRustTests,
     resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     vssFusedRadix51ProjectionOwnerRustFilter,
@@ -27,15 +28,20 @@ const manualRustKernelTests = {
     'rust-full-profile-evidence': fullProfileEvidenceRustTests,
     'rust-measurements': measurementRustTests,
     'rust-phase-liveness-evidence': phaseLivenessEvidenceRustTests,
+    'rust-proof-evidence': proofEvidenceRustTests,
     'rust-theorem-evidence': theoremEvidenceRustTests,
 } as const;
 
-type ManualRustKernelLane = keyof typeof manualRustKernelTests;
+export type ManualRustKernelLane = keyof typeof manualRustKernelTests;
+
+export const rustProofEvidenceCheckpointResumeEnvironmentVariable =
+    'SEALED_LATTICE_RUST_PROOF_EVIDENCE_CHECKPOINT_RESUME';
 
 const laneLabels = {
     'rust-full-profile-evidence': 'Rust full-profile evidence',
     'rust-measurements': 'Rust measurements',
     'rust-phase-liveness-evidence': 'Rust phase-liveness evidence',
+    'rust-proof-evidence': 'Rust proof evidence',
     'rust-theorem-evidence': 'Rust theorem evidence',
 } as const satisfies Record<ManualRustKernelLane, string>;
 
@@ -43,6 +49,7 @@ const laneCargoFeatures = {
     'rust-full-profile-evidence': [],
     'rust-measurements': ['primitive-measurement-evidence'],
     'rust-phase-liveness-evidence': [],
+    'rust-proof-evidence': [],
     'rust-theorem-evidence': ['theorem-evidence'],
 } as const satisfies Record<ManualRustKernelLane, readonly string[]>;
 
@@ -66,6 +73,14 @@ const resolveManualRustKernelTestFilters = (input: {
     const requestedScript = focusedRustLaneScripts[input.lane];
     if (input.configuredTestNames.length === 0) {
         throw new Error(`${requestedScript} has no configured Rust tests.`);
+    }
+    if (
+        new Set(input.configuredTestNames).size !==
+        input.configuredTestNames.length
+    ) {
+        throw new Error(
+            `${requestedScript} has duplicate configured Rust tests.`,
+        );
     }
     const focusedFilter = input.focusedFilter;
     if (focusedFilter === undefined) {
@@ -93,17 +108,37 @@ const resolveManualRustKernelTestFilters = (input: {
         }
         return selectedTests;
     }
-    if (
-        !input.configuredTestNames.some((testName) =>
-            testName.includes(focusedFilter),
-        )
-    ) {
+    const selectedTests = input.configuredTestNames.filter((testName) =>
+        testName.includes(focusedFilter),
+    );
+    if (selectedTests.length === 0) {
         throw new Error(
             `${requestedScript} filter ${focusedFilter} selects zero configured Rust tests.`,
         );
     }
 
-    return [focusedFilter];
+    return selectedTests;
+};
+
+export const buildManualRustKernelEnvironment = (input: {
+    readonly baseEnvironment?: NodeJS.ProcessEnv;
+    readonly lane: ManualRustKernelLane;
+    readonly targetDirectoryPath: string;
+}): NodeJS.ProcessEnv => {
+    const baseEnvironment = { ...(input.baseEnvironment ?? process.env) };
+    delete baseEnvironment[
+        rustProofEvidenceCheckpointResumeEnvironmentVariable
+    ];
+    if (input.lane === 'rust-proof-evidence') {
+        baseEnvironment[rustProofEvidenceCheckpointResumeEnvironmentVariable] =
+            '1';
+        baseEnvironment.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE = '1';
+    }
+
+    return buildGuardedRustEnvironment({
+        baseEnvironment,
+        targetDirectoryPath: input.targetDirectoryPath,
+    });
 };
 
 export const preflightAndRunManualRustKernelLane = async (input: {
@@ -171,7 +206,7 @@ const parseArguments = (
     );
     if (!(rawLane !== undefined && rawLane in manualRustKernelTests)) {
         throw new Error(
-            'The guarded manual Rust runner requires lane rust-full-profile-evidence, rust-measurements, rust-phase-liveness-evidence, or rust-theorem-evidence.',
+            'The guarded manual Rust runner requires lane rust-full-profile-evidence, rust-measurements, rust-phase-liveness-evidence, rust-proof-evidence, or rust-theorem-evidence.',
         );
     }
     const lane = rawLane as ManualRustKernelLane;
@@ -228,7 +263,8 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 'target',
                 `${parsed.lane}-${parsed.focusedFilter === undefined ? 'accelerated' : 'focused'}`,
             );
-            const environment = buildGuardedRustEnvironment({
+            const environment = buildManualRustKernelEnvironment({
+                lane: parsed.lane,
                 targetDirectoryPath,
             });
             const processMemoryGuardVerificationExitCode =
@@ -269,6 +305,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                         builtCommand: buildGuardedRustKernelCommand(
                             testFilter,
                             {
+                                baseEnvironment: environment,
                                 logFileSlug: `cargo-test-${parsed.lane}`,
                                 progressLabel: parsed.lane,
                                 runName: label,

@@ -4,7 +4,6 @@ import {
     buildRustKernelHeavyProcessMemoryGuardVerificationCommand,
     buildRustKernelHeavyTestCommand,
     parseRustKernelHeavyArguments,
-    rustKernelHeavyCheckpointResumeEnvironmentVariable,
 } from '#tools/ci/run-rust-kernel-heavy-tests';
 import {
     cargoTestArgumentsForRustKernelHeavy,
@@ -15,7 +14,6 @@ describe('Rust kernel heavy runner', () => {
     it('owns only ignored tests under the heavy prefix by default', () => {
         const parsed = parseRustKernelHeavyArguments([]);
         expect(parsed.testFilter).toBe(heavyRustKernelTestNamePrefix);
-        expect(parsed.resumeCheckpoints).toBe(false);
 
         const arguments_ = cargoTestArgumentsForRustKernelHeavy(
             parsed.testFilter,
@@ -33,42 +31,18 @@ describe('Rust kernel heavy runner', () => {
                 'heavy_rust_kernel_expensive_relation.rs',
             ]),
         ).toEqual({
-            resumeCheckpoints: false,
             testFilter: 'heavy_rust_kernel_expensive_relation',
         });
     });
 
-    it('owns explicit checkpoint resume independently of filter position', () => {
-        expect(
-            parseRustKernelHeavyArguments([
-                '--resume-checkpoints',
-                '--',
-                'heavy_rust_kernel_expensive_relation.rs',
-            ]),
-        ).toEqual({
-            resumeCheckpoints: true,
-            testFilter: 'heavy_rust_kernel_expensive_relation',
-        });
-        expect(
-            parseRustKernelHeavyArguments([
-                'heavy_rust_kernel_expensive_relation',
-                '--resume-checkpoints',
-            ]),
-        ).toEqual({
-            resumeCheckpoints: true,
-            testFilter: 'heavy_rust_kernel_expensive_relation',
-        });
+    it('refuses proof-evidence checkpoint arguments outside their owning lane', () => {
         expect(() =>
-            parseRustKernelHeavyArguments([
-                '--resume-checkpoints',
-                '--resume-checkpoints',
-            ]),
-        ).toThrow(/Duplicate --resume-checkpoints/u);
+            parseRustKernelHeavyArguments(['--resume-checkpoints']),
+        ).toThrow(/Unknown argument/u);
     });
 
     it('serializes heavy tests behind the verified process-memory guard', () => {
         const command = buildRustKernelHeavyTestCommand({
-            resumeCheckpoints: true,
             testFilter: 'heavy_rust_kernel_expensive_relation',
         });
         expect(command.command).toContain(
@@ -80,15 +54,8 @@ describe('Rust kernel heavy runner', () => {
             CARGO_BUILD_JOBS: '1',
             CARGO_INCREMENTAL: '0',
             RAYON_NUM_THREADS: '1',
-            [rustKernelHeavyCheckpointResumeEnvironmentVariable]: '1',
             SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
         });
-        expect(
-            buildRustKernelHeavyTestCommand({
-                resumeCheckpoints: false,
-                testFilter: 'heavy_rust_kernel_expensive_relation',
-            }).env?.[rustKernelHeavyCheckpointResumeEnvironmentVariable],
-        ).toBe('0');
         expect(
             buildRustKernelHeavyProcessMemoryGuardVerificationCommand().args,
         ).toContain('sealed-lattice-process-memory-guard');

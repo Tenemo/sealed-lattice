@@ -5,6 +5,7 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
+    proofEvidenceRustTests,
     resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     validateCompleteRustLaneOwnership,
@@ -37,6 +38,10 @@ describe('focused Rust lane selection', () => {
                 {
                     ignored: true,
                     testName: phaseLivenessEvidenceRustTests[0],
+                },
+                {
+                    ignored: true,
+                    testName: proofEvidenceRustTests[0],
                 },
                 {
                     ignored: true,
@@ -91,6 +96,14 @@ describe('focused Rust lane selection', () => {
             (testName) =>
                 ['rust-phase-liveness-evidence', true, testName] as [
                     'rust-phase-liveness-evidence',
+                    boolean,
+                    string,
+                ],
+        ),
+        ...proofEvidenceRustTests.map(
+            (testName) =>
+                ['rust-proof-evidence', true, testName] as [
+                    'rust-proof-evidence',
                     boolean,
                     string,
                 ],
