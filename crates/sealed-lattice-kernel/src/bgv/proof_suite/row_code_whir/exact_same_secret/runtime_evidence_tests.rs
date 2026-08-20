@@ -2751,12 +2751,29 @@ fn quotient_constraint_checkpoint_custody_replaces_and_binds_state() {
         "the same quotient coordinate cannot be rebound to different state",
     );
 
-    let wrong_attempt_store = phase_checkpoint_test_store(&directory, 0x62);
+    let wrong_source_store = DurableCommonProofCheckpointStore {
+        directory: directory.path.clone(),
+        profile: store.profile,
+        stable_attempt_binding_hash: [0x62; Hash512::BYTE_LENGTH],
+        checkpoint_lineage_identifier: store.checkpoint_lineage_identifier,
+    };
+    assert!(
+        wrong_source_store
+            .load_latest_quotient_constraint_checkpoint()
+            .is_err(),
+        "another authenticated source binding cannot restore retained quotient state",
+    );
+    let wrong_attempt_store = DurableCommonProofCheckpointStore {
+        directory: directory.path.clone(),
+        profile: store.profile,
+        stable_attempt_binding_hash: [0x63; Hash512::BYTE_LENGTH],
+        checkpoint_lineage_identifier: store.checkpoint_lineage_identifier,
+    };
     assert!(
         wrong_attempt_store
             .load_latest_quotient_constraint_checkpoint()
             .is_err(),
-        "another proof attempt cannot restore retained quotient state",
+        "another proof-attempt binding cannot restore retained quotient state",
     );
     let wrong_profile_store = DurableCommonProofCheckpointStore {
         directory: directory.path.clone(),

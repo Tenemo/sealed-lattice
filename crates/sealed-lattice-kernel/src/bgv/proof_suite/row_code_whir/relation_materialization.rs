@@ -942,6 +942,9 @@ mod tests {
         let mut progress_count = 0_usize;
         let mut completed = false;
         let mut first_constraint_checkpoint = None;
+        let mut completed_constraint_checkpoint_counts = Vec::new();
+        let mut completed_constraint_count = 0_usize;
+        let mut mid_constraint_checkpoint_probe_count = 0_usize;
 
         for _ in 0..100_000 {
             match materialization
@@ -1002,6 +1005,13 @@ mod tests {
                     materialization
                         .supply_transformed_column(transform_key, vector)
                         .expect("the exact requested transform is accepted");
+                    assert_eq!(
+                        materialization
+                            .completed_constraint_checkpoint_count()
+                            .expect("valid mid-constraint transform state is not a checkpoint"),
+                        None,
+                    );
+                    mid_constraint_checkpoint_probe_count += 1;
                 }
                 RowCodeWhirQuotientMaterializationAction::ReadEvaluationRange(read_request) => {
                     evaluation_read_count += 1;
@@ -1024,11 +1034,26 @@ mod tests {
                             ),
                         )
                         .expect("the exact transformed evaluation range is accepted");
+                    assert_eq!(
+                        materialization
+                            .completed_constraint_checkpoint_count()
+                            .expect("valid mid-constraint query state is not a checkpoint"),
+                        None,
+                    );
+                    mid_constraint_checkpoint_probe_count += 1;
                 }
                 RowCodeWhirQuotientMaterializationAction::Progressed => {
+                    assert_eq!(
+                        materialization
+                            .completed_constraint_checkpoint_count()
+                            .expect("valid mid-constraint block state is not a checkpoint"),
+                        None,
+                    );
+                    mid_constraint_checkpoint_probe_count += 1;
                     progress_count += 1;
                 }
                 RowCodeWhirQuotientMaterializationAction::ConstraintCompleted => {
+                    completed_constraint_count += 1;
                     assert!(matches!(
                         materialization
                             .next_action(
@@ -1043,11 +1068,15 @@ mod tests {
                     materialization
                         .acknowledge_completed_constraint_storage_step()
                         .expect("the completed constraint storage step is acknowledged");
+                    let completed_constraint_checkpoint_count = materialization
+                        .completed_constraint_checkpoint_count()
+                        .expect("the completed constraint boundary is checked");
+                    if let Some(completed_constraint_count) = completed_constraint_checkpoint_count
+                    {
+                        completed_constraint_checkpoint_counts.push(completed_constraint_count);
+                    }
                     if first_constraint_checkpoint.is_none()
-                        && materialization
-                            .completed_constraint_checkpoint_count()
-                            .expect("the completed constraint boundary is checked")
-                            == Some(1)
+                        && completed_constraint_checkpoint_count == Some(1)
                     {
                         first_constraint_checkpoint = Some(
                             materialization
@@ -1105,6 +1134,9 @@ mod tests {
         assert_ne!(transform_request_count, 0);
         assert_ne!(evaluation_read_count, 0);
         assert_ne!(progress_count, 0);
+        assert_ne!(mid_constraint_checkpoint_probe_count, 0);
+        assert!(completed_constraint_count >= 2);
+        assert_eq!(completed_constraint_checkpoint_counts.first(), Some(&1));
         assert_eq!(actual_components, expected_components);
         assert!(matches!(
             materialization.next_action(

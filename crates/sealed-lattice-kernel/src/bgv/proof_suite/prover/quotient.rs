@@ -853,27 +853,132 @@ impl CommonProofConstraintStreamQuotientBuilder {
     }
 
     #[cfg(test)]
+    fn validate_constraint_checkpoint_probe_state(&self) -> Result<(), CommonProofProverError> {
+        let constraint_count = self.constraint_columns.len();
+        if self.constraint_queries.len() != constraint_count
+            || self.composition_challenges.len() != constraint_count
+            || self.current_constraint_ordinal > constraint_count
+            || self.quotient_evaluations.len() != self.evaluation_domain.size()
+            || self.remaining_constraint_use_counts
+                != self.remaining_constraint_use_counts_from(self.current_constraint_ordinal)?
+            || validate_seeded_transformed_columns(
+                &self.column_value_types,
+                self.evaluation_domain.size(),
+                &self.remaining_constraint_use_counts,
+                &self.transformed_columns,
+            )
+            .is_err()
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+
+        if self.current_constraint_ordinal == constraint_count {
+            if self.next_transform_column_index != 0
+                || !self.transformed_columns.is_empty()
+                || self.block_start != 0
+                || self.next_query_ordinal != 0
+                || self.next_query_logical_value_offset != 0
+                || !self.block_values_by_query.is_empty()
+            {
+                return Err(CommonProofProverError::InvalidQuotient);
+            }
+            return Ok(());
+        }
+
+        let current_columns = self
+            .constraint_columns
+            .get(self.current_constraint_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let current_queries = self
+            .constraint_queries
+            .get(self.current_constraint_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        if self.next_transform_column_index > current_columns.len()
+            || current_columns[..self.next_transform_column_index]
+                .iter()
+                .any(|column_ordinal| !self.transformed_columns.contains_key(column_ordinal))
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let all_current_columns_are_transformed = current_columns
+            .iter()
+            .all(|column_ordinal| self.transformed_columns.contains_key(column_ordinal));
+        let query_work_has_started = self.block_start != 0
+            || self.next_query_ordinal != 0
+            || self.next_query_logical_value_offset != 0
+            || !self.block_values_by_query.is_empty();
+        if (self.next_transform_column_index == current_columns.len()
+            && !all_current_columns_are_transformed)
+            || (query_work_has_started
+                && (self.next_transform_column_index != current_columns.len()
+                    || !all_current_columns_are_transformed))
+            || self.block_start > self.evaluation_domain.size()
+            || (self.block_start != self.evaluation_domain.size()
+                && !self
+                    .block_start
+                    .is_multiple_of(COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH))
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+
+        if self.block_start == self.evaluation_domain.size() {
+            if !all_current_columns_are_transformed
+                || self.next_query_ordinal != 0
+                || self.next_query_logical_value_offset != 0
+                || !self.block_values_by_query.is_empty()
+            {
+                return Err(CommonProofProverError::InvalidQuotient);
+            }
+            return Ok(());
+        }
+
+        let block_element_count = self.current_block_end()? - self.block_start;
+        if self.next_query_ordinal > current_queries.len()
+            || self.next_query_logical_value_offset >= block_element_count
+            || (self.next_query_ordinal == current_queries.len()
+                && self.next_query_logical_value_offset != 0)
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let partial_query_count = usize::from(self.next_query_logical_value_offset != 0);
+        if self.block_values_by_query.len()
+            != self
+                .next_query_ordinal
+                .checked_add(partial_query_count)
+                .ok_or(CommonProofProverError::CountOverflow)?
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        for (query_ordinal, values) in self.block_values_by_query.iter().enumerate() {
+            let expected_value_count = if query_ordinal < self.next_query_ordinal {
+                block_element_count
+            } else {
+                self.next_query_logical_value_offset
+            };
+            if values.len() != expected_value_count {
+                return Err(CommonProofProverError::InvalidQuotient);
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub(crate) fn completed_constraint_checkpoint_count(
         &self,
     ) -> Result<Option<usize>, CommonProofProverError> {
+        self.validate_constraint_checkpoint_probe_state()?;
         if self.current_constraint_ordinal == 0
             || self.current_constraint_ordinal >= self.constraint_columns.len()
         {
             return Ok(None);
         }
-        if self.next_transform_column_index != 0
-            || !self.transformed_columns.is_empty()
-            || self.block_start != 0
-            || self.next_query_ordinal != 0
-            || self.next_query_logical_value_offset != 0
-            || !self.block_values_by_query.is_empty()
-            || self.quotient_evaluations.len() != self.evaluation_domain.size()
-            || self.remaining_constraint_use_counts
-                != self.remaining_constraint_use_counts_from(self.current_constraint_ordinal)?
-        {
-            return Err(CommonProofProverError::InvalidQuotient);
-        }
-        Ok(Some(self.current_constraint_ordinal))
+        Ok((self.next_transform_column_index == 0
+            && self.transformed_columns.is_empty()
+            && self.block_start == 0
+            && self.next_query_ordinal == 0
+            && self.next_query_logical_value_offset == 0
+            && self.block_values_by_query.is_empty())
+        .then_some(self.current_constraint_ordinal))
     }
 
     #[cfg(test)]
@@ -1628,9 +1733,17 @@ impl CommonProofQuotientComponentCursor {
 #[cfg(test)]
 mod reusable_transform_tests {
     use super::{
-        BTreeMap, BTreeSet, CommonProofProverError, ExternalPolynomialVector,
-        ProofExternalMemoryObject, RelationColumnValueType, next_untransformed_column,
-        retire_constraint_local_transformed_columns, validate_seeded_transformed_columns,
+        BTreeMap, BTreeSet, CommonProofConstraintStreamQuotientBuilder, CommonProofProverError,
+        ExternalPolynomialVector, ProofChallengeExtensionElement, ProofEvaluationDomain,
+        ProofExternalMemoryObject, RelationColumnValueType, RelationPlanCheckContext,
+        next_untransformed_column, retire_constraint_local_transformed_columns,
+        validate_seeded_transformed_columns,
+    };
+    use crate::bgv::proof_suite::{
+        CollectivePublicKeyAggregatePlanInput, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+        PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement,
+        PublicAggregateRelationGeometry, ResolvedSuiteModulus, SuiteModulusReference,
+        compile_collective_public_key_aggregate_relation_plan,
     };
 
     fn transformed_vector(
@@ -1644,6 +1757,104 @@ mod reusable_transform_tests {
             element_count,
         )
         .expect("the test vector has a nonzero element count")
+    }
+
+    fn modular_product(first: u64, second: u64, modulus: u64) -> u64 {
+        ((u128::from(first) * u128::from(second)) % u128::from(modulus)) as u64
+    }
+
+    fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u64 {
+        let mut result = 1_u64;
+        while exponent > 0 {
+            if exponent & 1 == 1 {
+                result = modular_product(result, base, modulus);
+            }
+            exponent >>= 1;
+            if exponent > 0 {
+                base = modular_product(base, base, modulus);
+            }
+        }
+        result
+    }
+
+    fn checkpoint_boundary_builder() -> CommonProofConstraintStreamQuotientBuilder {
+        let relation_context = RelationPlanCheckContext {
+            base_field_modulus: PROOF_BASE_FIELD_MODULUS,
+            challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
+            evaluation_domain_generator: modular_power(
+                PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+                (1_u64 << 32) / 128,
+                PROOF_BASE_FIELD_MODULUS,
+            ),
+            evaluation_coset_offset: 7,
+            out_of_domain_point_count: 2,
+            quotient_component_count: 2,
+            quotient_component_degree_bound_exclusive: 64,
+            phase_column_query_coordinate_count: 8,
+            non_native_theta_repetition_count: 2,
+            non_native_alpha_repetition_count: 2,
+            maximum_fiat_shamir_candidate_draws_per_output: 128,
+            resolved_moduli: vec![
+                ResolvedSuiteModulus::new(SuiteModulusReference::data(0), 97),
+                ResolvedSuiteModulus::new(SuiteModulusReference::special(0), 193),
+            ],
+        };
+        let relation_plan = compile_collective_public_key_aggregate_relation_plan(
+            &CollectivePublicKeyAggregatePlanInput {
+                geometry: PublicAggregateRelationGeometry {
+                    ring_degree: 16,
+                    evaluation_domain_size: 128,
+                    opening_degree_bound_exclusive: 64,
+                    public_polynomial_column_degree_bound_exclusive: 8,
+                    participant_count: 3,
+                },
+                ordered_component_moduli: vec![
+                    SuiteModulusReference::data(0),
+                    SuiteModulusReference::special(0),
+                ],
+            },
+            &relation_context,
+        )
+        .expect("the checkpoint-probe relation compiles");
+        let variant = relation_plan
+            .select_variant(None, None)
+            .expect("the checkpoint-probe relation has one variant");
+        let evaluation_domain =
+            ProofEvaluationDomain::new(64, 7).expect("the checkpoint-probe domain is valid");
+        let composition_challenges = (0..variant.constraint_count())
+            .map(|constraint_ordinal| {
+                ProofChallengeExtensionElement::from_base(
+                    ProofBaseFieldElement::from_canonical(
+                        u64::try_from(constraint_ordinal)
+                            .expect("the checkpoint-probe constraint ordinal fits u64")
+                            + 2,
+                    )
+                    .expect("the checkpoint-probe challenge is canonical"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut builder = CommonProofConstraintStreamQuotientBuilder::new(
+            variant,
+            &relation_context,
+            evaluation_domain,
+            BTreeMap::new(),
+            Vec::new(),
+            composition_challenges,
+            8,
+        )
+        .expect("the checkpoint-probe builder initializes");
+        assert!(builder.constraint_columns.len() > 1);
+        builder.current_constraint_ordinal = 1;
+        builder.remaining_constraint_use_counts = builder
+            .remaining_constraint_use_counts_from(1)
+            .expect("the checkpoint-probe remaining uses derive");
+        assert_eq!(
+            builder
+                .completed_constraint_checkpoint_count()
+                .expect("the clean checkpoint boundary is valid"),
+            Some(1),
+        );
+        builder
     }
 
     #[test]
@@ -1792,5 +2003,57 @@ mod reusable_transform_tests {
             BTreeMap::from([(2, 1), (7, 1)])
         );
         assert_eq!(transformed_columns, BTreeMap::from([(2, first_vector)]));
+    }
+
+    #[test]
+    fn checkpoint_probe_rejects_inconsistent_stream_state() {
+        let mut invalid_transform_cursor = checkpoint_boundary_builder();
+        invalid_transform_cursor.next_transform_column_index = invalid_transform_cursor
+            .constraint_columns
+            .get(invalid_transform_cursor.current_constraint_ordinal)
+            .expect("the checkpoint-probe constraint exists")
+            .len()
+            + 1;
+        assert_eq!(
+            invalid_transform_cursor.completed_constraint_checkpoint_count(),
+            Err(CommonProofProverError::InvalidQuotient),
+        );
+
+        let mut invalid_remaining_uses = checkpoint_boundary_builder();
+        *invalid_remaining_uses
+            .remaining_constraint_use_counts
+            .values_mut()
+            .next()
+            .expect("the checkpoint-probe relation retains a column use") += 1;
+        assert_eq!(
+            invalid_remaining_uses.completed_constraint_checkpoint_count(),
+            Err(CommonProofProverError::InvalidQuotient),
+        );
+
+        let mut query_without_transforms = checkpoint_boundary_builder();
+        query_without_transforms.next_query_ordinal = 1;
+        assert_eq!(
+            query_without_transforms.completed_constraint_checkpoint_count(),
+            Err(CommonProofProverError::InvalidQuotient),
+        );
+
+        let mut wrong_quotient_geometry = checkpoint_boundary_builder();
+        wrong_quotient_geometry.quotient_evaluations.pop();
+        assert_eq!(
+            wrong_quotient_geometry.completed_constraint_checkpoint_count(),
+            Err(CommonProofProverError::InvalidQuotient),
+        );
+
+        let mut wrong_transform_geometry = checkpoint_boundary_builder();
+        let current_column_ordinal = wrong_transform_geometry.constraint_columns
+            [wrong_transform_geometry.current_constraint_ordinal][0];
+        wrong_transform_geometry.transformed_columns.insert(
+            current_column_ordinal,
+            transformed_vector(90, RelationColumnValueType::BaseField, 63),
+        );
+        assert_eq!(
+            wrong_transform_geometry.completed_constraint_checkpoint_count(),
+            Err(CommonProofProverError::InvalidQuotient),
+        );
     }
 }

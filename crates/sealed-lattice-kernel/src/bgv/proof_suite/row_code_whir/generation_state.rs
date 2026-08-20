@@ -3135,6 +3135,43 @@ pub(in crate::bgv::proof_suite) struct RowCodeWhirGenerationStateMachine {
     phase: RowCodeWhirGenerationPhase,
 }
 
+#[cfg(test)]
+fn validate_retained_quotient_transform_plan_keys(
+    completed_constraint_count: u32,
+    retained_transform_keys: impl IntoIterator<Item = CommonProofQuotientConstraintTransformKey>,
+) -> Result<(), CommonProofProverError> {
+    if completed_constraint_count == 0
+        || retained_transform_keys
+            .into_iter()
+            .any(|transform_key| transform_key.constraint_ordinal() < completed_constraint_count)
+    {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn validate_quotient_constraint_checkpoint_bindings(
+    encoded_completed_constraint_count: u32,
+    expected_completed_constraint_count: u32,
+    encoded_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
+    expected_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
+    encoded_source_replay_identity_digest: [u8; HASH_BYTE_LENGTH],
+    expected_source_replay_identity_digest: [u8; HASH_BYTE_LENGTH],
+    encoded_stable_generation_binding_hash: [u8; HASH_BYTE_LENGTH],
+    expected_stable_generation_binding_hash: [u8; HASH_BYTE_LENGTH],
+) -> Result<(), CommonProofProverError> {
+    if encoded_completed_constraint_count != expected_completed_constraint_count
+        || encoded_construction_plan_identity_hash != expected_construction_plan_identity_hash
+        || encoded_source_replay_identity_digest != expected_source_replay_identity_digest
+        || encoded_stable_generation_binding_hash != expected_stable_generation_binding_hash
+    {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+    Ok(())
+}
+
 impl RowCodeWhirGenerationStateMachine {
     pub(in crate::bgv::proof_suite) fn new(
         input: CommonProofGenerationInput<'_>,
@@ -3669,11 +3706,10 @@ impl RowCodeWhirGenerationStateMachine {
         };
         let completed_constraint_count_u32 = u32::try_from(completed_constraint_count)
             .map_err(|_| CommonProofProverError::CountOverflow)?;
-        if self.quotient_transform_plans.keys().any(|transform_key| {
-            transform_key.constraint_ordinal() < completed_constraint_count_u32
-        }) {
-            return Err(CommonProofProverError::InvalidQuotient);
-        }
+        validate_retained_quotient_transform_plan_keys(
+            completed_constraint_count_u32,
+            self.quotient_transform_plans.keys().copied(),
+        )?;
         Ok(Some(completed_constraint_count_u32))
     }
 
@@ -3814,20 +3850,23 @@ impl RowCodeWhirGenerationStateMachine {
             reader.read_exact(materialization_checkpoint_byte_length)?;
         reader.finish()?;
         if declared_total_byte_length != canonical_checkpoint_bytes.len()
-            || encoded_completed_constraint_count != completed_constraint_count
             || first_reserved_word != 0
             || second_reserved_word != 0
             || third_reserved_word != 0
-            || construction_plan_identity_hash != self.construction_plan_identity_hash
-            || source_replay_identity_digest
-                != self
-                    .source_replay_identity_digest
-                    .ok_or(CommonProofProverError::InvalidInput)?
-            || stable_generation_binding_hash
-                != self.source_request_context.stable_generation_binding_hash()
         {
             return Err(CommonProofProverError::InvalidQuotient);
         }
+        validate_quotient_constraint_checkpoint_bindings(
+            encoded_completed_constraint_count,
+            completed_constraint_count,
+            construction_plan_identity_hash,
+            self.construction_plan_identity_hash,
+            source_replay_identity_digest,
+            self.source_replay_identity_digest
+                .ok_or(CommonProofProverError::InvalidInput)?,
+            stable_generation_binding_hash,
+            self.source_request_context.stable_generation_binding_hash(),
+        )?;
 
         let materialization = self
             .quotient_materialization
@@ -8634,6 +8673,101 @@ mod tests {
             {
                 return column_request_count;
             }
+        }
+    }
+
+    #[test]
+    fn quotient_checkpoint_rejects_superseded_retained_transform_plans() {
+        assert_eq!(
+            validate_retained_quotient_transform_plan_keys(
+                2,
+                [
+                    CommonProofQuotientConstraintTransformKey::new(2, 7),
+                    CommonProofQuotientConstraintTransformKey::new(3, 11),
+                ],
+            ),
+            Ok(()),
+        );
+        assert_eq!(
+            validate_retained_quotient_transform_plan_keys(
+                2,
+                [
+                    CommonProofQuotientConstraintTransformKey::new(1, 5),
+                    CommonProofQuotientConstraintTransformKey::new(2, 7),
+                ],
+            ),
+            Err(CommonProofProverError::InvalidQuotient),
+        );
+        assert_eq!(
+            validate_retained_quotient_transform_plan_keys(
+                0,
+                [CommonProofQuotientConstraintTransformKey::new(0, 3)],
+            ),
+            Err(CommonProofProverError::InvalidQuotient),
+        );
+    }
+
+    #[test]
+    fn quotient_checkpoint_binding_rejects_wrong_source_attempt_and_plan() {
+        let completed_constraint_count = 64;
+        let construction_plan_identity_hash = [0x31; HASH_BYTE_LENGTH];
+        let source_replay_identity_digest = [0x32; HASH_BYTE_LENGTH];
+        let stable_generation_binding_hash = [0x33; HASH_BYTE_LENGTH];
+        assert_eq!(
+            validate_quotient_constraint_checkpoint_bindings(
+                completed_constraint_count,
+                completed_constraint_count,
+                construction_plan_identity_hash,
+                construction_plan_identity_hash,
+                source_replay_identity_digest,
+                source_replay_identity_digest,
+                stable_generation_binding_hash,
+                stable_generation_binding_hash,
+            ),
+            Ok(()),
+        );
+
+        let hostile_bindings = [
+            (
+                "construction plan",
+                [0x41; HASH_BYTE_LENGTH],
+                source_replay_identity_digest,
+                stable_generation_binding_hash,
+            ),
+            (
+                "source replay",
+                construction_plan_identity_hash,
+                [0x42; HASH_BYTE_LENGTH],
+                stable_generation_binding_hash,
+            ),
+            (
+                "proof attempt",
+                construction_plan_identity_hash,
+                source_replay_identity_digest,
+                [0x43; HASH_BYTE_LENGTH],
+            ),
+        ];
+        for (
+            hostile_case,
+            encoded_construction_plan_identity_hash,
+            encoded_source_replay_identity_digest,
+            encoded_stable_generation_binding_hash,
+        ) in hostile_bindings
+        {
+            assert_eq!(
+                validate_quotient_constraint_checkpoint_bindings(
+                    completed_constraint_count,
+                    completed_constraint_count,
+                    encoded_construction_plan_identity_hash,
+                    construction_plan_identity_hash,
+                    encoded_source_replay_identity_digest,
+                    source_replay_identity_digest,
+                    encoded_stable_generation_binding_hash,
+                    stable_generation_binding_hash,
+                ),
+                Err(CommonProofProverError::InvalidQuotient),
+                "the {hostile_case} mismatch must refuse",
+            );
         }
     }
 
