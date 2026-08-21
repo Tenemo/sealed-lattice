@@ -9,9 +9,9 @@
 //! authenticated compact-generation restart.
 //!
 //! The resulting 512-bit prefix digest feeds the fixed-width verifier-message
-//! seed and predecessor-linked block schedule. That concrete multi-call
-//! SHAKE256 graph still needs its separate emitted-byte QROM correspondence;
-//! this module does not equate the graph with one ideal variable-output call.
+//! schedule of independently indexed 512-bit blocks. The source and theorem
+//! correspondence for that simple-domain-extender graph is owned separately;
+//! this module does not equate concrete SHAKE256 with an ideal oracle.
 
 use std::mem::size_of;
 

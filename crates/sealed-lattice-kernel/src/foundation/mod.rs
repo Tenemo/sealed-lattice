@@ -117,13 +117,15 @@ pub(crate) use finality_runtime::{
     release_verified_evaluator_replay, release_verified_finality, retain_verified_evaluator_replay,
     verify_finality, with_verified_finality,
 };
-#[cfg(test)]
-pub(crate) use hash::canonical_foundation_tuple_hash_preimage;
 pub(crate) use hash::{
     FoundationTupleHash512BlockReader, StreamingFoundationHashError,
     StreamingFoundationTupleHash512, foundation_tuple_hash512_seeded_stream_query_count,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
+#[cfg(test)]
+pub(crate) use hash::{
+    canonical_foundation_tuple_hash_preimage, foundation_tuple_hash512_block_count,
+};
 #[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) use local_encrypted_storage::measure_common_proof_scratch_record_codec;
 pub use local_encrypted_storage::{

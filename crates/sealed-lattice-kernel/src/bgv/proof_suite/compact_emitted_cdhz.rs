@@ -34,9 +34,7 @@ use super::compact_response_merkle::{CompactResponseLeafValueKind, CompactRespon
 #[cfg(test)]
 use super::compact_transcript::COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN;
 #[cfg(test)]
-use super::fixed_uniform_verifier_message::{
-    FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN, FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN,
-};
+use super::fixed_uniform_verifier_message::FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN;
 use super::merkle::maximum_minimal_frontier_node_count;
 #[cfg(test)]
 use crate::foundation::Hash512;
@@ -64,7 +62,6 @@ pub(crate) enum CompactEmittedCdhzError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CompactCdhzRandomOracleDomains {
     pub(crate) fiat_shamir_prefix: &'static str,
-    pub(crate) verifier_message_seed: &'static str,
     pub(crate) verifier_message_block: &'static str,
     pub(crate) merkle_leaf: &'static str,
     pub(crate) merkle_parent: &'static str,
@@ -125,7 +122,6 @@ pub(crate) struct CompactEmittedCdhzRound {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactSharedHashGraphCensus {
     pub(crate) fiat_shamir_prefix_hash_count: u64,
-    pub(crate) fixed_message_seed_hash_count: u64,
     pub(crate) fixed_message_block_hash_count: u64,
     pub(crate) opened_leaf_hash_count: u64,
     pub(crate) merkle_parent_hash_count: u64,
@@ -200,8 +196,8 @@ pub(crate) struct CompactEmittedCdhzMeasurement {
     pub(crate) observed_logical_verifier_oracle_call_count: u64,
     pub(crate) logical_verifier_oracle_call_bound: u64,
     /// CDHZ `qV` after expanding the implementation's shared
-    /// fixed-512-bit SHAKE QRO graph into one prefix query, seeded-stream
-    /// seed/block queries, and response-Merkle leaf/parent queries.
+    /// fixed-512-bit SHAKE QRO graph into one prefix query, independently
+    /// indexed block queries, and response-Merkle leaf/parent queries.
     pub(crate) observed_nrdx_verifier_q_v: u64,
     pub(crate) nrdx_verifier_q_v_bound: u64,
     /// CDHZ `lmax = max_i lp_i`, in committed response-vector symbols.
@@ -318,10 +314,10 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
             .concrete_hash_query_count()
             .map_err(|_| CompactEmittedCdhzError::InvalidCensus)?;
         // `compact_fiat_shamir_round_prefix_digest` is one fixed-output SHAKE
-        // query. The fixed-message owner separately counts its seed and every
-        // predecessor-linked 512-bit block query. The CDHZ reduction defines
-        // qV as verifier query complexity, so the compound logical round is
-        // not substituted for this concrete shared-QRO census.
+        // query. The fixed-message owner separately counts every independently
+        // indexed 512-bit block query. The CDHZ reduction defines qV as
+        // verifier query complexity, so the compound logical round is not
+        // substituted for this concrete shared-QRO census.
         let round_fiat_shamir_hash_query_count = round_fixed_message_hash_query_count
             .checked_add(1)
             .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
@@ -415,12 +411,7 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         return Err(CompactEmittedCdhzError::InvalidCensus);
     }
     let ior_round_count = u64_from_usize(rounds.len())?;
-    if fixed_message_hash_query_count < ior_round_count {
-        return Err(CompactEmittedCdhzError::InvalidCensus);
-    }
-    let fixed_message_block_hash_count = fixed_message_hash_query_count
-        .checked_sub(ior_round_count)
-        .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
+    let fixed_message_block_hash_count = fixed_message_hash_query_count;
     let observed_logical_verifier_oracle_call_count =
         checked_add(ior_round_count, observed_merkle_check_query_count)?;
     let logical_verifier_oracle_call_bound =
@@ -520,7 +511,6 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
             transcript_round_salt_absorption_count: transcript_commitment_absorption_count,
             shared_hash_graph: CompactSharedHashGraphCensus {
                 fiat_shamir_prefix_hash_count: ior_round_count,
-                fixed_message_seed_hash_count: ior_round_count,
                 fixed_message_block_hash_count,
                 opened_leaf_hash_count: observed_proof_query_count,
                 merkle_parent_hash_count: observed_merkle_parent_hash_query_count,
@@ -547,7 +537,6 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
         },
         random_oracle_domains: CompactCdhzRandomOracleDomains {
             fiat_shamir_prefix: COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN,
-            verifier_message_seed: FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN,
             verifier_message_block: FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
             merkle_leaf: COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
             merkle_parent: COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
@@ -597,8 +586,7 @@ impl CompactEmittedCdhzMeasurement {
         let hash_graph = &census.shared_hash_graph;
         let expected_hash_graph_total = hash_graph
             .fiat_shamir_prefix_hash_count
-            .checked_add(hash_graph.fixed_message_seed_hash_count)
-            .and_then(|count| count.checked_add(hash_graph.fixed_message_block_hash_count))
+            .checked_add(hash_graph.fixed_message_block_hash_count)
             .and_then(|count| count.checked_add(hash_graph.opened_leaf_hash_count))
             .and_then(|count| count.checked_add(hash_graph.merkle_parent_hash_count))
             .ok_or(CompactEmittedCdhzError::ArithmeticOverflow)?;
@@ -622,13 +610,11 @@ impl CompactEmittedCdhzMeasurement {
             || census.transcript_round_salt_absorption_count
                 != expected_transcript_commitment_absorption_count
             || hash_graph.fiat_shamir_prefix_hash_count != round_count
-            || hash_graph.fixed_message_seed_hash_count != round_count
             || hash_graph.opened_leaf_hash_count != self.observed_proof_query_count
             || hash_graph.merkle_parent_hash_count != observed_parent_hash_count
             || hash_graph
                 .fiat_shamir_prefix_hash_count
-                .checked_add(hash_graph.fixed_message_seed_hash_count)
-                .and_then(|count| count.checked_add(hash_graph.fixed_message_block_hash_count))
+                .checked_add(hash_graph.fixed_message_block_hash_count)
                 != Some(concrete_fiat_shamir_hash_count)
             || hash_graph.total_hash_count != expected_hash_graph_total
             || hash_graph.total_hash_count != self.observed_nrdx_verifier_q_v
@@ -870,8 +856,8 @@ mod tests {
 
         assert_eq!(q_pi, 79_310);
         assert_eq!(merkle_check_bound, 248_467);
-        assert_eq!(concrete_fiat_shamir_calls, 181_604);
-        assert_eq!(concrete_fiat_shamir_calls + merkle_check_bound, 430_071);
+        assert_eq!(concrete_fiat_shamir_calls, 181_522);
+        assert_eq!(concrete_fiat_shamir_calls + merkle_check_bound, 429_989);
         assert_eq!(l_max, 262_144);
         assert_eq!(q_pi * u64::from(l_max.ilog2()), 1_427_580);
         assert_eq!(maximum_leaf_value_byte_length, 5_120);

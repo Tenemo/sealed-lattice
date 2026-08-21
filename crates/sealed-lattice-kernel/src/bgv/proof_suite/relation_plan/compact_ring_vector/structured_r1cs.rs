@@ -3207,7 +3207,9 @@ mod tests {
                     CompactEmittedCdhzMeasurement, measure_selected_compact_emission_cdhz,
                     measure_source_verified_compact_emission_cdhz,
                 },
+                compact_fixed_tape_domain_extension::derive_source_verified_compact_fixed_tape_domain_extension,
                 compact_fixed_tape_source_correspondence::verify_source_verified_compact_fixed_tape_correspondence,
+                compact_fixed_tape_uniformity::CompactFixedTapeUniformityPremise,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::{
                     CompactPublicInputBindings, PROOF_FIXED_HEADER_BYTE_LENGTH,
@@ -8700,14 +8702,43 @@ mod tests {
             &source_verified_measurement,
         )
         .expect("the complete fixed-output tape graph matches the source-verified transport");
+        let domain_extension_certificate =
+            derive_source_verified_compact_fixed_tape_domain_extension(
+                &fixed_tape_correspondence,
+                &source_verified_measurement,
+            )
+            .expect("the source-verified graph matches the ideal-QRO simple domain extender");
+        let fixed_tape_uniformity =
+            CompactFixedTapeUniformityPremise::from_source_verified_domain_extension(
+                &domain_extension_certificate,
+            )
+            .expect("the source-verified domain extender supplies the fixed-tape premise");
+        fixed_tape_uniformity
+            .validate_measurement(&source_verified_measurement)
+            .expect("the fixed-tape premise remains bound to the source-verified transport");
+        let (domain_extension_loss_numerator, domain_extension_loss_denominator) =
+            domain_extension_certificate.domain_extension_loss_parts();
         println!(
-            "compact public-key fixed-tape source correspondence complete logical_round_count={} prefix_hash_count={} seed_hash_count={} output_block_hash_count={} total_tape_byte_length={} maximum_output_block_count_per_round={}",
+            "compact public-key fixed-tape source correspondence complete logical_round_count={} prefix_hash_count={} output_block_hash_count={} total_tape_byte_length={} maximum_output_block_count_per_round={}",
             fixed_tape_correspondence.logical_round_count,
             fixed_tape_correspondence.prefix_hash_count,
-            fixed_tape_correspondence.seed_hash_count,
             fixed_tape_correspondence.output_block_hash_count,
             fixed_tape_correspondence.total_fixed_tape_byte_length,
             fixed_tape_correspondence.maximum_output_block_count_per_round,
+        );
+        println!(
+            "compact public-key ideal-QRO domain extension complete theorem_hop_count={} conservative_loss_coefficient={} adversarial_query_budget={} domain_extension_loss_numerator={} domain_extension_loss_denominator={} selected_second_input_count={} minimum_selected_block_preimage_byte_length={} maximum_selected_block_preimage_byte_length={} selected_fixed_register_bit_length={} total_component_output_byte_length={} discarded_component_tail_byte_length={}",
+            domain_extension_certificate.theorem_hop_count(),
+            domain_extension_certificate.conservative_loss_coefficient(),
+            domain_extension_certificate.adversarial_query_budget(),
+            domain_extension_loss_numerator,
+            domain_extension_loss_denominator,
+            domain_extension_certificate.selected_second_input_count(),
+            domain_extension_certificate.minimum_selected_block_preimage_byte_length(),
+            domain_extension_certificate.maximum_selected_block_preimage_byte_length(),
+            domain_extension_certificate.selected_fixed_register_bit_length(),
+            domain_extension_certificate.total_component_output_byte_length(),
+            domain_extension_certificate.discarded_component_tail_byte_length(),
         );
         if let Some(transport_measurement) = transport_measurement {
             assert_eq!(

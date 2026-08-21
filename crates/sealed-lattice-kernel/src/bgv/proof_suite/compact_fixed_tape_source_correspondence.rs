@@ -1,11 +1,12 @@
 //! Independent source correspondence for the compact fixed-output tape graph.
 //!
-//! This module replays every selected SHAKE256 seed and output-block call from
-//! the source-verified canonical transport. It deliberately does not construct
-//! the QROM premise: matching executable bytes and graph calls is necessary
-//! source evidence, not a quantum domain-extension theorem.
+//! This module replays every selected SHAKE256 transcript-prefix and
+//! independently indexed output-block call from the source-verified canonical
+//! transport. Matching executable bytes and graph calls is necessary source
+//! evidence; the separate domain-extension owner maps this exact graph to its
+//! ideal-QRO theorem.
 
-use std::{collections::BTreeMap, mem::size_of};
+use std::mem::size_of;
 
 use sha3::{
     Shake256,
@@ -22,8 +23,8 @@ use super::compact_transcript::{
 };
 use super::fixed_uniform_verifier_message::{
     FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN, FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION,
-    FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN, FixedUniformVerifierMessageGeometry,
-    decode_fixed_uniform_verifier_message, materialize_fixed_uniform_verifier_message,
+    FixedUniformVerifierMessageGeometry, decode_fixed_uniform_verifier_message,
+    materialize_fixed_uniform_verifier_message,
 };
 use super::{
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, SourceVerifiedCompactPublicKeyProof,
@@ -47,10 +48,6 @@ pub(crate) enum CompactFixedTapeSourceCorrespondenceError {
     PrefixMismatch {
         round_ordinal: u32,
     },
-    SeedCollision {
-        first_round_ordinal: u32,
-        second_round_ordinal: u32,
-    },
     GraphMismatch {
         round_ordinal: u32,
         first_divergent_block_ordinal: u64,
@@ -61,6 +58,21 @@ pub(crate) enum CompactFixedTapeSourceCorrespondenceError {
     MeasurementMismatch,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompactFixedTapeGraphModel {
+    TranscriptPrefixThenIndependentBlocks,
+    #[cfg(test)]
+    PredecessorLinkedBlocks,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompactFixedTapeRoundSourceCorrespondence {
+    pub(crate) round_ordinal: u32,
+    pub(crate) transcript_prefix_digest: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) message_byte_length: u64,
+    pub(crate) output_block_count: u64,
+}
+
 /// Compact-only certificate bound to one source-verified canonical byte pair.
 /// It inventories the complete selected fixed-output graph without claiming a
 /// QROM reduction or minting a verification capability.
@@ -69,17 +81,21 @@ pub(crate) struct CompactFixedTapeSourceCorrespondence {
     pub(crate) selected_contract_source_hash: Hash512,
     pub(crate) canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
     pub(crate) canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) graph_model: CompactFixedTapeGraphModel,
+    pub(crate) prefix_domain: &'static str,
+    pub(crate) block_domain: &'static str,
+    pub(crate) geometry_version: u16,
+    pub(crate) fixed_hash_output_bit_length: u16,
     pub(crate) logical_round_count: u64,
     pub(crate) prefix_hash_count: u64,
-    pub(crate) seed_hash_count: u64,
     pub(crate) output_block_hash_count: u64,
     pub(crate) total_fixed_tape_byte_length: u64,
     pub(crate) maximum_output_block_count_per_round: u64,
+    pub(crate) rounds: Box<[CompactFixedTapeRoundSourceCorrespondence]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct IndependentFixedTapeTrace {
-    seed: [u8; Hash512::BYTE_LENGTH],
     message_bytes: Vec<u8>,
     output_block_count: u64,
 }
@@ -87,11 +103,10 @@ struct IndependentFixedTapeTrace {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IndependentFixedTapeFault {
     None,
-    WrongSeedDomain,
     WrongBlockDomain,
     WrongDeclaredWidth,
-    WrongFirstBlockPredecessor,
-    WrongSecondBlockPredecessor,
+    WrongFirstBlockOrdinal,
+    WrongSecondBlockOrdinal,
 }
 
 /// Replays the complete selected graph from a terminal that can exist only
@@ -118,10 +133,13 @@ pub(crate) fn verify_source_verified_compact_fixed_tape_correspondence(
         return Err(CompactFixedTapeSourceCorrespondenceError::MeasurementMismatch);
     }
 
-    let mut seed_owner_by_value = BTreeMap::new();
     let mut output_block_hash_count = 0_u64;
     let mut total_fixed_tape_byte_length = 0_u64;
     let mut maximum_output_block_count_per_round = 0_u64;
+    let mut rounds = Vec::new();
+    rounds
+        .try_reserve_exact(transport.verifier_messages().len())
+        .map_err(|_| CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?;
 
     for (round_index, ((response_geometry, retained_message), measured_round)) in verifier_inputs
         .proof_wire_geometry
@@ -205,18 +223,7 @@ pub(crate) fn verify_source_verified_compact_fixed_tape_correspondence(
                 CompactFixedTapeSourceCorrespondenceError::DecodedMessageMismatch { round_ordinal },
             );
         }
-        if let Some(first_round_ordinal) =
-            seed_owner_by_value.insert(independent_trace.seed, round_ordinal)
-        {
-            return Err(CompactFixedTapeSourceCorrespondenceError::SeedCollision {
-                first_round_ordinal,
-                second_round_ordinal: round_ordinal,
-            });
-        }
-        let expected_fixed_tape_hash_query_count = independent_trace
-            .output_block_count
-            .checked_add(1)
-            .ok_or(CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?;
+        let expected_fixed_tape_hash_query_count = independent_trace.output_block_count;
         let expected_round_hash_query_count =
             expected_fixed_tape_hash_query_count
                 .checked_add(1)
@@ -241,6 +248,13 @@ pub(crate) fn verify_source_verified_compact_fixed_tape_correspondence(
             .ok_or(CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?;
         maximum_output_block_count_per_round =
             maximum_output_block_count_per_round.max(independent_trace.output_block_count);
+        rounds.push(CompactFixedTapeRoundSourceCorrespondence {
+            round_ordinal,
+            transcript_prefix_digest: independent_prefix.into_bytes(),
+            message_byte_length: u64::try_from(independent_trace.message_bytes.len())
+                .map_err(|_| CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?,
+            output_block_count: independent_trace.output_block_count,
+        });
     }
 
     let logical_round_count = u64::try_from(transport.verifier_messages().len())
@@ -249,12 +263,18 @@ pub(crate) fn verify_source_verified_compact_fixed_tape_correspondence(
         selected_contract_source_hash,
         canonical_proof_binding: transport.canonical_proof_binding(),
         canonical_public_input_binding: public_input_view.binding(),
+        graph_model: CompactFixedTapeGraphModel::TranscriptPrefixThenIndependentBlocks,
+        prefix_domain: COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN,
+        block_domain: FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
+        geometry_version: FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION,
+        fixed_hash_output_bit_length: u16::try_from(Hash512::BYTE_LENGTH * u8::BITS as usize)
+            .map_err(|_| CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?,
         logical_round_count,
         prefix_hash_count: logical_round_count,
-        seed_hash_count: logical_round_count,
         output_block_hash_count,
         total_fixed_tape_byte_length,
         maximum_output_block_count_per_round,
+        rounds: rounds.into_boxed_slice(),
     };
     correspondence.validate_measurement_hash_graph(&measurement_census.shared_hash_graph)?;
     Ok(correspondence)
@@ -266,7 +286,6 @@ impl CompactFixedTapeSourceCorrespondence {
         hash_graph: &CompactSharedHashGraphCensus,
     ) -> Result<(), CompactFixedTapeSourceCorrespondenceError> {
         if hash_graph.fiat_shamir_prefix_hash_count != self.prefix_hash_count
-            || hash_graph.fixed_message_seed_hash_count != self.seed_hash_count
             || hash_graph.fixed_message_block_hash_count != self.output_block_hash_count
         {
             return Err(CompactFixedTapeSourceCorrespondenceError::MeasurementMismatch);
@@ -363,55 +382,38 @@ fn independently_materialize_fixed_tape(
     };
     let declared_output_byte_length_u64 = u64::try_from(declared_output_byte_length)
         .map_err(|_| CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?;
-    let seed_domain = if fault == IndependentFixedTapeFault::WrongSeedDomain {
-        "sealed-lattice/test/wrong-fixed-uniform-verifier-message-seed/v1"
-    } else {
-        FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN
-    };
     let block_domain = if fault == IndependentFixedTapeFault::WrongBlockDomain {
-        "sealed-lattice/test/wrong-fixed-uniform-verifier-message-block/v1"
+        "sealed-lattice/test/wrong-fixed-uniform-verifier-message-block/v2"
     } else {
         FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN
     };
-    let mut seed_items = independent_geometry_items(
+    let mut fixed_block_items = independent_geometry_items(
         starting_transcript_state,
         logical_verifier_move_ordinal,
         geometry,
     )?;
-    seed_items.push(CanonicalItem::unsigned64(declared_output_byte_length_u64));
-    let seed = independent_foundation_hash512(
-        seed_domain,
-        &seed_items,
-        logical_verifier_move_ordinal,
-        None,
-    )?
-    .into_bytes();
+    fixed_block_items.push(CanonicalItem::unsigned64(declared_output_byte_length_u64));
     let output_block_count = independent_output_block_count(output_byte_length)?;
     let mut message_bytes = Vec::new();
     message_bytes
         .try_reserve_exact(output_byte_length)
         .map_err(|_| CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?;
-    let mut preceding_block = seed;
     for block_ordinal in 0..output_block_count {
-        let mut predecessor = if block_ordinal == 0 {
-            seed
-        } else {
-            preceding_block
-        };
-        if (block_ordinal == 0 && fault == IndependentFixedTapeFault::WrongFirstBlockPredecessor)
-            || (block_ordinal == 1
-                && fault == IndependentFixedTapeFault::WrongSecondBlockPredecessor)
+        let encoded_block_ordinal = if block_ordinal == 0
+            && fault == IndependentFixedTapeFault::WrongFirstBlockOrdinal
         {
-            predecessor[0] ^= 1;
-        }
+            1
+        } else if block_ordinal == 1 && fault == IndependentFixedTapeFault::WrongSecondBlockOrdinal
+        {
+            0
+        } else {
+            block_ordinal
+        };
+        let mut block_items = fixed_block_items.clone();
+        block_items.push(CanonicalItem::unsigned64(encoded_block_ordinal));
         let block = independent_foundation_hash512(
             block_domain,
-            &[
-                CanonicalItem::hash512(seed),
-                CanonicalItem::hash512(predecessor),
-                CanonicalItem::unsigned64(declared_output_byte_length_u64),
-                CanonicalItem::unsigned64(block_ordinal),
-            ],
+            &block_items,
             logical_verifier_move_ordinal,
             Some(block_ordinal),
         )?
@@ -420,7 +422,6 @@ fn independently_materialize_fixed_tape(
             .checked_sub(message_bytes.len())
             .ok_or(CompactFixedTapeSourceCorrespondenceError::ArithmeticOverflow)?;
         message_bytes.extend_from_slice(&block[..remaining_byte_length.min(Hash512::BYTE_LENGTH)]);
-        preceding_block = block;
     }
     if message_bytes.len() != output_byte_length {
         return Err(CompactFixedTapeSourceCorrespondenceError::Geometry {
@@ -428,7 +429,6 @@ fn independently_materialize_fixed_tape(
         });
     }
     Ok(IndependentFixedTapeTrace {
-        seed,
         message_bytes,
         output_block_count,
     })
@@ -627,10 +627,9 @@ mod tests {
         assert!(independent.output_block_count > 1);
 
         for fault in [
-            IndependentFixedTapeFault::WrongSeedDomain,
             IndependentFixedTapeFault::WrongBlockDomain,
             IndependentFixedTapeFault::WrongDeclaredWidth,
-            IndependentFixedTapeFault::WrongFirstBlockPredecessor,
+            IndependentFixedTapeFault::WrongFirstBlockOrdinal,
         ] {
             let hostile = independently_materialize_fixed_tape(
                 starting_transcript_state,
@@ -649,9 +648,9 @@ mod tests {
             starting_transcript_state,
             11,
             &geometry,
-            IndependentFixedTapeFault::WrongSecondBlockPredecessor,
+            IndependentFixedTapeFault::WrongSecondBlockOrdinal,
         )
-        .expect("the second-predecessor mutation remains executable");
+        .expect("the second-block ordinal mutation remains executable");
         assert_eq!(
             first_divergent_block_ordinal(&production, &hostile.message_bytes),
             1,
@@ -712,18 +711,13 @@ mod tests {
             );
         }
         println!(
-            "selected compact fixed-tape inventory logical_round_count={} total_tape_byte_length={} seed_hash_count={} output_block_hash_count={} maximum_output_block_count_per_round={} minimum_message_bit_length={}",
+            "selected compact fixed-tape inventory logical_round_count={} total_tape_byte_length={} output_block_hash_count={} maximum_output_block_count_per_round={} minimum_message_bit_length={}",
             contract
                 .verifier_inputs()
                 .proof_wire_geometry
                 .responses()
                 .len(),
             total_byte_length,
-            contract
-                .verifier_inputs()
-                .proof_wire_geometry
-                .responses()
-                .len(),
             total_block_count,
             maximum_block_count,
             minimum_message_bit_length.expect("the selected contract has rounds"),

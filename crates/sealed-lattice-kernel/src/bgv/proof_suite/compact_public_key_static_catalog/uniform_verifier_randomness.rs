@@ -401,7 +401,7 @@ mod tests {
             UniformRandomnessSnapshot {
                 total_fixed_candidate_slot_count: 1_339_520,
                 total_uniform_message_byte_length: 11_612_160,
-                concrete_challenge_stream_hash_query_count: 181_522,
+                concrete_challenge_stream_hash_query_count: 181_440,
                 field_sampling_exhaustion_security_bit_floor_per_attempt: 4_088,
             }
         );

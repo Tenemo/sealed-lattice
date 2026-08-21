@@ -5,9 +5,10 @@
 //! by the selected implicit-instance-free construction. The census is not a
 //! proof-acceptance capability: the caller must also provide independently
 //! owned semantic, masking-correspondence, emitted-byte,
-//! Merkle-privacy-correspondence, and fixed-SHAKE premises. The latter four
-//! have no production constructors until the live algebraic chain and
-//! shared-QRO replacement prove their exact correspondences.
+//! Merkle-privacy-correspondence, and fixed-tape premises. The masking,
+//! emitted-byte, and Merkle premises remain conditional; the fixed-tape owner
+//! now has a source-verified ideal-QRO domain-extension constructor. Concrete
+//! shared Keccak instantiation remains outside this arithmetic.
 
 use std::cmp::Ordering;
 
@@ -23,9 +24,7 @@ use super::compact_response_merkle::{
     CompactResponseQuerySelection,
 };
 use super::compact_transcript::COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN;
-use super::fixed_uniform_verifier_message::{
-    FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN, FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN,
-};
+use super::fixed_uniform_verifier_message::FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN;
 use super::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE,
@@ -50,9 +49,9 @@ pub(crate) enum CompactCdhzAppendixAOneError {
     MissingMaskingPremise,
     MissingEmittedBytePremise,
     MissingMerklePrivacyPremise,
-    MissingShakePremise,
+    MissingFixedTapeUniformityPremise,
     PremiseBindingMismatch,
-    ShakePremiseMismatch,
+    FixedTapeUniformityPremiseMismatch,
     UnexpectedEmittedCoordinates,
     InvalidRelaxedRoundByRoundKnowledgeBound,
     AdaptiveSoundnessTargetExceeded,
@@ -231,7 +230,7 @@ pub(crate) struct CompactCdhzAppendixAOnePremises<'premise> {
     masking: Option<CompactCdhzMaskingPremise>,
     emitted_byte: Option<CompactCdhzEmittedBytePremise>,
     merkle_privacy: Option<CompactCdhzMerklePrivacyPremise>,
-    shake: Option<&'premise CompactFixedTapeUniformityPremise>,
+    fixed_tape_uniformity: Option<&'premise CompactFixedTapeUniformityPremise>,
 }
 
 impl CompactCdhzMaskingPremise {
@@ -472,7 +471,6 @@ impl CompactCdhzAppendixAOneCoordinates {
                 != expected_response_count
             || measurement.oracle_family_census.multi_extract_oracle_count != 1
             || domains.fiat_shamir_prefix != COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN
-            || domains.verifier_message_seed != FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN
             || domains.verifier_message_block != FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN
             || domains.merkle_leaf != COMPACT_RESPONSE_LEAF_HASH_DOMAIN
             || domains.merkle_parent != COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN
@@ -595,7 +593,7 @@ pub(crate) struct CompactCdhzAdaptiveSoundnessTerms {
     offline_extraction: CompactCdhzExactRational,
     online_indistinguishability: CompactCdhzExactRational,
     merkle_commutativity: CompactCdhzExactRational,
-    fixed_tape_seed_collision: CompactCdhzExactRational,
+    fixed_tape_domain_extension: CompactCdhzExactRational,
     fixed_tape_sampler_exhaustion: CompactCdhzExactRational,
     total_adaptive_soundness: CompactCdhzExactRational,
 }
@@ -617,8 +615,8 @@ impl CompactCdhzAdaptiveSoundnessTerms {
         &self.merkle_commutativity
     }
 
-    pub(crate) const fn fixed_tape_seed_collision(&self) -> &CompactCdhzExactRational {
-        &self.fixed_tape_seed_collision
+    pub(crate) const fn fixed_tape_domain_extension(&self) -> &CompactCdhzExactRational {
+        &self.fixed_tape_domain_extension
     }
 
     pub(crate) const fn fixed_tape_sampler_exhaustion(&self) -> &CompactCdhzExactRational {
@@ -748,8 +746,8 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
         .as_ref()
         .ok_or(CompactCdhzAppendixAOneError::MissingMerklePrivacyPremise)?;
     let fixed_tape_uniformity_premise = premises
-        .shake
-        .ok_or(CompactCdhzAppendixAOneError::MissingShakePremise)?;
+        .fixed_tape_uniformity
+        .ok_or(CompactCdhzAppendixAOneError::MissingFixedTapeUniformityPremise)?;
     if !masking_premise
         .emitted_byte_binding
         .matches_measurement(measurement)
@@ -764,7 +762,7 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
     }
     fixed_tape_uniformity_premise
         .validate_measurement(measurement)
-        .map_err(|_| CompactCdhzAppendixAOneError::ShakePremiseMismatch)?;
+        .map_err(|_| CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch)?;
     let coordinates = CompactCdhzAppendixAOneCoordinates::try_from_measurement(measurement)?;
     if fixed_tape_uniformity_premise.round_count()
         != usize::try_from(coordinates.response_vector_commitment_count())
@@ -772,7 +770,7 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
         || fixed_tape_uniformity_premise.minimum_uniform_message_bit_length()
             != coordinates.minimum_verifier_randomness_bit_length()
     {
-        return Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch);
+        return Err(CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch);
     }
     let direct_initial_transition_bound = compact_cfw_direct_initial_transition_bound();
     if relaxed_round_by_round_knowledge_bound.maximum_error() < &direct_initial_transition_bound {
@@ -856,11 +854,11 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
             * &commutativity_query_factor,
         random_oracle_denominator,
     );
-    let (seed_collision_numerator, seed_collision_denominator) =
-        fixed_tape_uniformity_premise.seed_collision_loss_parts();
-    let fixed_tape_seed_collision = fixed_tape_loss(
-        seed_collision_numerator.clone(),
-        seed_collision_denominator.clone(),
+    let (domain_extension_numerator, domain_extension_denominator) =
+        fixed_tape_uniformity_premise.domain_extension_loss_parts();
+    let fixed_tape_domain_extension = fixed_tape_loss(
+        domain_extension_numerator.clone(),
+        domain_extension_denominator.clone(),
     )?;
     let (sampler_exhaustion_numerator, sampler_exhaustion_denominator) =
         fixed_tape_uniformity_premise.sampler_exhaustion_loss_parts();
@@ -872,7 +870,7 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
         .add(&fixed_offline_extraction)
         .add(&fixed_online_indistinguishability)
         .add(&merkle_commutativity)
-        .add(&fixed_tape_seed_collision)
+        .add(&fixed_tape_domain_extension)
         .add(&fixed_tape_sampler_exhaustion);
     let target_adaptive_soundness = CompactCdhzExactRational::from_nonzero_parts(
         BigUint::one(),
@@ -997,7 +995,7 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
         .add(&offline_extraction)
         .add(&online_indistinguishability)
         .add(&merkle_commutativity)
-        .add(&fixed_tape_seed_collision)
+        .add(&fixed_tape_domain_extension)
         .add(&fixed_tape_sampler_exhaustion);
     if &total_adaptive_soundness
         != simplex_vertex_bound(&simplex_vertex_bounds, selected_maximizing_vertex)
@@ -1023,7 +1021,7 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
             offline_extraction,
             online_indistinguishability,
             merkle_commutativity,
-            fixed_tape_seed_collision,
+            fixed_tape_domain_extension,
             fixed_tape_sampler_exhaustion,
             total_adaptive_soundness,
         },
@@ -1053,7 +1051,7 @@ fn fixed_tape_loss(
     denominator: BigUint,
 ) -> Result<CompactCdhzExactRational, CompactCdhzAppendixAOneError> {
     if numerator.is_zero() || denominator.is_zero() || numerator > denominator {
-        return Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch);
+        return Err(CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch);
     }
     Ok(CompactCdhzExactRational::from_nonzero_parts(
         numerator,
@@ -1127,9 +1125,9 @@ mod tests {
 
     const TEST_RESPONSE_VECTOR_COMMITMENT_COUNT: u64 = 82;
     const TEST_PROOF_QUERY_BOUND: u64 = 79_310;
-    const TEST_CONCRETE_FIAT_SHAMIR_QUERY_COUNT: u64 = 181_604;
+    const TEST_CONCRETE_FIAT_SHAMIR_QUERY_COUNT: u64 = 181_522;
     const TEST_VECTOR_COMMITMENT_CHECK_QUERY_BOUND: u64 = 248_467;
-    const TEST_VERIFIER_RANDOM_ORACLE_QUERY_BOUND: u64 = 430_071;
+    const TEST_VERIFIER_RANDOM_ORACLE_QUERY_BOUND: u64 = 429_989;
     const TEST_MAXIMUM_PROOF_VECTOR_SYMBOL_LENGTH: u64 = 262_144;
     const TEST_MAXIMUM_LEAF_VALUE_BYTE_LENGTH: u64 = 5_120;
 
@@ -1149,7 +1147,7 @@ mod tests {
     fn assumed_complete_premises<'premise>(
         measurement: &CompactEmittedCdhzMeasurement,
         semantic: &'premise CompactRelaxedRoundByRoundKnowledgeBound,
-        shake: &'premise CompactFixedTapeUniformityPremise,
+        fixed_tape_uniformity: &'premise CompactFixedTapeUniformityPremise,
     ) -> CompactCdhzAppendixAOnePremises<'premise> {
         CompactCdhzAppendixAOnePremises {
             semantic: Some(semantic),
@@ -1162,7 +1160,7 @@ mod tests {
             merkle_privacy: Some(
                 CompactCdhzMerklePrivacyPremise::assume_for_appendix_arithmetic_test(measurement),
             ),
-            shake: Some(shake),
+            fixed_tape_uniformity: Some(fixed_tape_uniformity),
         }
     }
 
@@ -1170,10 +1168,11 @@ mod tests {
         measurement: Option<&CompactEmittedCdhzMeasurement>,
         semantic: &CompactRelaxedRoundByRoundKnowledgeBound,
     ) -> Result<CompactCdhzAppendixAOneCertificate, CompactCdhzAppendixAOneError> {
-        let shake = assumed_fixed_tape_uniformity_premise();
+        let fixed_tape_uniformity = assumed_fixed_tape_uniformity_premise();
         let premise_measurement = measurement
             .expect("the complete conditional arithmetic fixture needs measurement bytes");
-        let premises = assumed_complete_premises(premise_measurement, semantic, &shake);
+        let premises =
+            assumed_complete_premises(premise_measurement, semantic, &fixed_tape_uniformity);
         derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(measurement, &premises)
     }
 
@@ -1310,9 +1309,8 @@ mod tests {
                 transcript_round_salt_absorption_count: transcript_commitment_absorption_count,
                 shared_hash_graph: CompactSharedHashGraphCensus {
                     fiat_shamir_prefix_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
-                    fixed_message_seed_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
                     fixed_message_block_hash_count: TEST_CONCRETE_FIAT_SHAMIR_QUERY_COUNT
-                        - 2 * TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
+                        - TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
                     opened_leaf_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
                     merkle_parent_hash_count: TEST_RESPONSE_VECTOR_COMMITMENT_COUNT,
                     total_hash_count: TEST_CONCRETE_FIAT_SHAMIR_QUERY_COUNT
@@ -1341,7 +1339,6 @@ mod tests {
             },
             random_oracle_domains: CompactCdhzRandomOracleDomains {
                 fiat_shamir_prefix: COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN,
-                verifier_message_seed: FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN,
                 verifier_message_block: FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
                 merkle_leaf: COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
                 merkle_parent: COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
@@ -1368,7 +1365,7 @@ mod tests {
         assert_eq!(coordinates.proof_query_bound(), 79_310);
         assert_eq!(coordinates.input_implicit_instance_tuple_size(), 0);
         assert_eq!(coordinates.output_implicit_instance_tuple_size(), 0);
-        assert_eq!(coordinates.verifier_random_oracle_query_bound(), 430_071);
+        assert_eq!(coordinates.verifier_random_oracle_query_bound(), 429_989);
         assert_eq!(coordinates.maximum_proof_vector_symbol_length(), 262_144);
         assert_eq!(coordinates.minimum_verifier_randomness_bit_length(), 65_536);
         assert_eq!(coordinates.random_oracle_output_bit_length(), 512);
@@ -1378,8 +1375,9 @@ mod tests {
     fn every_missing_conditional_premise_keeps_the_terminal_unavailable() {
         let measurement = selected_coordinate_measurement_for_test();
         let semantic = distinct_semantic_knowledge_bound();
-        let shake = assumed_fixed_tape_uniformity_premise();
-        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        let fixed_tape_uniformity = assumed_fixed_tape_uniformity_premise();
+        let mut premises =
+            assumed_complete_premises(&measurement, &semantic, &fixed_tape_uniformity);
         premises.semantic = None;
         assert_eq!(
             derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
@@ -1388,7 +1386,8 @@ mod tests {
             ),
             Err(CompactCdhzAppendixAOneError::MissingSemanticPremise)
         );
-        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        let mut premises =
+            assumed_complete_premises(&measurement, &semantic, &fixed_tape_uniformity);
         premises.masking = None;
         assert_eq!(
             derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
@@ -1397,7 +1396,8 @@ mod tests {
             ),
             Err(CompactCdhzAppendixAOneError::MissingMaskingPremise)
         );
-        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        let mut premises =
+            assumed_complete_premises(&measurement, &semantic, &fixed_tape_uniformity);
         premises.emitted_byte = None;
         assert_eq!(
             derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
@@ -1406,7 +1406,8 @@ mod tests {
             ),
             Err(CompactCdhzAppendixAOneError::MissingEmittedBytePremise)
         );
-        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        let mut premises =
+            assumed_complete_premises(&measurement, &semantic, &fixed_tape_uniformity);
         premises.merkle_privacy = None;
         assert_eq!(
             derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
@@ -1415,14 +1416,15 @@ mod tests {
             ),
             Err(CompactCdhzAppendixAOneError::MissingMerklePrivacyPremise)
         );
-        let mut premises = assumed_complete_premises(&measurement, &semantic, &shake);
-        premises.shake = None;
+        let mut premises =
+            assumed_complete_premises(&measurement, &semantic, &fixed_tape_uniformity);
+        premises.fixed_tape_uniformity = None;
         assert_eq!(
             derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
                 Some(&measurement),
                 &premises,
             ),
-            Err(CompactCdhzAppendixAOneError::MissingShakePremise)
+            Err(CompactCdhzAppendixAOneError::MissingFixedTapeUniformityPremise)
         );
     }
 
@@ -1575,8 +1577,8 @@ mod tests {
     fn premise_bindings_and_decoded_census_coordinates_are_load_bearing() {
         let measurement = selected_coordinate_measurement_for_test();
         let semantic = distinct_semantic_knowledge_bound();
-        let shake = assumed_fixed_tape_uniformity_premise();
-        let premises = assumed_complete_premises(&measurement, &semantic, &shake);
+        let fixed_tape_uniformity = assumed_fixed_tape_uniformity_premise();
+        let premises = assumed_complete_premises(&measurement, &semantic, &fixed_tape_uniformity);
         let mut substituted_binding = measurement.clone();
         substituted_binding
             .decoded_actual_byte_census
@@ -1610,7 +1612,7 @@ mod tests {
     fn a_fixed_tape_premise_cannot_contribute_zero_distinguishing_loss() {
         assert_eq!(
             fixed_tape_loss(BigUint::zero(), BigUint::one()),
-            Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch)
+            Err(CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch)
         );
     }
 
@@ -1684,13 +1686,13 @@ mod tests {
             merkle_denominator,
         );
         let premise = assumed_fixed_tape_uniformity_premise();
-        let (seed_collision_numerator, seed_collision_denominator) =
-            premise.seed_collision_loss_parts();
-        let fixed_tape_seed_collision = CompactCdhzExactRational::try_new(
-            seed_collision_numerator.clone(),
-            seed_collision_denominator.clone(),
+        let (domain_extension_numerator, domain_extension_denominator) =
+            premise.domain_extension_loss_parts();
+        let fixed_tape_domain_extension = CompactCdhzExactRational::try_new(
+            domain_extension_numerator.clone(),
+            domain_extension_denominator.clone(),
         )
-        .expect("conditional seed-collision loss");
+        .expect("source-shaped domain-extension loss");
         let (sampler_exhaustion_numerator, sampler_exhaustion_denominator) =
             premise.sampler_exhaustion_loss_parts();
         let fixed_tape_sampler_exhaustion = CompactCdhzExactRational::try_new(
@@ -1710,8 +1712,8 @@ mod tests {
         );
         assert_eq!(terms.merkle_commutativity(), &merkle_commutativity);
         assert_eq!(
-            terms.fixed_tape_seed_collision(),
-            &fixed_tape_seed_collision
+            terms.fixed_tape_domain_extension(),
+            &fixed_tape_domain_extension
         );
         assert_eq!(
             terms.fixed_tape_sampler_exhaustion(),
@@ -1723,7 +1725,7 @@ mod tests {
                 .add(&offline_extraction)
                 .add(&online_indistinguishability)
                 .add(&merkle_commutativity)
-                .add(&fixed_tape_seed_collision)
+                .add(&fixed_tape_domain_extension)
                 .add(&fixed_tape_sampler_exhaustion)
         );
     }
@@ -1772,7 +1774,7 @@ mod tests {
             certificate
                 .coordinates()
                 .verifier_random_oracle_query_bound(),
-            430_071
+            429_989
         );
         measurement.nrdx_verifier_q_v_bound = 248_549;
         assert_eq!(
@@ -1805,9 +1807,8 @@ mod tests {
     #[test]
     fn every_random_oracle_domain_is_load_bearing() {
         let knowledge_bound = distinct_semantic_knowledge_bound();
-        let mutations: [fn(&mut CompactCdhzRandomOracleDomains); 5] = [
+        let mutations: [fn(&mut CompactCdhzRandomOracleDomains); 4] = [
             |domains: &mut CompactCdhzRandomOracleDomains| domains.fiat_shamir_prefix = "wrong",
-            |domains: &mut CompactCdhzRandomOracleDomains| domains.verifier_message_seed = "wrong",
             |domains: &mut CompactCdhzRandomOracleDomains| domains.verifier_message_block = "wrong",
             |domains: &mut CompactCdhzRandomOracleDomains| domains.merkle_leaf = "wrong",
             |domains: &mut CompactCdhzRandomOracleDomains| domains.merkle_parent = "wrong",
@@ -1817,7 +1818,7 @@ mod tests {
             mutate(&mut measurement.random_oracle_domains);
             assert_eq!(
                 derive_with_assumed_complete_premises(Some(&measurement), &knowledge_bound,),
-                Err(CompactCdhzAppendixAOneError::ShakePremiseMismatch)
+                Err(CompactCdhzAppendixAOneError::FixedTapeUniformityPremiseMismatch)
             );
         }
     }
@@ -1826,8 +1827,9 @@ mod tests {
     fn absent_measurement_cannot_mint_adaptive_soundness_arithmetic() {
         let binding_measurement = selected_coordinate_measurement_for_test();
         let semantic = distinct_semantic_knowledge_bound();
-        let shake = assumed_fixed_tape_uniformity_premise();
-        let premises = assumed_complete_premises(&binding_measurement, &semantic, &shake);
+        let fixed_tape_uniformity = assumed_fixed_tape_uniformity_premise();
+        let premises =
+            assumed_complete_premises(&binding_measurement, &semantic, &fixed_tape_uniformity);
         assert_eq!(
             derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(None, &premises,),
             Err(CompactCdhzAppendixAOneError::MissingEmittedMeasurement)

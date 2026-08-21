@@ -35,8 +35,8 @@ use super::compact_whir_geometry::CompactWhirVerifierGeometry;
 use super::field::PROOF_BASE_FIELD_MODULUS;
 use super::fixed_uniform_verifier_message::{
     FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN, FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION,
-    FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN, FixedUniformDistinctQueryGeometry,
-    FixedUniformVerifierMessageError, FixedUniformVerifierMessageGeometry,
+    FixedUniformDistinctQueryGeometry, FixedUniformVerifierMessageError,
+    FixedUniformVerifierMessageGeometry,
 };
 use super::relation_plan::{
     CompactPublicKeyRelationCatalog, selected_compact_public_key_relation_catalog,
@@ -67,12 +67,11 @@ const GENERATED_CONTRACT_SOURCE_HASH_DOMAIN: &str =
 /// same record independently from the production relation and proof catalogs.
 const GENERATED_CONTRACT_BYTES: &[u8] = include_bytes!("compact_proof_contract.generated.bin");
 
-fn compact_contract_binding_domains() -> [&'static str; 10] {
+fn compact_contract_binding_domains() -> [&'static str; 9] {
     let transcript = compact_transcript_binding_domains();
     let checkpoint = compact_checkpoint_binding_domains();
     [
         transcript[0],
-        FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN,
         FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
         COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
         COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,

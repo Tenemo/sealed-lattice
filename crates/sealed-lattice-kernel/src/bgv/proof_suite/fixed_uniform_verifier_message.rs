@@ -4,9 +4,10 @@
 //! string has a plan-derived fixed width and is decoded in a fixed order into
 //! challenge-extension elements, base-field elements, and sorted distinct
 //! query sets. Every logical output owns the same bounded candidate budget.
-//! Geometry and seeded-stream derivation are ordinary release code consumed by
-//! the compact verifier. The byte decoder remains test-only because verifier
-//! messages are derived and are never accepted from proof bytes.
+//! Geometry and independently indexed block derivation are ordinary release
+//! code consumed by the compact verifier. The byte decoder remains test-only
+//! because verifier messages are derived and are never accepted from proof
+//! bytes.
 
 use std::collections::BTreeSet;
 
@@ -17,16 +18,12 @@ use super::field::{PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE};
 use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::profile::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
 #[cfg(test)]
-use crate::foundation::foundation_tuple_hash512_seeded_stream_query_count;
-use crate::foundation::{
-    CanonicalItem, FoundationTupleHash512BlockReader, Hash512, StreamingFoundationHashError,
-};
+use crate::foundation::foundation_tuple_hash512_block_count;
+use crate::foundation::{CanonicalItem, Hash512, hash_foundation_tuple_512};
 
-pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN: &str =
-    "sealed-lattice/proof/fixed-uniform-verifier-message-seed/v1";
 pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN: &str =
-    "sealed-lattice/proof/fixed-uniform-verifier-message-block/v1";
-pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION: u16 = 1;
+    "sealed-lattice/proof/fixed-uniform-verifier-message-block/v2";
+pub(crate) const FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION: u16 = 2;
 const EXTENSION_CANDIDATE_BYTE_LENGTH: usize = 64;
 const BASE_OR_QUERY_CANDIDATE_BYTE_LENGTH: usize = std::mem::size_of::<u64>();
 
@@ -167,7 +164,7 @@ impl FixedUniformVerifierMessageGeometry {
     pub(crate) fn concrete_hash_query_count(
         &self,
     ) -> Result<u64, FixedUniformVerifierMessageError> {
-        foundation_tuple_hash512_seeded_stream_query_count(self.exact_message_byte_length()?)
+        foundation_tuple_hash512_block_count(self.exact_message_byte_length()?)
             .map_err(|_| FixedUniformVerifierMessageError::FoundationHashSchedule)
     }
 
@@ -207,7 +204,7 @@ impl FixedUniformVerifierMessageGeometry {
         Ok(())
     }
 
-    fn canonical_hash_prefix_items(
+    pub(super) fn canonical_hash_prefix_items(
         &self,
         starting_transcript_state: Hash512,
         logical_verifier_move_ordinal: u32,
@@ -359,14 +356,8 @@ pub(crate) fn derive_fixed_uniform_verifier_message(
     let output_byte_length = geometry.exact_message_byte_length()?;
     let prefix_items = geometry
         .canonical_hash_prefix_items(starting_transcript_state, logical_verifier_move_ordinal)?;
-    let reader = FoundationTupleHash512BlockReader::new(
-        FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN,
-        FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
-        &prefix_items,
-        output_byte_length,
-    )
-    .map_err(|_| FixedUniformVerifierMessageError::FoundationHashSchedule)?;
-    decode_from_reader(geometry, FoundationFixedMessageReader(reader))
+    let reader = IndependentBlockFixedMessageReader::new(prefix_items, output_byte_length)?;
+    decode_from_reader(geometry, DerivedFixedMessageReader(reader))
 }
 
 trait FixedMessageReader: Sized {
@@ -375,23 +366,131 @@ trait FixedMessageReader: Sized {
     fn finish(self) -> Result<(), FixedUniformVerifierMessageError>;
 }
 
-struct FoundationFixedMessageReader(FoundationTupleHash512BlockReader);
+/// Bounded compact-only reader whose independently indexed output blocks form
+/// the second oracle in the selected simple-domain-extender graph. The first
+/// item is the 512-bit digest of the complete canonical transcript prefix; all
+/// remaining fixed items bind the selected message geometry. Output width and
+/// block ordinal complete the second-oracle input.
+struct IndependentBlockFixedMessageReader {
+    block_items: Vec<CanonicalItem>,
+    current_block: [u8; Hash512::BYTE_LENGTH],
+    current_block_offset: usize,
+    next_block_ordinal: u64,
+    remaining_output_byte_length: usize,
+}
 
-impl FixedMessageReader for FoundationFixedMessageReader {
-    fn read(&mut self, output: &mut [u8]) -> Result<(), FixedUniformVerifierMessageError> {
-        self.0
-            .read(output)
-            .map_err(map_foundation_hash_schedule_error)
+impl IndependentBlockFixedMessageReader {
+    fn new(
+        mut block_items: Vec<CanonicalItem>,
+        output_byte_length: usize,
+    ) -> Result<Self, FixedUniformVerifierMessageError> {
+        if output_byte_length == 0 {
+            return Err(FixedUniformVerifierMessageError::FoundationHashSchedule);
+        }
+        let output_byte_length = u64::try_from(output_byte_length)
+            .map_err(|_| FixedUniformVerifierMessageError::LengthOverflow)?;
+        block_items
+            .try_reserve_exact(2)
+            .map_err(|_| FixedUniformVerifierMessageError::LengthOverflow)?;
+        block_items.push(CanonicalItem::unsigned64(output_byte_length));
+        block_items.push(CanonicalItem::unsigned64(0));
+        let current_block =
+            hash_foundation_tuple_512(FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN, &block_items)
+                .map_err(|_| FixedUniformVerifierMessageError::FoundationHashSchedule)?
+                .into_bytes();
+        Ok(Self {
+            block_items,
+            current_block,
+            current_block_offset: 0,
+            next_block_ordinal: 1,
+            remaining_output_byte_length: usize::try_from(output_byte_length)
+                .map_err(|_| FixedUniformVerifierMessageError::LengthOverflow)?,
+        })
     }
 
-    fn discard(&mut self, byte_length: usize) -> Result<(), FixedUniformVerifierMessageError> {
-        self.0
-            .discard(byte_length)
-            .map_err(map_foundation_hash_schedule_error)
+    fn advance_block(&mut self) -> Result<(), FixedUniformVerifierMessageError> {
+        let block_ordinal_item = self
+            .block_items
+            .last_mut()
+            .ok_or(FixedUniformVerifierMessageError::FoundationHashSchedule)?;
+        *block_ordinal_item = CanonicalItem::unsigned64(self.next_block_ordinal);
+        self.current_block = hash_foundation_tuple_512(
+            FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
+            &self.block_items,
+        )
+        .map_err(|_| FixedUniformVerifierMessageError::FoundationHashSchedule)?
+        .into_bytes();
+        self.current_block_offset = 0;
+        self.next_block_ordinal = self
+            .next_block_ordinal
+            .checked_add(1)
+            .ok_or(FixedUniformVerifierMessageError::LengthOverflow)?;
+        Ok(())
+    }
+
+    fn read(&mut self, output_fragment: &mut [u8]) -> Result<(), FixedUniformVerifierMessageError> {
+        if output_fragment.len() > self.remaining_output_byte_length {
+            return Err(FixedUniformVerifierMessageError::FoundationHashSchedule);
+        }
+        let mut written_byte_length = 0;
+        while written_byte_length < output_fragment.len() {
+            if self.current_block_offset == Hash512::BYTE_LENGTH {
+                self.advance_block()?;
+            }
+            let available_byte_length = Hash512::BYTE_LENGTH - self.current_block_offset;
+            let copied_byte_length =
+                available_byte_length.min(output_fragment.len() - written_byte_length);
+            output_fragment[written_byte_length..written_byte_length + copied_byte_length]
+                .copy_from_slice(
+                    &self.current_block
+                        [self.current_block_offset..self.current_block_offset + copied_byte_length],
+                );
+            self.current_block_offset += copied_byte_length;
+            written_byte_length += copied_byte_length;
+        }
+        self.remaining_output_byte_length -= output_fragment.len();
+        Ok(())
+    }
+
+    fn discard(
+        &mut self,
+        output_byte_length: usize,
+    ) -> Result<(), FixedUniformVerifierMessageError> {
+        if output_byte_length > self.remaining_output_byte_length {
+            return Err(FixedUniformVerifierMessageError::FoundationHashSchedule);
+        }
+        let mut buffer = [0_u8; 256];
+        let mut remaining_byte_length = output_byte_length;
+        while remaining_byte_length > 0 {
+            let fragment_byte_length = remaining_byte_length.min(buffer.len());
+            self.read(&mut buffer[..fragment_byte_length])?;
+            remaining_byte_length -= fragment_byte_length;
+        }
+        Ok(())
     }
 
     fn finish(self) -> Result<(), FixedUniformVerifierMessageError> {
-        self.0.finish().map_err(map_foundation_hash_schedule_error)
+        if self.remaining_output_byte_length == 0 {
+            Ok(())
+        } else {
+            Err(FixedUniformVerifierMessageError::FoundationHashSchedule)
+        }
+    }
+}
+
+struct DerivedFixedMessageReader(IndependentBlockFixedMessageReader);
+
+impl FixedMessageReader for DerivedFixedMessageReader {
+    fn read(&mut self, output: &mut [u8]) -> Result<(), FixedUniformVerifierMessageError> {
+        self.0.read(output)
+    }
+
+    fn discard(&mut self, byte_length: usize) -> Result<(), FixedUniformVerifierMessageError> {
+        self.0.discard(byte_length)
+    }
+
+    fn finish(self) -> Result<(), FixedUniformVerifierMessageError> {
+        self.0.finish()
     }
 }
 
@@ -599,12 +698,6 @@ fn challenge_extension_cardinality() -> BigUint {
     BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(PROOF_CHALLENGE_EXTENSION_DEGREE as u32)
 }
 
-fn map_foundation_hash_schedule_error(
-    _error: StreamingFoundationHashError,
-) -> FixedUniformVerifierMessageError {
-    FixedUniformVerifierMessageError::FoundationHashSchedule
-}
-
 #[cfg(test)]
 pub(super) fn materialize_fixed_uniform_verifier_message(
     starting_transcript_state: Hash512,
@@ -614,20 +707,10 @@ pub(super) fn materialize_fixed_uniform_verifier_message(
     let output_byte_length = geometry.exact_message_byte_length()?;
     let prefix_items = geometry
         .canonical_hash_prefix_items(starting_transcript_state, logical_verifier_move_ordinal)?;
-    let mut reader = FoundationTupleHash512BlockReader::new(
-        FIXED_UNIFORM_VERIFIER_MESSAGE_SEED_DOMAIN,
-        FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
-        &prefix_items,
-        output_byte_length,
-    )
-    .map_err(|_| FixedUniformVerifierMessageError::FoundationHashSchedule)?;
+    let mut reader = IndependentBlockFixedMessageReader::new(prefix_items, output_byte_length)?;
     let mut output = vec![0_u8; output_byte_length];
-    reader
-        .read(&mut output)
-        .map_err(map_foundation_hash_schedule_error)?;
-    reader
-        .finish()
-        .map_err(map_foundation_hash_schedule_error)?;
+    reader.read(&mut output)?;
+    reader.finish()?;
     Ok(output)
 }
 
@@ -862,7 +945,7 @@ mod tests {
         let message = materialize_fixed_uniform_verifier_message(state, 7, &geometry).unwrap();
         assert_eq!(
             geometry.concrete_hash_query_count(),
-            foundation_tuple_hash512_seeded_stream_query_count(message.len())
+            foundation_tuple_hash512_block_count(message.len())
                 .map_err(|_| FixedUniformVerifierMessageError::FoundationHashSchedule)
         );
         assert_eq!(
