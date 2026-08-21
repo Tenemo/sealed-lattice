@@ -6,6 +6,7 @@ import {
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
     proofEvidenceRustTests,
+    retiredProofEvidenceRustTests,
     resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     validateCompleteRustLaneOwnership,
@@ -42,6 +43,10 @@ describe('focused Rust lane selection', () => {
                 {
                     ignored: true,
                     testName: proofEvidenceRustTests[0],
+                },
+                {
+                    ignored: true,
+                    testName: retiredProofEvidenceRustTests[0],
                 },
                 {
                     ignored: true,
@@ -173,6 +178,26 @@ describe('focused Rust lane selection', () => {
                     tests: [inventoryEntry],
                 }),
             ).toThrow('test:rust:kernel:theorem-evidence');
+        }
+    });
+
+    it('owns rejected proof tests as non-executable history', () => {
+        for (const retiredTestName of retiredProofEvidenceRustTests) {
+            const inventoryEntry = {
+                ignored: true,
+                testName: retiredTestName,
+            } as const;
+
+            expect(() =>
+                validateCompleteRustLaneOwnership([inventoryEntry]),
+            ).not.toThrow();
+            expect(() =>
+                validateFocusedRustLaneSelection({
+                    lane: 'rust-proof-evidence',
+                    testFilter: retiredTestName,
+                    tests: [inventoryEntry],
+                }),
+            ).toThrow('retired non-executable Rust history');
         }
     });
 

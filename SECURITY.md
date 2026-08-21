@@ -55,7 +55,10 @@ consequences are:
   verify, and source-check one exact public-key-share proof in guarded native
   execution. Only the completed source-correspondent verifier can mint its
   internal accepted-setup capability. The narrower transport validator checks
-  canonical structure and openings but is not proof verification.
+  canonical structure and openings but is not proof verification. The current
+  compact-only lane generated and decoded the 23,815,474-byte proof, verified
+  all 122 public columns and four statement-owned roots, and reached terminal
+  verification in both its producer and separate restoration processes.
 - This vertical slice does not close the backend. It lacks the complete
   transported equation-invalid hostile corpus, release-WebAssembly generation
   and verification pair, real dedicated-worker lifecycle, complete emitted-byte
@@ -65,11 +68,15 @@ consequences are:
   correspondence. Both verifier-derived WHIR public-covector epochs use bounded
   in-place fold polls, and only the resulting fresh positive verification can
   mint the one-shot masking capability. Restore revalidates canonical inputs
-  and deterministically replays from genesis. The open obligation is to bound
-  cold-resume time, lost work, restart traffic, synchronous transport,
-  transition work, and storage transactions in the release browser path; it is
-  not to claim that no WHIR cursor exists or to require serialization of the
-  full live verifier state.
+  and deterministically replays from genesis. A producer Cargo process now
+  persists the 408-byte algebraic cursor, and a second Cargo process in the
+  same guarded run authenticates it, refuses changed checkpoint bytes, restores
+  it, and continues through all 323 algebraic boundaries. Separate-process
+  restoration of the 412-byte accepted/source cursor and the release-browser
+  lifecycle remain open. Cold-resume time, lost work, restart traffic,
+  synchronous transport, transition work, and storage transactions still need
+  release-browser bounds; serialization of the full live verifier state is not
+  required.
 - Independent test code checks all 4,046 selected same-secret relation
   constraints across 48,552 program evaluations, and the compact public-key
   structured matrices match the independent interpreter across all 2,686,977
@@ -192,11 +199,13 @@ that a coherent snapshot is newest.
   flow, or local proof that a coherent snapshot is newest. Lost or
   unauthenticated state retires that participant from the action.
 - `SEC-004`: The production proof backend is rejected for mobile proving. The
-  compact successor can generate and source-correspondently verify one guarded
-  native candidate, but it still lacks the complete theorem and privacy
-  composition, hostile corpus, release-WebAssembly pair, browser lifecycle, and
-  remaining proof families required for suite selection. Independent relation
-  semantics, matrix correspondence, and selected VSS and aggregate
+  compact successor can generate, canonically decode, and
+  source-correspondently verify one guarded native candidate. Baseline
+  transported mutations and separate-process algebraic checkpoint restoration
+  now fail closed, but the complete equation-invalid hostile corpus, theorem
+  and privacy composition, release-WebAssembly pair, browser lifecycle, and
+  remaining proof families are still required for suite selection. Independent
+  relation semantics, matrix correspondence, and selected VSS and aggregate
   source/witness correspondence exist as test-only native evidence.
   Rejected-backend terminal execution provides no independent compact evidence
   and remains non-gating.
@@ -239,11 +248,13 @@ that a coherent snapshot is newest.
   must carry no status or acceptance authority, and any mismatch with final
   suite inputs invalidates the evidence.
 - `SEC-020`: Guarded native evidence covers the exact candidate public-key proof,
-  source-bound verification, bounded CFW and WHIR polls, and exact-proof restore
-  from CFW and WHIR cursors. Dedicated-worker loss, bounded synchronous work,
-  live browser memory, storage amplification, release-WebAssembly proof
-  execution, exact candidate-byte browser restore, and full browser custody
-  remain open.
+  source-bound verification, bounded CFW and WHIR polls, persistence and
+  separate-process restoration of the 408-byte algebraic cursor, changed-cursor
+  refusal, and continuation to terminal verification. The 412-byte
+  accepted/source cursor has no separate-process restoration record.
+  Dedicated-worker loss, bounded synchronous work, live browser memory, storage
+  amplification, release-WebAssembly proof execution, exact candidate-byte
+  browser restore, and full browser custody remain open.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without incremental authenticated capacity accounting for committed,
   staged, and orphanable bytes; atomic counter updates across every storage

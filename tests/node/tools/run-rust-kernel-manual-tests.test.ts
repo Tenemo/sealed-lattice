@@ -2,13 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
     buildManualRustKernelEnvironment,
-    controlledQuotientConstraintCheckpointStopOutputPrefix,
-    parseControlledQuotientConstraintCheckpointStopOutput,
+    compactProofEvidenceRunIdentifierEnvironmentVariable,
     parseManualRustKernelArguments,
     preflightAndRunManualRustKernelLane,
-    rustProofEvidenceCheckpointResumeEnvironmentVariable,
-    rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable,
-    stopAfterQuotientConstraintCheckpointArgument,
 } from '#tools/ci/run-rust-kernel-manual-tests';
 import {
     fullProfileEvidenceRustTests,
@@ -18,7 +14,6 @@ import {
     resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
     validateFocusedRustLaneSelection,
-    vssPrerequisiteProofEvidenceRustTest,
     vssFusedRadix51ProjectionOwnerRustFilter,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -186,10 +181,11 @@ describe('manual Rust kernel preflight', () => {
         expect(executedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
     });
 
-    it('owns resumable exact proofs in one serialized guarded registry', async () => {
+    it('owns compact producer and separate-process restoration in one serialized registry', async () => {
         const environment = buildManualRustKernelEnvironment({
             baseEnvironment: {
-                [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '0',
+                [compactProofEvidenceRunIdentifierEnvironmentVariable]:
+                    'hostile-inherited-value',
             },
             lane: 'rust-proof-evidence',
             targetDirectoryPath: 'proof-evidence-target',
@@ -198,9 +194,14 @@ describe('manual Rust kernel preflight', () => {
             CARGO_BUILD_JOBS: '1',
             CARGO_TARGET_DIR: 'proof-evidence-target',
             RAYON_NUM_THREADS: '1',
-            [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '1',
             SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
         });
+        expect(
+            environment[compactProofEvidenceRunIdentifierEnvironmentVariable],
+        ).toMatch(/^[0-9a-f]{32}$/u);
+        expect(
+            environment[compactProofEvidenceRunIdentifierEnvironmentVariable],
+        ).not.toBe('hostile-inherited-value');
 
         const verifiedTestFilters: string[] = [];
         let executedTestFilters: readonly string[] = [];
@@ -224,121 +225,35 @@ describe('manual Rust kernel preflight', () => {
         expect(
             buildManualRustKernelEnvironment({
                 baseEnvironment: {
-                    [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '1',
+                    [compactProofEvidenceRunIdentifierEnvironmentVariable]:
+                        'hostile-inherited-value',
                 },
                 lane: 'rust-phase-liveness-evidence',
                 targetDirectoryPath: 'phase-liveness-target',
-            })[rustProofEvidenceCheckpointResumeEnvironmentVariable],
-        ).toBeUndefined();
-        expect(
-            environment[
-                rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable
-            ],
+            })[compactProofEvidenceRunIdentifierEnvironmentVariable],
         ).toBeUndefined();
     });
 
-    it('owns a controlled quotient-constraint stop only for the focused VSS proof', () => {
-        expect(
+    it('rejects retired proof filters and the removed controlled-stop option', () => {
+        expect(() =>
             parseManualRustKernelArguments([
                 'rust-proof-evidence',
-                '--',
                 'exact_vss_prerequisite_proof_round_trip',
-                stopAfterQuotientConstraintCheckpointArgument,
             ]),
-        ).toEqual({
-            focusedFilter: 'exact_vss_prerequisite_proof_round_trip',
-            lane: 'rust-proof-evidence',
-            stopAfterQuotientConstraintCheckpoint: true,
-        });
-        const environment = buildManualRustKernelEnvironment({
-            baseEnvironment: {
-                [rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable]:
-                    'hostile-inherited-value',
-            },
-            lane: 'rust-proof-evidence',
-            stopAfterQuotientConstraintCheckpoint: true,
-            targetDirectoryPath: 'proof-evidence-target',
-        });
-        expect(environment).toMatchObject({
-            [rustProofEvidenceCheckpointResumeEnvironmentVariable]: '1',
-            [rustProofEvidenceStopAfterQuotientConstraintCheckpointEnvironmentVariable]:
-                '1',
-        });
+        ).toThrow('selects zero configured Rust tests');
         expect(() =>
             parseManualRustKernelArguments([
                 'rust-proof-evidence',
-                'exact_aggregate_wide_same_secret_proof_round_trip',
-                stopAfterQuotientConstraintCheckpointArgument,
+                '--stop-after-quotient-constraint-checkpoint',
             ]),
-        ).toThrow('requires the focused production VSS prerequisite proof');
-        expect(() =>
-            parseManualRustKernelArguments([
-                'rust-proof-evidence',
-                stopAfterQuotientConstraintCheckpointArgument,
-            ]),
-        ).toThrow('requires the focused production VSS prerequisite proof');
-        expect(() =>
-            buildManualRustKernelEnvironment({
-                lane: 'rust-measurements',
-                stopAfterQuotientConstraintCheckpoint: true,
-                targetDirectoryPath: 'measurement-target',
-            }),
-        ).toThrow('Only the Rust proof-evidence lane');
-        expect(vssPrerequisiteProofEvidenceRustTest).toContain(
-            'exact_vss_prerequisite_proof_round_trip',
-        );
+        ).toThrow('Unknown argument');
     });
 
-    it('requires one authenticated and cancelled controlled-stop record', () => {
-        const record = {
-            authenticatedAfterWrite: true,
-            cancellationCompleted: true,
-            checkpointByteLength: 5_193,
-            completedConstraintCount: 64,
-            elapsedMilliseconds: 81_245,
-            familyIdentifier: 'selected-vss-prerequisite-proof',
-            maximumDeclaredExternalMemoryByteLength: 587_202_560,
-            resumedFromAuthenticatedBoundary: 1,
-            standardCheckpointCount: 2,
-        };
-        const encodedRecord = `${controlledQuotientConstraintCheckpointStopOutputPrefix}${JSON.stringify(record)}`;
-        expect(
-            parseControlledQuotientConstraintCheckpointStopOutput(
-                `timestamp [stdout] ${encodedRecord}\n`,
-            ),
-        ).toEqual(record);
-        expect(() =>
-            parseControlledQuotientConstraintCheckpointStopOutput(
-                `${encodedRecord}\n${encodedRecord}\n`,
-            ),
-        ).toThrow('exactly one terminal record');
-        expect(() =>
-            parseControlledQuotientConstraintCheckpointStopOutput(
-                `${controlledQuotientConstraintCheckpointStopOutputPrefix}${JSON.stringify(
-                    {
-                        ...record,
-                        authenticatedAfterWrite: false,
-                    },
-                )}\n`,
-            ),
-        ).toThrow('wrong terminal classification');
-        expect(() =>
-            parseControlledQuotientConstraintCheckpointStopOutput(
-                `${controlledQuotientConstraintCheckpointStopOutputPrefix}${JSON.stringify(
-                    {
-                        ...record,
-                        trailingProducerClaim: 'ignored',
-                    },
-                )}\n`,
-            ),
-        ).toThrow('wrong fields');
-    });
-
-    it('expands a broad proof-evidence filter only to registered exact tests', async () => {
+    it('expands the compact proof-evidence filter only to its ordered producer and consumer', async () => {
         let executedTestFilters: readonly string[] = [];
         await preflightAndRunManualRustKernelLane({
             configuredTestNames: proofEvidenceRustTests,
-            focusedFilter: 'exact_',
+            focusedFilter: 'compact_public_key_proof_evidence_',
             lane: 'rust-proof-evidence',
             runGuardedCommands: (testFilters) => {
                 executedTestFilters = testFilters;

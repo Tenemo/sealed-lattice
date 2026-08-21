@@ -3157,12 +3157,16 @@ fn value_minus_constant_form(
 #[cfg(test)]
 mod tests {
     use core::cell::Cell;
+    #[cfg(not(target_arch = "wasm32"))]
+    use core::mem::size_of;
 
     #[cfg(not(target_arch = "wasm32"))]
     use std::{
+        env,
         fs::{self, OpenOptions},
         io::{ErrorKind, Write},
         path::{Path, PathBuf},
+        process,
         time::Instant,
     };
 
@@ -3184,7 +3188,8 @@ mod tests {
     };
     use crate::bgv::proof_suite::external_memory::tests::{FileBackedTestStorage, TestStorage};
     use crate::bgv::proof_suite::field::{
-        PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
+        PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement,
+        ProofChallengeExtensionElement,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use crate::{
@@ -3198,7 +3203,10 @@ mod tests {
                 },
                 compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
-                compact_proof_wire::CompactPublicInputBindings,
+                compact_proof_wire::{
+                    CompactPublicInputBindings, PROOF_FIXED_HEADER_BYTE_LENGTH,
+                    PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH, decode_compact_proof_wire,
+                },
                 compact_public_key_accepted_verifier::ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
                 compact_public_key_algebraic_verifier::{
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT,
@@ -3238,6 +3246,13 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     const COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC: [u8; 8] = *b"SLCAPK01";
+    #[cfg(not(target_arch = "wasm32"))]
+    const COMPACT_PROOF_EVIDENCE_PROCESS_RECORD_MAGIC: [u8; 8] = *b"SLCPPE01";
+    #[cfg(not(target_arch = "wasm32"))]
+    const COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER_BYTE_LENGTH: usize = 32;
+    #[cfg(not(target_arch = "wasm32"))]
+    const COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER_ENVIRONMENT_VARIABLE: &str =
+        "SEALED_LATTICE_COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER";
 
     #[cfg(not(target_arch = "wasm32"))]
     fn compact_public_key_algebraic_checkpoint_directory() -> PathBuf {
@@ -3248,6 +3263,83 @@ mod tests {
             .join("temp")
             .join("test-checkpoints")
             .join("compact-public-key-algebraic-verification")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn compact_proof_evidence_run_identifier()
+    -> [u8; COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER_BYTE_LENGTH] {
+        let identifier = env::var(COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER_ENVIRONMENT_VARIABLE)
+            .expect("the compact proof-evidence runner supplies one run identifier");
+        assert_eq!(
+            identifier.len(),
+            COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER_BYTE_LENGTH,
+            "the compact proof-evidence run identifier has its fixed length"
+        );
+        assert!(
+            identifier
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+            "the compact proof-evidence run identifier is lowercase hexadecimal"
+        );
+        identifier
+            .into_bytes()
+            .try_into()
+            .expect("the validated compact proof-evidence run identifier has its fixed length")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_compact_proof_evidence_producer_process_record(directory: &Path) {
+        fs::create_dir_all(directory).expect("the compact evidence directory is available");
+        let path = directory.join("producer-process.bin");
+        let mut bytes = Vec::with_capacity(
+            COMPACT_PROOF_EVIDENCE_PROCESS_RECORD_MAGIC.len()
+                + size_of::<u32>()
+                + COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER_BYTE_LENGTH,
+        );
+        bytes.extend_from_slice(&COMPACT_PROOF_EVIDENCE_PROCESS_RECORD_MAGIC);
+        bytes.extend_from_slice(&process::id().to_le_bytes());
+        bytes.extend_from_slice(&compact_proof_evidence_run_identifier());
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .expect("the compact producer process record opens exclusively for replacement");
+        file.write_all(&bytes)
+            .expect("the complete compact producer process record is written");
+        file.sync_all()
+            .expect("the complete compact producer process record is durable");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn assert_compact_proof_evidence_consumer_is_a_separate_process(directory: &Path) {
+        let bytes = fs::read(directory.join("producer-process.bin"))
+            .expect("the compact producer process record exists");
+        let expected_byte_length = COMPACT_PROOF_EVIDENCE_PROCESS_RECORD_MAGIC.len()
+            + size_of::<u32>()
+            + COMPACT_PROOF_EVIDENCE_RUN_IDENTIFIER_BYTE_LENGTH;
+        assert_eq!(bytes.len(), expected_byte_length);
+        assert_eq!(
+            &bytes[..COMPACT_PROOF_EVIDENCE_PROCESS_RECORD_MAGIC.len()],
+            &COMPACT_PROOF_EVIDENCE_PROCESS_RECORD_MAGIC
+        );
+        let process_identifier_start = COMPACT_PROOF_EVIDENCE_PROCESS_RECORD_MAGIC.len();
+        let process_identifier_end = process_identifier_start + size_of::<u32>();
+        let producer_process_identifier = u32::from_le_bytes(
+            bytes[process_identifier_start..process_identifier_end]
+                .try_into()
+                .expect("the producer process identifier is complete"),
+        );
+        assert_ne!(
+            producer_process_identifier,
+            process::id(),
+            "the compact restoration owner must run in a separate process"
+        );
+        assert_eq!(
+            &bytes[process_identifier_end..],
+            &compact_proof_evidence_run_identifier(),
+            "producer and restoration processes must belong to the same guarded evidence run"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -3305,9 +3397,20 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn decode_compact_public_key_algebraic_checkpoint_bindings(
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct CompactPublicKeyAlgebraicCheckpointContext {
+        proof_attempt_identifier: [u8; 32],
+        public_input_bindings: CompactPublicInputBindings,
+        compact_construction_identity_hash: [u8; Hash512::BYTE_LENGTH],
+        checkpoint_schedule_digest: Hash512,
+        source_replay_binding: [u8; Hash512::BYTE_LENGTH],
+        private_coin_derivation_binding_hash: Hash512,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn decode_compact_public_key_algebraic_checkpoint_context(
         bytes: &[u8],
-    ) -> CompactPublicInputBindings {
+    ) -> CompactPublicKeyAlgebraicCheckpointContext {
         const PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
         const CONTEXT_HASH_COUNT: usize = 8;
         let expected_byte_length = COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC.len()
@@ -3319,8 +3422,10 @@ mod tests {
             &COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC
         );
         let mut cursor = COMPACT_PUBLIC_KEY_ALGEBRAIC_CHECKPOINT_CONTEXT_MAGIC.len();
-        let proof_attempt_identifier =
-            &bytes[cursor..cursor + PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+        let proof_attempt_identifier: [u8; PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH] = bytes
+            [cursor..cursor + PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH]
+            .try_into()
+            .expect("the checkpoint context contains one complete proof-attempt identifier");
         assert_ne!(
             proof_attempt_identifier,
             [0_u8; PROOF_ATTEMPT_IDENTIFIER_BYTE_LENGTH]
@@ -3337,12 +3442,19 @@ mod tests {
             cursor += Hash512::BYTE_LENGTH;
         }
         assert_eq!(cursor, bytes.len());
-        CompactPublicInputBindings::new(
-            context_hashes[0],
-            context_hashes[1],
-            context_hashes[2],
-            context_hashes[3],
-        )
+        CompactPublicKeyAlgebraicCheckpointContext {
+            proof_attempt_identifier,
+            public_input_bindings: CompactPublicInputBindings::new(
+                context_hashes[0],
+                context_hashes[1],
+                context_hashes[2],
+                context_hashes[3],
+            ),
+            compact_construction_identity_hash: context_hashes[4].into_bytes(),
+            checkpoint_schedule_digest: context_hashes[5],
+            source_replay_binding: context_hashes[6].into_bytes(),
+            private_coin_derivation_binding_hash: context_hashes[7],
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -5307,8 +5419,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual checkpointed compact public-key proof round trip"]
-    fn heavy_rust_kernel_checkpointed_compact_public_key_proof_round_trip() {
+    #[ignore = "manual compact public-key proof-evidence producer"]
+    fn compact_public_key_proof_evidence_generation_and_verification() {
         let authority = populate_compact_public_key_development_evidence_authority(0x43)
             .expect("standalone production-derived public-key authority populates");
         let action_private_randomness = authority.action_private_randomness;
@@ -7615,6 +7727,7 @@ mod tests {
             "binding-and-context.bin",
             &checkpoint_context,
         );
+        write_compact_proof_evidence_producer_process_record(&checkpoint_directory);
         let emitted_cdhz_measurement = measure_selected_compact_emission_cdhz(
             Some(response_generation_output.canonical_proof_bytes()),
             Some(&canonical_public_input_bytes),
@@ -7701,19 +7814,240 @@ mod tests {
                 .peak_stored_byte_length(),
         );
         drop(response_generation_output);
-        verify_checkpointed_compact_public_key_proof_algebraically(&checkpoint_directory);
+        verify_checkpointed_compact_public_key_proof_algebraically(
+            &checkpoint_directory,
+            CompactPublicKeyCheckpointEvidenceMode::PersistThenRestore,
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn verify_checkpointed_compact_public_key_proof_algebraically(checkpoint_directory: &Path) {
+    fn assert_selected_compact_transport_refusal(
+        category: &str,
+        public_input_bindings: CompactPublicInputBindings,
+        canonical_proof_bytes: Vec<u8>,
+        canonical_public_input_bytes: Vec<u8>,
+    ) {
+        match verify_selected_compact_public_key_transport(
+            public_input_bindings,
+            canonical_proof_bytes.into_boxed_slice(),
+            canonical_public_input_bytes.into_boxed_slice(),
+        ) {
+            Err(error) => println!(
+                "compact public-key transported hostile input refused category={category} error={error:?}"
+            ),
+            Ok(_) => panic!(
+                "compact public-key transported hostile input was accepted category={category}"
+            ),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn assert_selected_compact_public_key_transported_hostile_inputs_are_refused(
+        public_input_bindings: CompactPublicInputBindings,
+        canonical_proof_bytes: &[u8],
+        canonical_public_input_bytes: &[u8],
+    ) {
+        let contract =
+            crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
+                .expect("the selected compact public-key contract decodes");
+        let proof_geometry = &contract.verifier_inputs().proof_wire_geometry;
+        let decoded_proof = decode_compact_proof_wire(proof_geometry, canonical_proof_bytes)
+            .expect("the producer proof decodes before hostile mutations");
+        let first_response = decoded_proof
+            .responses()
+            .first()
+            .expect("the selected compact proof has a first response");
+        let first_response_geometry = proof_geometry
+            .responses()
+            .first()
+            .expect("the selected compact proof geometry has a first response");
+        assert!(first_response.queried_base_field_element_count() > 0);
+        assert!(first_response.queried_leaf_count() > 0);
+        let variable_count_byte_length = if first_response_geometry
+            .minimum_queried_base_field_element_count()
+            != first_response_geometry.maximum_queried_base_field_element_count()
+            || first_response_geometry.minimum_queried_extension_field_element_count()
+                != first_response_geometry.maximum_queried_extension_field_element_count()
+            || first_response_geometry.minimum_queried_leaf_count()
+                != first_response_geometry.maximum_queried_leaf_count()
+        {
+            3 * size_of::<u32>()
+        } else {
+            0
+        };
+        let response_ordinal_offset = PROOF_FIXED_HEADER_BYTE_LENGTH;
+        let response_root_offset = response_ordinal_offset + size_of::<u32>();
+        let round_salt_offset = response_root_offset + Hash512::BYTE_LENGTH;
+        let first_base_field_value_offset = round_salt_offset
+            + crate::bgv::proof_suite::compact_proof_wire::COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH
+            + variable_count_byte_length;
+        let first_leaf_salt_offset = first_base_field_value_offset
+            + first_response.queried_base_field_element_count() * size_of::<u64>()
+            + first_response.queried_extension_field_element_count()
+                * PROOF_CHALLENGE_EXTENSION_DEGREE
+                * size_of::<u64>();
+        assert_eq!(
+            &canonical_proof_bytes
+                [first_leaf_salt_offset..first_leaf_salt_offset + Hash512::BYTE_LENGTH * 2],
+            first_response
+                .leaf_salt(canonical_proof_bytes, 0)
+                .expect("the first transported leaf salt is canonical")
+                .as_slice()
+        );
+
+        let mut wrong_magic = canonical_proof_bytes.to_vec();
+        wrong_magic[0] ^= 1;
+        assert_selected_compact_transport_refusal(
+            "wrong-proof-magic",
+            public_input_bindings,
+            wrong_magic,
+            canonical_public_input_bytes.to_vec(),
+        );
+        assert_selected_compact_transport_refusal(
+            "truncated-proof",
+            public_input_bindings,
+            canonical_proof_bytes[..canonical_proof_bytes.len() - 1].to_vec(),
+            canonical_public_input_bytes.to_vec(),
+        );
+        let mut trailing_proof = canonical_proof_bytes.to_vec();
+        trailing_proof.push(0);
+        assert_selected_compact_transport_refusal(
+            "trailing-proof",
+            public_input_bindings,
+            trailing_proof,
+            canonical_public_input_bytes.to_vec(),
+        );
+        let mut reordered_response = canonical_proof_bytes.to_vec();
+        reordered_response[response_ordinal_offset] ^= 1;
+        assert_selected_compact_transport_refusal(
+            "reordered-response",
+            public_input_bindings,
+            reordered_response,
+            canonical_public_input_bytes.to_vec(),
+        );
+        let mut wrong_root = canonical_proof_bytes.to_vec();
+        wrong_root[response_root_offset] ^= 1;
+        assert_selected_compact_transport_refusal(
+            "wrong-response-root",
+            public_input_bindings,
+            wrong_root,
+            canonical_public_input_bytes.to_vec(),
+        );
+        let mut wrong_round_salt = canonical_proof_bytes.to_vec();
+        wrong_round_salt[round_salt_offset] ^= 1;
+        assert_selected_compact_transport_refusal(
+            "wrong-transcript-round-salt",
+            public_input_bindings,
+            wrong_round_salt,
+            canonical_public_input_bytes.to_vec(),
+        );
+        let mut noncanonical_proof_field = canonical_proof_bytes.to_vec();
+        noncanonical_proof_field
+            [first_base_field_value_offset..first_base_field_value_offset + size_of::<u64>()]
+            .copy_from_slice(&PROOF_BASE_FIELD_MODULUS.to_le_bytes());
+        assert_selected_compact_transport_refusal(
+            "noncanonical-proof-field",
+            public_input_bindings,
+            noncanonical_proof_field,
+            canonical_public_input_bytes.to_vec(),
+        );
+        let mut wrong_opening_salt = canonical_proof_bytes.to_vec();
+        wrong_opening_salt[first_leaf_salt_offset] ^= 1;
+        assert_selected_compact_transport_refusal(
+            "wrong-opening-salt",
+            public_input_bindings,
+            wrong_opening_salt,
+            canonical_public_input_bytes.to_vec(),
+        );
+
+        for (binding_ordinal, binding) in public_input_bindings
+            .ordered_hashes()
+            .into_iter()
+            .enumerate()
+        {
+            let mut changed_hash = binding.into_bytes();
+            changed_hash[0] ^= 1;
+            let mut changed_bindings = public_input_bindings.ordered_hashes();
+            changed_bindings[binding_ordinal] = Hash512::from_bytes(changed_hash);
+            assert_selected_compact_transport_refusal(
+                &format!("wrong-public-binding-{binding_ordinal}"),
+                CompactPublicInputBindings::new(
+                    changed_bindings[0],
+                    changed_bindings[1],
+                    changed_bindings[2],
+                    changed_bindings[3],
+                ),
+                canonical_proof_bytes.to_vec(),
+                canonical_public_input_bytes.to_vec(),
+            );
+        }
+
+        let mut wrong_public_input_magic = canonical_public_input_bytes.to_vec();
+        wrong_public_input_magic[0] ^= 1;
+        assert_selected_compact_transport_refusal(
+            "wrong-public-input-magic",
+            public_input_bindings,
+            canonical_proof_bytes.to_vec(),
+            wrong_public_input_magic,
+        );
+        let mut noncanonical_public_input_field = canonical_public_input_bytes.to_vec();
+        noncanonical_public_input_field[PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH
+            ..PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH + size_of::<u64>()]
+            .copy_from_slice(&PROOF_BASE_FIELD_MODULUS.to_le_bytes());
+        assert_selected_compact_transport_refusal(
+            "noncanonical-public-input-field",
+            public_input_bindings,
+            canonical_proof_bytes.to_vec(),
+            noncanonical_public_input_field,
+        );
+        assert_selected_compact_transport_refusal(
+            "truncated-public-input",
+            public_input_bindings,
+            canonical_proof_bytes.to_vec(),
+            canonical_public_input_bytes[..canonical_public_input_bytes.len() - 1].to_vec(),
+        );
+        let mut trailing_public_input = canonical_public_input_bytes.to_vec();
+        trailing_public_input.push(0);
+        assert_selected_compact_transport_refusal(
+            "trailing-public-input",
+            public_input_bindings,
+            canonical_proof_bytes.to_vec(),
+            trailing_public_input,
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum CompactPublicKeyCheckpointEvidenceMode {
+        PersistThenRestore,
+        RestoreFromProducerProcess,
+    }
+
+    #[test]
+    #[ignore = "manual compact public-key proof-evidence separate-process restoration"]
+    fn compact_public_key_proof_evidence_separate_process_restoration() {
+        let checkpoint_directory = compact_public_key_algebraic_checkpoint_directory();
+        assert_compact_proof_evidence_consumer_is_a_separate_process(&checkpoint_directory);
+        verify_checkpointed_compact_public_key_proof_algebraically(
+            &checkpoint_directory,
+            CompactPublicKeyCheckpointEvidenceMode::RestoreFromProducerProcess,
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn verify_checkpointed_compact_public_key_proof_algebraically(
+        checkpoint_directory: &Path,
+        evidence_mode: CompactPublicKeyCheckpointEvidenceMode,
+    ) {
         let canonical_proof_bytes = fs::read(checkpoint_directory.join("generated-proof.bin"))
             .expect("the generated compact proof checkpoint exists");
         let canonical_public_input_bytes = fs::read(checkpoint_directory.join("public-input.bin"))
             .expect("the compact public-input checkpoint exists");
         let context_bytes = fs::read(checkpoint_directory.join("binding-and-context.bin"))
             .expect("the compact binding-and-context checkpoint exists");
-        let public_input_bindings =
-            decode_compact_public_key_algebraic_checkpoint_bindings(&context_bytes);
+        let checkpoint_context =
+            decode_compact_public_key_algebraic_checkpoint_context(&context_bytes);
+        let public_input_bindings = checkpoint_context.public_input_bindings;
         let verification_started_at = Instant::now();
         let initial_transport = verify_selected_compact_public_key_transport(
             public_input_bindings,
@@ -7721,45 +8055,118 @@ mod tests {
             canonical_public_input_bytes.clone().into_boxed_slice(),
         )
         .expect("the checkpoint source passes independent compact transport verification");
+        assert_eq!(
+            checkpoint_context.compact_construction_identity_hash,
+            initial_transport
+                .verifier_inputs()
+                .canonical_source_hash()
+                .expect("the selected compact construction identity derives")
+                .into_bytes()
+        );
+        assert_eq!(
+            checkpoint_context.checkpoint_schedule_digest,
+            initial_transport
+                .verifier_inputs()
+                .checkpoint_schedule
+                .checkpoint_schedule_digest()
+        );
+        assert_ne!(checkpoint_context.proof_attempt_identifier, [0_u8; 32]);
+        assert_ne!(
+            checkpoint_context.source_replay_binding,
+            [0_u8; Hash512::BYTE_LENGTH]
+        );
+        assert_ne!(
+            checkpoint_context
+                .private_coin_derivation_binding_hash
+                .into_bytes(),
+            [0_u8; Hash512::BYTE_LENGTH]
+        );
         let expected_whir_work_unit_count =
             compact_public_key_whir_fold_work_unit_count(initial_transport.verifier_inputs())
                 .expect("the selected WHIR fold work derives from the verified contract");
-        let mut initial_verification =
-            CompactPublicKeyAlgebraicVerification::begin(initial_transport)
-                .expect("the compact algebraic verifier accepts the checkpoint source");
-        let first_completed_work_unit_count = match initial_verification
-            .advance(65_536)
-            .expect("the initial compact algebraic verifier slice succeeds")
-        {
-            CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
-                completed_work_unit_count,
-                checkpoint_safe_boundary_ordinal,
-            } => {
-                assert_eq!(checkpoint_safe_boundary_ordinal, Some(0));
-                completed_work_unit_count
+        let canonical_verification_checkpoint = match evidence_mode {
+            CompactPublicKeyCheckpointEvidenceMode::PersistThenRestore => {
+                let mut initial_verification =
+                    CompactPublicKeyAlgebraicVerification::begin(initial_transport)
+                        .expect("the compact algebraic verifier accepts the checkpoint source");
+                let first_completed_work_unit_count = match initial_verification
+                    .advance(65_536)
+                    .expect("the initial compact algebraic verifier slice succeeds")
+                {
+                    CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                        completed_work_unit_count,
+                        checkpoint_safe_boundary_ordinal,
+                    } => {
+                        assert_eq!(checkpoint_safe_boundary_ordinal, Some(0));
+                        completed_work_unit_count
+                    }
+                    CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
+                        panic!("a fresh verifier cannot complete checkpoint replay")
+                    }
+                    CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete { .. } => {
+                        panic!("a fresh verifier cannot complete WHIR checkpoint replay")
+                    }
+                    CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted { .. } => {
+                        panic!("one bounded slice cannot reach terminal WHIR work")
+                    }
+                    CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted { .. } => {
+                        panic!("one bounded slice cannot reach terminal WHIR verification")
+                    }
+                    CompactPublicKeyAlgebraicVerificationPoll::Complete(_) => {
+                        panic!("one bounded slice cannot complete the selected verifier")
+                    }
+                };
+                assert!(first_completed_work_unit_count > 0);
+                let checkpoint = initial_verification
+                    .canonical_checkpoint_bytes()
+                    .expect("the first safe verifier boundary has a canonical checkpoint");
+                write_or_validate_compact_public_key_algebraic_checkpoint_file(
+                    checkpoint_directory,
+                    "algebraic-verification-checkpoint.bin",
+                    &checkpoint,
+                );
+                checkpoint
             }
-            CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete { .. } => {
-                panic!("a fresh verifier cannot complete checkpoint replay")
-            }
-            CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete { .. } => {
-                panic!("a fresh verifier cannot complete WHIR checkpoint replay")
-            }
-            CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted { .. } => {
-                panic!("one bounded slice cannot reach terminal WHIR work")
-            }
-            CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted { .. } => {
-                panic!("one bounded slice cannot reach terminal WHIR verification")
-            }
-            CompactPublicKeyAlgebraicVerificationPoll::Complete(_) => {
-                panic!("one bounded slice cannot complete the selected verifier")
+            CompactPublicKeyCheckpointEvidenceMode::RestoreFromProducerProcess => {
+                assert_selected_compact_public_key_transported_hostile_inputs_are_refused(
+                    public_input_bindings,
+                    &canonical_proof_bytes,
+                    &canonical_public_input_bytes,
+                );
+                let checkpoint_bytes =
+                    fs::read(checkpoint_directory.join("algebraic-verification-checkpoint.bin"))
+                        .expect(
+                            "the producer process persisted its algebraic verification checkpoint",
+                        );
+                for changed_byte_offset in [
+                    0,
+                    8,
+                    8 + 4 * Hash512::BYTE_LENGTH,
+                    checkpoint_bytes.len() - 1,
+                ] {
+                    let mut changed_checkpoint_bytes = checkpoint_bytes.clone();
+                    changed_checkpoint_bytes[changed_byte_offset] ^= 1;
+                    let changed_checkpoint_transport =
+                        verify_selected_compact_public_key_transport(
+                            public_input_bindings,
+                            canonical_proof_bytes.clone().into_boxed_slice(),
+                            canonical_public_input_bytes.clone().into_boxed_slice(),
+                        )
+                        .expect("checkpoint hostility starts from the exact verified transport");
+                    assert!(
+                        CompactPublicKeyAlgebraicVerification::resume(
+                            changed_checkpoint_transport,
+                            &changed_checkpoint_bytes,
+                        )
+                        .is_err(),
+                        "changed checkpoint byte offset {changed_byte_offset} must fail closed"
+                    );
+                }
+                checkpoint_bytes.try_into().expect(
+                    "the persisted algebraic verification checkpoint has its canonical size",
+                )
             }
         };
-        assert!(first_completed_work_unit_count > 0);
-        let canonical_verification_checkpoint = initial_verification
-            .canonical_checkpoint_bytes()
-            .expect("the first safe verifier boundary has a canonical checkpoint");
-        drop(initial_verification);
-
         let resumed_transport = verify_selected_compact_public_key_transport(
             public_input_bindings,
             canonical_proof_bytes.clone().into_boxed_slice(),

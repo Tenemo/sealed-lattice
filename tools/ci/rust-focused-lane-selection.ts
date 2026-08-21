@@ -89,12 +89,14 @@ export const phaseLivenessEvidenceRustTests = [
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_row_code_whir_accounting_records_every_soft_variance_and_absolute_headroom',
 ] as const;
 
-export const vssPrerequisiteProofEvidenceRustTest =
-    'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_vss_prerequisite_proof_round_trip';
-
 export const proofEvidenceRustTests = [
+    'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_generation_and_verification',
+    'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_separate_process_restoration',
+] as const;
+
+export const retiredProofEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::exact_same_secret::tests::exact_same_secret_checkpoint_phases_are_self_owned',
-    vssPrerequisiteProofEvidenceRustTest,
+    'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_vss_prerequisite_proof_round_trip',
     'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_aggregate_wide_same_secret_proof_round_trip',
 ] as const;
 
@@ -145,6 +147,9 @@ type FocusedRustLane =
     | 'rust-proof-evidence'
     | 'rust-theorem-evidence';
 
+const retiredRustHistoryOwner = 'retired-rust-history' as const;
+type RustLaneOwner = FocusedRustLane | typeof retiredRustHistoryOwner;
+
 export const focusedRustLaneScripts = {
     'rust-full-profile-evidence': 'test:rust:kernel:full-profile-evidence',
     'rust-kernel-fast': 'test:rust:kernel',
@@ -161,33 +166,44 @@ const phaseLivenessEvidenceTestSet = new Set<string>(
     phaseLivenessEvidenceRustTests,
 );
 const proofEvidenceTestSet = new Set<string>(proofEvidenceRustTests);
+const retiredProofEvidenceTestSet = new Set<string>(
+    retiredProofEvidenceRustTests,
+);
 const theoremEvidenceTestSet = new Set<string>(theoremEvidenceRustTests);
-const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
-    const lanes: FocusedRustLane[] = [];
+const ownersForTest = (test: RustTestInventoryEntry): RustLaneOwner[] => {
+    const owners: RustLaneOwner[] = [];
     if (test.testName.includes(heavyRustKernelTestNamePrefix)) {
-        lanes.push('rust-kernel-heavy');
+        owners.push('rust-kernel-heavy');
     }
     if (fullProfileTestSet.has(test.testName)) {
-        lanes.push('rust-full-profile-evidence');
+        owners.push('rust-full-profile-evidence');
     }
     if (measurementTestSet.has(test.testName)) {
-        lanes.push('rust-measurements');
+        owners.push('rust-measurements');
     }
     if (phaseLivenessEvidenceTestSet.has(test.testName)) {
-        lanes.push('rust-phase-liveness-evidence');
+        owners.push('rust-phase-liveness-evidence');
     }
     if (proofEvidenceTestSet.has(test.testName)) {
-        lanes.push('rust-proof-evidence');
+        owners.push('rust-proof-evidence');
+    }
+    if (retiredProofEvidenceTestSet.has(test.testName)) {
+        owners.push(retiredRustHistoryOwner);
     }
     if (theoremEvidenceTestSet.has(test.testName)) {
-        lanes.push('rust-theorem-evidence');
+        owners.push('rust-theorem-evidence');
     }
     if (!test.ignored) {
-        lanes.push('rust-kernel-fast');
+        owners.push('rust-kernel-fast');
     }
 
-    return lanes;
+    return owners;
 };
+
+const rustLaneOwnerDescription = (owner: RustLaneOwner): string =>
+    owner === retiredRustHistoryOwner
+        ? 'retired non-executable Rust history'
+        : focusedRustLaneScripts[owner];
 
 export const validateCompleteRustLaneOwnership = (
     tests: readonly RustTestInventoryEntry[],
@@ -197,17 +213,17 @@ export const validateCompleteRustLaneOwnership = (
     }
 
     for (const test of tests) {
-        const lanes = lanesForTest(test);
-        if (lanes.length === 1) {
+        const owners = ownersForTest(test);
+        if (owners.length === 1) {
             continue;
         }
-        if (lanes.length === 0) {
+        if (owners.length === 0) {
             throw new Error(
                 `Ignored Rust test ${test.testName} belongs to no guarded Rust lane.`,
             );
         }
         throw new Error(
-            `Rust test ${test.testName} belongs to multiple Rust lanes: ${lanes.map((lane) => focusedRustLaneScripts[lane]).join(', ')}.`,
+            `Rust test ${test.testName} belongs to multiple Rust lanes: ${owners.map(rustLaneOwnerDescription).join(', ')}.`,
         );
     }
 };
@@ -225,19 +241,19 @@ export const validateFocusedRustLaneSelection = (input: {
     }
 
     for (const test of input.tests) {
-        const lanes = lanesForTest(test);
-        if (lanes.length === 1 && lanes[0] === input.lane) {
+        const owners = ownersForTest(test);
+        if (owners.length === 1 && owners[0] === input.lane) {
             continue;
         }
-        if (lanes.length > 1) {
+        if (owners.length > 1) {
             throw new Error(
-                `${requestedScript} filter ${input.testFilter} selects ${test.testName}, which belongs to multiple Rust lanes: ${lanes.map((lane) => focusedRustLaneScripts[lane]).join(', ')}.`,
+                `${requestedScript} filter ${input.testFilter} selects ${test.testName}, which belongs to multiple Rust lanes: ${owners.map(rustLaneOwnerDescription).join(', ')}.`,
             );
         }
         const correctScript =
-            lanes.length === 0
+            owners.length === 0
                 ? 'a dedicated guarded command'
-                : focusedRustLaneScripts[lanes[0]];
+                : rustLaneOwnerDescription(owners[0]);
         throw new Error(
             `${requestedScript} filter ${input.testFilter} selects ${test.testName}, which belongs to ${correctScript}.`,
         );

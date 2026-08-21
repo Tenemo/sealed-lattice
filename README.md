@@ -91,20 +91,24 @@ and target release remain incomplete or internal.
   every binding, compiler-constraint segment, semantic source category, and
   witness category is detected. The oracle cannot mint a capability and is not
   proof, WebAssembly, browser, or phone evidence.
-- For the public-key-share family, a guarded native owner generated one
-  23,815,474-byte canonical compact-proof candidate. Independent code validated
-  its transport, verified the CFW and both WHIR epochs, checked all code
-  switches and live masking gates, reconstructed all 122 public columns and
-  four statement-owned roots, and minted a source-bound accepted-setup
-  capability only after positive completion. This is one native vertical slice,
-  not a selected proof backend or accepted ceremony.
+- For the public-key-share family, the compact-only guarded native lane
+  generated one 23,815,474-byte canonical compact-proof candidate. Independent
+  code decoded and validated its transport, verified the CFW and both WHIR
+  epochs, checked all code switches and live masking gates, reconstructed all
+  122 public columns and four statement-owned roots, and minted a source-bound
+  accepted-setup capability only after positive completion. This is one native
+  vertical slice, not a selected proof backend or accepted ceremony.
 - The algebraic verifier exposes a 408-byte cursor over 323 durable CFW and
   WHIR boundaries. The source-bound accepted verifier exposes a distinct
   412-byte cursor over 4,541 boundaries, adding all public-column and
   statement-root correspondence work. Restoration revalidates canonical source
   bytes and replays deterministically from genesis; the cursors contain no
-  opaque transform state. Guarded native execution restores the exact proof at
-  CFW and WHIR boundaries and reproduces the cursor bytes.
+  opaque transform state. The compact-only guarded lane persists the 408-byte
+  algebraic cursor in its producer Cargo process. A second Cargo process in the
+  same runner-scoped execution rejects changed checkpoint bytes,
+  restores that exact cursor, replays it, and continues through all CFW, WHIR,
+  and source-correspondence work to the same terminal counts. Separate-process
+  restoration of the 412-byte accepted/source cursor remains open.
 - The five CFW transforms and seven post-CFW WHIR folds use bounded outer
   polling, and both production covector consumers reuse and truncate the source
   allocation instead of retaining a clone and separate output. Verifier-derived
@@ -161,21 +165,24 @@ ceremony or supported-phone qualification.
   fail-closed rather than accepting a producer-supplied status or qualification
   field.
 - The independent production source-and-witness baseline is complete for the
-  selected VSS prerequisite and aggregate same-secret relations. The next
-  replacement-evidence gap is a current-source compact public-key run that
-  combines canonical proof generation and decoding, fresh full verification,
-  the complete transported hostile corpus, independent source correspondence,
-  and authenticated persist, separate-worker restore, and continuation.
-- The most recent clean routine heavy run completed its five-test registry in
-  1,040.800 seconds with a terminal summary and no diagnostic failure. For that
-  recorded source, the compact public-key owner generated and positively
-  verified the canonical 23,815,474-byte proof, restored one checkpoint,
-  checked all 122 source-derived public columns and four statement-owned roots,
-  and completed the five tests in 1,035.05 seconds. The guard observed a
-  963,194,880-byte peak job allocation and a 966,090,752-byte peak process-tree
-  resident set without a ceiling violation. That run predates current source
-  and is retained as source-scoped development evidence, not a current-source
-  pass.
+  selected VSS prerequisite and aggregate same-secret relations. The current
+  compact public-key baseline now combines canonical proof generation and
+  decoding, fresh full verification, independent source correspondence,
+  baseline transported hostility, and authenticated persist,
+  separate-process restore, replay, and continuation. The complete transported
+  equation-invalid corpus remains part of the public-key vertical-slice gap.
+- The compact-only guarded lane has a terminal summary with no diagnostic
+  failure. Its producer generated and positively verified the canonical
+  23,815,474-byte proof, persisted the 408-byte algebraic cursor, and checked
+  122 source-derived public columns and four statement-owned roots. Its ordered
+  consumer ran in a distinct Cargo process, refused proof and public-input
+  truncation and trailing bytes, wrong magics, response reordering, changed
+  roots, transcript and opening salts, non-canonical field encodings, all four
+  changed public bindings, and changed checkpoint bytes, then restored and
+  continued to the same 323 algebraic boundaries and terminal verification.
+  The diagnostic records the implementation worktree as dirty, so this remains
+  exact-worktree native development evidence rather than clean-commit,
+  WebAssembly, browser, or phone evidence.
 - The rejected implementation's real checkpoint question is closed for its
   narrow development purpose. One controlled native run persisted,
   authenticated, and reread a 5,243,240-byte quotient state after 64 completed
@@ -300,8 +307,11 @@ Proof-heavy evidence belongs in separate guarded runners and is excluded from
 routine commands. Multi-minute construction-geometry and theorem tests have
 explicitly registered, serialized evidence lanes. Inspect the executable
 registry before invoking a manual proof lane: the rejected exact VSS and
-aggregate tests are non-gating and must not be run. Current proof work uses a
-compact-only evidence lane once its registry owns the relevant production path.
+aggregate tests are non-gating and must not be run. The current
+`test:rust:kernel:proof-evidence` registry owns only an ordered compact
+public-key producer and separate-process restoration consumer. Inspect that
+executable registry before invoking the lane; retired proof filters must fail
+preflight and remain non-executable history.
 
 ## License
 
