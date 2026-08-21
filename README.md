@@ -19,11 +19,11 @@ participant-side workflow. A separate host application, currently planned as
 organizer workflow, interface copy, notifications, and visit cadence.
 
 The host designates exactly one organizer, who must be a member of the frozen
-roster. The organizer is otherwise an ordinary trustee and eligible voter. They
-may submit no ballot or the same kind of ballot as anyone else, including an
-all-ones ballot. The organizer designation is not sent to or verified by
-`sealed-lattice` and grants no special key, proof bypass, quorum weight,
-finality power, or decryption authority.
+roster. The organizer is otherwise an ordinary roster participant and eligible
+voter. They may submit no ballot or the same kind of ballot as anyone else,
+including an all-ones ballot. The organizer designation is not sent to or
+verified by `sealed-lattice` and grants no special key, proof bypass, quorum
+weight, finality power, or decryption authority.
 
 ## How it works
 
@@ -48,7 +48,7 @@ The intended ceremony is:
 The only permitted public result is the ordered list of the selected `topCount`
 option identifiers, or the complete ordering when all options are selected.
 Exact sums, margins, individual scores, aggregate shares, comparison bits,
-ranks, and evaluator intermediates are not public outputs.
+selection bits, ranks, and evaluator intermediates are not public outputs.
 
 The protocol provides ballot secrecy, not voter anonymity. The frozen roster and
 accepted ballot authorship are public.
@@ -68,9 +68,15 @@ Schemas, formulas, validators, and deterministic compilers cover:
 - scores in `1..10`; and
 - `1 <= topCount <= optionCount`.
 
-The sole cryptographic, integration, performance, and supported-phone evidence
-target is currently `n = 10`, `optionCount = 10`. Other admitted sizes are not
-qualified.
+The sole cryptographic-completion, integration, performance, and supported-phone
+evidence target is currently `n = 10`, `optionCount = 10`. Other admitted sizes
+are not qualified.
+
+The active cryptographic target is an **80-bit reduced-assurance mobile research
+prototype**. Every load-bearing cryptographic component and the composed
+protocol must meet a minimum 80-bit post-quantum security level under the stated
+models and assumptions. The implementation has not yet established that target
+end to end, and the target is not a production rating or certification.
 
 Every participant-facing setup, proof, verification, aggregation, evaluation,
 finality, and release operation must retain a scalar-capable mobile-browser
@@ -83,16 +89,29 @@ devices provide development evidence only.
 
 ## Current status
 
-The complete ceremony is not implemented or certified. The current boundary is:
+The complete ceremony is not implemented or certified.
 
-| Area                        | Current evidence                                                                                                                                                                                         | Remaining gap                                                                                                                                                                                  |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Foundation and public SDK   | Canonical poll validation, manifest construction, foundation decoding, typed bindings, and reproducible Rust/WebAssembly-to-package byte copying                                                         | Downstream ceremony capabilities are incomplete and not public                                                                                                                                 |
-| Common proof replacement    | Independent relation, matrix, source, and witness checks plus a compiler-derived unactivated construction inventory covering 12 families, 103 physical applications, and 159 logical relation instances; one exact native public-key proof produces a 23,803,146-byte canonical proof and passes canonical transport decoding, full algebraic verification, independent source correspondence for 122 public columns and four roots, and authenticated separate-process checkpoint restoration; a separately constructed transport-valid equation-invalid proof refuses at the intended algebraic check; independent fixed-output tape replay covers 82 logical rounds, 82 transcript-prefix calls, 181,440 independently indexed output-block calls, and 11,612,160 raw tape bytes; a source-bound test-only certificate maps the exact one-hop graph to the simple domain extender in one modeled ideal quantum random oracle with conservative loss `932 * t^2 / 2^256` for `t <= 2^80 - 1`; this is native development evidence and cannot mint a runtime capability | Concrete shared-Keccak SHAKE/KMAC instantiation, emitted-byte zero knowledge, salted-Merkle privacy, the initial-transition lemma, complete proof composition, eleven compact family contracts, the scalar release-WebAssembly proof ABI, the final evidence identity, browser lifecycle, and the full hostile corpus remain open; the candidate is not selected |
-| Previous proof backend      | Retained only until an atomic replacement cutover can remove it                                                                                                                                          | It is rejected, non-gating, and cannot serve as a fallback or evidence source                                                                                                                  |
-| Browser runtime and custody | Scalar release WebAssembly, typed worker foundations, authenticated checkpoint primitives, and browser storage groundwork                                                                                | Complete generation and verification pairs, dedicated-worker interruption evidence, incremental storage accounting, repair, persistence, quota, eviction, and rollback handling are incomplete |
-| Ceremony workflow           | Normative setup, ballot, aggregation, evaluator, finality, and release designs exist internally                                                                                                          | They are not connected end to end through participant-owned browser capabilities                                                                                                               |
-| Phone and product evidence  | None                                                                                                                                                                                                     | No physical-phone Chrome qualification and no connected ten-participant host-application rehearsal exist                                                                                       |
+- **Foundation and public SDK:** Canonical poll validation, manifest
+  construction, foundation decoding, typed bindings, and reproducible
+  Rust/WebAssembly package bytes exist. Downstream ceremony capabilities remain
+  incomplete and are not yet public APIs.
+- **Proof system:** One native development prototype for the collective
+  public-key proof passes canonical decoding, full algebraic verification,
+  independent reconstruction of its public inputs, false-statement refusal, and
+  authenticated checkpoint restoration in a separate process. This covers one
+  proof family only. No production proof system is selected; the remaining proof
+  families, complete security argument, release WebAssembly path, hostile
+  corpus, and browser-lifecycle evidence remain open. The rejected previous
+  implementation cannot act as a fallback or evidence source.
+- **Browser runtime and custody:** A scalar WebAssembly build, typed worker
+  foundations, authenticated checkpoint primitives, and browser-storage
+  groundwork exist. Complete proof paths and lifecycle, storage, repair,
+  persistence, quota, eviction, and rollback evidence remain incomplete.
+- **Ceremony workflow:** Setup, ballot, aggregation, evaluation, finality, and
+  release are not yet connected end to end through participant-owned browser
+  capabilities.
+- **Phone and product evidence:** No physical-phone Chrome qualification or
+  connected ten-participant host-application rehearsal exists.
 
 Cryptographic completion and supported-phone qualification are independent
 results for the same exact suite and build bytes. Phone size, memory, storage,
@@ -144,8 +163,11 @@ console.log(manifest.manifestHash, manifest.canonicalBytes);
 
 `validatePollSpec` handles pre-protocol user input only. Protocol identity
 starts with the canonical manifest bytes and hash produced by the
-Rust/WebAssembly kernel. Import public APIs from the package root; workspace
-packages, test fixtures, and internal source paths are not public API.
+Rust/WebAssembly kernel. In that pre-protocol input, `topOptionCount` names the
+desired result length. The canonical action binds the same concept as
+`topCount`; the manifest itself contains only the ordered option definitions.
+Import public APIs from the package root; workspace packages, test fixtures, and
+internal source paths are not public API.
 
 ## Development
 

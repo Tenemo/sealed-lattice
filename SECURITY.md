@@ -18,9 +18,9 @@ witnesses, or unpublished exploit material.
 ## Supported profile
 
 No released version is supported for production use. The sole current
-cryptographic, integration, performance, and supported-phone evidence target is
-one exact build with `n = 10` roster participants and `optionCount = 10`
-options. It derives:
+cryptographic-completion, integration, performance, and supported-phone evidence
+target is one exact build with `n = 10` roster participants and
+`optionCount = 10` options. It derives:
 
 - active Byzantine bound `f = 3`;
 - share-reconstruction threshold `r = 4`; and
@@ -28,6 +28,14 @@ options. It derives:
 
 Schemas admit rosters in `3..20` and option counts in `2..20`, but other
 profiles are structurally admitted only and carry no security or runtime claim.
+
+The active profile has a minimum 80-bit post-quantum security target. Every
+load-bearing cryptographic component and the composed protocol must retain at
+least `2^80` modeled classical and quantum attack work under the stated models,
+reductions, assumptions, and resource bounds. This reduced-assurance research
+target is not a NIST security category, production rating, audit, or
+certification, and the open issues below mean it has not yet been established
+end to end.
 
 Cryptographic completion and supported-phone qualification are independent
 results for the same exact bytes. Both are currently incomplete. The sole phone
@@ -44,14 +52,14 @@ development evidence only.
   application. The protocol provides roster binding and auditability, not Sybil
   resistance.
 - The host designates exactly one organizer from the frozen roster. That person
-  is an ordinary trustee and eligible voter, may submit no ballot, and gains no
-  special key, proof bypass, quorum weight, finality power, or decryption
+  is an ordinary participant and eligible voter, may submit no ballot, and gains
+  no special key, proof bypass, quorum weight, finality power, or decryption
   authority. The organizer designation is not a protocol input.
-- All ten trustees complete collective setup before any ballot can use the
+- All ten participants complete collective setup before any ballot can use the
   collective public and evaluator keys. A smaller privileged setup group is not
   permitted.
-- The active adversary statically corrupts at most three trustees. The separate
-  passive-share-exposure game covers at most three disclosed trustee shares;
+- The active adversary statically corrupts at most three participants. The
+  separate passive-share-exposure game covers at most three disclosed shares;
   those bounds are not added into a larger active coalition.
 - Transcript, private-mailbox, and storage services are untrusted. They may
   censor, delay, reorder, duplicate, fork, or replace bytes, but acceptance
@@ -66,8 +74,8 @@ development evidence only.
   fixtures, and self-consistent records never establish acceptance.
 - Finality authorizes exactly one result target. Every decryption share and
   proof binds to that target, and no accepted interface may decrypt ballots,
-  aggregate scores, margins, comparison bits, ranks, evaluator intermediates, or
-  other broader results.
+  individual scores, aggregate scores or shares, margins, comparison or
+  selection bits, ranks, evaluator intermediates, or other broader results.
 - Participant action state is bound to one browser profile. There is no backup,
   export, migration, or replacement-device continuation. Missing, corrupt,
   stale, or unauthenticated state retires that participant from the action.
@@ -91,24 +99,52 @@ and implementation issues below.
 
 ## Open security issues
 
-| Identifier | Open limitation                                                                                                                                                                                                                                                      |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SEC-001`  | No independent audit, certification, or production hardening exists. Every result remains prototype evidence.                                                                                                                                                        |
-| `SEC-002`  | No exact ten-participant, ten-option setup-to-release ceremony is implemented and accepted end to end.                                                                                                                                                               |
-| `SEC-003`  | Participant state has no recovery or independently certified newest-snapshot mechanism. Lost or unverifiable state permanently removes that participant from the action.                                                                                             |
-| `SEC-004`  | No production proof backend is selected. The compiler derives 12 families, 103 physical applications, and 159 logical relation instances, but eleven compact family contracts, the complete hostile corpus, theorem and privacy composition, release-WebAssembly path, and browser lifecycle remain open. The rejected backend cannot satisfy any gate. |
-| `SEC-005`  | The native source-verified compact public-key terminal retains the 23,803,146-byte canonical proof and emitted-byte census only after transport, full algebraic verification, independent source correspondence for 122 public columns and four roots, and authenticated separate-process checkpoint restoration. Its independent fixed-output replay covers 82 transcript-prefix calls, 181,440 independently indexed output-block calls, and 11,612,160 raw tape bytes. A source-bound test-only certificate maps that exact one-hop graph to the simple domain extender in one modeled ideal quantum random oracle with conservative loss `932 * t^2 / 2^256` for `t <= 2^80 - 1`. This does not instantiate concrete SHAKE256, the shared Keccak SHAKE/KMAC premise, or the complete proof transform. Emitted-byte zero knowledge, salted-Merkle privacy, proof composition, the initial-transition lemma, and complete probability accounting remain open. No security-bit total is authorized. |
-| `SEC-006`  | The participant bridge does not yet carry verifier-minted capabilities and authenticated checkpoint custody from setup through release.                                                                                                                              |
-| `SEC-007`  | Direct ballot creation, proof generation, transport, and acceptance are incomplete. Ballots remain gated on `VerifiedSetup`; no provisional or pre-ratification ballot path is authorized.                                                                           |
-| `SEC-008`  | No physical-phone Chrome profile has completed every participant operation.                                                                                                                                                                                          |
-| `SEC-010`  | Homomorphic-encryption, verifiable-secret-sharing, and proof parameters remain provisional. The canonical candidate currently uses three data primes per key-switch block and three ordered special primes; it is internally consistent but lacks a complete reviewed joint-exposure reduction. |
-| `SEC-011`  | Evaluation-key material relies on circular or key-dependent-message assumptions, and malicious collective-setup composition remains incomplete.                                                                                                                      |
-| `SEC-016`  | Target-bound release lacks its complete production proof, correctness and privacy closure, participant finality producer, checkpoint lifecycle, and public workflow.                                                                                                 |
-| `SEC-017`  | Caller-key storage adapters do not safely support equivalent-key reimport or reuse across runtime lifecycles.                                                                                                                                                        |
-| `SEC-018`  | The tracked collective-setup record establishes internal consistency only; its authority and packet chronology are not independently derived and it cannot mint a capability or select a suite.                                                                      |
-| `SEC-019`  | A test-only construction fingerprint and independently recomputed input inventory bind the current unactivated suite, all 12 relation families, application multiplicities, and the one available compact contract. Readiness fails closed on the eleven missing contracts and missing complete scalar release-WebAssembly proof ABI, so no candidate evidence identity is frozen. |
-| `SEC-020`  | Proof execution lacks complete dedicated-worker loss, bounded synchronous work, browser-memory, release-WebAssembly, exact-byte restore, and browser-custody evidence.                                                                                               |
-| `SEC-021`  | Browser storage lacks complete incremental capacity accounting, atomic lifecycle counters, repair headroom, bounded resumable repair, persistence admission, quota and eviction qualification, external rollback detection, and physical-reclamation reconciliation. |
+- `SEC-001`: No independent audit, certification, or production hardening
+  exists. Every result remains prototype evidence.
+- `SEC-002`: No exact ten-participant, ten-option setup-to-release ceremony is
+  implemented and accepted end to end.
+- `SEC-003`: No independent mechanism certifies that a locally consistent
+  participant snapshot is the newest one. By design, lost or unverifiable state
+  retires that participant from the action instead of permitting recovery or
+  migration.
+- `SEC-004`: No production proof system is selected. The rejected previous
+  implementation cannot be used as a fallback or as evidence.
+- `SEC-005`: One native development proof family can be decoded and checked
+  algebraically. Independent code reconstructs its public inputs, false
+  statements are refused, and checkpoints restore in a separate process. It
+  still lacks proofs that the shared hash is modeled safely, emitted proof bytes
+  reveal no witness information, committed trees hide private data, and the
+  verifier's initial transition is sound. Full proof composition and probability
+  accounting also remain incomplete. This evidence establishes no security-bit
+  total and does not yet satisfy the profile's 80-bit minimum.
+- `SEC-006`: The participant bridge does not yet carry verifier-minted
+  capabilities and authenticated checkpoint custody from setup through release.
+- `SEC-007`: Direct ballot creation, proof generation, transport, and acceptance
+  are incomplete. Ballots remain gated on `VerifiedSetup`; no provisional or
+  pre-ratification ballot path is authorized.
+- `SEC-008`: No physical-phone Chrome profile has completed every participant
+  operation.
+- `SEC-010`: Homomorphic-encryption, verifiable-secret-sharing, and proof
+  parameters remain provisional and lack a complete reviewed joint-exposure
+  reduction.
+- `SEC-011`: Evaluation-key material relies on assumptions about encrypting
+  key-related material, and malicious collective-setup composition remains
+  incomplete.
+- `SEC-016`: Target-bound release lacks its complete production proof,
+  correctness and privacy closure, participant finality producer, checkpoint
+  lifecycle, and public workflow.
+- `SEC-017`: Caller-key storage adapters do not safely support equivalent-key
+  reimport or reuse across runtime lifecycles.
+- `SEC-018`: The tracked collective-setup record establishes internal
+  consistency only. Its authority and packet chronology are not independently
+  derived, and it cannot mint a capability or select a suite.
+- `SEC-019`: No immutable, content-addressed evidence record yet binds every
+  construction input and the exact release WebAssembly bytes. Test-only
+  fingerprints cannot select a cryptographic suite or authorize acceptance.
+- `SEC-020`: The required checkpoint and interruption boundary is not yet fully
+  implemented or evidenced in a release browser build.
+- `SEC-021`: The required storage boundary is not yet fully implemented or
+  evidenced for browser persistence, failure, rollback, and reclamation.
 
 Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
 `SEC-015` are retired.
