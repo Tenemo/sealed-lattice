@@ -45,6 +45,7 @@ const sourcePaths = [
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/transcript.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/interpreter.rs',
+    'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/production_source_witness_oracle.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_accounting.rs',
     'crates/sealed-lattice-kernel/src/bgv/proof_suite/selected_profile.rs',
     'crates/sealed-lattice-kernel/src/bgv/setup/commitment/mod.rs',

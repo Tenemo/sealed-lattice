@@ -79,8 +79,18 @@ and target release remain incomplete or internal.
   structured matrices separately match that interpreter across 2,686,977
   operative rows and 5,701,631 padding rows; a changed matrix coefficient is
   detected. These are test-only relation-semantics and lowering evidence, not
-  production-witness, proof-soundness, zero-knowledge, browser, or phone
-  evidence.
+  proof-soundness, zero-knowledge, browser, or phone evidence.
+- A separate test-only native oracle starts from the canonical production VSS
+  and aggregate same-secret objects and production witness. It binds distinct
+  expected and observed statement bytes, application slots, statement hashes,
+  attempts, proof profiles, relation variants, source catalogs, contexts, and
+  roots. Independent arithmetic checks 2,621,440 VSS recipient-share
+  coefficients, 262,144 degree-zero coefficients, and 196,608 anchor
+  coefficients across 32 coefficient materials, 80 recipient-share materials,
+  eight degree-zero materials, and three anchors. Deterministic corruption of
+  every binding, compiler-constraint segment, semantic source category, and
+  witness category is detected. The oracle cannot mint a capability and is not
+  proof, WebAssembly, browser, or phone evidence.
 - For the public-key-share family, a guarded native owner generated one
   23,815,474-byte canonical compact-proof candidate. Independent code validated
   its transport, verified the CFW and both WHIR epochs, checked all code
@@ -150,13 +160,12 @@ ceremony or supported-phone qualification.
 - No exact suite is frozen or selectable. Suite selection correctly remains
   fail-closed rather than accepting a producer-supplied status or qualification
   field.
-- The guarded heavy Rust compact-proof fixture is produced and consumed by one
-  owning test. The remaining first replacement-evidence gap is an independent
-  production source-and-witness oracle for the selected VSS prerequisite and
-  aggregate same-secret relations. It must reconstruct the complete relation
-  from canonical production objects, bind the exact statement and context, and
-  detect semantic source and witness mutations without using either proof
-  implementation to manufacture the expected result.
+- The independent production source-and-witness baseline is complete for the
+  selected VSS prerequisite and aggregate same-secret relations. The next
+  replacement-evidence gap is a current-source compact public-key run that
+  combines canonical proof generation and decoding, fresh full verification,
+  the complete transported hostile corpus, independent source correspondence,
+  and authenticated persist, separate-worker restore, and continuation.
 - The most recent clean routine heavy run completed its five-test registry in
   1,040.800 seconds with a terminal summary and no diagnostic failure. For that
   recorded source, the compact public-key owner generated and positively

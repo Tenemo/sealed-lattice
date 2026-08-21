@@ -104,6 +104,8 @@ mod committed_material_adapter;
 mod galois_key_share_adapter;
 mod interpreter;
 mod key_relation;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod production_source_witness_oracle;
 mod public_aggregate;
 mod public_key_share;
 mod relinearization_round_one_adapter;

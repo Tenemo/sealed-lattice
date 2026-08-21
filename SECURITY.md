@@ -74,10 +74,17 @@ consequences are:
   constraints across 48,552 program evaluations, and the compact public-key
   structured matrices match the independent interpreter across all 2,686,977
   operative rows. Deliberate evaluation and matrix-coefficient faults are
-  detected. This establishes relation semantics and lowering only. An
-  independent production source-and-witness oracle is still required before
-  those checks establish that canonical VSS and aggregate objects populate the
-  complete relation correctly.
+  detected. A separate test-only native source-and-witness oracle starts from
+  canonical production VSS and aggregate same-secret objects and the
+  production witness. It checks all 3,767 VSS and 4,046 same-secret compiler
+  segments, 2,621,440 recipient-share coefficients, 262,144 degree-zero
+  coefficients, and 196,608 anchor coefficients. Distinct expected and observed
+  statements, slots, hashes, attempts, profiles, variants, catalogs, contexts,
+  and roots are bound, and deterministic corruption of every binding, semantic
+  source category, witness category, and compiler segment is detected. These
+  checks establish relation semantics, lowering, and production source/witness
+  correspondence only; they cannot mint a capability or establish proof
+  soundness, zero knowledge, WebAssembly, browser, or phone behavior.
 - The rejected proof implementation has persisted and authenticated a real
   5,243,240-byte quotient checkpoint at 64 completed constraints; a separate
   process restored it and continued through later authenticated boundaries up
@@ -189,9 +196,10 @@ that a coherent snapshot is newest.
   native candidate, but it still lacks the complete theorem and privacy
   composition, hostile corpus, release-WebAssembly pair, browser lifecycle, and
   remaining proof families required for suite selection. Independent relation
-  semantics and matrix correspondence exist, but the complete production
-  source-and-witness oracle remains open. Rejected-backend terminal execution
-  provides no independent evidence for that obligation and is non-gating.
+  semantics, matrix correspondence, and selected VSS and aggregate
+  source/witness correspondence exist as test-only native evidence.
+  Rejected-backend terminal execution provides no independent compact evidence
+  and remains non-gating.
 - `SEC-005`: Emitted-byte correspondence, salted-Merkle and EPRO privacy, the
   symbolic joint fixed-Keccak assumption, fixed-tape shared-QRO premise, exact
   initial-transition lemma, and complete Merkle/QROM composition remain open.

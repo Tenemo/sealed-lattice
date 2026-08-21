@@ -140,6 +140,9 @@ describe('Selected collective-setup security evidence', () => {
         expect(new Set(sourceAuthorityPaths).size).toBe(
             sourceAuthorityPaths.length,
         );
+        expect(sourceAuthorityPaths).toContain(
+            'crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/production_source_witness_oracle.rs',
+        );
         expect(constructionEvidenceImports).toHaveLength(4);
         const qromImport = constructionEvidenceImports
             .map((value) => requireRecord(value))

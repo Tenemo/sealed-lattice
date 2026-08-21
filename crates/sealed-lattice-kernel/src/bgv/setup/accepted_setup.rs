@@ -55,7 +55,7 @@ pub(in crate::bgv) use self::evaluator_source::{
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use self::generation_authority::{
-    PreparedExactSameSecretGenerationSources,
+    PreparedExactSameSecretGenerationSources, SetupGenerationVssSource,
     with_setup_generation_vss_material_for_exact_same_secret_evidence,
 };
 pub(in crate::bgv) use self::generation_authority::{
