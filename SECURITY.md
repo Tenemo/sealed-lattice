@@ -69,14 +69,16 @@ consequences are:
   in-place fold polls, and only the resulting fresh positive verification can
   mint the one-shot masking capability. Restore revalidates canonical inputs
   and deterministically replays from genesis. A producer Cargo process now
-  persists the 408-byte algebraic cursor, and a second Cargo process in the
-  same guarded run authenticates it, refuses changed checkpoint bytes, restores
-  it, and continues through all 323 algebraic boundaries. Separate-process
-  restoration of the 412-byte accepted/source cursor and the release-browser
-  lifecycle remain open. Cold-resume time, lost work, restart traffic,
-  synchronous transport, transition work, and storage transactions still need
-  release-browser bounds; serialization of the full live verifier state is not
-  required.
+  persists the 408-byte algebraic cursor and the 412-byte accepted/source
+  cursor. A second Cargo process in the same guarded run authenticates both,
+  refuses changed algebraic cursor bytes, restores and continues the algebraic
+  cursor, and refuses malformed, wrong-context, wrong-proof, wrong-public-input,
+  impossible-progress, and excessive-source-progress accepted/source cursors.
+  It then replays all 21,168,497 algebraic work units and continues all 4,218
+  source-correspondence boundaries to terminal verification. Release-browser
+  lifecycle, cold-resume time, lost work, restart traffic, synchronous
+  transport, transition work, and storage-transaction bounds remain open;
+  serialization of the full live verifier state is not required.
 - Independent test code checks all 4,046 selected same-secret relation
   constraints across 48,552 program evaluations, and the compact public-key
   structured matrices match the independent interpreter across all 2,686,977
@@ -201,12 +203,12 @@ that a coherent snapshot is newest.
 - `SEC-004`: The production proof backend is rejected for mobile proving. The
   compact successor can generate, canonically decode, and
   source-correspondently verify one guarded native candidate. Baseline
-  transported mutations and separate-process algebraic checkpoint restoration
-  now fail closed, but the complete equation-invalid hostile corpus, theorem
-  and privacy composition, release-WebAssembly pair, browser lifecycle, and
-  remaining proof families are still required for suite selection. Independent
-  relation semantics, matrix correspondence, and selected VSS and aggregate
-  source/witness correspondence exist as test-only native evidence.
+  transported mutations and separate-process restoration of both verifier
+  cursors now fail closed, but the complete equation-invalid hostile corpus,
+  theorem and privacy composition, release-WebAssembly pair, browser lifecycle,
+  and remaining proof families are still required for suite selection.
+  Independent relation semantics, matrix correspondence, and selected VSS and
+  aggregate source/witness correspondence exist as test-only native evidence.
   Rejected-backend terminal execution provides no independent compact evidence
   and remains non-gating.
 - `SEC-005`: Emitted-byte correspondence, salted-Merkle and EPRO privacy, the
@@ -249,12 +251,12 @@ that a coherent snapshot is newest.
   suite inputs invalidates the evidence.
 - `SEC-020`: Guarded native evidence covers the exact candidate public-key proof,
   source-bound verification, bounded CFW and WHIR polls, persistence and
-  separate-process restoration of the 408-byte algebraic cursor, changed-cursor
-  refusal, and continuation to terminal verification. The 412-byte
-  accepted/source cursor has no separate-process restoration record.
-  Dedicated-worker loss, bounded synchronous work, live browser memory, storage
-  amplification, release-WebAssembly proof execution, exact candidate-byte
-  browser restore, and full browser custody remain open.
+  separate-process restoration of the 408-byte algebraic and 412-byte
+  accepted/source cursors, changed-cursor refusal, deterministic replay, and
+  continuation to terminal verification. Dedicated-worker loss, bounded
+  synchronous work, live browser memory, storage amplification,
+  release-WebAssembly proof execution, exact candidate-byte browser restore,
+  and full browser custody remain open.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
   custody without incremental authenticated capacity accounting for committed,
   staged, and orphanable bytes; atomic counter updates across every storage

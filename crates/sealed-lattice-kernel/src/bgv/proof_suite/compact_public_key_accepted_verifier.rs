@@ -7,6 +7,9 @@
 
 use crate::foundation::{Hash512, RefusalReason};
 
+#[cfg(test)]
+use super::compact_public_key_algebraic_verifier::AlgebraicallyVerifiedCompactPublicKeyProof;
+
 use super::{
     SourceVerifiedCompactPublicKeyProof, VerifiedCompactPublicKeyStatementAuthority,
     compact_proof_wire::CompactPublicInputBindings,
@@ -279,6 +282,47 @@ impl AcceptedCompactPublicKeyVerification {
             completed_correspondence_work_unit_count: 0,
             resume_target: prepared.resume_target,
         }
+    }
+
+    /// Enters source correspondence from the positive algebraic terminal.
+    ///
+    /// This test-only transition lets native evidence persist the combined
+    /// accepted-verifier cursor without replaying the complete algebraic proof
+    /// in the producer process. The input type has no decoder or public
+    /// constructor, so this cannot bypass positive algebraic verification.
+    #[cfg(test)]
+    pub(crate) fn from_algebraically_verified(
+        statement_authority: VerifiedCompactPublicKeyStatementAuthority,
+        algebraically_verified_proof: AlgebraicallyVerifiedCompactPublicKeyProof,
+    ) -> Result<Self, RefusalReason> {
+        let public_input_bindings = algebraically_verified_proof
+            .transport()
+            .public_input_bindings();
+        let canonical_proof_binding = algebraically_verified_proof
+            .transport()
+            .canonical_proof_binding();
+        let canonical_public_input_binding = algebraically_verified_proof
+            .transport()
+            .canonical_public_input_binding();
+        let correspondence = statement_authority
+            .begin_binding_algebraically_verified_proof(algebraically_verified_proof)?;
+        Ok(Self {
+            statement_authority: None,
+            stage: Some(
+                AcceptedCompactPublicKeyVerificationStage::SourceCorrespondence(Box::new(
+                    correspondence,
+                )),
+            ),
+            public_input_bindings,
+            canonical_proof_binding,
+            canonical_public_input_binding,
+            completed_cfw_work_unit_count:
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
+            completed_whir_work_unit_count:
+                COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_WHIR_WORK_UNIT_COUNT,
+            completed_correspondence_work_unit_count: 0,
+            resume_target: None,
+        })
     }
 
     pub(in crate::bgv) fn canonical_checkpoint_bytes(

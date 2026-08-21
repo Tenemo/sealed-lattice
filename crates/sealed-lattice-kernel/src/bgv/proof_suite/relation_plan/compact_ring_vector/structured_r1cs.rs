@@ -3196,7 +3196,8 @@ mod tests {
         bgv::{
             proof_suite::{
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
-                VerifiedCommonProofStatementSource, VerifiedCompactPublicKeyStatementAuthority,
+                SourceVerifiedCompactPublicKeyProof, VerifiedCommonProofStatementSource,
+                VerifiedCompactPublicKeyStatementAuthority,
                 compact_corpus_accounting::{
                     derive_selected_compact_corpus_rollup,
                     derive_selected_public_key_share_emitted_size_evidence,
@@ -3207,7 +3208,12 @@ mod tests {
                     CompactPublicInputBindings, PROOF_FIXED_HEADER_BYTE_LENGTH,
                     PUBLIC_INPUT_FIXED_HEADER_BYTE_LENGTH, decode_compact_proof_wire,
                 },
-                compact_public_key_accepted_verifier::ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
+                compact_public_key_accepted_verifier::{
+                    ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
+                    ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+                    AcceptedCompactPublicKeyVerification, AcceptedCompactPublicKeyVerificationPoll,
+                    PreparedAcceptedCompactPublicKeyVerification,
+                },
                 compact_public_key_algebraic_verifier::{
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_SAFE_BOUNDARY_COUNT,
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CFW_WORK_UNIT_COUNT,
@@ -3217,7 +3223,6 @@ mod tests {
                     CompactPublicKeyAlgebraicVerificationPoll,
                     compact_public_key_whir_fold_work_unit_count,
                 },
-                compact_public_key_statement_correspondence::CompactPublicKeyStatementCorrespondenceVerificationPoll,
                 compact_public_key_verifier::{
                     VerifiedCompactPublicKeyTransport, verify_selected_compact_public_key_transport,
                 },
@@ -3240,7 +3245,8 @@ mod tests {
         },
         foundation::{
             CanonicalStreamDomain, Hash512, PersistentProofCoinInput, ProofApplicationSlot,
-            derive_canonical_stream_descriptor, prepare_exact_same_secret_evidence_attempt,
+            RefusalReason, derive_canonical_stream_descriptor,
+            prepare_exact_same_secret_evidence_attempt,
         },
     };
 
@@ -8017,6 +8023,314 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn selected_compact_public_key_statement_authority(
+        canonical_proof_bytes: &[u8],
+    ) -> VerifiedCompactPublicKeyStatementAuthority {
+        let evidence_authority = populate_compact_public_key_development_evidence_authority(0x43)
+            .expect("the deterministic public-key source authority reconstructs");
+        let preparation_source =
+            resolve_setup_generation_compact_public_key_development_preparation_source(
+                &evidence_authority.authority,
+            )
+            .expect("the deterministic public-key statement source reconstructs");
+        let verified_public_randomness = evidence_authority.verified_public_randomness;
+        let (relation_input, relation_context) = super::super::selected_input_and_context()
+            .expect("the selected public-key relation input and context derive");
+        let compiled_relation = compile_public_key_share_relation_with_source_layout(
+            &relation_input,
+            &relation_context,
+        )
+        .expect("the selected public-key relation compiles independently");
+        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
+            &compiled_relation.relation_plan,
+            &relation_context,
+            None,
+            None,
+        )
+        .expect("the selected public-key relation capability derives independently");
+        let canonical_application_statement_bytes = preparation_source
+            .canonical_application_statement_bytes()
+            .to_vec();
+        let proof_stream_descriptor = derive_canonical_stream_descriptor(
+            CanonicalStreamDomain::PublicKeyShareProof,
+            canonical_proof_bytes,
+        )
+        .expect("the emitted compact proof has a canonical stream descriptor");
+        let runtime_limits =
+            selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)
+                .expect("the selected public-key runtime limits derive");
+        let statement_source =
+            VerifiedCommonProofStatementSource::from_test_verified_public_key_share_statement_source(
+                &verified_public_randomness,
+                canonical_application_statement_bytes.clone(),
+                proof_stream_descriptor,
+                relation_plan,
+                runtime_limits,
+            )
+            .expect("the verifier-owned compact public-key statement source derives");
+        let verified_context = verified_public_randomness.context();
+        let decoded_statement = decode_selected_public_key_share_statement(
+            &canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                verified_context.protocol_version(),
+                verified_context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .expect("the verifier-owned public-key statement decodes");
+        let setup_polynomial_prerequisite = VerifiedSetupPolynomialLowDegreePrerequisite::for_test(
+            verified_context.protocol_version(),
+            verified_context.suite_identifier().into_bytes(),
+            verified_context.ceremony_context_hash().into_bytes(),
+            verified_context.action_context_hash().into_bytes(),
+            decoded_statement.setup_proof_context_hash(),
+            decoded_statement.participant_identity(),
+            decoded_statement.roster_position(),
+            decoded_statement.anchor_commitment_roots(),
+        );
+        VerifiedCompactPublicKeyStatementAuthority::from_verified_accepted_setup_sources(
+            statement_source,
+            &verified_public_randomness,
+            setup_polynomial_prerequisite,
+        )
+        .expect("the accepted compact public-key statement authority derives")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn assert_selected_accepted_compact_public_key_checkpoint_refusal(
+        category: &str,
+        expected_refusal: RefusalReason,
+        public_input_bindings: CompactPublicInputBindings,
+        canonical_proof_bytes: &[u8],
+        canonical_public_input_bytes: &[u8],
+        canonical_checkpoint_bytes: &[u8],
+    ) {
+        let transport = verify_selected_compact_public_key_transport(
+            public_input_bindings,
+            canonical_proof_bytes.to_vec().into_boxed_slice(),
+            canonical_public_input_bytes.to_vec().into_boxed_slice(),
+        )
+        .expect("accepted-checkpoint hostility starts from the exact verified transport");
+        match PreparedAcceptedCompactPublicKeyVerification::prepare(
+            transport,
+            Some(canonical_checkpoint_bytes),
+        ) {
+            Err(refusal) => {
+                assert_eq!(refusal, expected_refusal, "hostile category={category}");
+                println!(
+                    "compact public-key accepted checkpoint hostile input refused category={category} refusal={refusal:?}"
+                );
+            }
+            Ok(_) => panic!(
+                "compact public-key accepted checkpoint hostile input was accepted category={category}"
+            ),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn assert_selected_accepted_compact_public_key_checkpoint_hostility(
+        public_input_bindings: CompactPublicInputBindings,
+        canonical_proof_bytes: &[u8],
+        canonical_public_input_bytes: &[u8],
+        canonical_checkpoint_bytes: &[u8],
+    ) {
+        assert_eq!(
+            canonical_checkpoint_bytes.len(),
+            ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+        );
+        let binding_start = 8_usize;
+        let canonical_proof_binding_start = binding_start + 4 * Hash512::BYTE_LENGTH;
+        let canonical_public_input_binding_start =
+            canonical_proof_binding_start + Hash512::BYTE_LENGTH;
+        let completed_cfw_work_unit_count_start =
+            canonical_public_input_binding_start + Hash512::BYTE_LENGTH;
+        let completed_whir_work_unit_count_start =
+            completed_cfw_work_unit_count_start + size_of::<u64>();
+        let completed_correspondence_work_unit_count_start =
+            completed_whir_work_unit_count_start + size_of::<u64>();
+        assert_eq!(
+            completed_correspondence_work_unit_count_start + size_of::<u32>(),
+            canonical_checkpoint_bytes.len(),
+        );
+
+        let mut wrong_magic = canonical_checkpoint_bytes.to_vec();
+        wrong_magic[0] ^= 1;
+        assert_selected_accepted_compact_public_key_checkpoint_refusal(
+            "wrong-checkpoint-magic",
+            RefusalReason::MalformedEncoding,
+            public_input_bindings,
+            canonical_proof_bytes,
+            canonical_public_input_bytes,
+            &wrong_magic,
+        );
+        assert_selected_accepted_compact_public_key_checkpoint_refusal(
+            "truncated-checkpoint",
+            RefusalReason::MalformedEncoding,
+            public_input_bindings,
+            canonical_proof_bytes,
+            canonical_public_input_bytes,
+            &canonical_checkpoint_bytes[..canonical_checkpoint_bytes.len() - 1],
+        );
+        let mut trailing_checkpoint = canonical_checkpoint_bytes.to_vec();
+        trailing_checkpoint.push(0);
+        assert_selected_accepted_compact_public_key_checkpoint_refusal(
+            "trailing-checkpoint",
+            RefusalReason::MalformedEncoding,
+            public_input_bindings,
+            canonical_proof_bytes,
+            canonical_public_input_bytes,
+            &trailing_checkpoint,
+        );
+
+        for (binding_ordinal, category) in [
+            "wrong-suite-identifier-binding",
+            "wrong-application-statement-and-action-context-binding",
+            "wrong-manifest-binding",
+            "wrong-relation-profile-binding",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut changed_checkpoint = canonical_checkpoint_bytes.to_vec();
+            changed_checkpoint[binding_start + binding_ordinal * Hash512::BYTE_LENGTH] ^= 1;
+            assert_selected_accepted_compact_public_key_checkpoint_refusal(
+                category,
+                RefusalReason::WrongContext,
+                public_input_bindings,
+                canonical_proof_bytes,
+                canonical_public_input_bytes,
+                &changed_checkpoint,
+            );
+        }
+        for (binding_start, category) in [
+            (
+                canonical_proof_binding_start,
+                "wrong-attempt-bound-canonical-proof-binding",
+            ),
+            (
+                canonical_public_input_binding_start,
+                "wrong-canonical-public-input-source-binding",
+            ),
+        ] {
+            let mut changed_checkpoint = canonical_checkpoint_bytes.to_vec();
+            changed_checkpoint[binding_start] ^= 1;
+            assert_selected_accepted_compact_public_key_checkpoint_refusal(
+                category,
+                RefusalReason::WrongContext,
+                public_input_bindings,
+                canonical_proof_bytes,
+                canonical_public_input_bytes,
+                &changed_checkpoint,
+            );
+        }
+        for (count_start, category) in [
+            (
+                completed_cfw_work_unit_count_start,
+                "wrong-completed-cfw-work-count",
+            ),
+            (
+                completed_whir_work_unit_count_start,
+                "wrong-completed-whir-work-count",
+            ),
+        ] {
+            let mut changed_checkpoint = canonical_checkpoint_bytes.to_vec();
+            changed_checkpoint[count_start] ^= 1;
+            assert_selected_accepted_compact_public_key_checkpoint_refusal(
+                category,
+                RefusalReason::MalformedEncoding,
+                public_input_bindings,
+                canonical_proof_bytes,
+                canonical_public_input_bytes,
+                &changed_checkpoint,
+            );
+        }
+        let mut excessive_correspondence = canonical_checkpoint_bytes.to_vec();
+        excessive_correspondence[completed_correspondence_work_unit_count_start
+            ..completed_correspondence_work_unit_count_start + size_of::<u32>()]
+            .copy_from_slice(
+                &(ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT + 1).to_le_bytes(),
+            );
+        assert_selected_accepted_compact_public_key_checkpoint_refusal(
+            "excessive-source-correspondence-work-count",
+            RefusalReason::MalformedEncoding,
+            public_input_bindings,
+            canonical_proof_bytes,
+            canonical_public_input_bytes,
+            &excessive_correspondence,
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn complete_selected_accepted_compact_public_key_verification(
+        mut verification: AcceptedCompactPublicKeyVerification,
+        resume_required: bool,
+        completed_correspondence_work_unit_count: &mut u32,
+        resume_complete_count: &mut u32,
+    ) -> (Box<SourceVerifiedCompactPublicKeyProof>, u64) {
+        let mut replayed_work_unit_count = 0_u64;
+        loop {
+            let maximum_work_unit_count = if resume_required && *resume_complete_count == 0 {
+                65_536
+            } else {
+                1_024
+            };
+            match verification
+                .advance(maximum_work_unit_count)
+                .expect("the accepted compact verifier advances through exact source authority")
+            {
+                AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                } => {
+                    assert!((1..=maximum_work_unit_count).contains(&completed_work_unit_count));
+                    if resume_required && *resume_complete_count == 0 {
+                        assert_eq!(checkpoint_safe_boundary_ordinal, None);
+                        replayed_work_unit_count = replayed_work_unit_count
+                            .checked_add(u64::from(completed_work_unit_count))
+                            .expect("the accepted-verifier replay work count fits u64");
+                        continue;
+                    }
+                    let previous_correspondence_work_unit_count =
+                        *completed_correspondence_work_unit_count;
+                    *completed_correspondence_work_unit_count =
+                        (*completed_correspondence_work_unit_count)
+                            .checked_add(completed_work_unit_count)
+                            .expect("the selected correspondence work count fits u32");
+                    assert_eq!(
+                        checkpoint_safe_boundary_ordinal,
+                        Some(
+                            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT
+                                + previous_correspondence_work_unit_count
+                                + completed_work_unit_count
+                                - 1,
+                        ),
+                    );
+                }
+                AcceptedCompactPublicKeyVerificationPoll::ResumeComplete {
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                } => {
+                    assert!(resume_required);
+                    assert_eq!(*resume_complete_count, 0);
+                    assert_eq!(completed_work_unit_count, 1);
+                    assert_eq!(
+                        checkpoint_safe_boundary_ordinal,
+                        COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
+                    );
+                    assert_eq!(*completed_correspondence_work_unit_count, 0);
+                    *completed_correspondence_work_unit_count = 1;
+                    *resume_complete_count += 1;
+                }
+                AcceptedCompactPublicKeyVerificationPoll::Complete(proof) => {
+                    assert_eq!(*resume_complete_count, u32::from(resume_required));
+                    return (proof, replayed_work_unit_count);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum CompactPublicKeyCheckpointEvidenceMode {
         PersistThenRestore,
@@ -8167,6 +8481,124 @@ mod tests {
                 )
             }
         };
+        if evidence_mode == CompactPublicKeyCheckpointEvidenceMode::RestoreFromProducerProcess {
+            let resumed_transport = verify_selected_compact_public_key_transport(
+                public_input_bindings,
+                canonical_proof_bytes.clone().into_boxed_slice(),
+                canonical_public_input_bytes.clone().into_boxed_slice(),
+            )
+            .expect("cold restoration revalidates the exact compact transport");
+            let mut resumed_verification = CompactPublicKeyAlgebraicVerification::resume(
+                resumed_transport,
+                &canonical_verification_checkpoint,
+            )
+            .expect("the separate process starts deterministic algebraic replay");
+            let mut algebraic_resume_complete = false;
+            loop {
+                match resumed_verification
+                    .advance(65_536)
+                    .expect("the separate process replays and continues the algebraic cursor")
+                {
+                    CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
+                        completed_work_unit_count,
+                        checkpoint_safe_boundary_ordinal,
+                    } => {
+                        assert_eq!(completed_work_unit_count, 65_536);
+                        assert_eq!(checkpoint_safe_boundary_ordinal, 0);
+                        assert_eq!(
+                            resumed_verification
+                                .canonical_checkpoint_bytes()
+                                .expect("replayed algebraic state reproduces its safe cursor"),
+                            canonical_verification_checkpoint,
+                        );
+                        algebraic_resume_complete = true;
+                    }
+                    CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                        completed_work_unit_count,
+                        checkpoint_safe_boundary_ordinal,
+                    } if algebraic_resume_complete => {
+                        assert_eq!(completed_work_unit_count, 65_536);
+                        assert_eq!(checkpoint_safe_boundary_ordinal, Some(1));
+                        break;
+                    }
+                    CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                        checkpoint_safe_boundary_ordinal,
+                        ..
+                    } => assert_eq!(checkpoint_safe_boundary_ordinal, None),
+                    _ => panic!(
+                        "the first algebraic cursor must restore and continue before WHIR or terminal verification"
+                    ),
+                }
+            }
+            assert!(algebraic_resume_complete);
+            drop(resumed_verification);
+
+            let accepted_checkpoint_bytes =
+                fs::read(checkpoint_directory.join("accepted-verification-checkpoint.bin"))
+                    .expect("the producer process persisted its accepted/source checkpoint");
+            assert_selected_accepted_compact_public_key_checkpoint_hostility(
+                public_input_bindings,
+                &canonical_proof_bytes,
+                &canonical_public_input_bytes,
+                &accepted_checkpoint_bytes,
+            );
+            let accepted_checkpoint: [u8;
+                ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH] =
+                accepted_checkpoint_bytes
+                    .try_into()
+                    .expect("the persisted accepted/source checkpoint has its canonical size");
+            let accepted_transport = verify_selected_compact_public_key_transport(
+                public_input_bindings,
+                canonical_proof_bytes.clone().into_boxed_slice(),
+                canonical_public_input_bytes.clone().into_boxed_slice(),
+            )
+            .expect("accepted/source restoration revalidates the exact compact transport");
+            let prepared_accepted_verification =
+                PreparedAcceptedCompactPublicKeyVerification::prepare(
+                    accepted_transport,
+                    Some(&accepted_checkpoint),
+                )
+                .expect("the accepted/source cursor binds the exact proof and public input");
+            let statement_authority =
+                selected_compact_public_key_statement_authority(&canonical_proof_bytes);
+            let accepted_verification = AcceptedCompactPublicKeyVerification::from_prepared(
+                statement_authority,
+                prepared_accepted_verification,
+            );
+            let mut correspondence_work_unit_count = 0_u32;
+            let mut accepted_resume_complete_count = 0_u32;
+            let (source_verified_proof, replayed_work_unit_count) =
+                complete_selected_accepted_compact_public_key_verification(
+                    accepted_verification,
+                    true,
+                    &mut correspondence_work_unit_count,
+                    &mut accepted_resume_complete_count,
+                );
+            assert_eq!(accepted_resume_complete_count, 1);
+            assert!(replayed_work_unit_count > 0);
+            assert_eq!(
+                correspondence_work_unit_count,
+                ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
+            );
+            let correspondence = source_verified_proof.correspondence();
+            assert_eq!(correspondence.public_ring_vector_count(), 61);
+            assert_eq!(correspondence.verified_column_count(), 122);
+            assert!(correspondence.verifier_sequence_column_count() > 0);
+            assert_eq!(correspondence.statement_tree_count(), 4);
+            println!(
+                "checkpointed compact public-key accepted/source restoration complete elapsed_milliseconds={} algebraic_checkpoint_byte_length={} accepted_checkpoint_byte_length={} accepted_replayed_work_unit_count={} correspondence_work_unit_count={} accepted_resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
+                verification_started_at.elapsed().as_millis(),
+                canonical_verification_checkpoint.len(),
+                accepted_checkpoint.len(),
+                replayed_work_unit_count,
+                correspondence_work_unit_count,
+                accepted_resume_complete_count,
+                canonical_proof_bytes.len(),
+                correspondence.verified_column_count(),
+                correspondence.statement_tree_count(),
+            );
+            return;
+        }
         let resumed_transport = verify_selected_compact_public_key_transport(
             public_input_bindings,
             canonical_proof_bytes.clone().into_boxed_slice(),
@@ -8369,103 +8801,53 @@ mod tests {
                 .canonical_bytes(),
             canonical_proof_bytes
         );
-        let evidence_authority = populate_compact_public_key_development_evidence_authority(0x43)
-            .expect("the deterministic public-key source authority reconstructs");
-        let preparation_source =
-            resolve_setup_generation_compact_public_key_development_preparation_source(
-                &evidence_authority.authority,
-            )
-            .expect("the deterministic public-key statement source reconstructs");
-        let verified_public_randomness = evidence_authority.verified_public_randomness;
-        let (relation_input, relation_context) = super::super::selected_input_and_context()
-            .expect("the selected public-key relation input and context derive");
-        let compiled_relation = compile_public_key_share_relation_with_source_layout(
-            &relation_input,
-            &relation_context,
-        )
-        .expect("the selected public-key relation compiles independently");
-        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
-            &compiled_relation.relation_plan,
-            &relation_context,
-            None,
-            None,
-        )
-        .expect("the selected public-key relation capability derives independently");
-        let canonical_application_statement_bytes = preparation_source
-            .canonical_application_statement_bytes()
-            .to_vec();
-        let proof_stream_descriptor = derive_canonical_stream_descriptor(
-            CanonicalStreamDomain::PublicKeyShareProof,
-            &canonical_proof_bytes,
-        )
-        .expect("the emitted compact proof has a canonical stream descriptor");
-        let runtime_limits =
-            selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)
-                .expect("the selected public-key runtime limits derive");
-        let statement_source =
-            VerifiedCommonProofStatementSource::from_test_verified_public_key_share_statement_source(
-                &verified_public_randomness,
-                canonical_application_statement_bytes.clone(),
-                proof_stream_descriptor,
-                relation_plan,
-                runtime_limits,
-            )
-            .expect("the verifier-owned compact public-key statement source derives");
-        let verified_context = verified_public_randomness.context();
-        let decoded_statement = decode_selected_public_key_share_statement(
-            &canonical_application_statement_bytes,
-            SelectedApplicationStatementContext::new(
-                verified_context.protocol_version(),
-                verified_context.suite_identifier().into_bytes(),
-                None,
-                None,
-            ),
-        )
-        .expect("the verifier-owned public-key statement decodes");
-        let setup_polynomial_prerequisite = VerifiedSetupPolynomialLowDegreePrerequisite::for_test(
-            verified_context.protocol_version(),
-            verified_context.suite_identifier().into_bytes(),
-            verified_context.ceremony_context_hash().into_bytes(),
-            verified_context.action_context_hash().into_bytes(),
-            decoded_statement.setup_proof_context_hash(),
-            decoded_statement.participant_identity(),
-            decoded_statement.roster_position(),
-            decoded_statement.anchor_commitment_roots(),
-        );
         let statement_authority =
-            VerifiedCompactPublicKeyStatementAuthority::from_verified_accepted_setup_sources(
-                statement_source,
-                &verified_public_randomness,
-                setup_polynomial_prerequisite,
+            selected_compact_public_key_statement_authority(&canonical_proof_bytes);
+        let mut accepted_verification =
+            AcceptedCompactPublicKeyVerification::from_algebraically_verified(
+                statement_authority,
+                algebraically_verified_proof,
             )
-            .expect("the accepted compact public-key statement authority derives");
-        let mut correspondence_verification = statement_authority
-            .begin_binding_algebraically_verified_proof(algebraically_verified_proof)
-            .expect("the source-correspondence verifier begins from the algebraic terminal");
-        let mut correspondence_work_unit_count = 0_u32;
-        let source_verified_proof = loop {
-            match correspondence_verification
-                .advance(1)
-                .expect("each source-correspondence boundary verifies")
-            {
-                CompactPublicKeyStatementCorrespondenceVerificationPoll::WorkCompleted {
-                    completed_work_unit_count,
+            .expect("the positive algebraic terminal enters accepted source correspondence");
+        let mut correspondence_work_unit_count = match accepted_verification
+            .advance(1)
+            .expect("the first accepted source-correspondence boundary verifies")
+        {
+            AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            } => {
+                assert_eq!(completed_work_unit_count, 1);
+                assert_eq!(
                     checkpoint_safe_boundary_ordinal,
-                } => {
-                    assert_eq!(completed_work_unit_count, 1);
-                    assert_eq!(
-                        checkpoint_safe_boundary_ordinal,
-                        correspondence_work_unit_count,
-                    );
-                    correspondence_work_unit_count = correspondence_work_unit_count
-                        .checked_add(1)
-                        .expect("the selected correspondence work count fits u32");
-                }
-                CompactPublicKeyStatementCorrespondenceVerificationPoll::Complete(proof) => {
-                    break *proof;
-                }
+                    Some(COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT),
+                );
+                completed_work_unit_count
             }
+            _ => panic!("the first accepted source boundary cannot complete the verifier"),
         };
+        let accepted_checkpoint = accepted_verification
+            .canonical_checkpoint_bytes()
+            .expect("the first accepted source boundary has a canonical checkpoint");
+        assert_eq!(
+            accepted_checkpoint.len(),
+            ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+        );
+        write_or_validate_compact_public_key_algebraic_checkpoint_file(
+            checkpoint_directory,
+            "accepted-verification-checkpoint.bin",
+            &accepted_checkpoint,
+        );
+        let mut accepted_resume_complete_count = 0_u32;
+        let (source_verified_proof, accepted_replayed_work_unit_count) =
+            complete_selected_accepted_compact_public_key_verification(
+                accepted_verification,
+                false,
+                &mut correspondence_work_unit_count,
+                &mut accepted_resume_complete_count,
+            );
+        assert_eq!(accepted_resume_complete_count, 0);
+        assert_eq!(accepted_replayed_work_unit_count, 0);
         assert_eq!(
             correspondence_work_unit_count,
             ACCEPTED_COMPACT_PUBLIC_KEY_CORRESPONDENCE_SAFE_BOUNDARY_COUNT,
@@ -8476,7 +8858,7 @@ mod tests {
         assert!(correspondence.verifier_sequence_column_count() > 0);
         assert_eq!(correspondence.statement_tree_count(), 4);
         println!(
-            "checkpointed compact public-key algebraic and statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} whir_verification_poll_count={} completed_work_unit_count={} whir_work_unit_count={} correspondence_work_unit_count={} resume_complete_count={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
+            "checkpointed compact public-key algebraic and accepted statement verification complete elapsed_milliseconds={} post_resume_work_poll_count={} observed_safe_boundary_count={} terminal_cfw_segment_poll_count={} whir_verification_poll_count={} completed_work_unit_count={} whir_work_unit_count={} correspondence_work_unit_count={} algebraic_resume_complete_count={} accepted_checkpoint_byte_length={} canonical_proof_byte_length={} source_verified_column_count={} source_statement_tree_count={}",
             verification_started_at.elapsed().as_millis(),
             cfw_verification_poll_count,
             observed_safe_boundary_count,
@@ -8486,6 +8868,7 @@ mod tests {
             completed_whir_work_unit_count,
             correspondence_work_unit_count,
             resume_complete_count,
+            accepted_checkpoint.len(),
             canonical_proof_bytes.len(),
             correspondence.verified_column_count(),
             correspondence.statement_tree_count(),

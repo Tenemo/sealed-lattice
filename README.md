@@ -103,12 +103,14 @@ and target release remain incomplete or internal.
   412-byte cursor over 4,541 boundaries, adding all public-column and
   statement-root correspondence work. Restoration revalidates canonical source
   bytes and replays deterministically from genesis; the cursors contain no
-  opaque transform state. The compact-only guarded lane persists the 408-byte
-  algebraic cursor in its producer Cargo process. A second Cargo process in the
-  same runner-scoped execution rejects changed checkpoint bytes,
-  restores that exact cursor, replays it, and continues through all CFW, WHIR,
-  and source-correspondence work to the same terminal counts. Separate-process
-  restoration of the 412-byte accepted/source cursor remains open.
+  opaque transform state. The compact-only guarded lane persists both cursors
+  in its producer Cargo process. A second Cargo process in the same
+  runner-scoped execution rejects changed 408-byte cursor bindings, restores
+  that cursor, replays it, and continues past its recorded algebraic boundary.
+  It separately rejects malformed or context-mismatched 412-byte cursors,
+  restores the exact accepted/source cursor, replays all 21,168,497 recorded
+  algebraic work units, and continues through all 4,218 source-correspondence
+  boundaries to the same terminal counts.
 - The five CFW transforms and seven post-CFW WHIR folds use bounded outer
   polling, and both production covector consumers reuse and truncate the source
   allocation instead of retaining a clone and separate output. Verifier-derived
@@ -173,16 +175,19 @@ ceremony or supported-phone qualification.
   equation-invalid corpus remains part of the public-key vertical-slice gap.
 - The compact-only guarded lane has a terminal summary with no diagnostic
   failure. Its producer generated and positively verified the canonical
-  23,815,474-byte proof, persisted the 408-byte algebraic cursor, and checked
-  122 source-derived public columns and four statement-owned roots. Its ordered
-  consumer ran in a distinct Cargo process, refused proof and public-input
-  truncation and trailing bytes, wrong magics, response reordering, changed
-  roots, transcript and opening salts, non-canonical field encodings, all four
-  changed public bindings, and changed checkpoint bytes, then restored and
-  continued to the same 323 algebraic boundaries and terminal verification.
-  The diagnostic records the implementation worktree as dirty, so this remains
-  exact-worktree native development evidence rather than clean-commit,
-  WebAssembly, browser, or phone evidence.
+  23,815,474-byte proof, persisted the 408-byte algebraic and 412-byte
+  accepted/source cursors, and checked 122 source-derived public columns and
+  four statement-owned roots. Its ordered consumer ran in a distinct Cargo
+  process, refused proof and public-input truncation and trailing bytes, wrong
+  magics, response reordering, changed roots, transcript and opening salts,
+  non-canonical field encodings, all four changed public bindings, changed
+  proof and public-input cursor bindings, impossible CFW and WHIR counts, and
+  excessive source progress. It restored and continued the 408-byte cursor,
+  then restored, replayed, and completed the 412-byte cursor to the same 4,541
+  safe boundaries and terminal verification. The diagnostic records the
+  implementation worktree as dirty, so this remains exact-worktree native
+  development evidence rather than clean-commit, WebAssembly, browser, or
+  phone evidence.
 - The rejected implementation's real checkpoint question is closed for its
   narrow development purpose. One controlled native run persisted,
   authenticated, and reread a 5,243,240-byte quotient state after 64 completed
@@ -199,8 +204,9 @@ ceremony or supported-phone qualification.
 - The exact public-key-share slice still needs the complete transported
   equation-invalid hostile corpus, exact emitted-byte masking and Merkle-privacy
   composition, fixed-tape shared-QRO mapping, symbolic shared-Keccak reduction,
-  bounded transport and cold resume, and real dedicated-worker lifecycle in
-  desktop Chromium. See SECURITY for the cryptographic consequences.
+  release-WebAssembly bounded transport and cold resume, and real
+  dedicated-worker lifecycle in desktop Chromium. See SECURITY for the
+  cryptographic consequences.
 - Current source consistently uses key-switch block width three and three
   special primes. That topology is not frozen, and the joint lattice exposure,
   malicious threshold behavior, auxiliary inputs, and reductions to named
