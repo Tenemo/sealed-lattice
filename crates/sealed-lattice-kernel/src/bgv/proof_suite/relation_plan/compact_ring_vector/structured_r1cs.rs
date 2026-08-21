@@ -3207,6 +3207,7 @@ mod tests {
                     CompactEmittedCdhzMeasurement, measure_selected_compact_emission_cdhz,
                     measure_source_verified_compact_emission_cdhz,
                 },
+                compact_fixed_tape_source_correspondence::verify_source_verified_compact_fixed_tape_correspondence,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::{
                     CompactPublicInputBindings, PROOF_FIXED_HEADER_BYTE_LENGTH,
@@ -8694,6 +8695,20 @@ mod tests {
         let source_verified_measurement =
             measure_source_verified_compact_emission_cdhz(source_verified_proof)
                 .expect("the source-verified terminal owns a consistent emitted-byte census");
+        let fixed_tape_correspondence = verify_source_verified_compact_fixed_tape_correspondence(
+            source_verified_proof,
+            &source_verified_measurement,
+        )
+        .expect("the complete fixed-output tape graph matches the source-verified transport");
+        println!(
+            "compact public-key fixed-tape source correspondence complete logical_round_count={} prefix_hash_count={} seed_hash_count={} output_block_hash_count={} total_tape_byte_length={} maximum_output_block_count_per_round={}",
+            fixed_tape_correspondence.logical_round_count,
+            fixed_tape_correspondence.prefix_hash_count,
+            fixed_tape_correspondence.seed_hash_count,
+            fixed_tape_correspondence.output_block_hash_count,
+            fixed_tape_correspondence.total_fixed_tape_byte_length,
+            fixed_tape_correspondence.maximum_output_block_count_per_round,
+        );
         if let Some(transport_measurement) = transport_measurement {
             assert_eq!(
                 &source_verified_measurement, transport_measurement,

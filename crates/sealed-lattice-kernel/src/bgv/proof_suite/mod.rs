@@ -51,6 +51,8 @@ mod compact_emitted_cdhz;
 #[cfg(test)]
 mod compact_factor_one_semantics;
 #[cfg(test)]
+mod compact_fixed_tape_source_correspondence;
+#[cfg(test)]
 mod compact_fixed_tape_uniformity;
 mod compact_generation_checkpoint;
 mod compact_generation_randomness;

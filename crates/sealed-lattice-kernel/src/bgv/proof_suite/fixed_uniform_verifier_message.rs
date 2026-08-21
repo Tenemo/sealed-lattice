@@ -606,7 +606,7 @@ fn map_foundation_hash_schedule_error(
 }
 
 #[cfg(test)]
-fn materialize_fixed_uniform_verifier_message(
+pub(super) fn materialize_fixed_uniform_verifier_message(
     starting_transcript_state: Hash512,
     logical_verifier_move_ordinal: u32,
     geometry: &FixedUniformVerifierMessageGeometry,
