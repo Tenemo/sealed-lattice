@@ -18,14 +18,7 @@ production-authority capability, or supported-phone result.
   fallback evidence authority.
 - A consumer that reads its expected authority from the same vector establishes
   canonical self-consistency, not independent authority freshness.
+- Enforce fixture eligibility in the owning source and tests. Do not maintain a
+  prose snapshot of which current files are selectable.
 - Keep exact runtime and proof evidence in the owning run diagnostics rather
   than copying measurements into fixture documentation.
-
-## Current exclusions
-
-`selected-lattice-security-estimator-evidence.json` describes a superseded
-candidate and is ineligible for suite selection until regenerated from the
-final production parameters and bytes. The tracked collective-setup record is
-development bookkeeping until its authority, reduction premises, and packet
-chronology are independently derived and consumed by a production capability
-path.

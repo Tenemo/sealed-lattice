@@ -13,9 +13,9 @@ not a separately supported public voting API.
   browser-local encrypted custody, checkpoints, and state witnessing.
 - Bind kernel-owned verifier cursor profiles to exact source digests in the
   authenticated checkpoint store, preserve the previous committed cursor until
-  replacement is durable, and keep fresh and resumed custody mutually
-  exclusive. Cursor sizes, boundary counts, source coordinates, and state
-  domains come from canonical kernel owners rather than TypeScript copies.
+  replacement is durable, and keep fresh and resumed custody mutually exclusive.
+  Cursor sizes, boundary counts, source coordinates, and state domains come from
+  canonical kernel owners rather than TypeScript copies.
 - Assemble inputs for setup, ballot, aggregation, evaluator, finality, and
   target-release verification without reimplementing certified cryptography in
   TypeScript.
@@ -25,14 +25,14 @@ not a separately supported public voting API.
 ## Boundaries
 
 General structural code covers `3 <= n <= 20` participants and
-`2 <= optionCount <= 20` options. Only the exact `n = 10`,
-`optionCount = 10` profile is the current cryptographic and runtime evidence
-target; admitting another size does not qualify it.
+`2 <= optionCount <= 20` options. Only the exact `n = 10`, `optionCount = 10`
+profile is the current cryptographic and runtime evidence target; admitting
+another size does not qualify it.
 
 The package may coordinate bytes, storage, cancellation, and typed results. It
 does not replace Rust/WebAssembly proof generation or verification, establish
-parameter security, freeze a suite, or turn a partial workflow into an
-accepted ceremony. Relays and storage remain untrusted.
+parameter security, freeze a suite, or turn a partial workflow into an accepted
+ceremony. Relays and storage remain untrusted.
 
 Current implementation status belongs to the repository
 [README](../../README.md), and current security limitations belong to
