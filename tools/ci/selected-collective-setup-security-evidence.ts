@@ -682,7 +682,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
         requiredClosurePredicate: 'completeConstructionExtractorCorrespondence',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The test-only compact semantic owner executes the selected factor-one chronology and derives its relaxed round-by-round error theorem, but no decoded-proof-to-semantic statement, prefix, or matrix adapter and no production compact proof exist. Appendix A.1 remains test-only and unavailable without the fixed-tape shared-QRO premise.',
+            'The test-only compact semantic owner executes the selected factor-one chronology and derives its relaxed round-by-round error theorem, but no decoded-proof-to-semantic statement, prefix, or matrix adapter and no accepted suite-bound release proof with production theorem correspondence exist. One unselected guarded native public-key candidate exists, but it cannot satisfy this import. Appendix A.1 remains test-only and unavailable without the fixed-tape shared-QRO premise.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[1],
@@ -691,7 +691,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
             'singleFixed512BitQroRestrictionCorrespondenceAndProductionRows',
         observedStatus: 'unresolved',
         missingEvidence:
-            'No complete transported compact proof instantiates the actual verifier oracle graph. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
+            'One unselected guarded native compact proof instantiates the current verifier oracle graph, but no selected release-WebAssembly proof and no complete theorem-to-transcript correspondence establish the shared-QRO transform. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[2],
@@ -700,7 +700,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
             'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The test-only compact emitted-byte and Appendix A.1 owners derive qPi, qy, qV, tuple, and Merkle coordinates conditionally from one verified transport. No selected proof bytes exist, the fixed-tape shared-QRO premise is unmintable, and setup-family or ceremony composition is absent.',
+            'The test-only compact emitted-byte and Appendix A.1 owners derive qPi, qy, qV, tuple, and Merkle coordinates conditionally from one verified transport. One unselected guarded native candidate supplies decoded proof coordinates, but no selected proof bytes exist; the fixed-tape shared-QRO premise is unmintable, and setup-family or ceremony composition is absent.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[3],
@@ -957,7 +957,7 @@ const buildReductionDag = (): JsonValue => [
         advantageExpression:
             'unresolved_common_construction_qrom_transform_error',
         statement:
-            'No complete transported compact proof instantiates the actual verifier oracle graph or its extraction terms. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
+            'One unselected guarded native compact proof instantiates the current verifier oracle graph, but no selected release-WebAssembly proof and no complete theorem-to-transcript correspondence establish its extraction terms. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
     },
     {
         identifier: 'commonProofQromComposition',
@@ -966,7 +966,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['commonConstructionQromTransform'],
         advantageExpression: 'unresolved_common_proof_qrom_composition_error',
         statement:
-            'The test-only compact emitted-byte and Appendix A.1 owners conditionally instantiate qPi, qy, qV, tuple size, proof length, and Merkle arithmetic from a verified transport. No selected proof bytes exist, the fixed-tape shared-QRO premise is unmintable, and setup-family and ceremony composition remain absent.',
+            'The test-only compact emitted-byte and Appendix A.1 owners conditionally instantiate qPi, qy, qV, tuple size, proof length, and Merkle arithmetic from a verified transport. One unselected guarded native candidate supplies decoded proof coordinates, but no selected proof bytes exist; the fixed-tape shared-QRO premise is unmintable, and setup-family and ceremony composition remain absent.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',

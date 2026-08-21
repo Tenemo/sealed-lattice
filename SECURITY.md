@@ -70,12 +70,30 @@ consequences are:
   transition work, and storage transactions in the release browser path; it is
   not to claim that no WHIR cursor exists or to require serialization of the
   full live verifier state.
+- Independent test code checks all 4,046 selected same-secret relation
+  constraints across 48,552 program evaluations, and the compact public-key
+  structured matrices match the independent interpreter across all 2,686,977
+  operative rows. Deliberate evaluation and matrix-coefficient faults are
+  detected. This establishes relation semantics and lowering only. An
+  independent production source-and-witness oracle is still required before
+  those checks establish that canonical VSS and aggregate objects populate the
+  complete relation correctly.
+- The rejected proof implementation has persisted and authenticated a real
+  5,243,240-byte quotient checkpoint at 64 completed constraints; a separate
+  process restored it and continued through later authenticated boundaries up
+  to constraint 2,752. The continuation was deliberately stopped without a
+  terminal proof summary. This is checkpoint implementation evidence only. A
+  terminal rejected-backend VSS or aggregate proof is neither required nor
+  sufficient for compact construction closure and must not be rerun as a gate.
 - Strict-durability desktop Chromium storage evidence exposed
   orders-of-magnitude read and transaction amplification from repeated
   namespace-wide capacity scans. Browser-reported origin usage also remained
   near one gigabyte after logical cleanup reached 206 bytes. Incremental
-  authenticated accounting, close/reopen testing, quota handling, and delayed
-  reclamation evidence remain required.
+  authenticated accounting must cover committed, staged, and orphanable bytes
+  and reserve repair headroom. Staging, commit, replacement, deletion, cleanup,
+  and counter changes must be atomic; a mismatch must stop normal mutation and
+  enter bounded, resumable exclusive repair. Close/reopen testing, quota
+  handling, and delayed-reclamation evidence remain required.
 
 ### Masking and zero-knowledge boundary
 
@@ -143,6 +161,14 @@ finality producer exists, and setup, ballot, aggregation, evaluator, target,
 and reconstruction operations do not all provide proactive authenticated
 checkpoint and exact resume.
 
+The proposed approximately-ten-opening state and schema reductions are not
+operative. Current ballot creation and verification require `VerifiedSetup`.
+Any future pre-ratification ballot path must analyze the joint transcript across
+every concurrently viable package and collective-key branch, maliciously
+correlated setup contributions, branch and attempt bounds, linkability, fresh
+randomness, replay, retries, and losing branches. A per-branch single-key
+zero-knowledge argument is insufficient.
+
 Strict IndexedDB transactions and Web Lock serialization are useful groundwork,
 but supported-phone custody additionally requires persistence request and
 recheck, quota admission, eviction qualification, and an external recency
@@ -162,7 +188,10 @@ that a coherent snapshot is newest.
   compact successor can generate and source-correspondently verify one guarded
   native candidate, but it still lacks the complete theorem and privacy
   composition, hostile corpus, release-WebAssembly pair, browser lifecycle, and
-  remaining proof families required for suite selection.
+  remaining proof families required for suite selection. Independent relation
+  semantics and matrix correspondence exist, but the complete production
+  source-and-witness oracle remains open. Rejected-backend terminal execution
+  provides no independent evidence for that obligation and is non-gating.
 - `SEC-005`: Emitted-byte correspondence, salted-Merkle and EPRO privacy, the
   symbolic joint fixed-Keccak assumption, fixed-tape shared-QRO premise, exact
   initial-transition lemma, and complete Merkle/QROM composition remain open.
@@ -171,13 +200,16 @@ that a coherent snapshot is newest.
 - `SEC-006`: The participant bridge does not connect the complete
   verifier-minted capability and checkpoint chain from setup through release.
 - `SEC-007`: Direct encrypted-ballot creation, proof generation, transport, and
-  acceptance are incomplete. Real ballots must not be cast or collected.
+  acceptance are incomplete. The proposed pre-ratification path has no accepted
+  joint multi-key or multi-branch privacy argument or frozen schema. Real
+  ballots must not be cast or collected.
 - `SEC-008`: No physical Chrome profile has completed every participant
   operation. Phone qualification remains independent from cryptographic
   completion.
 - `SEC-010`: BGV, VSS commitment, and proof parameters remain provisional. The
-  source topology and complete structured and joint exposure surface lack a
-  reviewed reduction.
+  source is internally consistent at key-switch block width three and three
+  special primes, but that topology is not frozen and the complete structured
+  and joint exposure surface lacks a reviewed reduction.
 - `SEC-011`: Evaluation-key material relies on circular or
   key-dependent-message assumptions, and malicious collective-setup
   composition remains incomplete.
@@ -193,7 +225,11 @@ that a coherent snapshot is newest.
 - `SEC-019`: Reproducible scalar release WebAssembly and SDK bytes establish
   build identity only. Source-bound verification lifecycle exports and
   kernel-derived cursor adapters exist, but no compact generation ABI completes
-  the release pair and current worker-host coverage is same-realm.
+  the release pair and current worker-host coverage is same-realm. Pre-selection
+  evidence also lacks a deterministic non-selectable candidate identity that
+  binds every candidate input and the exact scalar artifact; such an identity
+  must carry no status or acceptance authority, and any mismatch with final
+  suite inputs invalidates the evidence.
 - `SEC-020`: Guarded native evidence covers the exact candidate public-key proof,
   source-bound verification, bounded CFW and WHIR polls, and exact-proof restore
   from CFW and WHIR cursors. Dedicated-worker loss, bounded synchronous work,
@@ -201,9 +237,11 @@ that a coherent snapshot is newest.
   execution, exact candidate-byte browser restore, and full browser custody
   remain open.
 - `SEC-021`: IndexedDB and Web Lock groundwork does not establish durable mobile
-  custody without incremental authenticated capacity accounting, persistence
-  admission, quota and eviction qualification, externally anchored rollback
-  detection, and reconciliation of origin usage after logical cleanup.
+  custody without incremental authenticated capacity accounting for committed,
+  staged, and orphanable bytes; atomic counter updates across every storage
+  lifecycle; reserved repair headroom; bounded resumable repair; persistence
+  admission; quota and eviction qualification; externally anchored rollback
+  detection; and reconciliation of origin usage after logical cleanup.
 
 Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
 `SEC-015` were retired and remain withdrawn.
@@ -239,8 +277,18 @@ Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
   object must own restoration, publication, and release so every operation
   identity is retired on success, refusal, cancellation, and failure.
 - Durable state admission must request and recheck browser persistence, account
-  for quota, qualify eviction behavior, and compare authenticated local state
-  with an external recency anchor before accepting it as newest.
+  atomically for committed, staged, and orphanable bytes, reserve repair and
+  cleanup headroom, qualify quota and eviction behavior, and compare
+  authenticated local state with an external recency anchor before accepting it
+  as newest. Ledger mismatch stops normal mutation until bounded authenticated
+  repair completes.
+- Ballot creation and verification remain gated on `VerifiedSetup`. No
+  provisional or pre-ratification ballot path is authorized until its joint
+  multi-key and multi-branch privacy argument, state replacement theorem,
+  canonical schemas, hostile cases, and suite inputs are complete.
+- A pre-activation candidate evidence identity is metadata only. It never
+  substitutes for canonical suite bytes, proof verification, or a
+  verifier-owned capability, and changed bound inputs invalidate its evidence.
 - Quorum witnesses are other roster participants acting through their own
   clients; no external witness, trusted service, or finalizer is allowed.
 - Release is one-shot: a finality quorum authorizes exactly one target result,

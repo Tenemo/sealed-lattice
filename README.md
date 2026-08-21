@@ -68,9 +68,19 @@ and target release remain incomplete or internal.
   typed bindings, package integration, reproducible kernel-to-SDK byte copying,
   and a scalar-capable participant build. Reproducibility establishes build
   identity only.
-- The rejected row-code proof body remains fail-closed until a successor
-  accepts the same production corpus and hostile cases. It is not an approved
-  mobile proving backend or a fallback to preserve after cutover.
+- The rejected row-code proof body remains in source only until the compact
+  cutover can remove it atomically. Its terminal VSS and aggregate runs are
+  frozen, non-gating development history: they must not be restarted, cannot
+  select a suite, and are neither a production fallback nor an independent
+  oracle for the compact construction.
+- An independently implemented arithmetic interpreter checks all 4,046
+  selected same-secret constraints across 48,552 program evaluations and
+  detects deliberate evaluation corruption. Complete compact public-key
+  structured matrices separately match that interpreter across 2,686,977
+  operative rows and 5,701,631 padding rows; a changed matrix coefficient is
+  detected. These are test-only relation-semantics and lowering evidence, not
+  production-witness, proof-soundness, zero-knowledge, browser, or phone
+  evidence.
 - For the public-key-share family, a guarded native owner generated one
   23,815,474-byte canonical compact-proof candidate. Independent code validated
   its transport, verified the CFW and both WHIR epochs, checked all code
@@ -106,7 +116,10 @@ and target release remain incomplete or internal.
   physical accounting to 4,148,340 transactions and
   1,335,448,998,100 bytes read over about 105.55 minutes. This is an
   implementation defect in storage accounting, not an estimate of required
-  cryptographic work.
+  cryptographic work. The required replacement is an authenticated incremental
+  ledger covering committed, staged, and orphanable bytes, updated atomically
+  across every storage lifecycle with reserved repair headroom and bounded,
+  resumable exclusive repair after any mismatch.
 - Browser-reported usage rose to 1,009,837,865 bytes and remained
   1,009,702,372 bytes after logical cleanup reached 206 bytes. The discrepancy
   may be delayed backing-store compaction, but it remains unexplained and needs
@@ -118,10 +131,12 @@ and target release remain incomplete or internal.
   salted-Merkle or EPRO privacy, reset or reused-randomness security,
   shared-oracle composition, or ceremony-wide security.
 - The action inventory contains 103 physical proof objects and 159 logical
-  relation instances. The production generator feeds the generated
-  public-key-share proof length into the corpus roll-up, but that row is not an
-  accepted family size and all eleven other family sizes remain unknown. No
-  accepted ceremony-wide byte, transfer, storage, restart, or time total exists.
+  relation instances. A guarded native owner invokes production-derived
+  generation components and supplies the observed public-key-share proof length
+  to a test-owned corpus roll-up. That observation is neither release
+  generation nor an accepted family-size authority, and all eleven other family
+  sizes remain unknown. No accepted ceremony-wide byte, transfer, storage,
+  restart, or time total exists.
 - Source assertions derive a 50,331,520-byte retained response-tree live set
   and a 52,952,832-byte transient-inclusive peak for all 82 response
   geometries. These are source-level bounds, not browser memory measurements.
@@ -136,60 +151,31 @@ ceremony or supported-phone qualification.
   fail-closed rather than accepting a producer-supplied status or qualification
   field.
 - The guarded heavy Rust compact-proof fixture is produced and consumed by one
-  owning test. The native exact same-secret source, base-and-auxiliary, quotient,
-  VSS prerequisite, and aggregate proof gates have a separate guarded manual
-  proof-evidence registry. Each test owns its prerequisites, so neither path
-  depends on ignored-test name order or an artifact created by an independently
-  selected test.
-- A clean current-source routine heavy run completed its five-test registry in
-  1,040.800 seconds with a terminal summary and no diagnostic failure. The
-  compact public-key owner generated and positively verified the canonical
-  23,815,474-byte proof, restored one checkpoint, checked all 122 source-derived
-  public columns and four statement-owned roots, and completed the five tests in
-  1,035.05 seconds. The guard observed a 963,194,880-byte peak job allocation and
-  a 966,090,752-byte peak process-tree resident set without a ceiling violation.
-- Exact aggregate source preparation contains 112 expensive VSS
-  committed-material constructions. The native proof-evidence runner seals
-  each completed material in an encrypted, deterministic, source-bound
-  checkpoint after positive authentication. One uninterrupted source run
-  produced all 112 materials in 5,702,861 ms and completed source preparation
-  in 5,857.496 seconds. A later run authenticated and restored all 112 material
-  checkpoints in 324--329 ms, but rebuilding the three anchor roots and the
-  public-key root still made setup take 154.7--156.2 seconds.
-- A cold native resume rebuilt setup in 155.215 seconds, prepared proof inputs
-  in 48.550 seconds, and restored a 33,554,617-byte selected VSS base-lane
-  checkpoint in 1.089 seconds. Continuing from that state completed the base
-  commitment in 5,365.987 seconds of generation time. Four-lane foreground
-  segments were about 758--760 seconds, and retained lane states ranged from
-  266 bytes at the terminal lane to 100,663,481 bytes for the three-carry-plane
-  geometry.
-- The same run completed all 3,767 exact VSS quotient constraints in
-  28,283.700 seconds, then completed quotient-tree materialization and sealed
-  authenticated proof boundary 2 at 33,835.883 seconds of generation time.
-  The guarded job observed a 757,501,952-byte peak job allocation and a
-  568,115,200-byte peak process-tree resident set without crossing its memory
-  ceiling. The run was deliberately stopped at that authenticated boundary;
-  proof finalization and the exact aggregate proof have not completed.
-- Current source pauses after every completed initial base, auxiliary, and
-  quotient commitment lane. It also encodes the quotient accumulator at a
-  completed-constraint boundary and lets the manual native evidence runner
-  retain the newest state every 64 constraints under an integrity seal bound
-  to the exact runtime attempt and checkpoint lineage. Restoration rebuilds
-  relation catalogs, transcript-derived challenges, source objects, private
-  coin operations, and external-memory lifecycles before installing the
-  accumulator. Focused tests cover byte-for-byte equivalence with the
-  whole-operation quotient oracle, one-shot restore, malformed geometry and
-  framing, noncanonical fields, wrong custody bindings, supersession by a
-  later authenticated boundary, and exact external-memory continuation. No
-  production run has yet persisted and restored a quotient-constraint state.
-  Recovery also validates every retained phase-local file, then discards only
-  those definitively superseded by the authenticated resumed stage; same-stage
-  and future local checkpoints remain eligible for exact restoration.
-  These are test-only native evidence boundaries, not release-WebAssembly or
-  browser checkpoints. The evidence baseline remains open. The measured
-  multi-hour phases are excluded from the 110-minute routine heavy job and are
-  owned by `pnpm run test:rust:kernel:proof-evidence`, which enables their
-  authenticated checkpoint-resume protocol explicitly.
+  owning test. The remaining first replacement-evidence gap is an independent
+  production source-and-witness oracle for the selected VSS prerequisite and
+  aggregate same-secret relations. It must reconstruct the complete relation
+  from canonical production objects, bind the exact statement and context, and
+  detect semantic source and witness mutations without using either proof
+  implementation to manufacture the expected result.
+- The most recent clean routine heavy run completed its five-test registry in
+  1,040.800 seconds with a terminal summary and no diagnostic failure. For that
+  recorded source, the compact public-key owner generated and positively
+  verified the canonical 23,815,474-byte proof, restored one checkpoint,
+  checked all 122 source-derived public columns and four statement-owned roots,
+  and completed the five tests in 1,035.05 seconds. The guard observed a
+  963,194,880-byte peak job allocation and a 966,090,752-byte peak process-tree
+  resident set without a ceiling violation. That run predates current source
+  and is retained as source-scoped development evidence, not a current-source
+  pass.
+- The rejected implementation's real checkpoint question is closed for its
+  narrow development purpose. One controlled native run persisted,
+  authenticated, and reread a 5,243,240-byte quotient state after 64 completed
+  constraints and cancelled cleanly. A separate process restored that state
+  and continued through authenticated 64-constraint boundaries up to constraint
+  2,752 before the obsolete run was stopped. The continuation has no terminal
+  proof summary and is not a proof pass. It establishes checkpoint persistence,
+  separate-process restore, and continuation only; no terminal rejected-backend
+  proof or aggregate run is required for compact replacement work.
 - There is no complete production compact generation-and-verification
   release-WebAssembly ABI pair. The release transport validator checks
   canonical structure, transcript chronology, derived queries, and Merkle
@@ -199,10 +185,23 @@ ceremony or supported-phone qualification.
   composition, fixed-tape shared-QRO mapping, symbolic shared-Keccak reduction,
   bounded transport and cold resume, and real dedicated-worker lifecycle in
   desktop Chromium. See SECURITY for the cryptographic consequences.
-- Key-switch topology, joint lattice exposure, malicious threshold behavior,
-  auxiliary inputs, and the reductions to named cyclotomic-RLWE and BGV
-  circular or key-dependent-message assumptions remain provisional. Diagnostic
-  estimator results are not reductions.
+- Current source consistently uses key-switch block width three and three
+  special primes. That topology is not frozen, and the joint lattice exposure,
+  malicious threshold behavior, auxiliary inputs, and reductions to named
+  cyclotomic-RLWE and BGV circular or key-dependent-message assumptions remain
+  open. Diagnostic estimator results are not reductions.
+- Pre-activation browser and proof-family evidence still needs one deterministic
+  non-selectable candidate evidence identity derived from every bound candidate
+  input and the exact scalar WebAssembly artifact. It carries no status or
+  acceptance authority, cannot select a suite, and any bound-byte change must
+  invalidate and repeat the affected evidence before suite selection.
+- The host-facing approximately-ten-opening integration workflow is a design
+  target, not implemented library behavior. Current ballot creation and
+  verification still require
+  `VerifiedSetup`. Any future pre-ratification ballot path must close joint
+  multi-key and multi-branch privacy, correlated-setup, fresh-attempt,
+  linkability, replay, losing-branch, and bounded-attempt obligations before its
+  state schemas or suite can freeze.
 - The remaining eleven proof families have not been ported through generation,
   verification, source correspondence, hostile inputs, browser custody, and
   application capability consumption.
@@ -290,9 +289,10 @@ pnpm run smoke:pack:npm
 
 Proof-heavy evidence belongs in separate guarded runners and is excluded from
 routine commands. Multi-minute construction-geometry and theorem tests have
-explicitly registered, serialized evidence lanes. The multi-hour exact native
-proof flow is owned by `pnpm run test:rust:kernel:proof-evidence`; follow the
-repository instructions when changing proof or setup code.
+explicitly registered, serialized evidence lanes. Inspect the executable
+registry before invoking a manual proof lane: the rejected exact VSS and
+aggregate tests are non-gating and must not be run. Current proof work uses a
+compact-only evidence lane once its registry owns the relevant production path.
 
 ## License
 
