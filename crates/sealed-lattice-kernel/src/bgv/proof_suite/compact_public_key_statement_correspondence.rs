@@ -217,6 +217,11 @@ impl SourceVerifiedCompactPublicKeyProof {
         self.correspondence
     }
 
+    #[cfg(test)]
+    pub(super) const fn source_verified_transport(&self) -> &VerifiedCompactPublicKeyTransport {
+        &self._transport
+    }
+
     pub(in crate::bgv) fn into_accepted_terminal_source(
         self,
     ) -> VerifiedCompactPublicKeyAcceptedTerminalSource {

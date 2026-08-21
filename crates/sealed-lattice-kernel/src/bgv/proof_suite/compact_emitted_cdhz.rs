@@ -2,15 +2,18 @@
 //!
 //! The generated compact-proof contract owns the verifier geometry. This
 //! module retains the census value types used by the theorem arithmetic. Tests
-//! can measure those coordinates from an already-verified compact transport;
-//! the release transport validates structure and salted openings, while
-//! algebraic proof verification and production premise constructors remain
+//! can measure those coordinates from a compact transport. Retained theorem
+//! evidence uses the source-verified terminal so the same canonical bytes have
+//! already passed transport, full algebraic verification, and independent
+//! source correspondence. Production theorem-premise constructors remain
 //! unavailable.
 
 use std::mem::size_of;
 
 use super::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
 use super::PROOF_CHALLENGE_EXTENSION_DEGREE;
+#[cfg(test)]
+use super::SourceVerifiedCompactPublicKeyProof;
 #[cfg(test)]
 use super::compact_proof_contract::CompactPublicKeyProofContract;
 #[cfg(test)]
@@ -553,6 +556,16 @@ pub(crate) fn measure_verified_compact_emission_cdhz(
     };
     measurement.validate_internal_consistency()?;
     Ok(measurement)
+}
+
+/// Measures the exact canonical transport retained by a positive algebraic and
+/// source-correspondence terminal. The proof type has no caller decoder or
+/// public constructor, so transport validation alone cannot reach this seam.
+#[cfg(test)]
+pub(crate) fn measure_source_verified_compact_emission_cdhz(
+    proof: &SourceVerifiedCompactPublicKeyProof,
+) -> Result<CompactEmittedCdhzMeasurement, CompactEmittedCdhzError> {
+    measure_verified_compact_emission_cdhz(proof.source_verified_transport())
 }
 
 impl CompactEmittedCdhzMeasurement {

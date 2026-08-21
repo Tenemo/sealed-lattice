@@ -3201,8 +3201,12 @@ mod tests {
                 compact_corpus_accounting::{
                     derive_selected_compact_corpus_rollup,
                     derive_selected_public_key_share_emitted_size_evidence,
+                    derive_selected_public_key_share_source_verified_size_evidence,
                 },
-                compact_emitted_cdhz::measure_selected_compact_emission_cdhz,
+                compact_emitted_cdhz::{
+                    CompactEmittedCdhzMeasurement, measure_selected_compact_emission_cdhz,
+                    measure_source_verified_compact_emission_cdhz,
+                },
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::{
                     CompactPublicInputBindings, PROOF_FIXED_HEADER_BYTE_LENGTH,
@@ -8082,14 +8086,14 @@ mod tests {
             &checkpoint_context,
         );
         write_compact_proof_evidence_producer_process_record(&checkpoint_directory);
-        let emitted_cdhz_measurement = measure_selected_compact_emission_cdhz(
+        let transport_cdhz_measurement = measure_selected_compact_emission_cdhz(
             Some(response_generation_output.canonical_proof_bytes()),
             Some(&canonical_public_input_bytes),
             public_input_bindings,
         )
         .expect("the decoded actual-byte owner accepts and inventories the emitted transport");
-        let actual_byte_census = &emitted_cdhz_measurement.decoded_actual_byte_census;
-        assert_eq!(emitted_cdhz_measurement.rounds.len(), 82);
+        let actual_byte_census = &transport_cdhz_measurement.decoded_actual_byte_census;
+        assert_eq!(transport_cdhz_measurement.rounds.len(), 82);
         assert_eq!(actual_byte_census.prover_response_count, 82);
         assert_eq!(actual_byte_census.verifier_message_count, 82);
         assert_eq!(actual_byte_census.response_opening_tuple_count, 82);
@@ -8097,7 +8101,7 @@ mod tests {
         assert_eq!(actual_byte_census.internal_relation_commitment_count, 45);
         assert_eq!(
             actual_byte_census.shared_hash_graph.total_hash_count,
-            emitted_cdhz_measurement.observed_nrdx_verifier_q_v
+            transport_cdhz_measurement.observed_nrdx_verifier_q_v
         );
         let emitted_size_evidence =
             derive_selected_public_key_share_emitted_size_evidence(&response_generation_output)
@@ -8168,9 +8172,13 @@ mod tests {
                 .peak_stored_byte_length(),
         );
         drop(response_generation_output);
-        verify_checkpointed_compact_public_key_proof_algebraically(
+        let source_verified_proof = verify_checkpointed_compact_public_key_proof_algebraically(
             &checkpoint_directory,
             CompactPublicKeyCheckpointEvidenceMode::PersistThenRestore,
+        );
+        assert_source_verified_compact_public_key_emission_evidence(
+            &source_verified_proof,
+            Some(&transport_cdhz_measurement),
         );
     }
 
@@ -8679,6 +8687,68 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn assert_source_verified_compact_public_key_emission_evidence(
+        source_verified_proof: &SourceVerifiedCompactPublicKeyProof,
+        transport_measurement: Option<&CompactEmittedCdhzMeasurement>,
+    ) {
+        let source_verified_measurement =
+            measure_source_verified_compact_emission_cdhz(source_verified_proof)
+                .expect("the source-verified terminal owns a consistent emitted-byte census");
+        if let Some(transport_measurement) = transport_measurement {
+            assert_eq!(
+                &source_verified_measurement, transport_measurement,
+                "positive verification must retain the exact measured canonical transport",
+            );
+        }
+        let source_verified_size_evidence =
+            derive_selected_public_key_share_source_verified_size_evidence(source_verified_proof)
+                .expect("the source-verified terminal owns a nonempty canonical proof size");
+        assert_eq!(
+            source_verified_size_evidence.canonical_proof_byte_length,
+            source_verified_measurement.canonical_proof_byte_length,
+        );
+        let compact_corpus_rollup =
+            derive_selected_compact_corpus_rollup(&[source_verified_size_evidence])
+                .expect("the source-verified size feeds the selected corpus roll-up");
+        let public_key_share_corpus_entry = compact_corpus_rollup
+            .families
+            .iter()
+            .find(|family| {
+                family.application_statement_schema_identifier
+                    == source_verified_size_evidence.application_statement_schema_identifier
+            })
+            .expect("the selected corpus contains the public-key-share family");
+
+        assert_eq!(
+            compact_corpus_rollup
+                .blocked_family_schema_identifiers
+                .len(),
+            11
+        );
+        assert_eq!(
+            compact_corpus_rollup.accepted_canonical_corpus_byte_length,
+            None
+        );
+        assert_eq!(
+            public_key_share_corpus_entry.candidate_canonical_proof_byte_length,
+            None,
+        );
+        assert_eq!(
+            public_key_share_corpus_entry.accepted_canonical_proof_byte_length,
+            Some(source_verified_size_evidence.canonical_proof_byte_length),
+        );
+        assert_eq!(
+            public_key_share_corpus_entry.accepted_physical_corpus_byte_length,
+            source_verified_size_evidence
+                .canonical_proof_byte_length
+                .checked_mul(u64::from(
+                    public_key_share_corpus_entry.physical_proof_count,
+                )),
+        );
+        assert_eq!(public_key_share_corpus_entry.blocker, None);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum CompactPublicKeyCheckpointEvidenceMode {
         PersistThenRestore,
@@ -8690,17 +8760,18 @@ mod tests {
     fn compact_public_key_proof_evidence_separate_process_restoration() {
         let checkpoint_directory = compact_public_key_algebraic_checkpoint_directory();
         assert_compact_proof_evidence_consumer_is_a_separate_process(&checkpoint_directory);
-        verify_checkpointed_compact_public_key_proof_algebraically(
+        let source_verified_proof = verify_checkpointed_compact_public_key_proof_algebraically(
             &checkpoint_directory,
             CompactPublicKeyCheckpointEvidenceMode::RestoreFromProducerProcess,
         );
+        assert_source_verified_compact_public_key_emission_evidence(&source_verified_proof, None);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn verify_checkpointed_compact_public_key_proof_algebraically(
         checkpoint_directory: &Path,
         evidence_mode: CompactPublicKeyCheckpointEvidenceMode,
-    ) {
+    ) -> Box<SourceVerifiedCompactPublicKeyProof> {
         let canonical_proof_bytes = fs::read(checkpoint_directory.join("generated-proof.bin"))
             .expect("the generated compact proof checkpoint exists");
         let canonical_public_input_bytes = fs::read(checkpoint_directory.join("public-input.bin"))
@@ -8945,7 +9016,7 @@ mod tests {
                 correspondence.verified_column_count(),
                 correspondence.statement_tree_count(),
             );
-            return;
+            return source_verified_proof;
         }
         let resumed_transport = verify_selected_compact_public_key_transport(
             public_input_bindings,
@@ -9221,6 +9292,7 @@ mod tests {
             correspondence.verified_column_count(),
             correspondence.statement_tree_count(),
         );
+        source_verified_proof
     }
 
     #[test]

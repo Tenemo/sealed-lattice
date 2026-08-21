@@ -2,21 +2,22 @@
 //!
 //! The selected lifecycle inventory is production-derived. Compact byte
 //! lengths remain evidence-bearing inputs, and a transport-only candidate is
-//! never promoted into an accepted proof size or a complete corpus total.
+//! never promoted into a source-verified proof size or a complete corpus total.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::foundation::ProofApplicationSlotCeilings;
+
 use super::{
+    SourceVerifiedCompactPublicKeyProof,
     compact_response_generation::CompactResponseGenerationOutput,
     selected_accounting::derive_selected_proof_family_application_inventory,
 };
 
-const SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1212;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactFamilySizeEvidenceStatus {
     TransportCandidate,
-    AlgebraicallyVerified,
+    SourceVerified,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,7 +30,7 @@ pub(crate) struct CompactFamilySizeEvidence {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactFamilyCorpusBlocker {
     MissingCompactSize,
-    TransportCandidateNotAlgebraicallyVerified,
+    TransportCandidateNotSourceVerified,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,9 +77,35 @@ pub(crate) fn derive_selected_public_key_share_emitted_size_evidence(
     }
     Ok(CompactFamilySizeEvidence {
         application_statement_schema_identifier:
-            SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
         canonical_proof_byte_length,
         status: CompactFamilySizeEvidenceStatus::TransportCandidate,
+    })
+}
+
+/// Derives accepted corpus-size evidence only from the terminal that owns the
+/// exact transport after positive CFW/WHIR verification and independent source
+/// correspondence. No raw-byte or transport-only constructor reaches this
+/// bridge.
+pub(crate) fn derive_selected_public_key_share_source_verified_size_evidence(
+    proof: &SourceVerifiedCompactPublicKeyProof,
+) -> Result<CompactFamilySizeEvidence, CompactCorpusAccountingError> {
+    let canonical_proof_byte_length = u64::try_from(
+        proof
+            .source_verified_transport()
+            .proof_view()
+            .canonical_bytes()
+            .len(),
+    )
+    .map_err(|_| CompactCorpusAccountingError::ArithmeticOverflow)?;
+    if canonical_proof_byte_length == 0 {
+        return Err(CompactCorpusAccountingError::ZeroByteLength);
+    }
+    Ok(CompactFamilySizeEvidence {
+        application_statement_schema_identifier:
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        canonical_proof_byte_length,
+        status: CompactFamilySizeEvidenceStatus::SourceVerified,
     })
 }
 
@@ -138,7 +165,7 @@ pub(crate) fn derive_selected_compact_corpus_rollup(
             })
             .transpose()?;
         let accepted_canonical_proof_byte_length = evidence.and_then(|evidence| {
-            (evidence.status == CompactFamilySizeEvidenceStatus::AlgebraicallyVerified)
+            (evidence.status == CompactFamilySizeEvidenceStatus::SourceVerified)
                 .then_some(evidence.canonical_proof_byte_length)
         });
         let accepted_physical_corpus_byte_length = accepted_canonical_proof_byte_length
@@ -151,9 +178,9 @@ pub(crate) fn derive_selected_compact_corpus_rollup(
         let blocker = match evidence.map(|evidence| evidence.status) {
             None => Some(CompactFamilyCorpusBlocker::MissingCompactSize),
             Some(CompactFamilySizeEvidenceStatus::TransportCandidate) => {
-                Some(CompactFamilyCorpusBlocker::TransportCandidateNotAlgebraicallyVerified)
+                Some(CompactFamilyCorpusBlocker::TransportCandidateNotSourceVerified)
             }
-            Some(CompactFamilySizeEvidenceStatus::AlgebraicallyVerified) => None,
+            Some(CompactFamilySizeEvidenceStatus::SourceVerified) => None,
         };
         if blocker.is_some() {
             blocked_family_schema_identifiers.insert(schema_identifier);
@@ -197,7 +224,7 @@ mod tests {
     fn selected_rollup_keeps_a_transport_candidate_and_unknown_sizes_blocking() {
         let rollup = derive_selected_compact_corpus_rollup(&[CompactFamilySizeEvidence {
             application_statement_schema_identifier:
-                SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
             canonical_proof_byte_length: 17,
             status: CompactFamilySizeEvidenceStatus::TransportCandidate,
         }])
@@ -213,7 +240,7 @@ mod tests {
             .iter()
             .find(|family| {
                 family.application_statement_schema_identifier
-                    == SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER
+                    == ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
             })
             .expect("public-key-share family is inventoried");
         assert_eq!(public_key_share.physical_proof_count, 10);
@@ -230,8 +257,40 @@ mod tests {
         assert_eq!(public_key_share.accepted_physical_corpus_byte_length, None);
         assert_eq!(
             public_key_share.blocker,
-            Some(CompactFamilyCorpusBlocker::TransportCandidateNotAlgebraicallyVerified)
+            Some(CompactFamilyCorpusBlocker::TransportCandidateNotSourceVerified)
         );
+    }
+
+    #[test]
+    fn source_verified_family_size_unblocks_only_its_selected_family() {
+        let rollup = derive_selected_compact_corpus_rollup(&[CompactFamilySizeEvidence {
+            application_statement_schema_identifier:
+                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            canonical_proof_byte_length: 17,
+            status: CompactFamilySizeEvidenceStatus::SourceVerified,
+        }])
+        .expect("selected compact corpus roll-up derives");
+        let public_key_share = rollup
+            .families
+            .iter()
+            .find(|family| {
+                family.application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            })
+            .expect("public-key-share family is inventoried");
+
+        assert_eq!(rollup.blocked_family_schema_identifiers.len(), 11);
+        assert_eq!(rollup.accepted_canonical_corpus_byte_length, None);
+        assert_eq!(public_key_share.candidate_canonical_proof_byte_length, None);
+        assert_eq!(
+            public_key_share.accepted_canonical_proof_byte_length,
+            Some(17)
+        );
+        assert_eq!(
+            public_key_share.accepted_physical_corpus_byte_length,
+            Some(170)
+        );
+        assert_eq!(public_key_share.blocker, None);
     }
 
     #[test]
@@ -247,7 +306,7 @@ mod tests {
                     .application_statement_schema_identifier(),
                 canonical_proof_byte_length: u64::try_from(family_index + 1)
                     .expect("family index fits u64"),
-                status: CompactFamilySizeEvidenceStatus::AlgebraicallyVerified,
+                status: CompactFamilySizeEvidenceStatus::SourceVerified,
             })
             .collect::<Vec<_>>();
         let expected_total = inventory
@@ -279,7 +338,7 @@ mod tests {
     fn invalid_size_evidence_refuses_before_any_total_is_reported() {
         let valid = CompactFamilySizeEvidence {
             application_statement_schema_identifier:
-                SELECTED_PUBLIC_KEY_SHARE_APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
             canonical_proof_byte_length: 1,
             status: CompactFamilySizeEvidenceStatus::TransportCandidate,
         };
@@ -304,7 +363,7 @@ mod tests {
         assert_eq!(
             derive_selected_compact_corpus_rollup(&[CompactFamilySizeEvidence {
                 canonical_proof_byte_length: u64::MAX,
-                status: CompactFamilySizeEvidenceStatus::AlgebraicallyVerified,
+                status: CompactFamilySizeEvidenceStatus::SourceVerified,
                 ..valid
             }]),
             Err(CompactCorpusAccountingError::ArithmeticOverflow)
