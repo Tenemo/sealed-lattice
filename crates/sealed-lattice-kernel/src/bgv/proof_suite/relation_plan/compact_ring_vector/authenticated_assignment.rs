@@ -586,6 +586,15 @@ pub(crate) struct CompactPublicKeyBaseAssignment {
     base_witness_prefix: Zeroizing<Vec<ProofBaseFieldElement>>,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InjectedCompactPublicKeyWitnessEquationFault {
+    pub(crate) shifted_eta_two_witness_element_ordinal: u64,
+    pub(crate) original_shifted_value: u64,
+    pub(crate) retained_first_product_witness_element_ordinal: u64,
+    pub(crate) retained_first_product_value: u64,
+}
+
 impl CompactPublicKeyBaseAssignment {
     pub(crate) const fn memory_geometry(&self) -> CompactAuthenticatedAssignmentMemoryGeometry {
         self.geometry
@@ -620,6 +629,76 @@ impl CompactPublicKeyBaseAssignment {
             )
             .copied()
             .ok_or(CommonProofProverError::InvalidColumn)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_first_shifted_eta_two_product_equation_fault(
+        &mut self,
+        relation: &CompactPublicKeyRelationCatalog,
+    ) -> Result<InjectedCompactPublicKeyWitnessEquationFault, CommonProofProverError> {
+        let shifted_eta_two_segment =
+            witness_segment(relation, CompactWitnessSegmentKind::ShiftedEtaTwoValues)?;
+        let product_segment =
+            witness_segment(relation, CompactWitnessSegmentKind::SmallSetProducts)?;
+        let ring_degree = relation.ring_degree();
+        let shifted_ternary_vector_count = relation.shifted_ternary_vector_count();
+        let replacement_value = ProofBaseFieldElement::ONE;
+
+        for local_element_ordinal in 0..shifted_eta_two_segment.element_count {
+            let shifted_eta_two_witness_element_ordinal = shifted_eta_two_segment
+                .first_element
+                .checked_add(local_element_ordinal)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let shifted_value = self.witness_base_value(shifted_eta_two_witness_element_ordinal)?;
+            let original_shifted_value = shifted_value.canonical();
+            if original_shifted_value < 2 {
+                continue;
+            }
+
+            let vector_ordinal = local_element_ordinal / ring_degree;
+            let coefficient_ordinal = local_element_ordinal % ring_degree;
+            let first_product_vector_ordinal = shifted_ternary_vector_count
+                .checked_add(
+                    vector_ordinal
+                        .checked_mul(3)
+                        .ok_or(CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let retained_first_product_witness_element_ordinal = product_segment
+                .first_element
+                .checked_add(
+                    first_product_vector_ordinal
+                        .checked_mul(ring_degree)
+                        .ok_or(CommonProofProverError::CountOverflow)?,
+                )
+                .and_then(|first| first.checked_add(coefficient_ordinal))
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let retained_first_product =
+                self.witness_base_value(retained_first_product_witness_element_ordinal)?;
+            let expected_first_product =
+                shifted_value.multiply(shifted_value.subtract(ProofBaseFieldElement::ONE));
+            if retained_first_product != expected_first_product
+                || retained_first_product == ProofBaseFieldElement::ZERO
+            {
+                return Err(CommonProofProverError::InvalidInput);
+            }
+
+            *self
+                .base_witness_prefix
+                .get_mut(
+                    usize::try_from(shifted_eta_two_witness_element_ordinal)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::InvalidColumn)? = replacement_value;
+            return Ok(InjectedCompactPublicKeyWitnessEquationFault {
+                shifted_eta_two_witness_element_ordinal,
+                original_shifted_value,
+                retained_first_product_witness_element_ordinal,
+                retained_first_product_value: retained_first_product.canonical(),
+            });
+        }
+
+        Err(CommonProofProverError::InvalidInput)
     }
 
     pub(crate) fn begin_lookup_inverse_materialization(
@@ -1857,7 +1936,7 @@ mod tests {
                 CompactAuthenticatedAssignmentPoll::Complete => break,
             }
         }
-        let base_assignment = cursor
+        let mut base_assignment = cursor
             .finish(&relation, &relation_plan_variant)
             .expect("completed compact assignment cursor finishes");
         assert_eq!(loaded_source_count, 202);
@@ -1967,6 +2046,52 @@ mod tests {
                 .expect("third eta-two product exists"),
             ProofBaseFieldElement::ZERO,
         );
+        let injected_witness_equation_fault = base_assignment
+            .inject_first_shifted_eta_two_product_equation_fault(&relation)
+            .expect("a compiler-derived operative eta-two witness coordinate is available");
+        assert_eq!(
+            injected_witness_equation_fault.shifted_eta_two_witness_element_ordinal,
+            shifted_eta_two_segment.first_element,
+        );
+        assert_eq!(injected_witness_equation_fault.original_shifted_value, 2);
+        assert_eq!(
+            injected_witness_equation_fault.retained_first_product_witness_element_ordinal,
+            first_eta_product,
+        );
+        assert_eq!(
+            injected_witness_equation_fault.retained_first_product_value,
+            2,
+        );
+        assert_eq!(
+            base_assignment
+                .witness_base_value(
+                    injected_witness_equation_fault.shifted_eta_two_witness_element_ordinal,
+                )
+                .expect("the injected shifted eta-two value remains canonical"),
+            ProofBaseFieldElement::ONE,
+        );
+        assert_eq!(
+            base_assignment
+                .witness_base_value(
+                    injected_witness_equation_fault.retained_first_product_witness_element_ordinal,
+                )
+                .expect("the paired product remains unchanged")
+                .canonical(),
+            injected_witness_equation_fault.retained_first_product_value,
+        );
+        *base_assignment
+            .base_witness_prefix
+            .get_mut(
+                usize::try_from(
+                    injected_witness_equation_fault.shifted_eta_two_witness_element_ordinal,
+                )
+                .expect("the selected witness coordinate fits usize"),
+            )
+            .expect("the selected witness coordinate remains materialized") =
+            ProofBaseFieldElement::from_canonical(
+                injected_witness_equation_fault.original_shifted_value,
+            )
+            .expect("the original shifted eta-two value is canonical");
 
         assert_eq!(
             validate_lookup_challenge(

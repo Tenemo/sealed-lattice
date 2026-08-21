@@ -59,11 +59,22 @@ consequences are:
   compact-only lane generated and decoded the 23,815,474-byte proof, verified
   all 122 public columns and four statement-owned roots, and reached terminal
   verification in both its producer and separate restoration processes.
+- A test-only dishonest-prover constructor independently derives a same-slot
+  proof attempt and retains an original product after changing its
+  compiler-derived shifted witness value. It emits a canonically decodable
+  23,806,986-byte proof without disabling any production check. Every one of
+  its 23 CFW round polynomials violates the honest masking coefficient image,
+  while the production algebraic verifier refuses the first sumcheck equation
+  as `InvalidProof`. Positive-attempt algebraic and accepted/source cursors both
+  fail under substitution with wrong-context semantics. This establishes one
+  transport-valid semantic-equation rejection and attempt-bound restoration
+  case; the constructor is unavailable outside tests and cannot mint a
+  capability.
 - This vertical slice does not close the backend. It lacks the complete
-  transported equation-invalid hostile corpus, release-WebAssembly generation
-  and verification pair, real dedicated-worker lifecycle, complete emitted-byte
-  theorem composition, and browser resource evidence. The other eleven proof
-  families remain unported.
+  transported hostile corpus beyond the current deterministic semantic fault,
+  release-WebAssembly generation and verification pair, real dedicated-worker
+  lifecycle, complete emitted-byte theorem composition, and browser resource
+  evidence. The other eleven proof families remain unported.
 - Small source-bound cursors now cover CFW, WHIR, and public-source
   correspondence. Both verifier-derived WHIR public-covector epochs use bounded
   in-place fold polls, and only the resulting fresh positive verification can
@@ -75,10 +86,12 @@ consequences are:
   cursor, and refuses malformed, wrong-context, wrong-proof, wrong-public-input,
   impossible-progress, and excessive-source-progress accepted/source cursors.
   It then replays all 21,168,497 algebraic work units and continues all 4,218
-  source-correspondence boundaries to terminal verification. Release-browser
-  lifecycle, cold-resume time, lost work, restart traffic, synchronous
-  transport, transition work, and storage-transaction bounds remain open;
-  serialization of the full live verifier state is not required.
+  source-correspondence boundaries to terminal verification. An independently
+  bound hostile proof attempt also refuses both positive cursors before any
+  resumed work. Release-browser lifecycle, cold-resume time, lost work, restart
+  traffic, synchronous transport, transition work, and storage-transaction
+  bounds remain open; serialization of the full live verifier state is not
+  required.
 - Independent test code checks all 4,046 selected same-secret relation
   constraints across 48,552 program evaluations, and the compact public-key
   structured matrices match the independent interpreter across all 2,686,977
@@ -204,9 +217,11 @@ that a coherent snapshot is newest.
   compact successor can generate, canonically decode, and
   source-correspondently verify one guarded native candidate. Baseline
   transported mutations and separate-process restoration of both verifier
-  cursors now fail closed, but the complete equation-invalid hostile corpus,
-  theorem and privacy composition, release-WebAssembly pair, browser lifecycle,
-  and remaining proof families are still required for suite selection.
+  cursors now fail closed. One independently attempted, transport-valid
+  semantic-equation fault is refused at CFW round zero and rejects substituted
+  positive cursors, but the remaining full hostile corpus, theorem and privacy
+  composition, release-WebAssembly pair, browser lifecycle, and remaining
+  proof families are still required for suite selection.
   Independent relation semantics, matrix correspondence, and selected VSS and
   aggregate source/witness correspondence exist as test-only native evidence.
   Rejected-backend terminal execution provides no independent compact evidence
@@ -250,10 +265,11 @@ that a coherent snapshot is newest.
   must carry no status or acceptance authority, and any mismatch with final
   suite inputs invalidates the evidence.
 - `SEC-020`: Guarded native evidence covers the exact candidate public-key proof,
-  source-bound verification, bounded CFW and WHIR polls, persistence and
-  separate-process restoration of the 408-byte algebraic and 412-byte
-  accepted/source cursors, changed-cursor refusal, deterministic replay, and
-  continuation to terminal verification. Dedicated-worker loss, bounded
+  source-bound verification, one transport-valid equation-invalid proof and
+  local CFW refusal, bounded CFW and WHIR polls, persistence and separate-process
+  restoration of the 408-byte algebraic and 412-byte accepted/source cursors,
+  changed- and independently substituted-cursor refusal, deterministic replay,
+  and continuation to terminal verification. Dedicated-worker loss, bounded
   synchronous work, live browser memory, storage amplification,
   release-WebAssembly proof execution, exact candidate-byte browser restore,
   and full browser custody remain open.

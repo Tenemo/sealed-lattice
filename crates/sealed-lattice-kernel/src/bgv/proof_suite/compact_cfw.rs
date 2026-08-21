@@ -513,6 +513,10 @@ pub(crate) struct CompactCfwScalarProverState {
     past_outer_mask_evaluation: CompactChallengeField,
     pending_round_polynomial:
         Option<[CompactChallengeField; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH]>,
+    #[cfg(test)]
+    test_only_initial_sumcheck_inconsistency_enabled: bool,
+    #[cfg(test)]
+    test_only_initial_sumcheck_inconsistency_accepted: bool,
 }
 
 /// Incremental owner of one CFW sumcheck round.
@@ -737,6 +741,10 @@ impl CompactCfwScalarProverState {
             past_inner_mask_evaluations: [CompactChallengeField::ZERO; COMPACT_CFW_MATRIX_COUNT],
             past_outer_mask_evaluation: CompactChallengeField::ZERO,
             pending_round_polynomial: None,
+            #[cfg(test)]
+            test_only_initial_sumcheck_inconsistency_enabled: false,
+            #[cfg(test)]
+            test_only_initial_sumcheck_inconsistency_accepted: false,
         })
     }
 
@@ -750,6 +758,26 @@ impl CompactCfwScalarProverState {
 
     pub(crate) const fn geometry(&self) -> CompactCfwGeometry {
         self.geometry
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepare_test_only_initial_sumcheck_inconsistency_transcript(
+        &mut self,
+    ) -> Result<(), CompactCfwError> {
+        if self.round_ordinal != 0
+            || self.pending_round_polynomial.is_some()
+            || self.test_only_initial_sumcheck_inconsistency_enabled
+            || self.test_only_initial_sumcheck_inconsistency_accepted
+        {
+            return Err(CompactCfwError::WrongProverPhase);
+        }
+        self.test_only_initial_sumcheck_inconsistency_enabled = true;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn test_only_initial_sumcheck_inconsistency_accepted(&self) -> bool {
+        self.test_only_initial_sumcheck_inconsistency_accepted
     }
 
     pub(crate) fn round_accumulator(&self) -> Result<CompactCfwRoundAccumulator, CompactCfwError> {
@@ -782,6 +810,21 @@ impl CompactCfwScalarProverState {
             return Err(CompactCfwError::WrongProverPhase);
         }
         if polynomial_endpoint_sum(&polynomial) != self.previous_claim {
+            #[cfg(test)]
+            {
+                if self.test_only_initial_sumcheck_inconsistency_enabled
+                    && self.round_ordinal == 0
+                    && !self.test_only_initial_sumcheck_inconsistency_accepted
+                {
+                    self.test_only_initial_sumcheck_inconsistency_enabled = false;
+                    self.test_only_initial_sumcheck_inconsistency_accepted = true;
+                } else {
+                    return Err(CompactCfwError::SumcheckConsistency {
+                        round_ordinal: self.round_ordinal,
+                    });
+                }
+            }
+            #[cfg(not(test))]
             return Err(CompactCfwError::SumcheckConsistency {
                 round_ordinal: self.round_ordinal,
             });
@@ -2975,6 +3018,68 @@ mod tests {
                 CompactChallengeField::ZERO,
             );
         }
+    }
+
+    #[test]
+    fn test_only_dishonest_prover_can_bypass_only_the_initial_sumcheck_equation() {
+        let geometry = CompactCfwGeometry::derive(1 << 4).expect("valid compact CFW geometry");
+        let mut next_seed = 80_000_u64;
+        let mask_material = CompactCfwMaskMaterial::sample(geometry, || {
+            let value = extension_value(next_seed);
+            next_seed += 43;
+            value
+        })
+        .expect("complete compact CFW masks");
+        let equality_point = (0..geometry.sumcheck_round_count())
+            .map(|ordinal| extension_value(81_000 + ordinal as u64 * 47))
+            .collect::<Vec<_>>();
+        let new_scalar_state = || {
+            CompactCfwScalarProverState::begin(
+                geometry,
+                mask_material.clone(),
+                extension_value(82_001),
+                equality_point.clone(),
+            )
+            .expect("compact CFW scalar state")
+        };
+        let inconsistent_polynomial = |claim| {
+            let mut polynomial =
+                [CompactChallengeField::ZERO; COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH];
+            if polynomial_endpoint_sum(&polynomial) == claim {
+                polynomial[0] = CompactChallengeField::ONE;
+            }
+            assert_ne!(polynomial_endpoint_sum(&polynomial), claim);
+            polynomial
+        };
+
+        let mut ordinary_state = new_scalar_state();
+        assert_eq!(
+            ordinary_state
+                .accept_round_polynomial(inconsistent_polynomial(ordinary_state.previous_claim)),
+            Err(CompactCfwError::SumcheckConsistency { round_ordinal: 0 }),
+        );
+
+        let mut dishonest_state = new_scalar_state();
+        dishonest_state
+            .prepare_test_only_initial_sumcheck_inconsistency_transcript()
+            .expect("the test-only initial inconsistency is enabled exactly once");
+        dishonest_state
+            .accept_round_polynomial(inconsistent_polynomial(dishonest_state.previous_claim))
+            .expect("the test-only initial inconsistency is accepted");
+        assert!(dishonest_state.test_only_initial_sumcheck_inconsistency_accepted());
+        assert_eq!(
+            dishonest_state.prepare_test_only_initial_sumcheck_inconsistency_transcript(),
+            Err(CompactCfwError::WrongProverPhase),
+        );
+        dishonest_state
+            .bind_round_challenge(extension_value(83_003))
+            .expect("the first dishonest polynomial binds normally");
+        assert_eq!(
+            dishonest_state
+                .accept_round_polynomial(inconsistent_polynomial(dishonest_state.previous_claim)),
+            Err(CompactCfwError::SumcheckConsistency { round_ordinal: 1 }),
+            "the seam cannot bypass any later sumcheck equation",
+        );
     }
 
     #[test]

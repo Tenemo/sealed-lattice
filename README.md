@@ -98,6 +98,18 @@ and target release remain incomplete or internal.
   122 public columns and four statement-owned roots, and minted a source-bound
   accepted-setup capability only after positive completion. This is one native
   vertical slice, not a selected proof backend or accepted ceremony.
+- A separate hostile owner derives an independent same-slot proof attempt,
+  changes one compiler-derived shifted witness value while retaining its
+  original product value, and uses test-only dishonest-prover hooks to serialize
+  the resulting invalid CFW transcript without weakening the production prover
+  or verifier. The resulting 23,806,986-byte proof is canonically transport
+  valid. All 23 CFW round polynomials are outside the honest masking affine
+  image, and the full algebraic verifier refuses the first equation exactly as
+  `Cfw(SumcheckConsistency { round_ordinal: 0 })`, exposed as
+  `InvalidProof`. Substituting the positive proof's algebraic or
+  accepted/source cursor into this independent attempt fails with
+  `WrongContext`, and the hostile path cannot mint a capability. This is native
+  test-only hostile evidence, not a production proof-generation mode.
 - The algebraic verifier exposes a 408-byte cursor over 323 durable CFW and
   WHIR boundaries. The source-bound accepted verifier exposes a distinct
   412-byte cursor over 4,541 boundaries, adding all public-column and
@@ -170,24 +182,29 @@ ceremony or supported-phone qualification.
   selected VSS prerequisite and aggregate same-secret relations. The current
   compact public-key baseline now combines canonical proof generation and
   decoding, fresh full verification, independent source correspondence,
-  baseline transported hostility, and authenticated persist,
-  separate-process restore, replay, and continuation. The complete transported
-  equation-invalid corpus remains part of the public-key vertical-slice gap.
+  baseline transported hostility, one transport-valid compiler-derived
+  equation-invalid proof with a local typed refusal, independent-attempt cursor
+  substitution, and authenticated persist, separate-process restore, replay,
+  and continuation. Systematic algebraic, code-switch, WHIR,
+  conditional-image, mask, query, cancellation, and resume hostility remains
+  part of the public-key vertical-slice gap.
 - The compact-only guarded lane has a terminal summary with no diagnostic
-  failure. Its producer generated and positively verified the canonical
-  23,815,474-byte proof, persisted the 408-byte algebraic and 412-byte
-  accepted/source cursors, and checked 122 source-derived public columns and
-  four statement-owned roots. Its ordered consumer ran in a distinct Cargo
-  process, refused proof and public-input truncation and trailing bytes, wrong
-  magics, response reordering, changed roots, transcript and opening salts,
-  non-canonical field encodings, all four changed public bindings, changed
-  proof and public-input cursor bindings, impossible CFW and WHIR counts, and
-  excessive source progress. It restored and continued the 408-byte cursor,
-  then restored, replayed, and completed the 412-byte cursor to the same 4,541
-  safe boundaries and terminal verification. The diagnostic records the
-  implementation worktree as dirty, so this remains exact-worktree native
-  development evidence rather than clean-commit, WebAssembly, browser, or
-  phone evidence.
+  failure. Its positive producer generated and verified the canonical
+  23,815,474-byte proof, its independent-attempt hostile producer generated and
+  locally refused the 23,806,986-byte equation-invalid proof, and its ordered
+  restoration consumer ran in a distinct Cargo process. The positive producer
+  persisted the 408-byte algebraic and 412-byte accepted/source cursors and
+  checked 122 source-derived public columns and four statement-owned roots.
+  The restoration consumer refused proof and public-input truncation and
+  trailing bytes, wrong magics, response reordering, changed roots, transcript
+  and opening salts, non-canonical field encodings, all four changed public
+  bindings, changed proof and public-input cursor bindings, impossible CFW and
+  WHIR counts, and excessive source progress. It restored and continued the
+  408-byte cursor, then restored, replayed, and completed the 412-byte cursor
+  to the same 4,541 safe boundaries and terminal verification. The diagnostic
+  records the implementation worktree as dirty, so this remains exact-worktree
+  native development evidence rather than clean-commit, WebAssembly, browser,
+  or phone evidence.
 - The rejected implementation's real checkpoint question is closed for its
   narrow development purpose. One controlled native run persisted,
   authenticated, and reread a 5,243,240-byte quotient state after 64 completed
@@ -202,11 +219,11 @@ ceremony or supported-phone qualification.
   canonical structure, transcript chronology, derived queries, and Merkle
   openings only; it is not algebraic proof verification.
 - The exact public-key-share slice still needs the complete transported
-  equation-invalid hostile corpus, exact emitted-byte masking and Merkle-privacy
-  composition, fixed-tape shared-QRO mapping, symbolic shared-Keccak reduction,
-  release-WebAssembly bounded transport and cold resume, and real
-  dedicated-worker lifecycle in desktop Chromium. See SECURITY for the
-  cryptographic consequences.
+  hostile corpus beyond the current deterministic semantic-equation case,
+  exact emitted-byte masking and Merkle-privacy composition, fixed-tape
+  shared-QRO mapping, symbolic shared-Keccak reduction, release-WebAssembly
+  bounded transport and cold resume, and real dedicated-worker lifecycle in
+  desktop Chromium. See SECURITY for the cryptographic consequences.
 - Current source consistently uses key-switch block width three and three
   special primes. That topology is not frozen, and the joint lattice exposure,
   malicious threshold behavior, auxiliary inputs, and reductions to named
@@ -315,9 +332,10 @@ explicitly registered, serialized evidence lanes. Inspect the executable
 registry before invoking a manual proof lane: the rejected exact VSS and
 aggregate tests are non-gating and must not be run. The current
 `test:rust:kernel:proof-evidence` registry owns only an ordered compact
-public-key producer and separate-process restoration consumer. Inspect that
-executable registry before invoking the lane; retired proof filters must fail
-preflight and remain non-executable history.
+public-key positive producer, independent-attempt equation-invalid producer,
+and separate-process restoration consumer. Inspect that executable registry
+before invoking the lane; retired proof filters must fail preflight and remain
+non-executable history.
 
 ## License
 

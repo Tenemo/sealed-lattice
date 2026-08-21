@@ -91,6 +91,7 @@ export const phaseLivenessEvidenceRustTests = [
 
 export const proofEvidenceRustTests = [
     'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_generation_and_verification',
+    'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_transport_valid_equation_invalid_proof_is_refused',
     'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_separate_process_restoration',
 ] as const;
 

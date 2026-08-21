@@ -224,6 +224,23 @@ impl CompactCfwExternalProverState {
         self.scalar_state.auxiliary_target()
     }
 
+    #[cfg(test)]
+    pub(crate) fn prepare_test_only_initial_sumcheck_inconsistency_transcript(
+        &mut self,
+    ) -> Result<(), CompactCfwError> {
+        if self.phase != CompactCfwExternalProverPhase::DerivingRoundPolynomial {
+            return Err(CompactCfwError::WrongProverPhase);
+        }
+        self.scalar_state
+            .prepare_test_only_initial_sumcheck_inconsistency_transcript()
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn test_only_initial_sumcheck_inconsistency_accepted(&self) -> bool {
+        self.scalar_state
+            .test_only_initial_sumcheck_inconsistency_accepted()
+    }
+
     pub(crate) fn advance_round_polynomial<Storage: ProofExternalMemory>(
         &mut self,
         row_source: &impl CompactCfwExternalRowSource,

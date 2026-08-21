@@ -104,6 +104,8 @@ use crate::bgv::proof_suite::{
 use crate::foundation::Hash512;
 use crate::hashing::hash_framed_parts_512;
 
+#[cfg(test)]
+use super::authenticated_assignment::InjectedCompactPublicKeyWitnessEquationFault;
 use super::{
     CompactPublicKeyRelationCatalog, PreparedCompactPublicKeyAssignmentSources,
     PreparedCompactPublicKeyBaseAssignment,
@@ -687,6 +689,8 @@ struct CompactPublicKeyPostLookupMaterial {
     cfw_outer_masking_outputs: Vec<CompactChallengeField>,
     cfw_bound_round_advance_required: bool,
     cfw_external_output: Option<CompactCfwExternalProverOutput>,
+    #[cfg(test)]
+    test_only_cfw_masking_inconsistency_round_ordinals: Vec<u32>,
     pre_challenge_whir_relation_preparation: Option<CompactWhirPreChallengeRelationPreparation>,
     pre_challenge_whir_sumcheck_batches: Vec<CompactPublicKeyWhirSumcheckBatch>,
     pre_challenge_whir_code_switches: Vec<CompactPublicKeyWhirCodeSwitch>,
@@ -1689,6 +1693,14 @@ impl CompactPublicKeyGenerationState {
         self.family_materialization_state.pre_lookup_material()
     }
 
+    #[cfg(test)]
+    pub(crate) fn inject_first_shifted_eta_two_product_equation_fault(
+        &mut self,
+    ) -> Result<InjectedCompactPublicKeyWitnessEquationFault, CommonProofProverError> {
+        self.family_materialization_state
+            .inject_first_shifted_eta_two_product_equation_fault()
+    }
+
     pub(crate) fn poll_source_loading(
         &mut self,
         maximum_work_unit_count: u64,
@@ -1969,6 +1981,20 @@ impl CompactPublicKeyFamilyMaterializationState {
             checkpoint_schedule_digest: prepared.checkpoint_schedule_digest,
             source_replay_binding: prepared.base_assignment.source_replay_binding(),
         })
+    }
+
+    #[cfg(test)]
+    fn inject_first_shifted_eta_two_product_equation_fault(
+        &mut self,
+    ) -> Result<InjectedCompactPublicKeyWitnessEquationFault, CommonProofProverError> {
+        let CompactPublicKeyFamilyMaterializationPhase::AwaitingPreChallengeEncoding(prepared) =
+            &mut self.phase
+        else {
+            return Err(CommonProofProverError::InvalidInput);
+        };
+        prepared
+            .base_assignment
+            .inject_first_shifted_eta_two_product_equation_fault(&prepared.relation)
     }
 
     pub(crate) fn pre_challenge_material(&self) -> Option<&CompactPublicKeyPreChallengeMaterial> {
@@ -2791,6 +2817,35 @@ impl PreparedCompactPublicKeyMainEpoch {
     }
 
     #[cfg(test)]
+    pub(crate) fn prepare_test_only_initial_cfw_sumcheck_inconsistency_transcript(
+        &mut self,
+    ) -> Result<(), CompactCfwError> {
+        self.post_lookup_material
+            .as_mut()
+            .and_then(|material| material.cfw_external_prover.as_mut())
+            .ok_or(CompactCfwError::WrongProverPhase)?
+            .prepare_test_only_initial_sumcheck_inconsistency_transcript()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_only_initial_cfw_sumcheck_inconsistency_accepted(&self) -> bool {
+        self.post_lookup_material
+            .as_ref()
+            .and_then(|material| material.cfw_external_prover.as_ref())
+            .is_some_and(|prover| prover.test_only_initial_sumcheck_inconsistency_accepted())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_only_cfw_masking_inconsistency_round_ordinals(&self) -> Option<&[u32]> {
+        Some(
+            &self
+                .post_lookup_material
+                .as_ref()?
+                .test_only_cfw_masking_inconsistency_round_ordinals,
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) fn completed_cfw_round_count(&self) -> Option<usize> {
         self.post_lookup_material
             .as_ref()?
@@ -3179,12 +3234,42 @@ impl PreparedCompactPublicKeyMainEpoch {
                 .map_err(CompactPublicKeyMainEpochPollError::CfwExecution)?;
             let polynomial_ready = round_polynomial.is_some();
             if let Some(round_polynomial) = round_polynomial {
-                material
-                    .verify_cfw_round_masking(
-                        response_generation_state.verifier_messages(),
-                        &round_polynomial,
-                    )
-                    .map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
+                let masking_verification = material.verify_cfw_round_masking(
+                    response_generation_state.verifier_messages(),
+                    &round_polynomial,
+                );
+                #[cfg(test)]
+                if let Err(error) = masking_verification {
+                    let round_ordinal = u32::try_from(round_index).map_err(|_| {
+                        CompactPublicKeyMainEpochPollError::Preparation(
+                            CompactPublicKeyMainEpochPreparationError::InvalidGeometry,
+                        )
+                    })?;
+                    let masking_round_is_new = material
+                        .test_only_cfw_masking_inconsistency_round_ordinals
+                        .last()
+                        .is_none_or(|last_round_ordinal| *last_round_ordinal < round_ordinal);
+                    let test_only_dishonest_polynomial = masking_round_is_new
+                        && material.cfw_external_prover.as_ref().is_some_and(|prover| {
+                            prover.test_only_initial_sumcheck_inconsistency_accepted()
+                        })
+                        && matches!(
+                            &error,
+                            CompactPublicKeyMainEpochPreparationError::CfwRoundMasking {
+                                round_ordinal: error_round_ordinal,
+                                error: CompactMaskingEntropyError::InvalidCoefficientMap,
+                            } if *error_round_ordinal == round_ordinal
+                        );
+                    if test_only_dishonest_polynomial {
+                        material
+                            .test_only_cfw_masking_inconsistency_round_ordinals
+                            .push(round_ordinal);
+                    } else {
+                        return Err(CompactPublicKeyMainEpochPollError::Preparation(error));
+                    }
+                }
+                #[cfg(not(test))]
+                masking_verification.map_err(CompactPublicKeyMainEpochPollError::Preparation)?;
                 material.pending_cfw_round_polynomial = Some(round_polynomial);
             }
             return Ok(
@@ -7713,6 +7798,8 @@ fn prepare_post_lookup_material(
         cfw_outer_masking_outputs: Vec::new(),
         cfw_bound_round_advance_required: false,
         cfw_external_output: None,
+        #[cfg(test)]
+        test_only_cfw_masking_inconsistency_round_ordinals: Vec::new(),
         pre_challenge_whir_relation_preparation: None,
         pre_challenge_whir_sumcheck_batches: Vec::new(),
         pre_challenge_whir_code_switches: Vec::new(),

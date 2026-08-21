@@ -3220,6 +3220,7 @@ mod tests {
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_WORK_UNIT_INTERVAL,
                     COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
                     CompactPublicKeyAlgebraicVerification,
+                    CompactPublicKeyAlgebraicVerificationError,
                     CompactPublicKeyAlgebraicVerificationPoll,
                     compact_public_key_whir_fold_work_unit_count,
                 },
@@ -3244,9 +3245,9 @@ mod tests {
             },
         },
         foundation::{
-            CanonicalStreamDomain, Hash512, PersistentProofCoinInput, ProofApplicationSlot,
-            RefusalReason, derive_canonical_stream_descriptor,
-            prepare_exact_same_secret_evidence_attempt,
+            ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessRoot, CanonicalStreamDomain,
+            Hash512, PersistentProofCoinInput, ProofApplicationSlot, RefusalReason,
+            derive_canonical_stream_descriptor, prepare_exact_same_secret_evidence_attempt,
         },
     };
 
@@ -3514,6 +3515,28 @@ mod tests {
             }
         };
         (algebraic_terminal.into_transport(), algebraic_poll_count)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn refuse_transport_valid_equation_invalid_compact_public_key_proof(
+        transport: VerifiedCompactPublicKeyTransport,
+    ) -> (CompactPublicKeyAlgebraicVerificationError, u64) {
+        let mut algebraic_verification = CompactPublicKeyAlgebraicVerification::begin(transport)
+            .expect("the equation-invalid proof enters the algebraic verifier after transport");
+        let mut algebraic_poll_count = 0_u64;
+        loop {
+            match algebraic_verification.advance(65_536) {
+                Err(error) => return (error, algebraic_poll_count),
+                Ok(CompactPublicKeyAlgebraicVerificationPoll::Complete(_)) => {
+                    panic!("the equation-invalid witness proof cannot reach positive verification")
+                }
+                Ok(_) => {
+                    algebraic_poll_count = algebraic_poll_count
+                        .checked_add(1)
+                        .expect("the hostile algebraic poll count fits u64");
+                }
+            }
+        }
     }
 
     struct CountingCompactCfwExternalRowSource<'source, Source> {
@@ -5427,9 +5450,47 @@ mod tests {
     #[test]
     #[ignore = "manual compact public-key proof-evidence producer"]
     fn compact_public_key_proof_evidence_generation_and_verification() {
+        run_compact_public_key_proof_evidence_generation(
+            CompactPublicKeyProofEvidenceGenerationMode::Positive,
+        );
+    }
+
+    #[test]
+    #[ignore = "manual transport-valid equation-invalid compact public-key proof evidence"]
+    fn compact_public_key_transport_valid_equation_invalid_proof_is_refused() {
+        run_compact_public_key_proof_evidence_generation(
+            CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt,
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum CompactPublicKeyProofEvidenceGenerationMode {
+        Positive,
+        EquationInvalidIndependentAttempt,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn run_compact_public_key_proof_evidence_generation(
+        evidence_mode: CompactPublicKeyProofEvidenceGenerationMode,
+    ) {
         let authority = populate_compact_public_key_development_evidence_authority(0x43)
             .expect("standalone production-derived public-key authority populates");
-        let action_private_randomness = authority.action_private_randomness;
+        let authority_action_private_randomness = authority.action_private_randomness;
+        let proof_action_private_randomness = match evidence_mode {
+            CompactPublicKeyProofEvidenceGenerationMode::Positive => {
+                Rc::clone(&authority_action_private_randomness)
+            }
+            CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt => {
+                Rc::new(
+                    ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+                        [0x6b; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+                    ))
+                    .derive(authority_action_private_randomness.derivation_input())
+                    .expect("the independent same-slot proof randomness derives"),
+                )
+            }
+        };
         let authority = authority.authority;
         let execution_started_at = Instant::now();
         let phase_started_at = Instant::now();
@@ -5473,12 +5534,27 @@ mod tests {
         let proof_coin_input =
             PersistentProofCoinInput::new(application_slot, application_statement_hash)
                 .expect("the public-key proof coin input is canonical");
-        let private_randomness_attempt_identifier = action_private_randomness
+        let authority_private_randomness_attempt_identifier = authority_action_private_randomness
             .persistent_proof_preparation_identifier(&proof_coin_input)
-            .expect("the public-key private-randomness attempt derives");
+            .expect("the authority-bound public-key private-randomness attempt derives");
+        let private_randomness_attempt_identifier = proof_action_private_randomness
+            .persistent_proof_preparation_identifier(&proof_coin_input)
+            .expect("the selected public-key private-randomness attempt derives");
+        match evidence_mode {
+            CompactPublicKeyProofEvidenceGenerationMode::Positive => assert_eq!(
+                private_randomness_attempt_identifier,
+                authority_private_randomness_attempt_identifier,
+            ),
+            CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt => {
+                assert_ne!(
+                    private_randomness_attempt_identifier,
+                    authority_private_randomness_attempt_identifier,
+                );
+            }
+        }
         let proof_attempt_identifier = *private_randomness_attempt_identifier.as_bytes();
         let prepared_attempt = prepare_exact_same_secret_evidence_attempt(
-            &action_private_randomness,
+            &authority_action_private_randomness,
             application_slot,
             application_statement_hash,
             [0x44; 32],
@@ -5582,6 +5658,18 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0] < pair[1])
         );
+        let injected_witness_equation_fault = match evidence_mode {
+            CompactPublicKeyProofEvidenceGenerationMode::Positive => None,
+            CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt => {
+                Some(
+                    generation_state
+                        .inject_first_shifted_eta_two_product_equation_fault()
+                        .expect(
+                            "the test-only equation fault targets one compiler-derived witness coordinate",
+                        ),
+                )
+            }
+        };
         let selected_compact_contract =
             crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
                 .expect("the frozen compact public-key contract decodes");
@@ -5688,7 +5776,7 @@ mod tests {
         let phase_started_at = Instant::now();
         println!("compact public-key focused owner phase: encode pre-challenge source");
         let mut private_coins = PrivateRandomnessCommonProofCoinSource::new(
-            Rc::clone(&action_private_randomness),
+            Rc::clone(&proof_action_private_randomness),
             statement_schema_identifier,
             private_coin_derivation_binding_hash,
             private_randomness_attempt_identifier,
@@ -5898,15 +5986,53 @@ mod tests {
         }
         checked_rows.insert(relation.operative_constraint_count);
         checked_rows.insert(relation.padded_constraint_count - 1);
+        let first_compiler_derived_checked_row = *checked_rows
+            .first()
+            .expect("the selected relation contributes at least one checked row");
+        let mut first_divergent_checked_row = None;
+        let mut divergent_checked_row_count = 0_u64;
         for row_ordinal in checked_rows {
             let evaluation = row_source
                 .evaluate_row(row_ordinal)
                 .expect("selected production row evaluates");
-            assert_eq!(
-                evaluation.left.multiply(evaluation.right),
-                evaluation.output,
-                "production assignment violates row {row_ordinal}"
-            );
+            let evaluated_product = evaluation.left.multiply(evaluation.right);
+            if evaluated_product != evaluation.output {
+                match evidence_mode {
+                    CompactPublicKeyProofEvidenceGenerationMode::Positive => assert_eq!(
+                        evaluated_product, evaluation.output,
+                        "production assignment violates row {row_ordinal}"
+                    ),
+                    CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt => {
+                        first_divergent_checked_row.get_or_insert((
+                            row_ordinal,
+                            evaluated_product,
+                            evaluation.output,
+                        ));
+                        divergent_checked_row_count = divergent_checked_row_count
+                            .checked_add(1)
+                            .expect("the divergent checked-row count fits u64");
+                    }
+                }
+            }
+        }
+        match evidence_mode {
+            CompactPublicKeyProofEvidenceGenerationMode::Positive => {
+                assert_eq!(first_divergent_checked_row, None);
+            }
+            CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt => {
+                let (first_divergent_row_ordinal, evaluated_product, expected_output) =
+                    first_divergent_checked_row.expect(
+                        "the compiler-derived semantic witness fault must violate a checked relation row",
+                    );
+                assert_eq!(
+                    first_divergent_row_ordinal, first_compiler_derived_checked_row,
+                    "the selected first eta-two witness fault must diverge at the compiler's first checked relation row",
+                );
+                println!(
+                    "compact public-key equation-invalid preflight detected first_divergent_row_ordinal={} divergent_checked_row_count={} evaluated_product={evaluated_product:?} expected_output={expected_output:?}",
+                    first_divergent_row_ordinal, divergent_checked_row_count,
+                );
+            }
         }
         println!(
             "compact public-key focused owner phase complete: check relation segment boundaries elapsed_milliseconds={}",
@@ -6277,6 +6403,20 @@ mod tests {
             response_storage.retained_secret_object_count(),
         );
 
+        if evidence_mode
+            == CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt
+        {
+            prepared_main_epoch
+                .prepare_test_only_initial_cfw_sumcheck_inconsistency_transcript()
+                .expect(
+                    "the test-only dishonest prover is enabled before the first CFW polynomial",
+                );
+            assert!(
+                !prepared_main_epoch.test_only_initial_cfw_sumcheck_inconsistency_accepted(),
+                "the dishonest-prover seam cannot be consumed before a polynomial is derived",
+            );
+        }
+
         let phase_started_at = Instant::now();
         println!("compact public-key focused owner phase: complete verifier-bound compact CFW");
         let mut cfw_storage =
@@ -6287,6 +6427,7 @@ mod tests {
         let mut cfw_response_leaf_count = 0_u64;
         let mut cfw_opened_leaf_count = 0_u64;
         let mut completed_cfw_round_count = 0_usize;
+        let mut observed_test_only_initial_cfw_inconsistency = false;
         loop {
             match prepared_main_epoch
                 .poll_cfw(&mut response_storage, &mut cfw_storage)
@@ -6294,12 +6435,30 @@ mod tests {
             {
                 CompactPublicKeyMainEpochPoll::CfwRoundPolynomialStepCompleted {
                     round_ordinal,
-                    ..
+                    polynomial_ready,
                 } => {
                     assert_eq!(
                         usize::try_from(round_ordinal).unwrap(),
                         completed_cfw_round_count
                     );
+                    if polynomial_ready
+                        && round_ordinal == 0
+                        && evidence_mode
+                            == CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt
+                    {
+                        assert!(
+                            prepared_main_epoch
+                                .test_only_initial_cfw_sumcheck_inconsistency_accepted(),
+                            "the equation-invalid witness must diverge at the initial CFW claim",
+                        );
+                        assert_eq!(
+                            prepared_main_epoch
+                                .test_only_cfw_masking_inconsistency_round_ordinals(),
+                            Some(&[0_u32][..]),
+                            "the dishonest polynomial must be outside the initial masking affine image",
+                        );
+                        observed_test_only_initial_cfw_inconsistency = true;
+                    }
                     cfw_round_polynomial_poll_count += 1;
                 }
                 CompactPublicKeyMainEpochPoll::CfwBoundRoundStepCompleted {
@@ -6424,6 +6583,29 @@ mod tests {
         assert!(cfw_bound_round_poll_count > 0);
         assert!(cfw_response_leaf_count > 0);
         assert!(cfw_opened_leaf_count > 0);
+        assert_eq!(
+            observed_test_only_initial_cfw_inconsistency,
+            evidence_mode
+                == CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt,
+            "only the test-only hostile producer may emit an initial inconsistent CFW claim",
+        );
+        let test_only_cfw_masking_inconsistency_round_ordinals = prepared_main_epoch
+            .test_only_cfw_masking_inconsistency_round_ordinals()
+            .expect("the prepared main epoch retains its test-only CFW diagnostics");
+        match evidence_mode {
+            CompactPublicKeyProofEvidenceGenerationMode::Positive => {
+                assert!(test_only_cfw_masking_inconsistency_round_ordinals.is_empty());
+            }
+            CompactPublicKeyProofEvidenceGenerationMode::EquationInvalidIndependentAttempt => {
+                assert_eq!(
+                    test_only_cfw_masking_inconsistency_round_ordinals,
+                    (0..u32::try_from(expected_cfw_round_count).unwrap())
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                    "every dishonest CFW round must be outside the honest masking affine image",
+                );
+            }
+        }
         let cfw_usage = prepared_main_epoch
             .cfw_external_memory_usage()
             .expect("complete CFW retains its exact external-memory usage");
@@ -6447,7 +6629,7 @@ mod tests {
         );
         let final_cfw_safe_boundary_ordinal = final_cfw_checkpoint.safe_boundary_ordinal();
         println!(
-            "compact public-key focused owner phase complete: complete verifier-bound compact CFW elapsed_milliseconds={} round_count={} round_polynomial_poll_count={} bound_round_poll_count={} response_leaf_count={} opened_leaf_count={} external_transaction_count={} external_written_bytes={} external_read_bytes={} peak_external_storage_bytes={}",
+            "compact public-key focused owner phase complete: complete verifier-bound compact CFW elapsed_milliseconds={} round_count={} round_polynomial_poll_count={} bound_round_poll_count={} response_leaf_count={} opened_leaf_count={} external_transaction_count={} external_written_bytes={} external_read_bytes={} peak_external_storage_bytes={} test_only_masking_inconsistency_round_count={}",
             phase_started_at.elapsed().as_millis(),
             expected_cfw_round_count,
             cfw_round_polynomial_poll_count,
@@ -6458,6 +6640,7 @@ mod tests {
             cfw_usage.total_written_byte_length(),
             cfw_usage.total_read_byte_length(),
             cfw_usage.peak_stored_byte_length(),
+            test_only_cfw_masking_inconsistency_round_ordinals.len(),
         );
 
         let phase_started_at = Instant::now();
@@ -7709,6 +7892,172 @@ mod tests {
         let response_generation_output = prepared_main_epoch
             .finish()
             .expect("the terminal main-WHIR base emits one complete canonical proof");
+        let checkpoint_directory = compact_public_key_algebraic_checkpoint_directory();
+        if let Some(injected_witness_equation_fault) = injected_witness_equation_fault {
+            let positive_canonical_proof_bytes =
+                fs::read(checkpoint_directory.join("generated-proof.bin"))
+                    .expect("the preceding positive producer persisted its compact proof");
+            let positive_canonical_public_input_bytes =
+                fs::read(checkpoint_directory.join("public-input.bin"))
+                    .expect("the preceding positive producer persisted its public input");
+            let positive_checkpoint_context =
+                decode_compact_public_key_algebraic_checkpoint_context(
+                    &fs::read(checkpoint_directory.join("binding-and-context.bin"))
+                        .expect("the preceding positive producer persisted its binding context"),
+                );
+            assert_eq!(
+                canonical_public_input_bytes, positive_canonical_public_input_bytes,
+                "the semantic witness fault cannot alter the canonical public input",
+            );
+            assert_eq!(
+                public_input_bindings,
+                positive_checkpoint_context.public_input_bindings,
+            );
+            assert_eq!(
+                compact_construction_identity_hash,
+                positive_checkpoint_context.compact_construction_identity_hash,
+            );
+            assert_eq!(
+                checkpoint_schedule_digest,
+                positive_checkpoint_context.checkpoint_schedule_digest,
+            );
+            assert_eq!(
+                source_replay_binding,
+                positive_checkpoint_context.source_replay_binding,
+            );
+            assert_eq!(
+                private_coin_derivation_binding_hash,
+                positive_checkpoint_context.private_coin_derivation_binding_hash,
+            );
+            assert_ne!(
+                proof_attempt_identifier, positive_checkpoint_context.proof_attempt_identifier,
+                "the hostile proof must use an independently derived same-slot proof attempt",
+            );
+            assert_ne!(
+                response_generation_output.canonical_proof_bytes(),
+                positive_canonical_proof_bytes,
+                "the independently derived attempt must emit distinct canonical proof bytes",
+            );
+
+            let positive_transport = verify_selected_compact_public_key_transport(
+                public_input_bindings,
+                positive_canonical_proof_bytes.into_boxed_slice(),
+                positive_canonical_public_input_bytes
+                    .clone()
+                    .into_boxed_slice(),
+            )
+            .expect("the preceding producer proof remains transport-valid");
+            let equation_invalid_transport = verify_selected_compact_public_key_transport(
+                public_input_bindings,
+                response_generation_output
+                    .canonical_proof_bytes()
+                    .to_vec()
+                    .into_boxed_slice(),
+                canonical_public_input_bytes.clone().into_boxed_slice(),
+            )
+            .expect("the equation-invalid proof remains canonically transport-valid");
+            assert_ne!(
+                equation_invalid_transport.canonical_proof_binding(),
+                positive_transport.canonical_proof_binding(),
+            );
+
+            write_or_validate_compact_public_key_algebraic_checkpoint_file(
+                &checkpoint_directory,
+                "equation-invalid-proof.bin",
+                response_generation_output.canonical_proof_bytes(),
+            );
+            write_or_validate_compact_public_key_algebraic_checkpoint_file(
+                &checkpoint_directory,
+                "equation-invalid-binding-and-context.bin",
+                &encode_compact_public_key_algebraic_checkpoint_context(
+                    public_input_bindings,
+                    proof_attempt_identifier,
+                    compact_construction_identity_hash,
+                    checkpoint_schedule_digest,
+                    source_replay_binding,
+                    private_coin_derivation_binding_hash,
+                ),
+            );
+
+            let algebraic_verification_started_at = Instant::now();
+            let (algebraic_error, algebraic_poll_count) =
+                refuse_transport_valid_equation_invalid_compact_public_key_proof(
+                    equation_invalid_transport,
+                );
+            assert_eq!(
+                algebraic_error,
+                CompactPublicKeyAlgebraicVerificationError::Cfw(
+                    CompactCfwError::SumcheckConsistency { round_ordinal: 0 },
+                ),
+                "the full verifier must localize the semantic fault at the first CFW equation",
+            );
+            assert_eq!(
+                algebraic_error.clone().refusal_reason(),
+                RefusalReason::InvalidProof,
+                "the semantic equation fault must produce a typed algebraic proof refusal",
+            );
+
+            let algebraic_checkpoint_bytes =
+                fs::read(checkpoint_directory.join("algebraic-verification-checkpoint.bin"))
+                    .expect("the positive producer persisted its algebraic verification cursor");
+            let substituted_algebraic_transport = verify_selected_compact_public_key_transport(
+                public_input_bindings,
+                response_generation_output
+                    .canonical_proof_bytes()
+                    .to_vec()
+                    .into_boxed_slice(),
+                canonical_public_input_bytes.clone().into_boxed_slice(),
+            )
+            .expect("checkpoint substitution starts from transport-valid hostile proof bytes");
+            let substituted_checkpoint_error = CompactPublicKeyAlgebraicVerification::resume(
+                substituted_algebraic_transport,
+                &algebraic_checkpoint_bytes,
+            )
+            .err()
+            .expect("a cursor from the positive proof cannot restore under the hostile attempt");
+            assert_eq!(
+                substituted_checkpoint_error,
+                CompactPublicKeyAlgebraicVerificationError::WrongCheckpoint,
+            );
+            assert_eq!(
+                substituted_checkpoint_error.clone().refusal_reason(),
+                RefusalReason::WrongContext,
+            );
+
+            let accepted_checkpoint_bytes =
+                fs::read(checkpoint_directory.join("accepted-verification-checkpoint.bin"))
+                    .expect("the positive producer persisted its accepted/source cursor");
+            let substituted_accepted_transport = verify_selected_compact_public_key_transport(
+                public_input_bindings,
+                response_generation_output
+                    .canonical_proof_bytes()
+                    .to_vec()
+                    .into_boxed_slice(),
+                canonical_public_input_bytes.clone().into_boxed_slice(),
+            )
+            .expect("accepted cursor substitution starts from transport-valid hostile proof bytes");
+            assert_eq!(
+                PreparedAcceptedCompactPublicKeyVerification::prepare(
+                    substituted_accepted_transport,
+                    Some(&accepted_checkpoint_bytes),
+                )
+                .err(),
+                Some(RefusalReason::WrongContext),
+                "an accepted/source cursor from the positive proof cannot restore under the hostile attempt",
+            );
+
+            println!(
+                "transport-valid equation-invalid compact public-key proof refused elapsed_milliseconds={} algebraic_poll_count={} algebraic_error={algebraic_error:?} canonical_proof_byte_length={} shifted_eta_two_witness_element_ordinal={} original_shifted_value={} retained_first_product_witness_element_ordinal={} retained_first_product_value={} positive_attempt_checkpoint_refusal={substituted_checkpoint_error:?}",
+                algebraic_verification_started_at.elapsed().as_millis(),
+                algebraic_poll_count,
+                response_generation_output.canonical_proof_bytes().len(),
+                injected_witness_equation_fault.shifted_eta_two_witness_element_ordinal,
+                injected_witness_equation_fault.original_shifted_value,
+                injected_witness_equation_fault.retained_first_product_witness_element_ordinal,
+                injected_witness_equation_fault.retained_first_product_value,
+            );
+            return;
+        }
         let checkpoint_context = encode_compact_public_key_algebraic_checkpoint_context(
             public_input_bindings,
             proof_attempt_identifier,
@@ -7717,7 +8066,6 @@ mod tests {
             source_replay_binding,
             private_coin_derivation_binding_hash,
         );
-        let checkpoint_directory = compact_public_key_algebraic_checkpoint_directory();
         write_or_validate_compact_public_key_algebraic_checkpoint_file(
             &checkpoint_directory,
             "generated-proof.bin",

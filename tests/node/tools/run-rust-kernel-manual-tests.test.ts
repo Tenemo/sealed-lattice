@@ -181,7 +181,7 @@ describe('manual Rust kernel preflight', () => {
         expect(executedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
     });
 
-    it('owns compact producer and separate-process restoration in one serialized registry', async () => {
+    it('owns positive, hostile, and separate-process compact owners in one serialized registry', async () => {
         const environment = buildManualRustKernelEnvironment({
             baseEnvironment: {
                 [compactProofEvidenceRunIdentifierEnvironmentVariable]:
@@ -249,11 +249,11 @@ describe('manual Rust kernel preflight', () => {
         ).toThrow('Unknown argument');
     });
 
-    it('expands the compact proof-evidence filter only to its ordered producer and consumer', async () => {
+    it('expands the compact proof-evidence filter only to its three ordered compact owners', async () => {
         let executedTestFilters: readonly string[] = [];
         await preflightAndRunManualRustKernelLane({
             configuredTestNames: proofEvidenceRustTests,
-            focusedFilter: 'compact_public_key_proof_evidence_',
+            focusedFilter: 'compact_public_key',
             lane: 'rust-proof-evidence',
             runGuardedCommands: (testFilters) => {
                 executedTestFilters = testFilters;
