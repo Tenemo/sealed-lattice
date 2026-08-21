@@ -597,6 +597,17 @@ pub(crate) fn selected_proof_profile_set(
     maximum_ballot_attempts_per_participant: u16,
 ) -> Result<ProofProfileSet, ProofProfileError> {
     let relation_plans = selected_relation_plans()?;
+    selected_proof_profile_set_from_relation_plans(
+        relation_plans,
+        maximum_ballot_attempts_per_participant,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn selected_proof_profile_set_from_relation_plans(
+    relation_plans: Vec<ValidatedRelationPlanArtifact>,
+    maximum_ballot_attempts_per_participant: u16,
+) -> Result<ProofProfileSet, ProofProfileError> {
     ProofProfileSet::new(
         relation_plans,
         FirstProfileRootTopology::selected(maximum_ballot_attempts_per_participant)?,

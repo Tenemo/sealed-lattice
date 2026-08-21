@@ -323,6 +323,11 @@ impl ValidatedRelationPlanArtifact {
         self.canonical_plan_hash
     }
 
+    #[cfg(test)]
+    pub(crate) const fn canonical_plan_byte_length(&self) -> u64 {
+        self.canonical_plan_byte_length
+    }
+
     pub(in crate::bgv::proof_suite) const fn checked_context(&self) -> &RelationPlanCheckContext {
         &self.checked_context
     }

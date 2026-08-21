@@ -23,8 +23,9 @@ use crate::bgv::{
     },
     parameters::validate_supported_algebraic_parameters,
     proof_suite::{
-        selected_complete_proof_resource_accounting, selected_evaluator_aggregate_relation_plan,
-        selected_evaluator_entry_positions, selected_galois_key_share_batch_schedule,
+        ValidatedRelationPlanArtifact, selected_complete_proof_resource_accounting,
+        selected_evaluator_aggregate_relation_plan, selected_evaluator_entry_positions,
+        selected_galois_key_share_batch_schedule,
         selected_recipient_private_vss_payload_byte_length, selected_relation_plans,
         selected_target_decryption_flooding_bound,
     },
@@ -37,6 +38,7 @@ use super::schemas::SchemaResult;
 use super::suite_artifacts::{
     selected_encoder_and_ballot_layout_artifact_bytes, selected_evaluator_program_artifact_bytes,
     selected_lattice_commitment_profile_artifact_bytes, selected_proof_profile_artifact_bytes,
+    selected_proof_profile_artifact_bytes_from_relation_plans,
     selected_target_decryption_profile_artifact_bytes,
     selected_verifiable_secret_sharing_profile_artifact_bytes,
 };
@@ -599,6 +601,26 @@ fn derive_selected_fixed_algebra_candidate_record() -> SchemaResult<SuiteRecord>
 
 #[cfg(test)]
 pub(super) fn derive_selected_suite_candidate_record() -> SchemaResult<SuiteRecord> {
+    let candidate = derive_unactivated_selected_suite_candidate_record()?;
+    require_selected_absolute_resource_bounds()?;
+    Ok(candidate)
+}
+
+/// Derives the exact canonical suite inputs without claiming that the
+/// activation-only proof, resource, WebAssembly, or browser gates have closed.
+/// This test-only record is evidence input; `select_suite_record` continues to
+/// fail closed because `selected_suite_record` has no allowlisted value.
+#[cfg(test)]
+pub(crate) fn derive_unactivated_selected_suite_candidate_record() -> SchemaResult<SuiteRecord> {
+    let relation_plans = selected_relation_plans()
+        .map_err(|_| invalid_selected_suite("selected relation geometry is invalid"))?;
+    derive_unactivated_selected_suite_candidate_record_from_relation_plans(relation_plans)
+}
+
+#[cfg(test)]
+pub(crate) fn derive_unactivated_selected_suite_candidate_record_from_relation_plans(
+    relation_plans: Vec<ValidatedRelationPlanArtifact>,
+) -> SchemaResult<SuiteRecord> {
     require_selected_foundation_geometry()?;
     require_selected_evaluator_catalog()?;
     require_selected_release_margins()?;
@@ -607,13 +629,15 @@ pub(super) fn derive_selected_suite_candidate_record() -> SchemaResult<SuiteReco
     // particular, the committed-material checker owns the VSS numerator,
     // quotient, opening-degree, and evaluation-domain inequalities. An
     // unchecked compiler result can never reach suite identity derivation.
-    let relation_plans = selected_relation_plans()
-        .map_err(|_| invalid_selected_suite("selected relation geometry is invalid"))?;
     require_selected_complete_list_relation(&relation_plans)?;
-    require_selected_absolute_resource_bounds()?;
 
     let count_limits = selected_count_limits()?;
-    let artifact_references = derive_selected_artifact_references()?;
+    let proof_profile_bytes = selected_proof_profile_artifact_bytes_from_relation_plans(
+        relation_plans,
+        SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+    )?;
+    let artifact_references =
+        derive_selected_artifact_references_with_proof_profile_bytes(proof_profile_bytes)?;
     SuiteRecord::new(count_limits, artifact_references)
 }
 
@@ -911,6 +935,15 @@ fn derive_selected_fixed_algebra_artifact_references() -> SchemaResult<Vec<Artif
 
 #[cfg(test)]
 fn derive_selected_artifact_references() -> SchemaResult<Vec<ArtifactReference>> {
+    derive_selected_artifact_references_with_proof_profile_bytes(
+        selected_proof_profile_artifact_bytes(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT)?,
+    )
+}
+
+#[cfg(test)]
+fn derive_selected_artifact_references_with_proof_profile_bytes(
+    proof_profile_bytes: Vec<u8>,
+) -> SchemaResult<Vec<ArtifactReference>> {
     let artifacts = [
         (
             ArtifactKind::EncoderAndBallotLayout,
@@ -924,12 +957,7 @@ fn derive_selected_artifact_references() -> SchemaResult<Vec<ArtifactReference>>
             ArtifactKind::LatticeCommitmentProfile,
             selected_lattice_commitment_profile_artifact_bytes()?,
         ),
-        (
-            ArtifactKind::ProofProfileSet,
-            selected_proof_profile_artifact_bytes(
-                SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
-            )?,
-        ),
+        (ArtifactKind::ProofProfileSet, proof_profile_bytes),
         (
             ArtifactKind::EvaluatorProgramSet,
             selected_evaluator_program_artifact_bytes()?,

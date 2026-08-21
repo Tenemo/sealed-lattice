@@ -29,7 +29,8 @@ use crate::bgv::{
         POLYNOMIAL_DEGREE, plaintext_extension_lane_root, validate_supported_algebraic_parameters,
     },
     proof_suite::{
-        ProofProfileError, selected_committed_material_profile, selected_proof_profile_set,
+        ProofProfileError, ValidatedRelationPlanArtifact, selected_committed_material_profile,
+        selected_proof_profile_set, selected_proof_profile_set_from_relation_plans,
         selected_same_secret_relation_plan_input, selected_target_decryption_flooding_bound,
     },
     setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES},
@@ -572,6 +573,19 @@ pub(crate) fn selected_proof_profile_artifact_bytes(
     selected_proof_profile_set(maximum_ballot_attempts_per_participant)
         .and_then(|profile| profile.canonical_bytes())
         .map_err(proof_profile_error)
+}
+
+#[cfg(test)]
+pub(crate) fn selected_proof_profile_artifact_bytes_from_relation_plans(
+    relation_plans: Vec<ValidatedRelationPlanArtifact>,
+    maximum_ballot_attempts_per_participant: u16,
+) -> SchemaResult<Vec<u8>> {
+    selected_proof_profile_set_from_relation_plans(
+        relation_plans,
+        maximum_ballot_attempts_per_participant,
+    )
+    .and_then(|profile| profile.canonical_bytes())
+    .map_err(proof_profile_error)
 }
 
 pub(crate) fn selected_evaluator_program_artifact_bytes() -> SchemaResult<Vec<u8>> {

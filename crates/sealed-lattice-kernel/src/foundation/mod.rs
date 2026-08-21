@@ -241,6 +241,7 @@ pub(crate) use selected_suite::{
 pub(crate) use selected_suite::{SelectedSuiteCapability, select_suite_record};
 #[cfg(test)]
 pub(crate) use selected_suite::{
+    derive_unactivated_selected_suite_candidate_record_from_relation_plans,
     selected_maximum_proof_objects_per_action, selected_suite_capability_for_tests,
 };
 pub(crate) use setup_transcript_runtime::derive_public_randomness_contribution_commitment;

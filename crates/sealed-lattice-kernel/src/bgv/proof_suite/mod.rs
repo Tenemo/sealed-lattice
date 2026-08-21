@@ -14,6 +14,8 @@ mod bounded_radix2_dft;
 mod collective_public_key_runtime;
 mod committed_material;
 #[cfg(test)]
+mod compact_candidate_construction;
+#[cfg(test)]
 mod compact_cdhz_theorem;
 #[cfg_attr(
     not(test),
@@ -414,6 +416,8 @@ pub(crate) use selected_accounting::selected_complete_proof_resource_accounting;
 pub(crate) use selected_accounting::{SelectedProofAccountingError, selected_proof_runtime_limits};
 #[cfg(test)]
 pub(crate) use selected_profile::selected_proof_profile_set;
+#[cfg(test)]
+pub(crate) use selected_profile::selected_proof_profile_set_from_relation_plans;
 #[cfg(test)]
 pub(crate) use selected_profile::selected_target_decryption_flooding_bound;
 pub(crate) use selected_profile::{

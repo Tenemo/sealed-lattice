@@ -377,6 +377,11 @@ impl RelationPlanVariant {
         &self.ordered_columns
     }
 
+    #[cfg(test)]
+    pub(crate) const fn ordered_verifier_source_count(&self) -> usize {
+        self.ordered_verifier_sources.len()
+    }
+
     pub(crate) fn verifier_source(&self, ordinal: u32) -> Option<&RelationVerifierSource> {
         self.ordered_verifier_sources.get(ordinal as usize)
     }

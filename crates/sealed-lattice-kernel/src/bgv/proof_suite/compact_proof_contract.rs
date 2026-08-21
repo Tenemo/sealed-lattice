@@ -475,11 +475,23 @@ impl CompactPublicKeyProofContract {
 
 impl CompactPublicKeyVerifierInputs<'_> {
     pub(crate) fn canonical_source_hash(&self) -> Result<Hash512, CompactProofContractError> {
+        self.canonical_source_byte_length_and_hash()
+            .map(|(_, hash)| hash)
+    }
+
+    pub(crate) fn canonical_source_byte_length_and_hash(
+        &self,
+    ) -> Result<(u64, Hash512), CompactProofContractError> {
         let canonical_bytes = self.encode()?;
-        Ok(Hash512::from_bytes(hash_framed_parts_512(
-            GENERATED_CONTRACT_SOURCE_HASH_DOMAIN,
-            &[canonical_bytes.as_slice()],
-        )))
+        let byte_length = u64::try_from(canonical_bytes.len())
+            .map_err(|_| CompactProofContractError::LengthOverflow)?;
+        Ok((
+            byte_length,
+            Hash512::from_bytes(hash_framed_parts_512(
+                GENERATED_CONTRACT_SOURCE_HASH_DOMAIN,
+                &[canonical_bytes.as_slice()],
+            )),
+        ))
     }
 
     fn encode(&self) -> Result<Vec<u8>, CompactProofContractError> {
