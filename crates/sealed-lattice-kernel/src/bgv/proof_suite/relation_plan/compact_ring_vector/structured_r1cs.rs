@@ -3210,6 +3210,7 @@ mod tests {
                 compact_fixed_tape_domain_extension::derive_source_verified_compact_fixed_tape_domain_extension,
                 compact_fixed_tape_source_correspondence::verify_source_verified_compact_fixed_tape_correspondence,
                 compact_fixed_tape_uniformity::CompactFixedTapeUniformityPremise,
+                compact_masking_kmac::derive_source_verified_compact_joint_keccak_evidence,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
                 compact_proof_wire::{
                     CompactPublicInputBindings, PROOF_FIXED_HEADER_BYTE_LENGTH,
@@ -8702,6 +8703,22 @@ mod tests {
             &source_verified_measurement,
         )
         .expect("the complete fixed-output tape graph matches the source-verified transport");
+        let joint_keccak_evidence =
+            derive_source_verified_compact_joint_keccak_evidence(&fixed_tape_correspondence)
+                .expect("the KMAC catalog and fixed-output SHAKE tape share one source binding");
+        assert_eq!(
+            joint_keccak_evidence.selected_contract_source_hash,
+            fixed_tape_correspondence.selected_contract_source_hash,
+        );
+        assert_eq!(
+            joint_keccak_evidence.canonical_proof_binding,
+            fixed_tape_correspondence.canonical_proof_binding,
+        );
+        assert_eq!(
+            joint_keccak_evidence.canonical_public_input_binding,
+            fixed_tape_correspondence.canonical_public_input_binding,
+        );
+        assert!(!joint_keccak_evidence.fixed_keccak_joint_reduction_is_resolved());
         let domain_extension_certificate =
             derive_source_verified_compact_fixed_tape_domain_extension(
                 &fixed_tape_correspondence,
@@ -8725,6 +8742,15 @@ mod tests {
             fixed_tape_correspondence.output_block_hash_count,
             fixed_tape_correspondence.total_fixed_tape_byte_length,
             fixed_tape_correspondence.maximum_output_block_count_per_round,
+        );
+        println!(
+            "compact public-key joint Keccak source correspondence complete minimum_kmac_call_count={} maximum_kmac_call_count={} fixed_tape_prefix_hash_count={} fixed_tape_output_block_hash_count={} fixed_tape_hash_count={} fixed_keccak_joint_reduction_resolved={}",
+            joint_keccak_evidence.minimum_kmac_call_count,
+            joint_keccak_evidence.maximum_kmac_call_count,
+            joint_keccak_evidence.fixed_tape_prefix_hash_count,
+            joint_keccak_evidence.fixed_tape_output_block_hash_count,
+            joint_keccak_evidence.fixed_tape_hash_count,
+            joint_keccak_evidence.fixed_keccak_joint_reduction_is_resolved(),
         );
         println!(
             "compact public-key ideal-QRO domain extension complete theorem_hop_count={} conservative_loss_coefficient={} adversarial_query_budget={} domain_extension_loss_numerator={} domain_extension_loss_denominator={} selected_second_input_count={} minimum_selected_block_preimage_byte_length={} maximum_selected_block_preimage_byte_length={} selected_fixed_register_bit_length={} total_component_output_byte_length={} discarded_component_tail_byte_length={}",

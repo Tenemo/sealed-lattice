@@ -43,6 +43,16 @@ const PRIVATE_SAMPLER_CANDIDATE_BYTE_LENGTH: u64 = size_of::<u64>() as u64;
 const KMAC256_ATTEMPT_IDENTIFIER_OUTPUT_BIT_LENGTH: u32 = 256;
 const KMAC256_BLOCK_OUTPUT_BIT_LENGTH: u32 = 512;
 const SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH: u32 = 512;
+const KECCAK_F1600_STATE_BIT_LENGTH: u16 = 1_600;
+const KECCAK_F1600_PERMUTATION_ROUND_COUNT: u8 = 24;
+const SHAKE256_RATE_BIT_LENGTH: u16 = 1_088;
+const SHAKE256_CAPACITY_BIT_LENGTH: u16 = 512;
+const SHAKE256_RATE_BYTE_LENGTH: u16 = 136;
+const SHAKE_DELIMITED_SUFFIX: u8 = 0x1f;
+const CSHAKE_DELIMITED_SUFFIX: u8 = 0x04;
+const KMAC_FUNCTION_NAME: &[u8] = b"KMAC";
+const SELECTED_KMAC_KEY_BIT_LENGTH: u32 = 512;
+const SELECTED_KMAC_OUTPUT_BIT_LENGTHS: [u32; 4] = [256, 512, 1_024, 1_536];
 /// The exact known terms must stay below the nominal 256-bit computational
 /// primitive ceiling. Symbolic KMAC quantum-PRF advantages are deliberately
 /// excluded from this numeric gate.
@@ -73,28 +83,91 @@ impl CompactMaskingJointPrimitiveAssumption {
     }
 }
 
+/// Exact deployed SHAKE256/KMAC256 interface shared by the masking hybrid.
+///
+/// These are mode and source-correspondence facts, not a security theorem.
+/// The test-only joint-interface certificate independently checks the SP
+/// 800-185 encodings and the pinned implementations. In particular, this
+/// structure does not turn domain separation into independent random oracles
+/// and does not assign an advantage to fixed Keccak-f[1600].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompactMaskingJointKeccakInterface {
+    keccak_state_bit_length: u16,
+    keccak_permutation_round_count: u8,
+    rate_bit_length: u16,
+    capacity_bit_length: u16,
+    bytepad_width: u16,
+    shake_delimited_suffix: u8,
+    shake_fixed_output_bit_length: u32,
+    cshake_delimited_suffix: u8,
+    kmac_function_name: &'static [u8],
+    kmac_uses_fixed_output_mode: bool,
+    kmac_key_bit_length: u32,
+    kmac_output_bit_lengths: [u32; 4],
+    kmac_customization_domains: [&'static [u8]; 7],
+    minimum_kmac_call_count: u64,
+    maximum_kmac_call_count: u64,
+}
+
+impl CompactMaskingJointKeccakInterface {
+    fn has_valid_mode_parameters(self) -> bool {
+        self.keccak_state_bit_length == KECCAK_F1600_STATE_BIT_LENGTH
+            && self.keccak_permutation_round_count == KECCAK_F1600_PERMUTATION_ROUND_COUNT
+            && self.rate_bit_length == SHAKE256_RATE_BIT_LENGTH
+            && self.capacity_bit_length == SHAKE256_CAPACITY_BIT_LENGTH
+            && self.rate_bit_length.checked_add(self.capacity_bit_length)
+                == Some(self.keccak_state_bit_length)
+            && self.bytepad_width == SHAKE256_RATE_BYTE_LENGTH
+            && self.shake_delimited_suffix == SHAKE_DELIMITED_SUFFIX
+            && self.shake_fixed_output_bit_length == SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH
+            && self.cshake_delimited_suffix == CSHAKE_DELIMITED_SUFFIX
+            && self.kmac_function_name == KMAC_FUNCTION_NAME
+            && self.kmac_uses_fixed_output_mode
+            && self.kmac_key_bit_length == SELECTED_KMAC_KEY_BIT_LENGTH
+            && self.kmac_output_bit_lengths == SELECTED_KMAC_OUTPUT_BIT_LENGTHS
+            && self.minimum_kmac_call_count > 0
+            && self.minimum_kmac_call_count <= self.maximum_kmac_call_count
+            && self
+                .kmac_customization_domains
+                .iter()
+                .all(|customization| !customization.is_empty())
+            && self
+                .kmac_customization_domains
+                .iter()
+                .enumerate()
+                .all(|(index, customization)| {
+                    !self.kmac_customization_domains[index + 1..].contains(customization)
+                })
+    }
+}
+
 /// Source requirement and symbolic primitive model carried by the release
-/// masking bridge. Validation rederives its numeric terms separately; these
-/// labels cannot be supplied by a proof producer and never enter acceptance.
+/// masking bridge. The builder rederives every numeric term from the selected
+/// contract before validation; these labels cannot be supplied by a proof
+/// producer and never enter acceptance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CompactMaskingDeploymentHybridStatement {
     selected_contract_source_hash: Hash512,
     browser_action_root_bit_length: u32,
     quantum_query_budget: u128,
     kmac_qprf_hop_count: u8,
-    shake256_ideal_qro_output_bit_length: u32,
+    joint_keccak_interface: CompactMaskingJointKeccakInterface,
     joint_primitive_assumption: CompactMaskingJointPrimitiveAssumption,
 }
 
 impl CompactMaskingDeploymentHybridStatement {
-    fn validate(self) -> Result<Hash512, CompactMaskingKmacError> {
+    fn validate(
+        self,
+        expected_contract_source_hash: Hash512,
+    ) -> Result<Hash512, CompactMaskingKmacError> {
         if self.browser_action_root_bit_length != bit_length(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH)?
             || self.quantum_query_budget != DECLARED_ADVERSARIAL_QUERY_BUDGET
+            || self.selected_contract_source_hash != expected_contract_source_hash
             || self.kmac_qprf_hop_count != 3
-            || self.shake256_ideal_qro_output_bit_length != SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH
+            || !self.joint_keccak_interface.has_valid_mode_parameters()
             || self.joint_primitive_assumption.identifier().is_empty()
         {
-            return Err(CompactMaskingKmacError::InvalidCensus);
+            return Err(CompactMaskingKmacError::InvalidJointKeccakInterface);
         }
         Ok(self.selected_contract_source_hash)
     }
@@ -105,6 +178,7 @@ pub(crate) enum CompactMaskingKmacError {
     Contract(CompactProofContractError),
     ArithmeticOverflow,
     InvalidCensus,
+    InvalidJointKeccakInterface,
     KnownLossAboveSelectedFloor,
 }
 
@@ -459,7 +533,7 @@ impl CompactMaskingKmacCensus {
 pub(crate) fn derive_selected_compact_masking_kmac_conditional_hybrid_accounting(
     scope: CompactMaskingKmacUnionScope,
 ) -> Result<CompactMaskingKmacConditionalHybridAccounting, CompactMaskingKmacError> {
-    let (selected_contract_source_hash, hybrid_loss) =
+    let (selected_contract_source_hash, hybrid_loss, _census) =
         derive_selected_compact_masking_kmac_components(selected_application_multiplicity(scope)?)?;
     Ok(CompactMaskingKmacConditionalHybridAccounting {
         selected_contract_source_hash,
@@ -472,13 +546,20 @@ pub(crate) fn derive_selected_compact_masking_kmac_conditional_hybrid_accounting
 /// security assumption unproved and does not mint an authority for it.
 fn derive_selected_compact_masking_kmac_components(
     application_multiplicity: u64,
-) -> Result<(Hash512, CompactMaskingKmacQuantumHybridLoss), CompactMaskingKmacError> {
+) -> Result<
+    (
+        Hash512,
+        CompactMaskingKmacQuantumHybridLoss,
+        CompactMaskingKmacCensus,
+    ),
+    CompactMaskingKmacError,
+> {
     let contract = CompactPublicKeyProofContract::decode_selected()?;
     let selected_contract_source_hash = contract.verifier_inputs().canonical_source_hash()?;
     let census = derive_compact_masking_kmac_census(&contract)?;
     let hybrid_loss = census.quantum_hybrid_loss(application_multiplicity)?;
     enforce_selected_known_loss_floor(&hybrid_loss.known_loss_sum)?;
-    Ok((selected_contract_source_hash, hybrid_loss))
+    Ok((selected_contract_source_hash, hybrid_loss, census))
 }
 
 /// Re-derives the live single-proof KMAC bridge from the selected contract and
@@ -487,28 +568,95 @@ fn derive_selected_compact_masking_kmac_components(
 /// assumption remains external.
 pub(crate) fn derive_selected_compact_masking_kmac_bridge()
 -> Result<Hash512, CompactMaskingKmacError> {
-    derive_selected_compact_masking_deployment_hybrid_statement()?.validate()
+    Ok(
+        derive_selected_compact_masking_deployment_hybrid_statement()?
+            .selected_contract_source_hash,
+    )
 }
 
 fn derive_selected_compact_masking_deployment_hybrid_statement()
 -> Result<CompactMaskingDeploymentHybridStatement, CompactMaskingKmacError> {
-    let (selected_contract_source_hash, hybrid_loss) =
+    let (selected_contract_source_hash, hybrid_loss, census) =
         derive_selected_compact_masking_kmac_components(1)?;
     let kmac_qprf_hop_count = u8::try_from(hybrid_loss.qprf_hops.len())
         .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?;
-    Ok(CompactMaskingDeploymentHybridStatement {
+    let statement = CompactMaskingDeploymentHybridStatement {
         selected_contract_source_hash,
         browser_action_root_bit_length: bit_length(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH)?,
         quantum_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
         kmac_qprf_hop_count,
-        shake256_ideal_qro_output_bit_length: SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH,
+        joint_keccak_interface: derive_joint_keccak_interface(&census)?,
         joint_primitive_assumption:
             CompactMaskingJointPrimitiveAssumption::FixedKmac256QprfAndFixedShake256IdealQroWithSharedKeccakF1600,
-    })
+    };
+    statement.validate(selected_contract_source_hash)?;
+    Ok(statement)
+}
+
+#[cfg(test)]
+fn derive_selected_joint_keccak_interface()
+-> Result<CompactMaskingJointKeccakInterface, CompactMaskingKmacError> {
+    let census = derive_selected_compact_masking_kmac_census_from_source()?;
+    derive_joint_keccak_interface(&census)
+}
+
+fn derive_joint_keccak_interface(
+    census: &CompactMaskingKmacCensus,
+) -> Result<CompactMaskingJointKeccakInterface, CompactMaskingKmacError> {
+    let mut output_bit_lengths = census
+        .call_rows
+        .iter()
+        .map(|row| row.output_bit_length)
+        .collect::<Vec<_>>();
+    output_bit_lengths.sort_unstable();
+    output_bit_lengths.dedup();
+    let output_bit_lengths: [u32; 4] = output_bit_lengths
+        .try_into()
+        .map_err(|_| CompactMaskingKmacError::InvalidJointKeccakInterface)?;
+    if census
+        .call_rows
+        .iter()
+        .any(|row| row.key_bit_length != SELECTED_KMAC_KEY_BIT_LENGTH)
+    {
+        return Err(CompactMaskingKmacError::InvalidJointKeccakInterface);
+    }
+    let minimum_kmac_call_count = census.call_rows.iter().try_fold(0_u64, |total, row| {
+        checked_add(total, row.minimum_call_count)
+    })?;
+    let maximum_kmac_call_count = census.call_rows.iter().try_fold(0_u64, |total, row| {
+        checked_add(total, row.maximum_call_count)
+    })?;
+    let interface = CompactMaskingJointKeccakInterface {
+        keccak_state_bit_length: KECCAK_F1600_STATE_BIT_LENGTH,
+        keccak_permutation_round_count: KECCAK_F1600_PERMUTATION_ROUND_COUNT,
+        rate_bit_length: SHAKE256_RATE_BIT_LENGTH,
+        capacity_bit_length: SHAKE256_CAPACITY_BIT_LENGTH,
+        bytepad_width: SHAKE256_RATE_BYTE_LENGTH,
+        shake_delimited_suffix: SHAKE_DELIMITED_SUFFIX,
+        shake_fixed_output_bit_length: SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH,
+        cshake_delimited_suffix: CSHAKE_DELIMITED_SUFFIX,
+        kmac_function_name: KMAC_FUNCTION_NAME,
+        kmac_uses_fixed_output_mode: true,
+        kmac_key_bit_length: SELECTED_KMAC_KEY_BIT_LENGTH,
+        kmac_output_bit_lengths: output_bit_lengths,
+        kmac_customization_domains: census.call_rows.map(|row| row.customization),
+        minimum_kmac_call_count,
+        maximum_kmac_call_count,
+    };
+    if !interface.has_valid_mode_parameters() {
+        return Err(CompactMaskingKmacError::InvalidJointKeccakInterface);
+    }
+    Ok(interface)
 }
 
 #[cfg(test)]
 fn derive_selected_compact_masking_kmac_census()
+-> Result<CompactMaskingKmacCensus, CompactMaskingKmacError> {
+    derive_selected_compact_masking_kmac_census_from_source()
+}
+
+#[cfg(test)]
+fn derive_selected_compact_masking_kmac_census_from_source()
 -> Result<CompactMaskingKmacCensus, CompactMaskingKmacError> {
     let contract = CompactPublicKeyProofContract::decode_selected()?;
     derive_compact_masking_kmac_census(&contract)
@@ -1088,14 +1236,39 @@ mod tests {
             .canonical_source_hash()
             .expect("selected compact contract hashes");
 
-        assert_eq!(statement.validate(), Ok(selected_contract_hash));
+        assert_eq!(
+            statement.validate(selected_contract_hash),
+            Ok(selected_contract_hash)
+        );
         assert_eq!(statement.browser_action_root_bit_length, 512);
         assert_eq!(
             statement.quantum_query_budget,
             DECLARED_ADVERSARIAL_QUERY_BUDGET
         );
         assert_eq!(statement.kmac_qprf_hop_count, 3);
-        assert_eq!(statement.shake256_ideal_qro_output_bit_length, 512);
+        assert_eq!(
+            statement.joint_keccak_interface.keccak_state_bit_length,
+            1_600
+        );
+        assert_eq!(
+            statement
+                .joint_keccak_interface
+                .keccak_permutation_round_count,
+            24
+        );
+        assert_eq!(statement.joint_keccak_interface.rate_bit_length, 1_088);
+        assert_eq!(statement.joint_keccak_interface.capacity_bit_length, 512);
+        assert_eq!(statement.joint_keccak_interface.bytepad_width, 136);
+        assert_eq!(
+            statement
+                .joint_keccak_interface
+                .shake_fixed_output_bit_length,
+            512
+        );
+        assert_eq!(
+            statement.joint_keccak_interface.maximum_kmac_call_count,
+            9_938_187
+        );
         assert_eq!(
             statement.joint_primitive_assumption.identifier(),
             "fixed-kmac256-qprf-and-fixed-shake256-ideal-qro-with-shared-keccak-f1600"
@@ -1106,6 +1279,10 @@ mod tests {
         );
 
         for invalid_statement in [
+            CompactMaskingDeploymentHybridStatement {
+                selected_contract_source_hash: hash(0xee),
+                ..statement
+            },
             CompactMaskingDeploymentHybridStatement {
                 browser_action_root_bit_length: 256,
                 ..statement
@@ -1119,13 +1296,16 @@ mod tests {
                 ..statement
             },
             CompactMaskingDeploymentHybridStatement {
-                shake256_ideal_qro_output_bit_length: 256,
+                joint_keccak_interface: CompactMaskingJointKeccakInterface {
+                    shake_delimited_suffix: 0x04,
+                    ..statement.joint_keccak_interface
+                },
                 ..statement
             },
         ] {
             assert_eq!(
-                invalid_statement.validate(),
-                Err(CompactMaskingKmacError::InvalidCensus)
+                invalid_statement.validate(selected_contract_hash),
+                Err(CompactMaskingKmacError::InvalidJointKeccakInterface)
             );
         }
     }
@@ -1432,3 +1612,9 @@ mod tests {
         assert_eq!(first_blocks.len(), 2);
     }
 }
+
+#[cfg(test)]
+#[path = "compact_masking_kmac/joint_keccak_evidence.rs"]
+mod joint_keccak_evidence;
+#[cfg(test)]
+pub(crate) use joint_keccak_evidence::derive_source_verified_compact_joint_keccak_evidence;
