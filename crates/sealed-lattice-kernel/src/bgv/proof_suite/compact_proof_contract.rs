@@ -574,6 +574,15 @@ pub(crate) fn selected_compact_public_key_proof_contract()
 }
 
 #[cfg(test)]
+pub(crate) fn selected_compact_public_key_checkpoint_schedule_digest()
+-> Result<Hash512, CompactProofContractError> {
+    Ok(CompactPublicKeyProofContract::decode_selected()?
+        .verifier_inputs()
+        .checkpoint_schedule
+        .checkpoint_schedule_digest())
+}
+
+#[cfg(test)]
 pub(super) fn encode_generated_contract_source(
     input: CompactProofContractGenerationInput,
 ) -> Result<Vec<u8>, CompactProofContractError> {
@@ -2793,6 +2802,31 @@ mod tests {
         let decoded = CompactPublicKeyProofContract::decode_selected()
             .expect("checked-in factor-one contract decodes");
         assert_eq!(decoded.encode().expect("contract re-encodes"), generated);
+    }
+
+    #[test]
+    fn selected_checkpoint_schedule_is_derived_from_exact_emitted_response_dependencies() {
+        let contract = CompactPublicKeyProofContract::decode_selected()
+            .expect("the selected compact contract decodes");
+        let independently_derived_schedule = CompactResponseCheckpointSchedule::derive(
+            contract.verifier_inputs().proof_wire_geometry,
+            contract.verifier_inputs().response_merkle_geometries,
+        )
+        .expect("the emitted response dependencies derive one checkpoint schedule");
+        let selected_digest = selected_compact_public_key_checkpoint_schedule_digest()
+            .expect("the selected compact checkpoint schedule derives");
+        assert_ne!(selected_digest.into_bytes(), [0_u8; Hash512::BYTE_LENGTH]);
+        assert_eq!(
+            selected_digest,
+            independently_derived_schedule.checkpoint_schedule_digest(),
+        );
+        assert_eq!(
+            contract
+                .verifier_inputs()
+                .checkpoint_schedule
+                .completed_proof_response_counts(),
+            independently_derived_schedule.completed_proof_response_counts(),
+        );
     }
 
     #[test]

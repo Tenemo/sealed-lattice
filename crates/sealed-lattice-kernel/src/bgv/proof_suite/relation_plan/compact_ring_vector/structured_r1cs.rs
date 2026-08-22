@@ -3195,8 +3195,7 @@ mod tests {
     use crate::{
         bgv::{
             proof_suite::{
-                CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
-                SourceVerifiedCompactPublicKeyProof, VerifiedCommonProofStatementSource,
+                SelectedApplicationStatementContext, SourceVerifiedCompactPublicKeyProof,
                 VerifiedCompactPublicKeyStatementAuthority,
                 compact_cfw_initial_transition::{
                     CompactCfwInitialTransitionBinding, CompactCfwInitialTransitionError,
@@ -3239,13 +3238,12 @@ mod tests {
                     VerifiedCompactPublicKeyTransport, verify_selected_compact_public_key_transport,
                 },
                 compact_response_merkle::CompactResponseLeafValueKind,
-                compile_public_key_share_relation_with_source_layout,
                 decode_selected_public_key_share_statement,
                 prover::{
                     CommonProofPrivateCoinCoordinateCapacity,
                     PrivateRandomnessCommonProofCoinSource,
                 },
-                selected_proof_runtime_limits, verified_application_statement_hash,
+                verified_application_statement_hash,
             },
             setup::{
                 SetupGenerationKeyRelationApplication, SetupKeyRelationGenerationPreparationError,
@@ -5506,21 +5504,12 @@ mod tests {
         let execution_started_at = Instant::now();
         let phase_started_at = Instant::now();
         println!("compact public-key focused owner phase: prepare authenticated assignment");
-        let (input, relation_context) = super::super::selected_input_and_context()
-            .expect("selected public-key relation input and context");
-        let compiled =
-            compile_public_key_share_relation_with_source_layout(&input, &relation_context)
-                .expect("selected public-key relation compiles");
-        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
-            &compiled.relation_plan,
-            &relation_context,
-            None,
-            None,
-        )
-        .expect("selected public-key relation capability");
-        let checkpoint_schedule_digest = relation_plan
-            .checkpoint_schedule_digest()
-            .expect("selected checkpoint schedule digest");
+        let selected_compact_contract =
+            crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
+                .expect("the frozen compact public-key contract decodes");
+        let checkpoint_schedule_digest = crate::bgv::proof_suite::compact_proof_contract::
+            selected_compact_public_key_checkpoint_schedule_digest()
+            .expect("the selected compact checkpoint schedule derives");
         let preparation_source =
             resolve_setup_generation_compact_public_key_development_preparation_source(&authority)
                 .expect("retained public-key preparation source");
@@ -5572,6 +5561,18 @@ mod tests {
             checkpoint_schedule_digest,
         )
         .expect("authenticated public-key development attempt");
+        assert_eq!(
+            prepared_attempt
+                .checkpoint_continuation()
+                .checkpoint_schedule_digest(),
+            checkpoint_schedule_digest,
+        );
+        assert_eq!(
+            prepared_attempt
+                .checkpoint_continuation()
+                .next_event_index(),
+            0,
+        );
         let decoded_statement = decode_selected_public_key_share_statement(
             preparation_source.canonical_application_statement_bytes(),
             SelectedApplicationStatementContext::new(
@@ -5608,7 +5609,7 @@ mod tests {
                 _,
                 SetupKeyRelationGenerationPreparationError,
             >(authority, &application, |source| {
-                prepare_compact_public_key_assignment_sources(&source, relation_plan)
+                prepare_compact_public_key_assignment_sources(&source)
                     .map_err(SetupKeyRelationGenerationPreparationError::from)
             })
             .expect("retained authority prepares compact public-key sources");
@@ -5681,9 +5682,6 @@ mod tests {
                 )
             }
         };
-        let selected_compact_contract =
-            crate::bgv::proof_suite::compact_proof_contract::selected_compact_public_key_proof_contract()
-                .expect("the frozen compact public-key contract decodes");
         let (
             compact_construction_identity_hash,
             checkpoint_schedule_digest,
@@ -8401,20 +8399,6 @@ mod tests {
             )
             .expect("the deterministic public-key statement source reconstructs");
         let verified_public_randomness = evidence_authority.verified_public_randomness;
-        let (relation_input, relation_context) = super::super::selected_input_and_context()
-            .expect("the selected public-key relation input and context derive");
-        let compiled_relation = compile_public_key_share_relation_with_source_layout(
-            &relation_input,
-            &relation_context,
-        )
-        .expect("the selected public-key relation compiles independently");
-        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
-            &compiled_relation.relation_plan,
-            &relation_context,
-            None,
-            None,
-        )
-        .expect("the selected public-key relation capability derives independently");
         let canonical_application_statement_bytes = preparation_source
             .canonical_application_statement_bytes()
             .to_vec();
@@ -8423,18 +8407,6 @@ mod tests {
             canonical_proof_bytes,
         )
         .expect("the emitted compact proof has a canonical stream descriptor");
-        let runtime_limits =
-            selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)
-                .expect("the selected public-key runtime limits derive");
-        let statement_source =
-            VerifiedCommonProofStatementSource::from_test_verified_public_key_share_statement_source(
-                &verified_public_randomness,
-                canonical_application_statement_bytes.clone(),
-                proof_stream_descriptor,
-                relation_plan,
-                runtime_limits,
-            )
-            .expect("the verifier-owned compact public-key statement source derives");
         let verified_context = verified_public_randomness.context();
         let decoded_statement = decode_selected_public_key_share_statement(
             &canonical_application_statement_bytes,
@@ -8456,9 +8428,10 @@ mod tests {
             decoded_statement.roster_position(),
             decoded_statement.anchor_commitment_roots(),
         );
-        VerifiedCompactPublicKeyStatementAuthority::from_verified_accepted_setup_sources(
-            statement_source,
+        VerifiedCompactPublicKeyStatementAuthority::from_test_verified_public_key_share_statement_source(
             &verified_public_randomness,
+            canonical_application_statement_bytes,
+            proof_stream_descriptor,
             setup_polynomial_prerequisite,
         )
         .expect("the accepted compact public-key statement authority derives")

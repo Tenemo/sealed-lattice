@@ -20,7 +20,7 @@ use super::super::compact_proof_wire::{
 };
 use super::super::compact_response_merkle::CompactResponseMerkleGeometry;
 use super::super::{
-    CommonProofProverError, CommonProofRelationPlanCapability, CommonProofSourcePolynomialProvider,
+    CommonProofProverError, CommonProofSourcePolynomialProvider,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
 };
 
@@ -1231,7 +1231,6 @@ impl PreparedCompactPublicKeyAssignmentSources {
 )]
 pub(crate) fn prepare_compact_public_key_assignment_sources(
     source: &SetupGenerationKeyRelationSource<'_, '_>,
-    relation_plan: CommonProofRelationPlanCapability,
 ) -> Result<PreparedCompactPublicKeyAssignmentSources, CommonProofProverError> {
     if source.family() != SetupKeyRelationProofFamily::PublicKeyShare {
         return Err(CommonProofProverError::InvalidInput);
@@ -1240,13 +1239,6 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
     let compiled = compile_public_key_share_relation_with_source_layout(&input, &relation_context)?;
     compiled.relation_plan.check(&relation_context)?;
     let relation_plan_variant = compiled.relation_plan.select_variant(None, None)?.clone();
-    if relation_plan.application_statement_schema_identifier()
-        != ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-        || relation_plan.relation_plan_hash() != compiled.relation_plan.canonical_hash()?
-        || relation_plan.relation_plan_variant_hash() != relation_plan_variant.canonical_hash()?
-    {
-        return Err(CommonProofProverError::InvalidInput);
-    }
     let relation = derive_compact_public_key_relation_catalog(
         &input,
         &relation_plan_variant,
@@ -1288,7 +1280,7 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
     let source_polynomials =
         SetupKeyRelationSourcePolynomialAdapter::new_compact_public_key_assignment(
             source,
-            &relation_plan,
+            &compiled.relation_plan,
             relation_plan_variant.clone(),
             relation_context.clone(),
             usize::try_from(input.ring_degree)
@@ -1300,7 +1292,6 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         &relation_plan_variant,
         source_polynomials.compact_public_key_assignment_request_context()?,
     )?;
-    drop(relation_plan);
     Ok(PreparedCompactPublicKeyAssignmentSources {
         relation_plan_variant,
         relation,

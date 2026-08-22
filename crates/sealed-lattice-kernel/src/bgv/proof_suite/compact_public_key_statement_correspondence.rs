@@ -3,20 +3,26 @@ use crate::{
         proof_suite::{
             SetupPublicPolynomialRootBuilder, SetupPublicPolynomialRootConstruction,
             SetupPublicPolynomialRootConstructionPoll, ValidatedRelationPlanArtifact,
-            VerifiedCommonProofStatementSource, VerifiedKeyRelationColumnEvaluator,
-            VerifiedStatementOwnedTree, compile_public_key_share_relation_with_source_layout,
+            VerifiedKeyRelationColumnEvaluator, VerifiedStatementOwnedTree,
+            compile_public_key_share_relation_with_source_layout,
             selected_public_key_share_relation_plan_input, selected_relation_plan_check_context,
+            verified_application_statement_hash,
         },
-        setup::{VerifiedPublicRandomness, VerifiedSetupPolynomialLowDegreePrerequisite},
+        setup::{
+            CanonicalAcceptedSetupPackage, VerifiedPublicRandomness,
+            VerifiedSetupPolynomialLowDegreePrerequisite,
+        },
     },
     foundation::{
-        CanonicalStreamDomain, Hash512, ProofApplicationSlotCeilings, RefusalReason,
-        StreamDescriptor, derive_canonical_stream_descriptor,
+        CanonicalDecodeLimits, CanonicalStreamDomain, FOUNDATION_PROFILE, Hash512,
+        ProofApplicationBinding, ProofApplicationSlot, ProofApplicationSlotCeilings,
+        ProofObjectHeader, RefusalReason, StreamDescriptor, derive_canonical_stream_descriptor,
     },
 };
 
 use super::{
     ProofBaseFieldElement, SelectedApplicationStatementContext,
+    compact_proof_contract::selected_compact_public_key_proof_contract,
     compact_proof_wire::CompactPublicInputBindings,
     compact_public_key_algebraic_verifier::AlgebraicallyVerifiedCompactPublicKeyProof,
     compact_public_key_verifier::VerifiedCompactPublicKeyTransport,
@@ -26,6 +32,7 @@ use super::{
         RelationColumnValueType, RelationTreeDescriptor,
         derive_compact_public_key_relation_catalog,
     },
+    runtime::VerifiedCommonProofApplicationSourceAuthority,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,12 +156,20 @@ impl VerifiedCompactPublicKeyAcceptedTerminalSource {
 /// authority owns the exact statement trees and verifier-sequence evaluator;
 /// no later operation can substitute detached roots or randomness.
 pub(in crate::bgv) struct VerifiedCompactPublicKeyStatementAuthority {
-    statement_source: VerifiedCommonProofStatementSource,
+    statement_source: VerifiedCompactPublicKeyStatementSource,
     statement_trees: Vec<VerifiedStatementOwnedTree>,
     verified_column_evaluator: VerifiedKeyRelationColumnEvaluator,
     relation: CompactPublicKeyRelationCatalog,
     expected_public_input_bindings: CompactPublicInputBindings,
     terminal_source: VerifiedCompactPublicKeyAcceptedTerminalSource,
+}
+
+pub(in crate::bgv::proof_suite) struct VerifiedCompactPublicKeyStatementSource {
+    application_source_authority: VerifiedCommonProofApplicationSourceAuthority,
+    application_statement_hash: Hash512,
+    canonical_application_statement_bytes: Vec<u8>,
+    proof_application_binding: ProofApplicationBinding,
+    relation_plan_artifact: ValidatedRelationPlanArtifact,
 }
 
 struct ActiveStatementTreeCorrespondence {
@@ -200,7 +215,7 @@ pub(in crate::bgv) enum CompactPublicKeyStatementCorrespondenceVerificationPoll 
 /// only by consuming the algebraic terminal after every public column has
 /// independently matched the retained statement authority.
 pub(in crate::bgv) struct SourceVerifiedCompactPublicKeyProof {
-    _statement_source: VerifiedCommonProofStatementSource,
+    _statement_source: VerifiedCompactPublicKeyStatementSource,
     _transport: VerifiedCompactPublicKeyTransport,
     #[cfg(test)]
     correspondence: CompactPublicKeyStatementCorrespondence,
@@ -229,6 +244,163 @@ impl SourceVerifiedCompactPublicKeyProof {
     }
 }
 
+impl VerifiedCompactPublicKeyStatementSource {
+    fn prepare(
+        application_source_authority: VerifiedCommonProofApplicationSourceAuthority,
+        protocol_version: u16,
+        verified_public_randomness: &VerifiedPublicRandomness,
+        canonical_application_statement_bytes: Vec<u8>,
+    ) -> Result<Self, RefusalReason> {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+        let verified_context = verified_public_randomness.context();
+        let application_slot = ProofApplicationSlot::new(
+            application_source_authority.suite_identifier(),
+            application_source_authority.ceremony_context_hash(),
+            application_source_authority.action_context_hash(),
+            schema_identifier,
+            application_source_authority.producer_roster_position(),
+            application_source_authority.schedule_position(),
+            application_source_authority.producer_sequence(),
+        )
+        .map_err(|_| RefusalReason::WrongContext)?;
+        let proof_header = ProofObjectHeader::from_canonical_application_statement(
+            canonical_application_statement_bytes.clone(),
+            &CanonicalDecodeLimits::default(),
+        )
+        .map_err(|_| RefusalReason::MalformedEncoding)?;
+        let proof_application_binding = ProofApplicationBinding::new(
+            application_slot,
+            proof_header
+                .proof_header_hash()
+                .map_err(|_| RefusalReason::MalformedEncoding)?,
+            application_source_authority
+                .proof_stream_descriptor()
+                .clone(),
+        )
+        .map_err(|_| RefusalReason::WrongContext)?;
+
+        let relation_context = selected_relation_plan_check_context(schema_identifier)
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let relation_input = selected_public_key_share_relation_plan_input()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let compiled = compile_public_key_share_relation_with_source_layout(
+            &relation_input,
+            &relation_context,
+        )
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        let relation_plan_artifact = ValidatedRelationPlanArtifact::from_owned_compiled_plan(
+            compiled.relation_plan,
+            &relation_context,
+        )
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        let selected_variant = relation_plan_artifact
+            .compiled_plan()
+            .select_variant(None, None)
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        let compact_contract = selected_compact_public_key_proof_contract()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let proof_byte_length = usize::try_from(
+            application_source_authority
+                .proof_stream_descriptor()
+                .total_byte_length,
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let statement = decode_selected_public_key_share_statement(
+            &canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                verified_context.protocol_version(),
+                verified_context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .map_err(|_| RefusalReason::MalformedEncoding)?;
+        let expected_participant_identity = verified_public_randomness
+            .ordered_participant_identities()
+            .get(usize::from(statement.roster_position()))
+            .ok_or(RefusalReason::WrongContext)?;
+        if protocol_version != FOUNDATION_PROFILE.protocol_version
+            || protocol_version != verified_context.protocol_version()
+            || canonical_application_statement_bytes.is_empty()
+            || canonical_application_statement_bytes.len()
+                > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+            || application_source_authority.application_statement_schema_identifier()
+                != schema_identifier
+            || application_source_authority.suite_identifier()
+                != verified_context.suite_identifier()
+            || application_source_authority.ceremony_context_hash()
+                != verified_context.ceremony_context_hash()
+            || application_source_authority.action_context_hash()
+                != verified_context.action_context_hash()
+            || application_source_authority.producer_roster_position()
+                != Some(statement.roster_position())
+            || application_source_authority.schedule_position().is_some()
+            || application_source_authority.producer_sequence().is_some()
+            || !application_source_authority
+                .matches_proof_application_binding(&proof_application_binding)
+            || proof_byte_length == 0
+            || proof_byte_length
+                > compact_contract
+                    .verifier_inputs()
+                    .proof_wire_geometry
+                    .maximum_canonical_byte_length()
+            || relation_plan_artifact.application_statement_schema_identifier() != schema_identifier
+            || selected_variant.schedule_position().is_some()
+            || selected_variant.top_count().is_some()
+            || statement.setup_proof_context_hash()
+                != verified_public_randomness
+                    .setup_proof_context_hash()
+                    .into_bytes()
+            || statement.participant_identity() != expected_participant_identity.into_bytes()
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let application_statement_hash = Hash512::from_bytes(verified_application_statement_hash(
+            protocol_version,
+            application_slot.suite_identifier().into_bytes(),
+            schema_identifier,
+            &canonical_application_statement_bytes,
+        ));
+        Ok(Self {
+            application_source_authority,
+            application_statement_hash,
+            canonical_application_statement_bytes,
+            proof_application_binding,
+            relation_plan_artifact,
+        })
+    }
+
+    pub(in crate::bgv::proof_suite) const fn application_source_authority(
+        &self,
+    ) -> &VerifiedCommonProofApplicationSourceAuthority {
+        &self.application_source_authority
+    }
+
+    pub(in crate::bgv::proof_suite) const fn application_statement_hash(&self) -> Hash512 {
+        self.application_statement_hash
+    }
+
+    pub(in crate::bgv::proof_suite) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        &self.canonical_application_statement_bytes
+    }
+
+    pub(in crate::bgv::proof_suite) const fn proof_application_binding(
+        &self,
+    ) -> &ProofApplicationBinding {
+        &self.proof_application_binding
+    }
+
+    pub(in crate::bgv::proof_suite) fn selected_relation_variant(
+        &self,
+    ) -> Result<&super::RelationPlanVariant, RefusalReason> {
+        self.relation_plan_artifact
+            .compiled_plan()
+            .select_variant(None, None)
+            .map_err(|_| RefusalReason::WrongContext)
+    }
+}
+
 impl VerifiedCompactPublicKeyStatementAuthority {
     pub(in crate::bgv) const fn expected_public_input_bindings(
         &self,
@@ -236,10 +408,105 @@ impl VerifiedCompactPublicKeyStatementAuthority {
         self.expected_public_input_bindings
     }
 
-    /// Consumes the exact family statement source and derives every remaining
-    /// verifier input from the same accepted public-randomness terminal.
-    pub(in crate::bgv) fn from_verified_accepted_setup_sources(
-        statement_source: VerifiedCommonProofStatementSource,
+    pub(in crate::bgv) fn from_verified_accepted_setup_package(
+        setup_package: &CanonicalAcceptedSetupPackage,
+        verified_public_randomness: &VerifiedPublicRandomness,
+        canonical_application_statement_bytes: Vec<u8>,
+        setup_polynomial_prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,
+    ) -> Result<Self, RefusalReason> {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+        let verified_context = verified_public_randomness.context();
+        let statement = decode_selected_public_key_share_statement(
+            &canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                verified_context.protocol_version(),
+                verified_context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .map_err(|_| RefusalReason::MalformedEncoding)?;
+        let mut matching_descriptor_indices = setup_package
+            .selected_public_proof_slots()
+            .map_err(|_| RefusalReason::WrongContext)?
+            .into_iter()
+            .enumerate()
+            .filter(|(_, slot)| {
+                slot.application_statement_schema_identifier() == schema_identifier
+                    && slot.roster_position() == Some(statement.roster_position())
+                    && slot.schedule_position().is_none()
+            })
+            .map(|(descriptor_index, _)| descriptor_index);
+        let proof_descriptor_index = matching_descriptor_indices
+            .next()
+            .ok_or(RefusalReason::WrongContext)?;
+        if matching_descriptor_indices.next().is_some() {
+            return Err(RefusalReason::WrongContext);
+        }
+        let (application_source_authority, protocol_version) =
+            VerifiedCommonProofApplicationSourceAuthority::from_verified_accepted_setup_package(
+                setup_package,
+                verified_public_randomness,
+                proof_descriptor_index,
+            )
+            .map_err(|_| RefusalReason::WrongContext)?;
+        let statement_source = VerifiedCompactPublicKeyStatementSource::prepare(
+            application_source_authority,
+            protocol_version,
+            verified_public_randomness,
+            canonical_application_statement_bytes,
+        )?;
+        Self::from_verified_statement_source(
+            statement_source,
+            verified_public_randomness,
+            setup_polynomial_prerequisite,
+        )
+    }
+
+    #[cfg(test)]
+    pub(in crate::bgv) fn from_test_verified_public_key_share_statement_source(
+        verified_public_randomness: &VerifiedPublicRandomness,
+        canonical_application_statement_bytes: Vec<u8>,
+        proof_stream_descriptor: StreamDescriptor,
+        setup_polynomial_prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,
+    ) -> Result<Self, RefusalReason> {
+        let verified_context = verified_public_randomness.context();
+        let statement = decode_selected_public_key_share_statement(
+            &canonical_application_statement_bytes,
+            SelectedApplicationStatementContext::new(
+                verified_context.protocol_version(),
+                verified_context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .map_err(|_| RefusalReason::MalformedEncoding)?;
+        let (application_source_authority, protocol_version) =
+            VerifiedCommonProofApplicationSourceAuthority::from_test_verified_public_key_share_source(
+                verified_public_randomness,
+                proof_stream_descriptor,
+                statement.roster_position(),
+            )
+            .map_err(|_| RefusalReason::WrongContext)?;
+        let statement_source = VerifiedCompactPublicKeyStatementSource::prepare(
+            application_source_authority,
+            protocol_version,
+            verified_public_randomness,
+            canonical_application_statement_bytes,
+        )?;
+        Self::from_verified_statement_source(
+            statement_source,
+            verified_public_randomness,
+            setup_polynomial_prerequisite,
+        )
+    }
+
+    /// Consumes the compact family statement source and derives every
+    /// remaining verifier input from the same accepted public-randomness
+    /// terminal.
+    fn from_verified_statement_source(
+        statement_source: VerifiedCompactPublicKeyStatementSource,
         verified_public_randomness: &VerifiedPublicRandomness,
         setup_polynomial_prerequisite: VerifiedSetupPolynomialLowDegreePrerequisite,
     ) -> Result<Self, RefusalReason> {
@@ -327,7 +594,7 @@ impl VerifiedCompactPublicKeyStatementAuthority {
         let proof_stream_descriptor = application_source.proof_stream_descriptor().clone();
 
         let statement_trees =
-            VerifiedStatementOwnedTree::from_verified_accepted_setup_statement_source(
+            VerifiedStatementOwnedTree::from_verified_compact_public_key_statement_source(
                 &statement_source,
                 verified_public_randomness,
             )

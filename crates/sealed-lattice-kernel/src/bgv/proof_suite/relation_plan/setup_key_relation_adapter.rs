@@ -42,11 +42,11 @@ use super::super::{
     RelationProofTreeInput, StatementOwnedProofTreeInput,
 };
 use super::{
-    BoundTreeConstructionKind, PublicKeyShareSourceLayout, RelationBoundCertificate,
-    RelationColumnOrigin, RelationIntegerLiftCoefficient, RelationIntegerLiftFullRingHalf,
-    RelationIntegerLiftFullRingNegacyclicProductDescriptor, RelationPlanCheckContext,
-    RelationPlanVariant, RelationTreeDescriptor, RelationVerifierSource, SameSecretSourceLayout,
-    SuiteModulusReference,
+    BoundTreeConstructionKind, CompiledRelationPlan, PublicKeyShareSourceLayout,
+    RelationBoundCertificate, RelationColumnOrigin, RelationIntegerLiftCoefficient,
+    RelationIntegerLiftFullRingHalf, RelationIntegerLiftFullRingNegacyclicProductDescriptor,
+    RelationPlanCheckContext, RelationPlanVariant, RelationTreeDescriptor, RelationVerifierSource,
+    SameSecretSourceLayout, SuiteModulusReference,
     galois_key_share_adapter::{
         canonical_comparator_column_rows, exact_modular_quotient, exact_negacyclic_product_radix,
         exact_negacyclic_product_small, half_position, resolve_integer_lift_coefficient,
@@ -1279,6 +1279,23 @@ pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
     leaf_salts_finished: bool,
 }
 
+fn derive_compact_public_key_relation_plan_binding(
+    relation_plan: &CompiledRelationPlan,
+    relation_plan_variant: &RelationPlanVariant,
+    expected_statement_schema_identifier: u16,
+) -> Result<([u8; Hash512::BYTE_LENGTH], [u8; Hash512::BYTE_LENGTH]), CommonProofProverError> {
+    if relation_plan.application_statement_schema_identifier()
+        != expected_statement_schema_identifier
+        || relation_plan.select_variant(None, None)? != relation_plan_variant
+    {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    Ok((
+        relation_plan.canonical_hash()?,
+        relation_plan_variant.canonical_hash()?,
+    ))
+}
+
 impl SetupKeyRelationSourcePolynomialAdapter {
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) const fn exact_same_secret_evidence_request_context(
@@ -1361,24 +1378,31 @@ impl SetupKeyRelationSourcePolynomialAdapter {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_compact_public_key_assignment(
         source: &SetupGenerationKeyRelationSource<'_, '_>,
-        relation_plan: &CommonProofRelationPlanCapability,
+        relation_plan: &CompiledRelationPlan,
         relation_plan_variant: RelationPlanVariant,
         relation_context: RelationPlanCheckContext,
         ring_degree: usize,
         source_layout: PublicKeyShareSourceLayout,
     ) -> Result<Self, CommonProofProverError> {
+        let (relation_plan_hash, relation_plan_variant_hash) =
+            derive_compact_public_key_relation_plan_binding(
+                relation_plan,
+                &relation_plan_variant,
+                source.family().statement_schema_identifier(),
+            )?;
         let requested_column_ordinals = compact_public_key_assignment_source_column_ordinals(
             &relation_plan_variant,
             &source_layout,
         )?
         .into_boxed_slice();
-        Self::new_public_key_share_for_requested_columns(
+        Self::new_with_relation_hashes(
             source,
-            relation_plan,
+            relation_plan_hash,
+            relation_plan_variant_hash,
             relation_plan_variant,
             relation_context,
             ring_degree,
-            source_layout,
+            SetupKeyRelationSourceLayout::PublicKeyShare(source_layout),
             requested_column_ordinals,
         )
     }
@@ -1414,6 +1438,29 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         source_layout: SetupKeyRelationSourceLayout,
         requested_column_ordinals: Box<[u32]>,
     ) -> Result<Self, CommonProofProverError> {
+        Self::new_with_relation_hashes(
+            source,
+            relation_plan.relation_plan_hash(),
+            relation_plan.relation_plan_variant_hash(),
+            relation_plan_variant,
+            relation_context,
+            ring_degree,
+            source_layout,
+            requested_column_ordinals,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_relation_hashes(
+        source: &SetupGenerationKeyRelationSource<'_, '_>,
+        relation_plan_hash: [u8; Hash512::BYTE_LENGTH],
+        relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
+        relation_plan_variant: RelationPlanVariant,
+        relation_context: RelationPlanCheckContext,
+        ring_degree: usize,
+        source_layout: SetupKeyRelationSourceLayout,
+        requested_column_ordinals: Box<[u32]>,
+    ) -> Result<Self, CommonProofProverError> {
         if relation_plan_variant.schedule_position().is_some()
             || relation_plan_variant.top_count().is_some()
             || ring_degree == 0
@@ -1438,8 +1485,8 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                 .prepared_attempt()
                 .application_statement_hash()
                 .into_bytes(),
-            relation_plan.relation_plan_hash(),
-            relation_plan.relation_plan_variant_hash(),
+            relation_plan_hash,
+            relation_plan_variant_hash,
             None,
             None,
         );
@@ -3668,6 +3715,7 @@ mod compact_source_request_profile_tests {
     };
 
     fn selected_compact_request_fixture() -> (
+        CompiledRelationPlan,
         RelationPlanVariant,
         RelationPlanCheckContext,
         PublicKeyShareSourceLayout,
@@ -3704,6 +3752,7 @@ mod compact_source_request_profile_tests {
             independently_cataloged_column_ordinals,
         );
         (
+            compiled.relation_plan,
             relation_plan_variant,
             relation_context,
             compiled.source_layout,
@@ -3713,7 +3762,7 @@ mod compact_source_request_profile_tests {
 
     #[test]
     fn compact_public_key_provider_profile_accounts_only_the_exact_source_sequence() {
-        let (relation_plan_variant, relation_context, source_layout, requested_column_ordinals) =
+        let (_, relation_plan_variant, relation_context, source_layout, requested_column_ordinals) =
             selected_compact_request_fixture();
         let complete_requested_column_ordinals =
             requested_pre_challenge_source_column_ordinals(&relation_plan_variant)
@@ -3795,7 +3844,7 @@ mod compact_source_request_profile_tests {
 
     #[test]
     fn compact_public_key_provider_profile_refuses_noncanonical_source_sequences() {
-        let (relation_plan_variant, relation_context, source_layout, requested_column_ordinals) =
+        let (_, relation_plan_variant, relation_context, source_layout, requested_column_ordinals) =
             selected_compact_request_fixture();
         let ring_degree = u64::try_from(POLYNOMIAL_DEGREE).expect("ring degree fits u64");
         let mut reversed = requested_column_ordinals.clone();
@@ -3825,6 +3874,50 @@ mod compact_source_request_profile_tests {
                 Err(CommonProofProverError::InvalidColumn),
             );
         }
+    }
+
+    #[test]
+    fn compact_public_key_plan_binding_refuses_a_substituted_variant_or_schema() {
+        let (relation_plan, relation_plan_variant, _, _, _) = selected_compact_request_fixture();
+        let expected_binding = derive_compact_public_key_relation_plan_binding(
+            &relation_plan,
+            &relation_plan_variant,
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the checked plan and its selected variant bind");
+        assert_eq!(
+            expected_binding,
+            (
+                relation_plan.canonical_hash().expect("plan hash derives"),
+                relation_plan_variant
+                    .canonical_hash()
+                    .expect("variant hash derives"),
+            ),
+        );
+
+        let mut substituted_variant = relation_plan_variant;
+        substituted_variant.trace_domain_size = substituted_variant
+            .trace_domain_size
+            .checked_mul(2)
+            .expect("selected trace domain doubles");
+        assert_eq!(
+            derive_compact_public_key_relation_plan_binding(
+                &relation_plan,
+                &substituted_variant,
+                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ),
+            Err(CommonProofProverError::InvalidInput),
+        );
+        assert_eq!(
+            derive_compact_public_key_relation_plan_binding(
+                &relation_plan,
+                relation_plan
+                    .select_variant(None, None)
+                    .expect("selected variant remains available"),
+                ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            ),
+            Err(CommonProofProverError::InvalidInput),
+        );
     }
 }
 

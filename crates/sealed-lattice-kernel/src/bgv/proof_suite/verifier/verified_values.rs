@@ -3,8 +3,9 @@ use super::super::{
     ComponentMaterialOwnershipBinding, ConsumedVerifiedCommonProofCapability,
     SetupPublicPolynomialContext, VerifiedCommonProofStatementSource,
     VerifiedEvaluatorKeyStoreMaterial, VerifiedKeySwitchComponentMaterial,
-    VerifiedRelinearizationSourceMaterial, decode_selected_aggregate_threshold_share_statement,
-    decode_selected_application_statement,
+    VerifiedRelinearizationSourceMaterial,
+    compact_public_key_statement_correspondence::VerifiedCompactPublicKeyStatementSource,
+    decode_selected_aggregate_threshold_share_statement, decode_selected_application_statement,
     decode_selected_collective_public_key_aggregate_statement,
     decode_selected_galois_key_share_statement, decode_selected_public_key_share_statement,
     decode_selected_relinearization_round_one_aggregate_statement,
@@ -244,6 +245,105 @@ impl VerifiedStatementOwnedTree {
             },
             ordered_canonical_residue_moduli,
         }
+    }
+
+    pub(in crate::bgv::proof_suite) fn from_verified_compact_public_key_statement_source(
+        statement_source: &VerifiedCompactPublicKeyStatementSource,
+        verified_public_randomness: &VerifiedPublicRandomness,
+    ) -> Result<Vec<Self>, CommonProofVerifierError> {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+        let verified_context = verified_public_randomness.context();
+        let application_source_authority = statement_source.application_source_authority();
+        let application_slot = statement_source
+            .proof_application_binding()
+            .application_slot();
+        let canonical_statement = statement_source.canonical_application_statement_bytes();
+        let selected_variant = statement_source
+            .selected_relation_variant()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        if application_source_authority.application_statement_schema_identifier()
+            != schema_identifier
+            || application_source_authority.suite_identifier()
+                != verified_context.suite_identifier()
+            || application_source_authority.ceremony_context_hash()
+                != verified_context.ceremony_context_hash()
+            || application_source_authority.action_context_hash()
+                != verified_context.action_context_hash()
+            || application_slot.suite_identifier() != verified_context.suite_identifier()
+            || application_slot.ceremony_context_hash() != verified_context.ceremony_context_hash()
+            || application_slot.action_context_hash() != verified_context.action_context_hash()
+            || application_slot.application_statement_schema_identifier() != schema_identifier
+            || application_slot.roster_position()
+                != application_source_authority.producer_roster_position()
+            || application_slot.schedule_position().is_some()
+            || application_slot.producer_sequence().is_some()
+            || selected_variant.schedule_position().is_some()
+            || selected_variant.top_count().is_some()
+            || statement_source.application_statement_hash().into_bytes()
+                != verified_application_statement_hash(
+                    verified_context.protocol_version(),
+                    verified_context.suite_identifier().into_bytes(),
+                    schema_identifier,
+                    canonical_statement,
+                )
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        let statement = decode_selected_public_key_share_statement(
+            canonical_statement,
+            SelectedApplicationStatementContext::new(
+                verified_context.protocol_version(),
+                verified_context.suite_identifier().into_bytes(),
+                None,
+                None,
+            ),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        if application_source_authority.producer_roster_position()
+            != Some(statement.roster_position())
+            || verified_public_randomness
+                .ordered_participant_identities()
+                .get(usize::from(statement.roster_position()))
+                .map(|identity| identity.into_bytes())
+                != Some(statement.participant_identity())
+            || statement.setup_proof_context_hash()
+                != verified_public_randomness
+                    .setup_proof_context_hash()
+                    .into_bytes()
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        let mut statement_trees = Vec::new();
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            0,
+            BoundTreeRootUse::Output,
+            statement.public_key_share_root(),
+            SetupPublicPolynomialContext::public_key_share(
+                statement.setup_proof_context_hash(),
+                statement.participant_identity(),
+                statement.roster_position(),
+            )
+            .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+        )?);
+        for (anchor_ordinal, expected_root) in
+            statement.anchor_commitment_roots().into_iter().enumerate()
+        {
+            statement_trees.push(verified_setup_polynomial_statement_tree(
+                selected_variant,
+                statement_trees.len(),
+                BoundTreeRootUse::Input,
+                expected_root,
+                verified_lattice_anchor_context(
+                    statement.setup_proof_context_hash(),
+                    statement.participant_identity(),
+                    statement.roster_position(),
+                    anchor_ordinal,
+                )?,
+            )?);
+        }
+        require_complete_bound_tree_catalog(selected_variant, statement_trees)
     }
 
     /// Resolves the complete `0x1217` statement-tree catalog from one exact

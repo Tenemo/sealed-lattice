@@ -475,27 +475,45 @@ pub(in crate::bgv) fn reserve_compact_public_key_verification_source(
     {
         return Err(CommonProofRuntimeError::WrongVerificationBinding);
     }
-    let (statement_authority, terminal_source) = with_prepared_accepted_setup_statement(
-        AcceptedSetupProofFamily::PublicKeyShare,
+    let canonical_application_statement_bytes = canonical_application_statement_bytes.to_vec();
+    let (statement_authority, terminal_source) = with_accepted_setup_verification_sources(
         assembly_handle,
-        canonical_application_statement_bytes.to_vec(),
-        None,
-        |statement_source,
-         verified_public_randomness,
-         relation_plan_artifact,
-         setup_polynomial_prerequisite,
-         terminal_source| {
-            drop(relation_plan_artifact);
-            let prerequisite = setup_polynomial_prerequisite
-                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+        |package, verified_public_randomness| {
+            let verified_context = verified_public_randomness.context();
+            let statement = decode_selected_public_key_share_statement(
+                &canonical_application_statement_bytes,
+                SelectedApplicationStatementContext::new(
+                    verified_context.protocol_version(),
+                    verified_context.suite_identifier().into_bytes(),
+                    None,
+                    None,
+                ),
+            )
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+            let setup_polynomial_prerequisite = with_verified_same_secret_terminal(
+                assembly_handle,
+                statement.roster_position(),
+                |terminal| Ok(terminal.setup_polynomial_low_degree_prerequisite()),
+            )?;
             let statement_authority =
-                VerifiedCompactPublicKeyStatementAuthority::from_verified_accepted_setup_sources(
-                    statement_source,
+                VerifiedCompactPublicKeyStatementAuthority::from_verified_accepted_setup_package(
+                    package,
                     verified_public_randomness,
-                    prerequisite,
+                    canonical_application_statement_bytes.clone(),
+                    setup_polynomial_prerequisite,
                 )
                 .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            Ok((statement_authority, terminal_source))
+            Ok((
+                statement_authority,
+                AcceptedSetupVerificationTerminalSource {
+                    family: AcceptedSetupProofFamily::PublicKeyShare,
+                    assembly_handle,
+                    generation_statement_source_handle: None,
+                    canonical_application_statement_bytes: canonical_application_statement_bytes
+                        .clone()
+                        .into_boxed_slice(),
+                },
+            ))
         },
     )?;
     let terminal_source_handle = ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY
