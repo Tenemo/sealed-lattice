@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -10,17 +9,16 @@ import {
     verifyGuardedRustProcessMemoryGuardCommand,
 } from './guarded-rust-kernel-runner.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
-import { parseReleaseNativePrimitiveMeasurementOutput } from './primitive-measurement-evidence.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
+    compactPublicKeyProofEvidenceGenerationAndVerificationRustTestName,
+    compactPublicKeyProofEvidenceSeparateProcessRestorationRustTestName,
     focusedRustLaneScripts,
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
     proofEvidenceRustTests,
-    resolvePrimitiveMeasurementRustTestCases,
     theoremEvidenceRustTests,
-    vssFusedRadix51ProjectionOwnerRustFilter,
     verifyFocusedRustLaneSelection,
 } from './rust-focused-lane-selection.js';
 import { normalizeRustTestFilter } from './rust-kernel-test-arguments.js';
@@ -90,31 +88,38 @@ const resolveManualRustKernelTestFilters = (input: {
     if (focusedFilter === '') {
         throw new Error(`${requestedScript} requires a non-empty filter.`);
     }
-    if (
-        input.lane === 'rust-measurements' &&
-        focusedFilter === vssFusedRadix51ProjectionOwnerRustFilter
-    ) {
-        const selectedTests = resolvePrimitiveMeasurementRustTestCases(
-            focusedFilter,
-        ).map(({ testName }) => testName);
-        if (
-            selectedTests.length === 0 ||
-            selectedTests.some(
-                (testName) => !input.configuredTestNames.includes(testName),
-            )
-        ) {
-            throw new Error(
-                `${requestedScript} projection-owner filter is absent from the exact registry.`,
-            );
-        }
-        return selectedTests;
-    }
     const selectedTests = input.configuredTestNames.filter((testName) =>
         testName.includes(focusedFilter),
     );
     if (selectedTests.length === 0) {
         throw new Error(
             `${requestedScript} filter ${focusedFilter} selects zero configured Rust tests.`,
+        );
+    }
+
+    if (
+        input.lane === 'rust-proof-evidence' &&
+        selectedTests.includes(
+            compactPublicKeyProofEvidenceSeparateProcessRestorationRustTestName,
+        ) &&
+        !selectedTests.includes(
+            compactPublicKeyProofEvidenceGenerationAndVerificationRustTestName,
+        )
+    ) {
+        if (
+            !input.configuredTestNames.includes(
+                compactPublicKeyProofEvidenceGenerationAndVerificationRustTestName,
+            )
+        ) {
+            throw new Error(
+                `${requestedScript} restoration requires its registered generation-and-verification producer.`,
+            );
+        }
+        return input.configuredTestNames.filter(
+            (testName) =>
+                testName ===
+                    compactPublicKeyProofEvidenceGenerationAndVerificationRustTestName ||
+                selectedTests.includes(testName),
         );
     }
 
@@ -339,52 +344,6 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 runLog,
                 useReleaseProfile: parsed.lane === 'rust-measurements',
             });
-            if (parsed.lane === 'rust-measurements') {
-                const focusedFilter = parsed.focusedFilter;
-                const expectedFocusedCaseIdentifiers =
-                    focusedFilter === undefined
-                        ? undefined
-                        : resolvePrimitiveMeasurementRustTestCases(
-                              focusedFilter,
-                          ).map(({ caseIdentifier }) => caseIdentifier);
-                const evidence = parseReleaseNativePrimitiveMeasurementOutput(
-                    await readFile(
-                        path.join(runLog.runDirectoryPath, 'output.log'),
-                        'utf8',
-                    ),
-                    parsed.focusedFilter === undefined,
-                    expectedFocusedCaseIdentifiers,
-                );
-                const attachmentDirectoryPath = path.join(
-                    runLog.runDirectoryPath,
-                    'attachments',
-                    'primitive-measurements',
-                );
-                await mkdir(attachmentDirectoryPath, { recursive: true });
-                const attachmentFilePath = path.join(
-                    attachmentDirectoryPath,
-                    parsed.focusedFilter === undefined
-                        ? 'release-native-primitive-measurements.json'
-                        : expectedFocusedCaseIdentifiers?.length === 1
-                          ? 'release-native-focused-primitive-measurement.json'
-                          : 'release-native-focused-primitive-measurements.json',
-                );
-                await writeFile(
-                    attachmentFilePath,
-                    `${JSON.stringify(evidence, undefined, 2)}\n`,
-                    'utf8',
-                );
-                runLog.writeEvent({
-                    details: {
-                        attachmentFilePath,
-                        caseIdentifiers: evidence.primitiveCases.map(
-                            (record) => record.caseIdentifier,
-                        ),
-                    },
-                    eventType:
-                        'release-native-primitive-measurement-evidence-written',
-                });
-            }
         },
     );
 };

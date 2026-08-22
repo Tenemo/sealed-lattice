@@ -1,5 +1,4 @@
 import type { ActiveLocalRunLog } from './local-run-log.js';
-import { vssFusedRadix51ProjectionOwnerCaseIdentifiers } from './primitive-measurement-evidence.js';
 import type { CommandInvocation } from './run-command.js';
 import { heavyRustKernelTestNamePrefix } from './rust-kernel-test-arguments.js';
 import {
@@ -7,21 +6,24 @@ import {
     type RustTestInventoryEntry,
 } from './rust-test-inventory.js';
 
-export const fullProfileEvidenceRustTests = [
-    'bgv::evaluator::program::executor::semantic_tests::encrypted_evaluator_matches_direct_stable_top_k_across_covering_matrix',
-    'bgv::evaluator::program::executor::semantic_tests::production_evaluator_execution_releases_four_threshold_shares',
-    'bgv::proof_suite::prover::relation_columns::requested_pre_challenge_source_column_tests::selected_pre_challenge_source_column_catalog_matches_exact_family_geometry',
+const rejectedBackendFullProfileEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::tests::every_selected_variant_has_complete_descriptor_derived_geometry',
     'bgv::proof_suite::row_code_whir::same_secret_source_manifest::tests::selected_family_manifests_bind_each_candidate_specific_material_catalog',
-    'bgv::proof_suite::selected_profile::tests::selected_non_native_identity_counts_are_independently_minimal',
-    'bgv::proof_suite::selected_profile::tests::selected_profile_has_the_complete_relation_and_root_inventory',
-    'bgv::setup::collective_setup_security_evidence::collective_setup_security_production_authority_exports_for_refresh',
-    'bgv::setup::collective_setup_security_evidence::collective_setup_security_production_authority_closes_complete_evidence',
     'foundation::selected_suite::tests::candidate_suite_gate_derives_one_complete_canonical_record',
     'foundation::suite_artifact_preflight::tests::candidate_suite_artifacts_pass_semantic_preflight_and_refuse_mutations',
 ] as const;
 
-const primitiveMeasurementRustTestCases = [
+export const fullProfileEvidenceRustTests = [
+    'bgv::evaluator::program::executor::semantic_tests::encrypted_evaluator_matches_direct_stable_top_k_across_covering_matrix',
+    'bgv::evaluator::program::executor::semantic_tests::production_evaluator_execution_releases_four_threshold_shares',
+    'bgv::proof_suite::prover::relation_columns::requested_pre_challenge_source_column_tests::selected_pre_challenge_source_column_catalog_matches_exact_family_geometry',
+    'bgv::proof_suite::selected_profile::tests::selected_non_native_identity_counts_are_independently_minimal',
+    'bgv::proof_suite::selected_profile::tests::selected_profile_has_the_complete_relation_and_root_inventory',
+    'bgv::setup::collective_setup_security_evidence::collective_setup_security_production_authority_exports_for_refresh',
+    'bgv::setup::collective_setup_security_evidence::collective_setup_security_production_authority_closes_complete_evidence',
+] as const;
+
+const rejectedBackendPrimitiveMeasurementRustTests = [
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_bounded_lane_dft_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_salted_phase_leaf_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::selected_private_leaf_salt_derivation_emits_measurement',
@@ -42,39 +44,16 @@ const primitiveMeasurementRustTestCases = [
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::wide_key_switch_fixed_width_crt_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::compact_quintic_public_main_code_root_pass_emits_measurement',
     'bgv::proof_suite::row_code_whir::primitive_measurements::tests::compact_quintic_post_vss_main_code_root_pass_emits_measurement',
-].map((testName, testIndex) =>
-    Object.freeze({ caseIdentifier: testIndex + 1, testName }),
-);
-
-const primitiveMeasurementRustTests = Object.freeze(
-    primitiveMeasurementRustTestCases.map(({ testName }) => testName),
-);
-
-export const vssFusedRadix51ProjectionOwnerRustFilter =
-    'vss_fused_bound_range_projection_owners';
-const vssFusedRadix51ProjectionOwnerCaseIdentifierSet = new Set<number>(
-    vssFusedRadix51ProjectionOwnerCaseIdentifiers,
-);
-
-export const resolvePrimitiveMeasurementRustTestCases = (
-    focusedFilter: string,
-): readonly (typeof primitiveMeasurementRustTestCases)[number][] =>
-    focusedFilter === vssFusedRadix51ProjectionOwnerRustFilter
-        ? primitiveMeasurementRustTestCases.filter(({ caseIdentifier }) =>
-              vssFusedRadix51ProjectionOwnerCaseIdentifierSet.has(
-                  caseIdentifier,
-              ),
-          )
-        : primitiveMeasurementRustTestCases.filter(({ testName }) =>
-              testName.includes(focusedFilter),
-          );
-
-export const measurementRustTests = [
-    'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_emits_run_attachment',
-    ...primitiveMeasurementRustTests,
 ] as const;
 
-export const phaseLivenessEvidenceRustTests = [
+const rejectedBackendMeasurementRustTests = [
+    'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_emits_run_attachment',
+    ...rejectedBackendPrimitiveMeasurementRustTests,
+] as const;
+
+export const measurementRustTests = [] as const;
+
+const rejectedBackendPhaseLivenessEvidenceRustTests = [
     'bgv::proof_suite::collective_public_key_runtime::tests::selected_collective_public_key_accounting_separates_live_memory_storage_and_traffic',
     'bgv::proof_suite::phase_liveness_accounting::tests::construction_driven_phase_liveness_closes_every_selected_variant',
     'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_closes_every_missing_carrier',
@@ -89,19 +68,26 @@ export const phaseLivenessEvidenceRustTests = [
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_row_code_whir_accounting_records_every_soft_variance_and_absolute_headroom',
 ] as const;
 
+export const phaseLivenessEvidenceRustTests = [] as const;
+
+export const compactPublicKeyProofEvidenceGenerationAndVerificationRustTestName =
+    'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_generation_and_verification';
+export const compactPublicKeyProofEvidenceSeparateProcessRestorationRustTestName =
+    'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_separate_process_restoration';
+
 export const proofEvidenceRustTests = [
-    'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_generation_and_verification',
+    compactPublicKeyProofEvidenceGenerationAndVerificationRustTestName,
     'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_transport_valid_equation_invalid_proof_is_refused',
-    'bgv::proof_suite::relation_plan::compact_ring_vector::structured_r1cs::tests::compact_public_key_proof_evidence_separate_process_restoration',
+    compactPublicKeyProofEvidenceSeparateProcessRestorationRustTestName,
 ] as const;
 
-export const retiredProofEvidenceRustTests = [
+const rejectedBackendProofEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::exact_same_secret::tests::exact_same_secret_checkpoint_phases_are_self_owned',
     'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_vss_prerequisite_proof_round_trip',
     'bgv::proof_suite::row_code_whir::exact_same_secret::runtime_evidence_tests::exact_aggregate_wide_same_secret_proof_round_trip',
 ] as const;
 
-export const theoremEvidenceRustTests = [
+const rejectedBackendTheoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::aggregate_wide_hiding::tests::aggregate_wide_masking_certificate_refuses_every_load_bearing_mutation',
     'bgv::proof_suite::row_code_whir::aggregate_wide_hiding::tests::selected_aggregate_wide_masking_certificate_closes_every_generic_obligation',
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::production_construction_views_bind_every_physical_masking_map',
@@ -139,6 +125,16 @@ export const theoremEvidenceRustTests = [
     'bgv::proof_suite::row_code_whir::construction_plan::theorem_certificate::independent_unique_decoder_and_explicit_constraint_filter_cover_hostile_words',
 ] as const;
 
+export const theoremEvidenceRustTests = [] as const;
+
+export const retiredRejectedBackendRustTests = [
+    ...rejectedBackendFullProfileEvidenceRustTests,
+    ...rejectedBackendMeasurementRustTests,
+    ...rejectedBackendPhaseLivenessEvidenceRustTests,
+    ...rejectedBackendProofEvidenceRustTests,
+    ...rejectedBackendTheoremEvidenceRustTests,
+] as const;
+
 type FocusedRustLane =
     | 'rust-full-profile-evidence'
     | 'rust-kernel-fast'
@@ -167,8 +163,8 @@ const phaseLivenessEvidenceTestSet = new Set<string>(
     phaseLivenessEvidenceRustTests,
 );
 const proofEvidenceTestSet = new Set<string>(proofEvidenceRustTests);
-const retiredProofEvidenceTestSet = new Set<string>(
-    retiredProofEvidenceRustTests,
+const retiredRejectedBackendTestSet = new Set<string>(
+    retiredRejectedBackendRustTests,
 );
 const theoremEvidenceTestSet = new Set<string>(theoremEvidenceRustTests);
 const ownersForTest = (test: RustTestInventoryEntry): RustLaneOwner[] => {
@@ -188,7 +184,7 @@ const ownersForTest = (test: RustTestInventoryEntry): RustLaneOwner[] => {
     if (proofEvidenceTestSet.has(test.testName)) {
         owners.push('rust-proof-evidence');
     }
-    if (retiredProofEvidenceTestSet.has(test.testName)) {
+    if (retiredRejectedBackendTestSet.has(test.testName)) {
         owners.push(retiredRustHistoryOwner);
     }
     if (theoremEvidenceTestSet.has(test.testName)) {

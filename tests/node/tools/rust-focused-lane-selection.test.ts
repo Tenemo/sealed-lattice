@@ -1,17 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { vssFusedRadix51ProjectionOwnerCaseIdentifiers } from '#tools/ci/primitive-measurement-evidence';
 import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
     proofEvidenceRustTests,
-    retiredProofEvidenceRustTests,
-    resolvePrimitiveMeasurementRustTestCases,
+    retiredRejectedBackendRustTests,
     theoremEvidenceRustTests,
     validateCompleteRustLaneOwnership,
     validateFocusedRustLaneSelection,
-    vssFusedRadix51ProjectionOwnerRustFilter,
 } from '#tools/ci/rust-focused-lane-selection';
 import { heavyRustKernelTestNamePrefix } from '#tools/ci/rust-kernel-test-arguments';
 
@@ -34,23 +31,11 @@ describe('focused Rust lane selection', () => {
                 },
                 {
                     ignored: true,
-                    testName: measurementRustTests[0],
-                },
-                {
-                    ignored: true,
-                    testName: phaseLivenessEvidenceRustTests[0],
-                },
-                {
-                    ignored: true,
                     testName: proofEvidenceRustTests[0],
                 },
                 {
                     ignored: true,
-                    testName: retiredProofEvidenceRustTests[0],
-                },
-                {
-                    ignored: true,
-                    testName: theoremEvidenceRustTests[0],
+                    testName: retiredRejectedBackendRustTests[0],
                 },
             ]),
         ).not.toThrow();
@@ -75,7 +60,7 @@ describe('focused Rust lane selection', () => {
             validateCompleteRustLaneOwnership([
                 {
                     ignored: false,
-                    testName: measurementRustTests[0],
+                    testName: proofEvidenceRustTests[0],
                 },
             ]),
         ).toThrow('belongs to multiple Rust lanes');
@@ -96,7 +81,6 @@ describe('focused Rust lane selection', () => {
                     string,
                 ],
         ),
-        ['rust-measurements' as const, true, measurementRustTests[0]],
         ...phaseLivenessEvidenceRustTests.map(
             (testName) =>
                 ['rust-phase-liveness-evidence', true, testName] as [
@@ -113,7 +97,6 @@ describe('focused Rust lane selection', () => {
                     string,
                 ],
         ),
-        ['rust-theorem-evidence' as const, true, theoremEvidenceRustTests[0]],
     ])(
         'accepts %s tests only in their owning lane',
         (lane, ignored, testName) => {
@@ -157,32 +140,8 @@ describe('focused Rust lane selection', () => {
         }
     });
 
-    it('keeps construction theorem gates exclusively in the theorem-evidence lane', () => {
-        for (const theoremEvidenceTest of theoremEvidenceRustTests) {
-            const inventoryEntry = {
-                ignored: true,
-                testName: theoremEvidenceTest,
-            } as const;
-
-            expect(() =>
-                validateFocusedRustLaneSelection({
-                    lane: 'rust-theorem-evidence',
-                    testFilter: theoremEvidenceTest,
-                    tests: [inventoryEntry],
-                }),
-            ).not.toThrow();
-            expect(() =>
-                validateFocusedRustLaneSelection({
-                    lane: 'rust-kernel-fast',
-                    testFilter: theoremEvidenceTest,
-                    tests: [inventoryEntry],
-                }),
-            ).toThrow('test:rust:kernel:theorem-evidence');
-        }
-    });
-
-    it('owns rejected proof tests as non-executable history', () => {
-        for (const retiredTestName of retiredProofEvidenceRustTests) {
+    it('owns every rejected-backend evidence test as non-executable history', () => {
+        for (const retiredTestName of retiredRejectedBackendRustTests) {
             const inventoryEntry = {
                 ignored: true,
                 testName: retiredTestName,
@@ -239,28 +198,41 @@ describe('focused Rust lane selection', () => {
     it('rejects registered guarded tests that would also run in the fast lane', () => {
         expect(() =>
             validateFocusedRustLaneSelection({
-                lane: 'rust-measurements',
-                testFilter: measurementRustTests[0],
+                lane: 'rust-proof-evidence',
+                testFilter: proofEvidenceRustTests[0],
                 tests: [
                     {
                         ignored: false,
-                        testName: measurementRustTests[0],
+                        testName: proofEvidenceRustTests[0],
                     },
                 ],
             }),
         ).toThrow('multiple Rust lanes');
     });
 
-    it('binds the radix-51 projection selector to the shared primitive case set', () => {
-        expect(
-            resolvePrimitiveMeasurementRustTestCases(
-                vssFusedRadix51ProjectionOwnerRustFilter,
-            ).map(({ caseIdentifier }) => caseIdentifier),
-        ).toEqual(vssFusedRadix51ProjectionOwnerCaseIdentifiers);
-        expect(
-            resolvePrimitiveMeasurementRustTestCases(
-                'vss_fused_bound_range_candidate',
-            ).map(({ caseIdentifier }) => caseIdentifier),
-        ).toEqual([11, 12]);
+    it('keeps rejected-backend registries empty and disjoint from active evidence', () => {
+        const activeEvidenceTestNames = [
+            ...fullProfileEvidenceRustTests,
+            ...measurementRustTests,
+            ...phaseLivenessEvidenceRustTests,
+            ...proofEvidenceRustTests,
+            ...theoremEvidenceRustTests,
+        ];
+
+        expect(measurementRustTests).toEqual([]);
+        expect(phaseLivenessEvidenceRustTests).toEqual([]);
+        expect(theoremEvidenceRustTests).toEqual([]);
+        expect(new Set(retiredRejectedBackendRustTests).size).toBe(
+            retiredRejectedBackendRustTests.length,
+        );
+        for (const retiredTestName of retiredRejectedBackendRustTests) {
+            expect(activeEvidenceTestNames).not.toContain(retiredTestName);
+        }
+        expect(retiredRejectedBackendRustTests).toContain(
+            'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_emits_run_attachment',
+        );
+        expect(retiredRejectedBackendRustTests).toContain(
+            'bgv::proof_suite::collective_public_key_runtime::tests::selected_collective_public_key_accounting_separates_live_memory_storage_and_traffic',
+        );
     });
 });
