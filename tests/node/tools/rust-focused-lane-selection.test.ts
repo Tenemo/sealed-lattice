@@ -10,7 +10,10 @@ import {
     validateCompleteRustLaneOwnership,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
-import { heavyRustKernelTestNamePrefix } from '#tools/ci/rust-kernel-test-arguments';
+import {
+    heavyRustKernelTestNamePrefix,
+    rejectedRowCodeBackendRustTestNamePrefix,
+} from '#tools/ci/rust-kernel-test-arguments';
 
 describe('focused Rust lane selection', () => {
     it('assigns every discovered Rust test to exactly one lane', () => {
@@ -158,6 +161,25 @@ describe('focused Rust lane selection', () => {
                 }),
             ).toThrow('retired non-executable Rust history');
         }
+    });
+
+    it('owns regular rejected-backend tests as non-executable history', () => {
+        const retiredTestName = `${rejectedRowCodeBackendRustTestNamePrefix}generation_state::tests::ordinary_archived_test`;
+        const inventoryEntry = {
+            ignored: false,
+            testName: retiredTestName,
+        } as const;
+
+        expect(() =>
+            validateCompleteRustLaneOwnership([inventoryEntry]),
+        ).not.toThrow();
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-kernel-fast',
+                testFilter: retiredTestName,
+                tests: [inventoryEntry],
+            }),
+        ).toThrow('retired non-executable Rust history');
     });
 
     it('fails closed for zero matches and cross-lane selections', () => {

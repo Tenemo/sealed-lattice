@@ -1,6 +1,9 @@
 import type { ActiveLocalRunLog } from './local-run-log.js';
 import type { CommandInvocation } from './run-command.js';
-import { heavyRustKernelTestNamePrefix } from './rust-kernel-test-arguments.js';
+import {
+    heavyRustKernelTestNamePrefix,
+    rejectedRowCodeBackendRustTestNamePrefix,
+} from './rust-kernel-test-arguments.js';
 import {
     collectRustKernelTestInventory,
     type RustTestInventoryEntry,
@@ -168,6 +171,13 @@ const retiredRejectedBackendTestSet = new Set<string>(
 );
 const theoremEvidenceTestSet = new Set<string>(theoremEvidenceRustTests);
 const ownersForTest = (test: RustTestInventoryEntry): RustLaneOwner[] => {
+    if (
+        test.testName.startsWith(rejectedRowCodeBackendRustTestNamePrefix) ||
+        retiredRejectedBackendTestSet.has(test.testName)
+    ) {
+        return [retiredRustHistoryOwner];
+    }
+
     const owners: RustLaneOwner[] = [];
     if (test.testName.includes(heavyRustKernelTestNamePrefix)) {
         owners.push('rust-kernel-heavy');
@@ -183,9 +193,6 @@ const ownersForTest = (test: RustTestInventoryEntry): RustLaneOwner[] => {
     }
     if (proofEvidenceTestSet.has(test.testName)) {
         owners.push('rust-proof-evidence');
-    }
-    if (retiredRejectedBackendTestSet.has(test.testName)) {
-        owners.push(retiredRustHistoryOwner);
     }
     if (theoremEvidenceTestSet.has(test.testName)) {
         owners.push('rust-theorem-evidence');

@@ -1,4 +1,8 @@
 export const heavyRustKernelTestNamePrefix = 'heavy_rust_kernel_';
+// The rejected row-code backend remains source history until final removal.
+// Routine lanes must not execute its tests.
+export const rejectedRowCodeBackendRustTestNamePrefix =
+    'bgv::proof_suite::row_code_whir::';
 
 export const normalizeRustTestFilter = (filter: string): string => {
     const normalizedSeparators = filter.replace(/\\/gu, '/');
@@ -25,6 +29,8 @@ export const cargoTestArgumentsForRustKernelFast = (
     '--test-threads',
     '1',
     '--show-output',
+    '--skip',
+    rejectedRowCodeBackendRustTestNamePrefix,
 ];
 
 export const cargoTestArgumentsForRustKernelHeavy = (
