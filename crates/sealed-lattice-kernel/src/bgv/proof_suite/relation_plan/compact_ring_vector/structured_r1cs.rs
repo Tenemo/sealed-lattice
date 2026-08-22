@@ -3198,6 +3198,10 @@ mod tests {
                 CommonProofRelationPlanCapability, SelectedApplicationStatementContext,
                 SourceVerifiedCompactPublicKeyProof, VerifiedCommonProofStatementSource,
                 VerifiedCompactPublicKeyStatementAuthority,
+                compact_cfw_initial_transition::{
+                    CompactCfwInitialTransitionBinding, CompactCfwInitialTransitionError,
+                    derive_source_verified_compact_cfw_initial_transition_evidence,
+                },
                 compact_corpus_accounting::{
                     derive_selected_compact_corpus_rollup,
                     derive_selected_public_key_share_emitted_size_evidence,
@@ -3208,7 +3212,10 @@ mod tests {
                     measure_source_verified_compact_emission_cdhz,
                 },
                 compact_fixed_tape_domain_extension::derive_source_verified_compact_fixed_tape_domain_extension,
-                compact_fixed_tape_source_correspondence::verify_source_verified_compact_fixed_tape_correspondence,
+                compact_fixed_tape_source_correspondence::{
+                    CompactFixedTapeGraphModel,
+                    verify_source_verified_compact_fixed_tape_correspondence,
+                },
                 compact_fixed_tape_uniformity::CompactFixedTapeUniformityPremise,
                 compact_masking_kmac::derive_source_verified_compact_joint_keccak_evidence,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
@@ -8703,6 +8710,56 @@ mod tests {
             &source_verified_measurement,
         )
         .expect("the complete fixed-output tape graph matches the source-verified transport");
+        let initial_transition_evidence =
+            derive_source_verified_compact_cfw_initial_transition_evidence(
+                source_verified_proof,
+                &fixed_tape_correspondence,
+            )
+            .expect("the initial CFW transition lemma matches the source-verified transcript move");
+        assert_eq!(
+            initial_transition_evidence.canonical_proof_binding,
+            fixed_tape_correspondence.canonical_proof_binding,
+        );
+        assert_eq!(
+            initial_transition_evidence.canonical_public_input_binding,
+            fixed_tape_correspondence.canonical_public_input_binding,
+        );
+        assert_eq!(
+            initial_transition_evidence
+                .lemma
+                .selected_contract_source_hash,
+            fixed_tape_correspondence.selected_contract_source_hash,
+        );
+        assert_eq!(
+            initial_transition_evidence.equality_point_coordinates.len(),
+            usize::try_from(initial_transition_evidence.lemma.equality_coordinate_count,)
+                .expect("the equality-coordinate count fits usize"),
+        );
+        assert_ne!(
+            initial_transition_evidence.transcript_prefix_digest,
+            [0_u8; Hash512::BYTE_LENGTH],
+        );
+        assert!(
+            initial_transition_evidence
+                .auxiliary_target_coordinates
+                .into_iter()
+                .chain(initial_transition_evidence.constraint_combining_challenge_coordinates,)
+                .chain(
+                    initial_transition_evidence
+                        .equality_point_coordinates
+                        .iter()
+                        .flatten()
+                        .copied(),
+                )
+                .all(|coordinate| coordinate < PROOF_BASE_FIELD_MODULUS),
+        );
+        assert_selected_compact_cfw_initial_transition_source_faults_are_rejected(
+            source_verified_proof,
+            &fixed_tape_correspondence,
+            initial_transition_evidence
+                .lemma
+                .initial_verifier_move_ordinal,
+        );
         let joint_keccak_evidence =
             derive_source_verified_compact_joint_keccak_evidence(&fixed_tape_correspondence)
                 .expect("the KMAC catalog and fixed-output SHAKE tape share one source binding");
@@ -8742,6 +8799,20 @@ mod tests {
             fixed_tape_correspondence.output_block_hash_count,
             fixed_tape_correspondence.total_fixed_tape_byte_length,
             fixed_tape_correspondence.maximum_output_block_count_per_round,
+        );
+        println!(
+            "compact public-key initial CFW transition correspondence complete verifier_move_ordinal={} preceding_response_ordinal={} preceding_commitment_count={} equality_coordinate_count={} polynomial_variable_count={} maximum_total_degree={} soundness_numerator={}",
+            initial_transition_evidence
+                .lemma
+                .initial_verifier_move_ordinal,
+            initial_transition_evidence
+                .lemma
+                .preceding_prover_response_ordinal,
+            initial_transition_evidence.lemma.preceding_commitment_count,
+            initial_transition_evidence.lemma.equality_coordinate_count,
+            initial_transition_evidence.lemma.polynomial_variable_count,
+            initial_transition_evidence.lemma.maximum_total_degree,
+            initial_transition_evidence.lemma.soundness_numerator,
         );
         println!(
             "compact public-key joint Keccak source correspondence complete minimum_kmac_call_count={} maximum_kmac_call_count={} fixed_tape_prefix_hash_count={} fixed_tape_output_block_hash_count={} fixed_tape_hash_count={} fixed_keccak_joint_reduction_resolved={}",
@@ -8818,6 +8889,74 @@ mod tests {
                 )),
         );
         assert_eq!(public_key_share_corpus_entry.blocker, None);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn assert_selected_compact_cfw_initial_transition_source_faults_are_rejected(
+        source_verified_proof: &SourceVerifiedCompactPublicKeyProof,
+        fixed_tape_correspondence: &crate::bgv::proof_suite::compact_fixed_tape_source_correspondence::CompactFixedTapeSourceCorrespondence,
+        initial_verifier_move_ordinal: u32,
+    ) {
+        let expected = |binding| Err(CompactCfwInitialTransitionError::BindingMismatch(binding));
+
+        let mut wrong_contract = fixed_tape_correspondence.clone();
+        let mut wrong_contract_bytes = wrong_contract.selected_contract_source_hash.into_bytes();
+        wrong_contract_bytes[0] ^= 1;
+        wrong_contract.selected_contract_source_hash = Hash512::from_bytes(wrong_contract_bytes);
+        assert_eq!(
+            derive_source_verified_compact_cfw_initial_transition_evidence(
+                source_verified_proof,
+                &wrong_contract,
+            ),
+            expected(CompactCfwInitialTransitionBinding::ContractSource),
+        );
+
+        let mut wrong_proof = fixed_tape_correspondence.clone();
+        wrong_proof.canonical_proof_binding[0] ^= 1;
+        assert_eq!(
+            derive_source_verified_compact_cfw_initial_transition_evidence(
+                source_verified_proof,
+                &wrong_proof,
+            ),
+            expected(CompactCfwInitialTransitionBinding::CanonicalProof),
+        );
+
+        let mut wrong_public_input = fixed_tape_correspondence.clone();
+        wrong_public_input.canonical_public_input_binding[0] ^= 1;
+        assert_eq!(
+            derive_source_verified_compact_cfw_initial_transition_evidence(
+                source_verified_proof,
+                &wrong_public_input,
+            ),
+            expected(CompactCfwInitialTransitionBinding::CanonicalPublicInput),
+        );
+
+        let mut wrong_graph = fixed_tape_correspondence.clone();
+        wrong_graph.graph_model = CompactFixedTapeGraphModel::PredecessorLinkedBlocks;
+        assert_eq!(
+            derive_source_verified_compact_cfw_initial_transition_evidence(
+                source_verified_proof,
+                &wrong_graph,
+            ),
+            expected(CompactCfwInitialTransitionBinding::FixedTapeGraph),
+        );
+
+        let mut wrong_prefix = fixed_tape_correspondence.clone();
+        let initial_round = wrong_prefix
+            .rounds
+            .get_mut(
+                usize::try_from(initial_verifier_move_ordinal)
+                    .expect("the initial verifier move ordinal fits usize"),
+            )
+            .expect("the selected initial verifier move has a fixed-tape round");
+        initial_round.transcript_prefix_digest[0] ^= 1;
+        assert_eq!(
+            derive_source_verified_compact_cfw_initial_transition_evidence(
+                source_verified_proof,
+                &wrong_prefix,
+            ),
+            expected(CompactCfwInitialTransitionBinding::InitialTranscriptPrefix),
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

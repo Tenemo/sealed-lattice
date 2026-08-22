@@ -16,6 +16,7 @@ use super::{
     CompactStaticCatalogError, GOLDILOCKS_BASE_FIELD_MODULUS, MaskGroupRole,
     MaskGroupStaticSpecification, QUINTIC_EXTENSION_DEGREE, checked_add, checked_product,
 };
+use crate::bgv::proof_suite::compact_cfw_initial_transition::compact_cfw_initial_transition_soundness_numerator;
 
 const INNER_MASK_MESSAGE_LENGTH: u64 = COMPACT_CFW_INNER_MASK_MESSAGE_LENGTH as u64;
 const OUTER_MASK_MESSAGE_LENGTH: u64 = COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH as u64;
@@ -253,9 +254,12 @@ impl CfwReductionCatalog {
             // combining randomness or a root of the multilinear constraint
             // identity can make the post-challenge state true. The uniform
             // root bound is therefore `1 + sumcheck_round_count`.
-            initial_consistency_soundness_numerator: u64::from(sumcheck_round_count)
-                .checked_add(1)
-                .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?,
+            initial_consistency_soundness_numerator:
+                compact_cfw_initial_transition_soundness_numerator(
+                    usize::try_from(sumcheck_round_count)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                )
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
             per_round_soundness_numerator: OUTER_MASK_MESSAGE_LENGTH,
             joint_constraint_soundness_numerator: JOINT_CONSTRAINT_SOUNDNESS_NUMERATOR,
         };
@@ -443,9 +447,11 @@ impl CfwReductionCatalog {
                     5,
                 )?
             || self.initial_consistency_soundness_numerator
-                != u64::from(expected_sumcheck_round_count)
-                    .checked_add(1)
-                    .ok_or(CompactStaticCatalogError::ArithmeticOverflow)?
+                != compact_cfw_initial_transition_soundness_numerator(
+                    usize::try_from(expected_sumcheck_round_count)
+                        .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?,
+                )
+                .map_err(|_| CompactStaticCatalogError::ArithmeticOverflow)?
             || self.per_round_soundness_numerator != OUTER_MASK_MESSAGE_LENGTH
             || self.joint_constraint_soundness_numerator != JOINT_CONSTRAINT_SOUNDNESS_NUMERATOR
         {

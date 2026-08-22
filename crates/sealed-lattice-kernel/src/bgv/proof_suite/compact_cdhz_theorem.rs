@@ -1033,9 +1033,11 @@ pub(crate) fn derive_selected_compact_cdhz_appendix_a_one_adaptive_soundness(
 /// from the maximum relaxed round-by-round knowledge bound and is not an
 /// instantiation of the incompatible printed CFW formula.
 pub(crate) fn compact_cfw_direct_initial_transition_bound() -> CompactCdhzExactRational {
+    let lemma = super::compact_cfw_initial_transition::derive_selected_compact_cfw_initial_transition_lemma()
+        .expect("the selected initial CFW transition lemma derives from the checked contract");
     CompactCdhzExactRational::from_nonzero_parts(
-        BigUint::from(24_u8),
-        selected_challenge_field_cardinality(),
+        BigUint::from(lemma.soundness_numerator),
+        lemma.challenge_field_cardinality,
     )
 }
 

@@ -40,6 +40,10 @@ use crate::bgv::proof_suite::ProofChallengeExtensionElement;
 use crate::bgv::proof_suite::compact_cfw::{
     CompactChallengeField, compact_cfw_zero_evader_weights,
 };
+use crate::bgv::proof_suite::compact_cfw_initial_transition::{
+    compact_cfw_initial_transition_soundness_numerator,
+    verify_compact_cfw_initial_transition_bad_event,
+};
 use p3_field::PrimeCharacteristicRing;
 
 pub(super) type SemanticBadEventFamily = CompactFactorOneBadEventFamily;
@@ -70,10 +74,10 @@ pub(super) fn derive_owner_bad_transition_event_ceiling(
         )?]),
         CompactFactorOneSemanticOwner::CfwInitialRandomness => Ok(vec![root_event(
             CompactFactorOneBadEventFamily::CfwInitialConsistencyIdentity,
-            u64::try_from(cfw.geometry().sumcheck_round_count())
-                .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?
-                .checked_add(1)
-                .ok_or(CompactFactorOneSemanticError::ArithmeticOverflow)?,
+            compact_cfw_initial_transition_soundness_numerator(
+                cfw.geometry().sumcheck_round_count(),
+            )
+            .map_err(|_| CompactFactorOneSemanticError::ArithmeticOverflow)?,
             0,
         )?]),
         CompactFactorOneSemanticOwner::CfwSumcheckRound { round_ordinal } => {
@@ -463,23 +467,13 @@ fn validate_cfw_initial_certificate(
     else {
         return Err(CompactFactorOneSemanticError::InvalidGeometry);
     };
-    if *auxiliary_difference == CompactChallengeField::ZERO
-        && masked_constraint_hypercube_residuals
-            .iter()
-            .all(|residual| *residual == CompactChallengeField::ZERO)
-    {
-        return Err(CompactFactorOneSemanticError::InvalidGeometry);
-    }
-    let residual_at_equality_point = super::compact_multilinear_evaluation(
+    verify_compact_cfw_initial_transition_bad_event(
+        *auxiliary_difference,
         masked_constraint_hypercube_residuals,
+        *constraint_combining_challenge,
         equality_point,
     )
     .map_err(|_| CompactFactorOneSemanticError::InvalidGeometry)?;
-    if *auxiliary_difference + *constraint_combining_challenge * residual_at_equality_point
-        != CompactChallengeField::ZERO
-    {
-        return Err(CompactFactorOneSemanticError::InvalidGeometry);
-    }
     Ok(())
 }
 

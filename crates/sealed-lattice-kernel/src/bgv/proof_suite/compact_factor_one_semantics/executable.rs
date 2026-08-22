@@ -587,9 +587,10 @@ impl SemanticCfwBadTransition {
     /// would admit the tighter one-root bound.
     pub(super) fn polynomial_identity_numerator(&self) -> Option<u64> {
         match self {
-            Self::InitialConsistency { equality_point, .. } => {
-                u64::try_from(equality_point.len()).ok()?.checked_add(1)
-            }
+            Self::InitialConsistency { equality_point, .. } => crate::bgv::proof_suite::compact_cfw_initial_transition::compact_cfw_initial_transition_soundness_numerator(
+                equality_point.len(),
+            )
+            .ok(),
             Self::NonzeroPolynomial { coefficients, .. } => coefficients
                 .iter()
                 .rposition(|coefficient| *coefficient != CompactChallengeField::ZERO)
@@ -2809,6 +2810,15 @@ mod tests {
                         || masked_constraint_hypercube_residuals
                             .iter()
                             .any(|residual| *residual != CompactChallengeField::ZERO)
+                );
+                assert_eq!(
+                    crate::bgv::proof_suite::compact_cfw_initial_transition::verify_compact_cfw_initial_transition_bad_event(
+                        auxiliary_difference,
+                        &masked_constraint_hypercube_residuals,
+                        classified_challenge,
+                        &classified_equality_point,
+                    ),
+                    Ok(3),
                 );
                 assert_eq!(
                     auxiliary_difference

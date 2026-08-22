@@ -42,6 +42,8 @@ mod compact_cfw_external;
 )]
 mod compact_cfw_external_prover;
 mod compact_cfw_geometry;
+#[cfg(test)]
+mod compact_cfw_initial_transition;
 #[cfg(any(test, feature = "primitive-measurement-evidence"))]
 mod compact_cfw_storage_diagnostic;
 #[cfg(test)]

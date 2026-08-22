@@ -111,12 +111,15 @@ and implementation issues below.
   implementation cannot be used as a fallback or as evidence.
 - `SEC-005`: One native development proof family can be decoded and checked
   algebraically. Independent code reconstructs its public inputs, false
-  statements are refused, and checkpoints restore in a separate process. It
-  still lacks proofs that the shared hash is modeled safely, emitted proof bytes
-  reveal no witness information, committed trees hide private data, and the
-  verifier's initial transition is sound. Full proof composition and probability
-  accounting also remain incomplete. This evidence establishes no security-bit
-  total and does not yet satisfy the profile's 80-bit minimum.
+  statements are refused, and checkpoints restore in a separate process. A
+  compiler-derived, source-bound lemma maps the exact initial CFW verifier move
+  to a nonzero polynomial of total degree at most 24 and checks the corresponding
+  `24 / |F|` interactive uniform-message bound. This interactive result does not
+  complete the Fiat-Shamir transformation. The family still lacks proofs that
+  the shared hash is modeled safely, emitted proof bytes reveal no witness
+  information, and committed trees hide private data. Full proof composition
+  and probability accounting also remain incomplete. This evidence establishes
+  no security-bit total and does not yet satisfy the profile's 80-bit minimum.
 - `SEC-006`: The participant bridge does not yet carry verifier-minted
   capabilities and authenticated checkpoint custody from setup through release.
 - `SEC-007`: Direct ballot creation, proof generation, transport, and acceptance
