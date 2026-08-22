@@ -24,13 +24,11 @@ use num_bigint::BigUint;
 use p3_field::PrimeCharacteristicRing;
 
 use super::compact_cfw::CompactChallengeField;
-use super::compact_fixed_tape_source_correspondence::{
-    CompactFixedTapeGraphModel, CompactFixedTapeSourceCorrespondence,
-};
+use super::compact_fixed_tape_source_correspondence::CompactFixedTapeSourceCorrespondence;
 use super::compact_proof_contract::{
     CompactPublicKeyProofContract, CompactPublicKeyVerifierInputs,
 };
-use super::compact_transcript::compact_fiat_shamir_round_prefix_digest;
+use super::compact_transcript::compact_fiat_shamir_round_verifier_message_answer_prefix;
 use super::{
     PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, SourceVerifiedCompactPublicKeyProof,
 };
@@ -46,8 +44,8 @@ pub(crate) enum CompactCfwInitialTransitionBinding {
     ContractSource,
     CanonicalProof,
     CanonicalPublicInput,
-    FixedTapeGraph,
-    InitialTranscriptPrefix,
+    FixedTapeChronology,
+    InitialVerifierMessageAnswerPrefix,
     InitialVerifierMessage,
     AuxiliaryTarget,
 }
@@ -88,7 +86,7 @@ pub(crate) struct CompactCfwInitialTransitionSourceEvidence {
     pub(crate) lemma: CompactCfwInitialTransitionLemma,
     pub(crate) canonical_proof_binding: [u8; Hash512::BYTE_LENGTH],
     pub(crate) canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
-    pub(crate) transcript_prefix_digest: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) verifier_message_answer_prefix: [u8; Hash512::BYTE_LENGTH],
     pub(crate) auxiliary_target_coordinates: [u64; PROOF_CHALLENGE_EXTENSION_DEGREE],
     pub(crate) constraint_combining_challenge_coordinates: [u64; PROOF_CHALLENGE_EXTENSION_DEGREE],
     pub(crate) equality_point_coordinates: Box<[[u64; PROOF_CHALLENGE_EXTENSION_DEGREE]]>,
@@ -320,10 +318,10 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
             CompactCfwInitialTransitionBinding::CanonicalPublicInput,
         ));
     }
-    if fixed_tape_correspondence.graph_model
-        != CompactFixedTapeGraphModel::TranscriptPrefixThenIndependentBlocks
-        || usize::try_from(fixed_tape_correspondence.logical_round_count).ok()
-            != Some(transport.verifier_messages().len())
+    if usize::try_from(fixed_tape_correspondence.logical_round_count).ok()
+        != Some(transport.verifier_messages().len())
+        || fixed_tape_correspondence.direct_xof_call_count
+            != fixed_tape_correspondence.logical_round_count
         || fixed_tape_correspondence.rounds.len() != transport.verifier_messages().len()
         || fixed_tape_correspondence
             .rounds
@@ -334,7 +332,7 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
             })
     {
         return Err(CompactCfwInitialTransitionError::BindingMismatch(
-            CompactCfwInitialTransitionBinding::FixedTapeGraph,
+            CompactCfwInitialTransitionBinding::FixedTapeChronology,
         ));
     }
 
@@ -344,9 +342,9 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
         .rounds
         .get(initial_move_index)
         .ok_or(CompactCfwInitialTransitionError::BindingMismatch(
-            CompactCfwInitialTransitionBinding::InitialTranscriptPrefix,
+            CompactCfwInitialTransitionBinding::InitialVerifierMessageAnswerPrefix,
         ))?;
-    let production_prefix = compact_fiat_shamir_round_prefix_digest(
+    let production_answer_prefix = compact_fiat_shamir_round_verifier_message_answer_prefix(
         verifier_inputs.proof_wire_geometry,
         transport.proof_view().decoded(),
         transport.proof_view().canonical_bytes(),
@@ -356,14 +354,14 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
     )
     .map_err(|_| {
         CompactCfwInitialTransitionError::BindingMismatch(
-            CompactCfwInitialTransitionBinding::InitialTranscriptPrefix,
+            CompactCfwInitialTransitionBinding::InitialVerifierMessageAnswerPrefix,
         )
     })?;
     let initial_move = verifier_inputs
         .verifier_moves
         .get(initial_move_index)
         .ok_or(CompactCfwInitialTransitionError::InvalidInitialVerifierChronology)?;
-    if fixed_tape_round.transcript_prefix_digest != production_prefix.into_bytes()
+    if fixed_tape_round.verifier_message_answer_prefix != production_answer_prefix.into_bytes()
         || fixed_tape_round.message_byte_length
             != u64::try_from(
                 initial_move
@@ -376,7 +374,7 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
             .map_err(|_| CompactCfwInitialTransitionError::ArithmeticOverflow)?
     {
         return Err(CompactCfwInitialTransitionError::BindingMismatch(
-            CompactCfwInitialTransitionBinding::InitialTranscriptPrefix,
+            CompactCfwInitialTransitionBinding::InitialVerifierMessageAnswerPrefix,
         ));
     }
 
@@ -423,7 +421,7 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
         lemma,
         canonical_proof_binding: transport.canonical_proof_binding(),
         canonical_public_input_binding: public_input_view.binding(),
-        transcript_prefix_digest: fixed_tape_round.transcript_prefix_digest,
+        verifier_message_answer_prefix: fixed_tape_round.verifier_message_answer_prefix,
         auxiliary_target_coordinates: auxiliary_target.canonical_coordinates(),
         constraint_combining_challenge_coordinates: constraint_combining_challenge
             .canonical_coordinates(),

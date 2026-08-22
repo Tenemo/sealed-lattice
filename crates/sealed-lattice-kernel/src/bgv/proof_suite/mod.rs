@@ -53,8 +53,6 @@ mod compact_emitted_cdhz;
 #[cfg(test)]
 mod compact_factor_one_semantics;
 #[cfg(test)]
-mod compact_fixed_tape_domain_extension;
-#[cfg(test)]
 mod compact_fixed_tape_source_correspondence;
 #[cfg(test)]
 mod compact_fixed_tape_uniformity;

@@ -111,15 +111,18 @@ and implementation issues below.
   implementation cannot be used as a fallback or as evidence.
 - `SEC-005`: One native development proof family can be decoded and checked
   algebraically. Independent code reconstructs its public inputs, false
-  statements are refused, and checkpoints restore in a separate process. A
-  compiler-derived, source-bound lemma maps the exact initial CFW verifier move
-  to a nonzero polynomial of total degree at most 24 and checks the corresponding
-  `24 / |F|` interactive uniform-message bound. This interactive result does not
-  complete the Fiat-Shamir transformation. The family still lacks proofs that
-  the shared hash is modeled safely, emitted proof bytes reveal no witness
-  information, and committed trees hide private data. Full proof composition
-  and probability accounting also remain incomplete. This evidence establishes
-  no security-bit total and does not yet satisfy the profile's 80-bit minimum.
+  statements are refused, and checkpoints restore in a separate process.
+  Independent code reconstructs the complete compiler-derived public-source and
+  direct exact-width verifier-message transcript, and deterministic transport,
+  binding, chronology, source, and equation faults refuse. The direct transcript
+  removes the rejected two-stage domain extender and introduces no separate
+  domain-extension term in the ideal-oracle arithmetic. A compiler-derived,
+  source-bound lemma checks the initial CFW interactive uniform-message bound.
+  The family still lacks proofs that the shared fixed-Keccak interface is modeled
+  safely, emitted proof bytes reveal no witness information, and committed trees
+  hide private data. Full Fiat--Shamir composition and probability accounting
+  also remain incomplete. This evidence establishes no security-bit total and
+  does not yet satisfy the profile's security target.
 - `SEC-006`: The participant bridge does not yet carry verifier-minted
   capabilities and authenticated checkpoint custody from setup through release.
 - `SEC-007`: Direct ballot creation, proof generation, transport, and acceptance
@@ -147,7 +150,11 @@ and implementation issues below.
 - `SEC-020`: The required checkpoint and interruption boundary is not yet fully
   implemented or evidenced in a release browser build.
 - `SEC-021`: The required storage boundary is not yet fully implemented or
-  evidenced for browser persistence, failure, rollback, and reclamation.
+  evidenced for browser persistence, failure, rollback, and reclamation. A
+  nonqualifying desktop Chromium replay found that namespace-wide capacity scans
+  multiply normal-operation storage work and that internal cleanup does not yet
+  establish physical browser reclamation. Authenticated incremental accounting
+  and bounded exclusive repair remain required.
 
 Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through
 `SEC-015` are retired.

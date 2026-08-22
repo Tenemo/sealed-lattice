@@ -296,6 +296,55 @@ pub(crate) struct StreamingFoundationTupleHash512 {
     remaining_payload_byte_length: usize,
 }
 
+/// Exact-width reader for one canonically framed SHAKE256 invocation.
+///
+/// The caller fixes the complete output width before any byte is consumed.
+/// Fragmented reads and discards therefore expose one XOF answer without
+/// buffering it or silently extending the requested verifier message.
+pub(crate) struct BoundedFoundationTupleXofReader {
+    reader: <Shake256 as ExtendableOutput>::Reader,
+    remaining_output_byte_length: usize,
+}
+
+impl BoundedFoundationTupleXofReader {
+    pub(crate) fn read(
+        &mut self,
+        output_fragment: &mut [u8],
+    ) -> Result<(), StreamingFoundationHashError> {
+        if output_fragment.len() > self.remaining_output_byte_length {
+            return Err(StreamingFoundationHashError::OutputOverrun);
+        }
+        self.reader.read(output_fragment);
+        self.remaining_output_byte_length -= output_fragment.len();
+        Ok(())
+    }
+
+    pub(crate) fn discard(
+        &mut self,
+        output_byte_length: usize,
+    ) -> Result<(), StreamingFoundationHashError> {
+        if output_byte_length > self.remaining_output_byte_length {
+            return Err(StreamingFoundationHashError::OutputOverrun);
+        }
+        let mut buffer = [0_u8; 256];
+        let mut remaining_byte_length = output_byte_length;
+        while remaining_byte_length > 0 {
+            let fragment_byte_length = remaining_byte_length.min(buffer.len());
+            self.read(&mut buffer[..fragment_byte_length])?;
+            remaining_byte_length -= fragment_byte_length;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> Result<(), StreamingFoundationHashError> {
+        if self.remaining_output_byte_length == 0 {
+            Ok(())
+        } else {
+            Err(StreamingFoundationHashError::OutputIncomplete)
+        }
+    }
+}
+
 impl StreamingFoundationTupleHash512 {
     pub(crate) fn new_variable_bytes(
         domain: &str,
@@ -347,13 +396,27 @@ impl StreamingFoundationTupleHash512 {
         Ok(())
     }
 
-    pub(crate) fn finalize(self) -> Result<Hash512, StreamingFoundationHashError> {
+    pub(crate) fn finalize_bounded_xof(
+        self,
+        output_byte_length: usize,
+    ) -> Result<BoundedFoundationTupleXofReader, StreamingFoundationHashError> {
         if self.remaining_payload_byte_length != 0 {
             return Err(StreamingFoundationHashError::PayloadIncomplete);
         }
-        let mut reader = self.hasher.finalize_xof();
+        if output_byte_length == 0 {
+            return Err(StreamingFoundationHashError::OutputIncomplete);
+        }
+        Ok(BoundedFoundationTupleXofReader {
+            reader: self.hasher.finalize_xof(),
+            remaining_output_byte_length: output_byte_length,
+        })
+    }
+
+    pub(crate) fn finalize(self) -> Result<Hash512, StreamingFoundationHashError> {
+        let mut reader = self.finalize_bounded_xof(Hash512::BYTE_LENGTH)?;
         let mut output = [0_u8; Hash512::BYTE_LENGTH];
-        reader.read(&mut output);
+        reader.read(&mut output)?;
+        reader.finish()?;
         Ok(Hash512(output))
     }
 }
@@ -441,6 +504,79 @@ mod tests {
             }
             assert_eq!(streaming.finalize().expect("payload is complete"), expected);
         }
+    }
+
+    #[test]
+    fn bounded_streaming_xof_matches_one_canonical_shake_answer() {
+        let domain = "sealed-lattice/test/bounded-streaming-xof/v1";
+        let prefix_items = [
+            CanonicalItem::unsigned32(17),
+            CanonicalItem::hash512([0x42; Hash512::BYTE_LENGTH]),
+        ];
+        let payload = (0_u16..=1024)
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut one_shot_items = prefix_items.to_vec();
+        one_shot_items.push(CanonicalItem::variable_bytes(&payload).expect("bounded test payload"));
+        let preimage = canonical_foundation_tuple_hash_preimage(domain, &one_shot_items)
+            .expect("the independent canonical preimage encodes");
+        let mut expected_hasher = Shake256::default();
+        expected_hasher.update(&preimage);
+        let mut expected_reader = expected_hasher.finalize_xof();
+        let mut expected = vec![0_u8; 777];
+        expected_reader.read(&mut expected);
+
+        let mut streaming = StreamingFoundationTupleHash512::new_variable_bytes(
+            domain,
+            &prefix_items,
+            payload.len(),
+        )
+        .expect("the streaming XOF initializes");
+        for fragment in payload.chunks(73) {
+            streaming.absorb(fragment).expect("fragment fits");
+        }
+        let mut actual_reader = streaming
+            .finalize_bounded_xof(expected.len())
+            .expect("the declared output width is nonzero");
+        let mut actual = vec![0_u8; expected.len()];
+        actual_reader
+            .read(&mut actual[..211])
+            .expect("the first fragment fits");
+        actual_reader
+            .read(&mut actual[211..])
+            .expect("the second fragment completes the output");
+        actual_reader.finish().expect("the exact width is consumed");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn bounded_streaming_xof_refuses_zero_width_overrun_and_incomplete_output() {
+        let complete = || {
+            StreamingFoundationTupleHash512::new_variable_bytes(
+                "sealed-lattice/test/bounded-streaming-xof-errors/v1",
+                &[],
+                0,
+            )
+            .expect("empty payload is complete")
+        };
+        assert!(matches!(
+            complete().finalize_bounded_xof(0),
+            Err(StreamingFoundationHashError::OutputIncomplete),
+        ));
+        let mut overrun = complete()
+            .finalize_bounded_xof(2)
+            .expect("two output bytes are declared");
+        assert_eq!(
+            overrun.read(&mut [0_u8; 3]),
+            Err(StreamingFoundationHashError::OutputOverrun),
+        );
+        assert_eq!(
+            complete()
+                .finalize_bounded_xof(2)
+                .expect("two output bytes are declared")
+                .finish(),
+            Err(StreamingFoundationHashError::OutputIncomplete),
+        );
     }
 
     #[test]

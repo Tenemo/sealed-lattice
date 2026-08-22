@@ -29,14 +29,13 @@ use super::compact_response_merkle::{
     CompactResponseMerkleGeometry, CompactResponseQuerySchedule, CompactResponseQuerySelection,
 };
 use super::compact_transcript::{
-    COMPACT_FIAT_SHAMIR_PREFIX_VERSION, compact_transcript_binding_domains,
+    COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION, compact_transcript_binding_domains,
 };
 use super::compact_whir_geometry::CompactWhirVerifierGeometry;
 use super::field::PROOF_BASE_FIELD_MODULUS;
 use super::fixed_uniform_verifier_message::{
-    FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN, FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION,
-    FixedUniformDistinctQueryGeometry, FixedUniformVerifierMessageError,
-    FixedUniformVerifierMessageGeometry,
+    FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION, FixedUniformDistinctQueryGeometry,
+    FixedUniformVerifierMessageError, FixedUniformVerifierMessageGeometry,
 };
 use super::relation_plan::{
     CompactPublicKeyRelationCatalog, selected_compact_public_key_relation_catalog,
@@ -45,7 +44,7 @@ use crate::foundation::{FOUNDATION_PROFILE, Hash512};
 use crate::hashing::hash_framed_parts_512;
 
 const CONTRACT_MAGIC: [u8; 8] = *b"SLCPC001";
-const CONTRACT_VERSION: u16 = 3;
+const CONTRACT_VERSION: u16 = 4;
 const EXPECTED_RESPONSE_COUNT: usize = 82;
 const EXPECTED_COMMITMENT_COUNT: u32 = 45;
 const EXPECTED_DISTINCT_QUERY_GROUP_COUNT: u32 = 26;
@@ -67,12 +66,11 @@ const GENERATED_CONTRACT_SOURCE_HASH_DOMAIN: &str =
 /// same record independently from the production relation and proof catalogs.
 const GENERATED_CONTRACT_BYTES: &[u8] = include_bytes!("compact_proof_contract.generated.bin");
 
-fn compact_contract_binding_domains() -> [&'static str; 9] {
+fn compact_contract_binding_domains() -> [&'static str; 8] {
     let transcript = compact_transcript_binding_domains();
     let checkpoint = compact_checkpoint_binding_domains();
     [
         transcript[0],
-        FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN,
         COMPACT_RESPONSE_LEAF_HASH_DOMAIN,
         COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
         transcript[1],
@@ -211,7 +209,7 @@ impl CompactPublicKeyProofContract {
         reader.expect_u16(statement_layout.field_count())?;
         reader.expect_fixed(&statement_layout.canonical_layout_digest()?)?;
         reader.expect_u32(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT)?;
-        reader.expect_u16(COMPACT_FIAT_SHAMIR_PREFIX_VERSION)?;
+        reader.expect_u16(COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION)?;
         reader.expect_u16(FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION)?;
         reader.expect_fixed(&COMPACT_PROOF_WIRE_MAGIC)?;
         reader.expect_fixed(&COMPACT_PUBLIC_INPUT_WIRE_MAGIC)?;
@@ -513,7 +511,7 @@ impl CompactPublicKeyVerifierInputs<'_> {
         writer.write_u16(self.statement_layout.field_count());
         writer.write_fixed(&self.statement_layout.canonical_layout_digest()?);
         writer.write_u32(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT);
-        writer.write_u16(COMPACT_FIAT_SHAMIR_PREFIX_VERSION);
+        writer.write_u16(COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION);
         writer.write_u16(FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION);
         writer.write_fixed(&COMPACT_PROOF_WIRE_MAGIC);
         writer.write_fixed(&COMPACT_PUBLIC_INPUT_WIRE_MAGIC);
@@ -2939,7 +2937,7 @@ mod tests {
             .expect("generated candidate-draw binding decodes");
         let transcript_version_start = reader.offset;
         reader
-            .expect_u16(COMPACT_FIAT_SHAMIR_PREFIX_VERSION)
+            .expect_u16(COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION)
             .expect("generated transcript version decodes");
         assert_each_byte_mutation_is_refused(
             transcript_version_start..reader.offset,
@@ -3467,7 +3465,7 @@ mod tests {
             .expect_u32(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT)
             .expect("generated candidate-draw count decodes");
         reader
-            .expect_u16(COMPACT_FIAT_SHAMIR_PREFIX_VERSION)
+            .expect_u16(COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION)
             .expect("generated transcript version decodes");
         reader
             .expect_u16(FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION)

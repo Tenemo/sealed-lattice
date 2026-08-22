@@ -3211,11 +3211,7 @@ mod tests {
                     CompactEmittedCdhzMeasurement, measure_selected_compact_emission_cdhz,
                     measure_source_verified_compact_emission_cdhz,
                 },
-                compact_fixed_tape_domain_extension::derive_source_verified_compact_fixed_tape_domain_extension,
-                compact_fixed_tape_source_correspondence::{
-                    CompactFixedTapeGraphModel,
-                    verify_source_verified_compact_fixed_tape_correspondence,
-                },
+                compact_fixed_tape_source_correspondence::verify_source_verified_compact_fixed_tape_correspondence,
                 compact_fixed_tape_uniformity::CompactFixedTapeUniformityPremise,
                 compact_masking_kmac::derive_source_verified_compact_joint_keccak_evidence,
                 compact_proof_contract::{CompactPublicKeyProofContract, CompactWhirEpochContract},
@@ -8111,8 +8107,10 @@ mod tests {
         assert_eq!(actual_byte_census.response_commitment_root_count, 82);
         assert_eq!(actual_byte_census.internal_relation_commitment_count, 45);
         assert_eq!(
-            actual_byte_census.shared_hash_graph.total_hash_count,
-            transport_cdhz_measurement.observed_nrdx_verifier_q_v
+            actual_byte_census
+                .shared_hash_graph
+                .total_random_oracle_call_count,
+            transport_cdhz_measurement.observed_concrete_verifier_random_oracle_query_count
         );
         let emitted_size_evidence =
             derive_selected_public_key_share_emitted_size_evidence(&response_generation_output)
@@ -8168,7 +8166,9 @@ mod tests {
             response_generation_output.canonical_proof_bytes().len(),
             actual_byte_census.opened_leaf_count,
             actual_byte_census.frontier_node_count,
-            actual_byte_census.shared_hash_graph.total_hash_count,
+            actual_byte_census
+                .shared_hash_graph
+                .total_random_oracle_call_count,
             response_generation_output
                 .external_memory_usage()
                 .transaction_count(),
@@ -8709,7 +8709,7 @@ mod tests {
             source_verified_proof,
             &source_verified_measurement,
         )
-        .expect("the complete fixed-output tape graph matches the source-verified transport");
+        .expect("the complete direct round-XOF graph matches the source-verified transport");
         let initial_transition_evidence =
             derive_source_verified_compact_cfw_initial_transition_evidence(
                 source_verified_proof,
@@ -8736,7 +8736,7 @@ mod tests {
                 .expect("the equality-coordinate count fits usize"),
         );
         assert_ne!(
-            initial_transition_evidence.transcript_prefix_digest,
+            initial_transition_evidence.verifier_message_answer_prefix,
             [0_u8; Hash512::BYTE_LENGTH],
         );
         assert!(
@@ -8762,7 +8762,7 @@ mod tests {
         );
         let joint_keccak_evidence =
             derive_source_verified_compact_joint_keccak_evidence(&fixed_tape_correspondence)
-                .expect("the KMAC catalog and fixed-output SHAKE tape share one source binding");
+                .expect("the KMAC catalog and variable-width round XOFs share one source binding");
         assert_eq!(
             joint_keccak_evidence.selected_contract_source_hash,
             fixed_tape_correspondence.selected_contract_source_hash,
@@ -8776,29 +8776,23 @@ mod tests {
             fixed_tape_correspondence.canonical_public_input_binding,
         );
         assert!(!joint_keccak_evidence.fixed_keccak_joint_reduction_is_resolved());
-        let domain_extension_certificate =
-            derive_source_verified_compact_fixed_tape_domain_extension(
-                &fixed_tape_correspondence,
-                &source_verified_measurement,
-            )
-            .expect("the source-verified graph matches the ideal-QRO simple domain extender");
         let fixed_tape_uniformity =
-            CompactFixedTapeUniformityPremise::from_source_verified_domain_extension(
-                &domain_extension_certificate,
+            CompactFixedTapeUniformityPremise::from_source_verified_correspondence(
+                &fixed_tape_correspondence,
             )
-            .expect("the source-verified domain extender supplies the fixed-tape premise");
+            .expect("the source-verified direct XOF graph supplies the fixed-tape premise");
         fixed_tape_uniformity
             .validate_measurement(&source_verified_measurement)
             .expect("the fixed-tape premise remains bound to the source-verified transport");
-        let (domain_extension_loss_numerator, domain_extension_loss_denominator) =
-            domain_extension_certificate.domain_extension_loss_parts();
         println!(
-            "compact public-key fixed-tape source correspondence complete logical_round_count={} prefix_hash_count={} output_block_hash_count={} total_tape_byte_length={} maximum_output_block_count_per_round={}",
+            "compact public-key direct round-XOF source correspondence complete logical_round_count={} direct_xof_call_count={} total_xof_input_byte_length={} minimum_xof_input_byte_length_per_round={} maximum_xof_input_byte_length_per_round={} total_xof_output_byte_length={} maximum_message_byte_length_per_round={}",
             fixed_tape_correspondence.logical_round_count,
-            fixed_tape_correspondence.prefix_hash_count,
-            fixed_tape_correspondence.output_block_hash_count,
+            fixed_tape_correspondence.direct_xof_call_count,
+            fixed_tape_correspondence.total_verifier_message_input_byte_length,
+            fixed_tape_correspondence.minimum_verifier_message_input_byte_length,
+            fixed_tape_correspondence.maximum_verifier_message_input_byte_length,
             fixed_tape_correspondence.total_fixed_tape_byte_length,
-            fixed_tape_correspondence.maximum_output_block_count_per_round,
+            fixed_tape_correspondence.maximum_message_byte_length_per_round,
         );
         println!(
             "compact public-key initial CFW transition correspondence complete verifier_move_ordinal={} preceding_response_ordinal={} preceding_commitment_count={} equality_coordinate_count={} polynomial_variable_count={} maximum_total_degree={} soundness_numerator={}",
@@ -8815,27 +8809,17 @@ mod tests {
             initial_transition_evidence.lemma.soundness_numerator,
         );
         println!(
-            "compact public-key joint Keccak source correspondence complete minimum_kmac_call_count={} maximum_kmac_call_count={} fixed_tape_prefix_hash_count={} fixed_tape_output_block_hash_count={} fixed_tape_hash_count={} fixed_keccak_joint_reduction_resolved={}",
+            "compact public-key joint Keccak source correspondence complete minimum_kmac_call_count={} maximum_kmac_call_count={} verifier_message_xof_call_count={} total_verifier_message_input_byte_length={} minimum_verifier_message_input_byte_length={} maximum_verifier_message_input_byte_length={} minimum_verifier_message_output_bit_length={} maximum_verifier_message_output_bit_length={} total_verifier_message_output_byte_length={} fixed_keccak_joint_reduction_resolved={}",
             joint_keccak_evidence.minimum_kmac_call_count,
             joint_keccak_evidence.maximum_kmac_call_count,
-            joint_keccak_evidence.fixed_tape_prefix_hash_count,
-            joint_keccak_evidence.fixed_tape_output_block_hash_count,
-            joint_keccak_evidence.fixed_tape_hash_count,
+            joint_keccak_evidence.verifier_message_xof_call_count,
+            joint_keccak_evidence.total_verifier_message_input_byte_length,
+            joint_keccak_evidence.minimum_verifier_message_input_byte_length,
+            joint_keccak_evidence.maximum_verifier_message_input_byte_length,
+            joint_keccak_evidence.minimum_verifier_message_output_bit_length,
+            joint_keccak_evidence.maximum_verifier_message_output_bit_length,
+            joint_keccak_evidence.total_verifier_message_output_byte_length,
             joint_keccak_evidence.fixed_keccak_joint_reduction_is_resolved(),
-        );
-        println!(
-            "compact public-key ideal-QRO domain extension complete theorem_hop_count={} conservative_loss_coefficient={} adversarial_query_budget={} domain_extension_loss_numerator={} domain_extension_loss_denominator={} selected_second_input_count={} minimum_selected_block_preimage_byte_length={} maximum_selected_block_preimage_byte_length={} selected_fixed_register_bit_length={} total_component_output_byte_length={} discarded_component_tail_byte_length={}",
-            domain_extension_certificate.theorem_hop_count(),
-            domain_extension_certificate.conservative_loss_coefficient(),
-            domain_extension_certificate.adversarial_query_budget(),
-            domain_extension_loss_numerator,
-            domain_extension_loss_denominator,
-            domain_extension_certificate.selected_second_input_count(),
-            domain_extension_certificate.minimum_selected_block_preimage_byte_length(),
-            domain_extension_certificate.maximum_selected_block_preimage_byte_length(),
-            domain_extension_certificate.selected_fixed_register_bit_length(),
-            domain_extension_certificate.total_component_output_byte_length(),
-            domain_extension_certificate.discarded_component_tail_byte_length(),
         );
         if let Some(transport_measurement) = transport_measurement {
             assert_eq!(
@@ -8931,16 +8915,6 @@ mod tests {
             expected(CompactCfwInitialTransitionBinding::CanonicalPublicInput),
         );
 
-        let mut wrong_graph = fixed_tape_correspondence.clone();
-        wrong_graph.graph_model = CompactFixedTapeGraphModel::PredecessorLinkedBlocks;
-        assert_eq!(
-            derive_source_verified_compact_cfw_initial_transition_evidence(
-                source_verified_proof,
-                &wrong_graph,
-            ),
-            expected(CompactCfwInitialTransitionBinding::FixedTapeGraph),
-        );
-
         let mut wrong_prefix = fixed_tape_correspondence.clone();
         let initial_round = wrong_prefix
             .rounds
@@ -8949,13 +8923,13 @@ mod tests {
                     .expect("the initial verifier move ordinal fits usize"),
             )
             .expect("the selected initial verifier move has a fixed-tape round");
-        initial_round.transcript_prefix_digest[0] ^= 1;
+        initial_round.verifier_message_answer_prefix[0] ^= 1;
         assert_eq!(
             derive_source_verified_compact_cfw_initial_transition_evidence(
                 source_verified_proof,
                 &wrong_prefix,
             ),
-            expected(CompactCfwInitialTransitionBinding::InitialTranscriptPrefix),
+            expected(CompactCfwInitialTransitionBinding::InitialVerifierMessageAnswerPrefix),
         );
     }
 

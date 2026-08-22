@@ -8,10 +8,11 @@
 //! release code. Prover checkpoint cursors are canonical release state for
 //! authenticated compact-generation restart.
 //!
-//! The resulting 512-bit prefix digest feeds the fixed-width verifier-message
-//! schedule of independently indexed 512-bit blocks. The source and theorem
-//! correspondence for that simple-domain-extender graph is owned separately;
-//! this module does not equate concrete SHAKE256 with an ideal oracle.
+//! Each logical verifier move is one direct, exact-width SHAKE256 invocation
+//! over the complete canonical prefix and compiler-derived proof geometry.
+//! The source and theorem correspondence for those round-specific outputs is
+//! owned separately; this module does not equate concrete SHAKE256 with an
+//! ideal oracle.
 
 use std::mem::size_of;
 
@@ -22,15 +23,15 @@ use super::compact_proof_wire::{
 };
 use super::fixed_uniform_verifier_message::{
     DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageError,
-    derive_fixed_uniform_verifier_message,
+    decode_fixed_uniform_verifier_message_from_xof,
 };
 use crate::foundation::{
     CanonicalItem, Hash512, StreamingFoundationHashError, StreamingFoundationTupleHash512,
 };
 
-pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN: &str =
-    "sealed-lattice/proof/compact-fiat-shamir-prefix/v1";
-pub(crate) const COMPACT_FIAT_SHAMIR_PREFIX_VERSION: u16 = 1;
+pub(crate) const COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_DOMAIN: &str =
+    "sealed-lattice/proof/compact-fiat-shamir-verifier-message/v2";
+pub(crate) const COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION: u16 = 2;
 const COMMITMENT_PREFIX_ENTRY_BYTE_LENGTH: usize =
     size_of::<u32>() + Hash512::BYTE_LENGTH + COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH;
 const COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_MAGIC: [u8; 8] = *b"SLCTCP01";
@@ -55,7 +56,7 @@ const COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_VERSION: u16 = 1;
 
 pub(crate) const fn compact_transcript_binding_domains() -> [&'static str; 4] {
     [
-        COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN,
+        COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_DOMAIN,
         COMPACT_TRANSCRIPT_CHECKPOINT_CURSOR_DIGEST_DOMAIN,
         COMPACT_TRANSCRIPT_CHECKPOINT_PUBLIC_INPUT_DIGEST_DOMAIN,
         COMPACT_PROOF_WIRE_GEOMETRY_DIGEST_DOMAIN,
@@ -102,8 +103,8 @@ pub(crate) fn compact_vector_commitment_oracle_identifier(
         .ok_or(CompactTranscriptError::LengthOverflow)
 }
 
-/// Exact raw payload absorbed by the round-prefix hash.
-pub(crate) fn compact_fiat_shamir_prefix_payload_byte_length(
+/// Exact raw payload absorbed by one direct verifier-message XOF call.
+pub(crate) fn compact_fiat_shamir_verifier_message_payload_byte_length(
     canonical_public_input_byte_length: usize,
     prefix_response_count: usize,
 ) -> Result<usize, CompactTranscriptError> {
@@ -120,7 +121,7 @@ pub(crate) fn compact_fiat_shamir_prefix_payload_byte_length(
         .ok_or(CompactTranscriptError::LengthOverflow)
 }
 
-pub(crate) fn compact_fiat_shamir_round_prefix_digest(
+pub(crate) fn compact_fiat_shamir_round_verifier_message_answer_prefix(
     geometry: &CompactProofWireGeometry,
     decoded_proof: &DecodedCompactProofWire,
     canonical_proof_bytes: &[u8],
@@ -128,6 +129,58 @@ pub(crate) fn compact_fiat_shamir_round_prefix_digest(
     canonical_public_input_bytes: &[u8],
     logical_verifier_move_ordinal: u32,
 ) -> Result<Hash512, CompactTranscriptError> {
+    compact_fiat_shamir_verifier_message_hasher(
+        geometry,
+        decoded_proof,
+        canonical_proof_bytes,
+        decoded_public_input,
+        canonical_public_input_bytes,
+        logical_verifier_move_ordinal,
+    )?
+    .finalize()
+    .map_err(Into::into)
+}
+
+#[cfg(test)]
+pub(super) fn materialize_compact_fiat_shamir_verifier_message(
+    geometry: &CompactProofWireGeometry,
+    decoded_proof: &DecodedCompactProofWire,
+    canonical_proof_bytes: &[u8],
+    decoded_public_input: &DecodedCompactPublicInput,
+    canonical_public_input_bytes: &[u8],
+    logical_verifier_move_ordinal: u32,
+) -> Result<Vec<u8>, CompactTranscriptError> {
+    let response_index = usize::try_from(logical_verifier_move_ordinal)
+        .map_err(|_| CompactTranscriptError::LengthOverflow)?;
+    let output_byte_length = geometry
+        .responses()
+        .get(response_index)
+        .ok_or(CompactTranscriptError::InvalidGeometry)?
+        .verifier_message_geometry()
+        .exact_message_byte_length()?;
+    let hasher = compact_fiat_shamir_verifier_message_hasher(
+        geometry,
+        decoded_proof,
+        canonical_proof_bytes,
+        decoded_public_input,
+        canonical_public_input_bytes,
+        logical_verifier_move_ordinal,
+    )?;
+    let mut reader = hasher.finalize_bounded_xof(output_byte_length)?;
+    let mut output = vec![0_u8; output_byte_length];
+    reader.read(&mut output)?;
+    reader.finish()?;
+    Ok(output)
+}
+
+fn compact_fiat_shamir_verifier_message_hasher(
+    geometry: &CompactProofWireGeometry,
+    decoded_proof: &DecodedCompactProofWire,
+    canonical_proof_bytes: &[u8],
+    decoded_public_input: &DecodedCompactPublicInput,
+    canonical_public_input_bytes: &[u8],
+    logical_verifier_move_ordinal: u32,
+) -> Result<StreamingFoundationTupleHash512, CompactTranscriptError> {
     if decoded_proof.canonical_byte_length() != canonical_proof_bytes.len()
         || decoded_public_input.canonical_byte_length() != canonical_public_input_bytes.len()
         || decoded_proof.responses().len() != geometry.responses().len()
@@ -148,7 +201,7 @@ pub(crate) fn compact_fiat_shamir_round_prefix_digest(
         return Err(CompactTranscriptError::InvalidGeometry);
     }
 
-    compact_fiat_shamir_prefix_digest_from_entries(
+    compact_fiat_shamir_verifier_message_hasher_from_entries(
         geometry,
         canonical_public_input_bytes,
         logical_verifier_move_ordinal,
@@ -170,12 +223,12 @@ struct CompactTranscriptCommitmentEntry {
     fiat_shamir_round_salt: [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
 }
 
-fn compact_fiat_shamir_prefix_digest_from_entries(
+fn compact_fiat_shamir_verifier_message_hasher_from_entries(
     geometry: &CompactProofWireGeometry,
     canonical_public_input_bytes: &[u8],
     logical_verifier_move_ordinal: u32,
     entries: impl IntoIterator<Item = Result<CompactTranscriptCommitmentEntry, CompactTranscriptError>>,
-) -> Result<Hash512, CompactTranscriptError> {
+) -> Result<StreamingFoundationTupleHash512, CompactTranscriptError> {
     let current_response_index = usize::try_from(logical_verifier_move_ordinal)
         .map_err(|_| CompactTranscriptError::LengthOverflow)?;
     let prefix_response_count = current_response_index
@@ -189,21 +242,26 @@ fn compact_fiat_shamir_prefix_digest_from_entries(
     {
         return Err(CompactTranscriptError::InvalidGeometry);
     }
-    let payload_byte_length = compact_fiat_shamir_prefix_payload_byte_length(
+    let response_geometry = geometry
+        .responses()
+        .get(current_response_index)
+        .ok_or(CompactTranscriptError::InvalidGeometry)?;
+    let output_byte_length = response_geometry
+        .verifier_message_geometry()
+        .exact_message_byte_length()?;
+    let payload_byte_length = compact_fiat_shamir_verifier_message_payload_byte_length(
         canonical_public_input_bytes.len(),
         prefix_response_count,
     )?;
+    let prefix_items = compact_fiat_shamir_verifier_message_prefix_items(
+        geometry,
+        logical_verifier_move_ordinal,
+        prefix_response_count,
+        output_byte_length,
+    )?;
     let mut hasher = StreamingFoundationTupleHash512::new_variable_bytes(
-        COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN,
-        &[
-            CanonicalItem::unsigned16(COMPACT_FIAT_SHAMIR_PREFIX_VERSION),
-            CanonicalItem::unsigned16(COMPACT_PACKING_FACTOR),
-            CanonicalItem::unsigned32(logical_verifier_move_ordinal),
-            CanonicalItem::unsigned32(
-                u32::try_from(prefix_response_count)
-                    .map_err(|_| CompactTranscriptError::LengthOverflow)?,
-            ),
-        ],
+        COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_DOMAIN,
+        &prefix_items,
         payload_byte_length,
     )?;
     hasher.absorb(
@@ -232,7 +290,71 @@ fn compact_fiat_shamir_prefix_digest_from_entries(
     if absorbed_entry_count != prefix_response_count {
         return Err(CompactTranscriptError::InvalidGeometry);
     }
-    hasher.finalize().map_err(Into::into)
+    Ok(hasher)
+}
+
+fn compact_fiat_shamir_verifier_message_prefix_items(
+    geometry: &CompactProofWireGeometry,
+    logical_verifier_move_ordinal: u32,
+    prefix_response_count: usize,
+    output_byte_length: usize,
+) -> Result<Vec<CanonicalItem>, CompactTranscriptError> {
+    let geometry_item_count =
+        geometry
+            .responses()
+            .iter()
+            .try_fold(6_usize, |item_count, response| {
+                response
+                    .verifier_message_geometry()
+                    .distinct_query_groups()
+                    .len()
+                    .checked_mul(2)
+                    .and_then(|query_item_count| query_item_count.checked_add(16))
+                    .and_then(|response_item_count| item_count.checked_add(response_item_count))
+                    .ok_or(CompactTranscriptError::LengthOverflow)
+            })?;
+    let mut items = Vec::new();
+    items
+        .try_reserve_exact(geometry_item_count)
+        .map_err(|_| CompactTranscriptError::AllocationLimitExceeded)?;
+    items.push(CanonicalItem::unsigned16(
+        COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION,
+    ));
+    items.push(CanonicalItem::unsigned16(COMPACT_PACKING_FACTOR));
+    items.push(CanonicalItem::unsigned32(logical_verifier_move_ordinal));
+    items.push(CanonicalItem::unsigned32(
+        u32::try_from(prefix_response_count).map_err(|_| CompactTranscriptError::LengthOverflow)?,
+    ));
+    items.push(CanonicalItem::unsigned64(
+        u64::try_from(output_byte_length).map_err(|_| CompactTranscriptError::LengthOverflow)?,
+    ));
+    items.push(CanonicalItem::unsigned32(
+        u32::try_from(geometry.responses().len())
+            .map_err(|_| CompactTranscriptError::LengthOverflow)?,
+    ));
+    for response in geometry.responses() {
+        items.push(CanonicalItem::unsigned32(response.ordinal()));
+        for count in [
+            response.minimum_queried_base_field_element_count(),
+            response.maximum_queried_base_field_element_count(),
+            response.minimum_queried_extension_field_element_count(),
+            response.maximum_queried_extension_field_element_count(),
+            response.minimum_queried_leaf_count(),
+            response.maximum_queried_leaf_count(),
+            response.maximum_frontier_node_count(),
+        ] {
+            items.push(CanonicalItem::unsigned64(count));
+        }
+        items.extend(
+            response
+                .verifier_message_geometry()
+                .canonical_geometry_items()?,
+        );
+    }
+    if items.len() != geometry_item_count {
+        return Err(CompactTranscriptError::InvalidGeometry);
+    }
+    Ok(items)
 }
 
 /// Prover-side owner of the exact commitment prefix used by Fiat-Shamir.
@@ -705,16 +827,18 @@ impl CompactProverTranscript {
             .responses()
             .get(response_index)
             .ok_or(CompactTranscriptError::InvalidGeometry)?;
-        let prefix_digest = compact_fiat_shamir_prefix_digest_from_entries(
+        let output_byte_length = response_geometry
+            .verifier_message_geometry()
+            .exact_message_byte_length()?;
+        let verifier_message_hasher = compact_fiat_shamir_verifier_message_hasher_from_entries(
             &self.geometry,
             &self.canonical_public_input_bytes,
             logical_verifier_move_ordinal,
             self.commitment_entries.iter().copied().map(Ok),
         )?;
-        let verifier_message = derive_fixed_uniform_verifier_message(
-            prefix_digest,
-            logical_verifier_move_ordinal,
+        let verifier_message = decode_fixed_uniform_verifier_message_from_xof(
             response_geometry.verifier_message_geometry(),
+            verifier_message_hasher.finalize_bounded_xof(output_byte_length)?,
         )?;
         self.verifier_message_pending = false;
         Ok(verifier_message)
@@ -792,7 +916,10 @@ pub(crate) fn derive_compact_fiat_shamir_verifier_message(
         .responses()
         .get(current_response_index)
         .ok_or(CompactTranscriptError::InvalidGeometry)?;
-    let prefix_digest = compact_fiat_shamir_round_prefix_digest(
+    let output_byte_length = response_geometry
+        .verifier_message_geometry()
+        .exact_message_byte_length()?;
+    let verifier_message_hasher = compact_fiat_shamir_verifier_message_hasher(
         geometry,
         decoded_proof,
         canonical_proof_bytes,
@@ -800,10 +927,9 @@ pub(crate) fn derive_compact_fiat_shamir_verifier_message(
         canonical_public_input_bytes,
         logical_verifier_move_ordinal,
     )?;
-    derive_fixed_uniform_verifier_message(
-        prefix_digest,
-        logical_verifier_move_ordinal,
+    decode_fixed_uniform_verifier_message_from_xof(
         response_geometry.verifier_message_geometry(),
+        verifier_message_hasher.finalize_bounded_xof(output_byte_length)?,
     )
     .map_err(Into::into)
 }
@@ -1296,11 +1422,11 @@ mod tests {
             Err(CompactTranscriptError::LengthOverflow)
         );
         assert_eq!(
-            compact_fiat_shamir_prefix_payload_byte_length(public_bytes.len(), 2),
+            compact_fiat_shamir_verifier_message_payload_byte_length(public_bytes.len(), 2),
             Ok(size_of::<u64>() + public_bytes.len() + 2 * COMMITMENT_PREFIX_ENTRY_BYTE_LENGTH)
         );
         assert_eq!(
-            compact_fiat_shamir_prefix_payload_byte_length(public_bytes.len(), 0),
+            compact_fiat_shamir_verifier_message_payload_byte_length(public_bytes.len(), 0),
             Err(CompactTranscriptError::InvalidGeometry)
         );
         assert_eq!(

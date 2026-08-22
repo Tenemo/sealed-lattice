@@ -18,9 +18,7 @@ use sha3::{
 use tiny_keccak::{Hasher as TinyKeccakHasher, Kmac};
 
 use super::*;
-use crate::bgv::proof_suite::compact_fixed_tape_source_correspondence::{
-    CompactFixedTapeGraphModel, CompactFixedTapeSourceCorrespondence,
-};
+use crate::bgv::proof_suite::compact_fixed_tape_source_correspondence::CompactFixedTapeSourceCorrespondence;
 use crate::hashing::{framed_hash512_preimage, hash_framed_parts_512};
 
 const ACMT25_SPONGE_THEOREM_IDENTIFIER: &str = "acmt25-sponge-theorem-7.22";
@@ -34,7 +32,11 @@ enum CompactJointKeccakInterfaceField {
     CapacityBitLength,
     BytepadWidth,
     ShakeDelimitedSuffix,
-    ShakeFixedOutputBitLength,
+    ShakeFixedHashOutputBitLength,
+    FiatShamirVerifierMessageXofCallCount,
+    MinimumFiatShamirVerifierMessageOutputBitLength,
+    MaximumFiatShamirVerifierMessageOutputBitLength,
+    TotalFiatShamirVerifierMessageOutputByteLength,
     CshakeDelimitedSuffix,
     KmacFunctionName,
     KmacFixedOutputMode,
@@ -78,7 +80,6 @@ enum CompactJointKeccakEvidenceError {
 pub(crate) enum CompactSourceVerifiedJointKeccakError {
     ProductionDerivation,
     ContractSourceHash,
-    GraphModel,
     OutputWidth,
     HashCensus,
 }
@@ -164,7 +165,7 @@ struct CompactJointKeccakEvidenceCertificate {
 }
 
 /// Test-only join between the production-derived KMAC catalog and one complete
-/// source-verified fixed-output SHAKE256 tape. The retained bindings prevent a
+/// source-verified direct verifier-message SHAKE256 graph. The retained bindings prevent a
 /// certificate from being transplanted to another proof or public input. This
 /// record supplies source correspondence only; its fixed-permutation reduction
 /// boundary remains unresolved.
@@ -175,9 +176,13 @@ pub(crate) struct CompactSourceVerifiedJointKeccakEvidence {
     pub(crate) canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
     pub(crate) minimum_kmac_call_count: u64,
     pub(crate) maximum_kmac_call_count: u64,
-    pub(crate) fixed_tape_prefix_hash_count: u64,
-    pub(crate) fixed_tape_output_block_hash_count: u64,
-    pub(crate) fixed_tape_hash_count: u64,
+    pub(crate) verifier_message_xof_call_count: u64,
+    pub(crate) total_verifier_message_input_byte_length: u64,
+    pub(crate) minimum_verifier_message_input_byte_length: u64,
+    pub(crate) maximum_verifier_message_input_byte_length: u64,
+    pub(crate) minimum_verifier_message_output_bit_length: u64,
+    pub(crate) maximum_verifier_message_output_bit_length: u64,
+    pub(crate) total_verifier_message_output_byte_length: u64,
     fixed_keccak_joint_reduction_boundary: CompactFixedKeccakJointReductionBoundary,
 }
 
@@ -191,42 +196,88 @@ impl CompactSourceVerifiedJointKeccakEvidence {
 }
 
 pub(crate) fn derive_source_verified_compact_joint_keccak_evidence(
-    fixed_tape: &CompactFixedTapeSourceCorrespondence,
+    correspondence: &CompactFixedTapeSourceCorrespondence,
 ) -> Result<CompactSourceVerifiedJointKeccakEvidence, CompactSourceVerifiedJointKeccakError> {
     let certificate = derive_selected_joint_keccak_evidence_certificate()
         .map_err(|_| CompactSourceVerifiedJointKeccakError::ProductionDerivation)?;
-    if fixed_tape.selected_contract_source_hash != certificate.selected_contract_source_hash {
+    if correspondence.selected_contract_source_hash != certificate.selected_contract_source_hash {
         return Err(CompactSourceVerifiedJointKeccakError::ContractSourceHash);
     }
-    if fixed_tape.graph_model != CompactFixedTapeGraphModel::TranscriptPrefixThenIndependentBlocks {
-        return Err(CompactSourceVerifiedJointKeccakError::GraphModel);
-    }
-    if u32::from(fixed_tape.fixed_hash_output_bit_length)
-        != certificate.interface.shake_fixed_output_bit_length
-    {
-        return Err(CompactSourceVerifiedJointKeccakError::OutputWidth);
-    }
-    let fixed_tape_hash_count = fixed_tape
-        .prefix_hash_count
-        .checked_add(fixed_tape.output_block_hash_count)
-        .ok_or(CompactSourceVerifiedJointKeccakError::HashCensus)?;
-    if fixed_tape.logical_round_count == 0
-        || fixed_tape.prefix_hash_count != fixed_tape.logical_round_count
-        || fixed_tape.output_block_hash_count == 0
-        || fixed_tape.canonical_proof_binding == [0_u8; Hash512::BYTE_LENGTH]
-        || fixed_tape.canonical_public_input_binding == [0_u8; Hash512::BYTE_LENGTH]
+    let minimum_input_byte_length = correspondence
+        .rounds
+        .iter()
+        .map(|round| round.input_byte_length)
+        .min()
+        .ok_or(CompactSourceVerifiedJointKeccakError::OutputWidth)?;
+    let maximum_input_byte_length = correspondence
+        .rounds
+        .iter()
+        .map(|round| round.input_byte_length)
+        .max()
+        .ok_or(CompactSourceVerifiedJointKeccakError::OutputWidth)?;
+    let minimum_output_byte_length = correspondence
+        .rounds
+        .iter()
+        .map(|round| round.message_byte_length)
+        .min()
+        .ok_or(CompactSourceVerifiedJointKeccakError::OutputWidth)?;
+    let maximum_output_byte_length = correspondence
+        .rounds
+        .iter()
+        .map(|round| round.message_byte_length)
+        .max()
+        .ok_or(CompactSourceVerifiedJointKeccakError::OutputWidth)?;
+    let minimum_output_bit_length = minimum_output_byte_length
+        .checked_mul(u64::from(u8::BITS))
+        .ok_or(CompactSourceVerifiedJointKeccakError::OutputWidth)?;
+    let maximum_output_bit_length = maximum_output_byte_length
+        .checked_mul(u64::from(u8::BITS))
+        .ok_or(CompactSourceVerifiedJointKeccakError::OutputWidth)?;
+    if correspondence.logical_round_count == 0
+        || correspondence.direct_xof_call_count != correspondence.logical_round_count
+        || correspondence.direct_xof_call_count
+            != certificate
+                .interface
+                .fiat_shamir_verifier_message_xof_call_count
+        || minimum_output_bit_length
+            != certificate
+                .interface
+                .minimum_fiat_shamir_verifier_message_output_bit_length
+        || maximum_output_bit_length
+            != certificate
+                .interface
+                .maximum_fiat_shamir_verifier_message_output_bit_length
+        || correspondence.total_fixed_tape_byte_length
+            != certificate
+                .interface
+                .total_fiat_shamir_verifier_message_output_byte_length
+        || minimum_input_byte_length != correspondence.minimum_verifier_message_input_byte_length
+        || maximum_input_byte_length != correspondence.maximum_verifier_message_input_byte_length
+        || correspondence
+            .rounds
+            .iter()
+            .try_fold(0_u64, |total, round| {
+                total.checked_add(round.input_byte_length)
+            })
+            != Some(correspondence.total_verifier_message_input_byte_length)
+        || maximum_output_byte_length != correspondence.maximum_message_byte_length_per_round
     {
         return Err(CompactSourceVerifiedJointKeccakError::HashCensus);
     }
     Ok(CompactSourceVerifiedJointKeccakEvidence {
         selected_contract_source_hash: certificate.selected_contract_source_hash,
-        canonical_proof_binding: fixed_tape.canonical_proof_binding,
-        canonical_public_input_binding: fixed_tape.canonical_public_input_binding,
+        canonical_proof_binding: correspondence.canonical_proof_binding,
+        canonical_public_input_binding: correspondence.canonical_public_input_binding,
         minimum_kmac_call_count: certificate.interface.minimum_kmac_call_count,
         maximum_kmac_call_count: certificate.interface.maximum_kmac_call_count,
-        fixed_tape_prefix_hash_count: fixed_tape.prefix_hash_count,
-        fixed_tape_output_block_hash_count: fixed_tape.output_block_hash_count,
-        fixed_tape_hash_count,
+        verifier_message_xof_call_count: correspondence.direct_xof_call_count,
+        total_verifier_message_input_byte_length: correspondence
+            .total_verifier_message_input_byte_length,
+        minimum_verifier_message_input_byte_length: minimum_input_byte_length,
+        maximum_verifier_message_input_byte_length: maximum_input_byte_length,
+        minimum_verifier_message_output_bit_length: minimum_output_bit_length,
+        maximum_verifier_message_output_bit_length: maximum_output_bit_length,
+        total_verifier_message_output_byte_length: correspondence.total_fixed_tape_byte_length,
         fixed_keccak_joint_reduction_boundary:
             CompactFixedKeccakJointReductionBoundary::UnresolvedJointFixedPermutationAdvantage,
     })
@@ -329,9 +380,40 @@ impl CompactJointKeccakEvidenceCertificate {
                 CompactJointKeccakInterfaceField::ShakeDelimitedSuffix,
             ),
             (
-                self.interface.shake_fixed_output_bit_length
-                    == expected.interface.shake_fixed_output_bit_length,
-                CompactJointKeccakInterfaceField::ShakeFixedOutputBitLength,
+                self.interface.shake_fixed_hash_output_bit_length
+                    == expected.interface.shake_fixed_hash_output_bit_length,
+                CompactJointKeccakInterfaceField::ShakeFixedHashOutputBitLength,
+            ),
+            (
+                self.interface.fiat_shamir_verifier_message_xof_call_count
+                    == expected
+                        .interface
+                        .fiat_shamir_verifier_message_xof_call_count,
+                CompactJointKeccakInterfaceField::FiatShamirVerifierMessageXofCallCount,
+            ),
+            (
+                self.interface
+                    .minimum_fiat_shamir_verifier_message_output_bit_length
+                    == expected
+                        .interface
+                        .minimum_fiat_shamir_verifier_message_output_bit_length,
+                CompactJointKeccakInterfaceField::MinimumFiatShamirVerifierMessageOutputBitLength,
+            ),
+            (
+                self.interface
+                    .maximum_fiat_shamir_verifier_message_output_bit_length
+                    == expected
+                        .interface
+                        .maximum_fiat_shamir_verifier_message_output_bit_length,
+                CompactJointKeccakInterfaceField::MaximumFiatShamirVerifierMessageOutputBitLength,
+            ),
+            (
+                self.interface
+                    .total_fiat_shamir_verifier_message_output_byte_length
+                    == expected
+                        .interface
+                        .total_fiat_shamir_verifier_message_output_byte_length,
+                CompactJointKeccakInterfaceField::TotalFiatShamirVerifierMessageOutputByteLength,
             ),
             (
                 self.interface.cshake_delimited_suffix
@@ -689,7 +771,7 @@ fn hostile_joint_interface_mutations_report_the_first_divergent_binding() {
         |candidate| candidate.selected_contract_source_hash = Hash512::from_bytes([0xa5; 64]),
     );
 
-    let interface_mutations: [CompactJointKeccakInterfaceMutation; 14] = [
+    let interface_mutations: [CompactJointKeccakInterfaceMutation; 18] = [
         (
             CompactJointKeccakInterfaceField::KeccakStateBitLength,
             |value| value.keccak_state_bit_length -= 1,
@@ -713,8 +795,24 @@ fn hostile_joint_interface_mutations_report_the_first_divergent_binding() {
             |value| value.shake_delimited_suffix ^= 1,
         ),
         (
-            CompactJointKeccakInterfaceField::ShakeFixedOutputBitLength,
-            |value| value.shake_fixed_output_bit_length -= 1,
+            CompactJointKeccakInterfaceField::ShakeFixedHashOutputBitLength,
+            |value| value.shake_fixed_hash_output_bit_length -= 1,
+        ),
+        (
+            CompactJointKeccakInterfaceField::FiatShamirVerifierMessageXofCallCount,
+            |value| value.fiat_shamir_verifier_message_xof_call_count -= 1,
+        ),
+        (
+            CompactJointKeccakInterfaceField::MinimumFiatShamirVerifierMessageOutputBitLength,
+            |value| value.minimum_fiat_shamir_verifier_message_output_bit_length -= 1,
+        ),
+        (
+            CompactJointKeccakInterfaceField::MaximumFiatShamirVerifierMessageOutputBitLength,
+            |value| value.maximum_fiat_shamir_verifier_message_output_bit_length -= 1,
+        ),
+        (
+            CompactJointKeccakInterfaceField::TotalFiatShamirVerifierMessageOutputByteLength,
+            |value| value.total_fiat_shamir_verifier_message_output_byte_length -= 1,
         ),
         (
             CompactJointKeccakInterfaceField::CshakeDelimitedSuffix,

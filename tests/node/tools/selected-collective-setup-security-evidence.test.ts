@@ -153,7 +153,7 @@ describe('Selected collective-setup security evidence', () => {
         expect(qromImport).toMatchObject({
             observedStatus: 'unresolved',
             requiredClosurePredicate:
-                'singleFixed512BitQroRestrictionCorrespondenceAndProductionRows',
+                'directRoundXofQromCorrespondenceAndProductionRows',
         });
         const qromMissingEvidence = qromImport?.missingEvidence;
         expect(typeof qromMissingEvidence).toBe('string');
@@ -161,10 +161,13 @@ describe('Selected collective-setup security evidence', () => {
             throw new Error('Expected QROM graph missing evidence.');
         }
         expect(qromMissingEvidence).toContain(
-            'One unselected guarded native compact proof',
+            'direct exact-width round-XOF graph',
         );
         expect(qromMissingEvidence).toContain(
             'no selected release-WebAssembly proof',
+        );
+        expect(qromMissingEvidence).toContain(
+            'combined fixed SHAKE256/KMAC256 Keccak interface',
         );
         expect(qromImport?.ownerSourcePaths).toEqual([]);
         const qromCompositionImport = constructionEvidenceImports
@@ -182,10 +185,10 @@ describe('Selected collective-setup security evidence', () => {
             throw new Error('Expected QROM composition missing evidence.');
         }
         expect(qromCompositionMissingEvidence).toContain(
-            'One unselected guarded native candidate',
+            'One guarded native reference proof',
         );
         expect(qromCompositionMissingEvidence).toContain(
-            'no selected proof bytes exist',
+            'no selected proof bytes',
         );
         expect(qromCompositionImport?.ownerSourcePaths).toEqual([]);
         const quantumRandomOracleLedger = requireArray(record.residualLedgers)

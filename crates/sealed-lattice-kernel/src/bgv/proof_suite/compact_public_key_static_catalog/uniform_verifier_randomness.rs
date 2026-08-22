@@ -8,7 +8,7 @@
 //! The static construction requires exhaustion to reject. Conditional on
 //! acceptance, its fixed-slot rejection maps give every canonical field value
 //! and every sorted distinct-query set the same number of raw-message
-//! preimages. The production decoder and fixed SHAKE256 schedule own the
+//! preimages. The production decoder and direct SHAKE256 XOF schedule own the
 //! concrete geometry used by this independent ledger.
 
 use num_bigint::BigUint;
@@ -89,7 +89,7 @@ struct UniformVerifierMoveLedger {
     fixed_candidate_slot_count: u64,
     uniform_message_byte_length: u64,
     uniform_message_bit_length: u64,
-    concrete_challenge_stream_hash_query_count: u64,
+    direct_challenge_stream_xof_call_count: u64,
     field_sampling_exhaustion_security_bit_floor: u64,
 }
 
@@ -99,7 +99,7 @@ pub(super) struct PackingUniformVerifierRandomness {
     total_fixed_candidate_slot_count: u64,
     total_uniform_message_byte_length: u64,
     minimum_uniform_verifier_message_bit_length: u64,
-    concrete_challenge_stream_hash_query_count: u64,
+    direct_challenge_stream_xof_call_count: u64,
     field_sampling_exhaustion_security_bit_floor_per_attempt: u64,
 }
 
@@ -162,8 +162,8 @@ fn derive_move(
     let uniform_message_byte_length = fixed_message_geometry
         .exact_message_byte_length_u64()
         .map_err(map_production_message_error)?;
-    let concrete_challenge_stream_hash_query_count = fixed_message_geometry
-        .concrete_hash_query_count()
+    let direct_challenge_stream_xof_call_count = fixed_message_geometry
+        .concrete_xof_call_count()
         .map_err(map_production_message_error)?;
 
     let extension_rejection_formula = if extension_output_count == 0 {
@@ -206,7 +206,7 @@ fn derive_move(
             uniform_message_byte_length,
             u64::from(u8::BITS),
         ])?,
-        concrete_challenge_stream_hash_query_count,
+        direct_challenge_stream_xof_call_count,
         field_sampling_exhaustion_security_bit_floor,
     })
 }
@@ -226,12 +226,9 @@ fn derive_catalog(
         .map(|move_ledger| move_ledger.uniform_message_bit_length)
         .min()
         .ok_or(CompactStaticCatalogError::InvalidGeometry)?;
-    let concrete_challenge_stream_hash_query_count =
+    let direct_challenge_stream_xof_call_count =
         moves.iter().try_fold(0_u64, |count, move_ledger| {
-            checked_add(
-                count,
-                move_ledger.concrete_challenge_stream_hash_query_count,
-            )
+            checked_add(count, move_ledger.direct_challenge_stream_xof_call_count)
         })?;
     let field_sampling_move_count = moves
         .iter()
@@ -252,7 +249,7 @@ fn derive_catalog(
         total_fixed_candidate_slot_count,
         total_uniform_message_byte_length,
         minimum_uniform_verifier_message_bit_length,
-        concrete_challenge_stream_hash_query_count,
+        direct_challenge_stream_xof_call_count,
         field_sampling_exhaustion_security_bit_floor_per_attempt,
     })
 }
@@ -361,7 +358,7 @@ mod tests {
     struct UniformRandomnessSnapshot {
         total_fixed_candidate_slot_count: u64,
         total_uniform_message_byte_length: u64,
-        concrete_challenge_stream_hash_query_count: u64,
+        direct_challenge_stream_xof_call_count: u64,
         field_sampling_exhaustion_security_bit_floor_per_attempt: u64,
     }
 
@@ -381,7 +378,10 @@ mod tests {
         );
         assert!(randomness.total_fixed_candidate_slot_count > 0);
         assert!(randomness.total_uniform_message_byte_length > 0);
-        assert!(randomness.concrete_challenge_stream_hash_query_count > 0);
+        assert_eq!(
+            randomness.direct_challenge_stream_xof_call_count,
+            u64::try_from(randomness.moves.len()).expect("move count fits u64"),
+        );
         assert!(randomness.field_sampling_exhaustion_security_bit_floor_per_attempt >= 4_000);
         assert_eq!(
             UniformRandomnessSnapshot {
@@ -391,9 +391,9 @@ mod tests {
                 total_uniform_message_byte_length: selected
                     .uniform_verifier_randomness
                     .total_uniform_message_byte_length,
-                concrete_challenge_stream_hash_query_count: selected
+                direct_challenge_stream_xof_call_count: selected
                     .uniform_verifier_randomness
-                    .concrete_challenge_stream_hash_query_count,
+                    .direct_challenge_stream_xof_call_count,
                 field_sampling_exhaustion_security_bit_floor_per_attempt: selected
                     .uniform_verifier_randomness
                     .field_sampling_exhaustion_security_bit_floor_per_attempt,
@@ -401,7 +401,7 @@ mod tests {
             UniformRandomnessSnapshot {
                 total_fixed_candidate_slot_count: 1_339_520,
                 total_uniform_message_byte_length: 11_612_160,
-                concrete_challenge_stream_hash_query_count: 181_440,
+                direct_challenge_stream_xof_call_count: 82,
                 field_sampling_exhaustion_security_bit_floor_per_attempt: 4_088,
             }
         );

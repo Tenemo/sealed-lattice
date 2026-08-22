@@ -683,16 +683,16 @@ const buildConstructionEvidenceImports = (): JsonValue => [
         requiredClosurePredicate: 'completeConstructionExtractorCorrespondence',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The test-only compact semantic owner executes the selected factor-one chronology and derives its relaxed round-by-round error theorem, but no decoded-proof-to-semantic statement, prefix, or matrix adapter and no accepted suite-bound release proof with production theorem correspondence exist. One unselected guarded native public-key candidate exists, but it cannot satisfy this import. Appendix A.1 remains test-only and unavailable without the fixed-tape shared-QRO premise.',
+            'The compact reference family has one guarded native exact proof, independent canonical transport-to-statement, source, and matrix correspondence, and a source-bound interactive initial-transition lemma. It still lacks a complete extractor for every accepting emitted proof, a selected suite-bound release-WebAssembly proof, the remaining family correspondences, and noninteractive composition.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[1],
         ownerSourcePaths: [],
         requiredClosurePredicate:
-            'singleFixed512BitQroRestrictionCorrespondenceAndProductionRows',
+            'directRoundXofQromCorrespondenceAndProductionRows',
         observedStatus: 'unresolved',
         missingEvidence:
-            'One unselected guarded native compact proof instantiates the current verifier oracle graph, but no selected release-WebAssembly proof and no complete theorem-to-transcript correspondence establish the shared-QRO transform. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
+            'Independent native code reconstructs the direct exact-width round-XOF graph of the reference proof and its ideal random-function typing, but no selected release-WebAssembly proof, all-family emitted-byte theorem-to-transcript correspondence, complete Fiat--Shamir/QROM composition, or reduction for the combined fixed SHAKE256/KMAC256 Keccak interface exists.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[2],
@@ -701,7 +701,7 @@ const buildConstructionEvidenceImports = (): JsonValue => [
             'conservativePerPhysicalProofTransformAndExplicitCeremonyUnion',
         observedStatus: 'unresolved',
         missingEvidence:
-            'The test-only compact emitted-byte and Appendix A.1 owners derive qPi, qy, qV, tuple, and Merkle coordinates conditionally from one verified transport. One unselected guarded native candidate supplies decoded proof coordinates, but no selected proof bytes exist; the fixed-tape shared-QRO premise is unmintable, and setup-family or ceremony composition is absent.',
+            'The compact emitted-byte owners derive qPi, qy, qV, tuple, and Merkle coordinates conditionally from one verified transport. One guarded native reference proof supplies independently reconstructed decoded coordinates and direct round-XOF inputs, but no selected proof bytes, complete per-proof Fiat--Shamir/QROM transform, setup-family union, or ceremony composition exists.',
     },
     {
         identifier: exactConstructionEvidenceImportIdentifiers[3],
@@ -948,7 +948,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['canonicalHashBinding'],
         advantageExpression: 'unresolved_common_construction_knowledge_error',
         statement:
-            'The test-only compact semantic owner executes the selected chronology and derives its relaxed round-by-round error theorem. A decoded-proof-to-semantic statement, prefix, and matrix adapter, one production compact proof, the fixed-tape shared-QRO premise, and noninteractive composition remain absent.',
+            'The compact reference family has one guarded native exact proof, independent canonical transport-to-statement, source, and matrix correspondence, and a source-bound interactive initial-transition lemma. A complete extractor for every accepting emitted proof, a selected suite-bound release-WebAssembly proof, the remaining family correspondences, and noninteractive composition remain absent.',
     },
     {
         identifier: 'commonConstructionQromTransform',
@@ -958,7 +958,7 @@ const buildReductionDag = (): JsonValue => [
         advantageExpression:
             'unresolved_common_construction_qrom_transform_error',
         statement:
-            'One unselected guarded native compact proof instantiates the current verifier oracle graph, but no selected release-WebAssembly proof and no complete theorem-to-transcript correspondence establish its extraction terms. Fixed SHAKE256 remains an explicit domain-separated ideal-QRO assumption.',
+            'Independent native code reconstructs the direct exact-width round-XOF graph of the reference proof and its ideal random-function typing. A selected release-WebAssembly proof, all-family emitted-byte theorem-to-transcript correspondence, complete Fiat--Shamir/QROM composition, and a reduction for the combined fixed SHAKE256/KMAC256 Keccak interface remain absent.',
     },
     {
         identifier: 'commonProofQromComposition',
@@ -967,7 +967,7 @@ const buildReductionDag = (): JsonValue => [
         dependencies: ['commonConstructionQromTransform'],
         advantageExpression: 'unresolved_common_proof_qrom_composition_error',
         statement:
-            'The test-only compact emitted-byte and Appendix A.1 owners conditionally instantiate qPi, qy, qV, tuple size, proof length, and Merkle arithmetic from a verified transport. One unselected guarded native candidate supplies decoded proof coordinates, but no selected proof bytes exist; the fixed-tape shared-QRO premise is unmintable, and setup-family and ceremony composition remain absent.',
+            'The compact emitted-byte owners conditionally instantiate qPi, qy, qV, tuple size, proof length, and Merkle arithmetic from a verified transport. One guarded native reference proof supplies independently reconstructed decoded coordinates and direct round-XOF inputs. Selected proof bytes, a complete per-proof Fiat--Shamir/QROM transform, the setup-family union, and ceremony composition remain absent.',
     },
     {
         identifier: 'commonConstructionMaskingCorrespondence',

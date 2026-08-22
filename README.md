@@ -98,15 +98,22 @@ The complete ceremony is not implemented or certified.
 - **Proof system:** One native development prototype for the collective
   public-key proof passes canonical decoding, full algebraic verification,
   independent reconstruction of its public inputs, false-statement refusal, and
-  authenticated checkpoint restoration in a separate process. This covers one
-  proof family only. No production proof system is selected; the remaining proof
-  families, complete security argument, release WebAssembly path, hostile
-  corpus, and browser-lifecycle evidence remain open. The rejected previous
-  implementation cannot act as a fallback or evidence source.
+  authenticated checkpoint restoration in a separate process. Independent
+  native code also reconstructs the complete compiler-derived direct SHAKE256
+  verifier-message graph and detects domain, geometry, source, and chronology
+  mutations. This covers one proof family only and does not establish a
+  concrete SHAKE or complete Fiat--Shamir security reduction. No production
+  proof system is selected; the remaining proof families and their hostile
+  corpora, complete security argument, release WebAssembly path, and browser-
+  lifecycle evidence remain open. The rejected previous implementation cannot
+  act as a fallback or evidence source.
 - **Browser runtime and custody:** A scalar WebAssembly build, typed worker
   foundations, authenticated checkpoint primitives, and browser-storage
-  groundwork exist. Complete proof paths and lifecycle, storage, repair,
-  persistence, quota, eviction, and rollback evidence remain incomplete.
+  groundwork exist. A nonqualifying desktop Chromium diagnostic exposes
+  namespace-wide capacity scanning and incomplete physical reclamation in the
+  current storage adapter. Complete proof paths and lifecycle, incremental
+  accounting, repair, persistence, quota, eviction, and rollback evidence remain
+  incomplete.
 - **Ceremony workflow:** Setup, ballot, aggregation, evaluation, finality, and
   release are not yet connected end to end through participant-owned browser
   capabilities.

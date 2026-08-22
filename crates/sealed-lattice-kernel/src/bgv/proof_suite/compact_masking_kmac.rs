@@ -42,7 +42,7 @@ use crate::foundation::{
 const PRIVATE_SAMPLER_CANDIDATE_BYTE_LENGTH: u64 = size_of::<u64>() as u64;
 const KMAC256_ATTEMPT_IDENTIFIER_OUTPUT_BIT_LENGTH: u32 = 256;
 const KMAC256_BLOCK_OUTPUT_BIT_LENGTH: u32 = 512;
-const SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH: u32 = 512;
+const SHAKE256_FIXED_HASH_OUTPUT_BIT_LENGTH: u32 = 512;
 const KECCAK_F1600_STATE_BIT_LENGTH: u16 = 1_600;
 const KECCAK_F1600_PERMUTATION_ROUND_COUNT: u8 = 24;
 const SHAKE256_RATE_BIT_LENGTH: u16 = 1_088;
@@ -63,21 +63,22 @@ const SELECTED_KNOWN_LOSS_SECURITY_BIT_FLOOR: usize = 256;
 /// This is a symbolic assumption, not a producer assertion or a verification
 /// capability. It states that one adversary using both deployed interfaces may
 /// replace the domain-separated, keyed KMAC256 calls by the random functions
-/// named in the three qPRF hops while treating fixed SHAKE256 as the one ideal
-/// quantum random oracle used by the later transcript and Merkle reductions.
-/// Because both interfaces use Keccak-f[1600], the joint game carries one
+/// named in the three qPRF hops while treating fixed SHAKE256 as the 512-bit
+/// ideal hash interface used by commitment reductions and the typed vector of
+/// variable-width ideal XOFs used by the transcript. Because all interfaces use
+/// Keccak-f[1600], the joint game carries one
 /// additional symbolic shared-permutation advantage; domain separation does not
 /// make that advantage zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompactMaskingJointPrimitiveAssumption {
-    FixedKmac256QprfAndFixedShake256IdealQroWithSharedKeccakF1600,
+    FixedKmac256QprfAndShake256IdealHashAndRoundXofsWithSharedKeccakF1600,
 }
 
 impl CompactMaskingJointPrimitiveAssumption {
     const fn identifier(self) -> &'static str {
         match self {
-            Self::FixedKmac256QprfAndFixedShake256IdealQroWithSharedKeccakF1600 => {
-                "fixed-kmac256-qprf-and-fixed-shake256-ideal-qro-with-shared-keccak-f1600"
+            Self::FixedKmac256QprfAndShake256IdealHashAndRoundXofsWithSharedKeccakF1600 => {
+                "fixed-kmac256-qprf-and-shake256-ideal-hash-and-round-xofs-with-shared-keccak-f1600"
             }
         }
     }
@@ -98,7 +99,11 @@ struct CompactMaskingJointKeccakInterface {
     capacity_bit_length: u16,
     bytepad_width: u16,
     shake_delimited_suffix: u8,
-    shake_fixed_output_bit_length: u32,
+    shake_fixed_hash_output_bit_length: u32,
+    fiat_shamir_verifier_message_xof_call_count: u64,
+    minimum_fiat_shamir_verifier_message_output_bit_length: u64,
+    maximum_fiat_shamir_verifier_message_output_bit_length: u64,
+    total_fiat_shamir_verifier_message_output_byte_length: u64,
     cshake_delimited_suffix: u8,
     kmac_function_name: &'static [u8],
     kmac_uses_fixed_output_mode: bool,
@@ -119,7 +124,23 @@ impl CompactMaskingJointKeccakInterface {
                 == Some(self.keccak_state_bit_length)
             && self.bytepad_width == SHAKE256_RATE_BYTE_LENGTH
             && self.shake_delimited_suffix == SHAKE_DELIMITED_SUFFIX
-            && self.shake_fixed_output_bit_length == SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH
+            && self.shake_fixed_hash_output_bit_length == SHAKE256_FIXED_HASH_OUTPUT_BIT_LENGTH
+            && self.fiat_shamir_verifier_message_xof_call_count > 0
+            && self.minimum_fiat_shamir_verifier_message_output_bit_length > 0
+            && self.minimum_fiat_shamir_verifier_message_output_bit_length
+                <= self.maximum_fiat_shamir_verifier_message_output_bit_length
+            && self
+                .total_fiat_shamir_verifier_message_output_byte_length
+                .checked_mul(u64::from(u8::BITS))
+                .is_some_and(|total_output_bit_length| {
+                    self.minimum_fiat_shamir_verifier_message_output_bit_length
+                        .checked_mul(self.fiat_shamir_verifier_message_xof_call_count)
+                        .is_some_and(|minimum_total| minimum_total <= total_output_bit_length)
+                        && self
+                            .maximum_fiat_shamir_verifier_message_output_bit_length
+                            .checked_mul(self.fiat_shamir_verifier_message_xof_call_count)
+                            .is_some_and(|maximum_total| total_output_bit_length <= maximum_total)
+                })
             && self.cshake_delimited_suffix == CSHAKE_DELIMITED_SUFFIX
             && self.kmac_function_name == KMAC_FUNCTION_NAME
             && self.kmac_uses_fixed_output_mode
@@ -338,9 +359,9 @@ struct CompactMaskingKmacQuantumHybridLoss {
 /// Derivation recomputes the selected contract hash, KMAC census,
 /// authority-derived union multiplicity, exact quantum-query terms, and the
 /// 256-bit known-loss floor. The three KMAC quantum-PRF advantages remain
-/// symbolic. The release bridge names the compatible joint fixed-KMAC256 and
-/// fixed-SHAKE256 interface assumption over Keccak-f[1600], but this accounting
-/// neither proves that assumption nor grants proof-acceptance authority.
+/// symbolic. The release bridge names the compatible joint KMAC256 and SHAKE256
+/// hash-and-round-XOF interface assumption over Keccak-f[1600], but this
+/// accounting neither proves that assumption nor grants proof-acceptance authority.
 #[cfg(test)]
 pub(crate) struct CompactMaskingKmacConditionalHybridAccounting {
     selected_contract_source_hash: Hash512,
@@ -356,6 +377,10 @@ struct CompactMaskingKmacCensus {
     minimum_transported_leaf_salt_count: u64,
     maximum_transported_leaf_salt_count: u64,
     response_commitment_count: u32,
+    fiat_shamir_verifier_message_xof_call_count: u64,
+    minimum_fiat_shamir_verifier_message_output_bit_length: u64,
+    maximum_fiat_shamir_verifier_message_output_bit_length: u64,
+    total_fiat_shamir_verifier_message_output_byte_length: u64,
     call_rows: [CompactMaskingKmacCallRow; 7],
 }
 
@@ -385,7 +410,7 @@ impl CompactMaskingKmacCensus {
         ) * BigUint::from(application_multiplicity);
         let coordinate_context_collision = ExactProbabilityUpperBound::new(
             coordinate_context_collision_pair_count,
-            BigUint::one() << SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH,
+            BigUint::one() << SHAKE256_FIXED_HASH_OUTPUT_BIT_LENGTH,
         )?;
         // One canonical-witness attempt identifier enters the selected proof's
         // block frames. Authenticated resets repeat it; a changed witness needs
@@ -587,7 +612,7 @@ fn derive_selected_compact_masking_deployment_hybrid_statement()
         kmac_qprf_hop_count,
         joint_keccak_interface: derive_joint_keccak_interface(&census)?,
         joint_primitive_assumption:
-            CompactMaskingJointPrimitiveAssumption::FixedKmac256QprfAndFixedShake256IdealQroWithSharedKeccakF1600,
+            CompactMaskingJointPrimitiveAssumption::FixedKmac256QprfAndShake256IdealHashAndRoundXofsWithSharedKeccakF1600,
     };
     statement.validate(selected_contract_source_hash)?;
     Ok(statement)
@@ -633,7 +658,15 @@ fn derive_joint_keccak_interface(
         capacity_bit_length: SHAKE256_CAPACITY_BIT_LENGTH,
         bytepad_width: SHAKE256_RATE_BYTE_LENGTH,
         shake_delimited_suffix: SHAKE_DELIMITED_SUFFIX,
-        shake_fixed_output_bit_length: SHAKE256_IDEAL_QRO_OUTPUT_BIT_LENGTH,
+        shake_fixed_hash_output_bit_length: SHAKE256_FIXED_HASH_OUTPUT_BIT_LENGTH,
+        fiat_shamir_verifier_message_xof_call_count: census
+            .fiat_shamir_verifier_message_xof_call_count,
+        minimum_fiat_shamir_verifier_message_output_bit_length: census
+            .minimum_fiat_shamir_verifier_message_output_bit_length,
+        maximum_fiat_shamir_verifier_message_output_bit_length: census
+            .maximum_fiat_shamir_verifier_message_output_bit_length,
+        total_fiat_shamir_verifier_message_output_byte_length: census
+            .total_fiat_shamir_verifier_message_output_byte_length,
         cshake_delimited_suffix: CSHAKE_DELIMITED_SUFFIX,
         kmac_function_name: KMAC_FUNCTION_NAME,
         kmac_uses_fixed_output_mode: true,
@@ -697,6 +730,34 @@ fn derive_compact_masking_kmac_census(
     }
     let response_commitment_count = u32::try_from(inputs.response_merkle_geometries.len())
         .map_err(|_| CompactMaskingKmacError::ArithmeticOverflow)?;
+    let mut minimum_fiat_shamir_verifier_message_output_bit_length = None;
+    let mut maximum_fiat_shamir_verifier_message_output_bit_length = 0_u64;
+    let mut total_fiat_shamir_verifier_message_output_byte_length = 0_u64;
+    for response in inputs.proof_wire_geometry.responses() {
+        let output_byte_length = response
+            .verifier_message_geometry()
+            .exact_message_byte_length_u64()
+            .map_err(|_| CompactMaskingKmacError::InvalidCensus)?;
+        let output_bit_length = output_byte_length
+            .checked_mul(u64::from(u8::BITS))
+            .ok_or(CompactMaskingKmacError::ArithmeticOverflow)?;
+        minimum_fiat_shamir_verifier_message_output_bit_length = Some(
+            minimum_fiat_shamir_verifier_message_output_bit_length
+                .map_or(output_bit_length, |minimum: u64| {
+                    minimum.min(output_bit_length)
+                }),
+        );
+        maximum_fiat_shamir_verifier_message_output_bit_length =
+            maximum_fiat_shamir_verifier_message_output_bit_length.max(output_bit_length);
+        total_fiat_shamir_verifier_message_output_byte_length = checked_add(
+            total_fiat_shamir_verifier_message_output_byte_length,
+            output_byte_length,
+        )?;
+    }
+    let minimum_fiat_shamir_verifier_message_output_bit_length =
+        minimum_fiat_shamir_verifier_message_output_bit_length
+            .ok_or(CompactMaskingKmacError::InvalidCensus)?;
+    let fiat_shamir_verifier_message_xof_call_count = u64::from(response_commitment_count);
     for epoch in inputs.whir_epochs {
         let epoch_folds = inputs
             .whir_folds
@@ -814,6 +875,10 @@ fn derive_compact_masking_kmac_census(
         minimum_transported_leaf_salt_count,
         maximum_transported_leaf_salt_count,
         response_commitment_count,
+        fiat_shamir_verifier_message_xof_call_count,
+        minimum_fiat_shamir_verifier_message_output_bit_length,
+        maximum_fiat_shamir_verifier_message_output_bit_length,
+        total_fiat_shamir_verifier_message_output_byte_length,
         call_rows,
     };
     Ok(census)
@@ -1262,8 +1327,32 @@ mod tests {
         assert_eq!(
             statement
                 .joint_keccak_interface
-                .shake_fixed_output_bit_length,
+                .shake_fixed_hash_output_bit_length,
             512
+        );
+        assert_eq!(
+            statement
+                .joint_keccak_interface
+                .fiat_shamir_verifier_message_xof_call_count,
+            82
+        );
+        assert_eq!(
+            statement
+                .joint_keccak_interface
+                .minimum_fiat_shamir_verifier_message_output_bit_length,
+            65_536
+        );
+        assert_eq!(
+            statement
+                .joint_keccak_interface
+                .maximum_fiat_shamir_verifier_message_output_bit_length,
+            35_536_896
+        );
+        assert_eq!(
+            statement
+                .joint_keccak_interface
+                .total_fiat_shamir_verifier_message_output_byte_length,
+            11_612_160
         );
         assert_eq!(
             statement.joint_keccak_interface.maximum_kmac_call_count,
@@ -1271,7 +1360,7 @@ mod tests {
         );
         assert_eq!(
             statement.joint_primitive_assumption.identifier(),
-            "fixed-kmac256-qprf-and-fixed-shake256-ideal-qro-with-shared-keccak-f1600"
+            "fixed-kmac256-qprf-and-shake256-ideal-hash-and-round-xofs-with-shared-keccak-f1600"
         );
         assert_eq!(
             derive_selected_compact_masking_kmac_bridge(),

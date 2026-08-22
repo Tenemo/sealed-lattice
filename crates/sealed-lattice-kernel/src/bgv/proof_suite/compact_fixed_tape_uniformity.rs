@@ -1,39 +1,33 @@
-//! Fixed-tape uniformity boundary for the compact Fiat-Shamir transcript.
+//! Direct verifier-randomness boundary for the compact Fiat-Shamir transcript.
 //!
 //! CDHZ models each verifier move as one independently sampled uniform bit
-//! string. The selected compact graph obtains that string by projecting
-//! independently indexed 512-bit components from one simple domain extender.
-//! The source-verified domain-extension certificate can mint this test-only
-//! ideal-QRO premise, and bounded rejection contributes its separate exact
-//! exhaustion term. Concrete shared Keccak/SHAKE/KMAC instantiation remains a
-//! separate open reduction and is not implied here.
+//! string whose width may depend on the round. The selected compact transcript
+//! now makes exactly one fixed-width XOF call for each such `rnd_i` interface.
+//! A source-verified correspondence certificate can therefore mint this test-
+//! only ideal-QRO premise without a domain-extension hop. Bounded rejection
+//! contributes its separate exact exhaustion term. The concrete shared
+//! Keccak/SHAKE/KMAC reduction remains open and is not implied here.
 
 use num_bigint::BigUint;
+use num_traits::{CheckedSub, One, Zero};
 
 use super::compact_emitted_cdhz::CompactEmittedCdhzMeasurement;
-use super::compact_fixed_tape_domain_extension::{
-    CompactFixedTapeDomainExtensionCertificate,
-    selected_compact_fixed_tape_domain_extension_loss_for_arithmetic_fixture,
-};
+use super::compact_fixed_tape_source_correspondence::CompactFixedTapeSourceCorrespondence;
+use super::compact_proof_contract::CompactPublicKeyProofContract;
 use super::compact_response_merkle::{
     COMPACT_RESPONSE_LEAF_HASH_DOMAIN, COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN,
 };
-use super::compact_transcript::COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN;
-use super::fixed_uniform_verifier_message::{
-    FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN, FixedUniformVerifierMessageGeometry,
+use super::compact_transcript::{
+    COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_DOMAIN, COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION,
 };
-
-#[cfg(test)]
-use super::compact_proof_contract::CompactPublicKeyProofContract;
-#[cfg(test)]
+use super::fixed_uniform_verifier_message::{
+    FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION, FixedUniformVerifierMessageGeometry,
+};
 use super::{
     PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
 };
-#[cfg(test)]
 use crate::foundation::Hash512;
-#[cfg(test)]
-use num_traits::{CheckedSub, One, Zero};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactFixedTapeUniformityError {
@@ -49,7 +43,6 @@ struct CompactFixedTapeExactLoss {
     denominator: BigUint,
 }
 
-#[cfg(test)]
 impl CompactFixedTapeExactLoss {
     fn try_new(
         numerator: BigUint,
@@ -66,20 +59,17 @@ impl CompactFixedTapeExactLoss {
     }
 }
 
-/// Opaque test-only authority required to replace every selected component
-/// graph by the independent uniform verifier tapes assumed by CDHZ Appendix
-/// A.1 inside the ideal-QRO model.
+/// Opaque test-only authority that maps every source-verified direct round-XOF
+/// answer to the independent uniform verifier tape assumed by CDHZ Appendix
+/// A.1 in the ideal-QRO model.
 ///
-/// The production-shaped constructor requires the source-verified
-/// simple-domain-extender certificate for the same canonical proof and public
-/// input. This remains development evidence and cannot authorize proof
-/// acceptance or concrete SHAKE security reporting.
+/// This remains development evidence and cannot authorize proof verification
+/// or concrete SHAKE security reporting.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompactFixedTapeUniformityPremise {
     round_geometries: Box<[FixedUniformVerifierMessageGeometry]>,
     minimum_uniform_message_bit_length: u64,
     source_verified_binding: Option<CompactFixedTapeSourceVerifiedBinding>,
-    domain_extension_loss: CompactFixedTapeExactLoss,
     sampler_exhaustion_loss: CompactFixedTapeExactLoss,
 }
 
@@ -95,17 +85,10 @@ impl CompactFixedTapeUniformityPremise {
         self.round_geometries.len()
     }
 
-    /// CDHZ `r_min`: the minimum raw uniform verifier-message width, before
+    /// CDHZ `r_min`: the minimum raw uniform verifier-message width before
     /// deterministic rejection decoding.
     pub(super) const fn minimum_uniform_message_bit_length(&self) -> u64 {
         self.minimum_uniform_message_bit_length
-    }
-
-    pub(super) const fn domain_extension_loss_parts(&self) -> (&BigUint, &BigUint) {
-        (
-            &self.domain_extension_loss.numerator,
-            &self.domain_extension_loss.denominator,
-        )
     }
 
     pub(super) const fn sampler_exhaustion_loss_parts(&self) -> (&BigUint, &BigUint) {
@@ -115,7 +98,7 @@ impl CompactFixedTapeUniformityPremise {
         )
     }
 
-    /// Recomputes the emitted round widths and fixed hash-call counts from the
+    /// Recomputes every emitted round width and direct XOF-call count from the
     /// privately retained selected geometries. No measurement field can mint
     /// or strengthen this premise.
     pub(crate) fn validate_measurement(
@@ -147,10 +130,10 @@ impl CompactFixedTapeUniformityPremise {
             || u64::try_from(round_count).ok() != Some(measurement.response_vector_commitment_count)
             || u64::try_from(round_count).ok()
                 != Some(measurement.oracle_family_census.fiat_shamir_oracle_count)
-            || measurement.random_oracle_domains.fiat_shamir_prefix
-                != COMPACT_FIAT_SHAMIR_PREFIX_DOMAIN
-            || measurement.random_oracle_domains.verifier_message_block
-                != FIXED_UNIFORM_VERIFIER_MESSAGE_BLOCK_DOMAIN
+            || measurement
+                .random_oracle_domains
+                .fiat_shamir_verifier_message
+                != COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_DOMAIN
             || measurement.random_oracle_domains.merkle_leaf != COMPACT_RESPONSE_LEAF_HASH_DOMAIN
             || measurement.random_oracle_domains.merkle_parent
                 != COMPACT_RESPONSE_MERKLE_NODE_HASH_DOMAIN
@@ -173,14 +156,9 @@ impl CompactFixedTapeUniformityPremise {
             let expected_bit_length = expected_byte_length
                 .checked_mul(u64::from(u8::BITS))
                 .ok_or(CompactFixedTapeUniformityError::ArithmeticOverflow)?;
-            let expected_hash_query_count = geometry
-                .concrete_hash_query_count()
-                .map_err(|_| CompactFixedTapeUniformityError::InvalidSelectedGeometry)?
-                .checked_add(1)
-                .ok_or(CompactFixedTapeUniformityError::ArithmeticOverflow)?;
             if round.ordinal != expected_ordinal
                 || round.fiat_shamir_message_byte_length != expected_byte_length
-                || round.concrete_fiat_shamir_hash_query_count != expected_hash_query_count
+                || round.concrete_fiat_shamir_xof_call_count != 1
             {
                 return Err(CompactFixedTapeUniformityError::MeasurementMismatch);
             }
@@ -196,8 +174,8 @@ impl CompactFixedTapeUniformityPremise {
         Ok(())
     }
 
-    pub(crate) fn from_source_verified_domain_extension(
-        certificate: &CompactFixedTapeDomainExtensionCertificate,
+    pub(crate) fn from_source_verified_correspondence(
+        correspondence: &CompactFixedTapeSourceCorrespondence,
     ) -> Result<Self, CompactFixedTapeUniformityError> {
         let contract = CompactPublicKeyProofContract::decode_selected()
             .map_err(|_| CompactFixedTapeUniformityError::InvalidSelectedGeometry)?;
@@ -205,11 +183,34 @@ impl CompactFixedTapeUniformityPremise {
         if verifier_inputs
             .canonical_source_hash()
             .map_err(|_| CompactFixedTapeUniformityError::InvalidSelectedGeometry)?
-            != certificate.selected_contract_source_hash()
+            != correspondence.selected_contract_source_hash
+            || correspondence.verifier_message_domain != COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_DOMAIN
+            || correspondence.verifier_message_version
+                != COMPACT_FIAT_SHAMIR_VERIFIER_MESSAGE_VERSION
+            || correspondence.geometry_version != FIXED_UNIFORM_VERIFIER_MESSAGE_GEOMETRY_VERSION
+            || correspondence.logical_round_count != correspondence.direct_xof_call_count
             || u64::try_from(verifier_inputs.proof_wire_geometry.responses().len()).ok()
-                != Some(certificate.logical_round_count())
+                != Some(correspondence.logical_round_count)
+            || correspondence.rounds.len() != verifier_inputs.proof_wire_geometry.responses().len()
         {
             return Err(CompactFixedTapeUniformityError::BindingMismatch);
+        }
+        for (response, round) in verifier_inputs
+            .proof_wire_geometry
+            .responses()
+            .iter()
+            .zip(&correspondence.rounds)
+        {
+            if response.ordinal() != round.round_ordinal
+                || response
+                    .verifier_message_geometry()
+                    .exact_message_byte_length_u64()
+                    .ok()
+                    != Some(round.message_byte_length)
+                || round.input_byte_length == 0
+            {
+                return Err(CompactFixedTapeUniformityError::BindingMismatch);
+            }
         }
         let round_geometries = verifier_inputs
             .proof_wire_geometry
@@ -218,27 +219,19 @@ impl CompactFixedTapeUniformityPremise {
             .map(|response| response.verifier_message_geometry().clone())
             .collect::<Vec<_>>()
             .into_boxed_slice();
-        let (domain_extension_numerator, domain_extension_denominator) =
-            certificate.domain_extension_loss_parts();
         Self::from_selected_geometries(
             round_geometries,
             Some(CompactFixedTapeSourceVerifiedBinding {
-                selected_contract_source_hash: certificate.selected_contract_source_hash(),
-                canonical_proof_binding: *certificate.canonical_proof_binding(),
-                canonical_public_input_binding: *certificate.canonical_public_input_binding(),
+                selected_contract_source_hash: correspondence.selected_contract_source_hash,
+                canonical_proof_binding: correspondence.canonical_proof_binding,
+                canonical_public_input_binding: correspondence.canonical_public_input_binding,
             }),
-            CompactFixedTapeExactLoss::try_new(
-                domain_extension_numerator.clone(),
-                domain_extension_denominator.clone(),
-            )?,
         )
     }
 
-    /// Conditional-arithmetic fixture only. It uses the exact selected
-    /// domain-extension arithmetic without a source-verified byte binding and
-    /// must never authorize proof verification or production security
-    /// reporting.
-    #[cfg(test)]
+    /// Conditional-arithmetic fixture only. It has no source-verified byte
+    /// binding and must never authorize proof verification or production
+    /// security reporting.
     pub(super) fn assume_for_appendix_arithmetic_test()
     -> Result<Self, CompactFixedTapeUniformityError> {
         let contract = CompactPublicKeyProofContract::decode_selected()
@@ -261,24 +254,12 @@ impl CompactFixedTapeUniformityPremise {
             .map(|response| response.verifier_message_geometry().clone())
             .collect::<Vec<_>>()
             .into_boxed_slice();
-        let (domain_extension_numerator, domain_extension_denominator) =
-            selected_compact_fixed_tape_domain_extension_loss_for_arithmetic_fixture()
-                .map_err(|_| CompactFixedTapeUniformityError::InvalidSelectedGeometry)?;
-        Self::from_selected_geometries(
-            round_geometries,
-            None,
-            CompactFixedTapeExactLoss::try_new(
-                domain_extension_numerator,
-                domain_extension_denominator,
-            )?,
-        )
+        Self::from_selected_geometries(round_geometries, None)
     }
 
-    #[cfg(test)]
     fn from_selected_geometries(
         round_geometries: Box<[FixedUniformVerifierMessageGeometry]>,
         source_verified_binding: Option<CompactFixedTapeSourceVerifiedBinding>,
-        domain_extension_loss: CompactFixedTapeExactLoss,
     ) -> Result<Self, CompactFixedTapeUniformityError> {
         let minimum_uniform_message_bit_length = round_geometries
             .iter()
@@ -298,7 +279,6 @@ impl CompactFixedTapeUniformityPremise {
             round_geometries,
             minimum_uniform_message_bit_length,
             source_verified_binding,
-            domain_extension_loss,
             sampler_exhaustion_loss,
         })
     }
@@ -307,9 +287,7 @@ impl CompactFixedTapeUniformityPremise {
 /// Exact union-bound ceiling for every terminal fixed-slot exhaustion event.
 /// Conditional on avoiding these events, the decoder maps uniform candidates
 /// equidistributively to canonical field elements and ordered distinct query
-/// choices. This classical term is combined with, but does not replace, the
-/// source-verified ideal-QRO domain-extension certificate above.
-#[cfg(test)]
+/// choices.
 fn derive_sampler_exhaustion_loss(
     geometries: &[FixedUniformVerifierMessageGeometry],
 ) -> Result<CompactFixedTapeExactLoss, CompactFixedTapeUniformityError> {
@@ -381,7 +359,6 @@ fn derive_sampler_exhaustion_loss(
     CompactFixedTapeExactLoss::try_new(numerator, common_denominator)
 }
 
-#[cfg(test)]
 fn greatest_common_divisor(mut left: BigUint, mut right: BigUint) -> BigUint {
     while !right.is_zero() {
         let remainder = left % &right;
@@ -396,18 +373,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn conditional_arithmetic_fixture_uses_the_selected_raw_tape_geometry() {
+    fn conditional_arithmetic_fixture_uses_the_selected_direct_tape_geometry() {
         let premise = CompactFixedTapeUniformityPremise::assume_for_appendix_arithmetic_test()
             .expect("selected conditional fixed-tape arithmetic fixture");
         assert_eq!(premise.round_count(), 82);
         assert_eq!(premise.minimum_uniform_message_bit_length(), 65_536);
-        let (domain_extension_numerator, domain_extension_denominator) =
-            premise.domain_extension_loss_parts();
-        assert_eq!(
-            domain_extension_numerator,
-            &(BigUint::from(233_u16) * BigUint::from((1_u128 << 80) - 1).pow(2)),
-        );
-        assert_eq!(domain_extension_denominator, &(BigUint::one() << 254_usize));
         let (exhaustion_numerator, exhaustion_denominator) =
             premise.sampler_exhaustion_loss_parts();
         assert!(!exhaustion_numerator.is_zero());
