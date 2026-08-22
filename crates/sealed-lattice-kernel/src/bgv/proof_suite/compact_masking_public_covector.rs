@@ -296,7 +296,7 @@ impl<'transport> CompactFactorOnePublicCovectorAuthority<'transport> {
                 fold_contracts,
                 parsed,
                 initial,
-                0,
+                1,
                 prefix,
                 self.public_input.binding(),
             )?;
@@ -753,7 +753,25 @@ fn pre_challenge_initial_covectors(
     let source_length = 1_usize
         .checked_shl(epoch.polynomial_variable_count)
         .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
-    let source = multilinear_equality_covector(&parsed.cross_epoch_point, source_length)?;
+    let first_folding_factor = usize::try_from(
+        *epoch
+            .folding_schedule
+            .first()
+            .ok_or(CompactFactorOnePublicCovectorError::InvalidContract)?,
+    )
+    .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+    let first_batch = parsed
+        .whir_batches
+        .first()
+        .ok_or(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix)?;
+    if first_folding_factor == 0 || first_batch.folding_challenges.len() != first_folding_factor {
+        return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
+    }
+    let source = multilinear_equality_covector_after_leading_fold(
+        &parsed.cross_epoch_point,
+        source_length,
+        &first_batch.folding_challenges,
+    )?;
     Ok(PublicCovectorState {
         source,
         mask_groups: vec![vec![
@@ -1185,6 +1203,39 @@ fn multilinear_equality_covector(
     Ok(weights)
 }
 
+fn multilinear_equality_covector_after_leading_fold(
+    point: &[CompactChallengeField],
+    expected_unfolded_length: usize,
+    folding_challenges: &[CompactChallengeField],
+) -> Result<Vec<CompactChallengeField>, CompactFactorOnePublicCovectorError> {
+    let point_coordinate_count = u32::try_from(point.len())
+        .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+    let derived_unfolded_length = 1_usize
+        .checked_shl(point_coordinate_count)
+        .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+    if derived_unfolded_length != expected_unfolded_length || folding_challenges.len() > point.len()
+    {
+        return Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix);
+    }
+
+    let mut leading_fold_scale = CompactChallengeField::ONE;
+    for (&coordinate, &challenge) in point.iter().zip(folding_challenges) {
+        leading_fold_scale *= (CompactChallengeField::ONE - challenge)
+            * (CompactChallengeField::ONE - coordinate)
+            + challenge * coordinate;
+    }
+    let remaining_point = &point[folding_challenges.len()..];
+    let folded_length = 1_usize
+        .checked_shl(
+            u32::try_from(remaining_point.len())
+                .map_err(|_| CompactFactorOnePublicCovectorError::ArithmeticOverflow)?,
+        )
+        .ok_or(CompactFactorOnePublicCovectorError::ArithmeticOverflow)?;
+    let mut folded = multilinear_equality_covector(remaining_point, folded_length)?;
+    scale_in_place(&mut folded, leading_fold_scale);
+    Ok(folded)
+}
+
 fn compact_powers(value: CompactChallengeField, count: usize) -> Vec<CompactChallengeField> {
     let mut power = CompactChallengeField::ONE;
     (0..count)
@@ -1370,4 +1421,74 @@ fn epoch_folds<'a>(
         return Err(CompactFactorOnePublicCovectorError::InvalidContract);
     }
     Ok(folds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn challenge(canonical: u64) -> CompactChallengeField {
+        CompactChallengeField::from_u64(canonical)
+    }
+
+    #[test]
+    fn leading_tensor_fold_matches_the_full_allocation_reference() {
+        for point_coordinate_count in 1_usize..=9 {
+            let point = (0..point_coordinate_count)
+                .map(|coordinate_ordinal| {
+                    challenge(3 + 2 * u64::try_from(coordinate_ordinal).unwrap())
+                })
+                .collect::<Vec<_>>();
+            let unfolded_length = 1_usize << point_coordinate_count;
+            let full = multilinear_equality_covector(&point, unfolded_length).unwrap();
+            for folding_factor in 1_usize..=point_coordinate_count {
+                let folding_challenges = (0..folding_factor)
+                    .map(|challenge_ordinal| {
+                        challenge(29 + 3 * u64::try_from(challenge_ordinal).unwrap())
+                    })
+                    .collect::<Vec<_>>();
+                let expected = fold_whir_covector_with_allocation_reference(
+                    full.clone(),
+                    folding_factor,
+                    &folding_challenges,
+                )
+                .unwrap();
+                let actual = multilinear_equality_covector_after_leading_fold(
+                    &point,
+                    unfolded_length,
+                    &folding_challenges,
+                )
+                .unwrap();
+                assert_eq!(actual, expected);
+                assert_eq!(actual.len(), unfolded_length >> folding_factor);
+            }
+        }
+    }
+
+    #[test]
+    fn leading_tensor_fold_refuses_mismatched_geometry_and_overflow() {
+        let point = [challenge(2), challenge(5), challenge(7)];
+        assert_eq!(
+            multilinear_equality_covector_after_leading_fold(&point, 7, &[challenge(11)],),
+            Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix),
+        );
+        assert_eq!(
+            multilinear_equality_covector_after_leading_fold(
+                &point,
+                8,
+                &[challenge(11), challenge(13), challenge(17), challenge(19)],
+            ),
+            Err(CompactFactorOnePublicCovectorError::InvalidVerifierPrefix),
+        );
+
+        let overflowing_point = vec![challenge(23); usize::BITS as usize];
+        assert_eq!(
+            multilinear_equality_covector_after_leading_fold(
+                &overflowing_point,
+                1,
+                &[challenge(29)],
+            ),
+            Err(CompactFactorOnePublicCovectorError::ArithmeticOverflow),
+        );
+    }
 }

@@ -34,10 +34,34 @@ export const memoryBytes = (
     byteLength: number,
 ): Uint8Array => new Uint8Array(memory.buffer, pointer, byteLength);
 
+type LegacyCompactPublicKeyAlgebraicVerificationExports = Partial<{
+    sealed_lattice_compact_public_key_begin_algebraic_verification(
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        statusPointer: number,
+    ): number;
+    sealed_lattice_compact_public_key_resume_algebraic_verification(
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        checkpointPointer: number,
+        checkpointByteLength: number,
+        statusPointer: number,
+    ): number;
+}>;
+
 export const createMockKernelRuntime = (
     createCommonProofExports: (
         memory: WebAssembly.Memory,
-    ) => Partial<TranscriptCoreKernelExports>,
+    ) => Partial<TranscriptCoreKernelExports> &
+        LegacyCompactPublicKeyAlgebraicVerificationExports,
     initialMemoryPageCount = 64,
 ): TranscriptCoreKernelCommandRuntime => {
     const memory = new WebAssembly.Memory({
@@ -54,6 +78,190 @@ export const createMockKernelRuntime = (
         expect(pointer).toBeGreaterThan(0);
         expect(byteLength).toBeGreaterThan(0);
     };
+    const commonProofExports = createCommonProofExports(memory);
+    const legacyBegin =
+        commonProofExports.sealed_lattice_compact_public_key_begin_algebraic_verification;
+    const legacyResume =
+        commonProofExports.sealed_lattice_compact_public_key_resume_algebraic_verification;
+    let nextCompactPublicKeyInputHandle = 701;
+    const stagedCompactPublicKeyInputs = new Map<
+        number,
+        {
+            bindings: Uint8Array;
+            checkpoint: Uint8Array | undefined;
+            proof: Uint8Array;
+            proofCursor: number;
+            publicInput: Uint8Array;
+            publicInputCursor: number;
+        }
+    >();
+    const stagedCompactPublicKeyExports: Partial<TranscriptCoreKernelExports> =
+        legacyBegin === undefined && legacyResume === undefined
+            ? {}
+            : {
+                  sealed_lattice_compact_public_key_begin_algebraic_verification_input:
+                      (
+                          bindingsPointer,
+                          bindingsByteLength,
+                          proofByteLength,
+                          publicInputByteLength,
+                          checkpointPointer,
+                          checkpointByteLength,
+                          statusPointer,
+                      ) => {
+                          const inputHandle = nextCompactPublicKeyInputHandle;
+                          nextCompactPublicKeyInputHandle += 1;
+                          stagedCompactPublicKeyInputs.set(inputHandle, {
+                              bindings: memoryBytes(
+                                  memory,
+                                  bindingsPointer,
+                                  bindingsByteLength,
+                              ).slice(),
+                              checkpoint:
+                                  checkpointByteLength === 0
+                                      ? undefined
+                                      : memoryBytes(
+                                            memory,
+                                            checkpointPointer,
+                                            checkpointByteLength,
+                                        ).slice(),
+                              proof: new Uint8Array(proofByteLength),
+                              proofCursor: 0,
+                              publicInput: new Uint8Array(
+                                  publicInputByteLength,
+                              ),
+                              publicInputCursor: 0,
+                          });
+                          writeUnsigned32(memory, statusPointer, 0);
+                          return inputHandle;
+                      },
+                  sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk:
+                      (
+                          inputHandle,
+                          inputKind,
+                          byteOffset,
+                          chunkPointer,
+                          chunkByteLength,
+                      ) => {
+                          const staged =
+                              stagedCompactPublicKeyInputs.get(inputHandle);
+                          if (staged === undefined) {
+                              return 9;
+                          }
+                          const destination =
+                              inputKind === 1
+                                  ? staged.proof
+                                  : staged.publicInput;
+                          const cursor =
+                              inputKind === 1
+                                  ? staged.proofCursor
+                                  : staged.publicInputCursor;
+                          if (
+                              ![1, 2].includes(inputKind) ||
+                              byteOffset !== cursor ||
+                              byteOffset + chunkByteLength >
+                                  destination.byteLength
+                          ) {
+                              return 9;
+                          }
+                          destination.set(
+                              memoryBytes(
+                                  memory,
+                                  chunkPointer,
+                                  chunkByteLength,
+                              ),
+                              byteOffset,
+                          );
+                          if (inputKind === 1) {
+                              staged.proofCursor += chunkByteLength;
+                          } else {
+                              staged.publicInputCursor += chunkByteLength;
+                          }
+                          return 0;
+                      },
+                  sealed_lattice_compact_public_key_finish_algebraic_verification_input:
+                      (inputHandle, statusPointer) => {
+                          const staged =
+                              stagedCompactPublicKeyInputs.get(inputHandle);
+                          stagedCompactPublicKeyInputs.delete(inputHandle);
+                          if (
+                              staged === undefined ||
+                              staged.proofCursor !== staged.proof.byteLength ||
+                              staged.publicInputCursor !==
+                                  staged.publicInput.byteLength
+                          ) {
+                              writeUnsigned32(memory, statusPointer, 9);
+                              return 0;
+                          }
+                          const bindingsPointer = allocate(
+                              staged.bindings.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              bindingsPointer,
+                              staged.bindings.byteLength,
+                          ).set(staged.bindings);
+                          const proofPointer = allocate(
+                              staged.proof.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              proofPointer,
+                              staged.proof.byteLength,
+                          ).set(staged.proof);
+                          const publicInputPointer = allocate(
+                              staged.publicInput.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              publicInputPointer,
+                              staged.publicInput.byteLength,
+                          ).set(staged.publicInput);
+                          if (staged.checkpoint === undefined) {
+                              if (legacyBegin === undefined) {
+                                  writeUnsigned32(memory, statusPointer, 9);
+                                  return 0;
+                              }
+                              return legacyBegin(
+                                  bindingsPointer,
+                                  staged.bindings.byteLength,
+                                  proofPointer,
+                                  staged.proof.byteLength,
+                                  publicInputPointer,
+                                  staged.publicInput.byteLength,
+                                  statusPointer,
+                              );
+                          }
+                          if (legacyResume === undefined) {
+                              writeUnsigned32(memory, statusPointer, 9);
+                              return 0;
+                          }
+                          const checkpointPointer = allocate(
+                              staged.checkpoint.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              checkpointPointer,
+                              staged.checkpoint.byteLength,
+                          ).set(staged.checkpoint);
+                          return legacyResume(
+                              bindingsPointer,
+                              staged.bindings.byteLength,
+                              proofPointer,
+                              staged.proof.byteLength,
+                              publicInputPointer,
+                              staged.publicInput.byteLength,
+                              checkpointPointer,
+                              staged.checkpoint.byteLength,
+                              statusPointer,
+                          );
+                      },
+                  sealed_lattice_compact_public_key_cancel_algebraic_verification_input:
+                      (inputHandle) =>
+                          stagedCompactPublicKeyInputs.delete(inputHandle)
+                              ? 0
+                              : 9,
+              };
     const wasmExports: TranscriptCoreKernelExports = {
         memory,
         sealed_lattice_allocate: allocate,
@@ -94,7 +302,8 @@ export const createMockKernelRuntime = (
         sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count:
             () => 323,
         sealed_lattice_deallocate: deallocate,
-        ...createCommonProofExports(memory),
+        ...commonProofExports,
+        ...stagedCompactPublicKeyExports,
     };
     let operationInProgress = false;
     return {

@@ -1243,6 +1243,30 @@ const generateCompactPublicKeyInClosedWorker = async (
     let reusableStorageResponseBuffer: Uint8Array<ArrayBuffer> | undefined;
     let result: GeneratedCompactPublicKeyReferenceProof | undefined;
     let operationFailure: unknown;
+    let lastSuccessfulGenerationPollKind:
+        | 'none'
+        | 'progress'
+        | 'storage-request-ready'
+        | 'complete' = 'none';
+    let lastSuccessfulGenerationPollStage = 0;
+    let lastSuccessfulGenerationPollFirstOrdinal = 0;
+    let lastSuccessfulGenerationPollCompletedWorkUnitCount = 0;
+    let lastSuccessfulGenerationPollStorageOwner:
+        | CompactPublicKeyGenerationStorageOwner
+        | undefined;
+
+    const lastSuccessfulGenerationPollDescription = (): string => {
+        switch (lastSuccessfulGenerationPollKind) {
+            case 'none':
+                return 'no successful poll';
+            case 'progress':
+                return `progress stage ${String(lastSuccessfulGenerationPollStage)}, first ordinal ${String(lastSuccessfulGenerationPollFirstOrdinal)}, and ${String(lastSuccessfulGenerationPollCompletedWorkUnitCount)} completed work units`;
+            case 'storage-request-ready':
+                return `a ${lastSuccessfulGenerationPollStorageOwner ?? 'missing-owner'} storage request`;
+            case 'complete':
+                return 'the completion poll';
+        }
+    };
 
     try {
         if (generationRequest.kind === 'acceptedSetup') {
@@ -1463,10 +1487,34 @@ const generateCompactPublicKeyInClosedWorker = async (
             if (input.signal?.aborted === true) {
                 throw new CanonicalStreamCancellationError();
             }
-            const poll = generationKernel.poll(
-                operationHandle,
-                maximumWorkUnitCountPerPoll,
-            );
+            let poll: ReturnType<
+                CompactPublicKeyGenerationKernelBoundary['poll']
+            >;
+            try {
+                poll = generationKernel.poll(
+                    operationHandle,
+                    maximumWorkUnitCountPerPoll,
+                );
+            } catch (pollFailure) {
+                const failedPollWasmMemoryByteLength =
+                    context.memory.buffer.byteLength;
+                throw new CanonicalStreamInternalError(
+                    `The compact public-key generation kernel trapped after ${lastSuccessfulGenerationPollDescription()}; WASM memory held ${String(failedPollWasmMemoryByteLength)} bytes.`,
+                    pollFailure,
+                );
+            }
+            lastSuccessfulGenerationPollKind = poll.kind;
+            if (poll.kind === 'progress') {
+                lastSuccessfulGenerationPollStage = poll.stage;
+                lastSuccessfulGenerationPollFirstOrdinal = poll.firstOrdinal;
+                lastSuccessfulGenerationPollCompletedWorkUnitCount =
+                    poll.completedWorkUnitCount;
+                lastSuccessfulGenerationPollStorageOwner = undefined;
+            } else if (poll.kind === 'storage-request-ready') {
+                lastSuccessfulGenerationPollStorageOwner = poll.storageOwner;
+            } else {
+                lastSuccessfulGenerationPollStorageOwner = undefined;
+            }
             observeWasmMemory();
             if (poll.kind === 'progress') {
                 if (

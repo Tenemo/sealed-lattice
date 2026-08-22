@@ -193,7 +193,6 @@ impl<SourceError> From<CompactWhirError> for CompactWhirMainRelationPreparationE
 /// transcript and canonical public input; no prover-computed target is read
 /// from proof bytes.
 pub(crate) struct CompactWhirMainRelationPreparation {
-    source_evaluations: Vec<CompactChallengeField>,
     source_covector: Vec<CompactChallengeField>,
     next_source_element: usize,
     source_claim: CompactChallengeField,
@@ -204,6 +203,7 @@ pub(crate) struct CompactWhirMainRelationPreparation {
 /// Opaque, checked relation handed to one masked WHIR sumcheck batch.
 pub(crate) struct CompactWhirMaskedSumcheckRelation {
     source_evaluations: Vec<CompactChallengeField>,
+    authenticated_source_replay_element_count: Option<usize>,
     source_covector: Vec<CompactChallengeField>,
     source_claim: CompactChallengeField,
     target: CompactChallengeField,
@@ -231,6 +231,31 @@ impl CompactWhirMaskedSumcheckRelation {
             self.preceding_mask_claim,
             self.input_binding_challenge,
         )
+    }
+
+    pub(crate) const fn authenticated_source_replay_element_count_for_test(&self) -> Option<usize> {
+        self.authenticated_source_replay_element_count
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompactWhirAuthenticatedSourceReplayState {
+    current_element_count: usize,
+    folded_weight_offset: Option<usize>,
+    residual_source_taken: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CompactWhirInitialSumcheckSourceReplayError<SourceError> {
+    Whir(CompactWhirError),
+    Source(SourceError),
+}
+
+impl<SourceError> From<CompactWhirError>
+    for CompactWhirInitialSumcheckSourceReplayError<SourceError>
+{
+    fn from(error: CompactWhirError) -> Self {
+        Self::Whir(error)
     }
 }
 
@@ -283,6 +308,8 @@ pub(crate) enum CompactWhirInitialSumcheckPoll {
 pub(crate) struct CompactWhirInitialSumcheckState {
     source_evaluations: Vec<CompactChallengeField>,
     source_covector: Vec<CompactChallengeField>,
+    authenticated_source_replay: Option<CompactWhirAuthenticatedSourceReplayState>,
+    detached_replayed_source_covector: Option<Vec<CompactChallengeField>>,
     source_claim: CompactChallengeField,
     masked_target: CompactChallengeField,
     opening_batching_challenge: CompactChallengeField,
@@ -750,6 +777,7 @@ impl CompactWhirPreChallengeRelationPreparation {
         }
         Ok(CompactWhirMaskedSumcheckRelation {
             source_evaluations: core::mem::take(&mut self.source_evaluations),
+            authenticated_source_replay_element_count: None,
             source_covector: core::mem::take(&mut self.source_covector),
             source_claim: self.accumulated_source_claim,
             target: self.masked_pre_challenge_evaluation,
@@ -788,15 +816,7 @@ impl CompactWhirMainRelationPreparation {
         for (covector, mask) in cross_covectors.iter().zip(cross_epoch_masks) {
             preceding_mask_claim += covector[0] * mask;
         }
-        let mut source_evaluations = Vec::new();
-        source_evaluations
-            .try_reserve_exact(source_covector.len())
-            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
-        if source_evaluations.capacity() != source_covector.len() {
-            return Err(CompactWhirError::AllocationLimitExceeded);
-        }
         Ok(Self {
-            source_evaluations,
             source_covector,
             next_source_element: 0,
             source_claim: CompactChallengeField::ZERO,
@@ -831,7 +851,6 @@ impl CompactWhirMainRelationPreparation {
             )
             .map_err(CompactWhirMainRelationPreparationError::Source)?;
             self.source_claim += value * self.source_covector[source_ordinal];
-            self.source_evaluations.push(value);
             self.next_source_element = source_ordinal
                 .checked_add(1)
                 .ok_or(CompactWhirError::CountOverflow)?;
@@ -846,15 +865,16 @@ impl CompactWhirMainRelationPreparation {
     }
 
     pub(crate) fn finish(mut self) -> Result<CompactWhirMaskedSumcheckRelation, CompactWhirError> {
-        if self.next_source_element != self.source_covector.len()
-            || self.source_evaluations.len() != self.source_covector.len()
-            || self.source_evaluations.capacity() != self.source_covector.len()
-        {
+        if self.next_source_element != self.source_covector.len() {
             return Err(CompactWhirError::WrongProverPhase);
         }
         let target = self.source_claim + self.preceding_mask_claim;
+        let authenticated_source_replay_element_count = self.source_covector.len();
         Ok(CompactWhirMaskedSumcheckRelation {
-            source_evaluations: core::mem::take(&mut self.source_evaluations),
+            source_evaluations: Vec::new(),
+            authenticated_source_replay_element_count: Some(
+                authenticated_source_replay_element_count,
+            ),
             source_covector: core::mem::take(&mut self.source_covector),
             source_claim: self.source_claim,
             target,
@@ -866,7 +886,6 @@ impl CompactWhirMainRelationPreparation {
 
 impl Drop for CompactWhirMainRelationPreparation {
     fn drop(&mut self) {
-        self.source_evaluations.fill(CompactChallengeField::ZERO);
         self.source_covector.fill(CompactChallengeField::ZERO);
         self.source_claim = CompactChallengeField::ZERO;
         self.preceding_mask_claim = CompactChallengeField::ZERO;
@@ -931,11 +950,24 @@ impl CompactWhirInitialSumcheckState {
         random_source: &mut R,
     ) -> Result<Self, CompactWhirError> {
         let mask_group_shape = compact_whir_mask_group_shape(mask_group_contract)?;
-        if relation.source_evaluations.len() != relation.source_covector.len()
-            || relation.source_evaluations.is_empty()
-            || !relation.source_evaluations.len().is_power_of_two()
+        let source_element_count = match relation.authenticated_source_replay_element_count {
+            None if !relation.source_evaluations.is_empty()
+                && relation.source_evaluations.len() == relation.source_covector.len() =>
+            {
+                relation.source_evaluations.len()
+            }
+            Some(element_count)
+                if relation.source_evaluations.is_empty()
+                    && element_count == relation.source_covector.len() =>
+            {
+                element_count
+            }
+            _ => return Err(CompactWhirError::InvalidRelation),
+        };
+        if source_element_count == 0
+            || !source_element_count.is_power_of_two()
             || folding_factor == 0
-            || folding_factor > relation.source_evaluations.len().ilog2() as usize
+            || folding_factor > source_element_count.ilog2() as usize
             || mask_group_shape.width != folding_factor
             || mask_group_shape.shape.message_len != COMPACT_WHIR_SUMCHECK_MASK_MESSAGE_LENGTH
         {
@@ -987,9 +1019,21 @@ impl CompactWhirInitialSumcheckState {
             u64::try_from(folding_factor - 1).map_err(|_| CompactWhirError::CountOverflow)?,
         ) * remaining_mask_endpoint_sum;
 
+        let authenticated_source_replay =
+            relation
+                .authenticated_source_replay_element_count
+                .map(
+                    |current_element_count| CompactWhirAuthenticatedSourceReplayState {
+                        current_element_count,
+                        folded_weight_offset: None,
+                        residual_source_taken: false,
+                    },
+                );
         Ok(Self {
             source_evaluations: core::mem::take(&mut relation.source_evaluations),
             source_covector: core::mem::take(&mut relation.source_covector),
+            authenticated_source_replay,
+            detached_replayed_source_covector: None,
             source_claim: relation.source_claim,
             masked_target: relation.target,
             opening_batching_challenge: relation.input_binding_challenge,
@@ -1037,49 +1081,74 @@ impl CompactWhirInitialSumcheckState {
         self.begin_round_polynomial()
     }
 
-    pub(crate) fn poll(
+    pub(crate) const fn authenticated_source_replay_required(&self) -> bool {
+        matches!(
+            self.authenticated_source_replay,
+            Some(CompactWhirAuthenticatedSourceReplayState {
+                folded_weight_offset: None,
+                ..
+            })
+        )
+    }
+
+    /// Replays the authenticated main source only until the first folding
+    /// challenge has reduced it. The first fold overwrites the original public
+    /// covector with disjoint folded-source and folded-weight regions, avoiding
+    /// a second full-size allocation without changing any sumcheck arithmetic
+    /// or transcript bytes.
+    pub(crate) fn poll_replaying_authenticated_source<SourceError>(
         &mut self,
         maximum_work_unit_count: u64,
-    ) -> Result<CompactWhirInitialSumcheckPoll, CompactWhirError> {
+        mut source_value: impl FnMut(u64) -> Result<CompactChallengeField, SourceError>,
+    ) -> Result<
+        CompactWhirInitialSumcheckPoll,
+        CompactWhirInitialSumcheckSourceReplayError<SourceError>,
+    > {
         let maximum_work_unit_count = usize::try_from(maximum_work_unit_count)
             .map_err(|_| CompactWhirError::CountOverflow)?;
         if maximum_work_unit_count == 0 {
-            return Err(CompactWhirError::InvalidWorkBudget);
+            return Err(CompactWhirError::InvalidWorkBudget.into());
         }
+        let source_element_count = self
+            .authenticated_source_replay
+            .filter(|replay| replay.folded_weight_offset.is_none())
+            .map(|replay| replay.current_element_count)
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        let half = source_element_count
+            .checked_div(2)
+            .filter(|count| *count != 0)
+            .ok_or(CompactWhirError::InvalidRelation)?;
         match self.phase {
             CompactWhirInitialSumcheckPhase::ComputingRoundPolynomial {
                 next_pair_ordinal,
                 mut constant_coefficient,
                 mut leading_coefficient,
             } => {
-                let half = self
-                    .source_evaluations
-                    .len()
-                    .checked_div(2)
-                    .filter(|count| *count != 0)
-                    .ok_or(CompactWhirError::InvalidRelation)?;
                 let end = next_pair_ordinal
                     .saturating_add(maximum_work_unit_count)
                     .min(half);
                 for pair_ordinal in next_pair_ordinal..end {
-                    let evaluation_low = self.source_evaluations[pair_ordinal];
-                    let evaluation_high = self.source_evaluations[half + pair_ordinal];
+                    let high_pair_ordinal = half
+                        .checked_add(pair_ordinal)
+                        .ok_or(CompactWhirError::CountOverflow)?;
+                    let evaluation_low = source_value(
+                        u64::try_from(pair_ordinal).map_err(|_| CompactWhirError::CountOverflow)?,
+                    )
+                    .map_err(CompactWhirInitialSumcheckSourceReplayError::Source)?;
+                    let evaluation_high = source_value(
+                        u64::try_from(high_pair_ordinal)
+                            .map_err(|_| CompactWhirError::CountOverflow)?,
+                    )
+                    .map_err(CompactWhirInitialSumcheckSourceReplayError::Source)?;
                     let weight_low = self.source_covector[pair_ordinal];
-                    let weight_high = self.source_covector[half + pair_ordinal];
+                    let weight_high = self.source_covector[high_pair_ordinal];
                     constant_coefficient += evaluation_low * weight_low;
                     leading_coefficient +=
                         (evaluation_high - evaluation_low) * (weight_high - weight_low);
                 }
                 let polynomial_ready = end == half;
                 if polynomial_ready {
-                    let wire =
-                        self.assemble_round_wire(constant_coefficient, leading_coefficient)?;
-                    self.round_wires.push(wire.clone());
-                    self.pending_round_wire = Some(wire);
-                    self.phase = CompactWhirInitialSumcheckPhase::RoundPolynomialReady {
-                        constant_coefficient,
-                        leading_coefficient,
-                    };
+                    self.complete_round_polynomial(constant_coefficient, leading_coefficient)?;
                 } else {
                     self.phase = CompactWhirInitialSumcheckPhase::ComputingRoundPolynomial {
                         next_pair_ordinal: end,
@@ -1100,42 +1169,218 @@ impl CompactWhirInitialSumcheckState {
                 constant_coefficient,
                 leading_coefficient,
             } => {
-                let half = self
-                    .source_evaluations
-                    .len()
+                let end = next_pair_ordinal
+                    .saturating_add(maximum_work_unit_count)
+                    .min(half);
+                for pair_ordinal in next_pair_ordinal..end {
+                    let high_pair_ordinal = half
+                        .checked_add(pair_ordinal)
+                        .ok_or(CompactWhirError::CountOverflow)?;
+                    let evaluation_low = source_value(
+                        u64::try_from(pair_ordinal).map_err(|_| CompactWhirError::CountOverflow)?,
+                    )
+                    .map_err(CompactWhirInitialSumcheckSourceReplayError::Source)?;
+                    let evaluation_high = source_value(
+                        u64::try_from(high_pair_ordinal)
+                            .map_err(|_| CompactWhirError::CountOverflow)?,
+                    )
+                    .map_err(CompactWhirInitialSumcheckSourceReplayError::Source)?;
+                    let weight_low = self.source_covector[pair_ordinal];
+                    let weight_high = self.source_covector[high_pair_ordinal];
+                    self.source_covector[pair_ordinal] =
+                        evaluation_low + challenge * (evaluation_high - evaluation_low);
+                    self.source_covector[high_pair_ordinal] =
+                        weight_low + challenge * (weight_high - weight_low);
+                }
+                let round_complete = end == half;
+                if round_complete {
+                    self.complete_folded_round(
+                        half,
+                        constant_coefficient,
+                        leading_coefficient,
+                        challenge,
+                    )?;
+                } else {
+                    self.phase = CompactWhirInitialSumcheckPhase::FoldingRound {
+                        challenge,
+                        next_pair_ordinal: end,
+                        constant_coefficient,
+                        leading_coefficient,
+                    };
+                }
+                Ok(CompactWhirInitialSumcheckPoll::BoundRound {
+                    round_ordinal: u32::try_from(
+                        self.round_challenges
+                            .len()
+                            .checked_sub(1)
+                            .ok_or(CompactWhirError::WrongProverPhase)?,
+                    )
+                    .map_err(|_| CompactWhirError::CountOverflow)?,
+                    processed_work_unit_count: u64::try_from(end - next_pair_ordinal)
+                        .map_err(|_| CompactWhirError::CountOverflow)?,
+                    round_complete,
+                })
+            }
+            CompactWhirInitialSumcheckPhase::AwaitingCombinationChallenge
+            | CompactWhirInitialSumcheckPhase::RoundPolynomialReady { .. }
+            | CompactWhirInitialSumcheckPhase::ScalingWeights { .. }
+            | CompactWhirInitialSumcheckPhase::Complete => {
+                Err(CompactWhirError::WrongProverPhase.into())
+            }
+        }
+    }
+
+    pub(crate) fn poll(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<CompactWhirInitialSumcheckPoll, CompactWhirError> {
+        let maximum_work_unit_count = usize::try_from(maximum_work_unit_count)
+            .map_err(|_| CompactWhirError::CountOverflow)?;
+        if maximum_work_unit_count == 0 {
+            return Err(CompactWhirError::InvalidWorkBudget);
+        }
+        match self.phase {
+            CompactWhirInitialSumcheckPhase::ComputingRoundPolynomial {
+                next_pair_ordinal,
+                mut constant_coefficient,
+                mut leading_coefficient,
+            } => {
+                let source_element_count = match self.authenticated_source_replay {
+                    None => self.source_evaluations.len(),
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        current_element_count,
+                        folded_weight_offset: Some(_),
+                        ..
+                    }) => current_element_count,
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        folded_weight_offset: None,
+                        ..
+                    }) => return Err(CompactWhirError::WrongProverPhase),
+                };
+                let half = source_element_count
                     .checked_div(2)
                     .filter(|count| *count != 0)
                     .ok_or(CompactWhirError::InvalidRelation)?;
                 let end = next_pair_ordinal
                     .saturating_add(maximum_work_unit_count)
                     .min(half);
-                for pair_ordinal in next_pair_ordinal..end {
-                    let evaluation_low = self.source_evaluations[pair_ordinal];
-                    let evaluation_high = self.source_evaluations[half + pair_ordinal];
-                    self.source_evaluations[pair_ordinal] =
-                        evaluation_low + challenge * (evaluation_high - evaluation_low);
-                    let weight_low = self.source_covector[pair_ordinal];
-                    let weight_high = self.source_covector[half + pair_ordinal];
-                    self.source_covector[pair_ordinal] =
-                        weight_low + challenge * (weight_high - weight_low);
+                match self.authenticated_source_replay {
+                    None => {
+                        for pair_ordinal in next_pair_ordinal..end {
+                            let evaluation_low = self.source_evaluations[pair_ordinal];
+                            let evaluation_high = self.source_evaluations[half + pair_ordinal];
+                            let weight_low = self.source_covector[pair_ordinal];
+                            let weight_high = self.source_covector[half + pair_ordinal];
+                            constant_coefficient += evaluation_low * weight_low;
+                            leading_coefficient +=
+                                (evaluation_high - evaluation_low) * (weight_high - weight_low);
+                        }
+                    }
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        folded_weight_offset: Some(weight_offset),
+                        ..
+                    }) => {
+                        for pair_ordinal in next_pair_ordinal..end {
+                            let evaluation_low = self.source_covector[pair_ordinal];
+                            let evaluation_high = self.source_covector[half + pair_ordinal];
+                            let weight_low = self.source_covector[weight_offset + pair_ordinal];
+                            let weight_high =
+                                self.source_covector[weight_offset + half + pair_ordinal];
+                            constant_coefficient += evaluation_low * weight_low;
+                            leading_coefficient +=
+                                (evaluation_high - evaluation_low) * (weight_high - weight_low);
+                        }
+                    }
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        folded_weight_offset: None,
+                        ..
+                    }) => return Err(CompactWhirError::WrongProverPhase),
+                }
+                let polynomial_ready = end == half;
+                if polynomial_ready {
+                    self.complete_round_polynomial(constant_coefficient, leading_coefficient)?;
+                } else {
+                    self.phase = CompactWhirInitialSumcheckPhase::ComputingRoundPolynomial {
+                        next_pair_ordinal: end,
+                        constant_coefficient,
+                        leading_coefficient,
+                    };
+                }
+                Ok(CompactWhirInitialSumcheckPoll::RoundPolynomial {
+                    round_ordinal: self.current_round_ordinal()?,
+                    processed_work_unit_count: u64::try_from(end - next_pair_ordinal)
+                        .map_err(|_| CompactWhirError::CountOverflow)?,
+                    polynomial_ready,
+                })
+            }
+            CompactWhirInitialSumcheckPhase::FoldingRound {
+                challenge,
+                next_pair_ordinal,
+                constant_coefficient,
+                leading_coefficient,
+            } => {
+                let source_element_count = match self.authenticated_source_replay {
+                    None => self.source_evaluations.len(),
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        current_element_count,
+                        folded_weight_offset: Some(_),
+                        ..
+                    }) => current_element_count,
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        folded_weight_offset: None,
+                        ..
+                    }) => return Err(CompactWhirError::WrongProverPhase),
+                };
+                let half = source_element_count
+                    .checked_div(2)
+                    .filter(|count| *count != 0)
+                    .ok_or(CompactWhirError::InvalidRelation)?;
+                let end = next_pair_ordinal
+                    .saturating_add(maximum_work_unit_count)
+                    .min(half);
+                match self.authenticated_source_replay {
+                    None => {
+                        for pair_ordinal in next_pair_ordinal..end {
+                            let evaluation_low = self.source_evaluations[pair_ordinal];
+                            let evaluation_high = self.source_evaluations[half + pair_ordinal];
+                            self.source_evaluations[pair_ordinal] =
+                                evaluation_low + challenge * (evaluation_high - evaluation_low);
+                            let weight_low = self.source_covector[pair_ordinal];
+                            let weight_high = self.source_covector[half + pair_ordinal];
+                            self.source_covector[pair_ordinal] =
+                                weight_low + challenge * (weight_high - weight_low);
+                        }
+                    }
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        folded_weight_offset: Some(weight_offset),
+                        ..
+                    }) => {
+                        for pair_ordinal in next_pair_ordinal..end {
+                            let evaluation_low = self.source_covector[pair_ordinal];
+                            let evaluation_high = self.source_covector[half + pair_ordinal];
+                            let weight_low = self.source_covector[weight_offset + pair_ordinal];
+                            let weight_high =
+                                self.source_covector[weight_offset + half + pair_ordinal];
+                            self.source_covector[pair_ordinal] =
+                                evaluation_low + challenge * (evaluation_high - evaluation_low);
+                            self.source_covector[half + pair_ordinal] = CompactChallengeField::ZERO;
+                            self.source_covector[weight_offset + pair_ordinal] =
+                                weight_low + challenge * (weight_high - weight_low);
+                        }
+                    }
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        folded_weight_offset: None,
+                        ..
+                    }) => return Err(CompactWhirError::WrongProverPhase),
                 }
                 let round_complete = end == half;
                 if round_complete {
-                    self.source_evaluations.truncate(half);
-                    self.source_covector.truncate(half);
-                    self.source_claim = extrapolate_quadratic_from_boolean_sum(
+                    self.complete_folded_round(
+                        half,
                         constant_coefficient,
-                        self.source_claim,
                         leading_coefficient,
                         challenge,
-                    );
-                    if self.round_challenges.len() == self.sumcheck_mask_messages.len() {
-                        self.phase = CompactWhirInitialSumcheckPhase::ScalingWeights {
-                            next_element_ordinal: 0,
-                        };
-                    } else {
-                        self.begin_round_polynomial()?;
-                    }
+                    )?;
                 } else {
                     self.phase = CompactWhirInitialSumcheckPhase::FoldingRound {
                         challenge,
@@ -1163,13 +1408,27 @@ impl CompactWhirInitialSumcheckState {
                 let combination_challenge = self
                     .combination_challenge
                     .ok_or(CompactWhirError::WrongProverPhase)?;
+                let (weight_offset, weight_count) = match self.authenticated_source_replay {
+                    None => (0, self.source_covector.len()),
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        current_element_count,
+                        folded_weight_offset: Some(weight_offset),
+                        ..
+                    }) => (weight_offset, current_element_count),
+                    Some(CompactWhirAuthenticatedSourceReplayState {
+                        folded_weight_offset: None,
+                        ..
+                    }) => return Err(CompactWhirError::WrongProverPhase),
+                };
                 let end = next_element_ordinal
                     .saturating_add(maximum_work_unit_count)
-                    .min(self.source_covector.len());
-                for weight in &mut self.source_covector[next_element_ordinal..end] {
+                    .min(weight_count);
+                for weight in &mut self.source_covector
+                    [weight_offset + next_element_ordinal..weight_offset + end]
+                {
                     *weight *= combination_challenge;
                 }
-                let scaling_complete = end == self.source_covector.len();
+                let scaling_complete = end == weight_count;
                 if scaling_complete {
                     self.source_claim *= combination_challenge;
                     self.phase = CompactWhirInitialSumcheckPhase::Complete;
@@ -1243,32 +1502,113 @@ impl CompactWhirInitialSumcheckState {
         if !self.is_complete() {
             return Err(CompactWhirError::WrongProverPhase);
         }
-        Ok(&self.source_evaluations)
+        match self.authenticated_source_replay {
+            None => Ok(&self.source_evaluations),
+            Some(CompactWhirAuthenticatedSourceReplayState {
+                current_element_count,
+                folded_weight_offset: Some(_),
+                residual_source_taken: false,
+            }) => self
+                .source_covector
+                .get(..current_element_count)
+                .ok_or(CompactWhirError::InvalidRelation),
+            Some(_) => Err(CompactWhirError::WrongProverPhase),
+        }
     }
 
     pub(crate) fn take_residual_source(
         &mut self,
     ) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
-        if !self.is_complete() || self.source_evaluations.is_empty() {
+        if !self.is_complete() {
             return Err(CompactWhirError::WrongProverPhase);
         }
-        Ok(core::mem::take(&mut self.source_evaluations))
+        let Some(replay) = self.authenticated_source_replay else {
+            if self.source_evaluations.is_empty() {
+                return Err(CompactWhirError::WrongProverPhase);
+            }
+            return Ok(core::mem::take(&mut self.source_evaluations));
+        };
+        let weight_offset = replay
+            .folded_weight_offset
+            .filter(|_| !replay.residual_source_taken)
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        let source_end = replay.current_element_count;
+        let covector_end = weight_offset
+            .checked_add(replay.current_element_count)
+            .ok_or(CompactWhirError::CountOverflow)?;
+        let source = self
+            .source_covector
+            .get(..source_end)
+            .ok_or(CompactWhirError::InvalidRelation)?;
+        let covector = self
+            .source_covector
+            .get(weight_offset..covector_end)
+            .ok_or(CompactWhirError::InvalidRelation)?;
+        let mut detached_source = Vec::new();
+        detached_source
+            .try_reserve_exact(source.len())
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        let mut detached_covector = Vec::new();
+        detached_covector
+            .try_reserve_exact(covector.len())
+            .map_err(|_| CompactWhirError::AllocationLimitExceeded)?;
+        detached_source.extend_from_slice(source);
+        detached_covector.extend_from_slice(covector);
+        self.source_covector[..source_end].fill(CompactChallengeField::ZERO);
+        drop(core::mem::take(&mut self.source_covector));
+        self.authenticated_source_replay
+            .as_mut()
+            .ok_or(CompactWhirError::WrongProverPhase)?
+            .residual_source_taken = true;
+        self.detached_replayed_source_covector = Some(detached_covector);
+        Ok(detached_source)
     }
 
     pub(crate) fn residual_covector(&self) -> Result<&[CompactChallengeField], CompactWhirError> {
         if !self.is_complete() {
             return Err(CompactWhirError::WrongProverPhase);
         }
-        Ok(&self.source_covector)
+        let Some(replay) = self.authenticated_source_replay else {
+            return Ok(&self.source_covector);
+        };
+        if replay.residual_source_taken {
+            return self
+                .detached_replayed_source_covector
+                .as_deref()
+                .ok_or(CompactWhirError::WrongProverPhase);
+        }
+        let weight_offset = replay
+            .folded_weight_offset
+            .ok_or(CompactWhirError::WrongProverPhase)?;
+        let covector_end = weight_offset
+            .checked_add(replay.current_element_count)
+            .ok_or(CompactWhirError::CountOverflow)?;
+        self.source_covector
+            .get(weight_offset..covector_end)
+            .ok_or(CompactWhirError::InvalidRelation)
     }
 
     pub(crate) fn take_residual_covector(
         &mut self,
     ) -> Result<Vec<CompactChallengeField>, CompactWhirError> {
-        if !self.is_complete() || self.source_covector.is_empty() {
+        if !self.is_complete() {
             return Err(CompactWhirError::WrongProverPhase);
         }
-        Ok(core::mem::take(&mut self.source_covector))
+        if self.authenticated_source_replay.is_none() {
+            if self.source_covector.is_empty() {
+                return Err(CompactWhirError::WrongProverPhase);
+            }
+            return Ok(core::mem::take(&mut self.source_covector));
+        }
+        if !self
+            .authenticated_source_replay
+            .is_some_and(|replay| replay.residual_source_taken)
+        {
+            return Err(CompactWhirError::WrongProverPhase);
+        }
+        self.detached_replayed_source_covector
+            .take()
+            .ok_or(CompactWhirError::WrongProverPhase)
     }
 
     pub(crate) fn residual_source_claim(&self) -> Result<CompactChallengeField, CompactWhirError> {
@@ -1313,6 +1653,56 @@ impl CompactWhirInitialSumcheckState {
 
     pub(crate) fn mask_encoding_randomness(&self) -> &[Vec<CompactChallengeField>] {
         &self.sumcheck_mask_encoding_randomness
+    }
+
+    fn complete_round_polynomial(
+        &mut self,
+        constant_coefficient: CompactChallengeField,
+        leading_coefficient: CompactChallengeField,
+    ) -> Result<(), CompactWhirError> {
+        let wire = self.assemble_round_wire(constant_coefficient, leading_coefficient)?;
+        self.round_wires.push(wire.clone());
+        self.pending_round_wire = Some(wire);
+        self.phase = CompactWhirInitialSumcheckPhase::RoundPolynomialReady {
+            constant_coefficient,
+            leading_coefficient,
+        };
+        Ok(())
+    }
+
+    fn complete_folded_round(
+        &mut self,
+        folded_element_count: usize,
+        constant_coefficient: CompactChallengeField,
+        leading_coefficient: CompactChallengeField,
+        challenge: CompactChallengeField,
+    ) -> Result<(), CompactWhirError> {
+        match self.authenticated_source_replay.as_mut() {
+            None => {
+                self.source_evaluations.truncate(folded_element_count);
+                self.source_covector.truncate(folded_element_count);
+            }
+            Some(replay) => {
+                if replay.folded_weight_offset.is_none() {
+                    replay.folded_weight_offset = Some(folded_element_count);
+                }
+                replay.current_element_count = folded_element_count;
+            }
+        }
+        self.source_claim = extrapolate_quadratic_from_boolean_sum(
+            constant_coefficient,
+            self.source_claim,
+            leading_coefficient,
+            challenge,
+        );
+        if self.round_challenges.len() == self.sumcheck_mask_messages.len() {
+            self.phase = CompactWhirInitialSumcheckPhase::ScalingWeights {
+                next_element_ordinal: 0,
+            };
+        } else {
+            self.begin_round_polynomial()?;
+        }
+        Ok(())
     }
 
     fn begin_round_polynomial(&mut self) -> Result<(), CompactWhirError> {
@@ -1390,6 +1780,21 @@ impl CompactWhirInitialSumcheckState {
 impl Drop for CompactWhirInitialSumcheckState {
     fn drop(&mut self) {
         self.source_evaluations.fill(CompactChallengeField::ZERO);
+        if let Some(replay) = self.authenticated_source_replay {
+            let retained_secret_element_count = if replay.folded_weight_offset.is_some() {
+                replay.current_element_count
+            } else if let CompactWhirInitialSumcheckPhase::FoldingRound {
+                next_pair_ordinal, ..
+            } = self.phase
+            {
+                next_pair_ordinal
+            } else {
+                0
+            };
+            let retained_secret_element_count =
+                retained_secret_element_count.min(self.source_covector.len());
+            self.source_covector[..retained_secret_element_count].fill(CompactChallengeField::ZERO);
+        }
         self.source_claim = CompactChallengeField::ZERO;
         for mask_message in &mut self.sumcheck_mask_messages {
             mask_message.fill(CompactChallengeField::ZERO);
@@ -1887,6 +2292,7 @@ impl CompactWhirCodeSwitchRelationPreparation {
         }
         Ok(CompactWhirMaskedSumcheckRelation {
             source_evaluations: core::mem::take(&mut self.source_evaluations),
+            authenticated_source_replay_element_count: None,
             source_covector: core::mem::take(&mut self.source_covector),
             source_claim: self.source_claim,
             target: self.target,
@@ -4183,7 +4589,11 @@ mod tests {
         let resumed_relation = source_failure
             .finish()
             .expect("the resumed source produces one exact relation");
-        assert_eq!(resumed_relation.source_evaluations, source_evaluations);
+        assert!(resumed_relation.source_evaluations.is_empty());
+        assert_eq!(
+            resumed_relation.authenticated_source_replay_element_count,
+            Some(source_evaluations.len())
+        );
         assert_eq!(
             resumed_relation.source_claim,
             source_evaluations
@@ -4254,7 +4664,11 @@ mod tests {
             .sum::<CompactChallengeField>();
         let expected_mask_claim =
             expected_inner_mask_claim + expected_outer_mask_claim + expected_cross_epoch_mask_claim;
-        assert_eq!(relation.source_evaluations, source_evaluations);
+        assert!(relation.source_evaluations.is_empty());
+        assert_eq!(
+            relation.authenticated_source_replay_element_count,
+            Some(source_evaluations.len())
+        );
         assert_eq!(relation.source_covector, source_covector);
         assert_eq!(relation.source_claim, expected_source_claim);
         assert_eq!(relation.preceding_mask_claim, expected_mask_claim);
@@ -4295,6 +4709,307 @@ mod tests {
             ),
             Err(CompactWhirError::InvalidRelation)
         ));
+    }
+
+    #[test]
+    fn authenticated_source_replay_matches_materialized_sumcheck_and_resumes_source_failures() {
+        let configuration = bounded_test_configuration();
+        let source_evaluations = (0..1_usize << configuration.num_variables)
+            .map(|source_ordinal| {
+                CompactChallengeField::from_u64((source_ordinal as u64).wrapping_mul(41) + 7)
+            })
+            .collect::<Vec<_>>();
+        let source_covector = (0..source_evaluations.len())
+            .map(|source_ordinal| {
+                CompactChallengeField::from_u64((source_ordinal as u64).wrapping_mul(53) + 11)
+            })
+            .collect::<Vec<_>>();
+        let source_claim = source_evaluations
+            .iter()
+            .zip(&source_covector)
+            .map(|(value, coefficient)| *value * *coefficient)
+            .sum::<CompactChallengeField>();
+        let preceding_mask_claim = CompactChallengeField::from_u64(1_009);
+        let masked_target = source_claim + preceding_mask_claim;
+        let input_binding_challenge = CompactChallengeField::from_u64(1_103);
+        let materialized_relation = CompactWhirMaskedSumcheckRelation {
+            source_evaluations: source_evaluations.clone(),
+            authenticated_source_replay_element_count: None,
+            source_covector: source_covector.clone(),
+            source_claim,
+            target: masked_target,
+            preceding_mask_claim,
+            input_binding_challenge,
+        };
+        let replayed_relation = || CompactWhirMaskedSumcheckRelation {
+            source_evaluations: Vec::new(),
+            authenticated_source_replay_element_count: Some(source_evaluations.len()),
+            source_covector: source_covector.clone(),
+            source_claim,
+            target: masked_target,
+            preceding_mask_claim,
+            input_binding_challenge,
+        };
+        let mask_contract = initial_sumcheck_mask_contract(&configuration);
+        let mut materialized_random_source = CountingRandomSource(0xD9);
+        let mut replayed_random_source = CountingRandomSource(0xD9);
+        let mut materialized_state = CompactWhirInitialSumcheckState::new(
+            materialized_relation,
+            &configuration,
+            0,
+            mask_contract,
+            &mut materialized_random_source,
+        )
+        .expect("the materialized relation enters the sumcheck");
+        let mut replayed_state = CompactWhirInitialSumcheckState::new(
+            replayed_relation(),
+            &configuration,
+            0,
+            mask_contract,
+            &mut replayed_random_source,
+        )
+        .expect("the authenticated replay relation enters the same sumcheck");
+        assert!(!materialized_state.authenticated_source_replay_required());
+        assert!(replayed_state.authenticated_source_replay_required());
+        let combination_challenge = CompactChallengeField::from_u64(1_201);
+        materialized_state
+            .bind_combination_challenge(combination_challenge)
+            .expect("the materialized sumcheck binds its combination challenge");
+        replayed_state
+            .bind_combination_challenge(combination_challenge)
+            .expect("the replayed sumcheck binds the same combination challenge");
+        assert_eq!(
+            replayed_state.poll(1),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+        assert_eq!(
+            materialized_state.poll_replaying_authenticated_source::<core::convert::Infallible>(
+                1,
+                |_| unreachable!(),
+            ),
+            Err(CompactWhirInitialSumcheckSourceReplayError::Whir(
+                CompactWhirError::WrongProverPhase,
+            ))
+        );
+
+        let round_challenges = [
+            CompactChallengeField::from_u64(1_303),
+            CompactChallengeField::from_u64(1_409),
+        ];
+        let work_budgets = [1_u64, 7, 31, 3];
+        let mut poll_ordinal = 0_usize;
+        let mut replayed_source_ordinals = Vec::new();
+        for (round_index, challenge) in round_challenges.into_iter().enumerate() {
+            loop {
+                let work_budget = work_budgets[poll_ordinal % work_budgets.len()];
+                let materialized_poll = materialized_state
+                    .poll(work_budget)
+                    .expect("the materialized round polynomial advances");
+                let replayed_poll = if replayed_state.authenticated_source_replay_required() {
+                    replayed_state
+                        .poll_replaying_authenticated_source(work_budget, |source_ordinal| {
+                            replayed_source_ordinals.push(source_ordinal);
+                            Ok::<_, core::convert::Infallible>(
+                                source_evaluations[usize::try_from(source_ordinal).unwrap()],
+                            )
+                        })
+                        .expect("the authenticated source replay advances")
+                } else {
+                    replayed_state
+                        .poll(work_budget)
+                        .expect("the in-place replay state advances")
+                };
+                assert_eq!(replayed_poll, materialized_poll);
+                poll_ordinal += 1;
+                if matches!(
+                    materialized_poll,
+                    CompactWhirInitialSumcheckPoll::RoundPolynomial {
+                        polynomial_ready: true,
+                        ..
+                    }
+                ) {
+                    break;
+                }
+            }
+            assert_eq!(
+                replayed_state
+                    .pending_round_wire()
+                    .expect("the replayed round wire is ready"),
+                materialized_state
+                    .pending_round_wire()
+                    .expect("the materialized round wire is ready")
+            );
+            materialized_state
+                .bind_round_challenge(challenge)
+                .expect("the materialized round challenge binds");
+            replayed_state
+                .bind_round_challenge(challenge)
+                .expect("the replayed round challenge binds");
+            loop {
+                let work_budget = work_budgets[poll_ordinal % work_budgets.len()];
+                let materialized_poll = materialized_state
+                    .poll(work_budget)
+                    .expect("the materialized fold advances");
+                let replayed_poll = if replayed_state.authenticated_source_replay_required() {
+                    replayed_state
+                        .poll_replaying_authenticated_source(work_budget, |source_ordinal| {
+                            replayed_source_ordinals.push(source_ordinal);
+                            Ok::<_, core::convert::Infallible>(
+                                source_evaluations[usize::try_from(source_ordinal).unwrap()],
+                            )
+                        })
+                        .expect("the first replayed fold advances")
+                } else {
+                    replayed_state
+                        .poll(work_budget)
+                        .expect("the in-place replayed fold advances")
+                };
+                assert_eq!(replayed_poll, materialized_poll);
+                poll_ordinal += 1;
+                if matches!(
+                    materialized_poll,
+                    CompactWhirInitialSumcheckPoll::BoundRound {
+                        round_complete: true,
+                        ..
+                    }
+                ) {
+                    break;
+                }
+            }
+            if round_index == 0 {
+                assert!(!replayed_state.authenticated_source_replay_required());
+            }
+        }
+        loop {
+            let work_budget = work_budgets[poll_ordinal % work_budgets.len()];
+            let materialized_poll = materialized_state
+                .poll(work_budget)
+                .expect("the materialized weights scale");
+            let replayed_poll = replayed_state
+                .poll(work_budget)
+                .expect("the replayed weights scale");
+            assert_eq!(replayed_poll, materialized_poll);
+            poll_ordinal += 1;
+            if matches!(
+                materialized_poll,
+                CompactWhirInitialSumcheckPoll::WeightScaling {
+                    scaling_complete: true,
+                    ..
+                }
+            ) {
+                break;
+            }
+        }
+        assert!(materialized_state.is_complete());
+        assert!(replayed_state.is_complete());
+        assert_eq!(
+            replayed_state.residual_source().unwrap(),
+            materialized_state.residual_source().unwrap()
+        );
+        assert_eq!(
+            replayed_state.residual_covector().unwrap(),
+            materialized_state.residual_covector().unwrap()
+        );
+        assert_eq!(
+            replayed_state.residual_source_claim().unwrap(),
+            materialized_state.residual_source_claim().unwrap()
+        );
+        assert_eq!(
+            replayed_state.residual_mask_claim().unwrap(),
+            materialized_state.residual_mask_claim().unwrap()
+        );
+        let replay_storage = replayed_state
+            .authenticated_source_replay
+            .expect("the replay storage remains classified until extraction");
+        let replay_weight_offset = replay_storage
+            .folded_weight_offset
+            .expect("the first fold established the weight region");
+        assert!(
+            replayed_state.source_covector
+                [replay_storage.current_element_count..replay_weight_offset]
+                .iter()
+                .all(|value| *value == CompactChallengeField::ZERO)
+        );
+        assert_eq!(
+            replayed_state.take_residual_covector(),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+        assert_eq!(
+            replayed_state.take_residual_source().unwrap(),
+            materialized_state.take_residual_source().unwrap()
+        );
+        assert!(replayed_state.source_covector.is_empty());
+        assert_eq!(
+            replayed_state.take_residual_covector().unwrap(),
+            materialized_state.take_residual_covector().unwrap()
+        );
+        assert_eq!(
+            replayed_state.take_residual_source(),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+        assert_eq!(
+            replayed_state.take_residual_covector(),
+            Err(CompactWhirError::WrongProverPhase)
+        );
+
+        let half = source_evaluations.len() / 2;
+        let one_replay_pass = (0..half)
+            .flat_map(|pair_ordinal| {
+                [
+                    u64::try_from(pair_ordinal).unwrap(),
+                    u64::try_from(half + pair_ordinal).unwrap(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            replayed_source_ordinals,
+            one_replay_pass
+                .iter()
+                .chain(&one_replay_pass)
+                .copied()
+                .collect::<Vec<_>>()
+        );
+
+        for failing_source_ordinal in [0_u64, u64::try_from(half).unwrap()] {
+            let mut failure_random_source = CountingRandomSource(0xD9);
+            let mut failure_state = CompactWhirInitialSumcheckState::new(
+                replayed_relation(),
+                &configuration,
+                0,
+                mask_contract,
+                &mut failure_random_source,
+            )
+            .expect("the source-failure relation enters the sumcheck");
+            failure_state
+                .bind_combination_challenge(combination_challenge)
+                .expect("the source-failure sumcheck binds its challenge");
+            assert_eq!(
+                failure_state.poll_replaying_authenticated_source(1, |source_ordinal| {
+                    if source_ordinal == failing_source_ordinal {
+                        Err("authenticated source failure")
+                    } else {
+                        Ok(source_evaluations[usize::try_from(source_ordinal).unwrap()])
+                    }
+                }),
+                Err(CompactWhirInitialSumcheckSourceReplayError::Source(
+                    "authenticated source failure"
+                ))
+            );
+            assert_eq!(
+                failure_state
+                    .poll_replaying_authenticated_source(1, |source_ordinal| {
+                        Ok::<_, core::convert::Infallible>(
+                            source_evaluations[usize::try_from(source_ordinal).unwrap()],
+                        )
+                    })
+                    .expect("the failed source pair restarts without retained arithmetic"),
+                CompactWhirInitialSumcheckPoll::RoundPolynomial {
+                    round_ordinal: 0,
+                    processed_work_unit_count: 1,
+                    polynomial_ready: false,
+                }
+            );
+        }
     }
 
     #[test]

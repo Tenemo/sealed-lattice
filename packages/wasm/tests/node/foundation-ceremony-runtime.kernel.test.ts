@@ -117,7 +117,19 @@ describe('foundation ceremony Rust/WASM boundary', () => {
         ).toBe(4 * 64);
         expect(
             commandRuntime.wasmExports
-                .sealed_lattice_compact_public_key_begin_algebraic_verification,
+                .sealed_lattice_compact_public_key_begin_algebraic_verification_input,
+        ).toBeTypeOf('function');
+        expect(
+            commandRuntime.wasmExports
+                .sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk,
+        ).toBeTypeOf('function');
+        expect(
+            commandRuntime.wasmExports
+                .sealed_lattice_compact_public_key_finish_algebraic_verification_input,
+        ).toBeTypeOf('function');
+        expect(
+            commandRuntime.wasmExports
+                .sealed_lattice_compact_public_key_cancel_algebraic_verification_input,
         ).toBeTypeOf('function');
         expect(
             commandRuntime.wasmExports
@@ -126,10 +138,6 @@ describe('foundation ceremony Rust/WASM boundary', () => {
         expect(
             commandRuntime.wasmExports
                 .sealed_lattice_compact_public_key_cancel_algebraic_verification,
-        ).toBeTypeOf('function');
-        expect(
-            commandRuntime.wasmExports
-                .sealed_lattice_compact_public_key_resume_algebraic_verification,
         ).toBeTypeOf('function');
         expect(
             commandRuntime.wasmExports
@@ -190,11 +198,31 @@ describe('foundation ceremony Rust/WASM boundary', () => {
                 Uint8Array.of(2),
             ),
         ).toThrow(/status 4/u);
-        expect(
-            compactPublicKeyBoundary.beginCompactPublicKeyAlgebraicVerification(
+        const compactPublicKeyInput =
+            compactPublicKeyBoundary.beginCompactPublicKeyAlgebraicVerificationInput(
                 compactPublicKeyBindings,
                 Uint8Array.of(1),
                 Uint8Array.of(2),
+            );
+        expect(compactPublicKeyInput.kind).toBe('prepared');
+        if (compactPublicKeyInput.kind !== 'prepared') {
+            throw new Error('The compact verifier input was not prepared.');
+        }
+        compactPublicKeyBoundary.supplyCompactPublicKeyAlgebraicVerificationInputChunk(
+            compactPublicKeyInput.inputHandle,
+            'proof',
+            0,
+            Uint8Array.of(1),
+        );
+        compactPublicKeyBoundary.supplyCompactPublicKeyAlgebraicVerificationInputChunk(
+            compactPublicKeyInput.inputHandle,
+            'publicInput',
+            0,
+            Uint8Array.of(2),
+        );
+        expect(
+            compactPublicKeyBoundary.finishCompactPublicKeyAlgebraicVerificationInput(
+                compactPublicKeyInput.inputHandle,
             ),
         ).toEqual({ kind: 'refused', refusalReason: 'wrongContext' });
         expect(

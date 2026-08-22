@@ -3814,7 +3814,11 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
                     prepared_mask_claim,
                     prepared_input_binding_challenge,
                 ) = prepared_relation.relation_parts_for_test();
-                assert_eq!(prepared_source_evaluations, witness);
+                assert!(prepared_source_evaluations.is_empty());
+                assert_eq!(
+                    prepared_relation.authenticated_source_replay_element_count_for_test(),
+                    Some(witness.len())
+                );
                 assert_eq!(prepared_source_covector, source_covector);
                 assert_eq!(prepared_target, target);
                 assert_eq!(prepared_source_claim + prepared_mask_claim, target);

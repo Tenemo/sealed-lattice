@@ -62,6 +62,8 @@ const verificationPollComplete = 5;
 const compactPublicKeyAlgebraicVerificationPollProgress = 1;
 const compactPublicKeyAlgebraicVerificationPollComplete = 5;
 const compactPublicKeyAlgebraicVerificationPollResumeComplete = 7;
+const compactPublicKeyAlgebraicVerificationProofInput = 1;
+const compactPublicKeyAlgebraicVerificationPublicInput = 2;
 const compactPublicKeyGenerationPollProgress = 1;
 const compactPublicKeyGenerationPollStorageRequestReady = 2;
 const compactPublicKeyGenerationPollComplete = 5;
@@ -312,6 +314,10 @@ type CompactPublicKeyGenerationExternalMemoryUsage = Readonly<{
 
 type CompactPublicKeyAlgebraicVerificationKernelBegin =
     | Readonly<{ kind: 'started'; operationHandle: number }>
+    | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
+
+type CompactPublicKeyAlgebraicVerificationInputPreparation =
+    | Readonly<{ inputHandle: number; kind: 'prepared' }>
     | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
 
 type CompactPublicKeyAlgebraicVerificationKernelPoll =
@@ -2530,47 +2536,241 @@ export class CommonProofVerificationKernelBoundary {
         }
     }
 
-    /**
-     * Copies one exact compact proof into Rust-owned verification custody after
-     * strict transport validation. A refusal never returns a live handle.
-     */
-    public beginCompactPublicKeyAlgebraicVerification(
+    /** Begins Rust-owned staged custody without copying either large stream. */
+    public beginCompactPublicKeyAlgebraicVerificationInput(
         bindings: CompactPublicKeyTransportBindings,
         proofBytes: Uint8Array,
         publicInputBytes: Uint8Array,
-    ): CompactPublicKeyAlgebraicVerificationKernelBegin {
-        return this.#startCompactPublicKeyAlgebraicVerification(
-            bindings,
-            proofBytes,
-            publicInputBytes,
-        );
-    }
-
-    /**
-     * Revalidates the exact transported bytes and retains a fresh verifier at
-     * genesis. Bounded polls replay to the authenticated safe cursor before
-     * live work can continue.
-     */
-    public resumeCompactPublicKeyAlgebraicVerification(
-        bindings: CompactPublicKeyTransportBindings,
-        proofBytes: Uint8Array,
-        publicInputBytes: Uint8Array,
-        canonicalCheckpointBytes: Uint8Array,
-    ): CompactPublicKeyAlgebraicVerificationKernelBegin {
+        canonicalCheckpointBytes?: Uint8Array,
+    ): CompactPublicKeyAlgebraicVerificationInputPreparation {
         if (
-            !(canonicalCheckpointBytes instanceof Uint8Array) ||
-            canonicalCheckpointBytes.byteLength !==
-                this.compactPublicKeyAlgebraicVerificationCheckpointByteLength()
+            canonicalCheckpointBytes !== undefined &&
+            (!(canonicalCheckpointBytes instanceof Uint8Array) ||
+                canonicalCheckpointBytes.byteLength !==
+                    this.compactPublicKeyAlgebraicVerificationCheckpointByteLength())
         ) {
             throw resourceFailure(
                 'The compact public-key algebraic verification checkpoint has the wrong byte length.',
             );
         }
-        return this.#startCompactPublicKeyAlgebraicVerification(
+        const canonicalBindings = this.#copyCompactPublicKeyTransportBindings(
             bindings,
             proofBytes,
             publicInputBytes,
-            canonicalCheckpointBytes,
+        );
+        try {
+            return this.#context.runExclusive(
+                'compact public-key algebraic verification input begin',
+                () => {
+                    this.#requireCompactPublicKeyTransportBindingGeometry();
+                    let bindingsPointer: number | undefined;
+                    let checkpointPointer: number | undefined;
+                    let statusPointer: number | undefined;
+                    try {
+                        bindingsPointer =
+                            this.#memoryBoundary.copy(canonicalBindings);
+                        if (canonicalCheckpointBytes !== undefined) {
+                            checkpointPointer = this.#memoryBoundary.copy(
+                                canonicalCheckpointBytes,
+                            );
+                        }
+                        statusPointer =
+                            this.#memoryBoundary.allocateZeroedWords(1);
+                        const inputHandle = resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_begin_algebraic_verification_input',
+                        )(
+                            bindingsPointer,
+                            canonicalBindings.byteLength,
+                            proofBytes.byteLength,
+                            publicInputBytes.byteLength,
+                            checkpointPointer ?? 0,
+                            canonicalCheckpointBytes?.byteLength ?? 0,
+                            statusPointer,
+                        );
+                        const [status] = this.#memoryBoundary.readWords(
+                            statusPointer,
+                            1,
+                        );
+                        const refusalReason =
+                            decodeCompactPublicKeyAlgebraicVerificationStatus(
+                                status,
+                                'algebraic verification input begin',
+                            );
+                        if (refusalReason !== undefined) {
+                            if (inputHandle !== 0) {
+                                throw kernelFailure(
+                                    'A refused compact public-key verifier input begin returned a live handle.',
+                                );
+                            }
+                            return Object.freeze({
+                                kind: 'refused',
+                                refusalReason,
+                            });
+                        }
+                        return Object.freeze({
+                            inputHandle: requireLiveHandle(
+                                inputHandle,
+                                'The compact public-key algebraic verification input handle',
+                            ),
+                            kind: 'prepared',
+                        });
+                    } finally {
+                        if (statusPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                statusPointer,
+                                wasm32WordByteLength,
+                            );
+                        }
+                        if (
+                            checkpointPointer !== undefined &&
+                            canonicalCheckpointBytes !== undefined
+                        ) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                checkpointPointer,
+                                canonicalCheckpointBytes.byteLength,
+                            );
+                        }
+                        if (bindingsPointer !== undefined) {
+                            this.#memoryBoundary.zeroAndDeallocate(
+                                bindingsPointer,
+                                canonicalBindings.byteLength,
+                            );
+                        }
+                    }
+                },
+            );
+        } finally {
+            canonicalBindings.fill(0);
+        }
+    }
+
+    /** Copies one bounded sequential input chunk into existing Rust custody. */
+    public supplyCompactPublicKeyAlgebraicVerificationInputChunk(
+        inputHandle: number,
+        inputKind: 'proof' | 'publicInput',
+        byteOffset: number,
+        chunkBytes: Uint8Array,
+    ): void {
+        requireLiveHandle(
+            inputHandle,
+            'The compact public-key algebraic verification input handle',
+        );
+        if (
+            !Number.isSafeInteger(byteOffset) ||
+            byteOffset < 0 ||
+            byteOffset > maximumCommonProofByteLength ||
+            !(chunkBytes instanceof Uint8Array) ||
+            chunkBytes.byteLength === 0 ||
+            chunkBytes.byteLength > canonicalCommonProofChunkByteLength
+        ) {
+            throw resourceFailure(
+                'The compact public-key algebraic verification input chunk is outside its bounded geometry.',
+            );
+        }
+        this.#context.runExclusive(
+            'compact public-key algebraic verification input chunk',
+            () => {
+                const chunkPointer = this.#memoryBoundary.copy(chunkBytes);
+                try {
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk',
+                        )(
+                            inputHandle,
+                            inputKind === 'proof'
+                                ? compactPublicKeyAlgebraicVerificationProofInput
+                                : compactPublicKeyAlgebraicVerificationPublicInput,
+                            byteOffset,
+                            chunkPointer,
+                            chunkBytes.byteLength,
+                        ),
+                        'compact public-key algebraic verification input chunk',
+                    );
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        chunkPointer,
+                        chunkBytes.byteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    /** Consumes complete staged input and returns only a genuine verifier handle. */
+    public finishCompactPublicKeyAlgebraicVerificationInput(
+        inputHandle: number,
+    ): CompactPublicKeyAlgebraicVerificationKernelBegin {
+        requireLiveHandle(
+            inputHandle,
+            'The compact public-key algebraic verification input handle',
+        );
+        return this.#context.runExclusive(
+            'compact public-key algebraic verification input finish',
+            () => {
+                const statusPointer =
+                    this.#memoryBoundary.allocateZeroedWords(1);
+                try {
+                    const operationHandle = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_finish_algebraic_verification_input',
+                    )(inputHandle, statusPointer);
+                    const [status] = this.#memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    const refusalReason =
+                        decodeCompactPublicKeyAlgebraicVerificationStatus(
+                            status,
+                            'algebraic verification input finish',
+                        );
+                    if (refusalReason !== undefined) {
+                        if (operationHandle !== 0) {
+                            throw kernelFailure(
+                                'A refused compact public-key verifier input finish returned a live handle.',
+                            );
+                        }
+                        return Object.freeze({
+                            kind: 'refused',
+                            refusalReason,
+                        });
+                    }
+                    return Object.freeze({
+                        kind: 'started',
+                        operationHandle: requireLiveHandle(
+                            operationHandle,
+                            'The compact public-key algebraic verification operation handle',
+                        ),
+                    });
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public cancelCompactPublicKeyAlgebraicVerificationInput(
+        inputHandle: number,
+    ): void {
+        requireLiveHandle(
+            inputHandle,
+            'The compact public-key algebraic verification input handle',
+        );
+        this.#context.runExclusive(
+            'compact public-key algebraic verification input cancellation',
+            () => {
+                requireKernelSuccess(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_cancel_algebraic_verification_input',
+                    )(inputHandle),
+                    'compact public-key algebraic verification input cancellation',
+                );
+            },
         );
     }
 
@@ -2623,137 +2823,6 @@ export class CommonProofVerificationKernelBoundary {
             );
         }
         return safeBoundaryCount;
-    }
-
-    #startCompactPublicKeyAlgebraicVerification(
-        bindings: CompactPublicKeyTransportBindings,
-        proofBytes: Uint8Array,
-        publicInputBytes: Uint8Array,
-        canonicalCheckpointBytes?: Uint8Array,
-    ): CompactPublicKeyAlgebraicVerificationKernelBegin {
-        const canonicalBindings = this.#copyCompactPublicKeyTransportBindings(
-            bindings,
-            proofBytes,
-            publicInputBytes,
-        );
-        try {
-            return this.#context.runExclusive(
-                'compact public-key algebraic verification begin',
-                () => {
-                    this.#requireCompactPublicKeyTransportBindingGeometry();
-                    let bindingsPointer: number | undefined;
-                    let proofPointer: number | undefined;
-                    let publicInputPointer: number | undefined;
-                    let checkpointPointer: number | undefined;
-                    let statusPointer: number | undefined;
-                    try {
-                        bindingsPointer =
-                            this.#memoryBoundary.copy(canonicalBindings);
-                        proofPointer = this.#memoryBoundary.copy(proofBytes);
-                        publicInputPointer =
-                            this.#memoryBoundary.copy(publicInputBytes);
-                        if (canonicalCheckpointBytes !== undefined) {
-                            checkpointPointer = this.#memoryBoundary.copy(
-                                canonicalCheckpointBytes,
-                            );
-                        }
-                        statusPointer =
-                            this.#memoryBoundary.allocateZeroedWords(1);
-                        const operationHandle =
-                            canonicalCheckpointBytes === undefined
-                                ? resolveNumberExport(
-                                      this.#context.wasmExports,
-                                      'sealed_lattice_compact_public_key_begin_algebraic_verification',
-                                  )(
-                                      bindingsPointer,
-                                      canonicalBindings.byteLength,
-                                      proofPointer,
-                                      proofBytes.byteLength,
-                                      publicInputPointer,
-                                      publicInputBytes.byteLength,
-                                      statusPointer,
-                                  )
-                                : resolveNumberExport(
-                                      this.#context.wasmExports,
-                                      'sealed_lattice_compact_public_key_resume_algebraic_verification',
-                                  )(
-                                      bindingsPointer,
-                                      canonicalBindings.byteLength,
-                                      proofPointer,
-                                      proofBytes.byteLength,
-                                      publicInputPointer,
-                                      publicInputBytes.byteLength,
-                                      checkpointPointer!,
-                                      canonicalCheckpointBytes.byteLength,
-                                      statusPointer,
-                                  );
-                        const [status] = this.#memoryBoundary.readWords(
-                            statusPointer,
-                            1,
-                        );
-                        const refusalReason =
-                            decodeCompactPublicKeyAlgebraicVerificationStatus(
-                                status,
-                                'algebraic verification begin',
-                            );
-                        if (refusalReason !== undefined) {
-                            if (operationHandle !== 0) {
-                                throw kernelFailure(
-                                    'A refused compact public-key algebraic verifier begin returned a live handle.',
-                                );
-                            }
-                            return Object.freeze({
-                                kind: 'refused',
-                                refusalReason,
-                            });
-                        }
-                        return Object.freeze({
-                            kind: 'started',
-                            operationHandle: requireLiveHandle(
-                                operationHandle,
-                                'The compact public-key algebraic verification operation handle',
-                            ),
-                        });
-                    } finally {
-                        if (statusPointer !== undefined) {
-                            this.#memoryBoundary.zeroAndDeallocate(
-                                statusPointer,
-                                wasm32WordByteLength,
-                            );
-                        }
-                        if (
-                            checkpointPointer !== undefined &&
-                            canonicalCheckpointBytes !== undefined
-                        ) {
-                            this.#memoryBoundary.zeroAndDeallocate(
-                                checkpointPointer,
-                                canonicalCheckpointBytes.byteLength,
-                            );
-                        }
-                        if (publicInputPointer !== undefined) {
-                            this.#memoryBoundary.zeroAndDeallocate(
-                                publicInputPointer,
-                                publicInputBytes.byteLength,
-                            );
-                        }
-                        if (proofPointer !== undefined) {
-                            this.#memoryBoundary.zeroAndDeallocate(
-                                proofPointer,
-                                proofBytes.byteLength,
-                            );
-                        }
-                        if (bindingsPointer !== undefined) {
-                            this.#memoryBoundary.zeroAndDeallocate(
-                                bindingsPointer,
-                                canonicalBindings.byteLength,
-                            );
-                        }
-                    }
-                },
-            );
-        } finally {
-            canonicalBindings.fill(0);
-        }
     }
 
     /** Copies the source-bound cursor for the latest completed safe slice. */

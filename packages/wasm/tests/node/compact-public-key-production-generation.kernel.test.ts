@@ -7,6 +7,14 @@ import {
 import { openCompactPublicKeyProductionGenerationFixture } from '#packages/wasm/tests/support/compact-public-key-production-generation-fixture';
 
 describe('Compact public-key reference generation from production sources in real scalar WASM', () => {
+    it('refuses a fixture kernel that does not match its required artifact digest', async () => {
+        await expect(
+            openCompactPublicKeyProductionGenerationFixture({
+                expectedKernelSha256Hex: '00'.repeat(32),
+            }),
+        ).rejects.toThrow('failed integrity verification');
+    });
+
     it('enters exact source loading without suite authority and retires on bounded cancellation', async () => {
         const fixture = await openCompactPublicKeyProductionGenerationFixture();
         const cancellationController = new AbortController();

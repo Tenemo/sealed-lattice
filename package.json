@@ -34,6 +34,7 @@
         "test:evidence:vss-base-materialization-projection": "tsx ./tools/ci/run-vss-base-materialization-projection.ts",
         "test:rust:process-memory-guard": "tsx ./tools/ci/run-process-memory-guard-tests.ts",
         "test:node:kernel": "pnpm run build && pnpm exec vitest --project node-kernel-fast --run",
+        "test:node:kernel:proof-evidence": "tsx ./tools/ci/run-node-kernel-proof-evidence.ts",
         "test:node:built": "vitest --project node --project node-protocol --project node-kernel-fast --run",
         "test:node": "pnpm run build && pnpm run test:node:built",
         "test:browser:built": "vitest --project chromium-desktop --run",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    canonicalCommonProofChunkByteLength,
     CommonProofGenerationKernelBoundary,
     CommonProofVerificationKernelBoundary,
 } from '../../../src/common-proof-worker-runtime/kernel-boundaries.js';
@@ -471,7 +472,179 @@ describe('Compact public-key algebraic verification worker', () => {
             ),
         ).resolves.toEqual({ isValid: true, value: undefined });
         expect(pollCount).toBe(2);
-        expect(yieldCount).toBe(1);
+        expect(yieldCount).toBe(3);
+        expect(cancellationCount).toBe(0);
+    });
+
+    it('stages both verifier streams through exact sequential bounded chunks', async () => {
+        const largeProofBytes = new Uint8Array(
+            canonicalCommonProofChunkByteLength + 3,
+        );
+        const largePublicInputBytes = new Uint8Array(
+            2 * canonicalCommonProofChunkByteLength + 5,
+        );
+        for (
+            let byteOffset = 0;
+            byteOffset < largeProofBytes.byteLength;
+            byteOffset += 1
+        ) {
+            largeProofBytes[byteOffset] = byteOffset % 251;
+        }
+        for (
+            let byteOffset = 0;
+            byteOffset < largePublicInputBytes.byteLength;
+            byteOffset += 1
+        ) {
+            largePublicInputBytes[byteOffset] = (byteOffset * 3 + 7) % 253;
+        }
+        const suppliedChunks: Array<
+            Readonly<{
+                byteLength: number;
+                byteOffset: number;
+                inputKind: number;
+            }>
+        > = [];
+        let cancellationCount = 0;
+        let yieldCount = 0;
+        const runtime = createMockKernelRuntime(
+            (memory) => ({
+                sealed_lattice_compact_public_key_transport_bindings_byte_length:
+                    () => 256,
+                sealed_lattice_compact_public_key_begin_algebraic_verification_input:
+                    (
+                        _bindingsPointer,
+                        bindingsByteLength,
+                        proofByteLength,
+                        publicInputByteLength,
+                        _checkpointPointer,
+                        checkpointByteLength,
+                        statusPointer,
+                    ) => {
+                        expect(bindingsByteLength).toBe(256);
+                        expect(proofByteLength).toBe(
+                            largeProofBytes.byteLength,
+                        );
+                        expect(publicInputByteLength).toBe(
+                            largePublicInputBytes.byteLength,
+                        );
+                        expect(checkpointByteLength).toBe(0);
+                        writeUnsigned32(memory, statusPointer, 0);
+                        return 702;
+                    },
+                sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk:
+                    (
+                        inputHandle,
+                        inputKind,
+                        byteOffset,
+                        chunkPointer,
+                        chunkByteLength,
+                    ) => {
+                        expect(inputHandle).toBe(702);
+                        expect(chunkByteLength).toBeLessThanOrEqual(
+                            canonicalCommonProofChunkByteLength,
+                        );
+                        const expectedSource =
+                            inputKind === 1
+                                ? largeProofBytes
+                                : largePublicInputBytes;
+                        expect([1, 2]).toContain(inputKind);
+                        expect(
+                            memoryBytes(memory, chunkPointer, chunkByteLength),
+                        ).toEqual(
+                            expectedSource.subarray(
+                                byteOffset,
+                                byteOffset + chunkByteLength,
+                            ),
+                        );
+                        suppliedChunks.push({
+                            byteLength: chunkByteLength,
+                            byteOffset,
+                            inputKind,
+                        });
+                        return 0;
+                    },
+                sealed_lattice_compact_public_key_finish_algebraic_verification_input:
+                    (inputHandle, statusPointer) => {
+                        expect(inputHandle).toBe(702);
+                        writeUnsigned32(memory, statusPointer, 0);
+                        return 97;
+                    },
+                sealed_lattice_compact_public_key_cancel_algebraic_verification_input:
+                    () => {
+                        cancellationCount += 1;
+                        return 0;
+                    },
+                sealed_lattice_compact_public_key_algebraic_verification_poll: (
+                    operationHandle,
+                    _maximumWorkUnitCount,
+                    pollKindPointer,
+                    completedWorkUnitCountPointer,
+                    checkpointSafeBoundaryOrdinalPointer,
+                ) => {
+                    expect(operationHandle).toBe(97);
+                    writeUnsigned32(memory, pollKindPointer, 5);
+                    writeUnsigned32(memory, completedWorkUnitCountPointer, 0);
+                    writeUnsigned32(
+                        memory,
+                        checkpointSafeBoundaryOrdinalPointer,
+                        0xffff_ffff,
+                    );
+                    return 0;
+                },
+                sealed_lattice_compact_public_key_cancel_algebraic_verification:
+                    () => {
+                        throw new Error(
+                            'A completed verifier must not be cancelled.',
+                        );
+                    },
+            }),
+            128,
+        );
+
+        await expect(
+            verifyCompactPublicKeyAlgebraicallyInClosedWorker(
+                runtime,
+                {
+                    bindings,
+                    proofBytes: largeProofBytes,
+                    publicInputBytes: largePublicInputBytes,
+                },
+                {
+                    yieldControl: () => {
+                        yieldCount += 1;
+                        return Promise.resolve();
+                    },
+                },
+            ),
+        ).resolves.toEqual({ isValid: true, value: undefined });
+        expect(suppliedChunks).toEqual([
+            {
+                byteLength: canonicalCommonProofChunkByteLength,
+                byteOffset: 0,
+                inputKind: 1,
+            },
+            {
+                byteLength: 3,
+                byteOffset: canonicalCommonProofChunkByteLength,
+                inputKind: 1,
+            },
+            {
+                byteLength: canonicalCommonProofChunkByteLength,
+                byteOffset: 0,
+                inputKind: 2,
+            },
+            {
+                byteLength: canonicalCommonProofChunkByteLength,
+                byteOffset: canonicalCommonProofChunkByteLength,
+                inputKind: 2,
+            },
+            {
+                byteLength: 5,
+                byteOffset: 2 * canonicalCommonProofChunkByteLength,
+                inputKind: 2,
+            },
+        ]);
+        expect(yieldCount).toBe(suppliedChunks.length);
         expect(cancellationCount).toBe(0);
     });
 
@@ -695,7 +868,7 @@ describe('Compact public-key algebraic verification worker', () => {
         expect(publishedCheckpointBytes).toEqual(nextCheckpointBytes);
         expect(publishedSafeBoundaryOrdinal).toBe(1);
         expect(restoredCheckpointBytes.byteLength).toBe(0);
-        expect(yieldCount).toBe(3);
+        expect(yieldCount).toBe(5);
     });
 
     it('refuses a restored checkpoint that is not one exact owned canonical buffer', async () => {
@@ -936,6 +1109,7 @@ describe('Compact public-key algebraic verification worker', () => {
         const abortController = new AbortController();
         let cancellationCount = 0;
         let pollCount = 0;
+        let yieldCount = 0;
         const runtime = createMockKernelRuntime((memory) => ({
             sealed_lattice_compact_public_key_transport_bindings_byte_length:
                 () => 256,
@@ -986,13 +1160,17 @@ describe('Compact public-key algebraic verification worker', () => {
                     maximumWorkUnitCountPerPoll: 1,
                     signal: abortController.signal,
                     yieldControl: () => {
-                        abortController.abort('test cancellation');
+                        yieldCount += 1;
+                        if (yieldCount === 3) {
+                            abortController.abort('test cancellation');
+                        }
                         return Promise.resolve();
                     },
                 },
             ),
         ).rejects.toMatchObject({ code: 'Cancelled' });
         expect(pollCount).toBe(1);
+        expect(yieldCount).toBe(3);
         expect(cancellationCount).toBe(1);
     });
 

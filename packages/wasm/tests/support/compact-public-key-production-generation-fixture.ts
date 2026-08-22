@@ -19,6 +19,7 @@ import {
     type VerifiedTranscriptObject,
 } from '#packages/wasm/src/canonical-board-runtime';
 import {
+    createTranscriptCoreKernelLoader,
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
     type ClosedWorkerSetupMailboxRandomnessOperations,
@@ -40,6 +41,19 @@ const compactCandidateSuiteRecordUrl = new URL(
     './compact-candidate-suite-record.hex',
     import.meta.url,
 );
+const transcriptCoreKernelUrl = new URL(
+    '../../dist/sealed-lattice-kernel.wasm',
+    import.meta.url,
+);
+
+const loadFixtureKernel = (
+    expectedKernelSha256Hex?: string,
+): Promise<TranscriptCoreKernel> =>
+    expectedKernelSha256Hex === undefined
+        ? loadFreshTranscriptCoreKernel()
+        : createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
+              expectedKernelSha256Hex,
+          })();
 
 const loadCompactCandidateSuiteRecord = (): Uint8Array<ArrayBuffer> => {
     const hexadecimalBytes = readFileSync(
@@ -384,266 +398,262 @@ type CompactPublicKeyParticipantClientFixture = Readonly<{
     participant: CompactPublicKeyParticipantFixture;
 }>;
 
+type CompactPublicKeyProductionGenerationFixtureInput = Readonly<{
+    expectedKernelSha256Hex?: string;
+}>;
+
 /**
  * Constructs the exact ten-member setup prerequisite chain in ten isolated
  * scalar WASM instances. Carrier bytes cross clients only through canonical
  * board verification; private randomness and state authority remain owned by
  * the producing participant instance.
  */
-export const openCompactPublicKeyProductionGenerationFixture =
-    async (): Promise<CompactPublicKeyProductionGenerationFixture> => {
-        const kernel = await loadFreshTranscriptCoreKernel();
-        const initialStateVector = createStateVerifierTestVector();
-        const canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer> =
-            loadCompactCandidateSuiteRecord();
-        const boardContext = createCanonicalBoardContextTestInput(
-            kernel,
-            initialStateVector.canonicalRosterBytes,
-            canonicalSuiteRecordBytes,
-        );
-        const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
-            foundationProfile.participantCount,
-        );
-        const mailboxKeyPairs = createCanonicalCarrierMailboxKeyPairFixtures(
-            foundationProfile.participantCount,
-        );
-        const participantClients: CompactPublicKeyParticipantClientFixture[] =
-            [];
-        try {
-            for (
-                let rosterPosition = 0;
-                rosterPosition < foundationProfile.participantCount;
-                rosterPosition += 1
-            ) {
-                const signingKeyPair = signingKeyPairs[rosterPosition];
-                const mailboxKeyPair = mailboxKeyPairs[rosterPosition];
-                if (
-                    signingKeyPair === undefined ||
-                    mailboxKeyPair === undefined
-                ) {
-                    throw new Error(
-                        `The deterministic participant key fixture omitted roster position ${String(rosterPosition)}.`,
-                    );
-                }
-                const participantKernel =
-                    rosterPosition === 0
-                        ? kernel
-                        : await loadFreshTranscriptCoreKernel();
-                const participantBoardContext =
-                    createCanonicalBoardContextTestInput(
-                        participantKernel,
-                        initialStateVector.canonicalRosterBytes,
-                        canonicalSuiteRecordBytes,
-                    );
-                if (
-                    !bytesEqual(
-                        participantBoardContext.expectedSuiteIdentifier,
-                        boardContext.expectedSuiteIdentifier,
-                    ) ||
-                    !bytesEqual(
-                        participantBoardContext.expectedCeremonyContextHash,
-                        boardContext.expectedCeremonyContextHash,
-                    ) ||
-                    !bytesEqual(
-                        participantBoardContext.expectedActionContextHash,
-                        boardContext.expectedActionContextHash,
-                    )
-                ) {
-                    throw new Error(
-                        `Participant ${String(rosterPosition)} reconstructed a different canonical board context.`,
-                    );
-                }
-                const openedBoardSession = openCanonicalBoardVerifierSession({
-                    contextInput: participantBoardContext,
-                    kernel: participantKernel,
-                });
-                if (!openedBoardSession.isValid) {
-                    throw new Error(
-                        `Participant ${String(rosterPosition)} canonical board was refused: ${openedBoardSession.refusalReason}.`,
-                    );
-                }
-                try {
-                    const participant = await openParticipantFixture({
-                        actionContextHash:
-                            boardContext.expectedActionContextHash,
-                        ceremonyContextHash:
-                            boardContext.expectedCeremonyContextHash,
-                        kernel: participantKernel,
-                        mailboxEncapsulationKey: mailboxKeyPair.publicKey,
-                        rosterPosition,
-                        signingOperations:
-                            createBrowserLocalSigningOperations(signingKeyPair),
-                        suiteIdentifier: boardContext.expectedSuiteIdentifier,
-                    });
-                    participantClients.push(
-                        Object.freeze({
-                            boardVerifierSession: openedBoardSession.value,
-                            kernel: participantKernel,
-                            participant,
-                        }),
-                    );
-                } catch (error) {
-                    openedBoardSession.value.close();
-                    throw error;
-                }
-            }
-            for (const signingKeyPair of signingKeyPairs) {
-                signingKeyPair.secretKey.fill(0);
-            }
-            for (const mailboxKeyPair of mailboxKeyPairs) {
-                mailboxKeyPair.secretKey.fill(0);
-            }
-
-            const setupIntentCarriers = participantClients.map(
-                ({ participant }) =>
-                    participant.setupRandomness.produceSetupIntentCarrier(),
-            );
-            const orderedSetupIntentObjectsByClient = participantClients.map(
-                ({ boardVerifierSession }) =>
-                    verifyAndOrderCarrierFamily(
-                        boardVerifierSession,
-                        setupIntentCarriers,
-                        foundationObjectTypes.setupIntent,
-                    ),
-            );
-            const publicRandomnessCommitmentCarriers = participantClients.map(
-                ({ participant }, rosterPosition) => {
-                    const orderedSetupIntentObjects =
-                        orderedSetupIntentObjectsByClient[rosterPosition];
-                    if (orderedSetupIntentObjects === undefined) {
-                        throw new Error(
-                            `Participant ${String(rosterPosition)} has no verified setup-intent catalog.`,
-                        );
-                    }
-                    return participant.setupRandomness.producePublicRandomnessCommitmentCarrier(
-                        { orderedSetupIntentObjects },
-                    );
-                },
-            );
-            const orderedPublicRandomnessCommitmentObjectsByClient =
-                participantClients.map(({ boardVerifierSession }) =>
-                    verifyAndOrderCarrierFamily(
-                        boardVerifierSession,
-                        publicRandomnessCommitmentCarriers,
-                        foundationObjectTypes.publicRandomnessCommitment,
-                    ),
+export const openCompactPublicKeyProductionGenerationFixture = async (
+    input: CompactPublicKeyProductionGenerationFixtureInput = {},
+): Promise<CompactPublicKeyProductionGenerationFixture> => {
+    const kernel = await loadFixtureKernel(input.expectedKernelSha256Hex);
+    const initialStateVector = createStateVerifierTestVector();
+    const canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer> =
+        loadCompactCandidateSuiteRecord();
+    const boardContext = createCanonicalBoardContextTestInput(
+        kernel,
+        initialStateVector.canonicalRosterBytes,
+        canonicalSuiteRecordBytes,
+    );
+    const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
+        foundationProfile.participantCount,
+    );
+    const mailboxKeyPairs = createCanonicalCarrierMailboxKeyPairFixtures(
+        foundationProfile.participantCount,
+    );
+    const participantClients: CompactPublicKeyParticipantClientFixture[] = [];
+    try {
+        for (
+            let rosterPosition = 0;
+            rosterPosition < foundationProfile.participantCount;
+            rosterPosition += 1
+        ) {
+            const signingKeyPair = signingKeyPairs[rosterPosition];
+            const mailboxKeyPair = mailboxKeyPairs[rosterPosition];
+            if (signingKeyPair === undefined || mailboxKeyPair === undefined) {
+                throw new Error(
+                    `The deterministic participant key fixture omitted roster position ${String(rosterPosition)}.`,
                 );
-            const publicRandomnessRevealCarriers = participantClients.map(
-                ({ participant }, rosterPosition) => {
-                    const orderedSetupIntentObjects =
-                        orderedSetupIntentObjectsByClient[rosterPosition];
-                    const orderedPublicRandomnessCommitmentObjects =
-                        orderedPublicRandomnessCommitmentObjectsByClient[
-                            rosterPosition
-                        ];
-                    const setupIntentObject =
-                        orderedSetupIntentObjects?.[rosterPosition];
-                    const publicRandomnessCommitmentObject =
-                        orderedPublicRandomnessCommitmentObjects?.[
-                            rosterPosition
-                        ];
-                    if (
-                        setupIntentObject === undefined ||
-                        publicRandomnessCommitmentObject === undefined
-                    ) {
-                        throw new Error(
-                            `The ordered public-randomness catalog omitted roster position ${String(rosterPosition)}.`,
-                        );
-                    }
-                    return participant.setupRandomness.producePublicRandomnessRevealCarrier(
-                        {
-                            publicRandomnessCommitmentObject,
-                            setupIntentObject,
-                        },
-                    );
-                },
-            );
-            const subjectClient = participantClients[0];
-            const orderedSetupIntentObjects =
-                orderedSetupIntentObjectsByClient[0];
-            const orderedPublicRandomnessCommitmentObjects =
-                orderedPublicRandomnessCommitmentObjectsByClient[0];
+            }
+            const participantKernel =
+                rosterPosition === 0
+                    ? kernel
+                    : await loadFixtureKernel(input.expectedKernelSha256Hex);
+            const participantBoardContext =
+                createCanonicalBoardContextTestInput(
+                    participantKernel,
+                    initialStateVector.canonicalRosterBytes,
+                    canonicalSuiteRecordBytes,
+                );
             if (
-                subjectClient === undefined ||
-                orderedSetupIntentObjects === undefined ||
-                orderedPublicRandomnessCommitmentObjects === undefined
+                !bytesEqual(
+                    participantBoardContext.expectedSuiteIdentifier,
+                    boardContext.expectedSuiteIdentifier,
+                ) ||
+                !bytesEqual(
+                    participantBoardContext.expectedCeremonyContextHash,
+                    boardContext.expectedCeremonyContextHash,
+                ) ||
+                !bytesEqual(
+                    participantBoardContext.expectedActionContextHash,
+                    boardContext.expectedActionContextHash,
+                )
             ) {
                 throw new Error(
-                    'The compact public-key fixture has no subject participant catalog.',
+                    `Participant ${String(rosterPosition)} reconstructed a different canonical board context.`,
                 );
             }
-            const orderedPublicRandomnessRevealObjects =
-                verifyAndOrderCarrierFamily(
-                    subjectClient.boardVerifierSession,
-                    publicRandomnessRevealCarriers,
-                    foundationObjectTypes.publicRandomnessReveal,
-                );
-            const subjectParticipant = subjectClient.participant;
-            const setupIntentObject = orderedSetupIntentObjects[0];
-            if (setupIntentObject === undefined) {
-                throw new Error(
-                    'The compact public-key fixture has no subject participant.',
-                );
-            }
-            let closed = false;
-            return Object.freeze({
-                canonicalSuiteRecordBytes,
-                close: async (): Promise<void> => {
-                    if (closed) {
-                        return;
-                    }
-                    closed = true;
-                    const cleanupFailures: unknown[] = [];
-                    for (const client of participantClients.slice().reverse()) {
-                        try {
-                            client.boardVerifierSession.close();
-                        } catch (error) {
-                            cleanupFailures.push(error);
-                        }
-                        try {
-                            await client.participant.close();
-                        } catch (error) {
-                            cleanupFailures.push(error);
-                        }
-                    }
-                    if (cleanupFailures.length > 0) {
-                        throw new CompactPublicKeyProductionFixtureCleanupError(
-                            Object.freeze([...cleanupFailures]),
-                        );
-                    }
-                },
-                kernel,
-                orderedPublicRandomnessCommitmentObjects,
-                orderedPublicRandomnessRevealObjects,
-                orderedSetupIntentObjects,
-                productionOperationIdentifiers:
-                    subjectParticipant.productionOperationIdentifiers,
-                setupIntentObject,
-                workerKernel: subjectParticipant.workerKernel,
+            const openedBoardSession = openCanonicalBoardVerifierSession({
+                contextInput: participantBoardContext,
+                kernel: participantKernel,
             });
-        } catch (operationFailure) {
-            const cleanupFailures: unknown[] = [];
-            for (const client of participantClients.slice().reverse()) {
-                try {
-                    client.boardVerifierSession.close();
-                } catch (error) {
-                    cleanupFailures.push(error);
-                }
-                try {
-                    await client.participant.close();
-                } catch (error) {
-                    cleanupFailures.push(error);
-                }
+            if (!openedBoardSession.isValid) {
+                throw new Error(
+                    `Participant ${String(rosterPosition)} canonical board was refused: ${openedBoardSession.refusalReason}.`,
+                );
             }
-            for (const signingKeyPair of signingKeyPairs) {
-                signingKeyPair.secretKey.fill(0);
+            try {
+                const participant = await openParticipantFixture({
+                    actionContextHash: boardContext.expectedActionContextHash,
+                    ceremonyContextHash:
+                        boardContext.expectedCeremonyContextHash,
+                    kernel: participantKernel,
+                    mailboxEncapsulationKey: mailboxKeyPair.publicKey,
+                    rosterPosition,
+                    signingOperations:
+                        createBrowserLocalSigningOperations(signingKeyPair),
+                    suiteIdentifier: boardContext.expectedSuiteIdentifier,
+                });
+                participantClients.push(
+                    Object.freeze({
+                        boardVerifierSession: openedBoardSession.value,
+                        kernel: participantKernel,
+                        participant,
+                    }),
+                );
+            } catch (error) {
+                openedBoardSession.value.close();
+                throw error;
             }
-            for (const mailboxKeyPair of mailboxKeyPairs) {
-                mailboxKeyPair.secretKey.fill(0);
-            }
-            if (cleanupFailures.length > 0) {
-                combineCleanupFailures(operationFailure, cleanupFailures);
-            }
-            throw operationFailure;
         }
-    };
+        for (const signingKeyPair of signingKeyPairs) {
+            signingKeyPair.secretKey.fill(0);
+        }
+        for (const mailboxKeyPair of mailboxKeyPairs) {
+            mailboxKeyPair.secretKey.fill(0);
+        }
+
+        const setupIntentCarriers = participantClients.map(({ participant }) =>
+            participant.setupRandomness.produceSetupIntentCarrier(),
+        );
+        const orderedSetupIntentObjectsByClient = participantClients.map(
+            ({ boardVerifierSession }) =>
+                verifyAndOrderCarrierFamily(
+                    boardVerifierSession,
+                    setupIntentCarriers,
+                    foundationObjectTypes.setupIntent,
+                ),
+        );
+        const publicRandomnessCommitmentCarriers = participantClients.map(
+            ({ participant }, rosterPosition) => {
+                const orderedSetupIntentObjects =
+                    orderedSetupIntentObjectsByClient[rosterPosition];
+                if (orderedSetupIntentObjects === undefined) {
+                    throw new Error(
+                        `Participant ${String(rosterPosition)} has no verified setup-intent catalog.`,
+                    );
+                }
+                return participant.setupRandomness.producePublicRandomnessCommitmentCarrier(
+                    { orderedSetupIntentObjects },
+                );
+            },
+        );
+        const orderedPublicRandomnessCommitmentObjectsByClient =
+            participantClients.map(({ boardVerifierSession }) =>
+                verifyAndOrderCarrierFamily(
+                    boardVerifierSession,
+                    publicRandomnessCommitmentCarriers,
+                    foundationObjectTypes.publicRandomnessCommitment,
+                ),
+            );
+        const publicRandomnessRevealCarriers = participantClients.map(
+            ({ participant }, rosterPosition) => {
+                const orderedSetupIntentObjects =
+                    orderedSetupIntentObjectsByClient[rosterPosition];
+                const orderedPublicRandomnessCommitmentObjects =
+                    orderedPublicRandomnessCommitmentObjectsByClient[
+                        rosterPosition
+                    ];
+                const setupIntentObject =
+                    orderedSetupIntentObjects?.[rosterPosition];
+                const publicRandomnessCommitmentObject =
+                    orderedPublicRandomnessCommitmentObjects?.[rosterPosition];
+                if (
+                    setupIntentObject === undefined ||
+                    publicRandomnessCommitmentObject === undefined
+                ) {
+                    throw new Error(
+                        `The ordered public-randomness catalog omitted roster position ${String(rosterPosition)}.`,
+                    );
+                }
+                return participant.setupRandomness.producePublicRandomnessRevealCarrier(
+                    {
+                        publicRandomnessCommitmentObject,
+                        setupIntentObject,
+                    },
+                );
+            },
+        );
+        const subjectClient = participantClients[0];
+        const orderedSetupIntentObjects = orderedSetupIntentObjectsByClient[0];
+        const orderedPublicRandomnessCommitmentObjects =
+            orderedPublicRandomnessCommitmentObjectsByClient[0];
+        if (
+            subjectClient === undefined ||
+            orderedSetupIntentObjects === undefined ||
+            orderedPublicRandomnessCommitmentObjects === undefined
+        ) {
+            throw new Error(
+                'The compact public-key fixture has no subject participant catalog.',
+            );
+        }
+        const orderedPublicRandomnessRevealObjects =
+            verifyAndOrderCarrierFamily(
+                subjectClient.boardVerifierSession,
+                publicRandomnessRevealCarriers,
+                foundationObjectTypes.publicRandomnessReveal,
+            );
+        const subjectParticipant = subjectClient.participant;
+        const setupIntentObject = orderedSetupIntentObjects[0];
+        if (setupIntentObject === undefined) {
+            throw new Error(
+                'The compact public-key fixture has no subject participant.',
+            );
+        }
+        let closed = false;
+        return Object.freeze({
+            canonicalSuiteRecordBytes,
+            close: async (): Promise<void> => {
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                const cleanupFailures: unknown[] = [];
+                for (const client of participantClients.slice().reverse()) {
+                    try {
+                        client.boardVerifierSession.close();
+                    } catch (error) {
+                        cleanupFailures.push(error);
+                    }
+                    try {
+                        await client.participant.close();
+                    } catch (error) {
+                        cleanupFailures.push(error);
+                    }
+                }
+                if (cleanupFailures.length > 0) {
+                    throw new CompactPublicKeyProductionFixtureCleanupError(
+                        Object.freeze([...cleanupFailures]),
+                    );
+                }
+            },
+            kernel,
+            orderedPublicRandomnessCommitmentObjects,
+            orderedPublicRandomnessRevealObjects,
+            orderedSetupIntentObjects,
+            productionOperationIdentifiers:
+                subjectParticipant.productionOperationIdentifiers,
+            setupIntentObject,
+            workerKernel: subjectParticipant.workerKernel,
+        });
+    } catch (operationFailure) {
+        const cleanupFailures: unknown[] = [];
+        for (const client of participantClients.slice().reverse()) {
+            try {
+                client.boardVerifierSession.close();
+            } catch (error) {
+                cleanupFailures.push(error);
+            }
+            try {
+                await client.participant.close();
+            } catch (error) {
+                cleanupFailures.push(error);
+            }
+        }
+        for (const signingKeyPair of signingKeyPairs) {
+            signingKeyPair.secretKey.fill(0);
+        }
+        for (const mailboxKeyPair of mailboxKeyPairs) {
+            mailboxKeyPair.secretKey.fill(0);
+        }
+        if (cleanupFailures.length > 0) {
+            combineCleanupFailures(operationFailure, cleanupFailures);
+        }
+        throw operationFailure;
+    }
+};

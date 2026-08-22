@@ -14,7 +14,10 @@ import {
     verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
     verifyGeneratedAcceptedSetupSameSecretInClosedWorker,
 } from '#packages/wasm/src/accepted-setup-key-relation-generation-runtime';
-import { canonicalStreamDomains } from '#packages/wasm/src/canonical-stream-runtime';
+import {
+    canonicalStreamDomains,
+    CanonicalStreamInternalError,
+} from '#packages/wasm/src/canonical-stream-runtime';
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
@@ -1219,6 +1222,45 @@ describe('accepted-setup compact public-key generation', () => {
         expect(runtime.compactReleasedCompletedHandles).toEqual([]);
         expect(runtime.compactCancelledHandles).toEqual([61]);
         expect(runtime.compactSuppliedStorageOwners).toEqual([]);
+        expect(runtime.selectedSuiteReleases).toEqual([11]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('reports the last successful bounded poll when the kernel traps', async () => {
+        const runtime = createFakeRuntime();
+        runtime.compactPollOutcomes.splice(
+            0,
+            runtime.compactPollOutcomes.length,
+            {
+                checkpointReady: 0,
+                completedWorkUnitCount: 17,
+                firstOrdinal: 29,
+                pollCode: 1,
+                stage: 9,
+            },
+        );
+        const openExternalMemory = vi.fn();
+
+        const failure: unknown =
+            await generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactGenerationInput(runtime, openExternalMemory) as never,
+            ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(CanonicalStreamInternalError);
+        if (!(failure instanceof CanonicalStreamInternalError)) {
+            throw new Error(
+                'The focused compact generator returned the wrong failure type.',
+            );
+        }
+        expect(failure.message).toBe(
+            'The compact public-key generation kernel trapped after progress stage 9, first ordinal 29, and 17 completed work units; WASM memory held 131072 bytes.',
+        );
+        expect(failure.failureCause).toBeInstanceOf(Error);
+        expect((failure.failureCause as Error).message).toBe(
+            'The focused key-relation test exhausted compact poll outcomes.',
+        );
+        expect(openExternalMemory).not.toHaveBeenCalled();
+        expect(runtime.compactCancelledHandles).toEqual([61]);
+        expect(runtime.compactReleasedCompletedHandles).toEqual([]);
         expect(runtime.selectedSuiteReleases).toEqual([11]);
         expect(runtime.allocations.size).toBe(0);
     });

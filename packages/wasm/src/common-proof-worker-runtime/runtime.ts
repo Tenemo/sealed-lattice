@@ -2179,6 +2179,66 @@ const publishCompactPublicKeyAlgebraicVerificationCheckpoint = async (
     }
 };
 
+const beginCompactPublicKeyAlgebraicVerificationFromStagedInput = async (
+    kernel: CommonProofVerificationKernelBoundary,
+    input: CompactPublicKeyAlgebraicVerificationInput,
+    yieldControl: () => Promise<void>,
+    signal: AbortSignal | undefined,
+    canonicalCheckpointBytes?: Uint8Array,
+): Promise<
+    ReturnType<
+        CommonProofVerificationKernelBoundary['finishCompactPublicKeyAlgebraicVerificationInput']
+    >
+> => {
+    const preparation = kernel.beginCompactPublicKeyAlgebraicVerificationInput(
+        input.bindings,
+        input.proofBytes,
+        input.publicInputBytes,
+        canonicalCheckpointBytes,
+    );
+    if (preparation.kind === 'refused') {
+        return preparation;
+    }
+    const inputHandle = preparation.inputHandle;
+    let inputCustodyConsumed = false;
+    try {
+        for (const [inputKind, bytes] of [
+            ['proof', input.proofBytes],
+            ['publicInput', input.publicInputBytes],
+        ] as const) {
+            for (
+                let byteOffset = 0;
+                byteOffset < bytes.byteLength;
+                byteOffset += canonicalCommonProofChunkByteLength
+            ) {
+                throwIfVerificationCancelled(signal);
+                const chunkEnd = Math.min(
+                    byteOffset + canonicalCommonProofChunkByteLength,
+                    bytes.byteLength,
+                );
+                kernel.supplyCompactPublicKeyAlgebraicVerificationInputChunk(
+                    inputHandle,
+                    inputKind,
+                    byteOffset,
+                    bytes.subarray(byteOffset, chunkEnd),
+                );
+                await yieldControl();
+            }
+        }
+        throwIfVerificationCancelled(signal);
+        inputCustodyConsumed = true;
+        return kernel.finishCompactPublicKeyAlgebraicVerificationInput(
+            inputHandle,
+        );
+    } finally {
+        if (!inputCustodyConsumed) {
+            kernel.cancelCompactPublicKeyAlgebraicVerificationInput(
+                inputHandle,
+            );
+        }
+    }
+};
+
 /**
  * Verifies the exact compact public-key transport and every production CFW and
  * WHIR equation through bounded scalar WASM polls. This genuine verification
@@ -2243,42 +2303,43 @@ export const verifyCompactPublicKeyAlgebraicallyInClosedWorker = async (
                 );
             }
             throwIfVerificationCancelled(signal);
-            const begin =
-                resume === undefined
-                    ? kernel.beginCompactPublicKeyAlgebraicVerification(
-                          input.bindings,
-                          input.proofBytes,
-                          input.publicInputBytes,
-                      )
-                    : await (async () => {
-                          if (checkpointCustody === undefined) {
-                              throw kernelFailure(
-                                  'Compact public-key algebraic verification resume has no checkpoint custody.',
-                              );
-                          }
-                          const restoredCheckpoint =
-                              await restoreCompactPublicKeyAlgebraicVerificationCheckpoint(
-                                  kernel,
-                                  checkpointCustody,
-                              );
-                          const canonicalCheckpointBytes =
-                              restoredCheckpoint.canonicalCheckpointBytes;
-                          expectedResumeSafeBoundaryOrdinal =
-                              restoredCheckpoint.safeBoundaryOrdinal;
-                          try {
-                              throwIfVerificationCancelled(signal);
-                              return kernel.resumeCompactPublicKeyAlgebraicVerification(
-                                  input.bindings,
-                                  input.proofBytes,
-                                  input.publicInputBytes,
-                                  canonicalCheckpointBytes,
-                              );
-                          } finally {
-                              destroyTransferredWorkerBuffer(
-                                  canonicalCheckpointBytes,
-                              );
-                          }
-                      })();
+            const begin = await (resume === undefined
+                ? beginCompactPublicKeyAlgebraicVerificationFromStagedInput(
+                      kernel,
+                      input,
+                      yieldControl,
+                      signal,
+                  )
+                : (async () => {
+                      if (checkpointCustody === undefined) {
+                          throw kernelFailure(
+                              'Compact public-key algebraic verification resume has no checkpoint custody.',
+                          );
+                      }
+                      const restoredCheckpoint =
+                          await restoreCompactPublicKeyAlgebraicVerificationCheckpoint(
+                              kernel,
+                              checkpointCustody,
+                          );
+                      const canonicalCheckpointBytes =
+                          restoredCheckpoint.canonicalCheckpointBytes;
+                      expectedResumeSafeBoundaryOrdinal =
+                          restoredCheckpoint.safeBoundaryOrdinal;
+                      try {
+                          throwIfVerificationCancelled(signal);
+                          return await beginCompactPublicKeyAlgebraicVerificationFromStagedInput(
+                              kernel,
+                              input,
+                              yieldControl,
+                              signal,
+                              canonicalCheckpointBytes,
+                          );
+                      } finally {
+                          destroyTransferredWorkerBuffer(
+                              canonicalCheckpointBytes,
+                          );
+                      }
+                  })());
             if (begin.kind === 'refused') {
                 return Object.freeze({
                     isValid: false,

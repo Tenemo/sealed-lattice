@@ -109,9 +109,12 @@ and implementation issues below.
   migration.
 - `SEC-004`: No production proof system is selected. The rejected previous
   implementation cannot be used as a fallback or as evidence.
-- `SEC-005`: One native development proof family can be decoded and checked
-  algebraically. Independent code reconstructs its public inputs, false
-  statements are refused, and checkpoints restore in a separate process.
+- `SEC-005`: One reference development proof family can be decoded and checked
+  algebraically. A guarded Node.js development run generates one canonical proof
+  through the scalar release WebAssembly artifact and a fresh scalar instance
+  accepts the same proof and public-input bytes; malformed framing refuses.
+  Independent native code reconstructs its public inputs, false statements are
+  refused, and checkpoints restore in a separate process.
   Independent code reconstructs the complete compiler-derived public-source and
   direct exact-width verifier-message transcript, and deterministic transport,
   binding, chronology, source, and equation faults refuse. The direct transcript

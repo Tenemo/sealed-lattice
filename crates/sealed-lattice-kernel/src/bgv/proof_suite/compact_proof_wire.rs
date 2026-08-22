@@ -807,7 +807,6 @@ impl CompactPublicInputWireGeometry {
         })
     }
 
-    #[cfg(test)]
     pub(crate) const fn exact_canonical_byte_length(self) -> usize {
         self.exact_canonical_byte_length
     }

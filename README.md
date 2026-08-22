@@ -95,23 +95,28 @@ The complete ceremony is not implemented or certified.
   construction, foundation decoding, typed bindings, and reproducible
   Rust/WebAssembly package bytes exist. Downstream ceremony capabilities remain
   incomplete and are not yet public APIs.
-- **Proof system:** One native development prototype for the collective
-  public-key proof passes canonical decoding, full algebraic verification,
-  independent reconstruction of its public inputs, false-statement refusal, and
-  authenticated checkpoint restoration in a separate process. Independent
-  native code also reconstructs the complete compiler-derived direct SHAKE256
-  verifier-message graph and detects domain, geometry, source, and chronology
-  mutations. This covers one proof family only and does not establish a
-  concrete SHAKE or complete Fiat--Shamir security reduction. No production
-  proof system is selected; the remaining proof families and their hostile
-  corpora, complete security argument, release WebAssembly path, and browser-
-  lifecycle evidence remain open. The rejected previous implementation cannot
-  act as a fallback or evidence source.
-- **Browser runtime and custody:** A scalar WebAssembly build, typed worker
-  foundations, authenticated checkpoint primitives, and browser-storage
-  groundwork exist. A nonqualifying desktop Chromium diagnostic exposes
-  namespace-wide capacity scanning and incomplete physical reclamation in the
-  current storage adapter. Complete proof paths and lifecycle, incremental
+- **Proof system:** One reference development prototype for the collective
+  public-key proof passes canonical decoding and full algebraic verification.
+  Native evidence independently reconstructs its public inputs, refuses a false
+  statement, restores an authenticated checkpoint in a separate process, and
+  reconstructs the complete compiler-derived direct SHAKE256 verifier-message
+  graph. A guarded Node.js development run also generates one canonical proof
+  through the scalar release WebAssembly artifact and has a fresh scalar instance
+  accept the same proof and public-input bytes; malformed framing refuses. This
+  covers one proof family only and is not browser, lifecycle, source-
+  correspondence, or phone evidence. It does not establish a concrete SHAKE or
+  complete Fiat--Shamir security reduction. No production proof system is
+  selected; the remaining proof families and their hostile corpora, complete
+  security argument, and browser-lifecycle evidence remain open. The rejected
+  previous implementation cannot act as a fallback or evidence source.
+- **Browser runtime and custody:** A scalar WebAssembly build, one matched
+  reference generation-and-verification path, typed worker foundations,
+  authenticated checkpoint primitives, and browser-storage groundwork exist.
+  The guarded Node.js run exposes a long uninterrupted generation segment and
+  severe file-backed storage amplification. A separate nonqualifying desktop
+  Chromium diagnostic exposes namespace-wide capacity scanning and incomplete
+  physical reclamation in the current browser adapter. Browser execution,
+  checkpointed worker-loss restoration, the remaining proof paths, incremental
   accounting, repair, persistence, quota, eviction, and rollback evidence remain
   incomplete.
 - **Ceremony workflow:** Setup, ballot, aggregation, evaluation, finality, and

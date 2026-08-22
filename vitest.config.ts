@@ -11,6 +11,10 @@ import {
     manualDesktopBrowserProofEvidenceTestGlobs,
     ordinaryDesktopBrowserExcludedTestGlobs,
 } from './tools/ci/browser-test-project-selection.js';
+import {
+    manualNodeKernelProofEvidenceTestGlobs,
+    nodeKernelProofEvidenceProjectName,
+} from './tools/ci/node-kernel-proof-evidence-selection.js';
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
@@ -54,6 +58,7 @@ const nodeTestProjectDefinitions = [
         testTimeout: nodeKernelTestTimeoutMs,
     },
     {
+        exclude: manualNodeKernelProofEvidenceTestGlobs,
         fileParallelism: false,
         include: kernelNodeTestGlobs,
         projectName: 'node-kernel-fast',
@@ -272,6 +277,12 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
+            makeNodeProject({
+                fileParallelism: false,
+                include: manualNodeKernelProofEvidenceTestGlobs,
+                projectName: nodeKernelProofEvidenceProjectName,
+                testTimeout: 12 * 60 * 60_000,
+            }),
             makeBrowserProject({
                 exclude: ordinaryDesktopBrowserExcludedTestGlobs,
                 include: desktopBrowserTestGlobs,
