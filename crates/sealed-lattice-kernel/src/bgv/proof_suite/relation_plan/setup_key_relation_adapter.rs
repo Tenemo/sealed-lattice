@@ -3,13 +3,11 @@ use std::{
     mem::size_of,
 };
 
-#[cfg(test)]
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 use zeroize::Zeroizing;
 
-#[cfg(test)]
 use crate::bgv::setup::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
     setup_generation_compact_public_key_development_retained_payload_byte_length,
@@ -72,7 +70,6 @@ enum SetupKeyRelationSourceLayout {
 
 enum SetupKeyRelationAuthorityAccess {
     RetainedRegistry(u32),
-    #[cfg(test)]
     CompactPublicKeyDevelopment(Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>),
 }
 
@@ -1253,6 +1250,7 @@ fn add_setup_authority_payload_memory_accounting(
 /// the browser-owned setup authority.
 pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
     authority_access: SetupKeyRelationAuthorityAccess,
+    expected_compact_public_key_authority_owner_count: Option<usize>,
     family: SetupKeyRelationProofFamily,
     prepared_attempt: PreparedActionProofAttemptSource,
     canonical_application_statement_bytes: Vec<u8>,
@@ -1529,18 +1527,20 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                 .into_boxed_slice(),
             SetupKeyRelationSourceLayout::PublicKeyShare(_) => Box::new([]),
         };
-        #[cfg(test)]
         let authority_access = source
             .compact_public_key_development_authority()
             .map(SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment)
             .unwrap_or_else(|| {
                 SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier())
             });
-        #[cfg(not(test))]
-        let authority_access =
-            SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier());
+        let expected_compact_public_key_authority_owner_count = matches!(
+            &authority_access,
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(_)
+        )
+        .then_some(1);
         Ok(Self {
             authority_access,
+            expected_compact_public_key_authority_owner_count,
             family: source.family(),
             prepared_attempt: *source.prepared_attempt(),
             canonical_application_statement_bytes: source
@@ -1594,17 +1594,46 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         Ok(self.request_context)
     }
 
+    /// Retains the isolated reference authority for deferred private-coin
+    /// derivation. A second retention or any unexpected owner count fails
+    /// closed.
+    pub(crate) fn retain_compact_public_key_deferred_authority(
+        &mut self,
+    ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, CommonProofProverError>
+    {
+        let Some(expected_owner_count) = self
+            .expected_compact_public_key_authority_owner_count
+            .as_mut()
+        else {
+            return Err(CommonProofProverError::InvalidInput);
+        };
+        let SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) =
+            &self.authority_access
+        else {
+            return Err(CommonProofProverError::InvalidInput);
+        };
+        if *expected_owner_count != 1 || Rc::strong_count(authority) != *expected_owner_count {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        let deferred_authority = Rc::clone(authority);
+        *expected_owner_count = 2;
+        Ok(deferred_authority)
+    }
+
     pub(crate) fn finish_compact_public_key_assignment_sources(
         self,
     ) -> Result<(), CommonProofProverError> {
         let independently_expected_column_ordinals =
             self.independently_expected_requested_column_ordinals()?;
         let authority_access_is_valid = match &self.authority_access {
-            #[cfg(test)]
-            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
-                Rc::strong_count(authority) == 1
-            }
-            SetupKeyRelationAuthorityAccess::RetainedRegistry(_) => true,
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => self
+                .expected_compact_public_key_authority_owner_count
+                .is_some_and(|expected_owner_count| {
+                    Rc::strong_count(authority) == expected_owner_count
+                }),
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(_) => self
+                .expected_compact_public_key_authority_owner_count
+                .is_none(),
         };
         if self.family != SetupKeyRelationProofFamily::PublicKeyShare
             || self.request_profile
@@ -1622,8 +1651,9 @@ impl SetupKeyRelationSourcePolynomialAdapter {
         {
             return Err(CommonProofProverError::InvalidInput);
         }
-        // Consuming `self` now drops the sole retained standalone authority.
-        // Later assignment, row-source, and proof phases cannot reenter it.
+        // Consuming `self` now drops its retained standalone authority. An
+        // explicitly retained deferred owner may survive only inside the
+        // private-coin factory for this same prepared operation.
         Ok(())
     }
 
@@ -1769,7 +1799,6 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                     derive_polynomial,
                 )
             }
-            #[cfg(test)]
             SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
                 with_setup_generation_compact_public_key_development_relation_reentry::<
                     _,
@@ -1851,7 +1880,6 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
             SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
                 add_setup_authority_memory_accounting(base, *authority_identifier)
             }
-            #[cfg(test)]
             SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
                 add_setup_authority_payload_memory_accounting(
                     base,
@@ -1953,7 +1981,6 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
             SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
                 *authority_identifier
             }
-            #[cfg(test)]
             SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(_) => {
                 return Err(CommonProofProverError::InvalidTree);
             }

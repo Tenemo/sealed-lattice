@@ -10,7 +10,7 @@ use crate::{
         evaluator::key_switch::special_basis_modulus_residue,
         key_switch_topology::canonical_residue_byte_length,
         modular_arithmetic::{add_mod_fast, mul_mod_fast, sub_mod_fast},
-        parameters::PLAINTEXT_MODULUS,
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         proof_suite::{
             CommittedMaterialContext, CommittedMaterialRole, CommittedMaterialTree,
             KeySwitchComponentMaterialTopology, RecipientShareLimbInput,
@@ -31,13 +31,13 @@ use crate::{
     foundation::{
         ActionPrivateRandomness, CanonicalItem, CanonicalTuple, FOUNDATION_PROFILE, Hash512,
         PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain, RefusalReason,
-        SelectedSuiteCapability, SetupStructuredCommitmentOpeningContext, StateCapabilityKind,
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT, SelectedSuiteCapability,
+        SetupStructuredCommitmentOpeningContext, StateCapabilityKind,
         VerifiedStateReservationRuntimeBinding, hash_foundation_tuple_512,
     },
     transcript_core::encode_hex,
 };
 
-#[cfg(test)]
 use super::generation_authority::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
     SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
@@ -90,6 +90,78 @@ const SPECIAL_MODULUS_CATALOG_IDENTIFIER: u16 = 2;
 const GALOIS_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
 const PUBLIC_KEY_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
 const MATERIAL_SEED_BYTE_LENGTH: usize = 64;
+
+pub(super) trait SetupGenerationCryptographicProfile {
+    fn protocol_version(&self) -> u16;
+    fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH];
+    fn polynomial_degree(&self) -> u32;
+    fn ordered_data_primes(&self) -> &'static [u64];
+    fn maximum_private_sampler_candidate_draws_per_output(&self) -> u32;
+}
+
+impl SetupGenerationCryptographicProfile for SelectedSuiteCapability {
+    fn protocol_version(&self) -> u16 {
+        self.protocol_version()
+    }
+
+    fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier()
+    }
+
+    fn polynomial_degree(&self) -> u32 {
+        self.polynomial_degree()
+    }
+
+    fn ordered_data_primes(&self) -> &'static [u64] {
+        self.ordered_data_primes()
+    }
+
+    fn maximum_private_sampler_candidate_draws_per_output(&self) -> u32 {
+        self.maximum_private_sampler_candidate_draws_per_output()
+    }
+}
+
+struct CompactPublicKeyReferenceProfile {
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl CompactPublicKeyReferenceProfile {
+    fn from_verified_public_randomness(
+        verified_public_randomness: &VerifiedPublicRandomness,
+    ) -> Result<Self, RefusalReason> {
+        let context = verified_public_randomness.context();
+        if context.protocol_version() != FOUNDATION_PROFILE.protocol_version
+            || context.suite_identifier().into_bytes() == [0_u8; Hash512::BYTE_LENGTH]
+        {
+            return Err(RefusalReason::UnsupportedVersionOrSuite);
+        }
+        Ok(Self {
+            suite_identifier: context.suite_identifier().into_bytes(),
+        })
+    }
+}
+
+impl SetupGenerationCryptographicProfile for CompactPublicKeyReferenceProfile {
+    fn protocol_version(&self) -> u16 {
+        FOUNDATION_PROFILE.protocol_version
+    }
+
+    fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    fn polynomial_degree(&self) -> u32 {
+        POLYNOMIAL_DEGREE as u32
+    }
+
+    fn ordered_data_primes(&self) -> &'static [u64] {
+        &DATA_PRIMES
+    }
+
+    fn maximum_private_sampler_candidate_draws_per_output(&self) -> u32 {
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT
+    }
+}
 
 pub(super) struct SetupGenerationBindings {
     pub(super) suite_identifier: [u8; Hash512::BYTE_LENGTH],
@@ -306,15 +378,14 @@ pub(crate) fn populate_compact_public_key_development_evidence_authority(
 /// standalone compact public-key development slice. The returned authority is
 /// nonserializable and intentionally cannot drive VSS, relinearization,
 /// Galois, or ceremony setup output.
-#[cfg(test)]
-pub(in crate::bgv) fn populate_compact_public_key_development_authority(
-    selected_suite: &SelectedSuiteCapability,
+fn populate_compact_public_key_development_authority(
+    suite_profile: &impl SetupGenerationCryptographicProfile,
     verified_public_randomness: &VerifiedPublicRandomness,
     action_private_randomness: Rc<ActionPrivateRandomness>,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
 ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
     let bindings = validate_setup_generation_bindings(
-        selected_suite,
+        suite_profile,
         verified_public_randomness,
         &action_private_randomness,
         verified_reservation_binding,
@@ -325,7 +396,7 @@ pub(in crate::bgv) fn populate_compact_public_key_development_authority(
         .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
     let evaluation_domain_size = usize::try_from(relation_input.evaluation_domain_size)
         .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-    if u64::from(selected_suite.polynomial_degree()) != relation_input.ring_degree {
+    if u64::from(suite_profile.polynomial_degree()) != relation_input.ring_degree {
         return Err(RefusalReason::UnsupportedVersionOrSuite);
     }
 
@@ -334,7 +405,7 @@ pub(in crate::bgv) fn populate_compact_public_key_development_authority(
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("compact public-key development phase: sample common secret");
     let common_secret_coefficients = sample_common_secret_coefficients(
-        selected_suite,
+        suite_profile,
         &action_private_randomness,
         bindings.source_setup_intent_object_hash,
         bindings.setup_attempt_identifier,
@@ -351,7 +422,7 @@ pub(in crate::bgv) fn populate_compact_public_key_development_authority(
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("compact public-key development phase: construct anchor openings");
     let (_, anchor_openings) = construct_anchor_openings(
-        selected_suite,
+        suite_profile,
         &action_private_randomness,
         &bindings,
         &common_secret_coefficients,
@@ -368,7 +439,7 @@ pub(in crate::bgv) fn populate_compact_public_key_development_authority(
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("compact public-key development phase: construct public-key share");
     let public_key_share = construct_public_key_share(
-        selected_suite,
+        suite_profile,
         &action_private_randomness,
         &bindings,
         &common_secret_coefficients,
@@ -399,6 +470,25 @@ pub(in crate::bgv) fn populate_compact_public_key_development_authority(
             common_secret_coefficients,
             public_key_share,
         },
+    )
+}
+
+/// Constructs only the exact compact public-key reference witness from live,
+/// positively verified browser authorities. The returned source is incapable
+/// of driving the ceremony or minting a selected-suite capability.
+pub(in crate::bgv) fn populate_compact_public_key_reference_authority(
+    verified_public_randomness: &VerifiedPublicRandomness,
+    action_private_randomness: Rc<ActionPrivateRandomness>,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
+    let suite_profile = CompactPublicKeyReferenceProfile::from_verified_public_randomness(
+        verified_public_randomness,
+    )?;
+    populate_compact_public_key_development_authority(
+        &suite_profile,
+        verified_public_randomness,
+        action_private_randomness,
+        verified_reservation_binding,
     )
 }
 
@@ -594,7 +684,7 @@ where
 }
 
 fn construct_public_key_share(
-    selected_suite: &SelectedSuiteCapability,
+    suite_profile: &impl SetupGenerationCryptographicProfile,
     action_private_randomness: &ActionPrivateRandomness,
     bindings: &SetupGenerationBindings,
     common_secret_coefficients: &[i8],
@@ -621,7 +711,7 @@ fn construct_public_key_share(
     let mut ordered_limb_coefficients =
         Vec::with_capacity(relation_input.data_modulus_indices.len());
     for data_modulus_index in relation_input.data_modulus_indices.iter().copied() {
-        let modulus = *selected_suite
+        let modulus = *suite_profile
             .ordered_data_primes()
             .get(usize::from(data_modulus_index))
             .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
@@ -703,7 +793,7 @@ pub(crate) fn construct_public_key_share_limb(
 }
 
 fn validate_setup_generation_bindings(
-    selected_suite: &SelectedSuiteCapability,
+    suite_profile: &impl SetupGenerationCryptographicProfile,
     verified_public_randomness: &VerifiedPublicRandomness,
     action_private_randomness: &ActionPrivateRandomness,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
@@ -731,8 +821,8 @@ fn validate_setup_generation_bindings(
         .setup_action_randomness_authorization(context.roster_hash())
         .map_err(|error| error.refusal_reason)?;
 
-    if selected_suite.protocol_version() != context.protocol_version()
-        || selected_suite.suite_identifier() != context.suite_identifier().into_bytes()
+    if suite_profile.protocol_version() != context.protocol_version()
+        || suite_profile.suite_identifier() != context.suite_identifier().into_bytes()
         || derivation_input.suite_identifier() != context.suite_identifier()
         || derivation_input.ceremony_context_hash() != context.ceremony_context_hash()
         || derivation_input.action_context_hash() != context.action_context_hash()
@@ -789,7 +879,7 @@ fn validate_setup_generation_bindings(
 }
 
 fn sample_common_secret_coefficients(
-    selected_suite: &SelectedSuiteCapability,
+    suite_profile: &impl SetupGenerationCryptographicProfile,
     action_private_randomness: &ActionPrivateRandomness,
     source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
     setup_attempt_identifier: PrivateRandomnessAttemptIdentifier,
@@ -797,7 +887,7 @@ fn sample_common_secret_coefficients(
 ) -> Result<Zeroizing<Vec<i8>>, RefusalReason> {
     let context_hash = setup_source_sampler_context_hash(source_setup_intent_object_hash)?;
     sample_centered_ternary_polynomial(
-        selected_suite,
+        suite_profile,
         action_private_randomness,
         PrivateRandomnessDomain::setup_suite_distribution(SECRET_CONTRIBUTION_DISTRIBUTION_PURPOSE)
             .map_err(|error| error.refusal_reason)?,
@@ -808,7 +898,7 @@ fn sample_common_secret_coefficients(
 }
 
 fn construct_anchor_openings(
-    selected_suite: &SelectedSuiteCapability,
+    suite_profile: &impl SetupGenerationCryptographicProfile,
     action_private_randomness: &ActionPrivateRandomness,
     bindings: &SetupGenerationBindings,
     common_secret_coefficients: &[i8],
@@ -841,7 +931,7 @@ fn construct_anchor_openings(
             )
             .map_err(|error| error.refusal_reason)?;
             hiding_secret_polynomials.push(sample_centered_ternary_polynomial(
-                selected_suite,
+                suite_profile,
                 action_private_randomness,
                 PrivateRandomnessDomain::setup_suite_distribution(
                     ANCHOR_HIDING_SECRET_DISTRIBUTION_PURPOSE,
@@ -865,7 +955,7 @@ fn construct_anchor_openings(
             )
             .map_err(|error| error.refusal_reason)?;
             hiding_error_polynomials.push(sample_centered_ternary_polynomial(
-                selected_suite,
+                suite_profile,
                 action_private_randomness,
                 PrivateRandomnessDomain::setup_suite_distribution(
                     ANCHOR_HIDING_ERROR_DISTRIBUTION_PURPOSE,
@@ -1452,7 +1542,7 @@ fn construct_galois_component_bytes(
 }
 
 pub(super) fn sample_centered_ternary_polynomial(
-    selected_suite: &SelectedSuiteCapability,
+    suite_profile: &impl SetupGenerationCryptographicProfile,
     action_private_randomness: &ActionPrivateRandomness,
     domain: PrivateRandomnessDomain,
     context_hash: Hash512,
@@ -1467,7 +1557,7 @@ pub(super) fn sample_centered_ternary_polynomial(
         coefficients.push(
             stream
                 .sample_centered_ternary(
-                    selected_suite.maximum_private_sampler_candidate_draws_per_output(),
+                    suite_profile.maximum_private_sampler_candidate_draws_per_output(),
                 )
                 .map_err(|error| error.refusal_reason)?,
         );
@@ -1501,7 +1591,7 @@ pub(super) fn sample_centered_binomial_polynomial(
 }
 
 fn sample_uniform_polynomial(
-    selected_suite: &SelectedSuiteCapability,
+    suite_profile: &impl SetupGenerationCryptographicProfile,
     action_private_randomness: &ActionPrivateRandomness,
     domain: PrivateRandomnessDomain,
     context_hash: Hash512,
@@ -1518,7 +1608,7 @@ fn sample_uniform_polynomial(
             stream
                 .sample_modulo(
                     modulus,
-                    selected_suite.maximum_private_sampler_candidate_draws_per_output(),
+                    suite_profile.maximum_private_sampler_candidate_draws_per_output(),
                 )
                 .map_err(|error| error.refusal_reason)?,
         );

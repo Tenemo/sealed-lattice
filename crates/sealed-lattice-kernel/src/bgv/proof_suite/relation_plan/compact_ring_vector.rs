@@ -86,6 +86,7 @@ const CONSTRAINT_SEGMENT_RECORD_TAG: u16 = 0x0601;
     )
 )]
 mod authenticated_assignment;
+mod generation_runtime;
 #[cfg_attr(
     not(test),
     expect(
@@ -110,6 +111,11 @@ use authenticated_assignment::validate_compact_authenticated_assignment;
 use authenticated_assignment::{
     CompactAuthenticatedAssignmentCursor, CompactAuthenticatedAssignmentPoll,
     CompactPublicKeyBaseAssignment,
+};
+pub(crate) use generation_runtime::{
+    CompactPublicKeyGenerationRuntime, CompactPublicKeyGenerationRuntimeError,
+    CompactPublicKeyGenerationRuntimePoll, CompactPublicKeyGenerationRuntimeStage,
+    CompactPublicKeyGenerationStorageOwner, PreparedCompactPublicKeyGenerationRuntime,
 };
 pub(crate) use structured_r1cs::{
     CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,
@@ -1174,6 +1180,16 @@ impl PreparedCompactPublicKeyAssignmentSources {
         self.source_polynomials.memory_accounting()
     }
 
+    pub(crate) fn retain_compact_public_key_deferred_authority(
+        &mut self,
+    ) -> Result<
+        std::rc::Rc<crate::bgv::setup::SetupGenerationCompactPublicKeyDevelopmentAuthority>,
+        CommonProofProverError,
+    > {
+        self.source_polynomials
+            .retain_compact_public_key_deferred_authority()
+    }
+
     pub(crate) fn finish_source_loading(
         self,
     ) -> Result<PreparedCompactPublicKeyBaseAssignment, CommonProofProverError> {
@@ -1222,13 +1238,6 @@ impl PreparedCompactPublicKeyAssignmentSources {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the compact common generation state calls this release family constructor at the next integration boundary"
-    )
-)]
 pub(crate) fn prepare_compact_public_key_assignment_sources(
     source: &SetupGenerationKeyRelationSource<'_, '_>,
 ) -> Result<PreparedCompactPublicKeyAssignmentSources, CommonProofProverError> {

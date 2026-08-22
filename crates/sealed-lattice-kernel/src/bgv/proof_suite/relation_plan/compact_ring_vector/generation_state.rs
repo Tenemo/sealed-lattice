@@ -16,7 +16,6 @@ use p3_goldilocks::Goldilocks;
 use p3_matrix::Matrix;
 use rand::{Rng, RngExt};
 
-#[cfg(test)]
 use crate::bgv::proof_suite::external_memory::ProofExternalMemoryUsage;
 use crate::bgv::proof_suite::{
     ProofBaseFieldElement,
@@ -2860,7 +2859,6 @@ impl PreparedCompactPublicKeyMainEpoch {
             .is_some_and(|material| material.cfw_external_output.is_some())
     }
 
-    #[cfg(test)]
     pub(crate) fn cfw_external_memory_usage(&self) -> Option<ProofExternalMemoryUsage> {
         Some(
             self.post_lookup_material

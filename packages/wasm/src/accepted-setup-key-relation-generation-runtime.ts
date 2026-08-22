@@ -1,4 +1,5 @@
 import {
+    foundationProfile,
     refusalReasonCodes,
     type BrowserActionStorageWorkerKernel,
 } from '@sealed-lattice/types';
@@ -16,17 +17,37 @@ import { isUint8Array } from './byte-array.js';
 import type { VerifiedTranscriptObject } from './canonical-board-runtime.js';
 import {
     canonicalStreamDomains,
+    CanonicalStreamCancellationError,
     CanonicalStreamCleanupError,
     CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
 } from './canonical-stream-runtime.js';
-import type { CommonProofGenerationExternalMemoryAccounting } from './common-proof-worker-runtime/kernel-boundaries.js';
+import {
+    clearCommonProofExternalMemoryRequest,
+    decodeCommonProofExternalMemoryRequest,
+    encodeCommonProofExternalMemoryResponseInto,
+    maximumEncodedResponseByteLength,
+    type CommonProofExternalMemoryRequest,
+} from './common-proof-worker-runtime/external-memory.js';
+import {
+    canonicalCommonProofChunkByteLength,
+    CompactPublicKeyGenerationKernelBoundary,
+    yieldBrowserWorkerTurn,
+    type CommonProofBrowserStorageAccounting,
+    type CommonProofExternalMemoryUsageAccounting,
+    type CommonProofGenerationExternalMemoryAccounting,
+    type CompactPublicKeyGenerationStorageOwner,
+    type CompactPublicKeyTransportBindings,
+} from './common-proof-worker-runtime/kernel-boundaries.js';
 import {
     applyClosedWorkerGeneratedCommonProofCapability,
+    CommonProofStorageRequestSequence,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
+    validateTransferredReadResults,
+    type CommonProofExternalMemoryTransactionExecutor,
     type CommonProofGenerationExecutionOpener,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
@@ -46,6 +67,7 @@ import type {
 } from './transcript-core-bridge/kernel-types.js';
 import {
     consumeVerifiedVssLowDegreeEvidence,
+    resolveAggregatePublicRandomnessBoardAuthorization,
     resolveOrderedVerifiedBoardObjectAuthorization,
     type VerifiedVssLowDegreeEvidence,
 } from './vss-share-linkage-verification-runtime.js';
@@ -56,10 +78,81 @@ const verifierCapabilityByteLength = 32;
 const checkpointLineageIdentifierByteLength = 32;
 const wasm32WordByteLength = Uint32Array.BYTES_PER_ELEMENT;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
+const defaultCompactPublicKeyMaximumWorkUnitCountPerPoll = 4_096;
 
 type AcceptedSetupKeyRelationProofFamily = 'publicKeyShare' | 'sameSecret';
 
 export type AcceptedSetupKeyRelationGenerationMode = 'fresh' | 'resumed';
+
+export type AcceptedSetupCompactPublicKeyExternalMemoryOpening = Readonly<{
+    runtimeBindingHash: Uint8Array<ArrayBuffer>;
+    storageOwner: CompactPublicKeyGenerationStorageOwner;
+}>;
+
+export type AcceptedSetupCompactPublicKeyExternalMemoryOpener = (
+    opening: AcceptedSetupCompactPublicKeyExternalMemoryOpening,
+) =>
+    | CommonProofExternalMemoryTransactionExecutor
+    | Promise<CommonProofExternalMemoryTransactionExecutor>;
+
+export type AcceptedSetupCompactPublicKeyGenerationInput = Readonly<{
+    canonicalSuiteRecordBytes: Uint8Array;
+    checkpointLineageIdentifier: Uint8Array;
+    kernel: TranscriptCoreKernel;
+    maximumWorkUnitCountPerPoll?: number;
+    openExternalMemory: AcceptedSetupCompactPublicKeyExternalMemoryOpener;
+    productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
+    setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
+    setupIntentObject: VerifiedTranscriptObject;
+    signal?: AbortSignal;
+    workerKernel: BrowserActionStorageWorkerKernel;
+    yieldControl?: () => Promise<void>;
+}>;
+
+export type CompactPublicKeyReferenceGenerationInput = Omit<
+    AcceptedSetupCompactPublicKeyGenerationInput,
+    'canonicalSuiteRecordBytes' | 'setupGenerationAuthority'
+> &
+    Readonly<{
+        orderedPublicRandomnessCommitmentObjects: readonly VerifiedTranscriptObject[];
+        orderedPublicRandomnessRevealObjects: readonly VerifiedTranscriptObject[];
+        orderedSetupIntentObjects: readonly VerifiedTranscriptObject[];
+    }>;
+
+export type AcceptedSetupCompactPublicKeyGenerationStorageAccounting =
+    Readonly<{
+        actualUsage: CommonProofExternalMemoryUsageAccounting;
+        browserStorage?: CommonProofBrowserStorageAccounting;
+    }>;
+
+export type AcceptedSetupCompactPublicKeyGenerationWorkerAccounting = Readonly<{
+    browserToWasmStorageResponseByteLength: bigint;
+    browserToWasmStorageResponseCount: bigint;
+    canonicalOutputCopyByteLength: bigint;
+    canonicalOutputCopyCount: bigint;
+    finalWasmMemoryByteLength: number;
+    initialWasmMemoryByteLength: number;
+    maximumWasmMemoryByteLength: number;
+    readResultTransferByteLength: bigint;
+    readResultTransferCount: bigint;
+    wasmToBrowserStorageRequestByteLength: bigint;
+    wasmToBrowserStorageRequestCount: bigint;
+}>;
+
+export type GeneratedCompactPublicKeyReferenceProof = Readonly<{
+    canonicalProofBytes: Uint8Array<ArrayBuffer>;
+    canonicalPublicInputBytes: Uint8Array<ArrayBuffer>;
+    externalMemoryAccounting: Readonly<{
+        cfw: AcceptedSetupCompactPublicKeyGenerationStorageAccounting;
+        responseTrees: AcceptedSetupCompactPublicKeyGenerationStorageAccounting;
+        worker: AcceptedSetupCompactPublicKeyGenerationWorkerAccounting;
+    }>;
+    observedSafeBoundaryOrdinals: readonly number[];
+    transportBindings: CompactPublicKeyTransportBindings;
+}>;
+
+export type GeneratedAcceptedSetupCompactPublicKeyProof =
+    GeneratedCompactPublicKeyReferenceProof;
 
 const generatedAcceptedSetupKeyRelationProofBrand = Symbol(
     'generated accepted-setup key-relation proof',
@@ -150,26 +243,43 @@ type PrepareSetupKeyRelationGeneration = (
     statusPointer: number,
 ) => number;
 
-type SetupKeyRelationGenerationKernel = Readonly<{
-    cancelGeneratedSource: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_cancel']
-    >;
-    contributePackage: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_contribute_package']
-    >;
-    discardStatementSource: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_setup_key_relation_generation_statement_discard']
-    >;
-    prepareGeneration: PrepareSetupKeyRelationGeneration;
-    prepareResumedGeneration: PrepareSetupKeyRelationGeneration;
+type SelectedSuiteKernel = Readonly<{
     releaseSelectedSuite: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_common_proof_release_suite']
     >;
     selectSuite: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_common_proof_select_suite']
     >;
-    supplyAuthenticatedTranscriptPrefix?: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_supply_authenticated_transcript_prefix']
+}>;
+
+type SetupKeyRelationGenerationKernel = SelectedSuiteKernel &
+    Readonly<{
+        cancelGeneratedSource: NonNullable<
+            TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_cancel']
+        >;
+        contributePackage: NonNullable<
+            TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_contribute_package']
+        >;
+        discardStatementSource: NonNullable<
+            TranscriptCoreKernelExports['sealed_lattice_setup_key_relation_generation_statement_discard']
+        >;
+        prepareGeneration: PrepareSetupKeyRelationGeneration;
+        prepareResumedGeneration: PrepareSetupKeyRelationGeneration;
+        supplyAuthenticatedTranscriptPrefix?: NonNullable<
+            TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_supply_authenticated_transcript_prefix']
+        >;
+    }>;
+
+type CompactPublicKeyGenerationPreparationKernel = SelectedSuiteKernel &
+    Readonly<{
+        prepareGeneration: NonNullable<
+            TranscriptCoreKernelExports['sealed_lattice_compact_public_key_share_prepare_generation']
+        >;
+    }>;
+
+type CompactPublicKeyReferenceGenerationPreparationKernel = Readonly<{
+    prepareGeneration: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_compact_public_key_reference_prepare_generation']
     >;
 }>;
 
@@ -337,10 +447,50 @@ const requireGenerationKernel = (
     });
 };
 
+const requireCompactPublicKeyGenerationPreparationKernel = (
+    context: TranscriptCoreKernelCommandRuntime,
+): CompactPublicKeyGenerationPreparationKernel => {
+    const {
+        sealed_lattice_common_proof_release_suite: releaseSelectedSuite,
+        sealed_lattice_common_proof_select_suite: selectSuite,
+        sealed_lattice_compact_public_key_share_prepare_generation:
+            prepareGeneration,
+    } = context.wasmExports;
+    if (
+        typeof releaseSelectedSuite !== 'function' ||
+        typeof selectSuite !== 'function' ||
+        typeof prepareGeneration !== 'function'
+    ) {
+        throw new CanonicalStreamInternalError(
+            'The transcript-core kernel lacks the compact public-key generation preparation boundary.',
+        );
+    }
+    return Object.freeze({
+        prepareGeneration,
+        releaseSelectedSuite,
+        selectSuite,
+    });
+};
+
+const requireCompactPublicKeyReferenceGenerationPreparationKernel = (
+    context: TranscriptCoreKernelCommandRuntime,
+): CompactPublicKeyReferenceGenerationPreparationKernel => {
+    const {
+        sealed_lattice_compact_public_key_reference_prepare_generation:
+            prepareGeneration,
+    } = context.wasmExports;
+    if (typeof prepareGeneration !== 'function') {
+        throw new CanonicalStreamInternalError(
+            'The transcript-core kernel lacks the non-authorizing compact public-key reference generation boundary.',
+        );
+    }
+    return Object.freeze({ prepareGeneration });
+};
+
 const selectSuite = (input: {
     canonicalSuiteRecordBytes: Uint8Array;
     context: TranscriptCoreKernelCommandRuntime;
-    kernel: SetupKeyRelationGenerationKernel;
+    kernel: SelectedSuiteKernel;
     memoryBoundary: WasmMemoryBoundary;
     statusBoundary: WasmStatusBoundary;
 }): number =>
@@ -390,7 +540,7 @@ const selectSuite = (input: {
 const releaseSelectedSuite = (input: {
     context: TranscriptCoreKernelCommandRuntime;
     handle: number;
-    kernel: SetupKeyRelationGenerationKernel;
+    kernel: SelectedSuiteKernel;
     operationName: string;
     statusBoundary: WasmStatusBoundary;
 }): void => {
@@ -903,6 +1053,683 @@ export const generateAcceptedSetupPublicKeyShareInClosedWorker = (
     input: AcceptedSetupKeyRelationGenerationInput,
 ): Promise<GeneratedAcceptedSetupKeyRelationProof> =>
     generateAcceptedSetupKeyRelationInClosedWorker('publicKeyShare', input);
+
+const requireCompactPublicKeyExternalMemoryExecutor = (
+    value: CommonProofExternalMemoryTransactionExecutor,
+): CommonProofExternalMemoryTransactionExecutor => {
+    if (
+        typeof value !== 'object' ||
+        value === null ||
+        typeof value.executeTransaction !== 'function' ||
+        (value.copyBrowserStorageAccounting !== undefined &&
+            typeof value.copyBrowserStorageAccounting !== 'function')
+    ) {
+        throw new CanonicalStreamInternalError(
+            'The compact public-key external-memory opener returned a malformed executor.',
+        );
+    }
+    return value;
+};
+
+const compactPublicKeyStorageAccounting = (
+    actualUsage: CommonProofExternalMemoryUsageAccounting,
+    executor: CommonProofExternalMemoryTransactionExecutor | undefined,
+): AcceptedSetupCompactPublicKeyGenerationStorageAccounting => {
+    const browserStorage = executor?.copyBrowserStorageAccounting?.();
+    return Object.freeze({
+        actualUsage,
+        ...(browserStorage === undefined ? {} : { browserStorage }),
+    });
+};
+
+type CompactPublicKeyGenerationRequest =
+    | Readonly<{
+          input: AcceptedSetupCompactPublicKeyGenerationInput;
+          kind: 'acceptedSetup';
+      }>
+    | Readonly<{
+          input: CompactPublicKeyReferenceGenerationInput;
+          kind: 'reference';
+      }>;
+
+const generateCompactPublicKeyInClosedWorker = async (
+    generationRequest: CompactPublicKeyGenerationRequest,
+): Promise<GeneratedCompactPublicKeyReferenceProof> => {
+    const { input } = generationRequest;
+    if (typeof globalThis.document !== 'undefined') {
+        throw new CanonicalStreamInternalError(
+            'Accepted-setup compact public-key generation may only run inside the dedicated WASM worker.',
+        );
+    }
+    if (typeof input.openExternalMemory !== 'function') {
+        throw new CanonicalStreamRefusalError('wrongContext');
+    }
+    const maximumWorkUnitCountPerPoll =
+        input.maximumWorkUnitCountPerPoll ??
+        defaultCompactPublicKeyMaximumWorkUnitCountPerPoll;
+    if (
+        !Number.isSafeInteger(maximumWorkUnitCountPerPoll) ||
+        maximumWorkUnitCountPerPoll <= 0 ||
+        maximumWorkUnitCountPerPoll > maximumWasm32UnsignedInteger
+    ) {
+        throw new CanonicalStreamResourceError(
+            'The compact public-key generation work-unit bound must be a positive unsigned 32-bit integer.',
+        );
+    }
+    const context = resolveCommonProofKernelContext(input.kernel);
+    if (context === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The loaded WASM kernel has no common-proof worker context.',
+        );
+    }
+    const preparationKernel =
+        generationRequest.kind === 'acceptedSetup'
+            ? requireCompactPublicKeyGenerationPreparationKernel(context)
+            : undefined;
+    const referencePreparationKernel =
+        generationRequest.kind === 'reference'
+            ? requireCompactPublicKeyReferenceGenerationPreparationKernel(
+                  context,
+              )
+            : undefined;
+    const generationKernel = new CompactPublicKeyGenerationKernelBoundary(
+        context,
+    );
+    const statusBoundary = createStatusBoundary('publicKeyShare');
+    const memoryBoundary = new WasmMemoryBoundary({
+        context,
+        createInternalError: (message) =>
+            new CanonicalStreamInternalError(message),
+        createResourceError: (message) =>
+            new CanonicalStreamResourceError(message),
+        label: 'accepted-setup compact public-key generation',
+    });
+    const checkpointLineageIdentifier = requireOwnedFixedBytes(
+        input.checkpointLineageIdentifier,
+        checkpointLineageIdentifierByteLength,
+    );
+    const setupGenerationAuthorization =
+        generationRequest.kind === 'acceptedSetup'
+            ? resolveSetupGenerationAuthorityKernelAuthorization(
+                  generationRequest.input.setupGenerationAuthority,
+                  context,
+              )
+            : undefined;
+    const referenceBoardAuthorization =
+        generationRequest.kind === 'reference'
+            ? resolveAggregatePublicRandomnessBoardAuthorization({
+                  context,
+                  kernel: input.kernel,
+                  orderedCommitmentObjects:
+                      generationRequest.input
+                          .orderedPublicRandomnessCommitmentObjects,
+                  orderedRevealObjects:
+                      generationRequest.input
+                          .orderedPublicRandomnessRevealObjects,
+                  orderedSetupIntentObjects:
+                      generationRequest.input.orderedSetupIntentObjects,
+              })
+            : undefined;
+    const setupIntentAuthorization =
+        resolveOrderedVerifiedBoardObjectAuthorization({
+            context,
+            expectedObjectCount: 1,
+            kernel: input.kernel,
+            objects: [input.setupIntentObject],
+        });
+    if (
+        setupIntentAuthorization.handleBytes.byteLength !==
+            wasm32WordByteLength ||
+        (referenceBoardAuthorization !== undefined &&
+            (referenceBoardAuthorization.sessionHandle !==
+                setupIntentAuthorization.sessionHandle ||
+                referenceBoardAuthorization.capabilityPointer !==
+                    setupIntentAuthorization.capabilityPointer ||
+                referenceBoardAuthorization.handleBytes.byteLength !==
+                    foundationProfile.participantCount *
+                        3 *
+                        wasm32WordByteLength))
+    ) {
+        throw new CanonicalStreamInternalError(
+            'The compact public-key generation authorities do not belong to one WASM worker.',
+        );
+    }
+
+    const initialWasmMemoryByteLength = context.memory.buffer.byteLength;
+    let maximumWasmMemoryByteLength = initialWasmMemoryByteLength;
+    const observeWasmMemory = (): void => {
+        const currentByteLength = context.memory.buffer.byteLength;
+        if (currentByteLength > foundationProfile.maximumWasmMemoryByteLength) {
+            throw new CanonicalStreamResourceError(
+                'The compact public-key generator exceeded the absolute WASM memory bound.',
+            );
+        }
+        maximumWasmMemoryByteLength = Math.max(
+            maximumWasmMemoryByteLength,
+            currentByteLength,
+        );
+    };
+    observeWasmMemory();
+
+    const requestSequences: Readonly<
+        Record<
+            CompactPublicKeyGenerationStorageOwner,
+            CommonProofStorageRequestSequence
+        >
+    > = Object.freeze({
+        cfw: new CommonProofStorageRequestSequence(),
+        responseTrees: new CommonProofStorageRequestSequence(),
+    });
+    const externalMemoryExecutors = new Map<
+        CompactPublicKeyGenerationStorageOwner,
+        CommonProofExternalMemoryTransactionExecutor
+    >();
+    const observedSafeBoundaryOrdinals: number[] = [];
+    const observedSafeBoundarySet = new Set<number>();
+    const yieldControl = input.yieldControl ?? yieldBrowserWorkerTurn;
+
+    let browserToWasmStorageResponseByteLength = 0n;
+    let browserToWasmStorageResponseCount = 0n;
+    let readResultTransferByteLength = 0n;
+    let readResultTransferCount = 0n;
+    let wasmToBrowserStorageRequestByteLength = 0n;
+    let wasmToBrowserStorageRequestCount = 0n;
+    let selectedSuiteHandle = 0;
+    let operationHandle = 0;
+    let operationReleased = false;
+    let canonicalProofBytes: Uint8Array<ArrayBuffer> | undefined;
+    let canonicalPublicInputBytes: Uint8Array<ArrayBuffer> | undefined;
+    let transportBindings: CompactPublicKeyTransportBindings | undefined;
+    let reusableStorageResponseBuffer: Uint8Array<ArrayBuffer> | undefined;
+    let result: GeneratedCompactPublicKeyReferenceProof | undefined;
+    let operationFailure: unknown;
+
+    try {
+        if (generationRequest.kind === 'acceptedSetup') {
+            if (
+                preparationKernel === undefined ||
+                setupGenerationAuthorization === undefined
+            ) {
+                throw new CanonicalStreamInternalError(
+                    'The accepted-setup compact public-key preparation boundary is unavailable.',
+                );
+            }
+            selectedSuiteHandle = selectSuite({
+                canonicalSuiteRecordBytes:
+                    generationRequest.input.canonicalSuiteRecordBytes,
+                context,
+                kernel: preparationKernel,
+                memoryBoundary,
+                statusBoundary,
+            });
+            await withClosedWorkerProductionOperationAuthority(
+                input.workerKernel,
+                input.productionOperationIdentifiers,
+                (productionOperationAuthority) =>
+                    productionOperationAuthority.withExactKernelAuthorization(
+                        (authorization) => {
+                            if (
+                                authorization.kernel !== input.kernel ||
+                                authorization.actionRandomnessContext.memory !==
+                                    context.memory ||
+                                authorization.stateReservationCapabilityMemory !==
+                                    context.memory ||
+                                authorization.stateReservationCapabilityPointer <=
+                                    0 ||
+                                authorization.stateReservationCapabilityPointer +
+                                    verifierCapabilityByteLength >
+                                    context.memory.buffer.byteLength
+                            ) {
+                                throw new CanonicalStreamInternalError(
+                                    'The compact public-key generation authorities do not belong to one WASM worker.',
+                                );
+                            }
+                            operationHandle = context.runExclusive(
+                                'accepted-setup compact public-key generation preparation',
+                                () => {
+                                    const checkpointPointer =
+                                        memoryBoundary.copy(
+                                            checkpointLineageIdentifier,
+                                        );
+                                    const statusPointer =
+                                        memoryBoundary.allocateZeroedWords(1);
+                                    try {
+                                        const handle =
+                                            preparationKernel.prepareGeneration(
+                                                selectedSuiteHandle,
+                                                setupGenerationAuthorization.handle,
+                                                authorization.actionRandomnessHandle,
+                                                authorization.stateVerifierSessionHandle,
+                                                authorization.stateReservationCapabilityPointer,
+                                                verifierCapabilityByteLength,
+                                                authorization.stateReservationHandle,
+                                                setupIntentAuthorization.sessionHandle,
+                                                setupIntentAuthorization.capabilityPointer,
+                                                verifierCapabilityByteLength,
+                                                new DataView(
+                                                    setupIntentAuthorization
+                                                        .handleBytes.buffer,
+                                                    setupIntentAuthorization
+                                                        .handleBytes.byteOffset,
+                                                    setupIntentAuthorization
+                                                        .handleBytes.byteLength,
+                                                ).getUint32(0, true),
+                                                checkpointPointer,
+                                                checkpointLineageIdentifier.byteLength,
+                                                statusPointer,
+                                            );
+                                        const [status] =
+                                            memoryBoundary.readWords(
+                                                statusPointer,
+                                                1,
+                                            );
+                                        statusBoundary.throwIfError(status);
+                                        return requireLiveHandle(
+                                            handle,
+                                            'The compact public-key generation operation handle',
+                                        );
+                                    } finally {
+                                        memoryBoundary.zeroAndDeallocate(
+                                            statusPointer,
+                                            wasm32WordByteLength,
+                                        );
+                                        memoryBoundary.zeroAndDeallocate(
+                                            checkpointPointer,
+                                            checkpointLineageIdentifier.byteLength,
+                                        );
+                                    }
+                                },
+                            );
+                        },
+                    ),
+            );
+            releaseSelectedSuite({
+                context,
+                handle: selectedSuiteHandle,
+                kernel: preparationKernel,
+                operationName:
+                    'accepted-setup compact public-key generation selected-suite release',
+                statusBoundary,
+            });
+            selectedSuiteHandle = 0;
+        } else {
+            if (
+                referencePreparationKernel === undefined ||
+                referenceBoardAuthorization === undefined
+            ) {
+                throw new CanonicalStreamInternalError(
+                    'The compact public-key reference preparation boundary is unavailable.',
+                );
+            }
+            await withClosedWorkerProductionOperationAuthority(
+                input.workerKernel,
+                input.productionOperationIdentifiers,
+                (productionOperationAuthority) =>
+                    productionOperationAuthority.withExactKernelAuthorization(
+                        (authorization) => {
+                            if (
+                                authorization.kernel !== input.kernel ||
+                                authorization.actionRandomnessContext.memory !==
+                                    context.memory ||
+                                authorization.stateReservationCapabilityMemory !==
+                                    context.memory ||
+                                authorization.stateReservationCapabilityPointer <=
+                                    0 ||
+                                authorization.stateReservationCapabilityPointer +
+                                    verifierCapabilityByteLength >
+                                    context.memory.buffer.byteLength
+                            ) {
+                                throw new CanonicalStreamInternalError(
+                                    'The compact public-key reference authorities do not belong to one WASM worker.',
+                                );
+                            }
+                            operationHandle = context.runExclusive(
+                                'compact public-key reference generation preparation',
+                                () => {
+                                    const orderedHandlesPointer =
+                                        memoryBoundary.copy(
+                                            referenceBoardAuthorization.handleBytes,
+                                        );
+                                    const checkpointPointer =
+                                        memoryBoundary.copy(
+                                            checkpointLineageIdentifier,
+                                        );
+                                    const statusPointer =
+                                        memoryBoundary.allocateZeroedWords(1);
+                                    try {
+                                        const handle =
+                                            referencePreparationKernel.prepareGeneration(
+                                                referenceBoardAuthorization.sessionHandle,
+                                                referenceBoardAuthorization.capabilityPointer,
+                                                verifierCapabilityByteLength,
+                                                orderedHandlesPointer,
+                                                referenceBoardAuthorization
+                                                    .handleBytes.byteLength,
+                                                authorization.actionRandomnessHandle,
+                                                authorization.stateVerifierSessionHandle,
+                                                authorization.stateReservationCapabilityPointer,
+                                                verifierCapabilityByteLength,
+                                                authorization.stateReservationHandle,
+                                                new DataView(
+                                                    setupIntentAuthorization
+                                                        .handleBytes.buffer,
+                                                    setupIntentAuthorization
+                                                        .handleBytes.byteOffset,
+                                                    setupIntentAuthorization
+                                                        .handleBytes.byteLength,
+                                                ).getUint32(0, true),
+                                                checkpointPointer,
+                                                checkpointLineageIdentifier.byteLength,
+                                                statusPointer,
+                                            );
+                                        const [status] =
+                                            memoryBoundary.readWords(
+                                                statusPointer,
+                                                1,
+                                            );
+                                        statusBoundary.throwIfError(status);
+                                        return requireLiveHandle(
+                                            handle,
+                                            'The compact public-key reference generation operation handle',
+                                        );
+                                    } finally {
+                                        memoryBoundary.zeroAndDeallocate(
+                                            statusPointer,
+                                            wasm32WordByteLength,
+                                        );
+                                        memoryBoundary.zeroAndDeallocate(
+                                            checkpointPointer,
+                                            checkpointLineageIdentifier.byteLength,
+                                        );
+                                        memoryBoundary.zeroAndDeallocate(
+                                            orderedHandlesPointer,
+                                            referenceBoardAuthorization
+                                                .handleBytes.byteLength,
+                                        );
+                                    }
+                                },
+                            );
+                        },
+                    ),
+            );
+        }
+        if (operationHandle === 0) {
+            throw new CanonicalStreamInternalError(
+                'The operation completed without a compact public-key generator.',
+            );
+        }
+
+        for (;;) {
+            if (input.signal?.aborted === true) {
+                throw new CanonicalStreamCancellationError();
+            }
+            const poll = generationKernel.poll(
+                operationHandle,
+                maximumWorkUnitCountPerPoll,
+            );
+            observeWasmMemory();
+            if (poll.kind === 'progress') {
+                if (
+                    poll.checkpointSafeBoundaryOrdinal !== undefined &&
+                    !observedSafeBoundarySet.has(
+                        poll.checkpointSafeBoundaryOrdinal,
+                    )
+                ) {
+                    observedSafeBoundarySet.add(
+                        poll.checkpointSafeBoundaryOrdinal,
+                    );
+                    observedSafeBoundaryOrdinals.push(
+                        poll.checkpointSafeBoundaryOrdinal,
+                    );
+                }
+                await yieldControl();
+                continue;
+            }
+            if (poll.kind === 'storage-request-ready') {
+                const encodedRequest = generationKernel.copyStorageRequest(
+                    operationHandle,
+                    poll.storageOwner,
+                );
+                observeWasmMemory();
+                wasmToBrowserStorageRequestCount += 1n;
+                wasmToBrowserStorageRequestByteLength += BigInt(
+                    encodedRequest.byteLength,
+                );
+                let request: CommonProofExternalMemoryRequest | undefined;
+                try {
+                    request =
+                        decodeCommonProofExternalMemoryRequest(encodedRequest);
+                    requestSequences[poll.storageOwner].accept(request);
+                    let externalMemoryExecutor = externalMemoryExecutors.get(
+                        poll.storageOwner,
+                    );
+                    if (externalMemoryExecutor === undefined) {
+                        externalMemoryExecutor =
+                            requireCompactPublicKeyExternalMemoryExecutor(
+                                await input.openExternalMemory(
+                                    Object.freeze({
+                                        runtimeBindingHash:
+                                            request.runtimeBindingHash.slice(),
+                                        storageOwner: poll.storageOwner,
+                                    }),
+                                ),
+                            );
+                        externalMemoryExecutors.set(
+                            poll.storageOwner,
+                            externalMemoryExecutor,
+                        );
+                    }
+                    let readResults;
+                    try {
+                        readResults = validateTransferredReadResults(
+                            request,
+                            await externalMemoryExecutor.executeTransaction(
+                                request,
+                            ),
+                        );
+                    } catch (error) {
+                        throw new CanonicalStreamInternalError(
+                            'The browser store could not execute the exact compact public-key transaction.',
+                            error,
+                        );
+                    }
+                    readResultTransferCount += BigInt(readResults.length);
+                    for (const readResult of readResults) {
+                        readResultTransferByteLength += BigInt(
+                            readResult.bytes.byteLength,
+                        );
+                    }
+                    reusableStorageResponseBuffer ??= new Uint8Array(
+                        maximumEncodedResponseByteLength,
+                    );
+                    const encodedResponse =
+                        encodeCommonProofExternalMemoryResponseInto(
+                            request,
+                            readResults,
+                            reusableStorageResponseBuffer,
+                        );
+                    browserToWasmStorageResponseCount += 1n;
+                    browserToWasmStorageResponseByteLength += BigInt(
+                        encodedResponse.byteLength,
+                    );
+                    generationKernel.supplyStorageResponse(
+                        operationHandle,
+                        poll.storageOwner,
+                        encodedResponse,
+                    );
+                    observeWasmMemory();
+                    requestSequences[poll.storageOwner].commit();
+                } finally {
+                    if (request !== undefined) {
+                        clearCommonProofExternalMemoryRequest(request);
+                    }
+                    if (encodedRequest.byteLength > 0) {
+                        encodedRequest.fill(0);
+                    }
+                    reusableStorageResponseBuffer?.fill(0);
+                }
+                await yieldControl();
+                continue;
+            }
+
+            const externalMemoryUsage =
+                generationKernel.externalMemoryUsage(operationHandle);
+            transportBindings =
+                generationKernel.copyTransportBindings(operationHandle);
+            canonicalPublicInputBytes =
+                generationKernel.copyCanonicalPublicInput(operationHandle);
+            observeWasmMemory();
+            canonicalProofBytes =
+                generationKernel.copyCanonicalProof(operationHandle);
+            observeWasmMemory();
+            const canonicalOutputCopyByteLength = BigInt(
+                canonicalPublicInputBytes.byteLength +
+                    canonicalProofBytes.byteLength,
+            );
+            const canonicalOutputCopyCount = BigInt(
+                Math.ceil(
+                    canonicalPublicInputBytes.byteLength /
+                        canonicalCommonProofChunkByteLength,
+                ) +
+                    Math.ceil(
+                        canonicalProofBytes.byteLength /
+                            canonicalCommonProofChunkByteLength,
+                    ),
+            );
+            generationKernel.releaseCompleted(operationHandle);
+            operationReleased = true;
+            operationHandle = 0;
+            result = Object.freeze({
+                canonicalProofBytes,
+                canonicalPublicInputBytes,
+                externalMemoryAccounting: Object.freeze({
+                    cfw: compactPublicKeyStorageAccounting(
+                        externalMemoryUsage.cfw,
+                        externalMemoryExecutors.get('cfw'),
+                    ),
+                    responseTrees: compactPublicKeyStorageAccounting(
+                        externalMemoryUsage.responseTrees,
+                        externalMemoryExecutors.get('responseTrees'),
+                    ),
+                    worker: Object.freeze({
+                        browserToWasmStorageResponseByteLength,
+                        browserToWasmStorageResponseCount,
+                        canonicalOutputCopyByteLength,
+                        canonicalOutputCopyCount,
+                        finalWasmMemoryByteLength:
+                            context.memory.buffer.byteLength,
+                        initialWasmMemoryByteLength,
+                        maximumWasmMemoryByteLength,
+                        readResultTransferByteLength,
+                        readResultTransferCount,
+                        wasmToBrowserStorageRequestByteLength,
+                        wasmToBrowserStorageRequestCount,
+                    }),
+                }),
+                observedSafeBoundaryOrdinals: Object.freeze([
+                    ...observedSafeBoundaryOrdinals,
+                ]),
+                transportBindings,
+            });
+            canonicalProofBytes = undefined;
+            canonicalPublicInputBytes = undefined;
+            transportBindings = undefined;
+            break;
+        }
+    } catch (error) {
+        operationFailure = error;
+    } finally {
+        checkpointLineageIdentifier.fill(0);
+        referenceBoardAuthorization?.handleBytes.fill(0);
+        setupIntentAuthorization.handleBytes.fill(0);
+        reusableStorageResponseBuffer?.fill(0);
+    }
+
+    const cleanupFailures: unknown[] = [];
+    if (selectedSuiteHandle !== 0) {
+        try {
+            if (preparationKernel === undefined) {
+                throw new CanonicalStreamInternalError(
+                    'The selected-suite cleanup boundary is unavailable.',
+                );
+            }
+            releaseSelectedSuite({
+                context,
+                handle: selectedSuiteHandle,
+                kernel: preparationKernel,
+                operationName:
+                    'accepted-setup compact public-key selected-suite failure release',
+                statusBoundary,
+            });
+        } catch (cleanupFailure) {
+            cleanupFailures.push(cleanupFailure);
+        }
+    }
+    if (operationHandle !== 0 && !operationReleased) {
+        try {
+            generationKernel.cancel(operationHandle);
+            operationHandle = 0;
+        } catch (cleanupFailure) {
+            cleanupFailures.push(cleanupFailure);
+        }
+    }
+    if (operationFailure !== undefined) {
+        canonicalProofBytes?.fill(0);
+        canonicalPublicInputBytes?.fill(0);
+        transportBindings?.applicationStatementHash.fill(0);
+        transportBindings?.manifestHash.fill(0);
+        transportBindings?.relationPlanHash.fill(0);
+        transportBindings?.suiteIdentifier.fill(0);
+    }
+    if (cleanupFailures.length > 0) {
+        throw new CanonicalStreamCleanupError(
+            operationFailure,
+            new CanonicalStreamInternalError(
+                'Accepted-setup compact public-key generation failed to retire all worker-owned authority.',
+                Object.freeze({ cleanupFailures }),
+            ),
+        );
+    }
+    if (operationFailure !== undefined) {
+        if (operationFailure instanceof Error) {
+            throw operationFailure;
+        }
+        throw new CanonicalStreamInternalError(
+            'Accepted-setup compact public-key generation failed with a non-error value.',
+            operationFailure,
+        );
+    }
+    if (result === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The compact public-key generator returned no canonical output.',
+        );
+    }
+    return result;
+};
+
+/**
+ * Generates the exact compact public-key proof and public input from a selected
+ * setup authority in scalar release WASM. The returned bytes have no
+ * verification authority; only positive accepted-setup verification can mint
+ * the corresponding capability.
+ */
+export const generateAcceptedSetupCompactPublicKeyShareInClosedWorker = (
+    input: AcceptedSetupCompactPublicKeyGenerationInput,
+): Promise<GeneratedAcceptedSetupCompactPublicKeyProof> =>
+    generateCompactPublicKeyInClosedWorker(
+        Object.freeze({ input, kind: 'acceptedSetup' }),
+    );
+
+/**
+ * Generates exact compact public-key reference bytes from positively verified
+ * setup sources. This path neither selects a suite nor produces a capability.
+ */
+export const generateCompactPublicKeyReferenceInClosedWorker = (
+    input: CompactPublicKeyReferenceGenerationInput,
+): Promise<GeneratedCompactPublicKeyReferenceProof> =>
+    generateCompactPublicKeyInClosedWorker(
+        Object.freeze({ input, kind: 'reference' }),
+    );
 
 const contributeGeneratedAcceptedSetupKeyRelationToPackage = (
     family: AcceptedSetupKeyRelationProofFamily,

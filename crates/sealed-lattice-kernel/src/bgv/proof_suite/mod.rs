@@ -361,10 +361,10 @@ pub(crate) use relation_plan::{
     compile_relinearization_round_two_relation_with_source_layout,
     compile_rkg_round_one_aggregate_relation_plan, compile_same_secret_relation_plan,
     compile_same_secret_relation_with_source_layout, compile_target_release_relation,
-    compile_vss_share_linkage_relation_plan, galois_relation_tree_inputs,
-    public_key_share_relation_tree_inputs, relinearization_round_one_relation_tree_inputs,
-    relinearization_round_two_relation_tree_inputs, same_secret_relation_tree_inputs,
-    selected_galois_key_share_batch_schedule,
+    compile_vss_share_linkage_relation_plan, derive_compact_public_key_relation_catalog,
+    galois_relation_tree_inputs, public_key_share_relation_tree_inputs,
+    relinearization_round_one_relation_tree_inputs, relinearization_round_two_relation_tree_inputs,
+    same_secret_relation_tree_inputs, selected_galois_key_share_batch_schedule,
 };
 #[cfg(test)]
 pub(crate) use relation_plan::{
@@ -432,7 +432,8 @@ pub(crate) use selected_profile::{
     selected_same_secret_relation_plan_input, selected_target_release_relation,
 };
 pub(crate) use setup_generation_runtime::{
-    begin_setup_generation_authority, cancel_setup_generation_public_key_share_body_by_identifier,
+    begin_compact_public_key_reference_authority, begin_setup_generation_authority,
+    cancel_setup_generation_public_key_share_body_by_identifier,
     cancel_setup_generation_recipient_payload,
     open_setup_generation_public_key_share_body_by_identifier,
     open_setup_generation_recipient_payload,

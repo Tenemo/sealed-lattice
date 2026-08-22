@@ -831,6 +831,10 @@ impl ProofExternalMemoryTransactionRecorder {
         self.yielded_request.take()
     }
 
+    pub(crate) const fn yielded_request_is_available(&self) -> bool {
+        self.yielded_request.is_some()
+    }
+
     pub(crate) fn take_recycled_append_bytes(&mut self) -> Vec<Zeroizing<Vec<u8>>> {
         core::mem::take(&mut self.recycled_append_bytes)
     }

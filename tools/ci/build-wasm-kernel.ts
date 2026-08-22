@@ -145,13 +145,28 @@ export const createWasmCargoBuildArguments = (
         : ['--features', cargoFeatures.join(',')]),
 ];
 
+export const resolveWasmCargoExecutable = (
+    environment: NodeJS.ProcessEnv = process.env,
+): string => {
+    const configuredExecutable = environment.SEALED_LATTICE_CARGO_EXECUTABLE;
+    if (configuredExecutable === undefined) {
+        return 'cargo';
+    }
+    if (configuredExecutable.trim().length === 0) {
+        throw new Error(
+            'SEALED_LATTICE_CARGO_EXECUTABLE must name a nonempty Cargo executable.',
+        );
+    }
+    return configuredExecutable;
+};
+
 const runCargoBuild = (input: {
     readonly cargoFeatures: readonly string[];
     readonly environment: NodeJS.ProcessEnv;
     readonly targetDirectoryPath: string;
 }): void => {
     runCheckedCommand({
-        command: 'cargo',
+        command: resolveWasmCargoExecutable(input.environment),
         args: createWasmCargoBuildArguments(input.cargoFeatures),
         description: 'cargo build',
         env: createDeterministicCargoEnvironment(input.environment, {

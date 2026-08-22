@@ -1363,6 +1363,38 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         statementSourceHandleOutputPointer: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_compact_public_key_share_prepare_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_reference_prepare_generation?: (
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessObjectHandlesPointer: number,
+        orderedPublicRandomnessObjectHandlesByteLength: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_setup_key_relation_generation_statement_discard?: (
         statementSourceHandle: number,
     ) => number;
@@ -1464,6 +1496,69 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
     sealed_lattice_compact_public_key_transport_bindings_byte_length?: () => number;
+    sealed_lattice_compact_public_key_generation_external_memory_usage_word_count?: () => number;
+    sealed_lattice_compact_public_key_generation_poll?: (
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+        stageOutputPointer: number,
+        firstOrdinalOutputPointer: number,
+        completedWorkUnitCountOutputPointer: number,
+        checkpointReadyOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length?: (
+        operationHandle: number,
+        storageOwnerOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_storage_request?: (
+        operationHandle: number,
+        storageOwnerCode: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_supply_storage_response?: (
+        operationHandle: number,
+        storageOwnerCode: number,
+        responsePointer: number,
+        responseByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_public_input_byte_length?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_proof_byte_length?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_public_input?: (
+        operationHandle: number,
+        sourceOffset: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_proof?: (
+        operationHandle: number,
+        sourceOffset: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_transport_bindings?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_external_memory_usage?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputWordCount: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_release_completed?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_cancel?: (
+        operationHandle: number,
+    ) => number;
     sealed_lattice_compact_public_key_validate_transport?: (
         bindingsPointer: number,
         bindingsByteLength: number,

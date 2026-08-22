@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    encodeRequest,
+    runtimeBinding,
+} from './common-proof-worker-runtime/wire-fixtures.js';
+
+import {
     contributeGeneratedAcceptedSetupPublicKeyShareToPackage,
     contributeGeneratedAcceptedSetupSameSecretToPackage,
+    generateAcceptedSetupCompactPublicKeyShareInClosedWorker,
     generateAcceptedSetupPublicKeyShareInClosedWorker,
     generateAcceptedSetupSameSecretInClosedWorker,
     verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
@@ -196,12 +202,47 @@ vi.mock('#packages/wasm/src/generated-common-proof-output-runtime', () => ({
 vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
     applyClosedWorkerGeneratedCommonProofCapability:
         boundaryMocks.applyGeneratedCapability,
+    CommonProofStorageRequestSequence: class {
+        private nextRequestSequence = 1n;
+        private runtimeBindingHash: Uint8Array<ArrayBuffer> | undefined;
+
+        public accept(request: {
+            requestSequence: bigint;
+            runtimeBindingHash: Uint8Array<ArrayBuffer>;
+        }): void {
+            if (request.requestSequence !== this.nextRequestSequence) {
+                throw new Error(
+                    'The focused test observed a reordered request.',
+                );
+            }
+            if (this.runtimeBindingHash === undefined) {
+                this.runtimeBindingHash = request.runtimeBindingHash.slice();
+            } else if (
+                !this.runtimeBindingHash.every(
+                    (byte, byteIndex) =>
+                        request.runtimeBindingHash[byteIndex] === byte,
+                )
+            ) {
+                throw new Error(
+                    'The focused test observed a substituted runtime binding.',
+                );
+            }
+        }
+
+        public commit(): void {
+            this.nextRequestSequence += 1n;
+        }
+    },
     openClosedWorkerCommonProofGenerationFamilyAdapter:
         boundaryMocks.openGenerationAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter:
         boundaryMocks.releaseGenerationAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener:
         boundaryMocks.runGeneration,
+    validateTransferredReadResults: (
+        _request: unknown,
+        readResults: readonly unknown[],
+    ) => readResults,
 }));
 
 vi.mock('#packages/wasm/src/accepted-setup-package-builder-runtime', () => ({
@@ -225,6 +266,14 @@ vi.mock('#packages/wasm/src/accepted-setup-proof-verification-runtime', () => ({
 type SetupKeyRelationFamily = 'publicKeyShare' | 'sameSecret';
 type GenerationMode = 'fresh' | 'resumed';
 
+type CompactGenerationPollOutcome = Readonly<{
+    checkpointReady: number;
+    completedWorkUnitCount: number;
+    firstOrdinal: number;
+    pollCode: number;
+    stage: number;
+}>;
+
 type FakeSetupKeyRelationRuntime = Readonly<{
     allocations: ReadonlyMap<number, number>;
     authenticatedTranscriptPrefixes: Array<
@@ -240,6 +289,12 @@ type FakeSetupKeyRelationRuntime = Readonly<{
             statementSourceHandle: number;
         }>
     >;
+    compactCancelledHandles: number[];
+    compactGenerationPreparations: number[];
+    compactPendingStorageOwnerCode: { value: number };
+    compactPollOutcomes: CompactGenerationPollOutcome[];
+    compactReleasedCompletedHandles: number[];
+    compactSuppliedStorageOwners: number[];
     contributedGeneratedSources: Array<
         Readonly<{
             builderHandle: number;
@@ -280,6 +335,77 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
             statementSourceHandle: number;
         }>
     > = [];
+    const compactCancelledHandles: number[] = [];
+    const compactGenerationPreparations: number[] = [];
+    const compactReleasedCompletedHandles: number[] = [];
+    const compactSuppliedStorageOwners: number[] = [];
+    const compactPendingStorageOwnerCode = { value: 0 };
+    const compactPollOutcomes: CompactGenerationPollOutcome[] = [
+        {
+            checkpointReady: 0,
+            completedWorkUnitCount: 0,
+            firstOrdinal: 1,
+            pollCode: 2,
+            stage: 0,
+        },
+        {
+            checkpointReady: 0,
+            completedWorkUnitCount: 0,
+            firstOrdinal: 2,
+            pollCode: 2,
+            stage: 0,
+        },
+        {
+            checkpointReady: 1,
+            completedWorkUnitCount: 0,
+            firstOrdinal: 0,
+            pollCode: 1,
+            stage: 5,
+        },
+        {
+            checkpointReady: 0,
+            completedWorkUnitCount: 0,
+            firstOrdinal: 0,
+            pollCode: 5,
+            stage: 17,
+        },
+    ];
+    const compactStorageRequests = new Map([
+        [
+            1,
+            encodeRequest({
+                maximumPayloadByteLength: 1n,
+                operations: [
+                    {
+                        kind: 1,
+                        objectOrdinal: 0,
+                        payloadByteLength: 1n,
+                        position: 0n,
+                        protection: 1,
+                    },
+                ],
+                requestSequence: 1n,
+                runtimeBindingHash: runtimeBinding(0x31),
+            }),
+        ],
+        [
+            2,
+            encodeRequest({
+                maximumPayloadByteLength: 1n,
+                operations: [
+                    {
+                        kind: 1,
+                        objectOrdinal: 0,
+                        payloadByteLength: 1n,
+                        position: 0n,
+                        protection: 1,
+                    },
+                ],
+                requestSequence: 1n,
+                runtimeBindingHash: runtimeBinding(0x42),
+            }),
+        ],
+    ]);
     const contributedGeneratedSources: Array<
         Readonly<{
             builderHandle: number;
@@ -363,6 +489,199 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
         };
 
     const wasmExports = {
+        sealed_lattice_compact_public_key_generation_cancel: (
+            handle: number,
+        ) => {
+            compactCancelledHandles.push(handle);
+            return 0;
+        },
+        sealed_lattice_compact_public_key_generation_copy_external_memory_usage:
+            (
+                _handle: number,
+                outputPointer: number,
+                outputWordCount: number,
+            ) => {
+                const view = new DataView(memory.buffer, outputPointer);
+                for (
+                    let wordIndex = 0;
+                    wordIndex < outputWordCount;
+                    wordIndex += 1
+                ) {
+                    view.setBigUint64(
+                        wordIndex * BigUint64Array.BYTES_PER_ELEMENT,
+                        BigInt(wordIndex + 1),
+                        true,
+                    );
+                }
+                return 0;
+            },
+        sealed_lattice_compact_public_key_generation_copy_proof: (
+            _handle: number,
+            sourceOffset: number,
+            outputPointer: number,
+            outputByteLength: number,
+        ) => {
+            const proofBytes = Uint8Array.of(0xa1, 0xa2, 0xa3, 0xa4);
+            new Uint8Array(memory.buffer, outputPointer, outputByteLength).set(
+                proofBytes.subarray(
+                    sourceOffset,
+                    sourceOffset + outputByteLength,
+                ),
+            );
+            return 0;
+        },
+        sealed_lattice_compact_public_key_generation_copy_public_input: (
+            _handle: number,
+            sourceOffset: number,
+            outputPointer: number,
+            outputByteLength: number,
+        ) => {
+            const publicInputBytes = Uint8Array.of(0xb1, 0xb2, 0xb3);
+            new Uint8Array(memory.buffer, outputPointer, outputByteLength).set(
+                publicInputBytes.subarray(
+                    sourceOffset,
+                    sourceOffset + outputByteLength,
+                ),
+            );
+            return 0;
+        },
+        sealed_lattice_compact_public_key_generation_copy_storage_request: (
+            _handle: number,
+            storageOwnerCode: number,
+            outputPointer: number,
+            outputByteLength: number,
+        ) => {
+            const request = compactStorageRequests.get(storageOwnerCode);
+            if (
+                request === undefined ||
+                request.byteLength !== outputByteLength
+            ) {
+                return 11;
+            }
+            new Uint8Array(memory.buffer, outputPointer, outputByteLength).set(
+                request,
+            );
+            return 0;
+        },
+        sealed_lattice_compact_public_key_generation_copy_transport_bindings: (
+            _handle: number,
+            outputPointer: number,
+            outputByteLength: number,
+        ) => {
+            const output = new Uint8Array(
+                memory.buffer,
+                outputPointer,
+                outputByteLength,
+            );
+            for (
+                let bindingOrdinal = 0;
+                bindingOrdinal < 4;
+                bindingOrdinal += 1
+            ) {
+                output
+                    .subarray(bindingOrdinal * 64, (bindingOrdinal + 1) * 64)
+                    .fill(bindingOrdinal + 1);
+            }
+            return 0;
+        },
+        sealed_lattice_compact_public_key_generation_external_memory_usage_word_count:
+            () => 10,
+        sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length:
+            (
+                _handle: number,
+                storageOwnerOutputPointer: number,
+                statusPointer: number,
+            ) => {
+                const request = compactStorageRequests.get(
+                    compactPendingStorageOwnerCode.value,
+                );
+                writeStatus(
+                    memory,
+                    storageOwnerOutputPointer,
+                    compactPendingStorageOwnerCode.value,
+                );
+                writeStatus(
+                    memory,
+                    statusPointer,
+                    request === undefined ? 11 : 0,
+                );
+                return request?.byteLength ?? 0;
+            },
+        sealed_lattice_compact_public_key_generation_poll: (
+            _handle: number,
+            _maximumWorkUnitCount: number,
+            stageOutputPointer: number,
+            firstOrdinalOutputPointer: number,
+            completedWorkUnitCountOutputPointer: number,
+            checkpointReadyOutputPointer: number,
+            statusPointer: number,
+        ) => {
+            const outcome = compactPollOutcomes.shift();
+            if (outcome === undefined) {
+                throw new Error(
+                    'The focused key-relation test exhausted compact poll outcomes.',
+                );
+            }
+            writeStatus(memory, stageOutputPointer, outcome.stage);
+            writeStatus(
+                memory,
+                firstOrdinalOutputPointer,
+                outcome.firstOrdinal,
+            );
+            writeStatus(
+                memory,
+                completedWorkUnitCountOutputPointer,
+                outcome.completedWorkUnitCount,
+            );
+            writeStatus(
+                memory,
+                checkpointReadyOutputPointer,
+                outcome.checkpointReady,
+            );
+            writeStatus(memory, statusPointer, 0);
+            compactPendingStorageOwnerCode.value =
+                outcome.pollCode === 2 ? outcome.firstOrdinal : 0;
+            return outcome.pollCode;
+        },
+        sealed_lattice_compact_public_key_generation_proof_byte_length: (
+            _handle: number,
+            statusPointer: number,
+        ) => {
+            writeStatus(memory, statusPointer, 0);
+            return 4;
+        },
+        sealed_lattice_compact_public_key_generation_public_input_byte_length: (
+            _handle: number,
+            statusPointer: number,
+        ) => {
+            writeStatus(memory, statusPointer, 0);
+            return 3;
+        },
+        sealed_lattice_compact_public_key_generation_release_completed: (
+            handle: number,
+        ) => {
+            compactReleasedCompletedHandles.push(handle);
+            return 0;
+        },
+        sealed_lattice_compact_public_key_generation_supply_storage_response: (
+            _handle: number,
+            storageOwnerCode: number,
+            _responsePointer: number,
+            _responseByteLength: number,
+        ) => {
+            compactSuppliedStorageOwners.push(storageOwnerCode);
+            compactPendingStorageOwnerCode.value = 0;
+            return 0;
+        },
+        sealed_lattice_compact_public_key_transport_bindings_byte_length: () =>
+            256,
+        sealed_lattice_compact_public_key_share_prepare_generation: (
+            ...parameters: number[]
+        ) => {
+            compactGenerationPreparations.push(parameters.length);
+            writeStatus(memory, parameters[parameters.length - 1] ?? 0, 0);
+            return 61;
+        },
         sealed_lattice_common_proof_release_suite: (handle: number) => {
             selectedSuiteReleases.push(handle);
             return 0;
@@ -436,6 +755,12 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
         allocations,
         authenticatedTranscriptPrefixes,
         cancelledGeneratedSources,
+        compactCancelledHandles,
+        compactGenerationPreparations,
+        compactPendingStorageOwnerCode,
+        compactPollOutcomes,
+        compactReleasedCompletedHandles,
+        compactSuppliedStorageOwners,
         contributedGeneratedSources,
         discardedStatementSources,
         generationPreparations,
@@ -471,6 +796,28 @@ const generationInput = (
         ? { vssLowDegreeEvidence: boundaryMocks.vssLowDegreeEvidence }
         : {}),
     workerKernel: Object.freeze({ kernel: runtime.kernel }),
+});
+
+const compactGenerationInput = (
+    runtime: FakeSetupKeyRelationRuntime,
+    openExternalMemory: (
+        opening: Readonly<{
+            runtimeBindingHash: Uint8Array<ArrayBuffer>;
+            storageOwner: 'cfw' | 'responseTrees';
+        }>,
+    ) => unknown,
+    signal?: AbortSignal,
+) => ({
+    canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
+    checkpointLineageIdentifier: new Uint8Array(32).fill(7),
+    kernel: runtime.kernel,
+    openExternalMemory,
+    productionOperationIdentifiers: Object.freeze({}),
+    setupGenerationAuthority: Object.freeze({}),
+    setupIntentObject: Object.freeze({}),
+    ...(signal === undefined ? {} : { signal }),
+    workerKernel: Object.freeze({ kernel: runtime.kernel }),
+    yieldControl: () => Promise.resolve(),
 });
 
 const verificationInput = (
@@ -730,6 +1077,150 @@ describe('generated accepted-setup key-relation verification', () => {
             Uint8Array.of(0xd1, 0xd2),
         );
         proof.release();
+    });
+});
+
+describe('accepted-setup compact public-key generation', () => {
+    it('returns exact unverified bytes after both storage owners complete', async () => {
+        const runtime = createFakeRuntime();
+        const openings: Array<
+            Readonly<{
+                runtimeBindingHash: number[];
+                storageOwner: 'cfw' | 'responseTrees';
+            }>
+        > = [];
+        const result =
+            await generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactGenerationInput(runtime, (opening) => {
+                    openings.push({
+                        runtimeBindingHash: Array.from(
+                            opening.runtimeBindingHash,
+                        ),
+                        storageOwner: opening.storageOwner,
+                    });
+                    return Object.freeze({
+                        copyBrowserStorageAccounting: () =>
+                            Object.freeze({
+                                claimedBufferCount: 1n,
+                                claimedByteLength: 2n,
+                                maximumLiveBufferByteLength: 3n,
+                                maximumLiveBufferCount: 1,
+                                releasedBufferCount: 4n,
+                                releasedByteLength: 5n,
+                                secretRecordOpenByteLength: 6n,
+                                secretRecordOpenCount: 7n,
+                                secretRecordSealByteLength: 8n,
+                                secretRecordSealCount: 9n,
+                                transferredBufferCount: 10n,
+                                transferredByteLength: 11n,
+                            }),
+                        executeTransaction: () => Promise.resolve([]),
+                    });
+                }) as never,
+            );
+
+        expect(result.canonicalPublicInputBytes).toEqual(
+            Uint8Array.of(0xb1, 0xb2, 0xb3),
+        );
+        expect(result.canonicalProofBytes).toEqual(
+            Uint8Array.of(0xa1, 0xa2, 0xa3, 0xa4),
+        );
+        expect(result.transportBindings).toEqual({
+            applicationStatementHash: new Uint8Array(64).fill(2),
+            manifestHash: new Uint8Array(64).fill(3),
+            relationPlanHash: new Uint8Array(64).fill(4),
+            suiteIdentifier: new Uint8Array(64).fill(1),
+        });
+        expect(result.observedSafeBoundaryOrdinals).toEqual([0]);
+        expect(openings).toEqual([
+            {
+                runtimeBindingHash: new Array<number>(64).fill(0x31),
+                storageOwner: 'responseTrees',
+            },
+            {
+                runtimeBindingHash: new Array<number>(64).fill(0x42),
+                storageOwner: 'cfw',
+            },
+        ]);
+        expect(
+            result.externalMemoryAccounting.responseTrees.actualUsage,
+        ).toEqual({
+            deletedObjectLifecycleCount: 5n,
+            peakStoredByteLength: 3n,
+            totalReadByteLength: 2n,
+            totalWrittenByteLength: 1n,
+            transactionCount: 4n,
+        });
+        expect(result.externalMemoryAccounting.cfw.actualUsage).toEqual({
+            deletedObjectLifecycleCount: 10n,
+            peakStoredByteLength: 8n,
+            totalReadByteLength: 7n,
+            totalWrittenByteLength: 6n,
+            transactionCount: 9n,
+        });
+        expect(result.externalMemoryAccounting.worker).toMatchObject({
+            browserToWasmStorageResponseCount: 2n,
+            canonicalOutputCopyByteLength: 7n,
+            canonicalOutputCopyCount: 2n,
+            readResultTransferByteLength: 0n,
+            readResultTransferCount: 0n,
+            wasmToBrowserStorageRequestCount: 2n,
+        });
+        expect(
+            result.externalMemoryAccounting.worker
+                .browserToWasmStorageResponseByteLength,
+        ).toBeGreaterThan(0n);
+        expect(
+            result.externalMemoryAccounting.worker
+                .wasmToBrowserStorageRequestByteLength,
+        ).toBeGreaterThan(0n);
+        expect(runtime.compactGenerationPreparations).toEqual([14]);
+        expect(runtime.compactSuppliedStorageOwners).toEqual([1, 2]);
+        expect(runtime.compactReleasedCompletedHandles).toEqual([61]);
+        expect(runtime.compactCancelledHandles).toEqual([]);
+        expect(runtime.selectedSuiteReleases).toEqual([11]);
+        expect(runtime.compactPollOutcomes).toEqual([]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('cancels retained producer authority when cancellation precedes polling', async () => {
+        const runtime = createFakeRuntime();
+        const controller = new AbortController();
+        controller.abort('focused cancellation');
+        const openExternalMemory = vi.fn();
+
+        await expect(
+            generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactGenerationInput(
+                    runtime,
+                    openExternalMemory,
+                    controller.signal,
+                ) as never,
+            ),
+        ).rejects.toThrow(/cancel/u);
+        expect(openExternalMemory).not.toHaveBeenCalled();
+        expect(runtime.compactReleasedCompletedHandles).toEqual([]);
+        expect(runtime.compactCancelledHandles).toEqual([61]);
+        expect(runtime.selectedSuiteReleases).toEqual([11]);
+        expect(runtime.compactPollOutcomes).toHaveLength(4);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('fails closed and retires the producer when storage opening fails', async () => {
+        const runtime = createFakeRuntime();
+
+        await expect(
+            generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactGenerationInput(runtime, () => {
+                    throw new Error('storage unavailable');
+                }) as never,
+            ),
+        ).rejects.toThrow('storage unavailable');
+        expect(runtime.compactReleasedCompletedHandles).toEqual([]);
+        expect(runtime.compactCancelledHandles).toEqual([61]);
+        expect(runtime.compactSuppliedStorageOwners).toEqual([]);
+        expect(runtime.selectedSuiteReleases).toEqual([11]);
+        expect(runtime.allocations.size).toBe(0);
     });
 });
 

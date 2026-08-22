@@ -120,6 +120,18 @@ impl CommonProofStorageTransactionRuntime {
         )
     }
 
+    /// Reports a recorder-yielded request without consuming recorder-owned
+    /// buffers. A coordinator with multiple independent storage owners uses
+    /// this check to select the exact owner before calling
+    /// [`Self::capture_yielded_request`].
+    pub(crate) fn yielded_request_is_available(&self) -> bool {
+        matches!(
+            &self.pass,
+            CommonProofStorageTransactionPass::Recording(recorder)
+                if recorder.yielded_request_is_available()
+        )
+    }
+
     pub(crate) fn replay_is_active(&self) -> bool {
         matches!(self.pass, CommonProofStorageTransactionPass::Replaying(_))
     }

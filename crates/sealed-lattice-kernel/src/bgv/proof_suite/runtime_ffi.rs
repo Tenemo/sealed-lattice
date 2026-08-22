@@ -33,6 +33,11 @@ use super::compact_public_key_algebraic_verifier::{
 use super::compact_public_key_verifier::{
     validate_selected_compact_public_key_transport, verify_selected_compact_public_key_transport,
 };
+use super::relation_plan::{
+    CompactPublicKeyGenerationRuntime, CompactPublicKeyGenerationRuntimeError,
+    CompactPublicKeyGenerationRuntimePoll, CompactPublicKeyGenerationRuntimeStage,
+    CompactPublicKeyGenerationStorageOwner,
+};
 use super::runtime::{
     CommonProofVerificationReadbackAccounting, ExpectedCommonProofPackageBindings,
     common_proof_registry_entry_count, require_common_proof_worker_process_admission_capacity,
@@ -70,6 +75,7 @@ const GENERATION_POLL_CANCELLED: u32 = 6;
 const GENERATION_POLL_RESUME_COMPLETE: u32 = 7;
 const GENERATION_POLL_AUTHENTICATED_SOURCE_READ_READY: u32 = 8;
 const GENERATION_POLL_AUTHENTICATED_TRANSCRIPT_PREFIX_REQUIRED: u32 = 9;
+const COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT: usize = 10;
 const AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH: usize = 160;
 const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT: usize = 20;
 const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH: usize =
@@ -1316,6 +1322,7 @@ thread_local! {
 
 struct CommonProofWasmRuntimeRegistry {
     next_accepted_setup_compact_public_key_handle: u32,
+    next_compact_public_key_generation_handle: u32,
     next_compact_public_key_verification_handle: u32,
     next_generation_family_adapter_handle: u32,
     next_verification_family_adapter_handle: u32,
@@ -1326,6 +1333,7 @@ struct CommonProofWasmRuntimeRegistry {
     prepared_generations: BTreeMap<u32, PreparedCommonProofGeneration>,
     prepared_verifications: BTreeMap<u32, PreparedCommonProofVerification>,
     compact_public_key_verifications: BTreeMap<u32, CompactPublicKeyAlgebraicVerification>,
+    compact_public_key_generations: BTreeMap<u32, CompactPublicKeyGenerationRuntime>,
     accepted_setup_compact_public_key_prepared_verifications:
         BTreeMap<u32, AcceptedSetupCompactPublicKeyPreparedVerification>,
     accepted_setup_compact_public_key_verification_operations:
@@ -1342,6 +1350,7 @@ impl Default for CommonProofWasmRuntimeRegistry {
     fn default() -> Self {
         Self {
             next_accepted_setup_compact_public_key_handle: 1,
+            next_compact_public_key_generation_handle: 1,
             next_compact_public_key_verification_handle: 1,
             next_generation_family_adapter_handle: 1,
             next_verification_family_adapter_handle: 1,
@@ -1352,6 +1361,7 @@ impl Default for CommonProofWasmRuntimeRegistry {
             prepared_generations: BTreeMap::new(),
             prepared_verifications: BTreeMap::new(),
             compact_public_key_verifications: BTreeMap::new(),
+            compact_public_key_generations: BTreeMap::new(),
             accepted_setup_compact_public_key_prepared_verifications: BTreeMap::new(),
             accepted_setup_compact_public_key_verification_operations: BTreeMap::new(),
             accepted_setup_compact_public_key_capabilities: BTreeMap::new(),
@@ -1371,6 +1381,7 @@ impl CommonProofWasmRuntimeRegistry {
             self.prepared_generations.len(),
             self.prepared_verifications.len(),
             self.compact_public_key_verifications.len(),
+            self.compact_public_key_generations.len(),
             self.accepted_setup_compact_public_key_prepared_verifications
                 .len(),
             self.accepted_setup_compact_public_key_verification_operations
@@ -1449,6 +1460,30 @@ impl CommonProofWasmRuntimeRegistry {
         if self
             .compact_public_key_verifications
             .insert(handle, verification)
+            .is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(handle)
+    }
+
+    fn retain_compact_public_key_generation(
+        &mut self,
+        generation: CompactPublicKeyGenerationRuntime,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_compact_public_key_generation_handle;
+        if handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_compact_public_key_generation_handle = self
+            .next_compact_public_key_generation_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self
+            .compact_public_key_generations
+            .insert(handle, generation)
             .is_some()
         {
             return Err(CommonProofRuntimeError::WrongOperationPhase);
@@ -1540,6 +1575,86 @@ impl CommonProofWasmRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
         Ok(handle)
     }
+}
+
+pub(crate) fn retain_compact_public_key_generation_runtime(
+    generation: CompactPublicKeyGenerationRuntime,
+) -> Result<u32, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .try_borrow_mut()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)?
+            .retain_compact_public_key_generation(generation)
+    })
+}
+
+fn with_compact_public_key_generation_runtime_mut<Output>(
+    operation_handle: u32,
+    operation: impl FnOnce(
+        &mut CompactPublicKeyGenerationRuntime,
+    ) -> Result<Output, CompactPublicKeyGenerationRuntimeError>,
+) -> Result<Output, CompactPublicKeyGenerationRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.try_borrow_mut().map_err(|_| {
+            CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            )
+        })?;
+        let generation = registry
+            .compact_public_key_generations
+            .get_mut(&operation_handle)
+            .ok_or(CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::UnknownOrStaleHandle,
+            ))?;
+        operation(generation)
+    })
+}
+
+fn with_compact_public_key_generation_runtime<Output>(
+    operation_handle: u32,
+    operation: impl FnOnce(
+        &CompactPublicKeyGenerationRuntime,
+    ) -> Result<Output, CompactPublicKeyGenerationRuntimeError>,
+) -> Result<Output, CompactPublicKeyGenerationRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.try_borrow().map_err(|_| {
+            CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            )
+        })?;
+        let generation = registry
+            .compact_public_key_generations
+            .get(&operation_handle)
+            .ok_or(CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::UnknownOrStaleHandle,
+            ))?;
+        operation(generation)
+    })
+}
+
+fn release_completed_compact_public_key_generation_runtime(
+    operation_handle: u32,
+) -> Result<(), CompactPublicKeyGenerationRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.try_borrow_mut().map_err(|_| {
+            CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            )
+        })?;
+        let generation = registry
+            .compact_public_key_generations
+            .get(&operation_handle)
+            .ok_or(CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::UnknownOrStaleHandle,
+            ))?;
+        generation
+            .canonical_proof_byte_length()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)?;
+        registry
+            .compact_public_key_generations
+            .remove(&operation_handle);
+        Ok(())
+    })
 }
 
 /// Retains a deferred exact-family prover adapter. The generic worker can
@@ -2463,6 +2578,40 @@ pub(crate) fn runtime_error_status(error: CommonProofRuntimeError) -> u32 {
     }
 }
 
+fn compact_public_key_generation_runtime_error_status(
+    error: CompactPublicKeyGenerationRuntimeError,
+) -> u32 {
+    match error {
+        CompactPublicKeyGenerationRuntimeError::WrongPhase => {
+            runtime_error_status(CommonProofRuntimeError::WrongOperationPhase)
+        }
+        CompactPublicKeyGenerationRuntimeError::Refusal(refusal_reason) => {
+            refusal_status(refusal_reason)
+        }
+        CompactPublicKeyGenerationRuntimeError::Runtime(error) => runtime_error_status(error),
+        CompactPublicKeyGenerationRuntimeError::Contract(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        CompactPublicKeyGenerationRuntimeError::Initialization(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        CompactPublicKeyGenerationRuntimeError::Generation(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::InvalidArithmeticRelation)
+        }
+        CompactPublicKeyGenerationRuntimeError::MainPreparation(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::InvalidArithmeticRelation)
+        }
+        CompactPublicKeyGenerationRuntimeError::MainPoll(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::InvalidArithmeticRelation)
+        }
+    }
+}
+
 fn verification_worker_error_status(error: CommonProofVerificationWorkerError) -> u32 {
     match error {
         CommonProofVerificationWorkerError::Runtime(error) => runtime_error_status(error),
@@ -2501,6 +2650,392 @@ fn generation_preparation_error_status(error: CommonProofGenerationPreparationEr
             refusal_status(RefusalReason::OutsideSupportedProfile)
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_generation_external_memory_usage_word_count()
+-> usize {
+    COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT
+}
+
+/// Advances one bounded scalar compact-producer step. The returned poll code
+/// follows the common generation progress, storage-request, and completion
+/// codes. Stage and ordinal outputs are diagnostic progress only.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_poll(
+    operation_handle: u32,
+    maximum_work_unit_count: u32,
+    stage_output_pointer: *mut u32,
+    first_ordinal_output_pointer: *mut u32,
+    completed_work_unit_count_output_pointer: *mut u32,
+    checkpoint_ready_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    if maximum_work_unit_count == 0
+        || stage_output_pointer.is_null()
+        || first_ordinal_output_pointer.is_null()
+        || completed_work_unit_count_output_pointer.is_null()
+        || checkpoint_ready_output_pointer.is_null()
+    {
+        unsafe {
+            write_status(
+                status_pointer,
+                refusal_status(RefusalReason::WrongTypeOrLength),
+            )
+        };
+        return 0;
+    }
+    let result = with_compact_public_key_generation_runtime_mut(operation_handle, |generation| {
+        generation.poll(u64::from(maximum_work_unit_count))
+    });
+    match result {
+        Ok(poll) => {
+            let (poll_code, stage, first_ordinal, completed_work_unit_count, checkpoint_ready) =
+                match poll {
+                    CompactPublicKeyGenerationRuntimePoll::Progress {
+                        stage,
+                        first_ordinal,
+                        completed_work_unit_count,
+                    } => (
+                        GENERATION_POLL_PROGRESS,
+                        stage.canonical_code(),
+                        first_ordinal,
+                        completed_work_unit_count,
+                        0,
+                    ),
+                    CompactPublicKeyGenerationRuntimePoll::CheckpointReady {
+                        stage,
+                        safe_boundary_ordinal,
+                    } => (
+                        GENERATION_POLL_PROGRESS,
+                        stage.canonical_code(),
+                        safe_boundary_ordinal,
+                        0,
+                        1,
+                    ),
+                    CompactPublicKeyGenerationRuntimePoll::StorageRequestReady { owner } => (
+                        GENERATION_POLL_STORAGE_REQUEST_READY,
+                        0,
+                        owner.canonical_code(),
+                        0,
+                        0,
+                    ),
+                    CompactPublicKeyGenerationRuntimePoll::Complete => (
+                        GENERATION_POLL_COMPLETE,
+                        CompactPublicKeyGenerationRuntimeStage::Complete.canonical_code(),
+                        0,
+                        0,
+                        0,
+                    ),
+                };
+            let completed_work_unit_count = match u32::try_from(completed_work_unit_count) {
+                Ok(count) => count,
+                Err(_) => {
+                    unsafe {
+                        write_status(
+                            status_pointer,
+                            refusal_status(RefusalReason::OutsideSupportedProfile),
+                        )
+                    };
+                    return 0;
+                }
+            };
+            unsafe {
+                stage_output_pointer.write(stage);
+                first_ordinal_output_pointer.write(first_ordinal);
+                completed_work_unit_count_output_pointer.write(completed_work_unit_count);
+                checkpoint_ready_output_pointer.write(checkpoint_ready);
+                write_status(status_pointer, 0);
+            }
+            poll_code
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length(
+    operation_handle: u32,
+    storage_owner_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> usize {
+    if storage_owner_output_pointer.is_null() {
+        unsafe {
+            write_status(
+                status_pointer,
+                refusal_status(RefusalReason::WrongTypeOrLength),
+            )
+        };
+        return 0;
+    }
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .pending_storage_request_description()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    match result {
+        Ok((owner, byte_length)) => {
+            unsafe {
+                storage_owner_output_pointer.write(owner.canonical_code());
+                write_status(status_pointer, 0);
+            }
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_storage_request(
+    operation_handle: u32,
+    storage_owner_code: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let Some(owner) =
+        CompactPublicKeyGenerationStorageOwner::from_canonical_code(storage_owner_code)
+    else {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    };
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime_mut(operation_handle, |generation| {
+        generation
+            .copy_pending_storage_request(owner, output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_supply_storage_response(
+    operation_handle: u32,
+    storage_owner_code: u32,
+    response_pointer: *const u8,
+    response_byte_length: usize,
+) -> u32 {
+    let Some(owner) =
+        CompactPublicKeyGenerationStorageOwner::from_canonical_code(storage_owner_code)
+    else {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    };
+    if response_pointer.is_null() || response_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let response = unsafe { slice::from_raw_parts(response_pointer, response_byte_length) };
+    with_compact_public_key_generation_runtime_mut(operation_handle, |generation| {
+        generation
+            .supply_storage_response(owner, response)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_public_input_byte_length(
+    operation_handle: u32,
+    status_pointer: *mut u32,
+) -> usize {
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .canonical_public_input_byte_length()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    match result {
+        Ok(byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_proof_byte_length(
+    operation_handle: u32,
+    status_pointer: *mut u32,
+) -> usize {
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .canonical_proof_byte_length()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    match result {
+        Ok(byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_public_input(
+    operation_handle: u32,
+    source_offset: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .copy_canonical_public_input(source_offset, output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_proof(
+    operation_handle: u32,
+    source_offset: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .copy_canonical_proof(source_offset, output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+/// Copies the four producer-derived transport bindings for the completed
+/// canonical public input and proof. The binding order is suite identifier,
+/// application-statement hash, manifest hash, and relation-plan hash, exactly
+/// as consumed by the compact transport and algebraic verifier boundaries.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the compact transport-binding byte
+/// length reported by `sealed_lattice_compact_public_key_transport_bindings_byte_length`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_transport_bindings(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length != COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .copy_transport_bindings(output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_external_memory_usage(
+    operation_handle: u32,
+    output_pointer: *mut u64,
+    output_word_count: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_word_count != COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .external_memory_usages()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    let (response_usage, cfw_usage) = match result {
+        Ok(usages) => usages,
+        Err(error) => return compact_public_key_generation_runtime_error_status(error),
+    };
+    let words = [
+        response_usage.total_written_byte_length(),
+        response_usage.total_read_byte_length(),
+        response_usage.peak_stored_byte_length(),
+        response_usage.transaction_count(),
+        u64::from(response_usage.deleted_object_count()),
+        cfw_usage.total_written_byte_length(),
+        cfw_usage.total_read_byte_length(),
+        cfw_usage.peak_stored_byte_length(),
+        cfw_usage.transaction_count(),
+        u64::from(cfw_usage.deleted_object_count()),
+    ];
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_word_count) };
+    output.copy_from_slice(&words);
+    0
+}
+
+/// Releases a compact producer only after its canonical outputs and terminal
+/// accounting are available. Completion does not mint verification authority.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_release_completed(
+    operation_handle: u32,
+) -> u32 {
+    release_completed_compact_public_key_generation_runtime(operation_handle)
+        .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_cancel(
+    operation_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = match registry.try_borrow_mut() {
+            Ok(registry) => registry,
+            Err(_) => return runtime_error_status(CommonProofRuntimeError::WrongOperationPhase),
+        };
+        let Some(mut generation) = registry
+            .compact_public_key_generations
+            .remove(&operation_handle)
+        else {
+            return runtime_error_status(CommonProofRuntimeError::UnknownOrStaleHandle);
+        };
+        generation.cancel();
+        0
+    })
 }
 
 /// # Safety
@@ -3965,6 +4500,188 @@ mod tests {
         );
         assert_eq!(
             sealed_lattice_compact_public_key_cancel_algebraic_verification(17),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+    }
+
+    #[test]
+    fn compact_public_key_generation_boundary_refuses_malformed_and_stale_operations() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        assert_eq!(
+            sealed_lattice_compact_public_key_generation_external_memory_usage_word_count(),
+            COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT,
+        );
+
+        let mut stage = u32::MAX;
+        let mut first_ordinal = u32::MAX;
+        let mut completed_work_unit_count = u32::MAX;
+        let mut checkpoint_ready = u32::MAX;
+        let mut status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_poll(
+                    23,
+                    0,
+                    &mut stage,
+                    &mut first_ordinal,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_ready,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(status, refusal_status(RefusalReason::WrongTypeOrLength));
+        assert_eq!(stage, u32::MAX);
+        assert_eq!(first_ordinal, u32::MAX);
+        assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(checkpoint_ready, u32::MAX);
+
+        status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_poll(
+                    23,
+                    1,
+                    &mut stage,
+                    &mut first_ordinal,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_ready,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        assert_eq!(stage, u32::MAX);
+        assert_eq!(first_ordinal, u32::MAX);
+        assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(checkpoint_ready, u32::MAX);
+
+        let mut storage_owner = u32::MAX;
+        status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length(
+                    23,
+                    &mut storage_owner,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        assert_eq!(storage_owner, u32::MAX);
+
+        let mut byte = 0xa5;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_storage_request(
+                    23, 0, &mut byte, 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_storage_request(
+                    23,
+                    CompactPublicKeyGenerationStorageOwner::ResponseTrees.canonical_code(),
+                    &mut byte,
+                    1,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_supply_storage_response(
+                    23,
+                    CompactPublicKeyGenerationStorageOwner::Cfw.canonical_code(),
+                    &byte,
+                    1,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+
+        for byte_length in [
+            sealed_lattice_compact_public_key_generation_public_input_byte_length,
+            sealed_lattice_compact_public_key_generation_proof_byte_length,
+        ] {
+            status = u32::MAX;
+            assert_eq!(byte_length(23, &mut status), 0);
+            assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        }
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_public_input(23, 0, &mut byte, 1)
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_proof(
+                    23,
+                    usize::MAX,
+                    &mut byte,
+                    1,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+
+        let mut transport_bindings = [0xa5_u8; COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_transport_bindings(
+                    23,
+                    transport_bindings.as_mut_ptr(),
+                    transport_bindings.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_transport_bindings(
+                    23,
+                    transport_bindings.as_mut_ptr(),
+                    transport_bindings.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert!(transport_bindings.iter().all(|byte| *byte == 0xa5));
+
+        let mut usage = [u64::MAX; COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_external_memory_usage(
+                    23,
+                    usage.as_mut_ptr(),
+                    usage.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_external_memory_usage(
+                    23,
+                    usage.as_mut_ptr(),
+                    usage.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert!(usage.iter().all(|word| *word == u64::MAX));
+        assert_eq!(
+            sealed_lattice_compact_public_key_generation_release_completed(23),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            sealed_lattice_compact_public_key_generation_cancel(23),
             refusal_status(RefusalReason::ConsumedState),
         );
     }

@@ -174,6 +174,12 @@ pub(crate) use compact_ring_vector::{
     compact_structured_witness_covector_geometry,
 };
 pub(crate) use compact_ring_vector::{
+    CompactPublicKeyGenerationRuntime, CompactPublicKeyGenerationRuntimeError,
+    CompactPublicKeyGenerationRuntimePoll, CompactPublicKeyGenerationRuntimeStage,
+    CompactPublicKeyGenerationStorageOwner, PreparedCompactPublicKeyGenerationRuntime,
+    prepare_compact_public_key_assignment_sources,
+};
+pub(crate) use compact_ring_vector::{
     CompactPublicKeyRelationCatalog, selected_compact_public_key_relation_catalog,
 };
 pub(crate) use compact_ring_vector::{

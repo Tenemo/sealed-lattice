@@ -21,6 +21,7 @@ import type {
 import {
     CommonProofWorkerRuntimeError,
     maximumEncodedRequestByteLength,
+    maximumEncodedResponseByteLength,
     maximumWorkerOperationCount,
     maximumWorkerPayloadByteLength,
     requestHeaderByteLength,
@@ -61,6 +62,12 @@ const verificationPollComplete = 5;
 const compactPublicKeyAlgebraicVerificationPollProgress = 1;
 const compactPublicKeyAlgebraicVerificationPollComplete = 5;
 const compactPublicKeyAlgebraicVerificationPollResumeComplete = 7;
+const compactPublicKeyGenerationPollProgress = 1;
+const compactPublicKeyGenerationPollStorageRequestReady = 2;
+const compactPublicKeyGenerationPollComplete = 5;
+const compactPublicKeyGenerationFirstStage = 1;
+const compactPublicKeyGenerationCompleteStage = 17;
+const compactPublicKeyGenerationExternalMemoryUsageWordCount = 10;
 export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
@@ -183,7 +190,7 @@ export type CommonProofAuthenticatedSourceRangeRequest = Readonly<{
     storageByteOffset: bigint;
 }>;
 
-type CommonProofExternalMemoryUsageAccounting = Readonly<{
+export type CommonProofExternalMemoryUsageAccounting = Readonly<{
     deletedObjectLifecycleCount: bigint;
     peakStoredByteLength: bigint;
     totalReadByteLength: bigint;
@@ -282,6 +289,27 @@ type CommonProofVerificationKernelPoll =
       }>
     | Readonly<{ kind: 'complete' }>;
 
+export type CompactPublicKeyGenerationStorageOwner = 'responseTrees' | 'cfw';
+
+type CompactPublicKeyGenerationKernelPoll =
+    | Readonly<{
+          checkpointSafeBoundaryOrdinal?: number;
+          completedWorkUnitCount: number;
+          firstOrdinal: number;
+          kind: 'progress';
+          stage: number;
+      }>
+    | Readonly<{
+          kind: 'storage-request-ready';
+          storageOwner: CompactPublicKeyGenerationStorageOwner;
+      }>
+    | Readonly<{ kind: 'complete' }>;
+
+type CompactPublicKeyGenerationExternalMemoryUsage = Readonly<{
+    cfw: CommonProofExternalMemoryUsageAccounting;
+    responseTrees: CommonProofExternalMemoryUsageAccounting;
+}>;
+
 type CompactPublicKeyAlgebraicVerificationKernelBegin =
     | Readonly<{ kind: 'started'; operationHandle: number }>
     | Readonly<{ kind: 'refused'; refusalReason: RefusalReason }>;
@@ -341,6 +369,32 @@ const requireUnsigned32 = (value: number, label: string): number => {
         throw kernelFailure(`${label} is outside the unsigned 32-bit range.`);
     }
     return value;
+};
+
+const compactPublicKeyGenerationStorageOwnerByCode = (
+    code: number,
+): CompactPublicKeyGenerationStorageOwner => {
+    switch (requireUnsigned32(code, 'The compact storage-owner code')) {
+        case 1:
+            return 'responseTrees';
+        case 2:
+            return 'cfw';
+        default:
+            throw kernelFailure(
+                'The compact public-key producer returned an unknown storage owner.',
+            );
+    }
+};
+
+const compactPublicKeyGenerationStorageOwnerCode = (
+    owner: CompactPublicKeyGenerationStorageOwner,
+): number => {
+    switch (owner) {
+        case 'responseTrees':
+            return 1;
+        case 'cfw':
+            return 2;
+    }
 };
 
 const requireNonzeroUnsigned16 = (value: number, label: string): number => {
@@ -1778,6 +1832,548 @@ export class CommonProofGenerationKernelBoundary {
         throw kernelFailure(
             'The common-proof kernel returned malformed generation poll metadata.',
         );
+    }
+}
+
+export class CompactPublicKeyGenerationKernelBoundary {
+    readonly #context: TranscriptCoreKernelCommandRuntime;
+    readonly #memoryBoundary: WasmMemoryBoundary;
+
+    public constructor(context: TranscriptCoreKernelCommandRuntime) {
+        this.#context = context;
+        this.#memoryBoundary = new WasmMemoryBoundary({
+            context,
+            createInternalError: (message) => kernelFailure(message),
+            createResourceError: resourceFailure,
+            label: 'compact public-key producer worker',
+        });
+    }
+
+    public poll(
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+    ): CompactPublicKeyGenerationKernelPoll {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        requireUnsigned32(
+            maximumWorkUnitCount,
+            'The compact public-key generation work-unit bound',
+        );
+        if (maximumWorkUnitCount === 0) {
+            throw resourceFailure(
+                'The compact public-key generation work-unit bound must be positive.',
+            );
+        }
+        return this.#context.runExclusive(
+            'compact public-key generation poll',
+            () => {
+                const metadataPointer =
+                    this.#memoryBoundary.allocateZeroedWords(5);
+                try {
+                    const pollCode = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_generation_poll',
+                    )(
+                        operationHandle,
+                        maximumWorkUnitCount,
+                        metadataPointer,
+                        metadataPointer + wasm32WordByteLength,
+                        metadataPointer + 2 * wasm32WordByteLength,
+                        metadataPointer + 3 * wasm32WordByteLength,
+                        metadataPointer + 4 * wasm32WordByteLength,
+                    );
+                    const [
+                        stage,
+                        firstOrdinal,
+                        completedWorkUnitCount,
+                        checkpointReady,
+                        status,
+                    ] = this.#memoryBoundary.readWords(metadataPointer, 5);
+                    requireKernelSuccess(
+                        status,
+                        'compact public-key generation poll',
+                    );
+                    switch (pollCode) {
+                        case compactPublicKeyGenerationPollProgress: {
+                            if (
+                                stage < compactPublicKeyGenerationFirstStage ||
+                                stage >=
+                                    compactPublicKeyGenerationCompleteStage ||
+                                checkpointReady > 1 ||
+                                (checkpointReady === 1 &&
+                                    completedWorkUnitCount !== 0)
+                            ) {
+                                break;
+                            }
+                            return Object.freeze({
+                                ...(checkpointReady === 0
+                                    ? {}
+                                    : {
+                                          checkpointSafeBoundaryOrdinal:
+                                              firstOrdinal,
+                                      }),
+                                completedWorkUnitCount,
+                                firstOrdinal,
+                                kind: 'progress' as const,
+                                stage,
+                            });
+                        }
+                        case compactPublicKeyGenerationPollStorageRequestReady:
+                            if (
+                                stage === 0 &&
+                                completedWorkUnitCount === 0 &&
+                                checkpointReady === 0
+                            ) {
+                                return Object.freeze({
+                                    kind: 'storage-request-ready' as const,
+                                    storageOwner:
+                                        compactPublicKeyGenerationStorageOwnerByCode(
+                                            firstOrdinal,
+                                        ),
+                                });
+                            }
+                            break;
+                        case compactPublicKeyGenerationPollComplete:
+                            if (
+                                stage ===
+                                    compactPublicKeyGenerationCompleteStage &&
+                                firstOrdinal === 0 &&
+                                completedWorkUnitCount === 0 &&
+                                checkpointReady === 0
+                            ) {
+                                return Object.freeze({
+                                    kind: 'complete' as const,
+                                });
+                            }
+                            break;
+                    }
+                    throw kernelFailure(
+                        'The compact public-key producer returned malformed poll metadata.',
+                    );
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        metadataPointer,
+                        5 * wasm32WordByteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public copyStorageRequest(
+        operationHandle: number,
+        expectedStorageOwner: CompactPublicKeyGenerationStorageOwner,
+    ): Uint8Array<ArrayBuffer> {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        return this.#context.runExclusive(
+            'compact public-key generation storage-request copy',
+            () => {
+                const metadataPointer =
+                    this.#memoryBoundary.allocateZeroedWords(2);
+                try {
+                    const encodedRequestByteLength = resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length',
+                    )(
+                        operationHandle,
+                        metadataPointer,
+                        metadataPointer + wasm32WordByteLength,
+                    );
+                    const [storageOwnerCode, status] =
+                        this.#memoryBoundary.readWords(metadataPointer, 2);
+                    requireKernelSuccess(
+                        status,
+                        'compact public-key generation storage-request description',
+                    );
+                    if (
+                        compactPublicKeyGenerationStorageOwnerByCode(
+                            storageOwnerCode,
+                        ) !== expectedStorageOwner ||
+                        !Number.isSafeInteger(encodedRequestByteLength) ||
+                        encodedRequestByteLength < requestHeaderByteLength ||
+                        encodedRequestByteLength >
+                            maximumEncodedRequestByteLength
+                    ) {
+                        throw kernelFailure(
+                            'The compact public-key producer exposed an inconsistent storage request.',
+                        );
+                    }
+                    return this.#copyKernelBytes(
+                        encodedRequestByteLength,
+                        'compact public-key generation storage request',
+                        (outputPointer) =>
+                            resolveNumberExport(
+                                this.#context.wasmExports,
+                                'sealed_lattice_compact_public_key_generation_copy_storage_request',
+                            )(
+                                operationHandle,
+                                compactPublicKeyGenerationStorageOwnerCode(
+                                    expectedStorageOwner,
+                                ),
+                                outputPointer,
+                                encodedRequestByteLength,
+                            ),
+                    );
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        metadataPointer,
+                        2 * wasm32WordByteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public supplyStorageResponse(
+        operationHandle: number,
+        storageOwner: CompactPublicKeyGenerationStorageOwner,
+        encodedResponse: Uint8Array,
+    ): void {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        if (
+            !(encodedResponse instanceof Uint8Array) ||
+            encodedResponse.byteLength === 0 ||
+            encodedResponse.byteLength > maximumEncodedResponseByteLength
+        ) {
+            throw resourceFailure(
+                'The compact public-key storage response exceeds the worker safety bound.',
+            );
+        }
+        this.#context.runExclusive(
+            'compact public-key generation storage-response supply',
+            () => {
+                const responsePointer =
+                    this.#memoryBoundary.copy(encodedResponse);
+                try {
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_generation_supply_storage_response',
+                        )(
+                            operationHandle,
+                            compactPublicKeyGenerationStorageOwnerCode(
+                                storageOwner,
+                            ),
+                            responsePointer,
+                            encodedResponse.byteLength,
+                        ),
+                        'compact public-key generation storage-response supply',
+                    );
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        responsePointer,
+                        encodedResponse.byteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public copyCanonicalPublicInput(
+        operationHandle: number,
+    ): Uint8Array<ArrayBuffer> {
+        return this.#copyCompletedOutput(
+            operationHandle,
+            'public input',
+            'sealed_lattice_compact_public_key_generation_public_input_byte_length',
+            'sealed_lattice_compact_public_key_generation_copy_public_input',
+        );
+    }
+
+    public copyCanonicalProof(
+        operationHandle: number,
+    ): Uint8Array<ArrayBuffer> {
+        return this.#copyCompletedOutput(
+            operationHandle,
+            'proof',
+            'sealed_lattice_compact_public_key_generation_proof_byte_length',
+            'sealed_lattice_compact_public_key_generation_copy_proof',
+        );
+    }
+
+    public copyTransportBindings(
+        operationHandle: number,
+    ): CompactPublicKeyTransportBindings {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        return this.#context.runExclusive(
+            'compact public-key generation transport-binding copy',
+            () => {
+                const declaredByteLength = requireUnsigned32(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_transport_bindings_byte_length',
+                    )(),
+                    'The compact public-key transport-binding byte length',
+                );
+                if (
+                    declaredByteLength !==
+                    compactPublicKeyTransportBindingsByteLength
+                ) {
+                    throw kernelFailure(
+                        'The compact public-key producer exposed malformed transport-binding geometry.',
+                    );
+                }
+                const canonicalBindings = this.#copyKernelBytes(
+                    declaredByteLength,
+                    'compact public-key generation transport-binding copy',
+                    (outputPointer) =>
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_generation_copy_transport_bindings',
+                        )(operationHandle, outputPointer, declaredByteLength),
+                );
+                try {
+                    return Object.freeze({
+                        applicationStatementHash: canonicalBindings.slice(
+                            hashByteLength,
+                            2 * hashByteLength,
+                        ),
+                        manifestHash: canonicalBindings.slice(
+                            2 * hashByteLength,
+                            3 * hashByteLength,
+                        ),
+                        relationPlanHash: canonicalBindings.slice(
+                            3 * hashByteLength,
+                        ),
+                        suiteIdentifier: canonicalBindings.slice(
+                            0,
+                            hashByteLength,
+                        ),
+                    });
+                } finally {
+                    canonicalBindings.fill(0);
+                }
+            },
+        );
+    }
+
+    public externalMemoryUsage(
+        operationHandle: number,
+    ): CompactPublicKeyGenerationExternalMemoryUsage {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        return this.#context.runExclusive(
+            'compact public-key generation external-memory usage copy',
+            () => {
+                const declaredWordCount = requireUnsigned32(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_compact_public_key_generation_external_memory_usage_word_count',
+                    )(),
+                    'The compact public-key external-memory usage word count',
+                );
+                if (
+                    declaredWordCount !==
+                    compactPublicKeyGenerationExternalMemoryUsageWordCount
+                ) {
+                    throw kernelFailure(
+                        'The compact public-key producer exposed malformed external-memory accounting geometry.',
+                    );
+                }
+                const byteLength = declaredWordCount * 8;
+                const outputPointer = this.#memoryBoundary.allocate(byteLength);
+                try {
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_generation_copy_external_memory_usage',
+                        )(operationHandle, outputPointer, declaredWordCount),
+                        'compact public-key generation external-memory usage copy',
+                    );
+                    const bytes = new Uint8Array(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        byteLength,
+                    );
+                    return Object.freeze({
+                        cfw: externalMemoryUsageFromDiagnostic(bytes, 5),
+                        responseTrees: externalMemoryUsageFromDiagnostic(
+                            bytes,
+                            0,
+                        ),
+                    });
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        byteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    public releaseCompleted(operationHandle: number): void {
+        this.#retire(
+            operationHandle,
+            'sealed_lattice_compact_public_key_generation_release_completed',
+            'compact public-key completed-generation release',
+        );
+    }
+
+    public cancel(operationHandle: number): void {
+        this.#retire(
+            operationHandle,
+            'sealed_lattice_compact_public_key_generation_cancel',
+            'compact public-key generation cancellation',
+        );
+    }
+
+    #copyCompletedOutput(
+        operationHandle: number,
+        outputLabel: string,
+        lengthExportName:
+            | 'sealed_lattice_compact_public_key_generation_public_input_byte_length'
+            | 'sealed_lattice_compact_public_key_generation_proof_byte_length',
+        copyExportName:
+            | 'sealed_lattice_compact_public_key_generation_copy_public_input'
+            | 'sealed_lattice_compact_public_key_generation_copy_proof',
+    ): Uint8Array<ArrayBuffer> {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        return this.#context.runExclusive(
+            `compact public-key generation ${outputLabel} copy`,
+            () => {
+                const statusPointer =
+                    this.#memoryBoundary.allocateZeroedWords(1);
+                let outputByteLength: number;
+                try {
+                    outputByteLength = resolveNumberExport(
+                        this.#context.wasmExports,
+                        lengthExportName,
+                    )(operationHandle, statusPointer);
+                    const [status] = this.#memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    requireKernelSuccess(
+                        status,
+                        `compact public-key generation ${outputLabel} length`,
+                    );
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                }
+                if (
+                    !Number.isSafeInteger(outputByteLength) ||
+                    outputByteLength <= 0 ||
+                    outputByteLength > maximumCommonProofByteLength
+                ) {
+                    throw resourceFailure(
+                        `The compact public-key ${outputLabel} exceeds the accepted release boundary.`,
+                    );
+                }
+                const output = new Uint8Array(outputByteLength);
+                const scratchByteLength = Math.min(
+                    outputByteLength,
+                    canonicalCommonProofChunkByteLength,
+                );
+                const scratchPointer =
+                    this.#memoryBoundary.allocate(scratchByteLength);
+                try {
+                    for (
+                        let sourceOffset = 0;
+                        sourceOffset < outputByteLength;
+                        sourceOffset += scratchByteLength
+                    ) {
+                        const copiedByteLength = Math.min(
+                            scratchByteLength,
+                            outputByteLength - sourceOffset,
+                        );
+                        requireKernelSuccess(
+                            resolveNumberExport(
+                                this.#context.wasmExports,
+                                copyExportName,
+                            )(
+                                operationHandle,
+                                sourceOffset,
+                                scratchPointer,
+                                copiedByteLength,
+                            ),
+                            `compact public-key generation ${outputLabel} range copy`,
+                        );
+                        output.set(
+                            new Uint8Array(
+                                this.#context.memory.buffer,
+                                scratchPointer,
+                                copiedByteLength,
+                            ),
+                            sourceOffset,
+                        );
+                        new Uint8Array(
+                            this.#context.memory.buffer,
+                            scratchPointer,
+                            copiedByteLength,
+                        ).fill(0);
+                    }
+                    return output;
+                } catch (error) {
+                    output.fill(0);
+                    throw error;
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        scratchPointer,
+                        scratchByteLength,
+                    );
+                }
+            },
+        );
+    }
+
+    #copyKernelBytes(
+        byteLength: number,
+        operation: string,
+        copy: (outputPointer: number) => number,
+    ): Uint8Array<ArrayBuffer> {
+        const outputPointer = this.#memoryBoundary.allocate(byteLength);
+        try {
+            requireKernelSuccess(copy(outputPointer), operation);
+            return new Uint8Array(
+                this.#context.memory.buffer,
+                outputPointer,
+                byteLength,
+            ).slice();
+        } finally {
+            this.#memoryBoundary.zeroAndDeallocate(outputPointer, byteLength);
+        }
+    }
+
+    #retire(
+        operationHandle: number,
+        exportName:
+            | 'sealed_lattice_compact_public_key_generation_release_completed'
+            | 'sealed_lattice_compact_public_key_generation_cancel',
+        operation: string,
+    ): void {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        this.#context.runExclusive(operation, () => {
+            requireKernelSuccess(
+                resolveNumberExport(
+                    this.#context.wasmExports,
+                    exportName,
+                )(operationHandle),
+                operation,
+            );
+        });
     }
 }
 

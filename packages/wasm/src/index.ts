@@ -7,8 +7,10 @@ import {
     verifyGaloisKeyShareBatchInClosedWorker,
 } from './accepted-setup-galois-key-share-runtime.js';
 import {
+    generateAcceptedSetupCompactPublicKeyShareInClosedWorker,
     generateAcceptedSetupPublicKeyShareInClosedWorker,
     generateAcceptedSetupSameSecretInClosedWorker,
+    generateCompactPublicKeyReferenceInClosedWorker,
     verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
     verifyGeneratedAcceptedSetupSameSecretInClosedWorker,
 } from './accepted-setup-key-relation-generation-runtime.js';
@@ -146,7 +148,9 @@ export {
     FoundationBootstrapResourceError,
     foundationObjectTypes,
     generateAcceptedSetupPublicKeyShareInClosedWorker,
+    generateAcceptedSetupCompactPublicKeyShareInClosedWorker,
     generateAcceptedSetupSameSecretInClosedWorker,
+    generateCompactPublicKeyReferenceInClosedWorker,
     generateAggregateThresholdShareInClosedWorker,
     generateGaloisKeyShareBatchInClosedWorker,
     generateRelinearizationRoundOneAggregateInClosedWorker,
@@ -232,10 +236,18 @@ export type {
     RelinearizationRoundTwoActivationInput,
 } from './accepted-setup-relinearization-generation-runtime.js';
 export type {
+    AcceptedSetupCompactPublicKeyExternalMemoryOpener,
+    AcceptedSetupCompactPublicKeyExternalMemoryOpening,
+    AcceptedSetupCompactPublicKeyGenerationInput,
+    AcceptedSetupCompactPublicKeyGenerationStorageAccounting,
+    AcceptedSetupCompactPublicKeyGenerationWorkerAccounting,
+    CompactPublicKeyReferenceGenerationInput,
     AcceptedSetupKeyRelationGenerationInput,
     AcceptedSetupSameSecretGenerationInput,
     AcceptedSetupKeyRelationGenerationMode,
     GeneratedAcceptedSetupKeyRelationProof,
+    GeneratedAcceptedSetupCompactPublicKeyProof,
+    GeneratedCompactPublicKeyReferenceProof,
     GeneratedAcceptedSetupKeyRelationProofVerificationInput,
     GeneratedAcceptedSetupSameSecretProofVerificationInput,
 } from './accepted-setup-key-relation-generation-runtime.js';
@@ -339,6 +351,7 @@ export type {
     ClosedWorkerCommonProofVerificationFamilyAdapter,
     ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
     CompactPublicKeyAlgebraicVerificationCheckpointCustody,
+    CompactPublicKeyTransportBindings,
     CompactPublicKeyVerificationCheckpointCustody,
     CommonProofCanonicalOutputStore,
     CommonProofExternalMemoryOperation,

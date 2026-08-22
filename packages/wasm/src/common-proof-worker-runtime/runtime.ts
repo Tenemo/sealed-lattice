@@ -328,7 +328,7 @@ type PreparedCommonProofApplication = Readonly<{
     proofApplicationSlotHash: Uint8Array<ArrayBuffer>;
 }>;
 
-class CommonProofStorageRequestSequence {
+export class CommonProofStorageRequestSequence {
     #nextRequestSequence = 1n;
     #runtimeBindingHash: Uint8Array<ArrayBuffer> | undefined;
 
@@ -365,7 +365,7 @@ class CommonProofStorageRequestSequence {
     }
 }
 
-const validateTransferredReadResults = (
+export const validateTransferredReadResults = (
     request: CommonProofExternalMemoryRequest,
     readResults: readonly CommonProofExternalMemoryReadResult[],
 ): readonly CommonProofExternalMemoryReadResult[] => {

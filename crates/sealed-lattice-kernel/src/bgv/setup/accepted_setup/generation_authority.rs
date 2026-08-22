@@ -2,7 +2,6 @@ use std::{cell::RefCell, collections::BTreeMap, mem::size_of, rc::Rc, sync::Arc}
 
 use zeroize::{Zeroize, Zeroizing};
 
-#[cfg(test)]
 use crate::bgv::setup::selected_lattice_anchor_commitment_canonical_byte_length;
 
 use super::generation_relinearization::{
@@ -42,8 +41,9 @@ use crate::{
         compile_relinearization_round_one_relation_with_source_layout,
         compile_relinearization_round_two_relation_with_source_layout,
         compile_same_secret_relation_with_source_layout, compile_vss_share_linkage_relation_plan,
-        decode_recipient_private_vss_payload, galois_relation_tree_inputs,
-        public_key_share_relation_tree_inputs, relinearization_round_one_relation_tree_inputs,
+        decode_recipient_private_vss_payload, derive_compact_public_key_relation_catalog,
+        galois_relation_tree_inputs, public_key_share_relation_tree_inputs,
+        relinearization_round_one_relation_tree_inputs,
         relinearization_round_two_relation_tree_inputs, same_secret_relation_tree_inputs,
         selected_committed_material_profile, selected_committed_material_relation_plan_input,
         selected_evaluator_galois_entry_positions, selected_galois_key_share_batch_schedule,
@@ -1020,7 +1020,6 @@ pub(crate) struct SetupGenerationAuthorityInput {
 /// development slice. This authority deliberately excludes VSS,
 /// relinearization, and Galois material, and it cannot be serialized or used
 /// as a ceremony setup authority.
-#[cfg(test)]
 pub(crate) struct SetupGenerationCompactPublicKeyDevelopmentAuthorityInput {
     pub(crate) suite_identifier: [u8; Hash512::BYTE_LENGTH],
     pub(crate) manifest_hash: [u8; Hash512::BYTE_LENGTH],
@@ -1971,12 +1970,10 @@ impl SetupGenerationRelinearizationRoundTwoActivation {
 /// Nonserializable, Rust-worker-owned capability for the standalone compact
 /// public-key development slice. Cloning the surrounding `Rc` aliases this
 /// one state machine; it does not duplicate witness material.
-#[cfg(test)]
 pub(crate) struct SetupGenerationCompactPublicKeyDevelopmentAuthority {
     state: RefCell<SetupGenerationCompactPublicKeyDevelopmentAuthorityState>,
 }
 
-#[cfg(test)]
 struct SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
@@ -2111,7 +2108,6 @@ fn canonical_selected_same_secret_generation_statement(
     .map_err(|_| RefusalReason::OutsideSupportedProfile)
 }
 
-#[cfg(test)]
 impl SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
     fn from_browser_owned_input(
         input: SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
@@ -2357,7 +2353,6 @@ impl SetupGenerationCompactPublicKeyDevelopmentAuthorityState {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn selected_setup_generation_compact_public_key_development_retained_payload_byte_length()
 -> Result<u64, RefusalReason> {
     let relation_input = selected_public_key_share_relation_plan_input()
@@ -2438,7 +2433,6 @@ pub(crate) fn selected_setup_generation_compact_public_key_development_retained_
     Ok(total)
 }
 
-#[cfg(test)]
 pub(crate) fn retain_setup_generation_compact_public_key_development_authority(
     input: SetupGenerationCompactPublicKeyDevelopmentAuthorityInput,
 ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
@@ -4064,7 +4058,6 @@ impl<'statement> SetupGenerationKeyRelationApplication<'statement> {
 enum SetupGenerationKeyRelationRetainedAuthority<'authority> {
     AllFamilies(&'authority SetupGenerationAuthority),
     VssProof(&'authority SetupGenerationVssProofAuthority),
-    #[cfg(test)]
     CompactPublicKeyDevelopment(
         &'authority SetupGenerationCompactPublicKeyDevelopmentAuthorityState,
     ),
@@ -4076,7 +4069,6 @@ macro_rules! setup_generation_key_relation_authority_copy_field {
             match self {
                 Self::AllFamilies(authority) => authority.$field,
                 Self::VssProof(authority) => authority.$field,
-                #[cfg(test)]
                 Self::CompactPublicKeyDevelopment(authority) => authority.$field,
             }
         }
@@ -4141,7 +4133,6 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => authority.common_secret_coefficients.as_slice(),
             Self::VssProof(authority) => authority.common_secret_coefficients.as_slice(),
-            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => {
                 authority.common_secret_coefficients.as_slice()
             }
@@ -4152,7 +4143,6 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => &authority.anchor_openings,
             Self::VssProof(authority) => &authority.anchor_openings,
-            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => &authority.anchor_openings,
         }
     }
@@ -4161,7 +4151,6 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => Ok(&authority.public_key_share),
             Self::VssProof(_) => Err(RefusalReason::MissingPrerequisite),
-            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => Ok(&authority.public_key_share),
         }
     }
@@ -4177,7 +4166,6 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
             Self::VssProof(authority) => {
                 authority.degree_zero_material(degree_zero_material_ordinal)
             }
-            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(_) => Err(RefusalReason::MissingPrerequisite),
         }
     }
@@ -4186,7 +4174,6 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => authority.degree_zero_material_count(),
             Self::VssProof(authority) => authority.degree_zero_material_count(),
-            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(_) => Err(RefusalReason::MissingPrerequisite),
         }
     }
@@ -4195,7 +4182,6 @@ impl<'authority> SetupGenerationKeyRelationRetainedAuthority<'authority> {
         match self {
             Self::AllFamilies(authority) => &authority.action_private_randomness,
             Self::VssProof(authority) => &authority.action_private_randomness,
-            #[cfg(test)]
             Self::CompactPublicKeyDevelopment(authority) => &authority.action_private_randomness,
         }
     }
@@ -4205,7 +4191,6 @@ pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
     authority_identifier: u32,
     authority: SetupGenerationKeyRelationRetainedAuthority<'authority>,
     application: &'authority SetupGenerationKeyRelationApplication<'statement>,
-    #[cfg(test)]
     compact_public_key_development_authority:
         Option<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>>,
 }
@@ -4229,7 +4214,6 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         self.authority_identifier
     }
 
-    #[cfg(test)]
     pub(crate) fn compact_public_key_development_authority(
         &self,
     ) -> Option<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>> {
@@ -4549,6 +4533,52 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
             coordinate_capacity,
         )
         .map_err(|_| RefusalReason::WrongContext)
+    }
+
+    /// Derives the private-coin source for the exact compact public-key
+    /// construction after the compact producer has reconstructed its public
+    /// input and construction binding. The relation and selected variant are
+    /// independently recompiled here; neither the assignment loader nor a
+    /// caller-supplied capacity can authorize proof randomness.
+    pub(crate) fn prepare_compact_public_key_private_coin_source(
+        &self,
+        derivation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    ) -> Result<PrivateRandomnessCommonProofCoinSource, RefusalReason> {
+        if self.family() != SetupKeyRelationProofFamily::PublicKeyShare {
+            return Err(RefusalReason::WrongContext);
+        }
+        let relation_context = selected_relation_plan_check_context(
+            SetupKeyRelationProofFamily::PublicKeyShare.statement_schema_identifier(),
+        )
+        .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let input = selected_public_key_share_relation_plan_input()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let compiled =
+            compile_public_key_share_relation_with_source_layout(&input, &relation_context)
+                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        compiled
+            .relation_plan
+            .check(&relation_context)
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let relation_plan_variant = compiled
+            .relation_plan
+            .select_variant(None, None)
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let compact_relation = derive_compact_public_key_relation_catalog(
+            &input,
+            relation_plan_variant,
+            &compiled.source_layout,
+        )
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        compact_relation
+            .check(&input, &relation_context, relation_plan_variant)
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let witness_bound_attempt = self.witness_bound_attempt()?;
+        self.private_coin_source(
+            derivation_binding_hash,
+            relation_plan_variant,
+            witness_bound_attempt,
+        )
     }
 
     pub(crate) fn prepare_exact_same_secret_generation_sources(
@@ -6729,7 +6759,6 @@ pub(crate) fn setup_generation_retained_memory_accounting(
     }
 }
 
-#[cfg(test)]
 pub(crate) fn setup_generation_compact_public_key_development_retained_payload_byte_length(
     authority: &SetupGenerationCompactPublicKeyDevelopmentAuthority,
 ) -> Result<u64, RefusalReason> {
@@ -6740,7 +6769,6 @@ pub(crate) fn setup_generation_compact_public_key_development_retained_payload_b
         .retained_payload_byte_length()
 }
 
-#[cfg(test)]
 pub(crate) fn resolve_setup_generation_compact_public_key_development_preparation_source(
     authority: &SetupGenerationCompactPublicKeyDevelopmentAuthority,
 ) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
@@ -6813,7 +6841,6 @@ where
                 authority_identifier: handle.0,
                 authority: SetupGenerationKeyRelationRetainedAuthority::AllFamilies(authority),
                 application,
-                #[cfg(test)]
                 compact_public_key_development_authority: None,
             })
         });
@@ -6836,13 +6863,11 @@ where
             authority_identifier: handle.0,
             authority: SetupGenerationKeyRelationRetainedAuthority::VssProof(authority),
             application,
-            #[cfg(test)]
             compact_public_key_development_authority: None,
         })
     })
 }
 
-#[cfg(test)]
 pub(crate) fn with_exclusive_setup_generation_compact_public_key_development_relation<
     Value,
     Error,
@@ -6875,7 +6900,6 @@ where
     })
 }
 
-#[cfg(test)]
 pub(crate) fn with_setup_generation_compact_public_key_development_relation_reentry<Value, Error>(
     authority: &Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>,
     application: &SetupGenerationKeyRelationApplication<'_>,

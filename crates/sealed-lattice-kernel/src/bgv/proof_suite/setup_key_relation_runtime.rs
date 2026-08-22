@@ -5,7 +5,7 @@
 //! setup-generation authority. JavaScript receives only the generic prover
 //! adapter and an opaque retained handle for the statement lifecycle.
 
-use core::slice;
+use core::{mem::size_of, slice};
 use std::{cell::RefCell, collections::BTreeMap};
 
 use crate::{
@@ -13,7 +13,10 @@ use crate::{
         SetupGenerationAuthorityHandle, SetupGenerationKeyRelationApplication,
         SetupGenerationKeyRelationPreparationSource, SetupKeyRelationGenerationPreparationError,
         SetupKeyRelationProofFamily, add_generated_proof_source_to_accepted_setup_package_builder,
+        resolve_setup_generation_compact_public_key_development_preparation_source,
         resolve_setup_generation_key_relation_preparation_source,
+        with_exclusive_setup_generation_compact_public_key_development_relation,
+        with_setup_generation_compact_public_key_development_relation_reentry,
         with_setup_generation_key_relation,
     },
     foundation::{
@@ -26,12 +29,17 @@ use crate::{
     },
 };
 
+use super::relation_plan::{
+    CompactPublicKeyGenerationRuntime, CompactPublicKeyGenerationRuntimeError,
+    PreparedCompactPublicKeyGenerationRuntime, prepare_compact_public_key_assignment_sources,
+};
 use super::runtime_ffi::{
     CommonProofGenerationFamilyAdapter, CommonProofGenerationFamilyAdapterDescription,
     common_proof_generation_authenticated_transcript_prefix_request,
     preflight_generated_common_proof_attempt_binding,
     preflight_generated_common_proof_pending_statement,
-    retain_common_proof_generation_family_adapter, retire_generated_common_proof_capabilities,
+    retain_common_proof_generation_family_adapter, retain_compact_public_key_generation_runtime,
+    retire_generated_common_proof_capabilities,
     supply_common_proof_generation_authenticated_transcript_prefix,
     with_common_proof_selected_suite,
 };
@@ -42,8 +50,9 @@ use super::{
     ProofProfileError, RelationPlanError, SelectedApplicationStatementContext,
     SelectedProofAccountingError,
     attach_verified_vss_low_degree_evidence_to_same_secret_generation,
-    compile_public_key_share_relation_plan, compile_same_secret_relation_plan,
-    decode_selected_public_key_share_statement, decode_selected_same_secret_statement,
+    begin_compact_public_key_reference_authority, compile_public_key_share_relation_plan,
+    compile_same_secret_relation_plan, decode_selected_public_key_share_statement,
+    decode_selected_same_secret_statement,
     detach_verified_vss_low_degree_evidence_from_same_secret_generation,
     selected_proof_runtime_limits, selected_public_key_share_relation_plan_input,
     selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
@@ -60,11 +69,13 @@ enum SetupKeyRelationRuntimeError {
     Relation(RelationPlanError),
     RelationCapability(CommonProofRelationPlanCapabilityError),
     Runtime(CommonProofRuntimeError),
+    CompactGeneration(CompactPublicKeyGenerationRuntimeError),
     GenerationPreparation(SetupKeyRelationGenerationPreparationError),
     Foundation(FoundationSchemaError),
     ActionRandomnessRuntime(u32),
     BoardRuntime(u32),
     StateRuntime(u32),
+    SourceRuntime(u32),
     Refusal(RefusalReason),
     InvalidInput,
 }
@@ -96,6 +107,12 @@ impl From<CommonProofRelationPlanCapabilityError> for SetupKeyRelationRuntimeErr
 impl From<CommonProofRuntimeError> for SetupKeyRelationRuntimeError {
     fn from(error: CommonProofRuntimeError) -> Self {
         Self::Runtime(error)
+    }
+}
+
+impl From<CompactPublicKeyGenerationRuntimeError> for SetupKeyRelationRuntimeError {
+    fn from(error: CompactPublicKeyGenerationRuntimeError) -> Self {
+        Self::CompactGeneration(error)
     }
 }
 
@@ -1142,6 +1159,242 @@ fn prepare_generation(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn prepare_compact_public_key_generation(
+    selected_suite_handle: u32,
+    setup_generation_authority_handle: u32,
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability: &[u8],
+    verified_reservation_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability: &[u8],
+    setup_intent_object_handle: u32,
+    checkpoint_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+) -> Result<u32, SetupKeyRelationRuntimeError> {
+    if checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
+        return Err(SetupKeyRelationRuntimeError::InvalidInput);
+    }
+    let family = SetupKeyRelationProofFamily::PublicKeyShare;
+    let authority_handle =
+        SetupGenerationAuthorityHandle::from_identifier(setup_generation_authority_handle);
+    let preparation_source =
+        resolve_setup_generation_key_relation_preparation_source(&authority_handle, family)?;
+    if preparation_source.family() != family {
+        return Err(SetupKeyRelationRuntimeError::Refusal(
+            RefusalReason::WrongContext,
+        ));
+    }
+    require_selected_suite_matches_generation_source(selected_suite_handle, &preparation_source)?;
+    let board_source = resolve_single_setup_intent_source(
+        board_verifier_session_handle,
+        board_verifier_session_capability,
+        setup_intent_object_handle,
+    )?;
+    require_setup_intent_matches_generation_source(&board_source, &preparation_source)?;
+    let verified_reservation_binding = resolve_generation_reservation_binding(
+        state_verifier_session_handle,
+        state_verifier_session_capability,
+        verified_reservation_handle,
+        &preparation_source,
+    )?;
+    let contract = super::compact_proof_contract::selected_compact_public_key_proof_contract()
+        .map_err(CompactPublicKeyGenerationRuntimeError::Contract)?;
+    let checkpoint_schedule_digest = contract
+        .verifier_inputs()
+        .checkpoint_schedule
+        .checkpoint_schedule_digest();
+    let fresh_continuation =
+        crate::foundation::AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+        );
+    let prepared_attempt = resolve_prepared_attempt(
+        action_randomness_handle,
+        verified_reservation_binding,
+        &board_source,
+        &preparation_source,
+        fresh_continuation,
+    )?;
+    let statement = decode_selected_public_key_share_statement(
+        preparation_source.canonical_application_statement_bytes(),
+        SelectedApplicationStatementContext::new(
+            preparation_source.protocol_version(),
+            preparation_source.suite_identifier(),
+            None,
+            None,
+        ),
+    )
+    .map_err(|_| SetupKeyRelationRuntimeError::Refusal(RefusalReason::WrongContext))?;
+    let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
+        family,
+        prepared_attempt,
+        preparation_source.canonical_application_statement_bytes(),
+        statement.setup_proof_context_hash(),
+        preparation_source.roster_hash(),
+        statement.participant_identity(),
+        statement.roster_position(),
+    );
+    let assignment_sources =
+        with_setup_generation_key_relation(&authority_handle, &application, |source| {
+            prepare_compact_public_key_assignment_sources(&source)
+                .map_err(SetupKeyRelationGenerationPreparationError::from)
+        })
+        .map_err(SetupKeyRelationRuntimeError::GenerationPreparation)?;
+
+    let private_coin_preparation_source = preparation_source.clone();
+    let private_coin_factory = Box::new(move |derivation_binding_hash| {
+        let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
+            family,
+            prepared_attempt,
+            private_coin_preparation_source.canonical_application_statement_bytes(),
+            private_coin_preparation_source.setup_proof_context_hash(),
+            private_coin_preparation_source.roster_hash(),
+            private_coin_preparation_source.participant_identity(),
+            private_coin_preparation_source.roster_position(),
+        );
+        let authority_handle =
+            SetupGenerationAuthorityHandle::from_identifier(setup_generation_authority_handle);
+        with_setup_generation_key_relation(&authority_handle, &application, |source| {
+            source.prepare_compact_public_key_private_coin_source(derivation_binding_hash)
+        })
+    });
+    let prepared_runtime =
+        PreparedCompactPublicKeyGenerationRuntime::new(assignment_sources, private_coin_factory)?;
+    retain_compact_public_key_generation_runtime(CompactPublicKeyGenerationRuntime::new(
+        prepared_runtime,
+    ))
+    .map_err(SetupKeyRelationRuntimeError::Runtime)
+}
+
+/// Prepares one source-scoped compact public-key reference proof without a
+/// selected-suite capability. The returned operation can emit exact proof and
+/// public-input bytes, but it cannot enter the accepted-setup workflow or mint
+/// any verification capability.
+#[allow(clippy::too_many_arguments)]
+fn prepare_compact_public_key_reference_generation(
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability: &[u8],
+    ordered_public_randomness_object_handles: &[u32],
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability: &[u8],
+    verified_reservation_handle: u32,
+    setup_intent_object_handle: u32,
+    checkpoint_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+) -> Result<u32, SetupKeyRelationRuntimeError> {
+    if checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
+        return Err(SetupKeyRelationRuntimeError::InvalidInput);
+    }
+    let family = SetupKeyRelationProofFamily::PublicKeyShare;
+    let reference_authority = begin_compact_public_key_reference_authority(
+        board_verifier_session_handle,
+        board_verifier_session_capability,
+        ordered_public_randomness_object_handles,
+        action_randomness_handle,
+        state_verifier_session_handle,
+        state_verifier_session_capability,
+        verified_reservation_handle,
+    )
+    .map_err(SetupKeyRelationRuntimeError::SourceRuntime)?;
+    let preparation_source =
+        resolve_setup_generation_compact_public_key_development_preparation_source(
+            &reference_authority,
+        )?;
+    if preparation_source.family() != family {
+        return Err(SetupKeyRelationRuntimeError::Refusal(
+            RefusalReason::WrongContext,
+        ));
+    }
+    let board_source = resolve_single_setup_intent_source(
+        board_verifier_session_handle,
+        board_verifier_session_capability,
+        setup_intent_object_handle,
+    )?;
+    require_setup_intent_matches_generation_source(&board_source, &preparation_source)?;
+    let verified_reservation_binding = resolve_generation_reservation_binding(
+        state_verifier_session_handle,
+        state_verifier_session_capability,
+        verified_reservation_handle,
+        &preparation_source,
+    )?;
+    let contract = super::compact_proof_contract::selected_compact_public_key_proof_contract()
+        .map_err(CompactPublicKeyGenerationRuntimeError::Contract)?;
+    let checkpoint_schedule_digest = contract
+        .verifier_inputs()
+        .checkpoint_schedule
+        .checkpoint_schedule_digest();
+    let fresh_continuation =
+        crate::foundation::AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+        );
+    let prepared_attempt = resolve_prepared_attempt(
+        action_randomness_handle,
+        verified_reservation_binding,
+        &board_source,
+        &preparation_source,
+        fresh_continuation,
+    )?;
+    let statement = decode_selected_public_key_share_statement(
+        preparation_source.canonical_application_statement_bytes(),
+        SelectedApplicationStatementContext::new(
+            preparation_source.protocol_version(),
+            preparation_source.suite_identifier(),
+            None,
+            None,
+        ),
+    )
+    .map_err(|_| SetupKeyRelationRuntimeError::Refusal(RefusalReason::WrongContext))?;
+    let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
+        family,
+        prepared_attempt,
+        preparation_source.canonical_application_statement_bytes(),
+        statement.setup_proof_context_hash(),
+        preparation_source.roster_hash(),
+        statement.participant_identity(),
+        statement.roster_position(),
+    );
+    let mut assignment_sources =
+        with_exclusive_setup_generation_compact_public_key_development_relation(
+            reference_authority,
+            &application,
+            |source| {
+                prepare_compact_public_key_assignment_sources(&source)
+                    .map_err(SetupKeyRelationGenerationPreparationError::from)
+            },
+        )
+        .map_err(SetupKeyRelationRuntimeError::GenerationPreparation)?;
+    let deferred_authority = assignment_sources
+        .retain_compact_public_key_deferred_authority()
+        .map_err(SetupKeyRelationGenerationPreparationError::from)
+        .map_err(SetupKeyRelationRuntimeError::GenerationPreparation)?;
+
+    let private_coin_preparation_source = preparation_source.clone();
+    let private_coin_factory = Box::new(move |derivation_binding_hash| {
+        let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
+            family,
+            prepared_attempt,
+            private_coin_preparation_source.canonical_application_statement_bytes(),
+            private_coin_preparation_source.setup_proof_context_hash(),
+            private_coin_preparation_source.roster_hash(),
+            private_coin_preparation_source.participant_identity(),
+            private_coin_preparation_source.roster_position(),
+        );
+        with_setup_generation_compact_public_key_development_relation_reentry(
+            &deferred_authority,
+            &application,
+            |source| source.prepare_compact_public_key_private_coin_source(derivation_binding_hash),
+        )
+    });
+    let prepared_runtime =
+        PreparedCompactPublicKeyGenerationRuntime::new(assignment_sources, private_coin_factory)?;
+    retain_compact_public_key_generation_runtime(CompactPublicKeyGenerationRuntime::new(
+        prepared_runtime,
+    ))
+    .map_err(SetupKeyRelationRuntimeError::Runtime)
+}
+
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
 }
@@ -1151,6 +1404,28 @@ fn runtime_error_status(error: SetupKeyRelationRuntimeError) -> u32 {
         SetupKeyRelationRuntimeError::Runtime(error) => {
             super::runtime_ffi::runtime_error_status(error)
         }
+        SetupKeyRelationRuntimeError::CompactGeneration(error) => match error {
+            CompactPublicKeyGenerationRuntimeError::Refusal(refusal_reason) => {
+                refusal_status(refusal_reason)
+            }
+            CompactPublicKeyGenerationRuntimeError::Runtime(error) => {
+                super::runtime_ffi::runtime_error_status(error)
+            }
+            CompactPublicKeyGenerationRuntimeError::WrongPhase => {
+                super::runtime_ffi::runtime_error_status(
+                    CommonProofRuntimeError::WrongOperationPhase,
+                )
+            }
+            CompactPublicKeyGenerationRuntimeError::Contract(_)
+            | CompactPublicKeyGenerationRuntimeError::Initialization(_) => {
+                refusal_status(RefusalReason::OutsideSupportedProfile)
+            }
+            CompactPublicKeyGenerationRuntimeError::Generation(_)
+            | CompactPublicKeyGenerationRuntimeError::MainPreparation(_)
+            | CompactPublicKeyGenerationRuntimeError::MainPoll(_) => {
+                refusal_status(RefusalReason::InvalidArithmeticRelation)
+            }
+        },
         SetupKeyRelationRuntimeError::GenerationPreparation(error) => match error {
             SetupKeyRelationGenerationPreparationError::Refusal(refusal_reason) => {
                 refusal_status(refusal_reason)
@@ -1175,7 +1450,8 @@ fn runtime_error_status(error: SetupKeyRelationRuntimeError) -> u32 {
         SetupKeyRelationRuntimeError::Foundation(error) => refusal_status(error.refusal_reason),
         SetupKeyRelationRuntimeError::ActionRandomnessRuntime(status)
         | SetupKeyRelationRuntimeError::BoardRuntime(status)
-        | SetupKeyRelationRuntimeError::StateRuntime(status) => status,
+        | SetupKeyRelationRuntimeError::StateRuntime(status)
+        | SetupKeyRelationRuntimeError::SourceRuntime(status) => status,
         SetupKeyRelationRuntimeError::Refusal(refusal_reason) => refusal_status(refusal_reason),
         SetupKeyRelationRuntimeError::InvalidInput => {
             refusal_status(RefusalReason::WrongTypeOrLength)
@@ -1210,6 +1486,30 @@ unsafe fn fixed_input<const BYTE_LENGTH: usize>(
     bytes
         .try_into()
         .map_err(|_| SetupKeyRelationRuntimeError::InvalidInput)
+}
+
+unsafe fn u32_list_input(
+    pointer: *const u8,
+    declared_byte_length: usize,
+    expected_element_count: usize,
+) -> Result<Vec<u32>, SetupKeyRelationRuntimeError> {
+    let expected_byte_length = expected_element_count
+        .checked_mul(size_of::<u32>())
+        .ok_or(SetupKeyRelationRuntimeError::InvalidInput)?;
+    if pointer.is_null()
+        || declared_byte_length != expected_byte_length
+        || expected_element_count == 0
+    {
+        return Err(SetupKeyRelationRuntimeError::InvalidInput);
+    }
+    unsafe { slice::from_raw_parts(pointer, declared_byte_length) }
+        .chunks_exact(size_of::<u32>())
+        .map(|bytes| {
+            <[u8; size_of::<u32>()]>::try_from(bytes)
+                .map(u32::from_le_bytes)
+                .map_err(|_| SetupKeyRelationRuntimeError::InvalidInput)
+        })
+        .collect()
 }
 
 unsafe fn write_status(status_pointer: *mut u32, status: u32) {
@@ -1402,6 +1702,151 @@ public_key_share_generation_entry_point!(
     sealed_lattice_public_key_share_prepare_resumed_generation,
     GenerationMode::Resume
 );
+
+/// Prepares the compact public-key producer from the same retained setup,
+/// board, state-reservation, and action-randomness authorities as the accepted
+/// setup workflow. This fresh-only entry point deliberately does not route
+/// through the rejected generic proof adapter.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_share_prepare_generation(
+    selected_suite_handle: u32,
+    setup_generation_authority_handle: u32,
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability_pointer: *const u8,
+    state_verifier_session_capability_byte_length: usize,
+    verified_reservation_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    setup_intent_object_handle: u32,
+    checkpoint_lineage_identifier_pointer: *const u8,
+    checkpoint_lineage_identifier_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        let state_verifier_session_capability = unsafe {
+            fixed_input::<STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH>(
+                state_verifier_session_capability_pointer,
+                state_verifier_session_capability_byte_length,
+            )
+        }?;
+        let board_verifier_session_capability = unsafe {
+            fixed_input::<BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH>(
+                board_verifier_session_capability_pointer,
+                board_verifier_session_capability_byte_length,
+            )
+        }?;
+        let checkpoint_lineage_identifier = unsafe {
+            fixed_input::<ATTEMPT_IDENTIFIER_BYTE_LENGTH>(
+                checkpoint_lineage_identifier_pointer,
+                checkpoint_lineage_identifier_byte_length,
+            )
+        }?;
+        prepare_compact_public_key_generation(
+            selected_suite_handle,
+            setup_generation_authority_handle,
+            action_randomness_handle,
+            state_verifier_session_handle,
+            &state_verifier_session_capability,
+            verified_reservation_handle,
+            board_verifier_session_handle,
+            &board_verifier_session_capability,
+            setup_intent_object_handle,
+            checkpoint_lineage_identifier,
+        )
+    })();
+    match result {
+        Ok(operation_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            operation_handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Prepares exact compact public-key reference bytes from positively verified
+/// setup sources without requiring or creating a selected-suite capability.
+/// The resulting operation is non-authorizing and cannot attach its output to
+/// an accepted setup package.
+///
+/// # Safety
+///
+/// Every non-null input pointer must name its declared readable range. The
+/// ordered object-handle range contains little-endian `u32` handles. A non-null
+/// status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_reference_prepare_generation(
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    ordered_public_randomness_object_handles_pointer: *const u8,
+    ordered_public_randomness_object_handles_byte_length: usize,
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability_pointer: *const u8,
+    state_verifier_session_capability_byte_length: usize,
+    verified_reservation_handle: u32,
+    setup_intent_object_handle: u32,
+    checkpoint_lineage_identifier_pointer: *const u8,
+    checkpoint_lineage_identifier_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        let board_verifier_session_capability = unsafe {
+            fixed_input::<BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH>(
+                board_verifier_session_capability_pointer,
+                board_verifier_session_capability_byte_length,
+            )
+        }?;
+        let ordered_public_randomness_object_handles = unsafe {
+            u32_list_input(
+                ordered_public_randomness_object_handles_pointer,
+                ordered_public_randomness_object_handles_byte_length,
+                super::setup_generation_runtime::expected_public_randomness_object_handle_count()
+                    .map_err(SetupKeyRelationRuntimeError::SourceRuntime)?,
+            )
+        }?;
+        let state_verifier_session_capability = unsafe {
+            fixed_input::<STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH>(
+                state_verifier_session_capability_pointer,
+                state_verifier_session_capability_byte_length,
+            )
+        }?;
+        let checkpoint_lineage_identifier = unsafe {
+            fixed_input::<ATTEMPT_IDENTIFIER_BYTE_LENGTH>(
+                checkpoint_lineage_identifier_pointer,
+                checkpoint_lineage_identifier_byte_length,
+            )
+        }?;
+        prepare_compact_public_key_reference_generation(
+            board_verifier_session_handle,
+            &board_verifier_session_capability,
+            &ordered_public_randomness_object_handles,
+            action_randomness_handle,
+            state_verifier_session_handle,
+            &state_verifier_session_capability,
+            verified_reservation_handle,
+            setup_intent_object_handle,
+            checkpoint_lineage_identifier,
+        )
+    })();
+    match result {
+        Ok(operation_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            operation_handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
 
 fn supply_same_secret_authenticated_transcript_prefix(
     statement_source_handle: u32,
@@ -1648,6 +2093,42 @@ mod tests {
             vss_low_degree_evidence_handle: (family == SetupKeyRelationProofFamily::SameSecret)
                 .then_some(7),
             canonical_application_statement_bytes: vec![0xcc].into_boxed_slice(),
+        }
+    }
+
+    #[test]
+    fn compact_reference_preparation_refuses_noncanonical_public_randomness_handle_counts() {
+        let expected_handle_count =
+            super::super::setup_generation_runtime::expected_public_randomness_object_handle_count(
+            )
+            .expect("the selected roster has a bounded public-randomness handle count");
+        let board_capability = [0x21_u8; BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH];
+        let state_capability = [0x31_u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH];
+        let checkpoint_lineage_identifier = [0x41_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+
+        for supplied_handle_count in [expected_handle_count - 1, expected_handle_count + 1] {
+            let supplied_handle_bytes = vec![0x51_u8; supplied_handle_count * size_of::<u32>()];
+            let mut status = u32::MAX;
+            let operation_handle = unsafe {
+                sealed_lattice_compact_public_key_reference_prepare_generation(
+                    1,
+                    board_capability.as_ptr(),
+                    board_capability.len(),
+                    supplied_handle_bytes.as_ptr(),
+                    supplied_handle_bytes.len(),
+                    2,
+                    3,
+                    state_capability.as_ptr(),
+                    state_capability.len(),
+                    4,
+                    5,
+                    checkpoint_lineage_identifier.as_ptr(),
+                    checkpoint_lineage_identifier.len(),
+                    &mut status,
+                )
+            };
+            assert_eq!(operation_handle, 0);
+            assert_eq!(status, refusal_status(RefusalReason::WrongTypeOrLength));
         }
     }
 

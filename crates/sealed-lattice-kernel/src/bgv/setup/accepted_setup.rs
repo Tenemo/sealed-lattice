@@ -101,23 +101,22 @@ pub(in crate::bgv) use self::generation_authority::{
     with_setup_generation_relinearization_round_two_component_chunk,
     with_setup_generation_relinearization_round_two_witness, with_setup_generation_vss_material,
 };
-#[cfg(test)]
 pub(in crate::bgv) use self::generation_authority::{
     SetupGenerationCompactPublicKeyDevelopmentAuthority,
+    resolve_setup_generation_compact_public_key_development_preparation_source,
     setup_generation_compact_public_key_development_retained_payload_byte_length,
+    with_exclusive_setup_generation_compact_public_key_development_relation,
     with_setup_generation_compact_public_key_development_relation_reentry,
 };
 pub(crate) use self::generation_authority::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
 };
 #[cfg(test)]
-pub(in crate::bgv) use self::generation_authority::{
-    resolve_setup_generation_compact_public_key_development_preparation_source,
-    with_exclusive_setup_generation_compact_public_key_development_relation,
-};
-#[cfg(test)]
 pub(crate) use self::generation_population::construct_public_key_share_limb;
-pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
+pub(in crate::bgv) use self::generation_population::{
+    populate_browser_owned_setup_generation_authority,
+    populate_compact_public_key_reference_authority,
+};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) use self::generation_population::{
     populate_compact_public_key_development_evidence_authority,

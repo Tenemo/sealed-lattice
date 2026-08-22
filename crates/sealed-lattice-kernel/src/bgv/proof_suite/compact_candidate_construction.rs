@@ -614,6 +614,25 @@ mod tests {
     fn selected_compact_candidate_derives_exact_profile_from_canonical_authorities() {
         let construction = derive_selected_compact_candidate_construction()
             .expect("selected compact candidate construction derives");
+        let retained_suite_record_hex = include_str!(
+            "../../../../../packages/wasm/tests/support/compact-candidate-suite-record.hex"
+        )
+        .trim();
+        assert_eq!(retained_suite_record_hex.len() % 2, 0);
+        let retained_suite_record_bytes = retained_suite_record_hex
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|hexadecimal_pair| {
+                let hexadecimal_pair = core::str::from_utf8(hexadecimal_pair)
+                    .expect("retained suite record contains UTF-8 hexadecimal");
+                u8::from_str_radix(hexadecimal_pair, 16)
+                    .expect("retained suite record contains only hexadecimal bytes")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            construction.canonical_suite_record_bytes, retained_suite_record_bytes,
+            "the retained browser fixture must match the compact candidate authority byte for byte"
+        );
         let suite = SuiteRecord::decode(
             &construction.canonical_suite_record_bytes,
             &CanonicalDecodeLimits::default(),

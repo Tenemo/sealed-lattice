@@ -6,13 +6,17 @@
 //! Rust; no witness value, root, trace row, or generated coefficient crosses
 //! into this factory from JavaScript.
 
+use std::rc::Rc;
+
 use crate::{
     bgv::setup::{
-        SetupGenerationAuthorityHandle, SetupGenerationPublicKeyShareSourceHandle,
-        SetupGenerationRecipientPayloadSourceHandle, cancel_setup_generation_public_key_share_body,
+        SetupGenerationAuthorityHandle, SetupGenerationCompactPublicKeyDevelopmentAuthority,
+        SetupGenerationPublicKeyShareSourceHandle, SetupGenerationRecipientPayloadSourceHandle,
+        VerifiedPublicRandomness, cancel_setup_generation_public_key_share_body,
         cancel_setup_generation_recipient_vss_payload, open_setup_generation_public_key_share_body,
         open_setup_generation_recipient_vss_payload,
         populate_browser_owned_setup_generation_authority,
+        populate_compact_public_key_reference_authority,
         read_setup_generation_public_key_share_body,
         read_setup_generation_recipient_vss_payload_chunk, release_setup_generation_authority,
         setup_generation_public_key_share_body_byte_length,
@@ -23,8 +27,9 @@ use crate::{
         verify_public_randomness_board_sources,
     },
     foundation::{
-        BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, FOUNDATION_PROFILE, RefusalReason,
-        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, resolve_verified_board_application_sources,
+        ActionPrivateRandomness, BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, FOUNDATION_PROFILE,
+        RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
+        VerifiedStateReservationRuntimeBinding, resolve_verified_board_application_sources,
         retain_action_private_randomness_for_exact_family, verified_state_reservation_binding,
     },
 };
@@ -37,17 +42,20 @@ const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
 }
 
-fn expected_public_randomness_object_handle_count() -> Result<usize, u32> {
+pub(super) fn expected_public_randomness_object_handle_count() -> Result<usize, u32> {
     usize::from(FOUNDATION_PROFILE.participant_count)
         .checked_mul(PUBLIC_RANDOMNESS_OBJECT_FAMILY_COUNT)
         .ok_or_else(|| refusal_status(RefusalReason::OutsideSupportedProfile))
 }
 
-/// Builds one complete setup-generation authority from positive upstream
-/// capabilities already retained in this WASM instance.
+struct VerifiedSetupGenerationSourceAuthorities {
+    action_private_randomness: Rc<ActionPrivateRandomness>,
+    verified_public_randomness: VerifiedPublicRandomness,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn begin_setup_generation_authority(
-    selected_suite_handle: u32,
+fn resolve_setup_generation_source_authorities(
     board_verifier_session_handle: u32,
     board_verifier_session_capability: &[u8],
     ordered_public_randomness_object_handles: &[u32],
@@ -55,9 +63,8 @@ pub(crate) fn begin_setup_generation_authority(
     state_verifier_session_handle: u32,
     state_verifier_session_capability: &[u8],
     verified_reservation_handle: u32,
-) -> Result<SetupGenerationAuthorityHandle, u32> {
-    if selected_suite_handle == 0
-        || board_verifier_session_handle == 0
+) -> Result<VerifiedSetupGenerationSourceAuthorities, u32> {
+    if board_verifier_session_handle == 0
         || action_randomness_handle == 0
         || state_verifier_session_handle == 0
         || verified_reservation_handle == 0
@@ -105,16 +112,79 @@ pub(crate) fn begin_setup_generation_authority(
         state_verifier_session_capability,
         verified_reservation_handle,
     )?;
+    Ok(VerifiedSetupGenerationSourceAuthorities {
+        action_private_randomness,
+        verified_public_randomness,
+        verified_reservation_binding,
+    })
+}
+
+/// Builds one complete setup-generation authority from positive upstream
+/// capabilities already retained in this WASM instance.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn begin_setup_generation_authority(
+    selected_suite_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability: &[u8],
+    ordered_public_randomness_object_handles: &[u32],
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability: &[u8],
+    verified_reservation_handle: u32,
+) -> Result<SetupGenerationAuthorityHandle, u32> {
+    if selected_suite_handle == 0 {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+
+    let source_authorities = resolve_setup_generation_source_authorities(
+        board_verifier_session_handle,
+        board_verifier_session_capability,
+        ordered_public_randomness_object_handles,
+        action_randomness_handle,
+        state_verifier_session_handle,
+        state_verifier_session_capability,
+        verified_reservation_handle,
+    )?;
 
     with_common_proof_selected_suite(selected_suite_handle, |selected_suite| {
         populate_browser_owned_setup_generation_authority(
             selected_suite,
-            &verified_public_randomness,
-            action_private_randomness,
-            verified_reservation_binding,
+            &source_authorities.verified_public_randomness,
+            source_authorities.action_private_randomness,
+            source_authorities.verified_reservation_binding,
         )
     })
     .map_err(runtime_error_status)?
+    .map_err(refusal_status)
+}
+
+/// Builds the non-authorizing compact public-key reference source from the
+/// same positive upstream capabilities as production setup generation. The
+/// result is an in-process witness owner, not a suite or workflow capability.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn begin_compact_public_key_reference_authority(
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability: &[u8],
+    ordered_public_randomness_object_handles: &[u32],
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability: &[u8],
+    verified_reservation_handle: u32,
+) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, u32> {
+    let source_authorities = resolve_setup_generation_source_authorities(
+        board_verifier_session_handle,
+        board_verifier_session_capability,
+        ordered_public_randomness_object_handles,
+        action_randomness_handle,
+        state_verifier_session_handle,
+        state_verifier_session_capability,
+        verified_reservation_handle,
+    )?;
+    populate_compact_public_key_reference_authority(
+        &source_authorities.verified_public_randomness,
+        source_authorities.action_private_randomness,
+        source_authorities.verified_reservation_binding,
+    )
     .map_err(refusal_status)
 }
 
