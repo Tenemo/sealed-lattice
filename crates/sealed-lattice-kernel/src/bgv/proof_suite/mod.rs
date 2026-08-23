@@ -51,6 +51,8 @@ mod compact_corpus_accounting;
 #[cfg(test)]
 mod compact_emitted_cdhz;
 #[cfg(test)]
+mod compact_evaluator_key_topology_oracle;
+#[cfg(test)]
 mod compact_factor_one_semantics;
 #[cfg(test)]
 mod compact_family_geometry;
