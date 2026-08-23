@@ -34,7 +34,10 @@ use crate::{
     },
 };
 
-use super::runtime_ffi::{runtime_error_status, with_common_proof_selected_suite};
+use super::{
+    CompactGenerationDiagnosticCollector, CompactGenerationDiagnosticOwner,
+    runtime_ffi::{runtime_error_status, with_common_proof_selected_suite},
+};
 
 const PUBLIC_RANDOMNESS_OBJECT_FAMILY_COUNT: usize = 3;
 
@@ -170,20 +173,27 @@ pub(crate) fn begin_compact_public_key_reference_authority(
     state_verifier_session_handle: u32,
     state_verifier_session_capability: &[u8],
     verified_reservation_handle: u32,
+    diagnostics: &CompactGenerationDiagnosticCollector,
 ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, u32> {
-    let source_authorities = resolve_setup_generation_source_authorities(
-        board_verifier_session_handle,
-        board_verifier_session_capability,
-        ordered_public_randomness_object_handles,
-        action_randomness_handle,
-        state_verifier_session_handle,
-        state_verifier_session_capability,
-        verified_reservation_handle,
+    let source_authorities = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::UpstreamAuthorityResolution,
+        || {
+            resolve_setup_generation_source_authorities(
+                board_verifier_session_handle,
+                board_verifier_session_capability,
+                ordered_public_randomness_object_handles,
+                action_randomness_handle,
+                state_verifier_session_handle,
+                state_verifier_session_capability,
+                verified_reservation_handle,
+            )
+        },
     )?;
     populate_compact_public_key_reference_authority(
         &source_authorities.verified_public_randomness,
         source_authorities.action_private_randomness,
         source_authorities.verified_reservation_binding,
+        diagnostics,
     )
     .map_err(refusal_status)
 }

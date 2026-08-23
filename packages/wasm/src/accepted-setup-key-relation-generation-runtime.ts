@@ -107,6 +107,27 @@ export type CompactPublicKeyGenerationOperationOwnerIdentifier =
     | 'reference-board-authorization'
     | 'setup-intent-authorization'
     | 'kernel-preparation'
+    | 'upstream-authority-resolution'
+    | 'common-secret-sampling'
+    | 'anchor-opening-construction'
+    | 'public-key-share-construction'
+    | 'reference-authority-retention'
+    | 'relation-source-resolution'
+    | 'setup-intent-source-resolution'
+    | 'state-reservation-resolution'
+    | 'proof-contract-loading'
+    | 'prepared-attempt-resolution'
+    | 'statement-decoding'
+    | 'production-relation-context-loading'
+    | 'relation-catalog-loading-and-validation'
+    | 'assignment-source-catalog-loading-and-validation'
+    | 'source-adapter-preparation'
+    | 'assignment-cursor-preparation'
+    | 'runtime-contract-loading'
+    | 'runtime-initialization-and-retention'
+    | 'fiat-shamir-challenge-derivation'
+    | 'fiat-shamir-public-input-absorption'
+    | 'diagnostic-observation-copy'
     | 'kernel-poll'
     | 'storage-request-copy-and-decode'
     | 'storage-open'
@@ -154,6 +175,43 @@ const compactPublicKeyGenerationRuntimeStageIdentifiers = Object.freeze([
     'main-whir-base-fresh-response',
     'main-whir-base-blinded-response',
 ] as const);
+
+const compactPublicKeyGenerationDiagnosticOwnerIdentifiers = Object.freeze([
+    undefined,
+    'upstream-authority-resolution',
+    'common-secret-sampling',
+    'anchor-opening-construction',
+    'public-key-share-construction',
+    'reference-authority-retention',
+    'relation-source-resolution',
+    'setup-intent-source-resolution',
+    'state-reservation-resolution',
+    'proof-contract-loading',
+    'prepared-attempt-resolution',
+    'statement-decoding',
+    'production-relation-context-loading',
+    'relation-catalog-loading-and-validation',
+    'assignment-source-catalog-loading-and-validation',
+    'source-adapter-preparation',
+    'assignment-cursor-preparation',
+    'runtime-contract-loading',
+    'runtime-initialization-and-retention',
+    'fiat-shamir-challenge-derivation',
+    'fiat-shamir-public-input-absorption',
+] as const);
+
+const requireCompactPublicKeyGenerationDiagnosticOwnerIdentifier = (
+    ownerCode: number,
+): CompactPublicKeyGenerationOperationOwnerIdentifier => {
+    const identifier =
+        compactPublicKeyGenerationDiagnosticOwnerIdentifiers[ownerCode];
+    if (identifier === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The compact public-key generator exposed an unknown diagnostic owner.',
+        );
+    }
+    return identifier;
+};
 
 const requireCompactPublicKeyGenerationRuntimeStageIdentifier = (
     stage: number,
@@ -1887,6 +1945,32 @@ const generateCompactPublicKeyInClosedWorker = async (
                 continue;
             }
 
+            if (input.observeOperation !== undefined) {
+                const diagnosticObservations = runObservedOperation(
+                    'diagnostic-observation-copy',
+                    () =>
+                        generationKernel.copyDiagnosticObservations(
+                            operationHandle,
+                        ),
+                );
+                for (const observation of diagnosticObservations) {
+                    input.observeOperation(
+                        Object.freeze({
+                            durationMilliseconds:
+                                observation.finishedAtMilliseconds -
+                                observation.startedAtMilliseconds,
+                            finishedAtMilliseconds:
+                                observation.finishedAtMilliseconds,
+                            operationOwnerIdentifier:
+                                requireCompactPublicKeyGenerationDiagnosticOwnerIdentifier(
+                                    observation.ownerCode,
+                                ),
+                            startedAtMilliseconds:
+                                observation.startedAtMilliseconds,
+                        }),
+                    );
+                }
+            }
             const externalMemoryUsage = runObservedOperation(
                 'external-memory-accounting-copy',
                 () => generationKernel.externalMemoryUsage(operationHandle),

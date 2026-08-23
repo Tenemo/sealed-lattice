@@ -13,6 +13,7 @@ use crate::{
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         proof_suite::{
             CommittedMaterialContext, CommittedMaterialRole, CommittedMaterialTree,
+            CompactGenerationDiagnosticCollector, CompactGenerationDiagnosticOwner,
             KeySwitchComponentMaterialTopology, RecipientShareLimbInput,
             SelectedEvaluatorEntryKind, apply_negacyclic_automorphism,
             canonical_recipient_private_vss_payload, selected_committed_material_profile,
@@ -361,11 +362,13 @@ pub(crate) fn populate_compact_public_key_development_evidence_authority(
         action_private_randomness,
         verified_reservation_binding,
     } = exact_setup_generation_evidence_inputs(evidence_revision)?;
+    let diagnostics = CompactGenerationDiagnosticCollector::new();
     let authority = populate_compact_public_key_development_authority(
         &selected_suite,
         &verified_public_randomness,
         Rc::clone(&action_private_randomness),
         verified_reservation_binding,
+        &diagnostics,
     )?;
     Ok(CompactPublicKeyDevelopmentEvidenceAuthority {
         action_private_randomness,
@@ -383,6 +386,7 @@ fn populate_compact_public_key_development_authority(
     verified_public_randomness: &VerifiedPublicRandomness,
     action_private_randomness: Rc<ActionPrivateRandomness>,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+    diagnostics: &CompactGenerationDiagnosticCollector,
 ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
     let bindings = validate_setup_generation_bindings(
         suite_profile,
@@ -404,12 +408,17 @@ fn populate_compact_public_key_development_authority(
     let phase_started_at = Instant::now();
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("compact public-key development phase: sample common secret");
-    let common_secret_coefficients = sample_common_secret_coefficients(
-        suite_profile,
-        &action_private_randomness,
-        bindings.source_setup_intent_object_hash,
-        bindings.setup_attempt_identifier,
-        ring_degree,
+    let common_secret_coefficients = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::CommonSecretSampling,
+        || {
+            sample_common_secret_coefficients(
+                suite_profile,
+                &action_private_randomness,
+                bindings.source_setup_intent_object_hash,
+                bindings.setup_attempt_identifier,
+                ring_degree,
+            )
+        },
     )?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!(
@@ -421,12 +430,17 @@ fn populate_compact_public_key_development_authority(
     let phase_started_at = Instant::now();
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("compact public-key development phase: construct anchor openings");
-    let (_, anchor_openings) = construct_anchor_openings(
-        suite_profile,
-        &action_private_randomness,
-        &bindings,
-        &common_secret_coefficients,
-        evaluation_domain_size,
+    let (_, anchor_openings) = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::AnchorOpeningConstruction,
+        || {
+            construct_anchor_openings(
+                suite_profile,
+                &action_private_randomness,
+                &bindings,
+                &common_secret_coefficients,
+                evaluation_domain_size,
+            )
+        },
     )?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!(
@@ -438,12 +452,17 @@ fn populate_compact_public_key_development_authority(
     let phase_started_at = Instant::now();
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!("compact public-key development phase: construct public-key share");
-    let public_key_share = construct_public_key_share(
-        suite_profile,
-        &action_private_randomness,
-        &bindings,
-        &common_secret_coefficients,
-        evaluation_domain_size,
+    let public_key_share = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::PublicKeyShareConstruction,
+        || {
+            construct_public_key_share(
+                suite_profile,
+                &action_private_randomness,
+                &bindings,
+                &common_secret_coefficients,
+                evaluation_domain_size,
+            )
+        },
     )?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
     println!(
@@ -451,24 +470,30 @@ fn populate_compact_public_key_development_authority(
         phase_started_at.elapsed().as_millis()
     );
 
-    retain_setup_generation_compact_public_key_development_authority(
-        SetupGenerationCompactPublicKeyDevelopmentAuthorityInput {
-            suite_identifier: bindings.suite_identifier,
-            manifest_hash: bindings.manifest_hash,
-            ceremony_context_hash: bindings.ceremony_context_hash,
-            action_context_hash: bindings.action_context_hash,
-            roster_hash: bindings.roster_hash,
-            setup_proof_context_hash: bindings.setup_proof_context_hash,
-            source_setup_intent_object_hash: bindings.source_setup_intent_object_hash,
-            participant_identity: bindings.participant_identity,
-            roster_position: bindings.roster_position,
-            setup_attempt_identifier: *bindings.setup_attempt_identifier.as_bytes(),
-            action_randomness_authorization_hash: bindings.action_randomness_authorization_hash,
-            action_private_randomness,
-            public_setup_seed: bindings.public_setup_seed,
-            anchor_openings,
-            common_secret_coefficients,
-            public_key_share,
+    diagnostics.measure(
+        CompactGenerationDiagnosticOwner::ReferenceAuthorityRetention,
+        || {
+            retain_setup_generation_compact_public_key_development_authority(
+                SetupGenerationCompactPublicKeyDevelopmentAuthorityInput {
+                    suite_identifier: bindings.suite_identifier,
+                    manifest_hash: bindings.manifest_hash,
+                    ceremony_context_hash: bindings.ceremony_context_hash,
+                    action_context_hash: bindings.action_context_hash,
+                    roster_hash: bindings.roster_hash,
+                    setup_proof_context_hash: bindings.setup_proof_context_hash,
+                    source_setup_intent_object_hash: bindings.source_setup_intent_object_hash,
+                    participant_identity: bindings.participant_identity,
+                    roster_position: bindings.roster_position,
+                    setup_attempt_identifier: *bindings.setup_attempt_identifier.as_bytes(),
+                    action_randomness_authorization_hash: bindings
+                        .action_randomness_authorization_hash,
+                    action_private_randomness,
+                    public_setup_seed: bindings.public_setup_seed,
+                    anchor_openings,
+                    common_secret_coefficients,
+                    public_key_share,
+                },
+            )
         },
     )
 }
@@ -480,6 +505,7 @@ pub(in crate::bgv) fn populate_compact_public_key_reference_authority(
     verified_public_randomness: &VerifiedPublicRandomness,
     action_private_randomness: Rc<ActionPrivateRandomness>,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+    diagnostics: &CompactGenerationDiagnosticCollector,
 ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, RefusalReason> {
     let suite_profile = CompactPublicKeyReferenceProfile::from_verified_public_randomness(
         verified_public_randomness,
@@ -489,6 +515,7 @@ pub(in crate::bgv) fn populate_compact_public_key_reference_authority(
         verified_public_randomness,
         action_private_randomness,
         verified_reservation_binding,
+        diagnostics,
     )
 }
 

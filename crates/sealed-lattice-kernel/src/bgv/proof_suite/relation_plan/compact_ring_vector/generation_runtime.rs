@@ -8,6 +8,8 @@
 
 use crate::{
     bgv::proof_suite::{
+        CompactGenerationDiagnosticCollector, CompactGenerationDiagnosticObservation,
+        CompactGenerationDiagnosticOwner,
         compact_proof_contract::{
             CompactProofContractError, selected_compact_public_key_proof_contract,
         },
@@ -44,16 +46,22 @@ type CompactPrivateCoinFactory =
 /// compact construction binding.
 pub(crate) struct PreparedCompactPublicKeyGenerationRuntime {
     assignment_sources: PreparedCompactPublicKeyAssignmentSources,
+    diagnostics: CompactGenerationDiagnosticCollector,
     private_coin_factory: CompactPrivateCoinFactory,
     whir_batch_counts: [u8; 2],
 }
 
 impl PreparedCompactPublicKeyGenerationRuntime {
-    pub(crate) fn new(
+    pub(crate) fn new_with_diagnostics(
         assignment_sources: PreparedCompactPublicKeyAssignmentSources,
         private_coin_factory: CompactPrivateCoinFactory,
+        diagnostics: CompactGenerationDiagnosticCollector,
     ) -> Result<Self, CompactPublicKeyGenerationRuntimeError> {
-        let contract = selected_compact_public_key_proof_contract()
+        let contract = diagnostics
+            .measure(
+                CompactGenerationDiagnosticOwner::RuntimeContractLoading,
+                selected_compact_public_key_proof_contract,
+            )
             .map_err(CompactPublicKeyGenerationRuntimeError::Contract)?;
         let [pre_challenge_epoch, main_epoch] = contract.verifier_inputs().whir_epochs else {
             return Err(CompactPublicKeyGenerationRuntimeError::WrongPhase);
@@ -69,6 +77,7 @@ impl PreparedCompactPublicKeyGenerationRuntime {
         }
         Ok(Self {
             assignment_sources,
+            diagnostics,
             private_coin_factory,
             whir_batch_counts,
         })
@@ -224,6 +233,7 @@ struct CompletedCompactPublicKeyGeneration {
 /// memory transaction bytes and JavaScript receives final public bytes only
 /// after every producer phase has completed.
 pub(crate) struct CompactPublicKeyGenerationRuntime {
+    diagnostics: CompactGenerationDiagnosticCollector,
     phase: CompactPublicKeyGenerationRuntimePhase,
     initial_state: Option<CompactPublicKeyGenerationState>,
     private_coins: Option<PrivateRandomnessCommonProofCoinSource>,
@@ -237,10 +247,13 @@ pub(crate) struct CompactPublicKeyGenerationRuntime {
 
 impl CompactPublicKeyGenerationRuntime {
     pub(crate) fn new(prepared: PreparedCompactPublicKeyGenerationRuntime) -> Self {
+        let diagnostics = prepared.diagnostics;
         Self {
+            diagnostics: diagnostics.clone(),
             phase: CompactPublicKeyGenerationRuntimePhase::SourceLoading,
-            initial_state: Some(CompactPublicKeyGenerationState::new(
+            initial_state: Some(CompactPublicKeyGenerationState::new_with_diagnostics(
                 prepared.assignment_sources,
+                diagnostics,
             )),
             private_coins: None,
             private_coin_factory: Some(prepared.private_coin_factory),
@@ -250,6 +263,13 @@ impl CompactPublicKeyGenerationRuntime {
             whir_batch_counts: prepared.whir_batch_counts,
             completed: None,
         }
+    }
+
+    pub(crate) fn with_diagnostic_observations<ResultValue>(
+        &self,
+        operation: impl FnOnce(&[CompactGenerationDiagnosticObservation]) -> ResultValue,
+    ) -> Option<ResultValue> {
+        self.diagnostics.with_observations(operation)
     }
 
     pub(crate) fn poll(

@@ -57,6 +57,7 @@ mod compact_fixed_tape_source_correspondence;
 #[cfg(test)]
 mod compact_fixed_tape_uniformity;
 mod compact_generation_checkpoint;
+mod compact_generation_diagnostics;
 mod compact_generation_randomness;
 mod compact_masking_coefficient_maps;
 mod compact_masking_entropy;
@@ -205,6 +206,10 @@ pub(crate) use committed_material::{
 };
 #[cfg(feature = "primitive-measurement-evidence")]
 pub(crate) use compact_cfw_storage_diagnostic::selected_compact_cfw_storage_diagnostic_schedule;
+pub(crate) use compact_generation_diagnostics::{
+    CompactGenerationDiagnosticCollector, CompactGenerationDiagnosticObservation,
+    CompactGenerationDiagnosticOwner,
+};
 pub(in crate::bgv) use compact_public_key_accepted_verifier::{
     ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
     ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_SAFE_BOUNDARY_COUNT,

@@ -25,6 +25,7 @@ use super::fixed_uniform_verifier_message::{
     DecodedFixedUniformVerifierMessage, FixedUniformVerifierMessageError,
     decode_fixed_uniform_verifier_message_from_xof,
 };
+use crate::diagnostic_clock::now_milliseconds;
 use crate::foundation::{
     CanonicalItem, Hash512, StreamingFoundationHashError, StreamingFoundationTupleHash512,
 };
@@ -214,6 +215,7 @@ fn compact_fiat_shamir_verifier_message_hasher(
                         .fiat_shamir_round_salt(canonical_proof_bytes)?,
                 })
             }),
+        None,
     )
 }
 
@@ -223,11 +225,30 @@ struct CompactTranscriptCommitmentEntry {
     fiat_shamir_round_salt: [u8; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CompactFiatShamirPublicInputAbsorptionObservation {
+    started_at_milliseconds: f64,
+    finished_at_milliseconds: f64,
+}
+
+impl CompactFiatShamirPublicInputAbsorptionObservation {
+    pub(crate) const fn started_at_milliseconds(self) -> f64 {
+        self.started_at_milliseconds
+    }
+
+    pub(crate) const fn finished_at_milliseconds(self) -> f64 {
+        self.finished_at_milliseconds
+    }
+}
+
 fn compact_fiat_shamir_verifier_message_hasher_from_entries(
     geometry: &CompactProofWireGeometry,
     canonical_public_input_bytes: &[u8],
     logical_verifier_move_ordinal: u32,
     entries: impl IntoIterator<Item = Result<CompactTranscriptCommitmentEntry, CompactTranscriptError>>,
+    public_input_absorption_observation: Option<
+        &mut Option<CompactFiatShamirPublicInputAbsorptionObservation>,
+    >,
 ) -> Result<StreamingFoundationTupleHash512, CompactTranscriptError> {
     let current_response_index = usize::try_from(logical_verifier_move_ordinal)
         .map_err(|_| CompactTranscriptError::LengthOverflow)?;
@@ -269,7 +290,18 @@ fn compact_fiat_shamir_verifier_message_hasher_from_entries(
             .map_err(|_| CompactTranscriptError::LengthOverflow)?
             .to_le_bytes(),
     )?;
-    hasher.absorb(canonical_public_input_bytes)?;
+    if let Some(observation) = public_input_absorption_observation {
+        let started_at_milliseconds = now_milliseconds();
+        let absorption_result = hasher.absorb(canonical_public_input_bytes);
+        let finished_at_milliseconds = now_milliseconds();
+        *observation = Some(CompactFiatShamirPublicInputAbsorptionObservation {
+            started_at_milliseconds,
+            finished_at_milliseconds,
+        });
+        absorption_result?;
+    } else {
+        hasher.absorb(canonical_public_input_bytes)?;
+    }
     let mut absorbed_entry_count = 0_usize;
     for (response_index, entry) in entries.into_iter().enumerate() {
         if response_index >= prefix_response_count {
@@ -812,6 +844,35 @@ impl CompactProverTranscript {
     pub(crate) fn derive_verifier_message(
         &mut self,
     ) -> Result<DecodedFixedUniformVerifierMessage, CompactTranscriptError> {
+        self.derive_verifier_message_internal(false)
+            .map(|(message, _)| message)
+    }
+
+    pub(crate) fn derive_verifier_message_with_public_input_absorption_observation(
+        &mut self,
+    ) -> Result<
+        (
+            DecodedFixedUniformVerifierMessage,
+            CompactFiatShamirPublicInputAbsorptionObservation,
+        ),
+        CompactTranscriptError,
+    > {
+        let (message, observation) = self.derive_verifier_message_internal(true)?;
+        observation
+            .map(|observation| (message, observation))
+            .ok_or(CompactTranscriptError::WrongProverPhase)
+    }
+
+    fn derive_verifier_message_internal(
+        &mut self,
+        observe_public_input_absorption: bool,
+    ) -> Result<
+        (
+            DecodedFixedUniformVerifierMessage,
+            Option<CompactFiatShamirPublicInputAbsorptionObservation>,
+        ),
+        CompactTranscriptError,
+    > {
         if !self.verifier_message_pending {
             return Err(CompactTranscriptError::WrongProverPhase);
         }
@@ -830,18 +891,20 @@ impl CompactProverTranscript {
         let output_byte_length = response_geometry
             .verifier_message_geometry()
             .exact_message_byte_length()?;
+        let mut public_input_absorption_observation = None;
         let verifier_message_hasher = compact_fiat_shamir_verifier_message_hasher_from_entries(
             &self.geometry,
             &self.canonical_public_input_bytes,
             logical_verifier_move_ordinal,
             self.commitment_entries.iter().copied().map(Ok),
+            observe_public_input_absorption.then_some(&mut public_input_absorption_observation),
         )?;
         let verifier_message = decode_fixed_uniform_verifier_message_from_xof(
             response_geometry.verifier_message_geometry(),
             verifier_message_hasher.finalize_bounded_xof(output_byte_length)?,
         )?;
         self.verifier_message_pending = false;
-        Ok(verifier_message)
+        Ok((verifier_message, public_input_absorption_observation))
     }
 
     pub(crate) fn finish(self) -> Result<(), CompactTranscriptError> {
@@ -1161,6 +1224,51 @@ mod tests {
             Err(CompactTranscriptError::WrongProverPhase)
         );
         prover_transcript.finish().expect("complete chronology");
+    }
+
+    #[test]
+    fn public_input_absorption_timing_preserves_every_verifier_message() {
+        let geometry = proof_geometry();
+        let (public_geometry, bindings, public_bytes) = public_input(13);
+        let decoded_public = decode_compact_public_input(public_geometry, bindings, &public_bytes)
+            .expect("decoded public input");
+        let mut ordinary = CompactProverTranscript::new(&geometry, &decoded_public, &public_bytes)
+            .expect("ordinary prover transcript");
+        let mut observed = CompactProverTranscript::new(&geometry, &decoded_public, &public_bytes)
+            .expect("observed prover transcript");
+
+        for (root_byte, round_salt_byte) in [(0x11, 0x21), (0x12, 0x22)] {
+            let root = [root_byte; Hash512::BYTE_LENGTH];
+            let round_salt = [round_salt_byte; COMPACT_FIAT_SHAMIR_ROUND_SALT_BYTE_LENGTH];
+            ordinary
+                .record_response_commitment(root, round_salt)
+                .expect("ordinary response commitment");
+            observed
+                .record_response_commitment(root, round_salt)
+                .expect("observed response commitment");
+
+            let ordinary_message = ordinary
+                .derive_verifier_message()
+                .expect("ordinary verifier message");
+            let (observed_message, absorption_observation) = observed
+                .derive_verifier_message_with_public_input_absorption_observation()
+                .expect("observed verifier message");
+
+            assert_eq!(observed_message, ordinary_message);
+            assert!(absorption_observation.started_at_milliseconds().is_finite());
+            assert!(
+                absorption_observation
+                    .finished_at_milliseconds()
+                    .is_finite()
+            );
+            assert!(
+                absorption_observation.finished_at_milliseconds()
+                    >= absorption_observation.started_at_milliseconds()
+            );
+        }
+
+        ordinary.finish().expect("ordinary chronology");
+        observed.finish().expect("observed chronology");
     }
 
     #[test]

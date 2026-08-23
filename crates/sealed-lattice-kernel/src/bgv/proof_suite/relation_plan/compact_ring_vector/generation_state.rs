@@ -18,7 +18,7 @@ use rand::{Rng, RngExt};
 
 use crate::bgv::proof_suite::external_memory::ProofExternalMemoryUsage;
 use crate::bgv::proof_suite::{
-    ProofBaseFieldElement,
+    CompactGenerationDiagnosticCollector, ProofBaseFieldElement,
     compact_cfw::{
         COMPACT_CFW_MATRIX_COUNT, COMPACT_CFW_OUTER_MASK_MESSAGE_LENGTH, CompactCfwError,
         CompactCfwGeometry, CompactCfwMaskMaterial, CompactCfwMaskedCrossEpochClaims,
@@ -628,6 +628,7 @@ pub(crate) struct CompactPublicKeyFamilyMaterializationState {
 /// response boundary. The retained response state and family material continue
 /// into CFW and the main WHIR epoch; this state cannot emit a proof by itself.
 pub(crate) struct CompactPublicKeyGenerationState {
+    diagnostics: CompactGenerationDiagnosticCollector,
     family_materialization_state: CompactPublicKeyFamilyMaterializationState,
     response_generation_state: Option<CompactResponseGenerationState>,
 }
@@ -1675,8 +1676,17 @@ enum CompactPublicKeyCodeSwitchQueryEvaluationPoll {
 }
 
 impl CompactPublicKeyGenerationState {
+    #[cfg(test)]
     pub(crate) fn new(sources: PreparedCompactPublicKeyAssignmentSources) -> Self {
+        Self::new_with_diagnostics(sources, CompactGenerationDiagnosticCollector::new())
+    }
+
+    pub(crate) fn new_with_diagnostics(
+        sources: PreparedCompactPublicKeyAssignmentSources,
+        diagnostics: CompactGenerationDiagnosticCollector,
+    ) -> Self {
         Self {
+            diagnostics,
             family_materialization_state: CompactPublicKeyFamilyMaterializationState::new(sources),
             response_generation_state: None,
         }
@@ -1848,11 +1858,12 @@ impl CompactPublicKeyGenerationState {
             .family_materialization_state
             .pre_lookup_material()
             .ok_or(CompactResponseGenerationError::WrongPhase)?;
-        let response_generation_state = CompactResponseGenerationState::new(
+        let response_generation_state = CompactResponseGenerationState::new_with_diagnostics(
             pre_lookup_material.proof_wire_geometry(),
             pre_lookup_material.response_merkle_geometries(),
             pre_lookup_material.decoded_public_input(),
             pre_lookup_material.canonical_public_input_bytes(),
+            self.diagnostics.clone(),
         )?;
         self.response_generation_state = Some(response_generation_state);
         Ok(())

@@ -31,7 +31,8 @@ use crate::{
 
 use super::relation_plan::{
     CompactPublicKeyGenerationRuntime, CompactPublicKeyGenerationRuntimeError,
-    PreparedCompactPublicKeyGenerationRuntime, prepare_compact_public_key_assignment_sources,
+    PreparedCompactPublicKeyGenerationRuntime,
+    prepare_compact_public_key_assignment_sources_with_diagnostics,
 };
 use super::runtime_ffi::{
     CommonProofGenerationFamilyAdapter, CommonProofGenerationFamilyAdapterDescription,
@@ -46,6 +47,7 @@ use super::runtime_ffi::{
 use super::{
     CommonProofGenerationPreparationError, CommonProofRelationPlanCapability,
     CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
+    CompactGenerationDiagnosticCollector, CompactGenerationDiagnosticOwner,
     ExactSameSecretAuthenticatedTranscriptPrefixRequest, PreparedExactSameSecretTranscriptPrefix,
     ProofProfileError, RelationPlanError, SelectedApplicationStatementContext,
     SelectedProofAccountingError,
@@ -1175,30 +1177,47 @@ fn prepare_compact_public_key_generation(
     if checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
         return Err(SetupKeyRelationRuntimeError::InvalidInput);
     }
+    let diagnostics = CompactGenerationDiagnosticCollector::new();
     let family = SetupKeyRelationProofFamily::PublicKeyShare;
     let authority_handle =
         SetupGenerationAuthorityHandle::from_identifier(setup_generation_authority_handle);
-    let preparation_source =
-        resolve_setup_generation_key_relation_preparation_source(&authority_handle, family)?;
+    let preparation_source = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::RelationSourceResolution,
+        || resolve_setup_generation_key_relation_preparation_source(&authority_handle, family),
+    )?;
     if preparation_source.family() != family {
         return Err(SetupKeyRelationRuntimeError::Refusal(
             RefusalReason::WrongContext,
         ));
     }
     require_selected_suite_matches_generation_source(selected_suite_handle, &preparation_source)?;
-    let board_source = resolve_single_setup_intent_source(
-        board_verifier_session_handle,
-        board_verifier_session_capability,
-        setup_intent_object_handle,
+    let board_source = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::SetupIntentSourceResolution,
+        || {
+            resolve_single_setup_intent_source(
+                board_verifier_session_handle,
+                board_verifier_session_capability,
+                setup_intent_object_handle,
+            )
+        },
     )?;
     require_setup_intent_matches_generation_source(&board_source, &preparation_source)?;
-    let verified_reservation_binding = resolve_generation_reservation_binding(
-        state_verifier_session_handle,
-        state_verifier_session_capability,
-        verified_reservation_handle,
-        &preparation_source,
+    let verified_reservation_binding = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::StateReservationResolution,
+        || {
+            resolve_generation_reservation_binding(
+                state_verifier_session_handle,
+                state_verifier_session_capability,
+                verified_reservation_handle,
+                &preparation_source,
+            )
+        },
     )?;
-    let contract = super::compact_proof_contract::selected_compact_public_key_proof_contract()
+    let contract = diagnostics
+        .measure(
+            CompactGenerationDiagnosticOwner::ProofContractLoading,
+            super::compact_proof_contract::selected_compact_public_key_proof_contract,
+        )
         .map_err(CompactPublicKeyGenerationRuntimeError::Contract)?;
     let checkpoint_schedule_digest = contract
         .verifier_inputs()
@@ -1209,23 +1228,31 @@ fn prepare_compact_public_key_generation(
             checkpoint_lineage_identifier,
             checkpoint_schedule_digest,
         );
-    let prepared_attempt = resolve_prepared_attempt(
-        action_randomness_handle,
-        verified_reservation_binding,
-        &board_source,
-        &preparation_source,
-        fresh_continuation,
+    let prepared_attempt = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::PreparedAttemptResolution,
+        || {
+            resolve_prepared_attempt(
+                action_randomness_handle,
+                verified_reservation_binding,
+                &board_source,
+                &preparation_source,
+                fresh_continuation,
+            )
+        },
     )?;
-    let statement = decode_selected_public_key_share_statement(
-        preparation_source.canonical_application_statement_bytes(),
-        SelectedApplicationStatementContext::new(
-            preparation_source.protocol_version(),
-            preparation_source.suite_identifier(),
-            None,
-            None,
-        ),
-    )
-    .map_err(|_| SetupKeyRelationRuntimeError::Refusal(RefusalReason::WrongContext))?;
+    let statement = diagnostics
+        .measure(CompactGenerationDiagnosticOwner::StatementDecoding, || {
+            decode_selected_public_key_share_statement(
+                preparation_source.canonical_application_statement_bytes(),
+                SelectedApplicationStatementContext::new(
+                    preparation_source.protocol_version(),
+                    preparation_source.suite_identifier(),
+                    None,
+                    None,
+                ),
+            )
+        })
+        .map_err(|_| SetupKeyRelationRuntimeError::Refusal(RefusalReason::WrongContext))?;
     let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
         family,
         prepared_attempt,
@@ -1237,7 +1264,7 @@ fn prepare_compact_public_key_generation(
     );
     let assignment_sources =
         with_setup_generation_key_relation(&authority_handle, &application, |source| {
-            prepare_compact_public_key_assignment_sources(&source)
+            prepare_compact_public_key_assignment_sources_with_diagnostics(&source, &diagnostics)
                 .map_err(SetupKeyRelationGenerationPreparationError::from)
         })
         .map_err(SetupKeyRelationRuntimeError::GenerationPreparation)?;
@@ -1259,12 +1286,21 @@ fn prepare_compact_public_key_generation(
             source.prepare_compact_public_key_private_coin_source(derivation_binding_hash)
         })
     });
-    let prepared_runtime =
-        PreparedCompactPublicKeyGenerationRuntime::new(assignment_sources, private_coin_factory)?;
-    retain_compact_public_key_generation_runtime(CompactPublicKeyGenerationRuntime::new(
-        prepared_runtime,
-    ))
-    .map_err(SetupKeyRelationRuntimeError::Runtime)
+    let prepared_runtime = PreparedCompactPublicKeyGenerationRuntime::new_with_diagnostics(
+        assignment_sources,
+        private_coin_factory,
+        diagnostics.clone(),
+    )?;
+    diagnostics
+        .measure(
+            CompactGenerationDiagnosticOwner::RuntimeInitializationAndRetention,
+            || {
+                retain_compact_public_key_generation_runtime(
+                    CompactPublicKeyGenerationRuntime::new(prepared_runtime),
+                )
+            },
+        )
+        .map_err(SetupKeyRelationRuntimeError::Runtime)
 }
 
 /// Prepares one source-scoped compact public-key reference proof without a
@@ -1286,6 +1322,7 @@ fn prepare_compact_public_key_reference_generation(
     if checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
         return Err(SetupKeyRelationRuntimeError::InvalidInput);
     }
+    let diagnostics = CompactGenerationDiagnosticCollector::new();
     let family = SetupKeyRelationProofFamily::PublicKeyShare;
     let reference_authority = begin_compact_public_key_reference_authority(
         board_verifier_session_handle,
@@ -1295,30 +1332,49 @@ fn prepare_compact_public_key_reference_generation(
         state_verifier_session_handle,
         state_verifier_session_capability,
         verified_reservation_handle,
+        &diagnostics,
     )
     .map_err(SetupKeyRelationRuntimeError::SourceRuntime)?;
-    let preparation_source =
-        resolve_setup_generation_compact_public_key_development_preparation_source(
-            &reference_authority,
-        )?;
+    let preparation_source = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::RelationSourceResolution,
+        || {
+            resolve_setup_generation_compact_public_key_development_preparation_source(
+                &reference_authority,
+            )
+        },
+    )?;
     if preparation_source.family() != family {
         return Err(SetupKeyRelationRuntimeError::Refusal(
             RefusalReason::WrongContext,
         ));
     }
-    let board_source = resolve_single_setup_intent_source(
-        board_verifier_session_handle,
-        board_verifier_session_capability,
-        setup_intent_object_handle,
+    let board_source = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::SetupIntentSourceResolution,
+        || {
+            resolve_single_setup_intent_source(
+                board_verifier_session_handle,
+                board_verifier_session_capability,
+                setup_intent_object_handle,
+            )
+        },
     )?;
     require_setup_intent_matches_generation_source(&board_source, &preparation_source)?;
-    let verified_reservation_binding = resolve_generation_reservation_binding(
-        state_verifier_session_handle,
-        state_verifier_session_capability,
-        verified_reservation_handle,
-        &preparation_source,
+    let verified_reservation_binding = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::StateReservationResolution,
+        || {
+            resolve_generation_reservation_binding(
+                state_verifier_session_handle,
+                state_verifier_session_capability,
+                verified_reservation_handle,
+                &preparation_source,
+            )
+        },
     )?;
-    let contract = super::compact_proof_contract::selected_compact_public_key_proof_contract()
+    let contract = diagnostics
+        .measure(
+            CompactGenerationDiagnosticOwner::ProofContractLoading,
+            super::compact_proof_contract::selected_compact_public_key_proof_contract,
+        )
         .map_err(CompactPublicKeyGenerationRuntimeError::Contract)?;
     let checkpoint_schedule_digest = contract
         .verifier_inputs()
@@ -1329,23 +1385,31 @@ fn prepare_compact_public_key_reference_generation(
             checkpoint_lineage_identifier,
             checkpoint_schedule_digest,
         );
-    let prepared_attempt = resolve_prepared_attempt(
-        action_randomness_handle,
-        verified_reservation_binding,
-        &board_source,
-        &preparation_source,
-        fresh_continuation,
+    let prepared_attempt = diagnostics.measure(
+        CompactGenerationDiagnosticOwner::PreparedAttemptResolution,
+        || {
+            resolve_prepared_attempt(
+                action_randomness_handle,
+                verified_reservation_binding,
+                &board_source,
+                &preparation_source,
+                fresh_continuation,
+            )
+        },
     )?;
-    let statement = decode_selected_public_key_share_statement(
-        preparation_source.canonical_application_statement_bytes(),
-        SelectedApplicationStatementContext::new(
-            preparation_source.protocol_version(),
-            preparation_source.suite_identifier(),
-            None,
-            None,
-        ),
-    )
-    .map_err(|_| SetupKeyRelationRuntimeError::Refusal(RefusalReason::WrongContext))?;
+    let statement = diagnostics
+        .measure(CompactGenerationDiagnosticOwner::StatementDecoding, || {
+            decode_selected_public_key_share_statement(
+                preparation_source.canonical_application_statement_bytes(),
+                SelectedApplicationStatementContext::new(
+                    preparation_source.protocol_version(),
+                    preparation_source.suite_identifier(),
+                    None,
+                    None,
+                ),
+            )
+        })
+        .map_err(|_| SetupKeyRelationRuntimeError::Refusal(RefusalReason::WrongContext))?;
     let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
         family,
         prepared_attempt,
@@ -1360,8 +1424,11 @@ fn prepare_compact_public_key_reference_generation(
             reference_authority,
             &application,
             |source| {
-                prepare_compact_public_key_assignment_sources(&source)
-                    .map_err(SetupKeyRelationGenerationPreparationError::from)
+                prepare_compact_public_key_assignment_sources_with_diagnostics(
+                    &source,
+                    &diagnostics,
+                )
+                .map_err(SetupKeyRelationGenerationPreparationError::from)
             },
         )
         .map_err(SetupKeyRelationRuntimeError::GenerationPreparation)?;
@@ -1387,12 +1454,21 @@ fn prepare_compact_public_key_reference_generation(
             |source| source.prepare_compact_public_key_private_coin_source(derivation_binding_hash),
         )
     });
-    let prepared_runtime =
-        PreparedCompactPublicKeyGenerationRuntime::new(assignment_sources, private_coin_factory)?;
-    retain_compact_public_key_generation_runtime(CompactPublicKeyGenerationRuntime::new(
-        prepared_runtime,
-    ))
-    .map_err(SetupKeyRelationRuntimeError::Runtime)
+    let prepared_runtime = PreparedCompactPublicKeyGenerationRuntime::new_with_diagnostics(
+        assignment_sources,
+        private_coin_factory,
+        diagnostics.clone(),
+    )?;
+    diagnostics
+        .measure(
+            CompactGenerationDiagnosticOwner::RuntimeInitializationAndRetention,
+            || {
+                retain_compact_public_key_generation_runtime(
+                    CompactPublicKeyGenerationRuntime::new(prepared_runtime),
+                )
+            },
+        )
+        .map_err(SetupKeyRelationRuntimeError::Runtime)
 }
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {

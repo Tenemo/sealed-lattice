@@ -1,7 +1,7 @@
 {
   "recordKind": "selected-lattice-security-estimator-evidence",
   "recordVersion": 1,
-  "inputPayloadSha256": "6559d876608f0fa18adbd8f8c694960318e0956cadbf0dac62d32f635d778a3e",
+  "inputPayloadSha256": "dee1001ef13b72473fc0fd46931c9fbacd15e38ba84756ff443ee2aec984a751",
   "input": {
     "sourceAuthority": [
       {
@@ -30,7 +30,7 @@
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_population.rs",
-        "sha256": "f032fcbdaf37d0f59a9ca3b5e68c557192d3cd387c2777a80fc2922b6f7f9ed6"
+        "sha256": "0d011c696e4e31e97fca2219717c06d9e07167d5946b5a09d2fef00da95f9c4e"
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_relinearization.rs",
@@ -1081,5 +1081,5 @@
     "materialSuccessThreshold": "at least one half",
     "scope": "Known-attack scalar-LWE diagnostics under the explicitly named proxy model; reductions and joint structured or circular security remain separate assumptions."
   },
-  "outputPayloadSha256": "8f05b216e396caba792daaf994caf716f8227fe975bd81a0e74694cab30660bb"
+  "outputPayloadSha256": "6bb3bae8de52695e0bdbf6bf20a598f84d90bf378e16b59fc8c4b986d5e04485"
 }

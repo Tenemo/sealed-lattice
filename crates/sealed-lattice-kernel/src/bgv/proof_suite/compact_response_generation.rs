@@ -9,7 +9,6 @@
 
 use std::collections::VecDeque;
 
-use super::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
 use super::compact_generation_checkpoint::{
     CompactGenerationCheckpointError, CompactResponseCheckpointSchedule,
     compact_response_generation_checkpoint_boundary,
@@ -36,6 +35,10 @@ use super::external_memory::{
 use super::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 use super::fixed_uniform_verifier_message::DecodedFixedUniformVerifierMessage;
 use super::prover::CommonProofGenerationCheckpointBoundary;
+use super::{
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CompactGenerationDiagnosticCollector,
+    CompactGenerationDiagnosticObservation, CompactGenerationDiagnosticOwner,
+};
 use crate::foundation::Hash512;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -250,6 +253,7 @@ enum CompactResponseGenerationPhase {
 }
 
 pub(crate) struct CompactResponseGenerationState {
+    diagnostics: CompactGenerationDiagnosticCollector,
     proof_wire_geometry: CompactProofWireGeometry,
     response_merkle_geometries: Vec<CompactResponseMerkleGeometry>,
     checkpoint_schedule: CompactResponseCheckpointSchedule,
@@ -316,6 +320,22 @@ impl CompactResponseGenerationState {
         decoded_public_input: &DecodedCompactPublicInput,
         canonical_public_input_bytes: &[u8],
     ) -> Result<Self, CompactResponseGenerationError> {
+        Self::new_with_diagnostics(
+            proof_wire_geometry,
+            response_merkle_geometries,
+            decoded_public_input,
+            canonical_public_input_bytes,
+            CompactGenerationDiagnosticCollector::new(),
+        )
+    }
+
+    pub(crate) fn new_with_diagnostics(
+        proof_wire_geometry: &CompactProofWireGeometry,
+        response_merkle_geometries: &[CompactResponseMerkleGeometry],
+        decoded_public_input: &DecodedCompactPublicInput,
+        canonical_public_input_bytes: &[u8],
+        diagnostics: CompactGenerationDiagnosticCollector,
+    ) -> Result<Self, CompactResponseGenerationError> {
         let checkpoint_schedule = CompactResponseCheckpointSchedule::derive(
             proof_wire_geometry,
             response_merkle_geometries,
@@ -353,6 +373,7 @@ impl CompactResponseGenerationState {
             .try_reserve(response_count)
             .map_err(|_| CompactResponseGenerationError::AllocationLimitExceeded)?;
         Ok(Self {
+            diagnostics,
             proof_wire_geometry: proof_wire_geometry.clone(),
             response_merkle_geometries: response_merkle_geometries.to_vec(),
             checkpoint_schedule,
@@ -668,7 +689,19 @@ impl CompactResponseGenerationState {
                     .seal_next_response(storage)?;
                 self.prover_transcript
                     .record_response_commitment(root, fiat_shamir_round_salt)?;
-                let verifier_message = self.prover_transcript.derive_verifier_message()?;
+                let diagnostics = self.diagnostics.clone();
+                let (verifier_message, public_input_absorption) = diagnostics.measure(
+                    CompactGenerationDiagnosticOwner::FiatShamirChallengeDerivation,
+                    || {
+                        self.prover_transcript
+                            .derive_verifier_message_with_public_input_absorption_observation()
+                    },
+                )?;
+                diagnostics.record(CompactGenerationDiagnosticObservation::new(
+                    CompactGenerationDiagnosticOwner::FiatShamirPublicInputAbsorption,
+                    public_input_absorption.started_at_milliseconds(),
+                    public_input_absorption.finished_at_milliseconds(),
+                ));
                 self.verifier_messages.push(verifier_message);
                 let pending_round_salt = self
                     .pending_round_salts

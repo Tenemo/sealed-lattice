@@ -761,11 +761,14 @@ type NumberExportName =
     | 'sealed_lattice_compact_public_key_transport_bindings_byte_length'
     | 'sealed_lattice_compact_public_key_validate_transport'
     | 'sealed_lattice_compact_public_key_generation_cancel'
+    | 'sealed_lattice_compact_public_key_generation_copy_diagnostic_observations'
     | 'sealed_lattice_compact_public_key_generation_copy_external_memory_usage'
     | 'sealed_lattice_compact_public_key_generation_copy_proof'
     | 'sealed_lattice_compact_public_key_generation_copy_public_input'
     | 'sealed_lattice_compact_public_key_generation_copy_storage_request'
     | 'sealed_lattice_compact_public_key_generation_copy_transport_bindings'
+    | 'sealed_lattice_compact_public_key_generation_diagnostic_observation_count'
+    | 'sealed_lattice_compact_public_key_generation_diagnostic_record_byte_length'
     | 'sealed_lattice_compact_public_key_generation_external_memory_usage_word_count'
     | 'sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length'
     | 'sealed_lattice_compact_public_key_generation_poll'
@@ -1099,7 +1102,11 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
     if (expectedKernelSha256Hex !== undefined) {
         await verifyKernelIntegrity(bytes, expectedKernelSha256Hex);
     }
-    const instantiatedSource = await WebAssembly.instantiate(bytes, {});
+    const instantiatedSource = await WebAssembly.instantiate(bytes, {
+        sealed_lattice_diagnostics: {
+            monotonic_time_milliseconds: (): number => performance.now(),
+        },
+    });
     const wasmExports = instantiatedSource.instance
         .exports as TranscriptCoreKernelExports;
     const memory = resolveMemory(wasmExports);

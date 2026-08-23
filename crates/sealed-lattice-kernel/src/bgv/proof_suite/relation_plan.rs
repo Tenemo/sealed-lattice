@@ -181,7 +181,7 @@ pub(crate) use compact_ring_vector::{
     CompactPublicKeyGenerationRuntime, CompactPublicKeyGenerationRuntimeError,
     CompactPublicKeyGenerationRuntimePoll, CompactPublicKeyGenerationRuntimeStage,
     CompactPublicKeyGenerationStorageOwner, PreparedCompactPublicKeyGenerationRuntime,
-    prepare_compact_public_key_assignment_sources,
+    prepare_compact_public_key_assignment_sources_with_diagnostics,
 };
 pub(crate) use compact_ring_vector::{
     CompactStructuredWitnessCovectorAccumulator, CompactStructuredWitnessCovectorAccumulatorPoll,

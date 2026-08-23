@@ -77,6 +77,8 @@ const GENERATION_POLL_RESUME_COMPLETE: u32 = 7;
 const GENERATION_POLL_AUTHENTICATED_SOURCE_READ_READY: u32 = 8;
 const GENERATION_POLL_AUTHENTICATED_TRANSCRIPT_PREFIX_REQUIRED: u32 = 9;
 const COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT: usize = 10;
+const COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH: usize =
+    size_of::<u32>() * 2 + size_of::<f64>() * 2;
 const AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH: usize = 160;
 const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT: usize = 20;
 const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH: usize =
@@ -2801,6 +2803,88 @@ fn generation_preparation_error_status(error: CommonProofGenerationPreparationEr
 pub const extern "C" fn sealed_lattice_compact_public_key_generation_external_memory_usage_word_count()
 -> usize {
     COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_generation_diagnostic_record_byte_length()
+-> u32 {
+    COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_diagnostic_observation_count(
+    operation_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        let count = generation
+            .with_diagnostic_observations(|observations| observations.len())
+            .ok_or(CompactPublicKeyGenerationRuntimeError::WrongPhase)?;
+        u32::try_from(count).map_err(|_| CompactPublicKeyGenerationRuntimeError::WrongPhase)
+    });
+    match result {
+        Ok(count) => {
+            unsafe { write_status(status_pointer, 0) };
+            count
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_diagnostic_observations(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .with_diagnostic_observations(|observations| {
+                let expected_byte_length = observations
+                    .len()
+                    .checked_mul(COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH)
+                    .ok_or(CompactPublicKeyGenerationRuntimeError::WrongPhase)?;
+                if output.len() != expected_byte_length {
+                    return Err(CompactPublicKeyGenerationRuntimeError::WrongPhase);
+                }
+                for (observation_index, observation) in observations.iter().copied().enumerate() {
+                    let offset = observation_index
+                        * COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH;
+                    output[offset..offset + size_of::<u32>()]
+                        .copy_from_slice(&observation.owner().canonical_code().to_le_bytes());
+                    output[offset + size_of::<u32>()..offset + 2 * size_of::<u32>()].fill(0);
+                    output[offset + 2 * size_of::<u32>()..offset + 2 * size_of::<u32>() + 8]
+                        .copy_from_slice(
+                            &observation
+                                .started_at_milliseconds()
+                                .to_bits()
+                                .to_le_bytes(),
+                        );
+                    output[offset + 2 * size_of::<u32>() + 8..offset + 2 * size_of::<u32>() + 16]
+                        .copy_from_slice(
+                            &observation
+                                .finished_at_milliseconds()
+                                .to_bits()
+                                .to_le_bytes(),
+                        );
+                }
+                Ok(())
+            })
+            .ok_or(CompactPublicKeyGenerationRuntimeError::WrongPhase)?
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
 }
 
 /// Advances one bounded scalar compact-producer step. The returned poll code

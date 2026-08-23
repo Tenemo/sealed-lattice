@@ -7,6 +7,7 @@
 #![recursion_limit = "256"]
 
 pub(crate) mod bgv;
+mod diagnostic_clock;
 mod encoding;
 pub mod foundation;
 pub(crate) mod hashing;

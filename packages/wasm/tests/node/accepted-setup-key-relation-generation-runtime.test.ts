@@ -19,6 +19,7 @@ import {
     canonicalStreamDomains,
     CanonicalStreamInternalError,
 } from '#packages/wasm/src/canonical-stream-runtime';
+import { CommonProofWorkerRuntimeError } from '#packages/wasm/src/common-proof-worker-runtime/external-memory';
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
@@ -323,7 +324,23 @@ const writeStatus = (
     new DataView(memory.buffer).setUint32(pointer, status, true);
 };
 
-const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
+type CompactGenerationDiagnosticRecordWriter = (view: DataView) => void;
+
+const writeValidCompactGenerationDiagnosticRecords: CompactGenerationDiagnosticRecordWriter =
+    (view) => {
+        view.setUint32(0, 2, true);
+        view.setUint32(4, 0, true);
+        view.setFloat64(8, 1, true);
+        view.setFloat64(16, 3, true);
+        view.setUint32(24, 20, true);
+        view.setUint32(28, 0, true);
+        view.setFloat64(32, 4, true);
+        view.setFloat64(40, 4.5, true);
+    };
+
+const createFakeRuntime = (
+    writeCompactGenerationDiagnosticRecords: CompactGenerationDiagnosticRecordWriter = writeValidCompactGenerationDiagnosticRecords,
+): FakeSetupKeyRelationRuntime => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     const allocations = new Map<number, number>();
     const authenticatedTranscriptPrefixes: Array<
@@ -499,6 +516,23 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
             compactCancelledHandles.push(handle);
             return 0;
         },
+        sealed_lattice_compact_public_key_generation_copy_diagnostic_observations:
+            (
+                _handle: number,
+                outputPointer: number,
+                outputByteLength: number,
+            ) => {
+                if (outputByteLength !== 48) {
+                    return 11;
+                }
+                const view = new DataView(
+                    memory.buffer,
+                    outputPointer,
+                    outputByteLength,
+                );
+                writeCompactGenerationDiagnosticRecords(view);
+                return 0;
+            },
         sealed_lattice_compact_public_key_generation_copy_external_memory_usage:
             (
                 _handle: number,
@@ -590,6 +624,13 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
         },
         sealed_lattice_compact_public_key_generation_external_memory_usage_word_count:
             () => 10,
+        sealed_lattice_compact_public_key_generation_diagnostic_record_byte_length:
+            () => 24,
+        sealed_lattice_compact_public_key_generation_diagnostic_observation_count:
+            (_handle: number, statusPointer: number) => {
+                writeStatus(memory, statusPointer, 0);
+                return 2;
+            },
         sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length:
             (
                 _handle: number,
@@ -827,6 +868,26 @@ const compactGenerationInput = (
     workerKernel: Object.freeze({ kernel: runtime.kernel }),
     yieldControl: () => Promise.resolve(),
 });
+
+const openFakeCompactGenerationExternalMemory = () =>
+    Object.freeze({
+        copyBrowserStorageAccounting: () =>
+            Object.freeze({
+                claimedBufferCount: 1n,
+                claimedByteLength: 2n,
+                maximumLiveBufferByteLength: 3n,
+                maximumLiveBufferCount: 1,
+                releasedBufferCount: 4n,
+                releasedByteLength: 5n,
+                secretRecordOpenByteLength: 6n,
+                secretRecordOpenCount: 7n,
+                secretRecordSealByteLength: 8n,
+                secretRecordSealCount: 9n,
+                transferredBufferCount: 10n,
+                transferredByteLength: 11n,
+            }),
+        executeTransaction: () => Promise.resolve([]),
+    });
 
 const verificationInput = (
     kernel: TranscriptCoreKernel,
@@ -1110,24 +1171,7 @@ describe('accepted-setup compact public-key generation', () => {
                             ),
                             storageOwner: opening.storageOwner,
                         });
-                        return Object.freeze({
-                            copyBrowserStorageAccounting: () =>
-                                Object.freeze({
-                                    claimedBufferCount: 1n,
-                                    claimedByteLength: 2n,
-                                    maximumLiveBufferByteLength: 3n,
-                                    maximumLiveBufferCount: 1,
-                                    releasedBufferCount: 4n,
-                                    releasedByteLength: 5n,
-                                    secretRecordOpenByteLength: 6n,
-                                    secretRecordOpenCount: 7n,
-                                    secretRecordSealByteLength: 8n,
-                                    secretRecordSealCount: 9n,
-                                    transferredBufferCount: 10n,
-                                    transferredByteLength: 11n,
-                                }),
-                            executeTransaction: () => Promise.resolve([]),
-                        });
+                        return openFakeCompactGenerationExternalMemory();
                     },
                     undefined,
                     (observation) => {
@@ -1221,6 +1265,9 @@ describe('accepted-setup compact public-key generation', () => {
             'storage-request-cleanup',
             'kernel-poll',
             'kernel-poll',
+            'diagnostic-observation-copy',
+            'common-secret-sampling',
+            'fiat-shamir-public-input-absorption',
             'external-memory-accounting-copy',
             'transport-bindings-copy',
             'canonical-public-input-copy',
@@ -1260,6 +1307,53 @@ describe('accepted-setup compact public-key generation', () => {
                 precedingGenerationStageIdentifier: 'cfw',
             },
         ]);
+    });
+
+    it.each([
+        [
+            'unknown owner',
+            (view: DataView) => {
+                writeValidCompactGenerationDiagnosticRecords(view);
+                view.setUint32(0, 21, true);
+            },
+        ],
+        [
+            'nonzero reserved word',
+            (view: DataView) => {
+                writeValidCompactGenerationDiagnosticRecords(view);
+                view.setUint32(4, 1, true);
+            },
+        ],
+        [
+            'nonfinite start time',
+            (view: DataView) => {
+                writeValidCompactGenerationDiagnosticRecords(view);
+                view.setFloat64(8, Number.NaN, true);
+            },
+        ],
+        [
+            'reversed interval',
+            (view: DataView) => {
+                writeValidCompactGenerationDiagnosticRecords(view);
+                view.setFloat64(16, 0.5, true);
+            },
+        ],
+    ])('refuses a diagnostic record with %s', async (_label, writer) => {
+        const runtime = createFakeRuntime(writer);
+
+        await expect(
+            generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactGenerationInput(
+                    runtime,
+                    openFakeCompactGenerationExternalMemory,
+                    undefined,
+                    () => undefined,
+                ) as never,
+            ),
+        ).rejects.toBeInstanceOf(CommonProofWorkerRuntimeError);
+        expect(runtime.compactReleasedCompletedHandles).toEqual([]);
+        expect(runtime.compactCancelledHandles).toEqual([61]);
+        expect(runtime.allocations.size).toBe(0);
     });
 
     it('cancels retained producer authority when cancellation precedes polling', async () => {

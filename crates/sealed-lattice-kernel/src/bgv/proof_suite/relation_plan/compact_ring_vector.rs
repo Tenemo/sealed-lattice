@@ -22,6 +22,7 @@ use super::super::compact_response_merkle::CompactResponseMerkleGeometry;
 use super::super::{
     CommonProofProverError, CommonProofSourcePolynomialProvider,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+    CompactGenerationDiagnosticCollector, CompactGenerationDiagnosticOwner,
 };
 
 use super::key_relation::{
@@ -1408,17 +1409,45 @@ impl PreparedCompactPublicKeyAssignmentSources {
     }
 }
 
-pub(crate) fn prepare_compact_public_key_assignment_sources(
+fn observe_compact_preparation<ResultValue>(
+    diagnostics: Option<&CompactGenerationDiagnosticCollector>,
+    owner: CompactGenerationDiagnosticOwner,
+    operation: impl FnOnce() -> ResultValue,
+) -> ResultValue {
+    match diagnostics {
+        Some(diagnostics) => diagnostics.measure(owner, operation),
+        None => operation(),
+    }
+}
+
+fn prepare_compact_public_key_assignment_sources_with_optional_diagnostics(
     source: &SetupGenerationKeyRelationSource<'_, '_>,
+    diagnostics: Option<&CompactGenerationDiagnosticCollector>,
 ) -> Result<PreparedCompactPublicKeyAssignmentSources, CommonProofProverError> {
     if source.family() != SetupKeyRelationProofFamily::PublicKeyShare {
         return Err(CommonProofProverError::InvalidInput);
     }
-    let (input, relation_context) = selected_input_and_context()?;
-    let relation = selected_compact_public_key_relation_catalog()?;
-    let source_catalog = selected_compact_public_key_assignment_source_catalog(&relation)?;
-    let contract = selected_compact_public_key_proof_contract()
-        .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let (input, relation_context) = observe_compact_preparation(
+        diagnostics,
+        CompactGenerationDiagnosticOwner::ProductionRelationContextLoading,
+        selected_input_and_context,
+    )?;
+    let relation = observe_compact_preparation(
+        diagnostics,
+        CompactGenerationDiagnosticOwner::RelationCatalogLoadingAndValidation,
+        selected_compact_public_key_relation_catalog,
+    )?;
+    let source_catalog = observe_compact_preparation(
+        diagnostics,
+        CompactGenerationDiagnosticOwner::AssignmentSourceCatalogLoadingAndValidation,
+        || selected_compact_public_key_assignment_source_catalog(&relation),
+    )?;
+    let contract = observe_compact_preparation(
+        diagnostics,
+        CompactGenerationDiagnosticOwner::ProofContractLoading,
+        selected_compact_public_key_proof_contract,
+    )
+    .map_err(|_| CommonProofProverError::InvalidInput)?;
     let verifier_inputs = contract.verifier_inputs();
     if verifier_inputs.statement_layout.schema_identifier()
         != ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
@@ -1452,16 +1481,28 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
     if relation.ring_degree() != input.ring_degree {
         return Err(CommonProofProverError::InvalidInput);
     }
-    let (source_polynomials, assignment_catalog) = CompactPublicKeySourcePolynomialAdapter::new(
-        source,
-        &relation,
-        relation_context,
-        source_catalog,
+    let (source_polynomials, assignment_catalog) = observe_compact_preparation(
+        diagnostics,
+        CompactGenerationDiagnosticOwner::SourceAdapterPreparation,
+        || {
+            CompactPublicKeySourcePolynomialAdapter::new(
+                source,
+                &relation,
+                relation_context,
+                source_catalog,
+            )
+        },
     )?;
-    let assignment_cursor = CompactAuthenticatedAssignmentCursor::new_from_catalog(
-        &relation,
-        assignment_catalog,
-        source_polynomials.request_context(),
+    let assignment_cursor = observe_compact_preparation(
+        diagnostics,
+        CompactGenerationDiagnosticOwner::AssignmentCursorPreparation,
+        || {
+            CompactAuthenticatedAssignmentCursor::new_from_catalog(
+                &relation,
+                assignment_catalog,
+                source_polynomials.request_context(),
+            )
+        },
     )?;
     Ok(PreparedCompactPublicKeyAssignmentSources {
         relation,
@@ -1474,6 +1515,23 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         compact_construction_identity_hash,
         checkpoint_schedule_digest,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn prepare_compact_public_key_assignment_sources(
+    source: &SetupGenerationKeyRelationSource<'_, '_>,
+) -> Result<PreparedCompactPublicKeyAssignmentSources, CommonProofProverError> {
+    prepare_compact_public_key_assignment_sources_with_optional_diagnostics(source, None)
+}
+
+pub(crate) fn prepare_compact_public_key_assignment_sources_with_diagnostics(
+    source: &SetupGenerationKeyRelationSource<'_, '_>,
+    diagnostics: &CompactGenerationDiagnosticCollector,
+) -> Result<PreparedCompactPublicKeyAssignmentSources, CommonProofProverError> {
+    prepare_compact_public_key_assignment_sources_with_optional_diagnostics(
+        source,
+        Some(diagnostics),
+    )
 }
 
 fn encode_compact_public_key_assignment_public_input(

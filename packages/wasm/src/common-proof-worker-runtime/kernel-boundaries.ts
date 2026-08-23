@@ -70,6 +70,8 @@ const compactPublicKeyGenerationPollComplete = 5;
 const compactPublicKeyGenerationFirstStage = 1;
 const compactPublicKeyGenerationCompleteStage = 17;
 const compactPublicKeyGenerationExternalMemoryUsageWordCount = 10;
+const compactPublicKeyGenerationDiagnosticRecordByteLength = 24;
+const maximumCompactPublicKeyGenerationDiagnosticObservationCount = 512;
 export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
@@ -292,6 +294,12 @@ type CommonProofVerificationKernelPoll =
     | Readonly<{ kind: 'complete' }>;
 
 export type CompactPublicKeyGenerationStorageOwner = 'responseTrees' | 'cfw';
+
+type CompactPublicKeyGenerationDiagnosticObservation = Readonly<{
+    finishedAtMilliseconds: number;
+    ownerCode: number;
+    startedAtMilliseconds: number;
+}>;
 
 type CompactPublicKeyGenerationKernelPoll =
     | Readonly<{
@@ -1853,6 +1861,138 @@ export class CompactPublicKeyGenerationKernelBoundary {
             createResourceError: resourceFailure,
             label: 'compact public-key producer worker',
         });
+    }
+
+    public copyDiagnosticObservations(
+        operationHandle: number,
+    ): readonly CompactPublicKeyGenerationDiagnosticObservation[] {
+        requireLiveHandle(
+            operationHandle,
+            'The compact public-key generation operation handle',
+        );
+        return this.#context.runExclusive(
+            'compact public-key generation diagnostic copy',
+            () => {
+                const statusPointer =
+                    this.#memoryBoundary.allocateZeroedWords(1);
+                let outputPointer = 0;
+                let outputByteLength = 0;
+                try {
+                    const declaredRecordByteLength = requireUnsigned32(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_generation_diagnostic_record_byte_length',
+                        )(),
+                        'The compact public-key generation diagnostic record byte length',
+                    );
+                    if (
+                        declaredRecordByteLength !==
+                        compactPublicKeyGenerationDiagnosticRecordByteLength
+                    ) {
+                        throw kernelFailure(
+                            'The compact public-key producer exposed malformed diagnostic geometry.',
+                        );
+                    }
+                    const observationCount = requireUnsigned32(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_generation_diagnostic_observation_count',
+                        )(operationHandle, statusPointer),
+                        'The compact public-key generation diagnostic observation count',
+                    );
+                    const [status] = this.#memoryBoundary.readWords(
+                        statusPointer,
+                        1,
+                    );
+                    requireKernelSuccess(
+                        status,
+                        'compact public-key generation diagnostic description',
+                    );
+                    if (
+                        observationCount >
+                        maximumCompactPublicKeyGenerationDiagnosticObservationCount
+                    ) {
+                        throw kernelFailure(
+                            'The compact public-key producer exceeded the diagnostic observation bound.',
+                        );
+                    }
+                    if (observationCount === 0) {
+                        return Object.freeze([]);
+                    }
+                    outputByteLength =
+                        observationCount * declaredRecordByteLength;
+                    outputPointer =
+                        this.#memoryBoundary.allocate(outputByteLength);
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_compact_public_key_generation_copy_diagnostic_observations',
+                        )(operationHandle, outputPointer, outputByteLength),
+                        'compact public-key generation diagnostic copy',
+                    );
+                    const view = new DataView(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        outputByteLength,
+                    );
+                    const observations: CompactPublicKeyGenerationDiagnosticObservation[] =
+                        [];
+                    for (
+                        let observationIndex = 0;
+                        observationIndex < observationCount;
+                        observationIndex += 1
+                    ) {
+                        const offset =
+                            observationIndex * declaredRecordByteLength;
+                        const ownerCode = view.getUint32(offset, true);
+                        const reserved = view.getUint32(
+                            offset + wasm32WordByteLength,
+                            true,
+                        );
+                        const startedAtMilliseconds = view.getFloat64(
+                            offset + 2 * wasm32WordByteLength,
+                            true,
+                        );
+                        const finishedAtMilliseconds = view.getFloat64(
+                            offset + 2 * wasm32WordByteLength + 8,
+                            true,
+                        );
+                        if (
+                            ownerCode < 1 ||
+                            ownerCode > 20 ||
+                            reserved !== 0 ||
+                            !Number.isFinite(startedAtMilliseconds) ||
+                            !Number.isFinite(finishedAtMilliseconds) ||
+                            startedAtMilliseconds < 0 ||
+                            finishedAtMilliseconds < startedAtMilliseconds
+                        ) {
+                            throw kernelFailure(
+                                'The compact public-key producer exposed a malformed diagnostic observation.',
+                            );
+                        }
+                        observations.push(
+                            Object.freeze({
+                                finishedAtMilliseconds,
+                                ownerCode,
+                                startedAtMilliseconds,
+                            }),
+                        );
+                    }
+                    return Object.freeze(observations);
+                } finally {
+                    if (outputPointer !== 0) {
+                        this.#memoryBoundary.zeroAndDeallocate(
+                            outputPointer,
+                            outputByteLength,
+                        );
+                    }
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        statusPointer,
+                        wasm32WordByteLength,
+                    );
+                }
+            },
+        );
     }
 
     public poll(

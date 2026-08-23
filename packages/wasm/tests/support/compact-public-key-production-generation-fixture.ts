@@ -400,6 +400,12 @@ type CompactPublicKeyParticipantClientFixture = Readonly<{
 
 type CompactPublicKeyProductionGenerationFixtureInput = Readonly<{
     expectedKernelSha256Hex?: string;
+    observeKernelInitialization?: (
+        observation: Readonly<{
+            durationMilliseconds: number;
+            rosterPosition: number;
+        }>,
+    ) => void;
 }>;
 
 /**
@@ -411,7 +417,22 @@ type CompactPublicKeyProductionGenerationFixtureInput = Readonly<{
 export const openCompactPublicKeyProductionGenerationFixture = async (
     input: CompactPublicKeyProductionGenerationFixtureInput = {},
 ): Promise<CompactPublicKeyProductionGenerationFixture> => {
-    const kernel = await loadFixtureKernel(input.expectedKernelSha256Hex);
+    const loadMeasuredFixtureKernel = async (
+        rosterPosition: number,
+    ): Promise<TranscriptCoreKernel> => {
+        const startedAtMilliseconds = performance.now();
+        const loadedKernel = await loadFixtureKernel(
+            input.expectedKernelSha256Hex,
+        );
+        input.observeKernelInitialization?.(
+            Object.freeze({
+                durationMilliseconds: performance.now() - startedAtMilliseconds,
+                rosterPosition,
+            }),
+        );
+        return loadedKernel;
+    };
+    const kernel = await loadMeasuredFixtureKernel(0);
     const initialStateVector = createStateVerifierTestVector();
     const canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer> =
         loadCompactCandidateSuiteRecord();
@@ -443,7 +464,7 @@ export const openCompactPublicKeyProductionGenerationFixture = async (
             const participantKernel =
                 rosterPosition === 0
                     ? kernel
-                    : await loadFixtureKernel(input.expectedKernelSha256Hex);
+                    : await loadMeasuredFixtureKernel(rosterPosition);
             const participantBoardContext =
                 createCanonicalBoardContextTestInput(
                     participantKernel,

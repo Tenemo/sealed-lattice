@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { foundationProfile } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import { verifyCompactPublicKeyAlgebraicallyInClosedWorker } from '#packages/wasm/src/common-proof-worker-runtime';
@@ -277,19 +278,40 @@ const operationOwnerOrdinal: Readonly<
     'reference-board-authorization': 2,
     'setup-intent-authorization': 3,
     'kernel-preparation': 4,
-    'kernel-poll': 5,
-    'storage-request-copy-and-decode': 6,
-    'storage-open': 7,
-    'storage-transaction': 8,
-    'storage-response-encode-and-supply': 9,
-    'storage-request-cleanup': 10,
-    'external-memory-accounting-copy': 11,
-    'transport-bindings-copy': 12,
-    'canonical-public-input-copy': 13,
-    'canonical-proof-copy': 14,
-    'selected-suite-release': 15,
-    'kernel-release': 16,
-    'kernel-cancellation': 17,
+    'upstream-authority-resolution': 5,
+    'common-secret-sampling': 6,
+    'anchor-opening-construction': 7,
+    'public-key-share-construction': 8,
+    'reference-authority-retention': 9,
+    'relation-source-resolution': 10,
+    'setup-intent-source-resolution': 11,
+    'state-reservation-resolution': 12,
+    'proof-contract-loading': 13,
+    'prepared-attempt-resolution': 14,
+    'statement-decoding': 15,
+    'production-relation-context-loading': 16,
+    'relation-catalog-loading-and-validation': 17,
+    'assignment-source-catalog-loading-and-validation': 18,
+    'source-adapter-preparation': 19,
+    'assignment-cursor-preparation': 20,
+    'runtime-contract-loading': 21,
+    'runtime-initialization-and-retention': 22,
+    'fiat-shamir-challenge-derivation': 23,
+    'fiat-shamir-public-input-absorption': 24,
+    'diagnostic-observation-copy': 25,
+    'kernel-poll': 26,
+    'storage-request-copy-and-decode': 27,
+    'storage-open': 28,
+    'storage-transaction': 29,
+    'storage-response-encode-and-supply': 30,
+    'storage-request-cleanup': 31,
+    'external-memory-accounting-copy': 32,
+    'transport-bindings-copy': 33,
+    'canonical-public-input-copy': 34,
+    'canonical-proof-copy': 35,
+    'selected-suite-release': 36,
+    'kernel-release': 37,
+    'kernel-cancellation': 38,
 });
 
 const generationStageOrdinal: Readonly<
@@ -700,12 +722,36 @@ describe('Compact public-key scalar WASM proof evidence', () => {
         const normalizedWasmSha256Hex = createHash('sha256')
             .update(normalizeTranscriptCoreKernelBytesForHash(wasmBytes))
             .digest('hex');
+        const kernelInitializationObservations: Array<
+            Readonly<{
+                durationMilliseconds: number;
+                rosterPosition: number;
+            }>
+        > = [];
         const fixtureStartedAt = performance.now();
         const fixture = await openCompactPublicKeyProductionGenerationFixture({
             expectedKernelSha256Hex: normalizedWasmSha256Hex,
+            observeKernelInitialization: (observation) => {
+                kernelInitializationObservations.push(observation);
+            },
         });
         const fixtureDurationMilliseconds =
             performance.now() - fixtureStartedAt;
+        expect(
+            kernelInitializationObservations.map(
+                ({ rosterPosition }) => rosterPosition,
+            ),
+        ).toEqual(
+            Array.from(
+                { length: foundationProfile.participantCount },
+                (_, rosterPosition) => rosterPosition,
+            ),
+        );
+        expect(
+            kernelInitializationObservations.every(
+                ({ durationMilliseconds }) => durationMilliseconds >= 0,
+            ),
+        ).toBe(true);
         const stores = new Map<
             'cfw' | 'responseTrees',
             FileBackedCommonProofExternalMemory
@@ -904,9 +950,10 @@ describe('Compact public-key scalar WASM proof evidence', () => {
                     {
                         artifact: artifactEvidence,
                         fixtureDurationMilliseconds,
+                        kernelInitializationObservations,
                         generation: generationEvidence,
                         phase: 'generation complete; verification not claimed',
-                        schemaVersion: 2,
+                        schemaVersion: 3,
                     },
                     undefined,
                     2,
@@ -975,6 +1022,7 @@ describe('Compact public-key scalar WASM proof evidence', () => {
             const evidenceRecord = Object.freeze({
                 artifact: artifactEvidence,
                 fixtureDurationMilliseconds,
+                kernelInitializationObservations,
                 generation: generationEvidence,
                 hostileVerification: Object.freeze({
                     isValid: hostileVerification.isValid,
@@ -992,7 +1040,7 @@ describe('Compact public-key scalar WASM proof evidence', () => {
                     progress: completedVerificationProgress,
                     scope: 'Canonical transport plus complete algebraic CFW and WHIR verification; source correspondence and workflow capability are not claimed by this record.',
                 }),
-                schemaVersion: 2,
+                schemaVersion: 3,
             });
             await writeFile(
                 evidencePath,

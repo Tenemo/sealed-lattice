@@ -1497,6 +1497,16 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
     sealed_lattice_compact_public_key_transport_bindings_byte_length?: () => number;
     sealed_lattice_compact_public_key_generation_external_memory_usage_word_count?: () => number;
+    sealed_lattice_compact_public_key_generation_diagnostic_record_byte_length?: () => number;
+    sealed_lattice_compact_public_key_generation_diagnostic_observation_count?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_diagnostic_observations?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
     sealed_lattice_compact_public_key_generation_poll?: (
         operationHandle: number,
         maximumWorkUnitCount: number,
