@@ -238,6 +238,80 @@ pub(crate) struct GaloisKeyShareAnchorSourceLayout {
     pub(super) quotients: Box<[TrusteeRadixThreeQuotientWitness]>,
 }
 
+#[cfg(test)]
+impl CompiledRelinearizationRoundOneRelation {
+    /// Counts the source-level modular quotient ring vectors before any compact
+    /// representation introduces lookup inverses or radix-three high carries.
+    pub(crate) fn semantic_modular_quotient_ring_vector_count(
+        &self,
+    ) -> Result<u64, RelationPlanError> {
+        checked_quotient_ring_vector_count(
+            self.source_layout
+                .quotients_by_row
+                .len()
+                .checked_mul(2)
+                .ok_or(RelationPlanError::CountOverflow)?,
+            &self.source_layout.ordered_anchors,
+        )
+    }
+}
+
+#[cfg(test)]
+impl CompiledRelinearizationRoundTwoRelation {
+    /// Counts the source-level modular quotient ring vectors before any compact
+    /// representation introduces lookup inverses or radix-three high carries.
+    pub(crate) fn semantic_modular_quotient_ring_vector_count(
+        &self,
+    ) -> Result<u64, RelationPlanError> {
+        let round_one_and_two_count = self
+            .source_layout
+            .round_one_quotients_by_row
+            .len()
+            .checked_mul(2)
+            .and_then(|count| {
+                count.checked_add(self.source_layout.round_two_quotients_by_row.len())
+            })
+            .ok_or(RelationPlanError::CountOverflow)?;
+        checked_quotient_ring_vector_count(
+            round_one_and_two_count,
+            &self.source_layout.ordered_anchors,
+        )
+    }
+}
+
+#[cfg(test)]
+impl CompiledGaloisKeyShareRelation {
+    /// Counts the source-level modular quotient ring vectors before any compact
+    /// representation introduces lookup inverses or radix-three high carries.
+    pub(crate) fn semantic_modular_quotient_ring_vector_count(
+        &self,
+    ) -> Result<u64, RelationPlanError> {
+        let entry_count = self
+            .source_layout
+            .ordered_entries
+            .iter()
+            .try_fold(0_usize, |count, entry| {
+                count.checked_add(entry.quotients_by_row.len())
+            })
+            .ok_or(RelationPlanError::CountOverflow)?;
+        checked_quotient_ring_vector_count(entry_count, &self.source_layout.ordered_anchors)
+    }
+}
+
+#[cfg(test)]
+fn checked_quotient_ring_vector_count(
+    relation_quotient_count: usize,
+    ordered_anchors: &[GaloisKeyShareAnchorSourceLayout],
+) -> Result<u64, RelationPlanError> {
+    let total_count = ordered_anchors
+        .iter()
+        .try_fold(relation_quotient_count, |count, anchor| {
+            count.checked_add(anchor.quotients.len())
+        })
+        .ok_or(RelationPlanError::CountOverflow)?;
+    u64::try_from(total_count).map_err(|_| RelationPlanError::CountOverflow)
+}
+
 impl TrusteeEvaluationKeyRelationGeometry {
     pub(crate) fn selected_catalog_prefix(
         &self,

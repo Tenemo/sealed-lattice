@@ -105,21 +105,26 @@ The complete ceremony is not implemented or certified.
   accept the same proof and public-input bytes; malformed framing refuses. This
   covers one proof family only and is not browser, lifecycle, source-
   correspondence, or phone evidence. It does not establish a concrete SHAKE or
-  complete Fiat--Shamir security reduction. No production proof system is
-  selected; the remaining proof families and their hostile corpora, complete
-  security argument, and browser-lifecycle evidence remain open. The rejected
-  previous implementation cannot act as a fallback or evidence source.
+  complete Fiat--Shamir security reduction. Production-derived evaluator-key
+  quotient witnesses alone exceed the current common-proof scratch ceiling
+  before other witness categories are added, so the present compact construction
+  requires a geometry redesign before bounding-family proof or browser work can
+  continue. No production proof system is selected; the remaining proof families
+  and their hostile corpora, complete security argument, and browser-lifecycle
+  evidence remain open. The rejected previous implementation cannot act as a
+  fallback or evidence source.
 - **Browser runtime and custody:** A scalar WebAssembly build, one matched
   reference generation-and-verification path, typed worker foundations,
   authenticated checkpoint primitives, and browser-storage groundwork exist.
-  The guarded Node.js run exposes a long uninterrupted generation interval whose
-  owning phase is not yet localized, plus severe copy-on-write amplification in
-  its file-backed development adapter. A separate nonqualifying desktop
-  Chromium diagnostic exposes namespace-wide capacity scanning and incomplete
-  physical reclamation in the current browser adapter. Browser execution,
-  checkpointed worker-loss restoration, the remaining proof paths, incremental
-  accounting, repair, persistence, quota, eviction, and rollback evidence remain
-  incomplete.
+  Phase instrumentation localizes the guarded Node.js run's long uninterrupted
+  interval to synchronous production-source construction before pollable proof
+  generation begins; relation-catalog loading is not its owner. The file-backed
+  development adapter still has severe whole-object copy-on-write amplification.
+  Browser custody already chunks large proof objects, but capacity accounting
+  still scans namespace metadata, and physical reclamation remains incomplete.
+  Browser execution, checkpointed worker-loss restoration, the remaining proof
+  paths, incremental accounting, repair, persistence, quota, eviction, and
+  rollback evidence remain incomplete.
 - **Ceremony workflow:** Setup, ballot, aggregation, evaluation, finality, and
   release are not yet connected end to end through participant-owned browser
   capabilities.

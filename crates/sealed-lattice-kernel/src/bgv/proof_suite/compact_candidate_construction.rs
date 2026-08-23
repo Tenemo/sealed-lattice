@@ -610,6 +610,65 @@ mod tests {
 
     use super::*;
 
+    fn maximum_public_source_column_count(family: &CompactCandidateFamilyEntry) -> u64 {
+        family
+            .variants
+            .iter()
+            .map(|variant| {
+                u64::from(variant.verifier_sequence_column_count)
+                    + u64::from(variant.bound_tree_column_count)
+            })
+            .max()
+            .expect("every production family has a relation variant")
+    }
+
+    fn maximum_prover_column_count(family: &CompactCandidateFamilyEntry) -> u64 {
+        family
+            .variants
+            .iter()
+            .map(|variant| u64::from(variant.prover_column_count))
+            .max()
+            .expect("every production family has a relation variant")
+    }
+
+    fn maximum_constraint_count(family: &CompactCandidateFamilyEntry) -> u64 {
+        family
+            .variants
+            .iter()
+            .map(|variant| variant.constraint_count)
+            .max()
+            .expect("every production family has a relation variant")
+    }
+
+    fn uniquely_largest_candidate_family<'a>(
+        families: &'a [CompactCandidateFamilyEntry],
+        value: &impl Fn(&CompactCandidateFamilyEntry) -> u64,
+    ) -> &'a CompactCandidateFamilyEntry {
+        let maximum = families
+            .iter()
+            .map(&value)
+            .max()
+            .expect("the production family inventory is non-empty");
+        let mut matching = families.iter().filter(|family| value(family) == maximum);
+        let selected = matching.next().expect("the maximum family exists");
+        assert!(matching.next().is_none(), "the maximum family is unique");
+        selected
+    }
+
+    fn assert_unique_family_maximum(
+        families: &[CompactCandidateFamilyEntry],
+        value: impl Fn(&CompactCandidateFamilyEntry) -> u64,
+        expected_schema_identifier: u16,
+        expected_value: u64,
+    ) {
+        let selected = uniquely_largest_candidate_family(families, &value);
+        assert_eq!(
+            selected.application_statement_schema_identifier,
+            expected_schema_identifier
+        );
+        assert_eq!(value(selected), expected_value);
+    }
+
     #[test]
     fn selected_compact_candidate_derives_exact_profile_from_canonical_authorities() {
         let construction = derive_selected_compact_candidate_construction()
@@ -657,6 +716,37 @@ mod tests {
                 && family.canonical_relation_plan_hash != [0_u8; Hash512::BYTE_LENGTH]
                 && !family.variants.is_empty()
         }));
+
+        assert_unique_family_maximum(
+            &construction.ordered_families,
+            maximum_public_source_column_count,
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            20_680,
+        );
+        assert_unique_family_maximum(
+            &construction.ordered_families,
+            maximum_prover_column_count,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+            223_792,
+        );
+        assert_unique_family_maximum(
+            &construction.ordered_families,
+            maximum_constraint_count,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+            339_284,
+        );
+        assert_unique_family_maximum(
+            &construction.ordered_families,
+            |family| u64::from(family.physical_proof_application_count),
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+            20,
+        );
+        assert_unique_family_maximum(
+            &construction.ordered_families,
+            |family| u64::from(family.logical_relation_instance_count),
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            60,
+        );
 
         let public_key = construction
             .ordered_families

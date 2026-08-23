@@ -107,8 +107,12 @@ and implementation issues below.
   participant snapshot is the newest one. By design, lost or unverifiable state
   retires that participant from the action instead of permitting recovery or
   migration.
-- `SEC-004`: No production proof system is selected. The rejected previous
-  implementation cannot be used as a fallback or as evidence.
+- `SEC-004`: No production proof system is selected. Under the current compact
+  lowering, production-derived evaluator-key quotient witnesses alone exceed
+  the common-proof scratch ceiling before other witness categories are added.
+  The construction requires a reviewed geometry redesign before further family
+  proof or browser qualification work. The rejected previous implementation
+  cannot be used as a fallback or as evidence.
 - `SEC-005`: One reference development proof family can be decoded and checked
   algebraically. A guarded Node.js development run generates one canonical proof
   through the scalar release WebAssembly artifact and a fresh scalar instance
