@@ -1,7 +1,7 @@
 {
   "recordKind": "selected-lattice-security-estimator-evidence",
   "recordVersion": 1,
-  "inputPayloadSha256": "0ee7d3e436dc347716cbd16d3d0e6d406fc4fe8e09bf882ff0efddc5a93250e7",
+  "inputPayloadSha256": "6559d876608f0fa18adbd8f8c694960318e0956cadbf0dac62d32f635d778a3e",
   "input": {
     "sourceAuthority": [
       {
@@ -22,15 +22,15 @@
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/evaluator/top_k/mod.rs",
-        "sha256": "290a2a274f69cdfbb0cba7cba0b1563faf24e9380d930ae89f9a9d3ba40ea8fd"
+        "sha256": "91befe04a95ffe6f3487d3aecd070cef9797e8752733d2611a3f88e3b8efd43f"
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/evaluator/top_k/rotations.rs",
-        "sha256": "bd509e297cfd266f389d72a062fee3b2527bc5eb691b93933de8dbd042eb9270"
+        "sha256": "271299e239180607c2ea1967c7c0aaef8107cb87c176f9125b11906ad02c1e4f"
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_population.rs",
-        "sha256": "76311ccf819557f3c14c025cc84c78bc47099c2d8eae68a745e0d6318467d1b5"
+        "sha256": "f032fcbdaf37d0f59a9ca3b5e68c557192d3cd387c2777a80fc2922b6f7f9ed6"
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_relinearization.rs",
@@ -38,11 +38,11 @@
       },
       {
         "path": "crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/ballot_validity_adapter.rs",
-        "sha256": "3e2b4e399472bc63cc9c88b81fcbaa9ce09bc65ca4f4bfe03deed2fb9c401fba"
+        "sha256": "9240c829d2e9222300fa7df00591962a35f839b3458b4fa9889c02205173597f"
       },
       {
         "path": "crates/sealed-lattice-kernel/src/foundation/schemas.rs",
-        "sha256": "adae4bfb5e5bca0305786fe98c6dfd9de4b385f18b5d06161b299ccd9f8118da"
+        "sha256": "f6decb7b659661c0f7d5489852487880d653089abda69a7ce7a652593da84c2e"
       }
     ],
     "estimator": {
@@ -133,7 +133,7 @@
       ],
       "targetCiphertextLevel": 7,
       "participantCount": 10,
-      "optionCount": 20
+      "optionCount": 10
     },
     "distributions": {
       "trusteeSecretContribution": {
@@ -1081,5 +1081,5 @@
     "materialSuccessThreshold": "at least one half",
     "scope": "Known-attack scalar-LWE diagnostics under the explicitly named proxy model; reductions and joint structured or circular security remain separate assumptions."
   },
-  "outputPayloadSha256": "8d2bf0874efd9a8cb2084fec590d39577d75bb601a190f9db2d8c13a5098c68c"
+  "outputPayloadSha256": "8f05b216e396caba792daaf994caf716f8227fe975bd81a0e74694cab30660bb"
 }
