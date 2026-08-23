@@ -108,7 +108,15 @@ impl CfwReductionCatalog {
     pub(super) fn derive(
         relation: &CompactPublicKeyRelationCatalog,
     ) -> Result<Self, CompactStaticCatalogError> {
-        let relation_variable_count = relation.padded_witness_element_count();
+        let catalog =
+            Self::derive_for_relation_variable_count(relation.padded_witness_element_count())?;
+        catalog.check(relation)?;
+        Ok(catalog)
+    }
+
+    pub(super) fn derive_for_relation_variable_count(
+        relation_variable_count: u64,
+    ) -> Result<Self, CompactStaticCatalogError> {
         if !relation_variable_count.is_power_of_two() {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -263,7 +271,7 @@ impl CfwReductionCatalog {
             per_round_soundness_numerator: OUTER_MASK_MESSAGE_LENGTH,
             joint_constraint_soundness_numerator: JOINT_CONSTRAINT_SOUNDNESS_NUMERATOR,
         };
-        catalog.check(relation)?;
+        catalog.check_relation_variable_count(relation_variable_count)?;
         Ok(catalog)
     }
 
@@ -271,7 +279,13 @@ impl CfwReductionCatalog {
         &self,
         relation: &CompactPublicKeyRelationCatalog,
     ) -> Result<(), CompactStaticCatalogError> {
-        let expected_relation_variable_count = relation.padded_witness_element_count();
+        self.check_relation_variable_count(relation.padded_witness_element_count())
+    }
+
+    pub(super) fn check_relation_variable_count(
+        &self,
+        expected_relation_variable_count: u64,
+    ) -> Result<(), CompactStaticCatalogError> {
         if !expected_relation_variable_count.is_power_of_two() {
             return Err(CompactStaticCatalogError::InvalidGeometry);
         }
@@ -588,6 +602,26 @@ mod tests {
         assert_eq!(catalog.honest_verifier_simulator_oracle_count, 93);
         assert_eq!(catalog.base_field_characteristic % 2, 1);
         assert_eq!(catalog.extension_degree, 5);
+    }
+
+    #[test]
+    fn packet_sized_relation_variables_derive_without_a_public_key_catalog() {
+        for (ring_vector_count, expected_sumcheck_round_count) in
+            [(16_u64, 20_u32), (32, 21), (64, 22), (128, 23)]
+        {
+            let relation_variable_count = ring_vector_count * 32_768;
+            let catalog =
+                CfwReductionCatalog::derive_for_relation_variable_count(relation_variable_count)
+                    .expect("the packet-sized CFW reduction derives");
+            assert_eq!(catalog.relation_variable_count, relation_variable_count);
+            assert_eq!(
+                catalog.sumcheck_round_count(),
+                expected_sumcheck_round_count
+            );
+            catalog
+                .check_relation_variable_count(relation_variable_count)
+                .expect("the packet-sized CFW reduction independently checks");
+        }
     }
 
     #[test]

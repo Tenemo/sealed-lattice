@@ -71,6 +71,8 @@ mod compact_masking_public_covector;
 #[cfg(test)]
 mod compact_masking_simulator;
 mod compact_merkle_privacy;
+#[cfg(test)]
+mod compact_packetization_viability;
 mod compact_proof_contract;
 #[cfg_attr(
     not(test),
