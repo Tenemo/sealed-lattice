@@ -108,6 +108,8 @@ mod compact_response_merkle;
     )
 )]
 mod compact_response_tree_external;
+#[cfg(test)]
+mod compact_shared_source_packetization_viability;
 #[cfg_attr(
     not(test),
     expect(

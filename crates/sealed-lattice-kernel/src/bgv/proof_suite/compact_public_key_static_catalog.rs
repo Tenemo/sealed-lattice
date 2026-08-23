@@ -79,6 +79,15 @@ const PROOF_ALLOCATION_BOUND_BYTE_LENGTH: u64 = 268_435_456;
 
 type ChallengeField = BinomialExtensionField<Goldilocks, 5>;
 
+#[cfg(test)]
+pub(super) fn selected_initial_whir_codeword_byte_length(
+    message_element_count: u64,
+) -> Option<u64> {
+    message_element_count
+        .checked_shl(MAIN_CODE_LOG_INVERSE_RATE)?
+        .checked_mul(BASE_FIELD_ELEMENT_BYTE_LENGTH)
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ConfigurationOnlyChallenger<F>(core::marker::PhantomData<F>);
 
