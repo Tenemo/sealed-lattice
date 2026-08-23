@@ -19,7 +19,10 @@ use crate::bgv::proof_suite::{
 };
 use crate::bgv::proof_suite::{
     prover::requested_pre_challenge_source_column_ordinals,
-    relation_plan::{RelationColumnOrigin, RelationColumnValueType, RelationPlanVariant},
+    relation_plan::{
+        RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
+        RelationPlanVariant,
+    },
 };
 use crate::hashing::StreamingHash512;
 
@@ -32,13 +35,16 @@ use super::{
 const COMPACT_AUTHENTICATED_ASSIGNMENT_BINDING_DOMAIN: &str =
     "sealed-lattice/compact-ring-vector/authenticated-assignment-binding/v1";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(crate) enum CompactAssignmentStorage {
     PublicInput,
     Witness,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) enum CompactAuthenticatedSourceRole {
     PublicInput {
         vector_ordinal: u64,
@@ -55,7 +61,8 @@ pub(crate) enum CompactAuthenticatedSourceRole {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactAuthenticatedSourceHalf {
     source_column_ordinal: u32,
     source_degree_bound_exclusive: u64,
@@ -96,20 +103,48 @@ impl CompactAuthenticatedSourceHalf {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum CompactAuthenticatedSourceOrigin {
     VerifierSequence,
     BoundTree,
     Prover,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactAuthenticatedAssignmentCatalog {
+    #[serde(
+        serialize_with = "serialize_assignment_catalog_hash",
+        deserialize_with = "deserialize_assignment_catalog_hash"
+    )]
     relation_plan_hash: [u8; 64],
     trace_domain_size: u64,
     requested_source_column_count: u64,
     ignored_source_column_count: u64,
     ordered_source_halves: Vec<CompactAuthenticatedSourceHalf>,
+    ordered_source_descriptors: Vec<RelationColumnDescriptor>,
+}
+
+fn serialize_assignment_catalog_hash<Serializer>(
+    hash: &[u8; 64],
+    serializer: Serializer,
+) -> Result<Serializer::Ok, Serializer::Error>
+where
+    Serializer: serde::Serializer,
+{
+    serde::Serialize::serialize(hash.as_slice(), serializer)
+}
+
+fn deserialize_assignment_catalog_hash<'de, Deserializer>(
+    deserializer: Deserializer,
+) -> Result<[u8; 64], Deserializer::Error>
+where
+    Deserializer: serde::Deserializer<'de>,
+{
+    let bytes = <Vec<u8> as serde::Deserialize>::deserialize(deserializer)?;
+    bytes.try_into().map_err(|bytes: Vec<u8>| {
+        serde::de::Error::invalid_length(bytes.len(), &"exactly 64 hash bytes")
+    })
 }
 
 fn derive_compact_authenticated_assignment(
@@ -267,6 +302,19 @@ fn derive_compact_authenticated_assignment(
     if !source_halves_by_column.is_empty() {
         return Err(RelationPlanError::InvalidConstraint);
     }
+    let ordered_source_descriptors = ordered_source_halves
+        .iter()
+        .map(|source_half| {
+            relation_plan_variant
+                .ordered_columns()
+                .get(
+                    usize::try_from(source_half.source_column_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                )
+                .cloned()
+                .ok_or(RelationPlanError::InvalidColumn)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let requested_source_column_count = u64::try_from(requested_source_columns.len())
         .map_err(|_| RelationPlanError::CountOverflow)?;
     let used_source_column_count =
@@ -280,6 +328,7 @@ fn derive_compact_authenticated_assignment(
         requested_source_column_count,
         ignored_source_column_count,
         ordered_source_halves,
+        ordered_source_descriptors,
     })
 }
 
@@ -316,6 +365,57 @@ impl CompactAuthenticatedAssignmentCatalog {
 
     pub(crate) fn ordered_source_halves(&self) -> &[CompactAuthenticatedSourceHalf] {
         &self.ordered_source_halves
+    }
+
+    pub(crate) fn source_descriptor(
+        &self,
+        source_index: usize,
+    ) -> Option<&RelationColumnDescriptor> {
+        self.ordered_source_descriptors.get(source_index)
+    }
+
+    pub(crate) const fn relation_plan_hash(&self) -> [u8; 64] {
+        self.relation_plan_hash
+    }
+
+    pub(crate) const fn trace_domain_size(&self) -> u64 {
+        self.trace_domain_size
+    }
+
+    pub(crate) fn validate_generated(
+        &self,
+        relation: &CompactPublicKeyRelationCatalog,
+    ) -> Result<(), RelationPlanError> {
+        if self.relation_plan_hash != relation.relation_plan_variant_hash
+            || self.trace_domain_size.checked_mul(2) != Some(relation.ring_degree)
+            || self.ordered_source_halves.is_empty()
+            || self.ordered_source_halves.len() != self.ordered_source_descriptors.len()
+            || self
+                .ordered_source_halves
+                .windows(2)
+                .any(|pair| pair[0].source_column_ordinal >= pair[1].source_column_ordinal)
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        for (source_half, descriptor) in self
+            .ordered_source_halves
+            .iter()
+            .zip(&self.ordered_source_descriptors)
+        {
+            if descriptor.value_type() != RelationColumnValueType::BaseField
+                || descriptor.source_degree_bound_exclusive()
+                    != source_half.source_degree_bound_exclusive()
+                || descriptor_origin(descriptor.origin()) != source_half.source_origin()
+                || source_half.element_count != self.trace_domain_size
+            {
+                return Err(RelationPlanError::InvalidColumn);
+            }
+        }
+        check_destination_intervals(
+            self.ordered_source_halves.iter().copied(),
+            relation.padded_public_input_element_count,
+            relation.padded_witness_element_count,
+        )
     }
 }
 
@@ -424,9 +524,23 @@ impl CompactAuthenticatedAssignmentCursor {
     ) -> Result<Self, CommonProofProverError> {
         let catalog =
             CompactAuthenticatedAssignmentCatalog::derive(relation, relation_plan_variant)?;
-        if request_context.relation_plan_variant_hash() != catalog.relation_plan_hash
-            || request_context.schedule_position() != relation_plan_variant.schedule_position()
+        if request_context.schedule_position() != relation_plan_variant.schedule_position()
             || request_context.top_count() != relation_plan_variant.top_count()
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Self::new_from_catalog(relation, catalog, request_context)
+    }
+
+    pub(crate) fn new_from_catalog(
+        relation: &CompactPublicKeyRelationCatalog,
+        catalog: CompactAuthenticatedAssignmentCatalog,
+        request_context: CommonProofSourcePolynomialRequestContext,
+    ) -> Result<Self, CommonProofProverError> {
+        catalog.validate_generated(relation)?;
+        if request_context.relation_plan_variant_hash() != catalog.relation_plan_hash
+            || request_context.schedule_position().is_some()
+            || request_context.top_count().is_some()
         {
             return Err(CommonProofProverError::InvalidInput);
         }
@@ -465,12 +579,10 @@ impl CompactAuthenticatedAssignmentCursor {
     pub(crate) fn next_source(
         &mut self,
         relation: &CompactPublicKeyRelationCatalog,
-        relation_plan_variant: &RelationPlanVariant,
         source_provider: &mut dyn CommonProofSourcePolynomialProvider,
     ) -> Result<CompactAuthenticatedAssignmentPoll, CommonProofProverError> {
         if self.request_context.relation_plan_variant_hash() != self.catalog.relation_plan_hash
             || relation.relation_plan_variant_hash != self.catalog.relation_plan_hash
-            || relation_plan_variant.canonical_hash()? != self.catalog.relation_plan_hash
         {
             return Err(CommonProofProverError::InvalidInput);
         }
@@ -502,12 +614,9 @@ impl CompactAuthenticatedAssignmentCursor {
             return Ok(CompactAuthenticatedAssignmentPoll::Complete);
         };
         let column_ordinal = source_half.source_column_ordinal();
-        let descriptor = relation_plan_variant
-            .ordered_columns()
-            .get(
-                usize::try_from(column_ordinal)
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
+        let descriptor = self
+            .catalog
+            .source_descriptor(self.next_source_index)
             .ok_or(CommonProofProverError::InvalidColumn)?;
         if descriptor.source_degree_bound_exclusive() != source_half.source_degree_bound_exclusive()
             || descriptor_origin(descriptor.origin()) != source_half.source_origin()
@@ -557,11 +666,9 @@ impl CompactAuthenticatedAssignmentCursor {
     pub(crate) fn finish(
         mut self,
         relation: &CompactPublicKeyRelationCatalog,
-        relation_plan_variant: &RelationPlanVariant,
     ) -> Result<CompactPublicKeyBaseAssignment, CommonProofProverError> {
         if self.request_context.relation_plan_variant_hash() != self.catalog.relation_plan_hash
             || relation.relation_plan_variant_hash != self.catalog.relation_plan_hash
-            || relation_plan_variant.canonical_hash()? != self.catalog.relation_plan_hash
             || self.next_source_index != self.catalog.ordered_source_halves.len()
             || self.source_identity_hasher.is_some()
             || self.buffers.is_some()
@@ -1896,7 +2003,7 @@ mod tests {
 
         assert!(matches!(
             cursor
-                .next_source(&relation, &relation_plan_variant, &mut source_provider)
+                .next_source(&relation, &mut source_provider)
                 .expect("first source poll requests authenticated bytes"),
             CompactAuthenticatedAssignmentPoll::AuthenticatedSourceReadRequired,
         ));
@@ -1917,7 +2024,7 @@ mod tests {
         let mut loaded_source_count = 0_usize;
         loop {
             match cursor
-                .next_source(&relation, &relation_plan_variant, &mut source_provider)
+                .next_source(&relation, &mut source_provider)
                 .expect("compact authenticated source poll succeeds")
             {
                 CompactAuthenticatedAssignmentPoll::AuthenticatedSourceReadRequired => {
@@ -1937,7 +2044,7 @@ mod tests {
             }
         }
         let mut base_assignment = cursor
-            .finish(&relation, &relation_plan_variant)
+            .finish(&relation)
             .expect("completed compact assignment cursor finishes");
         assert_eq!(loaded_source_count, 202);
         assert!(source_provider.finished);
@@ -2176,7 +2283,7 @@ mod tests {
         )
         .expect("compact assignment cursor starts");
         assert!(matches!(
-            cursor.next_source(&relation, &relation_plan_variant, &mut wrong_type_provider,),
+            cursor.next_source(&relation, &mut wrong_type_provider,),
             Err(CommonProofProverError::InvalidColumn),
         ));
 

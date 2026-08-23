@@ -69,7 +69,9 @@ pub(super) fn canonical_encoding_error<T>(_: T) -> RelationPlanError {
     RelationPlanError::CanonicalEncoding
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u16)]
 pub(crate) enum ModulusCatalog {
     Data = 1,
@@ -79,7 +81,10 @@ pub(crate) enum ModulusCatalog {
     Target = 5,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SuiteModulusReference {
     pub(super) catalog: ModulusCatalog,
     pub(super) modulus_index: u16,
@@ -800,14 +805,15 @@ impl RelationPublicSamplerDescriptor {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u16)]
 pub(crate) enum RelationColumnValueType {
     BaseField = 1,
     ChallengeExtension = 2,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) enum RelationColumnOrigin {
     VerifierSequence {
         verifier_source_ordinal: u32,
@@ -852,7 +858,8 @@ impl RelationColumnOrigin {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RelationColumnDescriptor {
     pub(super) origin: RelationColumnOrigin,
     pub(super) value_type: RelationColumnValueType,

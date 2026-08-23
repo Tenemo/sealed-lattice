@@ -24,7 +24,9 @@ use crate::{
             with_setup_generation_key_relation,
         },
     },
-    foundation::{Hash512, PreparedActionProofAttemptSource, RefusalReason},
+    foundation::{
+        Hash512, PreparedActionProofAttemptSource, ProofApplicationSlotCeilings, RefusalReason,
+    },
     hashing::hash_framed_parts_512,
     transcript_core::encode_hex,
 };
@@ -39,11 +41,14 @@ use super::super::{
     ProofLeafVisibility, ProofTreeRole, ProvidedCommonProofSourcePolynomial,
     RelationProofTreeInput, StatementOwnedProofTreeInput,
 };
+#[cfg(test)]
+use super::key_relation::PublicKeyShareRelationPlanInput;
 use super::{
-    BoundTreeConstructionKind, CompiledRelationPlan, PublicKeyShareSourceLayout,
-    RelationBoundCertificate, RelationColumnOrigin, RelationIntegerLiftCoefficient,
-    RelationIntegerLiftFullRingHalf, RelationIntegerLiftFullRingNegacyclicProductDescriptor,
-    RelationPlanCheckContext, RelationPlanVariant, RelationTreeDescriptor, RelationVerifierSource,
+    BoundTreeConstructionKind, CompactAuthenticatedAssignmentCatalog,
+    CompactPublicKeyRelationCatalog, PublicKeyShareSourceLayout, RelationBoundCertificate,
+    RelationColumnOrigin, RelationIntegerLiftCoefficient, RelationIntegerLiftFullRingHalf,
+    RelationIntegerLiftFullRingNegacyclicProductDescriptor, RelationPlanCheckContext,
+    RelationPlanError, RelationPlanVariant, RelationTreeDescriptor, RelationVerifierSource,
     SameSecretSourceLayout, SuiteModulusReference,
     galois_key_share_adapter::{
         canonical_comparator_column_rows, exact_modular_quotient, exact_negacyclic_product_radix,
@@ -57,6 +62,8 @@ use super::{
     },
     public_key_share::compact_public_key_assignment_source_column_ordinals,
 };
+#[cfg(test)]
+use super::{CompiledRelationPlan, RelationColumnValueType};
 
 const SAME_SECRET_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
     "sealed-lattice/same-secret/source-replay-identity/v1";
@@ -77,6 +84,568 @@ enum SetupKeyRelationAuthorityAccess {
 enum SetupKeyRelationSourceRequestProfile {
     CompleteRelation,
     CompactPublicKeyAssignment,
+}
+
+const COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_SCHEMA_VERSION: u16 = 1;
+const COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_DIGEST_DOMAIN: &str =
+    "sealed-lattice/compact-public-key-assignment-source-catalog/v1";
+const MAXIMUM_COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_BYTE_LENGTH: usize = 256 * 1024;
+const GENERATED_COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_BYTES: &[u8] =
+    include_bytes!("compact_public_key_assignment_source.generated.json");
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CompactPublicKeyAssignmentSourceCatalog {
+    schema_version: u16,
+    #[serde(
+        serialize_with = "serialize_compact_assignment_source_hash",
+        deserialize_with = "deserialize_compact_assignment_source_hash"
+    )]
+    complete_relation_plan_hash: [u8; Hash512::BYTE_LENGTH],
+    relation_column_count: u32,
+    assignment_catalog: CompactAuthenticatedAssignmentCatalog,
+    ordered_sources: Vec<CompactPublicKeyAssignmentSource>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompactPublicKeyAssignmentSource {
+    column_ordinal: u32,
+    derivation: CompactPublicKeySourceDerivation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+enum CompactPublicKeySourceDerivation {
+    CommonSecret {
+        half_ordinal: u8,
+        centered_offset: u64,
+    },
+    PublicKeyError {
+        half_ordinal: u8,
+        centered_offset: u64,
+    },
+    PublicKeyShare {
+        limb_ordinal: u16,
+        half_ordinal: u8,
+    },
+    PublicKeyCommonReference {
+        data_modulus_index: u16,
+        first_logical_element_index: u64,
+        logical_element_stride: u64,
+    },
+    PublicKeyQuotient {
+        limb_ordinal: u16,
+        data_modulus_index: u16,
+        half_ordinal: u8,
+    },
+    AnchorHidingSecret {
+        anchor_ordinal: u16,
+        polynomial_ordinal: u16,
+        half_ordinal: u8,
+        centered_offset: u64,
+    },
+    AnchorHidingError {
+        anchor_ordinal: u16,
+        polynomial_ordinal: u16,
+        half_ordinal: u8,
+        centered_offset: u64,
+    },
+    AnchorCommitment {
+        anchor_ordinal: u16,
+        row_ordinal: u16,
+        half_ordinal: u8,
+    },
+    SetupCommitmentMatrix {
+        data_modulus_index: u16,
+        matrix_row: u16,
+        matrix_column: u16,
+        first_logical_element_index: u64,
+        logical_element_stride: u64,
+    },
+    AnchorQuotient {
+        anchor_ordinal: u16,
+        row_ordinal: u16,
+        data_modulus_index: u16,
+        half_ordinal: u8,
+    },
+}
+
+impl CompactPublicKeySourceDerivation {
+    fn matches_descriptor(
+        &self,
+        descriptor: &super::RelationColumnDescriptor,
+        trace_domain_size: u64,
+        ring_degree: u64,
+    ) -> bool {
+        let valid_half_ordinal = |half_ordinal: u8| half_ordinal < 2;
+        let valid_verifier_range =
+            |first_logical_element_index: u64, logical_element_stride: u64| {
+                logical_element_stride != 0
+                    && trace_domain_size
+                        .checked_sub(1)
+                        .and_then(|last_offset| last_offset.checked_mul(logical_element_stride))
+                        .and_then(|last_offset| {
+                            first_logical_element_index.checked_add(last_offset)
+                        })
+                        .is_some_and(|last_index| last_index < ring_degree)
+            };
+        match (self, descriptor.origin()) {
+            (
+                Self::PublicKeyCommonReference {
+                    first_logical_element_index,
+                    logical_element_stride,
+                    ..
+                }
+                | Self::SetupCommitmentMatrix {
+                    first_logical_element_index,
+                    logical_element_stride,
+                    ..
+                },
+                RelationColumnOrigin::VerifierSequence {
+                    first_logical_element_index: descriptor_first_index,
+                    logical_element_stride: descriptor_stride,
+                    ..
+                },
+            ) => {
+                first_logical_element_index == descriptor_first_index
+                    && logical_element_stride == descriptor_stride
+                    && valid_verifier_range(*first_logical_element_index, *logical_element_stride)
+            }
+            (
+                Self::PublicKeyShare { half_ordinal, .. }
+                | Self::AnchorCommitment { half_ordinal, .. },
+                RelationColumnOrigin::BoundTree { .. },
+            ) => valid_half_ordinal(*half_ordinal),
+            (
+                Self::CommonSecret { half_ordinal, .. }
+                | Self::PublicKeyError { half_ordinal, .. }
+                | Self::PublicKeyQuotient { half_ordinal, .. }
+                | Self::AnchorHidingSecret { half_ordinal, .. }
+                | Self::AnchorHidingError { half_ordinal, .. }
+                | Self::AnchorQuotient { half_ordinal, .. },
+                RelationColumnOrigin::Prover,
+            ) => valid_half_ordinal(*half_ordinal),
+            _ => false,
+        }
+    }
+}
+
+impl CompactPublicKeyAssignmentSourceCatalog {
+    fn canonical_digest(&self) -> Result<[u8; Hash512::BYTE_LENGTH], RelationPlanError> {
+        let canonical_bytes =
+            serde_json::to_vec(self).map_err(|_| RelationPlanError::CanonicalEncoding)?;
+        Ok(hash_framed_parts_512(
+            COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_DIGEST_DOMAIN,
+            &[canonical_bytes.as_slice()],
+        ))
+    }
+
+    fn validate_generated(
+        &self,
+        relation: &CompactPublicKeyRelationCatalog,
+    ) -> Result<(), RelationPlanError> {
+        self.assignment_catalog.validate_generated(relation)?;
+        let source_column_ordinals = self.assignment_catalog.source_column_ordinals();
+        let ring_degree = relation.ring_degree();
+        let trace_domain_size = self.assignment_catalog.trace_domain_size();
+        if self.schema_version != COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_SCHEMA_VERSION
+            || self.relation_column_count == 0
+            || self.ordered_sources.is_empty()
+            || self.ordered_sources.len() != source_column_ordinals.len()
+            || self.assignment_catalog.requested_source_column_count()
+                != self
+                    .assignment_catalog
+                    .ignored_source_column_count()
+                    .checked_add(
+                        u64::try_from(self.ordered_sources.len())
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    )
+                    .ok_or(RelationPlanError::CountOverflow)?
+            || trace_domain_size.checked_mul(2) != Some(ring_degree)
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        for (source_index, (source, expected_column_ordinal)) in self
+            .ordered_sources
+            .iter()
+            .zip(source_column_ordinals)
+            .enumerate()
+        {
+            let descriptor = self
+                .assignment_catalog
+                .source_descriptor(source_index)
+                .ok_or(RelationPlanError::InvalidColumn)?;
+            if source.column_ordinal != expected_column_ordinal
+                || source.column_ordinal >= self.relation_column_count
+                || !source
+                    .derivation
+                    .matches_descriptor(descriptor, trace_domain_size, ring_degree)
+            {
+                return Err(RelationPlanError::InvalidColumn);
+            }
+        }
+        if self.complete_relation_plan_hash != relation.complete_relation_plan_hash()
+            || self.canonical_digest()? != relation.assignment_source_catalog_digest()
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn selected_compact_public_key_assignment_source_catalog(
+    relation: &CompactPublicKeyRelationCatalog,
+) -> Result<CompactPublicKeyAssignmentSourceCatalog, RelationPlanError> {
+    if GENERATED_COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_BYTES.len()
+        > MAXIMUM_COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_BYTE_LENGTH
+    {
+        return Err(RelationPlanError::CanonicalEncoding);
+    }
+    let canonical_bytes = GENERATED_COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_BYTES
+        .strip_suffix(b"\n")
+        .ok_or(RelationPlanError::CanonicalEncoding)?;
+    let catalog: CompactPublicKeyAssignmentSourceCatalog = serde_json::from_slice(canonical_bytes)
+        .map_err(|_| RelationPlanError::CanonicalEncoding)?;
+    if serde_json::to_vec(&catalog).map_err(|_| RelationPlanError::CanonicalEncoding)?
+        != canonical_bytes
+    {
+        return Err(RelationPlanError::CanonicalEncoding);
+    }
+    catalog.validate_generated(relation)?;
+    Ok(catalog)
+}
+
+fn serialize_compact_assignment_source_hash<Serializer>(
+    hash: &[u8; Hash512::BYTE_LENGTH],
+    serializer: Serializer,
+) -> Result<Serializer::Ok, Serializer::Error>
+where
+    Serializer: serde::Serializer,
+{
+    serde::Serialize::serialize(hash.as_slice(), serializer)
+}
+
+fn deserialize_compact_assignment_source_hash<'de, Deserializer>(
+    deserializer: Deserializer,
+) -> Result<[u8; Hash512::BYTE_LENGTH], Deserializer::Error>
+where
+    Deserializer: serde::Deserializer<'de>,
+{
+    let bytes = <Vec<u8> as serde::Deserialize>::deserialize(deserializer)?;
+    bytes.try_into().map_err(|bytes: Vec<u8>| {
+        serde::de::Error::invalid_length(bytes.len(), &"exactly 64 hash bytes")
+    })
+}
+
+#[cfg(test)]
+fn record_unique_compact_public_key_derivation(
+    selected: &mut Option<CompactPublicKeySourceDerivation>,
+    candidate: CompactPublicKeySourceDerivation,
+) -> Result<(), RelationPlanError> {
+    if selected.replace(candidate).is_some() {
+        Err(RelationPlanError::DuplicateItem)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+fn source_half_ordinal(vector: SplitIntegerVector, column_ordinal: u32) -> Option<u8> {
+    vector
+        .halves
+        .iter()
+        .position(|candidate| *candidate == column_ordinal)
+        .and_then(|half_ordinal| u8::try_from(half_ordinal).ok())
+}
+
+#[cfg(test)]
+fn derive_compact_public_key_source_derivation(
+    column_ordinal: u32,
+    relation_plan_variant: &RelationPlanVariant,
+    source_layout: &PublicKeyShareSourceLayout,
+) -> Result<CompactPublicKeySourceDerivation, RelationPlanError> {
+    let descriptor = relation_plan_variant
+        .ordered_columns()
+        .get(usize::try_from(column_ordinal).map_err(|_| RelationPlanError::CountOverflow)?)
+        .ok_or(RelationPlanError::InvalidColumn)?;
+    if descriptor.value_type() != RelationColumnValueType::BaseField {
+        return Err(RelationPlanError::InvalidColumn);
+    }
+    let mut selected = None;
+    if let Some(half_ordinal) = source_half_ordinal(
+        source_layout.common_secret.source.coefficients,
+        column_ordinal,
+    ) {
+        record_unique_compact_public_key_derivation(
+            &mut selected,
+            CompactPublicKeySourceDerivation::CommonSecret {
+                half_ordinal,
+                centered_offset: source_layout.common_secret.source.offset,
+            },
+        )?;
+    }
+    if let Some(half_ordinal) =
+        source_half_ordinal(source_layout.public_key_error.coefficients, column_ordinal)
+    {
+        record_unique_compact_public_key_derivation(
+            &mut selected,
+            CompactPublicKeySourceDerivation::PublicKeyError {
+                half_ordinal,
+                centered_offset: source_layout.public_key_error.offset,
+            },
+        )?;
+    }
+    for (limb_ordinal, vector) in source_layout
+        .public_key_share_limbs
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        if let Some(half_ordinal) = source_half_ordinal(vector, column_ordinal) {
+            record_unique_compact_public_key_derivation(
+                &mut selected,
+                CompactPublicKeySourceDerivation::PublicKeyShare {
+                    limb_ordinal: u16::try_from(limb_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    half_ordinal,
+                },
+            )?;
+        }
+    }
+    for (limb_ordinal, limb) in source_layout.ordered_limbs.iter().enumerate() {
+        if let Some(half_ordinal) = limb
+            .quotient_columns
+            .iter()
+            .position(|candidate| *candidate == column_ordinal)
+            .and_then(|half_ordinal| u8::try_from(half_ordinal).ok())
+        {
+            record_unique_compact_public_key_derivation(
+                &mut selected,
+                CompactPublicKeySourceDerivation::PublicKeyQuotient {
+                    limb_ordinal: u16::try_from(limb_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    data_modulus_index: limb.data_modulus_index,
+                    half_ordinal,
+                },
+            )?;
+        }
+    }
+    for (anchor_ordinal, anchor) in source_layout.ordered_anchors.iter().enumerate() {
+        let anchor_ordinal =
+            u16::try_from(anchor_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+        for (polynomial_ordinal, hiding_secret) in
+            anchor.opening.hiding_secrets().iter().enumerate()
+        {
+            if let Some(half_ordinal) =
+                source_half_ordinal(hiding_secret.source.coefficients, column_ordinal)
+            {
+                record_unique_compact_public_key_derivation(
+                    &mut selected,
+                    CompactPublicKeySourceDerivation::AnchorHidingSecret {
+                        anchor_ordinal,
+                        polynomial_ordinal: u16::try_from(polynomial_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        half_ordinal,
+                        centered_offset: hiding_secret.source.offset,
+                    },
+                )?;
+            }
+        }
+        for (polynomial_ordinal, hiding_error) in anchor.opening.hiding_errors().iter().enumerate()
+        {
+            if let Some(half_ordinal) =
+                source_half_ordinal(hiding_error.coefficients, column_ordinal)
+            {
+                record_unique_compact_public_key_derivation(
+                    &mut selected,
+                    CompactPublicKeySourceDerivation::AnchorHidingError {
+                        anchor_ordinal,
+                        polynomial_ordinal: u16::try_from(polynomial_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        half_ordinal,
+                        centered_offset: hiding_error.offset,
+                    },
+                )?;
+            }
+        }
+        for (row_ordinal, commitment) in anchor.commitments.iter().copied().enumerate() {
+            if let Some(half_ordinal) = source_half_ordinal(commitment, column_ordinal) {
+                record_unique_compact_public_key_derivation(
+                    &mut selected,
+                    CompactPublicKeySourceDerivation::AnchorCommitment {
+                        anchor_ordinal,
+                        row_ordinal: u16::try_from(row_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        half_ordinal,
+                    },
+                )?;
+            }
+        }
+        for (row_ordinal, quotient_columns) in anchor.quotients.rows().iter().enumerate() {
+            if let Some(half_ordinal) = quotient_columns
+                .iter()
+                .position(|candidate| *candidate == column_ordinal)
+                .and_then(|half_ordinal| u8::try_from(half_ordinal).ok())
+            {
+                record_unique_compact_public_key_derivation(
+                    &mut selected,
+                    CompactPublicKeySourceDerivation::AnchorQuotient {
+                        anchor_ordinal,
+                        row_ordinal: u16::try_from(row_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        data_modulus_index: anchor.data_modulus_index,
+                        half_ordinal,
+                    },
+                )?;
+            }
+        }
+    }
+    if let RelationColumnOrigin::VerifierSequence {
+        verifier_source_ordinal,
+        first_logical_element_index,
+        logical_element_stride,
+    } = descriptor.origin()
+    {
+        let verifier_source = relation_plan_variant
+            .verifier_source(*verifier_source_ordinal)
+            .ok_or(RelationPlanError::InvalidSource)?;
+        let verifier_derivation = match verifier_source {
+            RelationVerifierSource::Protocol {
+                protocol_source_kind: 5,
+                source_coordinates,
+                ..
+            } => {
+                let [data_modulus_index, matrix_part, row, column] = source_coordinates.as_slice()
+                else {
+                    return Err(RelationPlanError::InvalidSource);
+                };
+                let matrix_row = match *matrix_part {
+                    1 => *row,
+                    2 if *row == 0 => u64::try_from(SETUP_COMMITMENT_MODULE_RANK)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    _ => return Err(RelationPlanError::InvalidSource),
+                };
+                CompactPublicKeySourceDerivation::SetupCommitmentMatrix {
+                    data_modulus_index: u16::try_from(*data_modulus_index)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    matrix_row: u16::try_from(matrix_row)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    matrix_column: u16::try_from(*column)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    first_logical_element_index: *first_logical_element_index,
+                    logical_element_stride: *logical_element_stride,
+                }
+            }
+            RelationVerifierSource::Protocol {
+                protocol_source_kind: 6,
+                source_coordinates,
+                ..
+            } => {
+                let [data_modulus_index] = source_coordinates.as_slice() else {
+                    return Err(RelationPlanError::InvalidSource);
+                };
+                CompactPublicKeySourceDerivation::PublicKeyCommonReference {
+                    data_modulus_index: u16::try_from(*data_modulus_index)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    first_logical_element_index: *first_logical_element_index,
+                    logical_element_stride: *logical_element_stride,
+                }
+            }
+            _ => return Err(RelationPlanError::InvalidSource),
+        };
+        record_unique_compact_public_key_derivation(&mut selected, verifier_derivation)?;
+    }
+    let selected = selected.ok_or(RelationPlanError::InvalidColumn)?;
+    let origin_matches = matches!(
+        (&selected, descriptor.origin()),
+        (
+            CompactPublicKeySourceDerivation::PublicKeyCommonReference { .. }
+                | CompactPublicKeySourceDerivation::SetupCommitmentMatrix { .. },
+            RelationColumnOrigin::VerifierSequence { .. }
+        ) | (
+            CompactPublicKeySourceDerivation::PublicKeyShare { .. }
+                | CompactPublicKeySourceDerivation::AnchorCommitment { .. },
+            RelationColumnOrigin::BoundTree { .. }
+        ) | (
+            CompactPublicKeySourceDerivation::CommonSecret { .. }
+                | CompactPublicKeySourceDerivation::PublicKeyError { .. }
+                | CompactPublicKeySourceDerivation::PublicKeyQuotient { .. }
+                | CompactPublicKeySourceDerivation::AnchorHidingSecret { .. }
+                | CompactPublicKeySourceDerivation::AnchorHidingError { .. }
+                | CompactPublicKeySourceDerivation::AnchorQuotient { .. },
+            RelationColumnOrigin::Prover
+        )
+    );
+    if !origin_matches {
+        return Err(RelationPlanError::InvalidColumn);
+    }
+    Ok(selected)
+}
+
+#[cfg(test)]
+pub(crate) fn derive_compact_public_key_assignment_source_catalog(
+    relation_plan: &CompiledRelationPlan,
+    relation_plan_variant: &RelationPlanVariant,
+    source_layout: &PublicKeyShareSourceLayout,
+    relation: &CompactPublicKeyRelationCatalog,
+) -> Result<CompactPublicKeyAssignmentSourceCatalog, RelationPlanError> {
+    let assignment_catalog =
+        CompactAuthenticatedAssignmentCatalog::derive(relation, relation_plan_variant)?;
+    let ordered_sources = assignment_catalog
+        .source_column_ordinals()
+        .into_iter()
+        .map(|column_ordinal| {
+            Ok(CompactPublicKeyAssignmentSource {
+                column_ordinal,
+                derivation: derive_compact_public_key_source_derivation(
+                    column_ordinal,
+                    relation_plan_variant,
+                    source_layout,
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>, RelationPlanError>>()?;
+    Ok(CompactPublicKeyAssignmentSourceCatalog {
+        schema_version: COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_SCHEMA_VERSION,
+        complete_relation_plan_hash: relation_plan.canonical_hash()?,
+        relation_column_count: u32::try_from(relation_plan_variant.ordered_columns().len())
+            .map_err(|_| RelationPlanError::CountOverflow)?,
+        assignment_catalog,
+        ordered_sources,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn derive_bound_compact_public_key_catalogs(
+    input: &PublicKeyShareRelationPlanInput,
+    relation_plan: &CompiledRelationPlan,
+    relation_plan_variant: &RelationPlanVariant,
+    source_layout: &PublicKeyShareSourceLayout,
+) -> Result<
+    (
+        CompactPublicKeyRelationCatalog,
+        CompactPublicKeyAssignmentSourceCatalog,
+    ),
+    RelationPlanError,
+> {
+    let mut relation = super::compact_ring_vector::derive_compact_public_key_relation_catalog(
+        input,
+        relation_plan_variant,
+        source_layout,
+    )?;
+    let source_catalog = derive_compact_public_key_assignment_source_catalog(
+        relation_plan,
+        relation_plan_variant,
+        source_layout,
+        &relation,
+    )?;
+    relation.bind_generated_authorities(
+        relation_plan.canonical_hash()?,
+        source_catalog.canonical_digest()?,
+    )?;
+    source_catalog.validate_generated(&relation)?;
+    Ok((relation, source_catalog))
 }
 
 fn classify_setup_key_relation_source_request_profile(
@@ -159,7 +728,6 @@ trait PublicKeyShareCoefficientSource: SetupKeyRelationAnchorCoefficientSource {
         &self,
         limb_ordinal: usize,
     ) -> Result<&[u64], RefusalReason>;
-    #[cfg(test)]
     fn public_key_limb_count(&self) -> Result<usize, RefusalReason>;
 }
 
@@ -260,7 +828,6 @@ impl PublicKeyShareCoefficientSource for SetupGenerationKeyRelationSource<'_, '_
             .ok_or(RefusalReason::WrongTypeOrLength)
     }
 
-    #[cfg(test)]
     fn public_key_limb_count(&self) -> Result<usize, RefusalReason> {
         Ok(self.public_key_share()?.ordered_limb_coefficients().len())
     }
@@ -1250,7 +1817,6 @@ fn add_setup_authority_payload_memory_accounting(
 /// the browser-owned setup authority.
 pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
     authority_access: SetupKeyRelationAuthorityAccess,
-    expected_compact_public_key_authority_owner_count: Option<usize>,
     family: SetupKeyRelationProofFamily,
     prepared_attempt: PreparedActionProofAttemptSource,
     canonical_application_statement_bytes: Vec<u8>,
@@ -1277,6 +1843,424 @@ pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
     leaf_salts_finished: bool,
 }
 
+/// Compact public-key source provider backed by the immutable selected source
+/// catalog. Unlike the general relation adapter, this owner does not retain or
+/// reconstruct the multi-megabyte production relation plan at runtime.
+pub(crate) struct CompactPublicKeySourcePolynomialAdapter {
+    authority_access: SetupKeyRelationAuthorityAccess,
+    expected_compact_public_key_authority_owner_count: Option<usize>,
+    prepared_attempt: PreparedActionProofAttemptSource,
+    canonical_application_statement_bytes: Vec<u8>,
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    setup_attempt_identifier: [u8; 32],
+    source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+    action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    request_context: CommonProofSourcePolynomialRequestContext,
+    relation_context: RelationPlanCheckContext,
+    ring_degree: usize,
+    ordered_sources: Box<[CompactPublicKeyAssignmentSource]>,
+    ordered_source_descriptors: Box<[super::RelationColumnDescriptor]>,
+    next_source_index: usize,
+    cached_quotient: Option<CachedQuotient>,
+    source_polynomials_finished: bool,
+}
+
+impl CompactPublicKeySourcePolynomialAdapter {
+    pub(crate) fn new(
+        source: &SetupGenerationKeyRelationSource<'_, '_>,
+        relation: &CompactPublicKeyRelationCatalog,
+        relation_context: RelationPlanCheckContext,
+        source_catalog: CompactPublicKeyAssignmentSourceCatalog,
+    ) -> Result<(Self, CompactAuthenticatedAssignmentCatalog), CommonProofProverError> {
+        source_catalog.validate_generated(relation)?;
+        let ring_degree = usize::try_from(relation.ring_degree())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let trace_domain_size =
+            usize::try_from(source_catalog.assignment_catalog.trace_domain_size())
+                .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let expected_public_key_limb_count = source_catalog
+            .ordered_sources
+            .iter()
+            .filter_map(|entry| match entry.derivation {
+                CompactPublicKeySourceDerivation::PublicKeyShare { limb_ordinal, .. }
+                | CompactPublicKeySourceDerivation::PublicKeyQuotient { limb_ordinal, .. } => {
+                    Some(usize::from(limb_ordinal))
+                }
+                _ => None,
+            })
+            .max()
+            .and_then(|maximum| maximum.checked_add(1))
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let expected_anchor_count = source_catalog
+            .ordered_sources
+            .iter()
+            .filter_map(|entry| match entry.derivation {
+                CompactPublicKeySourceDerivation::AnchorHidingSecret { anchor_ordinal, .. }
+                | CompactPublicKeySourceDerivation::AnchorHidingError { anchor_ordinal, .. }
+                | CompactPublicKeySourceDerivation::AnchorCommitment { anchor_ordinal, .. }
+                | CompactPublicKeySourceDerivation::AnchorQuotient { anchor_ordinal, .. } => {
+                    Some(usize::from(anchor_ordinal))
+                }
+                _ => None,
+            })
+            .max()
+            .and_then(|maximum| maximum.checked_add(1))
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if source.family() != SetupKeyRelationProofFamily::PublicKeyShare
+            || source.family().statement_schema_identifier()
+                != ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            || source.ring_degree() != ring_degree
+            || trace_domain_size.checked_mul(2) != Some(ring_degree)
+            || source
+                .public_key_limb_count()
+                .map_err(|_| CommonProofProverError::InvalidColumn)?
+                != expected_public_key_limb_count
+            || source.anchor_count() != expected_anchor_count
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        for entry in source_catalog.ordered_sources.iter() {
+            let data_modulus_index = match entry.derivation {
+                CompactPublicKeySourceDerivation::PublicKeyCommonReference {
+                    data_modulus_index,
+                    ..
+                }
+                | CompactPublicKeySourceDerivation::PublicKeyQuotient {
+                    data_modulus_index, ..
+                }
+                | CompactPublicKeySourceDerivation::SetupCommitmentMatrix {
+                    data_modulus_index,
+                    ..
+                }
+                | CompactPublicKeySourceDerivation::AnchorQuotient {
+                    data_modulus_index, ..
+                } => Some(data_modulus_index),
+                _ => None,
+            };
+            if data_modulus_index.is_some_and(|index| {
+                relation_context
+                    .resolved_modulus(SuiteModulusReference::data(index))
+                    .is_err()
+            }) {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+        }
+        let ordered_source_descriptors = (0..source_catalog.ordered_sources.len())
+            .map(|source_index| {
+                source_catalog
+                    .assignment_catalog
+                    .source_descriptor(source_index)
+                    .cloned()
+                    .ok_or(CommonProofProverError::InvalidColumn)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_boxed_slice();
+        let request_context = CommonProofSourcePolynomialRequestContext::new(
+            source.protocol_version(),
+            source.suite_identifier(),
+            source.family().statement_schema_identifier(),
+            source
+                .prepared_attempt()
+                .application_statement_hash()
+                .into_bytes(),
+            source_catalog.complete_relation_plan_hash,
+            source_catalog.assignment_catalog.relation_plan_hash(),
+            None,
+            None,
+        );
+        let authority_access = source
+            .compact_public_key_development_authority()
+            .map(SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment)
+            .unwrap_or_else(|| {
+                SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier())
+            });
+        let expected_compact_public_key_authority_owner_count = matches!(
+            &authority_access,
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(_)
+        )
+        .then_some(1);
+        let assignment_catalog = source_catalog.assignment_catalog;
+        let adapter = Self {
+            authority_access,
+            expected_compact_public_key_authority_owner_count,
+            prepared_attempt: *source.prepared_attempt(),
+            canonical_application_statement_bytes: source
+                .canonical_application_statement_bytes()
+                .to_vec(),
+            setup_proof_context_hash: source.setup_proof_context_hash(),
+            roster_hash: source.roster_hash(),
+            participant_identity: source.participant_identity(),
+            roster_position: source.roster_position(),
+            setup_attempt_identifier: source.setup_attempt_identifier(),
+            source_setup_intent_object_hash: source.source_setup_intent_object_hash(),
+            action_randomness_authorization_hash: source.action_randomness_authorization_hash(),
+            request_context,
+            relation_context,
+            ring_degree,
+            ordered_sources: source_catalog.ordered_sources.into_boxed_slice(),
+            ordered_source_descriptors,
+            next_source_index: 0,
+            cached_quotient: None,
+            source_polynomials_finished: false,
+        };
+        Ok((adapter, assignment_catalog))
+    }
+
+    pub(crate) const fn request_context(&self) -> CommonProofSourcePolynomialRequestContext {
+        self.request_context
+    }
+
+    pub(crate) fn retain_deferred_authority(
+        &mut self,
+    ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, CommonProofProverError>
+    {
+        let Some(expected_owner_count) = self
+            .expected_compact_public_key_authority_owner_count
+            .as_mut()
+        else {
+            return Err(CommonProofProverError::InvalidInput);
+        };
+        let SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) =
+            &self.authority_access
+        else {
+            return Err(CommonProofProverError::InvalidInput);
+        };
+        if *expected_owner_count != 1 || Rc::strong_count(authority) != *expected_owner_count {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        let deferred_authority = Rc::clone(authority);
+        *expected_owner_count = 2;
+        Ok(deferred_authority)
+    }
+
+    pub(crate) fn finish_compact_sources(self) -> Result<(), CommonProofProverError> {
+        let authority_access_is_valid = match &self.authority_access {
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => self
+                .expected_compact_public_key_authority_owner_count
+                .is_some_and(|expected_owner_count| {
+                    Rc::strong_count(authority) == expected_owner_count
+                }),
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(_) => self
+                .expected_compact_public_key_authority_owner_count
+                .is_none(),
+        };
+        if self.next_source_index != self.ordered_sources.len()
+            || self.ordered_sources.len() != self.ordered_source_descriptors.len()
+            || !self.source_polynomials_finished
+            || self.cached_quotient.is_some()
+            || !authority_access_is_valid
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Ok(())
+    }
+
+    fn replay_identity(
+        &self,
+        column_ordinal: u32,
+    ) -> Result<CommonProofSourcePolynomialReplayIdentity, CommonProofProverError> {
+        CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(hash_framed_parts_512(
+            PUBLIC_KEY_SHARE_SOURCE_REPLAY_IDENTITY_DOMAIN,
+            &[
+                &self.request_context.stable_generation_binding_hash(),
+                &column_ordinal.to_le_bytes(),
+                &self.setup_attempt_identifier,
+                &self.source_setup_intent_object_hash,
+                &self.action_randomness_authorization_hash,
+                &self.setup_proof_context_hash,
+                &self.roster_hash,
+                &self.participant_identity,
+                &self.roster_position.to_le_bytes(),
+            ],
+        ))
+    }
+
+    fn derive_source_polynomial(
+        &mut self,
+        source_index: usize,
+    ) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+        let derivation = self
+            .ordered_sources
+            .get(source_index)
+            .map(|entry| entry.derivation.clone())
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
+            SetupKeyRelationProofFamily::PublicKeyShare,
+            self.prepared_attempt,
+            &self.canonical_application_statement_bytes,
+            self.setup_proof_context_hash,
+            self.roster_hash,
+            self.participant_identity,
+            self.roster_position,
+        );
+        let relation_context = &self.relation_context;
+        let ring_degree = self.ring_degree;
+        let cached_quotient = &mut self.cached_quotient;
+        let derive_polynomial = |source: SetupGenerationKeyRelationSource<'_, '_>| {
+            derive_compact_public_key_source_polynomial(
+                &source,
+                relation_context,
+                ring_degree,
+                &derivation,
+                cached_quotient,
+            )
+        };
+        match &self.authority_access {
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
+                with_setup_generation_key_relation::<_, RefusalReason>(
+                    &SetupGenerationAuthorityHandle::from_identifier(*authority_identifier),
+                    &application,
+                    derive_polynomial,
+                )
+            }
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
+                with_setup_generation_compact_public_key_development_relation_reentry::<
+                    _,
+                    RefusalReason,
+                >(authority, &application, derive_polynomial)
+            }
+        }
+        .map_err(|_| CommonProofProverError::InvalidColumn)
+    }
+
+    fn base_memory_accounting(
+        &self,
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let ring_degree =
+            u64::try_from(self.ring_degree).map_err(|_| CommonProofProverError::CountOverflow)?;
+        let trace_domain_size = ring_degree / 2;
+        let adapter_retained_byte_length = [
+            u64::try_from(size_of::<Self>()).map_err(|_| CommonProofProverError::CountOverflow)?,
+            u64::try_from(self.canonical_application_statement_bytes.capacity())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+            self.relation_context
+                .resident_owned_payload_byte_length()
+                .map_err(CommonProofProverError::Relation)?,
+            setup_provider_payload_for_count::<CompactPublicKeyAssignmentSource>(
+                self.ordered_sources.len(),
+            )?,
+            setup_provider_payload_for_count::<super::RelationColumnDescriptor>(
+                self.ordered_source_descriptors.len(),
+            )?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_setup_provider_add)?;
+        let cached_quotient_byte_length = checked_setup_provider_multiply(
+            ring_degree,
+            u64::try_from(size_of::<i128>()).map_err(|_| CommonProofProverError::CountOverflow)?,
+        )?;
+        let per_ring_coefficient_transient_byte_length = u64::try_from(
+            4 * size_of::<u64>() + 12 * size_of::<i128>() + 6 * size_of::<ProofBaseFieldElement>(),
+        )
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let additional_loading_transient_byte_length = checked_setup_provider_multiply(
+            ring_degree,
+            per_ring_coefficient_transient_byte_length,
+        )?;
+        let maximum_returned_source_polynomial_byte_length = checked_setup_provider_multiply(
+            trace_domain_size,
+            u64::try_from(size_of::<ProofBaseFieldElement>())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )?;
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            checked_setup_provider_add(adapter_retained_byte_length, cached_quotient_byte_length)?,
+            adapter_retained_byte_length,
+            additional_loading_transient_byte_length,
+            maximum_returned_source_polynomial_byte_length,
+        ))
+    }
+}
+
+impl CommonProofSourcePolynomialProvider for CompactPublicKeySourcePolynomialAdapter {
+    fn memory_accounting(
+        &self,
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let base = self.base_memory_accounting()?;
+        match &self.authority_access {
+            SetupKeyRelationAuthorityAccess::RetainedRegistry(authority_identifier) => {
+                add_setup_authority_memory_accounting(base, *authority_identifier)
+            }
+            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => {
+                add_setup_authority_payload_memory_accounting(
+                    base,
+                    setup_generation_compact_public_key_development_retained_payload_byte_length(
+                        authority,
+                    )
+                    .map_err(|_| CommonProofProverError::InvalidInput)?,
+                )
+            }
+        }
+    }
+
+    fn poll_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        let expected_source = self
+            .ordered_sources
+            .get(self.next_source_index)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if self.source_polynomials_finished
+            || request.request_context() != self.request_context
+            || request.column_ordinal() != expected_source.column_ordinal
+            || self.ordered_source_descriptors.get(self.next_source_index)
+                != Some(request.descriptor())
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let source_index = self.next_source_index;
+        let column_ordinal = request.column_ordinal();
+        let replay_identity = self.replay_identity(column_ordinal)?;
+        let polynomial = self.derive_source_polynomial(source_index)?;
+        self.next_source_index = self
+            .next_source_index
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
+            ProvidedCommonProofSourcePolynomial::new(polynomial, replay_identity),
+        ))
+    }
+
+    fn poll_replayed_source_polynomial(
+        &mut self,
+        request: CommonProofSourcePolynomialRequest<'_>,
+    ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError> {
+        let source_index = self
+            .ordered_sources
+            .binary_search_by_key(&request.column_ordinal(), |entry| entry.column_ordinal)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        if !self.source_polynomials_finished
+            || request.request_context() != self.request_context
+            || self.ordered_source_descriptors.get(source_index) != Some(request.descriptor())
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.cached_quotient = None;
+        let polynomial = self.derive_source_polynomial(source_index)?;
+        self.cached_quotient = None;
+        Ok(CommonProofSourcePolynomialProviderPoll::Ready(
+            ProvidedCommonProofSourcePolynomial::new(
+                polynomial,
+                self.replay_identity(request.column_ordinal())?,
+            ),
+        ))
+    }
+
+    fn finish(&mut self) -> Result<(), CommonProofProverError> {
+        if self.source_polynomials_finished || self.next_source_index != self.ordered_sources.len()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.cached_quotient = None;
+        self.source_polynomials_finished = true;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 fn derive_compact_public_key_relation_plan_binding(
     relation_plan: &CompiledRelationPlan,
     relation_plan_variant: &RelationPlanVariant,
@@ -1369,38 +2353,6 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             relation_context,
             ring_degree,
             source_layout,
-            requested_column_ordinals,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_compact_public_key_assignment(
-        source: &SetupGenerationKeyRelationSource<'_, '_>,
-        relation_plan: &CompiledRelationPlan,
-        relation_plan_variant: RelationPlanVariant,
-        relation_context: RelationPlanCheckContext,
-        ring_degree: usize,
-        source_layout: PublicKeyShareSourceLayout,
-    ) -> Result<Self, CommonProofProverError> {
-        let (relation_plan_hash, relation_plan_variant_hash) =
-            derive_compact_public_key_relation_plan_binding(
-                relation_plan,
-                &relation_plan_variant,
-                source.family().statement_schema_identifier(),
-            )?;
-        let requested_column_ordinals = compact_public_key_assignment_source_column_ordinals(
-            &relation_plan_variant,
-            &source_layout,
-        )?
-        .into_boxed_slice();
-        Self::new_with_relation_hashes(
-            source,
-            relation_plan_hash,
-            relation_plan_variant_hash,
-            relation_plan_variant,
-            relation_context,
-            ring_degree,
-            SetupKeyRelationSourceLayout::PublicKeyShare(source_layout),
             requested_column_ordinals,
         )
     }
@@ -1533,14 +2485,8 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             .unwrap_or_else(|| {
                 SetupKeyRelationAuthorityAccess::RetainedRegistry(source.authority_identifier())
             });
-        let expected_compact_public_key_authority_owner_count = matches!(
-            &authority_access,
-            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(_)
-        )
-        .then_some(1);
         Ok(Self {
             authority_access,
-            expected_compact_public_key_authority_owner_count,
             family: source.family(),
             prepared_attempt: *source.prepared_attempt(),
             canonical_application_statement_bytes: source
@@ -1580,81 +2526,6 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             self.participant_identity,
             self.roster_position,
         )
-    }
-
-    pub(crate) fn compact_public_key_assignment_request_context(
-        &self,
-    ) -> Result<CommonProofSourcePolynomialRequestContext, CommonProofProverError> {
-        if self.family != SetupKeyRelationProofFamily::PublicKeyShare
-            || self.request_profile
-                != SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment
-        {
-            return Err(CommonProofProverError::InvalidInput);
-        }
-        Ok(self.request_context)
-    }
-
-    /// Retains the isolated reference authority for deferred private-coin
-    /// derivation. A second retention or any unexpected owner count fails
-    /// closed.
-    pub(crate) fn retain_compact_public_key_deferred_authority(
-        &mut self,
-    ) -> Result<Rc<SetupGenerationCompactPublicKeyDevelopmentAuthority>, CommonProofProverError>
-    {
-        let Some(expected_owner_count) = self
-            .expected_compact_public_key_authority_owner_count
-            .as_mut()
-        else {
-            return Err(CommonProofProverError::InvalidInput);
-        };
-        let SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) =
-            &self.authority_access
-        else {
-            return Err(CommonProofProverError::InvalidInput);
-        };
-        if *expected_owner_count != 1 || Rc::strong_count(authority) != *expected_owner_count {
-            return Err(CommonProofProverError::InvalidInput);
-        }
-        let deferred_authority = Rc::clone(authority);
-        *expected_owner_count = 2;
-        Ok(deferred_authority)
-    }
-
-    pub(crate) fn finish_compact_public_key_assignment_sources(
-        self,
-    ) -> Result<(), CommonProofProverError> {
-        let independently_expected_column_ordinals =
-            self.independently_expected_requested_column_ordinals()?;
-        let authority_access_is_valid = match &self.authority_access {
-            SetupKeyRelationAuthorityAccess::CompactPublicKeyDevelopment(authority) => self
-                .expected_compact_public_key_authority_owner_count
-                .is_some_and(|expected_owner_count| {
-                    Rc::strong_count(authority) == expected_owner_count
-                }),
-            SetupKeyRelationAuthorityAccess::RetainedRegistry(_) => self
-                .expected_compact_public_key_authority_owner_count
-                .is_none(),
-        };
-        if self.family != SetupKeyRelationProofFamily::PublicKeyShare
-            || self.request_profile
-                != SetupKeyRelationSourceRequestProfile::CompactPublicKeyAssignment
-            || self.requested_column_ordinals.as_ref()
-                != independently_expected_column_ordinals.as_slice()
-            || self.next_source_index != self.requested_column_ordinals.len()
-            || !self.source_polynomials_finished
-            || self.cached_quotient.is_some()
-            || !self.bound_material_tree_sources.is_empty()
-            || self.next_leaf_salt_source_ordinal != 0
-            || self.next_leaf_salt_index != 0
-            || self.leaf_salts_finished
-            || !authority_access_is_valid
-        {
-            return Err(CommonProofProverError::InvalidInput);
-        }
-        // Consuming `self` now drops its retained standalone authority. An
-        // explicitly retained deferred owner may survive only inside the
-        // private-coin factory for this same prepared operation.
-        Ok(())
     }
 
     fn replay_identity(
@@ -2411,6 +3282,46 @@ pub(crate) fn derive_compact_public_key_development_source_polynomials(
                 &mut cached_quotient,
             )
             .map(|polynomial| (column_ordinal, polynomial))
+            .map_err(|_| CommonProofProverError::InvalidColumn)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn derive_generated_compact_public_key_development_source_polynomials(
+    source: &CompactPublicKeyDevelopmentCoefficientSource,
+    relation_context: &RelationPlanCheckContext,
+    source_catalog: &CompactPublicKeyAssignmentSourceCatalog,
+) -> Result<Vec<(u32, CommonProofSourcePolynomial)>, CommonProofProverError> {
+    let ring_degree = source.ring_degree();
+    if source.source_family() != SetupKeyRelationProofFamily::PublicKeyShare
+        || source_catalog.ordered_sources.is_empty()
+        || source_catalog.ordered_sources.len()
+            != source_catalog
+                .assignment_catalog
+                .ordered_source_halves()
+                .len()
+        || source_catalog
+            .assignment_catalog
+            .trace_domain_size()
+            .checked_mul(2)
+            != u64::try_from(ring_degree).ok()
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let mut cached_quotient = None;
+    source_catalog
+        .ordered_sources
+        .iter()
+        .map(|entry| {
+            derive_compact_public_key_source_polynomial(
+                source,
+                relation_context,
+                ring_degree,
+                &entry.derivation,
+                &mut cached_quotient,
+            )
+            .map(|polynomial| (entry.column_ordinal, polynomial))
             .map_err(|_| CommonProofProverError::InvalidColumn)
         })
         .collect()
@@ -3305,47 +4216,61 @@ where
             .ordered_limbs
             .get(limb_ordinal)
             .ok_or(RefusalReason::WrongTypeOrLength)?;
-        let modulus = self
-            .relation_context
-            .resolved_modulus(SuiteModulusReference::data(limb_layout.data_modulus_index))
-            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-        let public_key_share = self
-            .source
-            .public_key_limb_coefficient_slice(limb_ordinal)?;
-        let common_reference = self
-            .source
-            .public_key_common_reference_limb(limb_layout.data_modulus_index, self.ring_degree)?;
-        let secret = self
-            .source
-            .common_secret_coefficient_slice()
-            .iter()
-            .copied()
-            .map(i128::from)
-            .collect::<Vec<_>>();
-        let product = exact_negacyclic_product_radix(
-            &common_reference
-                .into_iter()
-                .map(i128::from)
-                .collect::<Vec<_>>(),
-            &secret,
-        )?;
-        let error = self.source.public_key_error_coefficient_slice()?;
-        exact_modular_quotient(
-            public_key_share
-                .iter()
-                .copied()
-                .zip(product.iter().copied())
-                .zip(error.iter().copied()),
-            modulus,
-            |((public_key_share, product), error)| {
-                i128::from(public_key_share)
-                    .checked_add(product)
-                    .and_then(|value| {
-                        value.checked_sub(i128::from(PLAINTEXT_MODULUS) * i128::from(error))
-                    })
-            },
+        derive_public_key_quotient(
+            self.source,
+            self.relation_context,
+            self.ring_degree,
+            limb_ordinal,
+            limb_layout.data_modulus_index,
         )
     }
+}
+
+fn derive_public_key_quotient<Source>(
+    source: &Source,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: usize,
+    limb_ordinal: usize,
+    data_modulus_index: u16,
+) -> Result<Zeroizing<Vec<i128>>, RefusalReason>
+where
+    Source: PublicKeyShareCoefficientSource + ?Sized,
+{
+    let modulus = relation_context
+        .resolved_modulus(SuiteModulusReference::data(data_modulus_index))
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+    let public_key_share = source.public_key_limb_coefficient_slice(limb_ordinal)?;
+    let common_reference =
+        source.public_key_common_reference_limb(data_modulus_index, ring_degree)?;
+    let secret = source
+        .common_secret_coefficient_slice()
+        .iter()
+        .copied()
+        .map(i128::from)
+        .collect::<Vec<_>>();
+    let product = exact_negacyclic_product_radix(
+        &common_reference
+            .into_iter()
+            .map(i128::from)
+            .collect::<Vec<_>>(),
+        &secret,
+    )?;
+    let error = source.public_key_error_coefficient_slice()?;
+    exact_modular_quotient(
+        public_key_share
+            .iter()
+            .copied()
+            .zip(product.iter().copied())
+            .zip(error.iter().copied()),
+        modulus,
+        |((public_key_share, product), error)| {
+            i128::from(public_key_share)
+                .checked_add(product)
+                .and_then(|value| {
+                    value.checked_sub(i128::from(PLAINTEXT_MODULUS) * i128::from(error))
+                })
+        },
+    )
 }
 
 trait AnchorSourceLayout {
@@ -3492,7 +4417,7 @@ where
                         source,
                         relation_context,
                         ring_degree,
-                        layout,
+                        layout.data_modulus_index(),
                         anchor_ordinal,
                         row_ordinal,
                     )?;
@@ -3521,6 +4446,259 @@ fn split_i8_polynomial_with_relation_offset(
             .ok_or(RefusalReason::InvalidArithmeticRelation)?;
     }
     Ok(rows)
+}
+
+fn select_compact_verifier_trace_rows(
+    sequence: &[u64],
+    first_logical_element_index: u64,
+    logical_element_stride: u64,
+    trace_domain_size: usize,
+) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
+    let first_index = usize::try_from(first_logical_element_index)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let stride = usize::try_from(logical_element_stride)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    if stride == 0 {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    (0..trace_domain_size)
+        .map(|row_ordinal| {
+            first_index
+                .checked_add(
+                    row_ordinal
+                        .checked_mul(stride)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?,
+                )
+                .and_then(|index| sequence.get(index).copied())
+                .map(i128::from)
+                .ok_or(RefusalReason::WrongTypeOrLength)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Zeroizing::new)
+}
+
+fn derive_compact_public_key_source_polynomial<Source>(
+    source: &Source,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: usize,
+    derivation: &CompactPublicKeySourceDerivation,
+    cached_quotient: &mut Option<CachedQuotient>,
+) -> Result<CommonProofSourcePolynomial, RefusalReason>
+where
+    Source: PublicKeyShareCoefficientSource + ?Sized,
+{
+    if source.source_family() != SetupKeyRelationProofFamily::PublicKeyShare
+        || ring_degree == 0
+        || !ring_degree.is_multiple_of(2)
+    {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let trace_domain_size = ring_degree / 2;
+    let half_ordinal = |half_ordinal: u8| {
+        usize::from(half_ordinal)
+            .checked_add(1)
+            .filter(|exclusive| *exclusive <= 2)
+            .map(|exclusive| exclusive - 1)
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    };
+    let signed_rows = match *derivation {
+        CompactPublicKeySourceDerivation::CommonSecret {
+            half_ordinal: selected_half,
+            centered_offset,
+        } => split_i8_polynomial_with_relation_offset(
+            source.common_secret_coefficient_slice(),
+            half_ordinal(selected_half)?,
+            centered_offset,
+        )?,
+        CompactPublicKeySourceDerivation::PublicKeyError {
+            half_ordinal: selected_half,
+            centered_offset,
+        } => split_i8_polynomial_with_relation_offset(
+            source.public_key_error_coefficient_slice()?,
+            half_ordinal(selected_half)?,
+            centered_offset,
+        )?,
+        CompactPublicKeySourceDerivation::PublicKeyShare {
+            limb_ordinal,
+            half_ordinal: selected_half,
+        } => {
+            let coefficients =
+                source.public_key_limb_coefficient_slice(usize::from(limb_ordinal))?;
+            if coefficients.len() != ring_degree {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            let selected_half = half_ordinal(selected_half)?;
+            let first = selected_half
+                .checked_mul(trace_domain_size)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            let end = first
+                .checked_add(trace_domain_size)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            Zeroizing::new(
+                coefficients
+                    .get(first..end)
+                    .ok_or(RefusalReason::WrongTypeOrLength)?
+                    .iter()
+                    .copied()
+                    .map(i128::from)
+                    .collect(),
+            )
+        }
+        CompactPublicKeySourceDerivation::PublicKeyCommonReference {
+            data_modulus_index,
+            first_logical_element_index,
+            logical_element_stride,
+        } => {
+            let sequence =
+                source.public_key_common_reference_limb(data_modulus_index, ring_degree)?;
+            select_compact_verifier_trace_rows(
+                &sequence,
+                first_logical_element_index,
+                logical_element_stride,
+                trace_domain_size,
+            )?
+        }
+        CompactPublicKeySourceDerivation::PublicKeyQuotient {
+            limb_ordinal,
+            data_modulus_index,
+            half_ordinal: selected_half,
+        } => {
+            let limb_ordinal = usize::from(limb_ordinal);
+            let key = CachedQuotientKey::PublicKeyShare { limb_ordinal };
+            if cached_quotient.as_ref().map(|cached| cached.key) != Some(key) {
+                *cached_quotient = Some(CachedQuotient {
+                    key,
+                    coefficients: derive_public_key_quotient(
+                        source,
+                        relation_context,
+                        ring_degree,
+                        limb_ordinal,
+                        data_modulus_index,
+                    )?,
+                });
+            }
+            split_signed_polynomial(
+                cached_quotient
+                    .as_ref()
+                    .ok_or(RefusalReason::ConsumedState)?
+                    .coefficients
+                    .as_slice(),
+                half_ordinal(selected_half)?,
+            )?
+        }
+        CompactPublicKeySourceDerivation::AnchorHidingSecret {
+            anchor_ordinal,
+            polynomial_ordinal,
+            half_ordinal: selected_half,
+            centered_offset,
+        } => split_i8_polynomial_with_relation_offset(
+            source.anchor_hiding_secret_polynomial(
+                usize::from(anchor_ordinal),
+                usize::from(polynomial_ordinal),
+            )?,
+            half_ordinal(selected_half)?,
+            centered_offset,
+        )?,
+        CompactPublicKeySourceDerivation::AnchorHidingError {
+            anchor_ordinal,
+            polynomial_ordinal,
+            half_ordinal: selected_half,
+            centered_offset,
+        } => split_i8_polynomial_with_relation_offset(
+            source.anchor_hiding_error_polynomial(
+                usize::from(anchor_ordinal),
+                usize::from(polynomial_ordinal),
+            )?,
+            half_ordinal(selected_half)?,
+            centered_offset,
+        )?,
+        CompactPublicKeySourceDerivation::AnchorCommitment {
+            anchor_ordinal,
+            row_ordinal,
+            half_ordinal: selected_half,
+        } => source.anchor_commitment_trace_row_half(
+            usize::from(anchor_ordinal),
+            usize::from(row_ordinal),
+            half_ordinal(selected_half)?,
+        )?,
+        CompactPublicKeySourceDerivation::SetupCommitmentMatrix {
+            data_modulus_index,
+            matrix_row,
+            matrix_column,
+            first_logical_element_index,
+            logical_element_stride,
+        } => {
+            let modulus = relation_context
+                .resolved_modulus(SuiteModulusReference::data(data_modulus_index))
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+            let sequence = setup_commitment_matrix_polynomial(
+                &encode_hex(&source.public_setup_seed_bytes()),
+                usize::from(data_modulus_index),
+                usize::from(matrix_row),
+                usize::from(matrix_column),
+                ring_degree,
+                modulus,
+            )
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+            select_compact_verifier_trace_rows(
+                &sequence,
+                first_logical_element_index,
+                logical_element_stride,
+                trace_domain_size,
+            )?
+        }
+        CompactPublicKeySourceDerivation::AnchorQuotient {
+            anchor_ordinal,
+            row_ordinal,
+            data_modulus_index,
+            half_ordinal: selected_half,
+        } => {
+            let anchor_ordinal = usize::from(anchor_ordinal);
+            let row_ordinal = usize::from(row_ordinal);
+            let key = CachedQuotientKey::Anchor {
+                family: SetupKeyRelationProofFamily::PublicKeyShare,
+                anchor_ordinal,
+                row_ordinal,
+            };
+            if cached_quotient.as_ref().map(|cached| cached.key) != Some(key) {
+                *cached_quotient = Some(CachedQuotient {
+                    key,
+                    coefficients: derive_anchor_quotient(
+                        source,
+                        relation_context,
+                        ring_degree,
+                        data_modulus_index,
+                        anchor_ordinal,
+                        row_ordinal,
+                    )?,
+                });
+            }
+            split_signed_polynomial(
+                cached_quotient
+                    .as_ref()
+                    .ok_or(RefusalReason::ConsumedState)?
+                    .coefficients
+                    .as_slice(),
+                half_ordinal(selected_half)?,
+            )?
+        }
+    };
+    if signed_rows.len() != trace_domain_size {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let mut field_values = Zeroizing::new(
+        signed_rows
+            .iter()
+            .copied()
+            .map(signed_integer_to_base_field)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    drop(signed_rows);
+    ProofEvaluationDomain::new_subgroup(trace_domain_size)
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
+        .interpolate_base_polynomial_in_place(&mut field_values)
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+    Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(field_values))
 }
 
 fn recentered_matrix_rows<Source>(
@@ -3579,16 +4757,15 @@ where
     Ok(None)
 }
 
-fn derive_anchor_quotient<Layout, Source>(
+fn derive_anchor_quotient<Source>(
     source: &Source,
     relation_context: &RelationPlanCheckContext,
     ring_degree: usize,
-    layout: &Layout,
+    data_modulus_index: u16,
     anchor_ordinal: usize,
     row_ordinal: usize,
 ) -> Result<Zeroizing<Vec<i128>>, RefusalReason>
 where
-    Layout: AnchorSourceLayout,
     Source: SetupKeyRelationAnchorCoefficientSource + ?Sized,
 {
     if anchor_ordinal >= source.anchor_count() {
@@ -3598,7 +4775,7 @@ where
         return Err(RefusalReason::WrongTypeOrLength);
     }
     let modulus = relation_context
-        .resolved_modulus(SuiteModulusReference::data(layout.data_modulus_index()))
+        .resolved_modulus(SuiteModulusReference::data(data_modulus_index))
         .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
     let commitment = source.anchor_commitment_row(anchor_ordinal, row_ordinal)?;
     let seed = encode_hex(&source.public_setup_seed_bytes());
@@ -3616,7 +4793,7 @@ where
         };
         let matrix = setup_commitment_matrix_polynomial(
             &seed,
-            usize::from(layout.data_modulus_index()),
+            usize::from(data_modulus_index),
             matrix_row,
             column_ordinal,
             ring_degree,
@@ -3944,6 +5121,229 @@ mod compact_source_request_profile_tests {
                 ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
             ),
             Err(CommonProofProverError::InvalidInput),
+        );
+    }
+
+    #[test]
+    fn generated_compact_assignment_source_catalog_is_the_checked_production_output() {
+        let (relation_plan, relation_plan_variant, relation_context, source_layout, _) =
+            selected_compact_request_fixture();
+        let input = selected_public_key_share_relation_plan_input()
+            .expect("selected public-key relation input");
+        let (relation, independently_derived) = derive_bound_compact_public_key_catalogs(
+            &input,
+            &relation_plan,
+            &relation_plan_variant,
+            &source_layout,
+        )
+        .expect("bound compact public-key catalogs derive");
+        relation
+            .check(&input, &relation_context, &relation_plan_variant)
+            .expect("compact public-key relation checks");
+        independently_derived
+            .validate_generated(&relation)
+            .expect("independently derived compact assignment source catalog checks");
+        let selected = selected_compact_public_key_assignment_source_catalog(&relation)
+            .expect("generated compact assignment source catalog decodes");
+        assert_eq!(selected, independently_derived);
+        assert_eq!(selected.ordered_sources.len(), 202);
+        assert_eq!(selected.relation_column_count, 6_976);
+        assert_eq!(
+            serde_json::to_vec(&independently_derived)
+                .expect("independently derived compact assignment source catalog serializes"),
+            GENERATED_COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_BYTES
+                .strip_suffix(b"\n")
+                .expect("generated compact assignment source catalog has one source-file newline"),
+        );
+    }
+
+    #[cfg(feature = "compact-public-key-catalog-regeneration")]
+    #[test]
+    fn generated_compact_public_key_catalog_regeneration_writes_canonical_compiler_output() {
+        let (relation_plan, relation_plan_variant, relation_context, source_layout, _) =
+            selected_compact_request_fixture();
+        let input = selected_public_key_share_relation_plan_input()
+            .expect("selected public-key relation input");
+        let (relation, source_catalog) = derive_bound_compact_public_key_catalogs(
+            &input,
+            &relation_plan,
+            &relation_plan_variant,
+            &source_layout,
+        )
+        .expect("bound compact public-key catalogs derive");
+        relation
+            .check(&input, &relation_context, &relation_plan_variant)
+            .expect("regenerated compact public-key relation checks");
+        source_catalog
+            .validate_generated(&relation)
+            .expect("regenerated compact assignment-source catalog checks");
+
+        let canonical_relation_bytes = serde_json::to_vec(&relation)
+            .expect("regenerated compact public-key relation serializes");
+        let canonical_source_catalog_bytes = serde_json::to_vec(&source_catalog)
+            .expect("regenerated compact assignment-source catalog serializes");
+        if let Some(output_directory) =
+            std::env::var_os("SEALED_LATTICE_COMPACT_PUBLIC_KEY_CATALOG_OUTPUT_DIRECTORY")
+                .map(std::path::PathBuf::from)
+        {
+            std::fs::write(
+                output_directory.join("compact_public_key_relation.generated.json"),
+                [canonical_relation_bytes.as_slice(), b"\n"].concat(),
+            )
+            .expect("regenerated compact public-key relation writes");
+            std::fs::write(
+                output_directory.join("compact_public_key_assignment_source.generated.json"),
+                [canonical_source_catalog_bytes.as_slice(), b"\n"].concat(),
+            )
+            .expect("regenerated compact assignment-source catalog writes");
+        } else {
+            assert_eq!(
+                super::super::compact_ring_vector::selected_compact_public_key_relation_catalog()
+                    .expect("checked-in compact public-key relation decodes"),
+                relation,
+            );
+            assert_eq!(
+                [canonical_source_catalog_bytes.as_slice(), b"\n"].concat(),
+                GENERATED_COMPACT_PUBLIC_KEY_ASSIGNMENT_SOURCE_CATALOG_BYTES,
+            );
+        }
+    }
+
+    #[test]
+    fn generated_compact_assignment_source_catalog_refuses_substituted_bindings_and_derivations() {
+        let (relation_plan, relation_plan_variant, relation_context, source_layout, _) =
+            selected_compact_request_fixture();
+        let input = selected_public_key_share_relation_plan_input()
+            .expect("selected public-key relation input");
+        let (relation, catalog) = derive_bound_compact_public_key_catalogs(
+            &input,
+            &relation_plan,
+            &relation_plan_variant,
+            &source_layout,
+        )
+        .expect("bound compact public-key catalogs derive");
+        relation
+            .check(&input, &relation_context, &relation_plan_variant)
+            .expect("compact public-key relation checks");
+
+        let mut wrong_schema = catalog.clone();
+        wrong_schema.schema_version += 1;
+        assert_eq!(
+            wrong_schema.validate_generated(&relation),
+            Err(RelationPlanError::InvalidConstraint)
+        );
+
+        let mut substituted_complete_plan_hash = catalog.clone();
+        substituted_complete_plan_hash.complete_relation_plan_hash[0] ^= 1;
+        assert_eq!(
+            substituted_complete_plan_hash.validate_generated(&relation),
+            Err(RelationPlanError::InvalidConstraint)
+        );
+
+        let mut substituted_variant_hash_value =
+            serde_json::to_value(&catalog).expect("source catalog converts to JSON value");
+        let substituted_variant_hash_byte = substituted_variant_hash_value
+            .pointer_mut("/assignment_catalog/relation_plan_hash/0")
+            .expect("assignment variant hash byte exists");
+        *substituted_variant_hash_byte =
+            serde_json::json!(substituted_variant_hash_byte.as_u64().expect("hash byte") ^ 1);
+        let substituted_variant_hash: CompactPublicKeyAssignmentSourceCatalog =
+            serde_json::from_value(substituted_variant_hash_value)
+                .expect("substituted variant-hash catalog decodes");
+        assert_eq!(
+            substituted_variant_hash.validate_generated(&relation),
+            Err(RelationPlanError::InvalidConstraint)
+        );
+
+        let mut missing_relation_columns = catalog.clone();
+        missing_relation_columns.relation_column_count = 0;
+        assert_eq!(
+            missing_relation_columns.validate_generated(&relation),
+            Err(RelationPlanError::InvalidConstraint)
+        );
+
+        let mut reordered_sources = catalog.clone();
+        reordered_sources.ordered_sources.swap(0, 1);
+        assert_eq!(
+            reordered_sources.validate_generated(&relation),
+            Err(RelationPlanError::InvalidColumn)
+        );
+
+        let mut wrong_origin_value =
+            serde_json::to_value(&catalog).expect("source catalog converts to JSON value");
+        *wrong_origin_value
+            .pointer_mut("/assignment_catalog/ordered_source_halves/0/source_origin")
+            .expect("first source origin exists") = serde_json::json!("BoundTree");
+        let wrong_origin: CompactPublicKeyAssignmentSourceCatalog =
+            serde_json::from_value(wrong_origin_value)
+                .expect("wrong-origin source catalog decodes");
+        assert_eq!(
+            wrong_origin.validate_generated(&relation),
+            Err(RelationPlanError::InvalidColumn)
+        );
+
+        let mut wrong_destination_value =
+            serde_json::to_value(&catalog).expect("source catalog converts to JSON value");
+        let wrong_destination = wrong_destination_value
+            .pointer_mut("/assignment_catalog/ordered_source_halves/0/destination_first_element")
+            .expect("first destination exists");
+        *wrong_destination = serde_json::json!(
+            wrong_destination
+                .as_u64()
+                .expect("destination is an integer")
+                + 1
+        );
+        let wrong_destination: CompactPublicKeyAssignmentSourceCatalog =
+            serde_json::from_value(wrong_destination_value)
+                .expect("wrong-destination source catalog decodes");
+        assert!(wrong_destination.validate_generated(&relation).is_err());
+
+        let mut invalid_half = catalog.clone();
+        let CompactPublicKeySourceDerivation::CommonSecret { half_ordinal, .. } =
+            &mut invalid_half.ordered_sources[0].derivation
+        else {
+            panic!("the first generated source is the first common-secret half")
+        };
+        *half_ordinal = 2;
+        assert_eq!(
+            invalid_half.validate_generated(&relation),
+            Err(RelationPlanError::InvalidColumn)
+        );
+
+        let mut wrong_modulus = catalog.clone();
+        let CompactPublicKeySourceDerivation::PublicKeyQuotient {
+            data_modulus_index, ..
+        } = &mut wrong_modulus
+            .ordered_sources
+            .iter_mut()
+            .find(|source| {
+                matches!(
+                    &source.derivation,
+                    CompactPublicKeySourceDerivation::PublicKeyQuotient { .. }
+                )
+            })
+            .expect("a public-key quotient source exists")
+            .derivation
+        else {
+            unreachable!("the selected source is a public-key quotient")
+        };
+        *data_modulus_index += 1;
+        assert_eq!(
+            wrong_modulus.validate_generated(&relation),
+            Err(RelationPlanError::InvalidConstraint)
+        );
+
+        let mut wrong_source_derivation = catalog;
+        let CompactPublicKeySourceDerivation::CommonSecret {
+            centered_offset, ..
+        } = &mut wrong_source_derivation.ordered_sources[0].derivation
+        else {
+            panic!("the first generated source is the first common-secret half")
+        };
+        *centered_offset += 1;
+        assert_eq!(
+            wrong_source_derivation.validate_generated(&relation),
+            Err(RelationPlanError::InvalidConstraint)
         );
     }
 }

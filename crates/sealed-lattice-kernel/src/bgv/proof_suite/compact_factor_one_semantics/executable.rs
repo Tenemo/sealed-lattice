@@ -20,6 +20,10 @@ use crate::bgv::proof_suite::compact_cfw::{
     compact_challenge_from_production, compact_challenge_to_production,
     verify_compact_cfw_transcript,
 };
+use crate::bgv::proof_suite::compact_cfw_initial_transition::{
+    CompactCfwInitialTransitionBinding, CompactCfwInitialTransitionError,
+    CompactCfwInitialVerifierPrefix, verify_compact_cfw_initial_transition_bad_event,
+};
 use crate::bgv::proof_suite::compact_reed_solomon::{
     CanonicalReedSolomonError, CanonicalReedSolomonGeometry,
     decode_canonical_interleaved_reed_solomon, encode_canonical_interleaved_reed_solomon,
@@ -457,8 +461,31 @@ pub(super) struct SemanticCfwCrossEpochHandoff {
     pub(super) mask_difference: CompactChallengeField,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SemanticCfwInitialStatementBinding {
+    relation_plan_hash: [u8; 64],
+    canonical_public_input_binding: [u8; 64],
+    initial_verifier_prefix: CompactCfwInitialVerifierPrefix,
+}
+
+impl SemanticCfwInitialStatementBinding {
+    pub(super) fn new(
+        relation_plan_hash: [u8; 64],
+        canonical_public_input_binding: [u8; 64],
+        initial_verifier_prefix: &CompactCfwInitialVerifierPrefix,
+    ) -> Self {
+        Self {
+            relation_plan_hash,
+            canonical_public_input_binding,
+            initial_verifier_prefix: initial_verifier_prefix.clone(),
+        }
+    }
+}
+
 pub(super) struct SemanticCfwStatement<'statement, Matrices: CompactCfwR1csMatrices> {
     relation_plan_hash: [u8; 64],
+    canonical_public_input_binding: [u8; 64],
+    initial_verifier_prefix: CompactCfwInitialVerifierPrefix,
     matrices: &'statement Matrices,
     public_input: &'statement [CompactChallengeField],
     code_relations: &'statement SemanticCfwCodeRelations,
@@ -470,26 +497,37 @@ pub(super) struct SemanticCfwStatement<'statement, Matrices: CompactCfwR1csMatri
 
 impl<'statement, Matrices: CompactCfwR1csMatrices> SemanticCfwStatement<'statement, Matrices> {
     pub(super) fn new(
-        relation_plan_hash: [u8; 64],
+        initial_statement_binding: SemanticCfwInitialStatementBinding,
         matrices: &'statement Matrices,
         public_input: &'statement [CompactChallengeField],
         code_relations: &'statement SemanticCfwCodeRelations,
         committed_instances: &'statement SemanticCfwCommittedInstances,
         cross_epoch_handoff: &'statement SemanticCfwCrossEpochHandoff,
     ) -> Result<Self, SemanticCfwError> {
-        if public_input.len() != matrices.witness_length() {
+        let SemanticCfwInitialStatementBinding {
+            relation_plan_hash,
+            canonical_public_input_binding,
+            initial_verifier_prefix,
+        } = initial_statement_binding;
+        let geometry = CompactCfwGeometry::derive(matrices.witness_length())?;
+        if public_input.len() != matrices.witness_length()
+            || initial_verifier_prefix.equality_point().len() != geometry.sumcheck_round_count()
+        {
             return Err(SemanticCfwError::MalformedStatement);
         }
-        validate_semantic_cfw_code_relations(
-            CompactCfwGeometry::derive(matrices.witness_length())?,
-            code_relations,
+        initial_verifier_prefix.verify_semantic_binding(
+            relation_plan_hash,
+            canonical_public_input_binding,
+            initial_verifier_prefix.auxiliary_target(),
+            initial_verifier_prefix.constraint_combining_challenge(),
+            initial_verifier_prefix.equality_point(),
         )?;
-        validate_semantic_cfw_cross_epoch_handoff(
-            CompactCfwGeometry::derive(matrices.witness_length())?,
-            cross_epoch_handoff,
-        )?;
+        validate_semantic_cfw_code_relations(geometry, code_relations)?;
+        validate_semantic_cfw_cross_epoch_handoff(geometry, cross_epoch_handoff)?;
         Ok(Self {
             relation_plan_hash,
+            canonical_public_input_binding,
+            initial_verifier_prefix,
             matrices,
             public_input,
             code_relations,
@@ -559,14 +597,29 @@ pub(super) enum SemanticCfwVerifierTransition {
     JointConstraint,
 }
 
+/// Opaque result of deriving and independently checking the initial bad-event
+/// polynomial from verifier-owned matrices, an extracted witness, and the
+/// source-bound production prefix.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SemanticCfwInitialBadTransition {
+    initial_verifier_prefix: CompactCfwInitialVerifierPrefix,
+    soundness_numerator: u64,
+}
+
+impl SemanticCfwInitialBadTransition {
+    pub(super) const fn soundness_numerator(&self) -> u64 {
+        self.soundness_numerator
+    }
+
+    #[cfg(test)]
+    fn initial_verifier_prefix(&self) -> &CompactCfwInitialVerifierPrefix {
+        &self.initial_verifier_prefix
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SemanticCfwBadTransition {
-    InitialConsistency {
-        auxiliary_difference: CompactChallengeField,
-        masked_constraint_hypercube_residuals: Vec<CompactChallengeField>,
-        constraint_combining_challenge: CompactChallengeField,
-        equality_point: Vec<CompactChallengeField>,
-    },
+    InitialConsistency(SemanticCfwInitialBadTransition),
     NonzeroPolynomial {
         transition: SemanticCfwVerifierTransition,
         coefficients: Vec<CompactChallengeField>,
@@ -587,10 +640,7 @@ impl SemanticCfwBadTransition {
     /// would admit the tighter one-root bound.
     pub(super) fn polynomial_identity_numerator(&self) -> Option<u64> {
         match self {
-            Self::InitialConsistency { equality_point, .. } => crate::bgv::proof_suite::compact_cfw_initial_transition::compact_cfw_initial_transition_soundness_numerator(
-                equality_point.len(),
-            )
-            .ok(),
+            Self::InitialConsistency(event) => Some(event.soundness_numerator()),
             Self::NonzeroPolynomial { coefficients, .. } => coefficients
                 .iter()
                 .rposition(|coefficient| *coefficient != CompactChallengeField::ZERO)
@@ -608,9 +658,16 @@ pub(super) enum SemanticCfwError {
     ArithmeticOverflow,
     CompactCfw(CompactCfwError),
     InconsistentBadTransition,
+    InitialSourceBinding(CompactCfwInitialTransitionError),
     MalformedPrefix,
     MalformedStatement,
     Relation(SemanticRelationError),
+}
+
+impl From<CompactCfwInitialTransitionError> for SemanticCfwError {
+    fn from(error: CompactCfwInitialTransitionError) -> Self {
+        Self::InitialSourceBinding(error)
+    }
 }
 
 impl From<CompactCfwError> for SemanticCfwError {
@@ -792,6 +849,9 @@ pub(super) fn semantic_cfw_bad_transition<Matrices: CompactCfwR1csMatrices>(
     post_challenge_witness: &SemanticCfwExtractedWitness,
 ) -> Result<Option<SemanticCfwBadTransition>, SemanticCfwError> {
     let transition = semantic_cfw_verifier_transition(extended_prefix)?;
+    if transition == SemanticCfwVerifierTransition::InitialRandomness {
+        verify_semantic_cfw_initial_source_binding(statement, extended_prefix)?;
+    }
     if !semantic_cfw_kstate(statement, Some(extended_prefix), post_challenge_witness)? {
         return Ok(None);
     }
@@ -818,8 +878,7 @@ pub(super) fn semantic_cfw_bad_transition<Matrices: CompactCfwR1csMatrices>(
 
     match transition {
         SemanticCfwVerifierTransition::InitialRandomness => {
-            semantic_cfw_initial_bad_transition(statement, extended_prefix, &decoded.witness)
-                .map(Some)
+            semantic_cfw_initial_bad_transition(statement, &decoded.witness).map(Some)
         }
         SemanticCfwVerifierTransition::SumcheckRound { round_ordinal } => {
             let actual_polynomial = compact_cfw_semantic_round_polynomial(
@@ -903,7 +962,6 @@ pub(super) fn semantic_cfw_bad_transition<Matrices: CompactCfwR1csMatrices>(
 
 fn semantic_cfw_initial_bad_transition<Matrices: CompactCfwR1csMatrices>(
     statement: &SemanticCfwStatement<'_, Matrices>,
-    extended_prefix: &SemanticCfwTranscriptPrefix,
     decoded: &SemanticCfwExtractedWitness,
 ) -> Result<SemanticCfwBadTransition, SemanticCfwError> {
     let actual_auxiliary_target = PreparedCompactCfwProver::prepare(
@@ -913,28 +971,47 @@ fn semantic_cfw_initial_bad_transition<Matrices: CompactCfwR1csMatrices>(
         decoded.mask_material.clone(),
     )?
     .auxiliary_target();
-    let auxiliary_difference = actual_auxiliary_target - extended_prefix.auxiliary_target;
+    let auxiliary_difference =
+        actual_auxiliary_target - statement.initial_verifier_prefix.auxiliary_target();
     let residuals = semantic_cfw_masked_constraint_hypercube_residuals(statement, decoded)?;
-    let residual_at_equality_point =
-        compact_multilinear_evaluation(&residuals, &extended_prefix.equality_point)?;
+    let soundness_numerator = verify_compact_cfw_initial_transition_bad_event(
+        auxiliary_difference,
+        &residuals,
+        statement
+            .initial_verifier_prefix
+            .constraint_combining_challenge(),
+        statement.initial_verifier_prefix.equality_point(),
+    )
+    .map_err(|error| match error {
+        CompactCfwInitialTransitionError::IdentityDoesNotVanish
+        | CompactCfwInitialTransitionError::ZeroPolynomial => {
+            SemanticCfwError::InconsistentBadTransition
+        }
+        other => SemanticCfwError::InitialSourceBinding(other),
+    })?;
+    Ok(SemanticCfwBadTransition::InitialConsistency(
+        SemanticCfwInitialBadTransition {
+            initial_verifier_prefix: statement.initial_verifier_prefix.clone(),
+            soundness_numerator,
+        },
+    ))
+}
+
+fn verify_semantic_cfw_initial_source_binding<Matrices: CompactCfwR1csMatrices>(
+    statement: &SemanticCfwStatement<'_, Matrices>,
+    extended_prefix: &SemanticCfwTranscriptPrefix,
+) -> Result<(), SemanticCfwError> {
     let constraint_combining_challenge = extended_prefix
         .constraint_combining_challenge
         .ok_or(SemanticCfwError::MalformedPrefix)?;
-    if (auxiliary_difference == CompactChallengeField::ZERO
-        && residuals
-            .iter()
-            .all(|residual| *residual == CompactChallengeField::ZERO))
-        || auxiliary_difference + constraint_combining_challenge * residual_at_equality_point
-            != CompactChallengeField::ZERO
-    {
-        return Err(SemanticCfwError::InconsistentBadTransition);
-    }
-    Ok(SemanticCfwBadTransition::InitialConsistency {
-        auxiliary_difference,
-        masked_constraint_hypercube_residuals: residuals,
+    statement.initial_verifier_prefix.verify_semantic_binding(
+        statement.relation_plan_hash,
+        statement.canonical_public_input_binding,
+        extended_prefix.auxiliary_target,
         constraint_combining_challenge,
-        equality_point: extended_prefix.equality_point.clone(),
-    })
+        &extended_prefix.equality_point,
+    )?;
+    Ok(())
 }
 
 fn semantic_cfw_masked_constraint_hypercube_residuals<Matrices: CompactCfwR1csMatrices>(
@@ -996,30 +1073,6 @@ fn semantic_cfw_masked_constraint_hypercube_residuals<Matrices: CompactCfwR1csMa
         );
     }
     Ok(residuals)
-}
-
-fn compact_multilinear_evaluation(
-    hypercube_values: &[CompactChallengeField],
-    point: &[CompactChallengeField],
-) -> Result<CompactChallengeField, SemanticCfwError> {
-    let expected_value_count = 1_usize
-        .checked_shl(u32::try_from(point.len()).map_err(|_| SemanticCfwError::ArithmeticOverflow)?)
-        .ok_or(SemanticCfwError::ArithmeticOverflow)?;
-    if hypercube_values.len() != expected_value_count {
-        return Err(SemanticCfwError::MalformedStatement);
-    }
-    let mut evaluations = hypercube_values.to_vec();
-    for &coordinate in point {
-        evaluations = evaluations
-            .chunks_exact(2)
-            .map(|pair| pair[0] + coordinate * (pair[1] - pair[0]))
-            .collect();
-    }
-    evaluations
-        .first()
-        .copied()
-        .filter(|_| evaluations.len() == 1)
-        .ok_or(SemanticCfwError::MalformedStatement)
 }
 
 fn semantic_cfw_verifier_transition(
@@ -2223,7 +2276,7 @@ mod tests {
             inner_masks: inner_mask_relation.clone(),
             outer_masks: outer_mask_relation.clone(),
         };
-        let (source_instance, _) =
+        let (source_instance, source_code_witness) =
             code_fixture_from_messages(&source_relation, vec![vec![field(5), field(7)]], 31);
         let inner_messages = (0..6_u64)
             .map(|mask_ordinal| {
@@ -2237,7 +2290,7 @@ mod tests {
                 ]
             })
             .collect::<Vec<_>>();
-        let (inner_mask_instance, _) =
+        let (inner_mask_instance, inner_mask_code_witness) =
             code_fixture_from_messages(&inner_mask_relation, inner_messages, 101);
         let outer_messages = (0..2_u64)
             .map(|mask_ordinal| {
@@ -2246,7 +2299,7 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let (outer_mask_instance, _) =
+        let (outer_mask_instance, outer_mask_code_witness) =
             code_fixture_from_messages(&outer_mask_relation, outer_messages, 211);
         let pre_challenge_mask = compact_challenge_from_production(field(307));
         let main_mask = compact_challenge_from_production(field(311));
@@ -2275,8 +2328,46 @@ mod tests {
             compact_challenge_from_production(field(3)),
         ];
         let matrices = SmallR1csMatrices;
+        let expected_extraction = semantic_cfw_witness_from_code_witnesses(
+            CompactCfwGeometry::derive(matrices.witness_length()).unwrap(),
+            source_code_witness,
+            inner_mask_code_witness,
+            outer_mask_code_witness,
+            cross_epoch_mask_code_witness.clone(),
+        )
+        .expect("the focused committed witnesses define the CFW witness");
+        let constraint_combining_challenge = compact_challenge_from_production(field(13));
+        let equality_point = vec![
+            compact_challenge_from_production(field(17)),
+            compact_challenge_from_production(field(19)),
+        ];
+        let round_challenges = vec![
+            compact_challenge_from_production(field(23)),
+            compact_challenge_from_production(field(29)),
+        ];
+        let prepared = PreparedCompactCfwProver::prepare(
+            &matrices,
+            &public_input,
+            &expected_extraction.r1cs_witness,
+            expected_extraction.mask_material.clone(),
+        )
+        .expect("small CFW witness prepares");
+        let auxiliary_target = prepared.auxiliary_target();
+        let relation_plan_hash = [0x5a; 64];
+        let canonical_public_input_binding = [0x6a; 64];
+        let initial_verifier_prefix = CompactCfwInitialVerifierPrefix::for_focused_semantic_test(
+            relation_plan_hash,
+            canonical_public_input_binding,
+            auxiliary_target,
+            constraint_combining_challenge,
+            equality_point.clone(),
+        );
         let statement = SemanticCfwStatement::new(
-            [0x5a; 64],
+            SemanticCfwInitialStatementBinding::new(
+                relation_plan_hash,
+                canonical_public_input_binding,
+                &initial_verifier_prefix,
+            ),
             &matrices,
             &public_input,
             &code_relations,
@@ -2290,25 +2381,9 @@ mod tests {
         assert_eq!(statement.implicit_tuple_dimensions(), (0, 0));
         assert!(decoding.field_operation_count > 0);
         let extraction = decoding.witness;
+        assert_eq!(extraction, expected_extraction);
         assert!(semantic_cfw_kstate(&statement, None, &extraction).unwrap());
 
-        let constraint_combining_challenge = compact_challenge_from_production(field(13));
-        let equality_point = vec![
-            compact_challenge_from_production(field(17)),
-            compact_challenge_from_production(field(19)),
-        ];
-        let round_challenges = vec![
-            compact_challenge_from_production(field(23)),
-            compact_challenge_from_production(field(29)),
-        ];
-        let prepared = PreparedCompactCfwProver::prepare(
-            &matrices,
-            &public_input,
-            &extraction.r1cs_witness,
-            extraction.mask_material.clone(),
-        )
-        .expect("small CFW witness prepares");
-        let auxiliary_target = prepared.auxiliary_target();
         let mut prover = prepared
             .begin(constraint_combining_challenge, equality_point.clone())
             .expect("small CFW prover begins");
@@ -2731,8 +2806,21 @@ mod tests {
             compact_challenge_from_production(field(2)),
             compact_challenge_from_production(field(4)),
         ];
-        let invalid_statement = SemanticCfwStatement::new(
-            [0x5b; 64],
+        let invalid_relation_plan_hash = [0x5b; 64];
+        let invalid_public_input_binding = [0x6b; 64];
+        let extraction_prefix = CompactCfwInitialVerifierPrefix::for_focused_semantic_test(
+            invalid_relation_plan_hash,
+            invalid_public_input_binding,
+            auxiliary_target,
+            constraint_combining_challenge,
+            prefix.equality_point.clone(),
+        );
+        let invalid_statement_for_extraction = SemanticCfwStatement::new(
+            SemanticCfwInitialStatementBinding::new(
+                invalid_relation_plan_hash,
+                invalid_public_input_binding,
+                &extraction_prefix,
+            ),
             &matrices,
             &invalid_public_input,
             &code_relations,
@@ -2740,12 +2828,17 @@ mod tests {
             &cross_epoch_handoff,
         )
         .expect("the invalid-relation statement remains structurally canonical");
-        let invalid_decoding =
-            semantic_cfw_errbr(&invalid_statement, cross_epoch_mask_code_witness)
-                .expect("the committed witness still decodes canonically");
+        let invalid_decoding = semantic_cfw_errbr(
+            &invalid_statement_for_extraction,
+            cross_epoch_mask_code_witness,
+        )
+        .expect("the committed witness still decodes canonically");
         assert!(invalid_decoding.field_operation_count > 0);
         let invalid_extraction = invalid_decoding.witness;
-        assert!(!semantic_cfw_kstate(&invalid_statement, None, &invalid_extraction).unwrap());
+        assert!(
+            !semantic_cfw_kstate(&invalid_statement_for_extraction, None, &invalid_extraction,)
+                .unwrap()
+        );
         let invalid_initial_polynomial = compact_cfw_semantic_round_polynomial(
             &matrices,
             &invalid_public_input,
@@ -2766,6 +2859,108 @@ mod tests {
             final_message: None,
             joint_constraint_challenge: None,
         };
+        let invalid_source_prefix = CompactCfwInitialVerifierPrefix::for_focused_semantic_test(
+            invalid_relation_plan_hash,
+            invalid_public_input_binding,
+            invalid_initial_prefix.auxiliary_target,
+            constraint_combining_challenge,
+            invalid_initial_prefix.equality_point.clone(),
+        );
+        let invalid_statement = SemanticCfwStatement::new(
+            SemanticCfwInitialStatementBinding::new(
+                invalid_relation_plan_hash,
+                invalid_public_input_binding,
+                &invalid_source_prefix,
+            ),
+            &matrices,
+            &invalid_public_input,
+            &code_relations,
+            &committed_instances,
+            &cross_epoch_handoff,
+        )
+        .expect("the exact invalid prefix binds the verifier-owned statement");
+        let mut wrong_relation_plan_hash = invalid_relation_plan_hash;
+        wrong_relation_plan_hash[0] ^= 1;
+        assert!(matches!(
+            SemanticCfwStatement::new(
+                SemanticCfwInitialStatementBinding::new(
+                    wrong_relation_plan_hash,
+                    invalid_public_input_binding,
+                    &invalid_source_prefix,
+                ),
+                &matrices,
+                &invalid_public_input,
+                &code_relations,
+                &committed_instances,
+                &cross_epoch_handoff,
+            ),
+            Err(SemanticCfwError::InitialSourceBinding(
+                CompactCfwInitialTransitionError::BindingMismatch(
+                    CompactCfwInitialTransitionBinding::RelationPlanVariant,
+                ),
+            ))
+        ));
+        let mut wrong_public_input_binding = invalid_public_input_binding;
+        wrong_public_input_binding[0] ^= 1;
+        assert!(matches!(
+            SemanticCfwStatement::new(
+                SemanticCfwInitialStatementBinding::new(
+                    invalid_relation_plan_hash,
+                    wrong_public_input_binding,
+                    &invalid_source_prefix,
+                ),
+                &matrices,
+                &invalid_public_input,
+                &code_relations,
+                &committed_instances,
+                &cross_epoch_handoff,
+            ),
+            Err(SemanticCfwError::InitialSourceBinding(
+                CompactCfwInitialTransitionError::BindingMismatch(
+                    CompactCfwInitialTransitionBinding::CanonicalPublicInput,
+                ),
+            ))
+        ));
+        for (changed_prefix, expected_binding) in [
+            (
+                SemanticCfwTranscriptPrefix {
+                    auxiliary_target: invalid_initial_prefix.auxiliary_target
+                        + CompactChallengeField::ONE,
+                    ..invalid_initial_prefix.clone()
+                },
+                CompactCfwInitialTransitionBinding::AuxiliaryTarget,
+            ),
+            (
+                SemanticCfwTranscriptPrefix {
+                    constraint_combining_challenge: Some(
+                        constraint_combining_challenge + CompactChallengeField::ONE,
+                    ),
+                    ..invalid_initial_prefix.clone()
+                },
+                CompactCfwInitialTransitionBinding::InitialVerifierMessage,
+            ),
+            (
+                SemanticCfwTranscriptPrefix {
+                    equality_point: vec![
+                        invalid_initial_prefix.equality_point[0] + CompactChallengeField::ONE,
+                        invalid_initial_prefix.equality_point[1],
+                    ],
+                    ..invalid_initial_prefix.clone()
+                },
+                CompactCfwInitialTransitionBinding::InitialVerifierMessage,
+            ),
+        ] {
+            assert_eq!(
+                semantic_cfw_bad_transition(
+                    &invalid_statement,
+                    &changed_prefix,
+                    &invalid_extraction,
+                ),
+                Err(SemanticCfwError::InitialSourceBinding(
+                    CompactCfwInitialTransitionError::BindingMismatch(expected_binding),
+                ))
+            );
+        }
         assert!(
             semantic_cfw_kstate(
                 &invalid_statement,
@@ -2791,48 +2986,53 @@ mod tests {
         )
         .expect("the initial bad transition is classified")
         .expect("the invalid input creates a bad transition");
+        let mut substituted_extraction = invalid_extraction.clone();
+        substituted_extraction.r1cs_witness[0] += CompactChallengeField::ONE;
+        assert_eq!(
+            semantic_cfw_bad_transition(
+                &invalid_statement,
+                &invalid_initial_prefix,
+                &substituted_extraction,
+            ),
+            Ok(None)
+        );
         assert_eq!(
             invalid_initial_event.polynomial_identity_numerator(),
             Some(3)
         );
-        match invalid_initial_event {
-            SemanticCfwBadTransition::InitialConsistency {
-                auxiliary_difference,
-                masked_constraint_hypercube_residuals,
-                constraint_combining_challenge: classified_challenge,
-                equality_point: classified_equality_point,
-            } => {
-                assert_eq!(classified_challenge, constraint_combining_challenge);
-                assert_eq!(classified_equality_point, prefix.equality_point);
-                assert_eq!(masked_constraint_hypercube_residuals.len(), 4);
-                assert!(
-                    auxiliary_difference != CompactChallengeField::ZERO
-                        || masked_constraint_hypercube_residuals
-                            .iter()
-                            .any(|residual| *residual != CompactChallengeField::ZERO)
-                );
-                assert_eq!(
-                    crate::bgv::proof_suite::compact_cfw_initial_transition::verify_compact_cfw_initial_transition_bad_event(
-                        auxiliary_difference,
-                        &masked_constraint_hypercube_residuals,
-                        classified_challenge,
-                        &classified_equality_point,
-                    ),
-                    Ok(3),
-                );
-                assert_eq!(
-                    auxiliary_difference
-                        + classified_challenge
-                            * compact_multilinear_evaluation(
-                                &masked_constraint_hypercube_residuals,
-                                &classified_equality_point,
-                            )
-                            .unwrap(),
-                    CompactChallengeField::ZERO
-                );
-            }
-            event => panic!("unexpected initial transition event: {event:?}"),
-        }
+        let SemanticCfwBadTransition::InitialConsistency(initial_event) = &invalid_initial_event
+        else {
+            panic!("unexpected initial transition event: {invalid_initial_event:?}");
+        };
+        assert_eq!(initial_event.soundness_numerator(), 3);
+        assert_eq!(
+            initial_event
+                .initial_verifier_prefix()
+                .constraint_combining_challenge(),
+            constraint_combining_challenge
+        );
+        assert_eq!(
+            initial_event.initial_verifier_prefix().equality_point(),
+            prefix.equality_point
+        );
+        let initial_descriptor =
+            semantic_execution::SemanticFactorOneMoveDescriptor::for_focused_test(
+                semantic_execution::SemanticVerifierMoveOwner::CfwInitialRandomness,
+            );
+        let initial_events = semantic_error_bounds::derive_bad_transition_certificate_events(
+            &initial_descriptor,
+            &semantic_execution::SemanticVerifierMoveBadTransition::Cfw(
+                invalid_initial_event.clone(),
+            ),
+        )
+        .expect("the opaque initial event enters the semantic probability ledger");
+        assert_eq!(
+            initial_events
+                .iter()
+                .map(|event| event.family)
+                .collect::<Vec<_>>(),
+            [semantic_error_bounds::SemanticBadEventFamily::CfwInitialConsistencyIdentity]
+        );
 
         let first_round_challenge = prefix.round_challenges[0];
         let mut root_adjusted_polynomial = prefix.round_polynomials[0];

@@ -148,7 +148,7 @@ const requireEvidenceRecord = async (evidencePath: string): Promise<void> => {
         typeof parsed !== 'object' ||
         parsed === null ||
         !('schemaVersion' in parsed) ||
-        parsed.schemaVersion !== 1 ||
+        parsed.schemaVersion !== 2 ||
         !('sameByteVerification' in parsed) ||
         typeof parsed.sameByteVerification !== 'object' ||
         parsed.sameByteVerification === null ||

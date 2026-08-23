@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest';
 import { verifyCompactPublicKeyAlgebraicallyInClosedWorker } from '#packages/wasm/src/common-proof-worker-runtime';
 import {
     generateCompactPublicKeyReferenceInClosedWorker,
+    type CompactPublicKeyGenerationOperationObservation,
+    type CompactPublicKeyGenerationOperationOwnerIdentifier,
+    type CompactPublicKeyGenerationRuntimeStageIdentifier,
     type GeneratedCompactPublicKeyReferenceProof,
 } from '#packages/wasm/src/index';
 import {
@@ -46,10 +49,54 @@ type ProcessMemoryObservation = Readonly<{
 
 type ProgressObservation = Readonly<{
     durationMilliseconds: number;
+    lastYieldToCompletionMilliseconds?: number;
     maximumProcessMemory: ProcessMemoryObservation;
+    maximumBetweenYieldIntervalMilliseconds: number;
     maximumCooperativeYieldIntervalMilliseconds: number;
     maximumWasmMemoryByteLength?: number;
+    startToFirstYieldMilliseconds?: number;
     yieldCount: number;
+}>;
+
+type CompactPublicKeyGenerationOperationPollKind = NonNullable<
+    CompactPublicKeyGenerationOperationObservation['pollKind']
+>;
+type CompactPublicKeyGenerationOperationStorageOwner = NonNullable<
+    CompactPublicKeyGenerationOperationObservation['storageOwner']
+>;
+
+type GenerationOperationSummary = Readonly<{
+    firstStartedAtOffsetMilliseconds: number;
+    generationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+    lastFinishedAtOffsetMilliseconds: number;
+    maximumCompletedWorkUnitCount?: number;
+    maximumDurationMilliseconds: number;
+    maximumFirstOrdinal?: number;
+    minimumFirstOrdinal?: number;
+    observationCount: number;
+    operationOwnerIdentifier: CompactPublicKeyGenerationOperationOwnerIdentifier;
+    pollKind?: CompactPublicKeyGenerationOperationPollKind;
+    precedingGenerationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+    storageOwner?: CompactPublicKeyGenerationOperationStorageOwner;
+    totalDurationMilliseconds: number;
+}>;
+
+type GenerationOperationTimingObservation = Readonly<{
+    longestCompletedOperation: Readonly<{
+        checkpointSafeBoundaryOrdinal?: number;
+        completedWorkUnitCount?: number;
+        durationMilliseconds: number;
+        finishedAtOffsetMilliseconds: number;
+        firstOrdinal?: number;
+        generationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+        operationOwnerIdentifier: CompactPublicKeyGenerationOperationOwnerIdentifier;
+        pollKind?: CompactPublicKeyGenerationOperationPollKind;
+        precedingGenerationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+        startedAtOffsetMilliseconds: number;
+        storageOwner?: CompactPublicKeyGenerationOperationStorageOwner;
+    }>;
+    operationSummaries: readonly GenerationOperationSummary[];
+    totalObservationCount: number;
 }>;
 
 class CompactPublicKeyWasmEvidenceCleanupError extends Error {
@@ -107,26 +154,22 @@ const maximumProcessMemory = (
 
 const beginProgressObservation = (input: {
     label: string;
+    startedAtMilliseconds?: number;
     wasmMemoryByteLength?: () => number;
 }): Readonly<{
     finish(): ProgressObservation;
     yieldControl(): Promise<void>;
 }> => {
-    const startedAt = performance.now();
-    let lastYieldAt = startedAt;
-    let lastReportAt = startedAt;
+    const startedAtMilliseconds =
+        input.startedAtMilliseconds ?? performance.now();
+    let activeSegmentStartedAtMilliseconds = startedAtMilliseconds;
+    let lastReportAtMilliseconds = startedAtMilliseconds;
     let maximumMemory = observeProcessMemory();
+    let maximumBetweenYieldIntervalMilliseconds = 0;
     let maximumCooperativeYieldIntervalMilliseconds = 0;
     let maximumWasmMemoryByteLength = input.wasmMemoryByteLength?.();
+    let startToFirstYieldMilliseconds: number | undefined;
     let yieldCount = 0;
-
-    const observeYieldInterval = (now: number): void => {
-        maximumCooperativeYieldIntervalMilliseconds = Math.max(
-            maximumCooperativeYieldIntervalMilliseconds,
-            now - lastYieldAt,
-        );
-        lastYieldAt = now;
-    };
 
     const sampleMemory = (): void => {
         maximumMemory = maximumProcessMemory(
@@ -144,36 +187,344 @@ const beginProgressObservation = (input: {
 
     return Object.freeze({
         finish: (): ProgressObservation => {
-            const finishedAt = performance.now();
-            observeYieldInterval(finishedAt);
+            const finishedAtMilliseconds = performance.now();
+            const lastActiveIntervalMilliseconds =
+                finishedAtMilliseconds - activeSegmentStartedAtMilliseconds;
+            maximumCooperativeYieldIntervalMilliseconds = Math.max(
+                maximumCooperativeYieldIntervalMilliseconds,
+                lastActiveIntervalMilliseconds,
+            );
             sampleMemory();
             return Object.freeze({
-                durationMilliseconds: finishedAt - startedAt,
+                durationMilliseconds:
+                    finishedAtMilliseconds - startedAtMilliseconds,
+                ...(yieldCount === 0
+                    ? {}
+                    : {
+                          lastYieldToCompletionMilliseconds:
+                              lastActiveIntervalMilliseconds,
+                      }),
                 maximumProcessMemory: maximumMemory,
+                maximumBetweenYieldIntervalMilliseconds,
                 maximumCooperativeYieldIntervalMilliseconds,
                 ...(maximumWasmMemoryByteLength === undefined
                     ? {}
                     : { maximumWasmMemoryByteLength }),
+                ...(startToFirstYieldMilliseconds === undefined
+                    ? {}
+                    : { startToFirstYieldMilliseconds }),
                 yieldCount,
             });
         },
         yieldControl: async (): Promise<void> => {
+            const yieldedAtMilliseconds = performance.now();
+            const activeIntervalMilliseconds =
+                yieldedAtMilliseconds - activeSegmentStartedAtMilliseconds;
+            if (yieldCount === 0) {
+                startToFirstYieldMilliseconds = activeIntervalMilliseconds;
+            } else {
+                maximumBetweenYieldIntervalMilliseconds = Math.max(
+                    maximumBetweenYieldIntervalMilliseconds,
+                    activeIntervalMilliseconds,
+                );
+            }
+            maximumCooperativeYieldIntervalMilliseconds = Math.max(
+                maximumCooperativeYieldIntervalMilliseconds,
+                activeIntervalMilliseconds,
+            );
             yieldCount += 1;
-            const now = performance.now();
-            observeYieldInterval(now);
             if (yieldCount % memorySampleInterval === 0) {
                 sampleMemory();
             }
-            if (now - lastReportAt >= progressReportIntervalMilliseconds) {
+            if (
+                yieldedAtMilliseconds - lastReportAtMilliseconds >=
+                progressReportIntervalMilliseconds
+            ) {
                 const memory = observeProcessMemory();
                 console.log(
                     `${input.label} remains live after ${String(yieldCount)} bounded yields; process RSS ${String(memory.residentSet)} bytes.`,
                 );
-                lastReportAt = now;
+                lastReportAtMilliseconds = yieldedAtMilliseconds;
             }
             await new Promise<void>((resolve) => {
                 setImmediate(resolve);
             });
+            activeSegmentStartedAtMilliseconds = performance.now();
+        },
+    });
+};
+
+type MutableGenerationOperationSummary = {
+    firstStartedAtOffsetMilliseconds: number;
+    generationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+    lastFinishedAtOffsetMilliseconds: number;
+    maximumCompletedWorkUnitCount?: number;
+    maximumDurationMilliseconds: number;
+    maximumFirstOrdinal?: number;
+    minimumFirstOrdinal?: number;
+    observationCount: number;
+    operationOwnerIdentifier: CompactPublicKeyGenerationOperationOwnerIdentifier;
+    pollKind?: CompactPublicKeyGenerationOperationPollKind;
+    precedingGenerationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+    storageOwner?: CompactPublicKeyGenerationOperationStorageOwner;
+    totalDurationMilliseconds: number;
+};
+
+const operationOwnerOrdinal: Readonly<
+    Record<CompactPublicKeyGenerationOperationOwnerIdentifier, number>
+> = Object.freeze({
+    'setup-generation-authorization': 1,
+    'reference-board-authorization': 2,
+    'setup-intent-authorization': 3,
+    'kernel-preparation': 4,
+    'kernel-poll': 5,
+    'storage-request-copy-and-decode': 6,
+    'storage-open': 7,
+    'storage-transaction': 8,
+    'storage-response-encode-and-supply': 9,
+    'storage-request-cleanup': 10,
+    'external-memory-accounting-copy': 11,
+    'transport-bindings-copy': 12,
+    'canonical-public-input-copy': 13,
+    'canonical-proof-copy': 14,
+    'selected-suite-release': 15,
+    'kernel-release': 16,
+    'kernel-cancellation': 17,
+});
+
+const generationStageOrdinal: Readonly<
+    Record<CompactPublicKeyGenerationRuntimeStageIdentifier, number>
+> = Object.freeze({
+    'source-loading': 1,
+    'family-materialization': 2,
+    'post-lookup-response': 3,
+    'cross-epoch-response': 4,
+    cfw: 5,
+    'pre-challenge-whir-sumcheck': 6,
+    'pre-challenge-whir-code-switch': 7,
+    'pre-challenge-whir-next-sumcheck-preparation': 8,
+    'pre-challenge-whir-base-fresh-response': 9,
+    'pre-challenge-whir-base-blinded-response': 10,
+    'main-whir-initial-preparation': 11,
+    'main-whir-sumcheck': 12,
+    'main-whir-code-switch': 13,
+    'main-whir-next-sumcheck-preparation': 14,
+    'main-whir-base-fresh-response': 15,
+    'main-whir-base-blinded-response': 16,
+});
+
+const pollKindOrdinal: Readonly<
+    Record<CompactPublicKeyGenerationOperationPollKind, number>
+> = Object.freeze({
+    progress: 1,
+    'storage-request-ready': 2,
+    complete: 3,
+});
+
+const storageOwnerOrdinal: Readonly<
+    Record<CompactPublicKeyGenerationOperationStorageOwner, number>
+> = Object.freeze({
+    responseTrees: 1,
+    cfw: 2,
+});
+
+const generationOperationSummaryKey = (
+    observation: CompactPublicKeyGenerationOperationObservation,
+): number => {
+    const pollKind =
+        observation.pollKind === undefined
+            ? 0
+            : pollKindOrdinal[observation.pollKind];
+    const generationStage =
+        observation.generationStageIdentifier === undefined
+            ? 0
+            : generationStageOrdinal[observation.generationStageIdentifier];
+    const precedingGenerationStage =
+        observation.precedingGenerationStageIdentifier === undefined
+            ? 0
+            : generationStageOrdinal[
+                  observation.precedingGenerationStageIdentifier
+              ];
+    const storageOwner =
+        observation.storageOwner === undefined
+            ? 0
+            : storageOwnerOrdinal[observation.storageOwner];
+    const ownerAndPollOrdinal =
+        operationOwnerOrdinal[observation.operationOwnerIdentifier] * 4 +
+        pollKind;
+    const ownerPollAndStageOrdinal = ownerAndPollOrdinal * 17 + generationStage;
+    const ownerPollAndBothStagesOrdinal =
+        ownerPollAndStageOrdinal * 17 + precedingGenerationStage;
+    return ownerPollAndBothStagesOrdinal * 3 + storageOwner;
+};
+
+const beginGenerationOperationTimingObservation = (input: {
+    startedAtMilliseconds: number;
+}): Readonly<{
+    finish(): GenerationOperationTimingObservation;
+    observeOperation(
+        observation: CompactPublicKeyGenerationOperationObservation,
+    ): void;
+}> => {
+    const summaries = new Map<number, MutableGenerationOperationSummary>();
+    let longestCompletedOperation:
+        | GenerationOperationTimingObservation['longestCompletedOperation']
+        | undefined;
+    let totalObservationCount = 0;
+
+    return Object.freeze({
+        finish: (): GenerationOperationTimingObservation => {
+            if (longestCompletedOperation === undefined) {
+                throw new Error(
+                    'Compact public-key generation emitted no operation timing observations.',
+                );
+            }
+            const operationSummaries = [...summaries.entries()]
+                .sort(([leftKey], [rightKey]) => leftKey - rightKey)
+                .map(([, summary]) => Object.freeze({ ...summary }));
+            return Object.freeze({
+                longestCompletedOperation,
+                operationSummaries: Object.freeze(operationSummaries),
+                totalObservationCount,
+            });
+        },
+        observeOperation: (
+            observation: CompactPublicKeyGenerationOperationObservation,
+        ): void => {
+            const startedAtOffsetMilliseconds =
+                observation.startedAtMilliseconds - input.startedAtMilliseconds;
+            const finishedAtOffsetMilliseconds =
+                observation.finishedAtMilliseconds -
+                input.startedAtMilliseconds;
+            const summaryKey = generationOperationSummaryKey(observation);
+            const existingSummary = summaries.get(summaryKey);
+            if (existingSummary === undefined) {
+                summaries.set(summaryKey, {
+                    firstStartedAtOffsetMilliseconds:
+                        startedAtOffsetMilliseconds,
+                    ...(observation.generationStageIdentifier === undefined
+                        ? {}
+                        : {
+                              generationStageIdentifier:
+                                  observation.generationStageIdentifier,
+                          }),
+                    lastFinishedAtOffsetMilliseconds:
+                        finishedAtOffsetMilliseconds,
+                    ...(observation.completedWorkUnitCount === undefined
+                        ? {}
+                        : {
+                              maximumCompletedWorkUnitCount:
+                                  observation.completedWorkUnitCount,
+                          }),
+                    maximumDurationMilliseconds:
+                        observation.durationMilliseconds,
+                    ...(observation.firstOrdinal === undefined
+                        ? {}
+                        : {
+                              maximumFirstOrdinal: observation.firstOrdinal,
+                              minimumFirstOrdinal: observation.firstOrdinal,
+                          }),
+                    observationCount: 1,
+                    operationOwnerIdentifier:
+                        observation.operationOwnerIdentifier,
+                    ...(observation.pollKind === undefined
+                        ? {}
+                        : { pollKind: observation.pollKind }),
+                    ...(observation.precedingGenerationStageIdentifier ===
+                    undefined
+                        ? {}
+                        : {
+                              precedingGenerationStageIdentifier:
+                                  observation.precedingGenerationStageIdentifier,
+                          }),
+                    ...(observation.storageOwner === undefined
+                        ? {}
+                        : { storageOwner: observation.storageOwner }),
+                    totalDurationMilliseconds: observation.durationMilliseconds,
+                });
+            } else {
+                existingSummary.firstStartedAtOffsetMilliseconds = Math.min(
+                    existingSummary.firstStartedAtOffsetMilliseconds,
+                    startedAtOffsetMilliseconds,
+                );
+                existingSummary.lastFinishedAtOffsetMilliseconds = Math.max(
+                    existingSummary.lastFinishedAtOffsetMilliseconds,
+                    finishedAtOffsetMilliseconds,
+                );
+                existingSummary.maximumDurationMilliseconds = Math.max(
+                    existingSummary.maximumDurationMilliseconds,
+                    observation.durationMilliseconds,
+                );
+                existingSummary.observationCount += 1;
+                existingSummary.totalDurationMilliseconds +=
+                    observation.durationMilliseconds;
+                if (observation.completedWorkUnitCount !== undefined) {
+                    existingSummary.maximumCompletedWorkUnitCount = Math.max(
+                        existingSummary.maximumCompletedWorkUnitCount ?? 0,
+                        observation.completedWorkUnitCount,
+                    );
+                }
+                if (observation.firstOrdinal !== undefined) {
+                    existingSummary.minimumFirstOrdinal = Math.min(
+                        existingSummary.minimumFirstOrdinal ??
+                            observation.firstOrdinal,
+                        observation.firstOrdinal,
+                    );
+                    existingSummary.maximumFirstOrdinal = Math.max(
+                        existingSummary.maximumFirstOrdinal ??
+                            observation.firstOrdinal,
+                        observation.firstOrdinal,
+                    );
+                }
+            }
+            totalObservationCount += 1;
+            if (
+                longestCompletedOperation === undefined ||
+                observation.durationMilliseconds >
+                    longestCompletedOperation.durationMilliseconds
+            ) {
+                longestCompletedOperation = Object.freeze({
+                    ...(observation.checkpointSafeBoundaryOrdinal === undefined
+                        ? {}
+                        : {
+                              checkpointSafeBoundaryOrdinal:
+                                  observation.checkpointSafeBoundaryOrdinal,
+                          }),
+                    ...(observation.completedWorkUnitCount === undefined
+                        ? {}
+                        : {
+                              completedWorkUnitCount:
+                                  observation.completedWorkUnitCount,
+                          }),
+                    durationMilliseconds: observation.durationMilliseconds,
+                    finishedAtOffsetMilliseconds,
+                    ...(observation.firstOrdinal === undefined
+                        ? {}
+                        : { firstOrdinal: observation.firstOrdinal }),
+                    ...(observation.generationStageIdentifier === undefined
+                        ? {}
+                        : {
+                              generationStageIdentifier:
+                                  observation.generationStageIdentifier,
+                          }),
+                    operationOwnerIdentifier:
+                        observation.operationOwnerIdentifier,
+                    ...(observation.pollKind === undefined
+                        ? {}
+                        : { pollKind: observation.pollKind }),
+                    ...(observation.precedingGenerationStageIdentifier ===
+                    undefined
+                        ? {}
+                        : {
+                              precedingGenerationStageIdentifier:
+                                  observation.precedingGenerationStageIdentifier,
+                          }),
+                    startedAtOffsetMilliseconds,
+                    ...(observation.storageOwner === undefined
+                        ? {}
+                        : { storageOwner: observation.storageOwner }),
+                });
+            }
         },
     });
 };
@@ -361,6 +712,9 @@ describe('Compact public-key scalar WASM proof evidence', () => {
         >();
         let generated: GeneratedCompactPublicKeyReferenceProof | undefined;
         let operationFailure: unknown;
+        let generationOperationTiming:
+            | GenerationOperationTimingObservation
+            | undefined;
         let generationProgress: ProgressObservation | undefined;
         let storageEvidence:
             | Readonly<
@@ -374,13 +728,19 @@ describe('Compact public-key scalar WASM proof evidence', () => {
               >
             | undefined;
         try {
+            const generationStartedAtMilliseconds = performance.now();
             const progress = beginProgressObservation({
                 label: 'Compact public-key scalar WASM generation',
+                startedAtMilliseconds: generationStartedAtMilliseconds,
+            });
+            const operationTiming = beginGenerationOperationTimingObservation({
+                startedAtMilliseconds: generationStartedAtMilliseconds,
             });
             generated = await generateCompactPublicKeyReferenceInClosedWorker({
                 checkpointLineageIdentifier: new Uint8Array(32).fill(0x71),
                 kernel: fixture.kernel,
                 maximumWorkUnitCountPerPoll,
+                observeOperation: operationTiming.observeOperation,
                 openExternalMemory: async ({
                     runtimeBindingHash,
                     storageOwner,
@@ -413,6 +773,7 @@ describe('Compact public-key scalar WASM proof evidence', () => {
                 yieldControl: progress.yieldControl,
             });
             generationProgress = progress.finish();
+            generationOperationTiming = operationTiming.finish();
             expect([...stores.keys()].sort()).toEqual(['cfw', 'responseTrees']);
             for (const storageOwner of ['cfw', 'responseTrees'] as const) {
                 const storage = stores.get(storageOwner);
@@ -469,6 +830,7 @@ describe('Compact public-key scalar WASM proof evidence', () => {
         }
         if (
             generated === undefined ||
+            generationOperationTiming === undefined ||
             generationProgress === undefined ||
             storageEvidence === undefined
         ) {
@@ -510,6 +872,7 @@ describe('Compact public-key scalar WASM proof evidence', () => {
                 }),
                 maximumWorkUnitCountPerPoll,
                 observedSafeBoundaryOrdinals,
+                operationTiming: generationOperationTiming,
                 progress: generationProgress,
                 storage: storageEvidence,
                 transportBindings: Object.freeze({
@@ -543,7 +906,7 @@ describe('Compact public-key scalar WASM proof evidence', () => {
                         fixtureDurationMilliseconds,
                         generation: generationEvidence,
                         phase: 'generation complete; verification not claimed',
-                        schemaVersion: 1,
+                        schemaVersion: 2,
                     },
                     undefined,
                     2,
@@ -629,7 +992,7 @@ describe('Compact public-key scalar WASM proof evidence', () => {
                     progress: completedVerificationProgress,
                     scope: 'Canonical transport plus complete algebraic CFW and WHIR verification; source correspondence and workflow capability are not claimed by this record.',
                 }),
-                schemaVersion: 1,
+                schemaVersion: 2,
             });
             await writeFile(
                 evidencePath,

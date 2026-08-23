@@ -112,8 +112,9 @@ The complete ceremony is not implemented or certified.
 - **Browser runtime and custody:** A scalar WebAssembly build, one matched
   reference generation-and-verification path, typed worker foundations,
   authenticated checkpoint primitives, and browser-storage groundwork exist.
-  The guarded Node.js run exposes a long uninterrupted generation segment and
-  severe file-backed storage amplification. A separate nonqualifying desktop
+  The guarded Node.js run exposes a long uninterrupted generation interval whose
+  owning phase is not yet localized, plus severe copy-on-write amplification in
+  its file-backed development adapter. A separate nonqualifying desktop
   Chromium diagnostic exposes namespace-wide capacity scanning and incomplete
   physical reclamation in the current browser adapter. Browser execution,
   checkpointed worker-loss restoration, the remaining proof paths, incremental

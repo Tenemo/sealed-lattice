@@ -19,6 +19,7 @@
         "build:verify-reproducible": "tsx ./tools/ci/verify-build-reproducibility.ts",
         "check": "tsx ./tools/ci/run-check.ts",
         "check:desktop": "tsx ./tools/ci/run-check.ts --include-desktop-browser",
+        "generate:compact-public-key-catalogs": "tsx ./tools/ci/regenerate-compact-public-key-catalogs.ts",
         "evidence:collective-setup-security:refresh": "tsx ./tools/ci/refresh-selected-collective-setup-security-evidence.ts",
         "evidence:lattice-security": "tsx ./tools/ci/run-selected-lattice-security-evidence.ts",
         "evidence:lattice-security:refresh": "tsx ./tools/ci/run-selected-lattice-security-evidence.ts --write-record",

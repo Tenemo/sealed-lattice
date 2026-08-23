@@ -12,8 +12,14 @@ use crate::bgv::{
 
 #[test]
 fn selected_kllps_constants_match_the_spaced_monomial_construction() {
-    assert_eq!(KLLPS_PARTICIPANT_COUNT, 10);
-    assert_eq!(KLLPS_RECONSTRUCTION_THRESHOLD, 4);
+    assert_eq!(
+        KLLPS_PARTICIPANT_COUNT,
+        usize::from(FOUNDATION_PROFILE.participant_count)
+    );
+    assert_eq!(
+        KLLPS_RECONSTRUCTION_THRESHOLD,
+        usize::from(FOUNDATION_PROFILE.reconstruction_threshold)
+    );
     assert_eq!(KLLPS_DENOMINATOR_CLEARING_FACTOR, 4);
     assert_eq!(KLLPS_PAIRED_TARGET_ROLE_COUNT, 2);
     assert_eq!(KLLPS_POINT_STRIDE, POLYNOMIAL_DEGREE / 8);
@@ -139,12 +145,19 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         &DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL],
         &expected_target_primes,
     );
+    let selected_participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
     let selected_option_count = usize::from(FOUNDATION_PROFILE.option_count);
 
-    let target_bounds_by_ballot_count = (1..=10)
+    let target_bounds_by_ballot_count = (1..=selected_participant_count)
         .map(|ballot_count| {
-            direct_ballot_target_noise_bounds(10, ballot_count, selected_option_count, 1, 10)
-                .expect("every accepted ballot count has exact symbolic target bounds")
+            direct_ballot_target_noise_bounds(
+                u64::from(FOUNDATION_PROFILE.participant_count),
+                ballot_count,
+                selected_option_count,
+                1,
+                10,
+            )
+            .expect("every accepted ballot count has exact symbolic target bounds")
         })
         .collect::<Vec<_>>();
     assert!(target_bounds_by_ballot_count.iter().all(|target_bounds| {
@@ -236,10 +249,10 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         "C2 must scale the converted ciphertext's unscaled evaluator error by ||Cdec||_1 = 4",
     );
     assert!(scaled_c2_left < (&target_modulus << 1_usize));
-    let release_traces_by_ballot_count = (1..=10)
+    let release_traces_by_ballot_count = (1..=selected_participant_count)
         .map(|ballot_count| {
             direct_ballot_target_release_noise_trace(DirectBallotTargetReleaseNoiseInput {
-                participant_count: 10,
+                participant_count: u64::from(FOUNDATION_PROFILE.participant_count),
                 ballot_count,
                 option_count: selected_option_count,
                 minimum_score: 1,
@@ -259,7 +272,7 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
     }));
     let release_trace = release_traces_by_ballot_count
         .last()
-        .expect("ten-ballot release trace exists");
+        .expect("full-roster ballot release trace exists");
     assert_eq!(
         release_trace
             .iter()

@@ -84,6 +84,89 @@ type AcceptedSetupKeyRelationProofFamily = 'publicKeyShare' | 'sameSecret';
 
 export type AcceptedSetupKeyRelationGenerationMode = 'fresh' | 'resumed';
 
+export type CompactPublicKeyGenerationRuntimeStageIdentifier =
+    | 'source-loading'
+    | 'family-materialization'
+    | 'post-lookup-response'
+    | 'cross-epoch-response'
+    | 'cfw'
+    | 'pre-challenge-whir-sumcheck'
+    | 'pre-challenge-whir-code-switch'
+    | 'pre-challenge-whir-next-sumcheck-preparation'
+    | 'pre-challenge-whir-base-fresh-response'
+    | 'pre-challenge-whir-base-blinded-response'
+    | 'main-whir-initial-preparation'
+    | 'main-whir-sumcheck'
+    | 'main-whir-code-switch'
+    | 'main-whir-next-sumcheck-preparation'
+    | 'main-whir-base-fresh-response'
+    | 'main-whir-base-blinded-response';
+
+export type CompactPublicKeyGenerationOperationOwnerIdentifier =
+    | 'setup-generation-authorization'
+    | 'reference-board-authorization'
+    | 'setup-intent-authorization'
+    | 'kernel-preparation'
+    | 'kernel-poll'
+    | 'storage-request-copy-and-decode'
+    | 'storage-open'
+    | 'storage-transaction'
+    | 'storage-response-encode-and-supply'
+    | 'storage-request-cleanup'
+    | 'external-memory-accounting-copy'
+    | 'transport-bindings-copy'
+    | 'canonical-public-input-copy'
+    | 'canonical-proof-copy'
+    | 'selected-suite-release'
+    | 'kernel-release'
+    | 'kernel-cancellation';
+
+export type CompactPublicKeyGenerationOperationObservation = Readonly<{
+    checkpointSafeBoundaryOrdinal?: number;
+    completedWorkUnitCount?: number;
+    durationMilliseconds: number;
+    finishedAtMilliseconds: number;
+    firstOrdinal?: number;
+    generationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+    operationOwnerIdentifier: CompactPublicKeyGenerationOperationOwnerIdentifier;
+    pollKind?: 'progress' | 'storage-request-ready' | 'complete';
+    precedingGenerationStageIdentifier?: CompactPublicKeyGenerationRuntimeStageIdentifier;
+    startedAtMilliseconds: number;
+    storageOwner?: CompactPublicKeyGenerationStorageOwner;
+}>;
+
+const compactPublicKeyGenerationRuntimeStageIdentifiers = Object.freeze([
+    undefined,
+    'source-loading',
+    'family-materialization',
+    'post-lookup-response',
+    'cross-epoch-response',
+    'cfw',
+    'pre-challenge-whir-sumcheck',
+    'pre-challenge-whir-code-switch',
+    'pre-challenge-whir-next-sumcheck-preparation',
+    'pre-challenge-whir-base-fresh-response',
+    'pre-challenge-whir-base-blinded-response',
+    'main-whir-initial-preparation',
+    'main-whir-sumcheck',
+    'main-whir-code-switch',
+    'main-whir-next-sumcheck-preparation',
+    'main-whir-base-fresh-response',
+    'main-whir-base-blinded-response',
+] as const);
+
+const requireCompactPublicKeyGenerationRuntimeStageIdentifier = (
+    stage: number,
+): CompactPublicKeyGenerationRuntimeStageIdentifier => {
+    const identifier = compactPublicKeyGenerationRuntimeStageIdentifiers[stage];
+    if (identifier === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The compact public-key generator exposed an unknown runtime stage.',
+        );
+    }
+    return identifier;
+};
+
 export type AcceptedSetupCompactPublicKeyExternalMemoryOpening = Readonly<{
     runtimeBindingHash: Uint8Array<ArrayBuffer>;
     storageOwner: CompactPublicKeyGenerationStorageOwner;
@@ -100,6 +183,9 @@ export type AcceptedSetupCompactPublicKeyGenerationInput = Readonly<{
     checkpointLineageIdentifier: Uint8Array;
     kernel: TranscriptCoreKernel;
     maximumWorkUnitCountPerPoll?: number;
+    observeOperation?: (
+        observation: CompactPublicKeyGenerationOperationObservation,
+    ) => void;
     openExternalMemory: AcceptedSetupCompactPublicKeyExternalMemoryOpener;
     productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
@@ -1092,10 +1178,76 @@ type CompactPublicKeyGenerationRequest =
           kind: 'reference';
       }>;
 
+type CompactPublicKeyGenerationOperationObservationDetails = Omit<
+    CompactPublicKeyGenerationOperationObservation,
+    | 'durationMilliseconds'
+    | 'finishedAtMilliseconds'
+    | 'operationOwnerIdentifier'
+    | 'startedAtMilliseconds'
+>;
+
 const generateCompactPublicKeyInClosedWorker = async (
     generationRequest: CompactPublicKeyGenerationRequest,
 ): Promise<GeneratedCompactPublicKeyReferenceProof> => {
     const { input } = generationRequest;
+    const observeCompletedOperation = (
+        operationOwnerIdentifier: CompactPublicKeyGenerationOperationOwnerIdentifier,
+        startedAtMilliseconds: number,
+        details: CompactPublicKeyGenerationOperationObservationDetails = {},
+    ): void => {
+        if (input.observeOperation === undefined) {
+            return;
+        }
+        const finishedAtMilliseconds = performance.now();
+        input.observeOperation(
+            Object.freeze({
+                ...details,
+                durationMilliseconds:
+                    finishedAtMilliseconds - startedAtMilliseconds,
+                finishedAtMilliseconds,
+                operationOwnerIdentifier,
+                startedAtMilliseconds,
+            }),
+        );
+    };
+    const runObservedOperation = <Result>(
+        operationOwnerIdentifier: CompactPublicKeyGenerationOperationOwnerIdentifier,
+        operation: () => Result,
+        describeResult?: (
+            result: Result,
+        ) => CompactPublicKeyGenerationOperationObservationDetails,
+    ): Result => {
+        if (input.observeOperation === undefined) {
+            return operation();
+        }
+        const startedAtMilliseconds = performance.now();
+        const result = operation();
+        observeCompletedOperation(
+            operationOwnerIdentifier,
+            startedAtMilliseconds,
+            describeResult?.(result),
+        );
+        return result;
+    };
+    const runObservedAsyncOperation = async <Result>(
+        operationOwnerIdentifier: CompactPublicKeyGenerationOperationOwnerIdentifier,
+        operation: () => Promise<Result>,
+        describeResult?: (
+            result: Result,
+        ) => CompactPublicKeyGenerationOperationObservationDetails,
+    ): Promise<Result> => {
+        if (input.observeOperation === undefined) {
+            return await operation();
+        }
+        const startedAtMilliseconds = performance.now();
+        const result = await operation();
+        observeCompletedOperation(
+            operationOwnerIdentifier,
+            startedAtMilliseconds,
+            describeResult?.(result),
+        );
+        return result;
+    };
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
             'Accepted-setup compact public-key generation may only run inside the dedicated WASM worker.',
@@ -1150,33 +1302,40 @@ const generateCompactPublicKeyInClosedWorker = async (
     );
     const setupGenerationAuthorization =
         generationRequest.kind === 'acceptedSetup'
-            ? resolveSetupGenerationAuthorityKernelAuthorization(
-                  generationRequest.input.setupGenerationAuthority,
-                  context,
+            ? runObservedOperation('setup-generation-authorization', () =>
+                  resolveSetupGenerationAuthorityKernelAuthorization(
+                      generationRequest.input.setupGenerationAuthority,
+                      context,
+                  ),
               )
             : undefined;
     const referenceBoardAuthorization =
         generationRequest.kind === 'reference'
-            ? resolveAggregatePublicRandomnessBoardAuthorization({
-                  context,
-                  kernel: input.kernel,
-                  orderedCommitmentObjects:
-                      generationRequest.input
-                          .orderedPublicRandomnessCommitmentObjects,
-                  orderedRevealObjects:
-                      generationRequest.input
-                          .orderedPublicRandomnessRevealObjects,
-                  orderedSetupIntentObjects:
-                      generationRequest.input.orderedSetupIntentObjects,
-              })
+            ? runObservedOperation('reference-board-authorization', () =>
+                  resolveAggregatePublicRandomnessBoardAuthorization({
+                      context,
+                      kernel: input.kernel,
+                      orderedCommitmentObjects:
+                          generationRequest.input
+                              .orderedPublicRandomnessCommitmentObjects,
+                      orderedRevealObjects:
+                          generationRequest.input
+                              .orderedPublicRandomnessRevealObjects,
+                      orderedSetupIntentObjects:
+                          generationRequest.input.orderedSetupIntentObjects,
+                  }),
+              )
             : undefined;
-    const setupIntentAuthorization =
-        resolveOrderedVerifiedBoardObjectAuthorization({
-            context,
-            expectedObjectCount: 1,
-            kernel: input.kernel,
-            objects: [input.setupIntentObject],
-        });
+    const setupIntentAuthorization = runObservedOperation(
+        'setup-intent-authorization',
+        () =>
+            resolveOrderedVerifiedBoardObjectAuthorization({
+                context,
+                expectedObjectCount: 1,
+                kernel: input.kernel,
+                objects: [input.setupIntentObject],
+            }),
+    );
     if (
         setupIntentAuthorization.handleBytes.byteLength !==
             wasm32WordByteLength ||
@@ -1286,96 +1445,104 @@ const generateCompactPublicKeyInClosedWorker = async (
                 memoryBoundary,
                 statusBoundary,
             });
-            await withClosedWorkerProductionOperationAuthority(
-                input.workerKernel,
-                input.productionOperationIdentifiers,
-                (productionOperationAuthority) =>
-                    productionOperationAuthority.withExactKernelAuthorization(
-                        (authorization) => {
-                            if (
-                                authorization.kernel !== input.kernel ||
-                                authorization.actionRandomnessContext.memory !==
-                                    context.memory ||
-                                authorization.stateReservationCapabilityMemory !==
-                                    context.memory ||
-                                authorization.stateReservationCapabilityPointer <=
-                                    0 ||
-                                authorization.stateReservationCapabilityPointer +
-                                    verifierCapabilityByteLength >
-                                    context.memory.buffer.byteLength
-                            ) {
-                                throw new CanonicalStreamInternalError(
-                                    'The compact public-key generation authorities do not belong to one WASM worker.',
-                                );
-                            }
-                            operationHandle = context.runExclusive(
-                                'accepted-setup compact public-key generation preparation',
-                                () => {
-                                    const checkpointPointer =
-                                        memoryBoundary.copy(
-                                            checkpointLineageIdentifier,
-                                        );
-                                    const statusPointer =
-                                        memoryBoundary.allocateZeroedWords(1);
-                                    try {
-                                        const handle =
-                                            preparationKernel.prepareGeneration(
-                                                selectedSuiteHandle,
-                                                setupGenerationAuthorization.handle,
-                                                authorization.actionRandomnessHandle,
-                                                authorization.stateVerifierSessionHandle,
-                                                authorization.stateReservationCapabilityPointer,
-                                                verifierCapabilityByteLength,
-                                                authorization.stateReservationHandle,
-                                                setupIntentAuthorization.sessionHandle,
-                                                setupIntentAuthorization.capabilityPointer,
-                                                verifierCapabilityByteLength,
-                                                new DataView(
-                                                    setupIntentAuthorization
-                                                        .handleBytes.buffer,
-                                                    setupIntentAuthorization
-                                                        .handleBytes.byteOffset,
-                                                    setupIntentAuthorization
-                                                        .handleBytes.byteLength,
-                                                ).getUint32(0, true),
-                                                checkpointPointer,
-                                                checkpointLineageIdentifier.byteLength,
-                                                statusPointer,
+            await runObservedAsyncOperation('kernel-preparation', () =>
+                withClosedWorkerProductionOperationAuthority(
+                    input.workerKernel,
+                    input.productionOperationIdentifiers,
+                    (productionOperationAuthority) =>
+                        productionOperationAuthority.withExactKernelAuthorization(
+                            (authorization) => {
+                                if (
+                                    authorization.kernel !== input.kernel ||
+                                    authorization.actionRandomnessContext
+                                        .memory !== context.memory ||
+                                    authorization.stateReservationCapabilityMemory !==
+                                        context.memory ||
+                                    authorization.stateReservationCapabilityPointer <=
+                                        0 ||
+                                    authorization.stateReservationCapabilityPointer +
+                                        verifierCapabilityByteLength >
+                                        context.memory.buffer.byteLength
+                                ) {
+                                    throw new CanonicalStreamInternalError(
+                                        'The compact public-key generation authorities do not belong to one WASM worker.',
+                                    );
+                                }
+                                operationHandle = context.runExclusive(
+                                    'accepted-setup compact public-key generation preparation',
+                                    () => {
+                                        const checkpointPointer =
+                                            memoryBoundary.copy(
+                                                checkpointLineageIdentifier,
                                             );
-                                        const [status] =
-                                            memoryBoundary.readWords(
-                                                statusPointer,
+                                        const statusPointer =
+                                            memoryBoundary.allocateZeroedWords(
                                                 1,
                                             );
-                                        statusBoundary.throwIfError(status);
-                                        return requireLiveHandle(
-                                            handle,
-                                            'The compact public-key generation operation handle',
-                                        );
-                                    } finally {
-                                        memoryBoundary.zeroAndDeallocate(
-                                            statusPointer,
-                                            wasm32WordByteLength,
-                                        );
-                                        memoryBoundary.zeroAndDeallocate(
-                                            checkpointPointer,
-                                            checkpointLineageIdentifier.byteLength,
-                                        );
-                                    }
-                                },
-                            );
-                        },
-                    ),
+                                        try {
+                                            const handle =
+                                                preparationKernel.prepareGeneration(
+                                                    selectedSuiteHandle,
+                                                    setupGenerationAuthorization.handle,
+                                                    authorization.actionRandomnessHandle,
+                                                    authorization.stateVerifierSessionHandle,
+                                                    authorization.stateReservationCapabilityPointer,
+                                                    verifierCapabilityByteLength,
+                                                    authorization.stateReservationHandle,
+                                                    setupIntentAuthorization.sessionHandle,
+                                                    setupIntentAuthorization.capabilityPointer,
+                                                    verifierCapabilityByteLength,
+                                                    new DataView(
+                                                        setupIntentAuthorization
+                                                            .handleBytes.buffer,
+                                                        setupIntentAuthorization
+                                                            .handleBytes
+                                                            .byteOffset,
+                                                        setupIntentAuthorization
+                                                            .handleBytes
+                                                            .byteLength,
+                                                    ).getUint32(0, true),
+                                                    checkpointPointer,
+                                                    checkpointLineageIdentifier.byteLength,
+                                                    statusPointer,
+                                                );
+                                            const [status] =
+                                                memoryBoundary.readWords(
+                                                    statusPointer,
+                                                    1,
+                                                );
+                                            statusBoundary.throwIfError(status);
+                                            return requireLiveHandle(
+                                                handle,
+                                                'The compact public-key generation operation handle',
+                                            );
+                                        } finally {
+                                            memoryBoundary.zeroAndDeallocate(
+                                                statusPointer,
+                                                wasm32WordByteLength,
+                                            );
+                                            memoryBoundary.zeroAndDeallocate(
+                                                checkpointPointer,
+                                                checkpointLineageIdentifier.byteLength,
+                                            );
+                                        }
+                                    },
+                                );
+                            },
+                        ),
+                ),
             );
-            releaseSelectedSuite({
-                context,
-                handle: selectedSuiteHandle,
-                kernel: preparationKernel,
-                operationName:
-                    'accepted-setup compact public-key generation selected-suite release',
-                statusBoundary,
+            runObservedOperation('selected-suite-release', () => {
+                releaseSelectedSuite({
+                    context,
+                    handle: selectedSuiteHandle,
+                    kernel: preparationKernel,
+                    operationName:
+                        'accepted-setup compact public-key generation selected-suite release',
+                    statusBoundary,
+                });
+                selectedSuiteHandle = 0;
             });
-            selectedSuiteHandle = 0;
         } else {
             if (
                 referencePreparationKernel === undefined ||
@@ -1385,96 +1552,102 @@ const generateCompactPublicKeyInClosedWorker = async (
                     'The compact public-key reference preparation boundary is unavailable.',
                 );
             }
-            await withClosedWorkerProductionOperationAuthority(
-                input.workerKernel,
-                input.productionOperationIdentifiers,
-                (productionOperationAuthority) =>
-                    productionOperationAuthority.withExactKernelAuthorization(
-                        (authorization) => {
-                            if (
-                                authorization.kernel !== input.kernel ||
-                                authorization.actionRandomnessContext.memory !==
-                                    context.memory ||
-                                authorization.stateReservationCapabilityMemory !==
-                                    context.memory ||
-                                authorization.stateReservationCapabilityPointer <=
-                                    0 ||
-                                authorization.stateReservationCapabilityPointer +
-                                    verifierCapabilityByteLength >
-                                    context.memory.buffer.byteLength
-                            ) {
-                                throw new CanonicalStreamInternalError(
-                                    'The compact public-key reference authorities do not belong to one WASM worker.',
-                                );
-                            }
-                            operationHandle = context.runExclusive(
-                                'compact public-key reference generation preparation',
-                                () => {
-                                    const orderedHandlesPointer =
-                                        memoryBoundary.copy(
-                                            referenceBoardAuthorization.handleBytes,
-                                        );
-                                    const checkpointPointer =
-                                        memoryBoundary.copy(
-                                            checkpointLineageIdentifier,
-                                        );
-                                    const statusPointer =
-                                        memoryBoundary.allocateZeroedWords(1);
-                                    try {
-                                        const handle =
-                                            referencePreparationKernel.prepareGeneration(
-                                                referenceBoardAuthorization.sessionHandle,
-                                                referenceBoardAuthorization.capabilityPointer,
-                                                verifierCapabilityByteLength,
+            await runObservedAsyncOperation('kernel-preparation', () =>
+                withClosedWorkerProductionOperationAuthority(
+                    input.workerKernel,
+                    input.productionOperationIdentifiers,
+                    (productionOperationAuthority) =>
+                        productionOperationAuthority.withExactKernelAuthorization(
+                            (authorization) => {
+                                if (
+                                    authorization.kernel !== input.kernel ||
+                                    authorization.actionRandomnessContext
+                                        .memory !== context.memory ||
+                                    authorization.stateReservationCapabilityMemory !==
+                                        context.memory ||
+                                    authorization.stateReservationCapabilityPointer <=
+                                        0 ||
+                                    authorization.stateReservationCapabilityPointer +
+                                        verifierCapabilityByteLength >
+                                        context.memory.buffer.byteLength
+                                ) {
+                                    throw new CanonicalStreamInternalError(
+                                        'The compact public-key reference authorities do not belong to one WASM worker.',
+                                    );
+                                }
+                                operationHandle = context.runExclusive(
+                                    'compact public-key reference generation preparation',
+                                    () => {
+                                        const orderedHandlesPointer =
+                                            memoryBoundary.copy(
+                                                referenceBoardAuthorization.handleBytes,
+                                            );
+                                        const checkpointPointer =
+                                            memoryBoundary.copy(
+                                                checkpointLineageIdentifier,
+                                            );
+                                        const statusPointer =
+                                            memoryBoundary.allocateZeroedWords(
+                                                1,
+                                            );
+                                        try {
+                                            const handle =
+                                                referencePreparationKernel.prepareGeneration(
+                                                    referenceBoardAuthorization.sessionHandle,
+                                                    referenceBoardAuthorization.capabilityPointer,
+                                                    verifierCapabilityByteLength,
+                                                    orderedHandlesPointer,
+                                                    referenceBoardAuthorization
+                                                        .handleBytes.byteLength,
+                                                    authorization.actionRandomnessHandle,
+                                                    authorization.stateVerifierSessionHandle,
+                                                    authorization.stateReservationCapabilityPointer,
+                                                    verifierCapabilityByteLength,
+                                                    authorization.stateReservationHandle,
+                                                    new DataView(
+                                                        setupIntentAuthorization
+                                                            .handleBytes.buffer,
+                                                        setupIntentAuthorization
+                                                            .handleBytes
+                                                            .byteOffset,
+                                                        setupIntentAuthorization
+                                                            .handleBytes
+                                                            .byteLength,
+                                                    ).getUint32(0, true),
+                                                    checkpointPointer,
+                                                    checkpointLineageIdentifier.byteLength,
+                                                    statusPointer,
+                                                );
+                                            const [status] =
+                                                memoryBoundary.readWords(
+                                                    statusPointer,
+                                                    1,
+                                                );
+                                            statusBoundary.throwIfError(status);
+                                            return requireLiveHandle(
+                                                handle,
+                                                'The compact public-key reference generation operation handle',
+                                            );
+                                        } finally {
+                                            memoryBoundary.zeroAndDeallocate(
+                                                statusPointer,
+                                                wasm32WordByteLength,
+                                            );
+                                            memoryBoundary.zeroAndDeallocate(
+                                                checkpointPointer,
+                                                checkpointLineageIdentifier.byteLength,
+                                            );
+                                            memoryBoundary.zeroAndDeallocate(
                                                 orderedHandlesPointer,
                                                 referenceBoardAuthorization
                                                     .handleBytes.byteLength,
-                                                authorization.actionRandomnessHandle,
-                                                authorization.stateVerifierSessionHandle,
-                                                authorization.stateReservationCapabilityPointer,
-                                                verifierCapabilityByteLength,
-                                                authorization.stateReservationHandle,
-                                                new DataView(
-                                                    setupIntentAuthorization
-                                                        .handleBytes.buffer,
-                                                    setupIntentAuthorization
-                                                        .handleBytes.byteOffset,
-                                                    setupIntentAuthorization
-                                                        .handleBytes.byteLength,
-                                                ).getUint32(0, true),
-                                                checkpointPointer,
-                                                checkpointLineageIdentifier.byteLength,
-                                                statusPointer,
                                             );
-                                        const [status] =
-                                            memoryBoundary.readWords(
-                                                statusPointer,
-                                                1,
-                                            );
-                                        statusBoundary.throwIfError(status);
-                                        return requireLiveHandle(
-                                            handle,
-                                            'The compact public-key reference generation operation handle',
-                                        );
-                                    } finally {
-                                        memoryBoundary.zeroAndDeallocate(
-                                            statusPointer,
-                                            wasm32WordByteLength,
-                                        );
-                                        memoryBoundary.zeroAndDeallocate(
-                                            checkpointPointer,
-                                            checkpointLineageIdentifier.byteLength,
-                                        );
-                                        memoryBoundary.zeroAndDeallocate(
-                                            orderedHandlesPointer,
-                                            referenceBoardAuthorization
-                                                .handleBytes.byteLength,
-                                        );
-                                    }
-                                },
-                            );
-                        },
-                    ),
+                                        }
+                                    },
+                                );
+                            },
+                        ),
+                ),
             );
         }
         if (operationHandle === 0) {
@@ -1490,6 +1663,8 @@ const generateCompactPublicKeyInClosedWorker = async (
             let poll: ReturnType<
                 CompactPublicKeyGenerationKernelBoundary['poll']
             >;
+            const pollStartedAtMilliseconds =
+                input.observeOperation === undefined ? 0 : performance.now();
             try {
                 poll = generationKernel.poll(
                     operationHandle,
@@ -1501,6 +1676,47 @@ const generateCompactPublicKeyInClosedWorker = async (
                 throw new CanonicalStreamInternalError(
                     `The compact public-key generation kernel trapped after ${lastSuccessfulGenerationPollDescription()}; WASM memory held ${String(failedPollWasmMemoryByteLength)} bytes.`,
                     pollFailure,
+                );
+            }
+            if (poll.kind === 'progress') {
+                observeCompletedOperation(
+                    'kernel-poll',
+                    pollStartedAtMilliseconds,
+                    Object.freeze({
+                        ...(poll.checkpointSafeBoundaryOrdinal === undefined
+                            ? {}
+                            : {
+                                  checkpointSafeBoundaryOrdinal:
+                                      poll.checkpointSafeBoundaryOrdinal,
+                              }),
+                        completedWorkUnitCount: poll.completedWorkUnitCount,
+                        firstOrdinal: poll.firstOrdinal,
+                        generationStageIdentifier:
+                            requireCompactPublicKeyGenerationRuntimeStageIdentifier(
+                                poll.stage,
+                            ),
+                        pollKind: poll.kind,
+                    }),
+                );
+            } else {
+                const precedingGenerationStageIdentifier =
+                    lastSuccessfulGenerationPollStage === 0
+                        ? undefined
+                        : requireCompactPublicKeyGenerationRuntimeStageIdentifier(
+                              lastSuccessfulGenerationPollStage,
+                          );
+                observeCompletedOperation(
+                    'kernel-poll',
+                    pollStartedAtMilliseconds,
+                    Object.freeze({
+                        pollKind: poll.kind,
+                        ...(precedingGenerationStageIdentifier === undefined
+                            ? {}
+                            : { precedingGenerationStageIdentifier }),
+                        ...(poll.kind === 'storage-request-ready'
+                            ? { storageOwner: poll.storageOwner }
+                            : {}),
+                    }),
                 );
             }
             lastSuccessfulGenerationPollKind = poll.kind;
@@ -1534,6 +1750,21 @@ const generateCompactPublicKeyInClosedWorker = async (
                 continue;
             }
             if (poll.kind === 'storage-request-ready') {
+                const storageObservationDetails = Object.freeze({
+                    ...(lastSuccessfulGenerationPollStage === 0
+                        ? {}
+                        : {
+                              precedingGenerationStageIdentifier:
+                                  requireCompactPublicKeyGenerationRuntimeStageIdentifier(
+                                      lastSuccessfulGenerationPollStage,
+                                  ),
+                          }),
+                    storageOwner: poll.storageOwner,
+                });
+                const requestCopyStartedAtMilliseconds =
+                    input.observeOperation === undefined
+                        ? 0
+                        : performance.now();
                 const encodedRequest = generationKernel.copyStorageRequest(
                     operationHandle,
                     poll.storageOwner,
@@ -1544,23 +1775,34 @@ const generateCompactPublicKeyInClosedWorker = async (
                     encodedRequest.byteLength,
                 );
                 let request: CommonProofExternalMemoryRequest | undefined;
+                let storageRequestCompleted = false;
                 try {
                     request =
                         decodeCommonProofExternalMemoryRequest(encodedRequest);
                     requestSequences[poll.storageOwner].accept(request);
+                    observeCompletedOperation(
+                        'storage-request-copy-and-decode',
+                        requestCopyStartedAtMilliseconds,
+                        storageObservationDetails,
+                    );
                     let externalMemoryExecutor = externalMemoryExecutors.get(
                         poll.storageOwner,
                     );
                     if (externalMemoryExecutor === undefined) {
                         externalMemoryExecutor =
-                            requireCompactPublicKeyExternalMemoryExecutor(
-                                await input.openExternalMemory(
-                                    Object.freeze({
-                                        runtimeBindingHash:
-                                            request.runtimeBindingHash.slice(),
-                                        storageOwner: poll.storageOwner,
-                                    }),
-                                ),
+                            await runObservedAsyncOperation(
+                                'storage-open',
+                                async () =>
+                                    requireCompactPublicKeyExternalMemoryExecutor(
+                                        await input.openExternalMemory(
+                                            Object.freeze({
+                                                runtimeBindingHash:
+                                                    request!.runtimeBindingHash.slice(),
+                                                storageOwner: poll.storageOwner,
+                                            }),
+                                        ),
+                                    ),
+                                () => storageObservationDetails,
                             );
                         externalMemoryExecutors.set(
                             poll.storageOwner,
@@ -1569,11 +1811,16 @@ const generateCompactPublicKeyInClosedWorker = async (
                     }
                     let readResults;
                     try {
-                        readResults = validateTransferredReadResults(
-                            request,
-                            await externalMemoryExecutor.executeTransaction(
-                                request,
-                            ),
+                        readResults = await runObservedAsyncOperation(
+                            'storage-transaction',
+                            async () =>
+                                validateTransferredReadResults(
+                                    request!,
+                                    await externalMemoryExecutor.executeTransaction(
+                                        request!,
+                                    ),
+                                ),
+                            () => storageObservationDetails,
                         );
                     } catch (error) {
                         throw new CanonicalStreamInternalError(
@@ -1590,24 +1837,37 @@ const generateCompactPublicKeyInClosedWorker = async (
                     reusableStorageResponseBuffer ??= new Uint8Array(
                         maximumEncodedResponseByteLength,
                     );
-                    const encodedResponse =
-                        encodeCommonProofExternalMemoryResponseInto(
-                            request,
-                            readResults,
-                            reusableStorageResponseBuffer,
-                        );
+                    const encodedResponse = runObservedOperation(
+                        'storage-response-encode-and-supply',
+                        () => {
+                            const response =
+                                encodeCommonProofExternalMemoryResponseInto(
+                                    request!,
+                                    readResults,
+                                    reusableStorageResponseBuffer!,
+                                );
+                            generationKernel.supplyStorageResponse(
+                                operationHandle,
+                                poll.storageOwner,
+                                response,
+                            );
+                            return response;
+                        },
+                        () => storageObservationDetails,
+                    );
                     browserToWasmStorageResponseCount += 1n;
                     browserToWasmStorageResponseByteLength += BigInt(
                         encodedResponse.byteLength,
                     );
-                    generationKernel.supplyStorageResponse(
-                        operationHandle,
-                        poll.storageOwner,
-                        encodedResponse,
-                    );
                     observeWasmMemory();
                     requestSequences[poll.storageOwner].commit();
+                    storageRequestCompleted = true;
                 } finally {
+                    const cleanupStartedAtMilliseconds =
+                        input.observeOperation === undefined ||
+                        !storageRequestCompleted
+                            ? 0
+                            : performance.now();
                     if (request !== undefined) {
                         clearCommonProofExternalMemoryRequest(request);
                     }
@@ -1615,20 +1875,36 @@ const generateCompactPublicKeyInClosedWorker = async (
                         encodedRequest.fill(0);
                     }
                     reusableStorageResponseBuffer?.fill(0);
+                    if (storageRequestCompleted) {
+                        observeCompletedOperation(
+                            'storage-request-cleanup',
+                            cleanupStartedAtMilliseconds,
+                            storageObservationDetails,
+                        );
+                    }
                 }
                 await yieldControl();
                 continue;
             }
 
-            const externalMemoryUsage =
-                generationKernel.externalMemoryUsage(operationHandle);
-            transportBindings =
-                generationKernel.copyTransportBindings(operationHandle);
-            canonicalPublicInputBytes =
-                generationKernel.copyCanonicalPublicInput(operationHandle);
+            const externalMemoryUsage = runObservedOperation(
+                'external-memory-accounting-copy',
+                () => generationKernel.externalMemoryUsage(operationHandle),
+            );
+            transportBindings = runObservedOperation(
+                'transport-bindings-copy',
+                () => generationKernel.copyTransportBindings(operationHandle),
+            );
+            canonicalPublicInputBytes = runObservedOperation(
+                'canonical-public-input-copy',
+                () =>
+                    generationKernel.copyCanonicalPublicInput(operationHandle),
+            );
             observeWasmMemory();
-            canonicalProofBytes =
-                generationKernel.copyCanonicalProof(operationHandle);
+            canonicalProofBytes = runObservedOperation(
+                'canonical-proof-copy',
+                () => generationKernel.copyCanonicalProof(operationHandle),
+            );
             observeWasmMemory();
             const canonicalOutputCopyByteLength = BigInt(
                 canonicalPublicInputBytes.byteLength +
@@ -1644,9 +1920,11 @@ const generateCompactPublicKeyInClosedWorker = async (
                             canonicalCommonProofChunkByteLength,
                     ),
             );
-            generationKernel.releaseCompleted(operationHandle);
-            operationReleased = true;
-            operationHandle = 0;
+            runObservedOperation('kernel-release', () => {
+                generationKernel.releaseCompleted(operationHandle);
+                operationReleased = true;
+                operationHandle = 0;
+            });
             result = Object.freeze({
                 canonicalProofBytes,
                 canonicalPublicInputBytes,
@@ -1701,13 +1979,16 @@ const generateCompactPublicKeyInClosedWorker = async (
                     'The selected-suite cleanup boundary is unavailable.',
                 );
             }
-            releaseSelectedSuite({
-                context,
-                handle: selectedSuiteHandle,
-                kernel: preparationKernel,
-                operationName:
-                    'accepted-setup compact public-key selected-suite failure release',
-                statusBoundary,
+            runObservedOperation('selected-suite-release', () => {
+                releaseSelectedSuite({
+                    context,
+                    handle: selectedSuiteHandle,
+                    kernel: preparationKernel,
+                    operationName:
+                        'accepted-setup compact public-key selected-suite failure release',
+                    statusBoundary,
+                });
+                selectedSuiteHandle = 0;
             });
         } catch (cleanupFailure) {
             cleanupFailures.push(cleanupFailure);
@@ -1715,8 +1996,10 @@ const generateCompactPublicKeyInClosedWorker = async (
     }
     if (operationHandle !== 0 && !operationReleased) {
         try {
-            generationKernel.cancel(operationHandle);
-            operationHandle = 0;
+            runObservedOperation('kernel-cancellation', () => {
+                generationKernel.cancel(operationHandle);
+                operationHandle = 0;
+            });
         } catch (cleanupFailure) {
             cleanupFailures.push(cleanupFailure);
         }

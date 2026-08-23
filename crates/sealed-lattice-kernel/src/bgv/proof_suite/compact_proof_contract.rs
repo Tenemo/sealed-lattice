@@ -42,6 +42,7 @@ use super::relation_plan::{
 };
 use crate::foundation::{FOUNDATION_PROFILE, Hash512};
 use crate::hashing::hash_framed_parts_512;
+use std::{cell::RefCell, rc::Rc};
 
 const CONTRACT_MAGIC: [u8; 8] = *b"SLCPC001";
 const CONTRACT_VERSION: u16 = 4;
@@ -94,6 +95,16 @@ pub(crate) struct CompactPublicKeyProofContract {
     verifier_moves: Vec<CompactVerifierMoveContract>,
     whir_epochs: Vec<CompactWhirEpochContract>,
     whir_folds: Vec<CompactWhirFoldContract>,
+}
+
+std::thread_local! {
+    /// The selected contract bytes and every authority used to decode them are
+    /// immutable within one kernel artifact. Retain one validated owner per
+    /// scalar worker instead of rebuilding the complete production relation at
+    /// every generation and verification transition.
+    static SELECTED_COMPACT_PUBLIC_KEY_PROOF_CONTRACT: RefCell<
+        Option<Rc<CompactPublicKeyProofContract>>
+    > = const { RefCell::new(None) };
 }
 
 /// One borrowed, already-validated set of inputs for the compact verifier.
@@ -569,8 +580,15 @@ impl CompactPublicKeyVerifierInputs<'_> {
 }
 
 pub(crate) fn selected_compact_public_key_proof_contract()
--> Result<CompactPublicKeyProofContract, CompactProofContractError> {
-    CompactPublicKeyProofContract::decode_selected()
+-> Result<Rc<CompactPublicKeyProofContract>, CompactProofContractError> {
+    SELECTED_COMPACT_PUBLIC_KEY_PROOF_CONTRACT.with(|retained_contract| {
+        if let Some(contract) = retained_contract.borrow().as_ref().map(Rc::clone) {
+            return Ok(contract);
+        }
+        let contract = Rc::new(CompactPublicKeyProofContract::decode_selected()?);
+        retained_contract.replace(Some(Rc::clone(&contract)));
+        Ok(contract)
+    })
 }
 
 #[cfg(test)]
@@ -2802,6 +2820,38 @@ mod tests {
         let decoded = CompactPublicKeyProofContract::decode_selected()
             .expect("checked-in factor-one contract decodes");
         assert_eq!(decoded.encode().expect("contract re-encodes"), generated);
+    }
+
+    #[cfg(feature = "compact-public-key-catalog-regeneration")]
+    #[test]
+    fn generated_compact_public_key_contract_regeneration_writes_current_source() {
+        let generated =
+            super::super::compact_public_key_static_catalog::generated_factor_one_contract_source_bytes();
+        if let Some(output_directory) =
+            std::env::var_os("SEALED_LATTICE_COMPACT_PUBLIC_KEY_CATALOG_OUTPUT_DIRECTORY")
+                .map(std::path::PathBuf::from)
+        {
+            std::fs::write(
+                output_directory.join("compact_proof_contract.generated.bin"),
+                generated,
+            )
+            .expect("regenerated compact public-key contract writes");
+        } else {
+            assert_eq!(generated, GENERATED_CONTRACT_BYTES);
+        }
+    }
+
+    #[test]
+    fn selected_contract_reuses_one_immutable_worker_owner() {
+        let first = selected_compact_public_key_proof_contract()
+            .expect("the selected compact contract decodes");
+        let second = selected_compact_public_key_proof_contract()
+            .expect("the selected compact contract remains available");
+        assert!(Rc::ptr_eq(&first, &second));
+        assert_eq!(
+            first.encode().expect("the retained contract re-encodes"),
+            GENERATED_CONTRACT_BYTES,
+        );
     }
 
     #[test]

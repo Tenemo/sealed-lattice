@@ -10,7 +10,7 @@ import {
 } from '#tools/ci/guarded-rust-kernel-runner';
 
 describe('Guarded Rust kernel runner', () => {
-    it('pins serialized incremental execution without inheriting proof checkpoints', () => {
+    it('pins serialized non-incremental execution without inheriting proof checkpoints', () => {
         const environment = buildGuardedRustEnvironment({
             baseEnvironment: {
                 CARGO_TARGET_DIR: 'inherited-target',
@@ -21,7 +21,7 @@ describe('Guarded Rust kernel runner', () => {
         });
         expect(environment).toMatchObject({
             CARGO_BUILD_JOBS: '1',
-            CARGO_INCREMENTAL: '1',
+            CARGO_INCREMENTAL: '0',
             CARGO_TARGET_DIR: 'guarded-target',
             RAYON_NUM_THREADS: '1',
         });
@@ -40,6 +40,9 @@ describe('Guarded Rust kernel runner', () => {
         expect(command.command.args).toContain('--include-ignored');
         expect(command.command.args).not.toContain('--skip');
         expect(command.command.env?.RUNNER_OWNED_BOUNDARY).toBe('enabled');
+        expect(command.setupMessages[1]).toContain(
+            'Incremental compilation: off.',
+        );
 
         const featureGatedCommand = buildGuardedRustKernelCommand(
             'theorem_test',

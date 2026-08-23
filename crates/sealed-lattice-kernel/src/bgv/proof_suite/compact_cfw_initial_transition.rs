@@ -23,7 +23,7 @@
 use num_bigint::BigUint;
 use p3_field::PrimeCharacteristicRing;
 
-use super::compact_cfw::CompactChallengeField;
+use super::compact_cfw::{CompactChallengeField, compact_challenge_from_production};
 use super::compact_fixed_tape_source_correspondence::CompactFixedTapeSourceCorrespondence;
 use super::compact_proof_contract::{
     CompactPublicKeyProofContract, CompactPublicKeyVerifierInputs,
@@ -42,12 +42,93 @@ const NON_EPOCH_TAG: u8 = 0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactCfwInitialTransitionBinding {
     ContractSource,
+    RelationPlanVariant,
     CanonicalProof,
     CanonicalPublicInput,
     FixedTapeChronology,
     InitialVerifierMessageAnswerPrefix,
     InitialVerifierMessage,
     AuxiliaryTarget,
+}
+
+/// Opaque verifier-owned source for the exact initial CFW message.
+///
+/// Production code can obtain this value only after canonical transport and
+/// the direct round-XOF correspondence have both bound the selected contract,
+/// proof, public input, answer prefix, and decoded verifier coordinates. The
+/// semantic theorem consumes this object instead of accepting caller-supplied
+/// initial-message coordinates as a certificate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CompactCfwInitialVerifierPrefix {
+    relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
+    canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
+    auxiliary_target: CompactChallengeField,
+    constraint_combining_challenge: CompactChallengeField,
+    equality_point: Box<[CompactChallengeField]>,
+}
+
+impl CompactCfwInitialVerifierPrefix {
+    pub(super) const fn auxiliary_target(&self) -> CompactChallengeField {
+        self.auxiliary_target
+    }
+
+    pub(super) const fn constraint_combining_challenge(&self) -> CompactChallengeField {
+        self.constraint_combining_challenge
+    }
+
+    pub(super) const fn equality_point(&self) -> &[CompactChallengeField] {
+        &self.equality_point
+    }
+
+    pub(super) fn verify_semantic_binding(
+        &self,
+        relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
+        canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
+        auxiliary_target: CompactChallengeField,
+        constraint_combining_challenge: CompactChallengeField,
+        equality_point: &[CompactChallengeField],
+    ) -> Result<(), CompactCfwInitialTransitionError> {
+        if relation_plan_variant_hash != self.relation_plan_variant_hash {
+            return Err(CompactCfwInitialTransitionError::BindingMismatch(
+                CompactCfwInitialTransitionBinding::RelationPlanVariant,
+            ));
+        }
+        if canonical_public_input_binding != self.canonical_public_input_binding {
+            return Err(CompactCfwInitialTransitionError::BindingMismatch(
+                CompactCfwInitialTransitionBinding::CanonicalPublicInput,
+            ));
+        }
+        if auxiliary_target != self.auxiliary_target {
+            return Err(CompactCfwInitialTransitionError::BindingMismatch(
+                CompactCfwInitialTransitionBinding::AuxiliaryTarget,
+            ));
+        }
+        if constraint_combining_challenge != self.constraint_combining_challenge
+            || equality_point != self.equality_point.as_ref()
+        {
+            return Err(CompactCfwInitialTransitionError::BindingMismatch(
+                CompactCfwInitialTransitionBinding::InitialVerifierMessage,
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn for_focused_semantic_test(
+        relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
+        canonical_public_input_binding: [u8; Hash512::BYTE_LENGTH],
+        auxiliary_target: CompactChallengeField,
+        constraint_combining_challenge: CompactChallengeField,
+        equality_point: Vec<CompactChallengeField>,
+    ) -> Self {
+        Self {
+            relation_plan_variant_hash,
+            canonical_public_input_binding,
+            auxiliary_target,
+            constraint_combining_challenge,
+            equality_point: equality_point.into_boxed_slice(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +171,13 @@ pub(crate) struct CompactCfwInitialTransitionSourceEvidence {
     pub(crate) auxiliary_target_coordinates: [u64; PROOF_CHALLENGE_EXTENSION_DEGREE],
     pub(crate) constraint_combining_challenge_coordinates: [u64; PROOF_CHALLENGE_EXTENSION_DEGREE],
     pub(crate) equality_point_coordinates: Box<[[u64; PROOF_CHALLENGE_EXTENSION_DEGREE]]>,
+    verifier_prefix: CompactCfwInitialVerifierPrefix,
+}
+
+impl CompactCfwInitialTransitionSourceEvidence {
+    pub(super) const fn verifier_prefix(&self) -> &CompactCfwInitialVerifierPrefix {
+        &self.verifier_prefix
+    }
 }
 
 /// Derives the common conservative numerator without fixing a profile count.
@@ -417,7 +505,22 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
         ));
     };
 
-    Ok(CompactCfwInitialTransitionSourceEvidence {
+    let verifier_prefix = CompactCfwInitialVerifierPrefix {
+        relation_plan_variant_hash: verifier_inputs.relation.relation_plan_variant_hash(),
+        canonical_public_input_binding: public_input_view.binding(),
+        auxiliary_target: compact_challenge_from_production(*auxiliary_target),
+        constraint_combining_challenge: compact_challenge_from_production(
+            *constraint_combining_challenge,
+        ),
+        equality_point: equality_point
+            .iter()
+            .copied()
+            .map(compact_challenge_from_production)
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    };
+
+    let evidence = CompactCfwInitialTransitionSourceEvidence {
         lemma,
         canonical_proof_binding: transport.canonical_proof_binding(),
         canonical_public_input_binding: public_input_view.binding(),
@@ -430,7 +533,17 @@ pub(crate) fn derive_source_verified_compact_cfw_initial_transition_evidence(
             .map(|coordinate| coordinate.canonical_coordinates())
             .collect::<Vec<_>>()
             .into_boxed_slice(),
-    })
+        verifier_prefix,
+    };
+    let verifier_prefix = evidence.verifier_prefix();
+    verifier_prefix.verify_semantic_binding(
+        verifier_inputs.relation.relation_plan_variant_hash(),
+        public_input_view.binding(),
+        verifier_prefix.auxiliary_target(),
+        verifier_prefix.constraint_combining_challenge(),
+        verifier_prefix.equality_point(),
+    )?;
+    Ok(evidence)
 }
 
 #[cfg(test)]
@@ -487,6 +600,107 @@ mod tests {
             lemma.selected_contract_source_hash,
             Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
         );
+    }
+
+    #[test]
+    fn opaque_initial_prefix_refuses_every_semantic_source_substitution() {
+        let relation_plan_variant_hash = [0x41; Hash512::BYTE_LENGTH];
+        let canonical_public_input_binding = [0x43; Hash512::BYTE_LENGTH];
+        let auxiliary_target = field(5);
+        let constraint_combining_challenge = field(7);
+        let equality_point = vec![field(11), field(13)];
+        let prefix = CompactCfwInitialVerifierPrefix::for_focused_semantic_test(
+            relation_plan_variant_hash,
+            canonical_public_input_binding,
+            auxiliary_target,
+            constraint_combining_challenge,
+            equality_point.clone(),
+        );
+
+        assert_eq!(
+            prefix.verify_semantic_binding(
+                relation_plan_variant_hash,
+                canonical_public_input_binding,
+                auxiliary_target,
+                constraint_combining_challenge,
+                &equality_point,
+            ),
+            Ok(())
+        );
+
+        let mut wrong_relation_plan_variant_hash = relation_plan_variant_hash;
+        wrong_relation_plan_variant_hash[0] ^= 1;
+        let mut wrong_public_input_binding = canonical_public_input_binding;
+        wrong_public_input_binding[0] ^= 1;
+        for (actual, expected_binding) in [
+            (
+                prefix.verify_semantic_binding(
+                    wrong_relation_plan_variant_hash,
+                    canonical_public_input_binding,
+                    auxiliary_target,
+                    constraint_combining_challenge,
+                    &equality_point,
+                ),
+                CompactCfwInitialTransitionBinding::RelationPlanVariant,
+            ),
+            (
+                prefix.verify_semantic_binding(
+                    relation_plan_variant_hash,
+                    wrong_public_input_binding,
+                    auxiliary_target,
+                    constraint_combining_challenge,
+                    &equality_point,
+                ),
+                CompactCfwInitialTransitionBinding::CanonicalPublicInput,
+            ),
+            (
+                prefix.verify_semantic_binding(
+                    relation_plan_variant_hash,
+                    canonical_public_input_binding,
+                    auxiliary_target + field(1),
+                    constraint_combining_challenge,
+                    &equality_point,
+                ),
+                CompactCfwInitialTransitionBinding::AuxiliaryTarget,
+            ),
+            (
+                prefix.verify_semantic_binding(
+                    relation_plan_variant_hash,
+                    canonical_public_input_binding,
+                    auxiliary_target,
+                    constraint_combining_challenge + field(1),
+                    &equality_point,
+                ),
+                CompactCfwInitialTransitionBinding::InitialVerifierMessage,
+            ),
+            (
+                prefix.verify_semantic_binding(
+                    relation_plan_variant_hash,
+                    canonical_public_input_binding,
+                    auxiliary_target,
+                    constraint_combining_challenge,
+                    &[equality_point[0] + field(1), equality_point[1]],
+                ),
+                CompactCfwInitialTransitionBinding::InitialVerifierMessage,
+            ),
+            (
+                prefix.verify_semantic_binding(
+                    relation_plan_variant_hash,
+                    canonical_public_input_binding,
+                    auxiliary_target,
+                    constraint_combining_challenge,
+                    &equality_point[..1],
+                ),
+                CompactCfwInitialTransitionBinding::InitialVerifierMessage,
+            ),
+        ] {
+            assert_eq!(
+                actual,
+                Err(CompactCfwInitialTransitionError::BindingMismatch(
+                    expected_binding
+                ))
+            );
+        }
     }
 
     #[test]

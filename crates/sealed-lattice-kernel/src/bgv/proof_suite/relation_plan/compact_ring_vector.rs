@@ -28,9 +28,9 @@ use super::key_relation::{
     MODULAR_QUOTIENT_ENCODING_OFFSET, MODULAR_QUOTIENT_VALUE_COUNT,
     PublicKeyShareRelationPlanInput, SplitIntegerVector,
 };
-use super::public_key_share::{
-    PublicKeyShareSourceLayout, compile_public_key_share_relation_with_source_layout,
-};
+use super::public_key_share::PublicKeyShareSourceLayout;
+#[cfg(test)]
+use super::public_key_share::compile_public_key_share_relation_with_source_layout;
 use super::{
     RelationColumnOrigin, RelationEmbeddingKind, RelationPlanCheckContext, RelationPlanError,
     RelationPlanVariant, RelationVerifierSource,
@@ -44,29 +44,56 @@ const MODULAR_QUOTIENT_MINIMUM: i64 = -(MODULAR_QUOTIENT_ENCODING_OFFSET as i64)
 const MODULAR_QUOTIENT_MAXIMUM: i64 =
     (MODULAR_QUOTIENT_VALUE_COUNT - MODULAR_QUOTIENT_ENCODING_OFFSET - 1) as i64;
 const COMPACT_RELATION_SCHEMA_DIGEST_DOMAIN: &str =
-    "sealed-lattice/compact-public-key-relation-schema/v1";
-const COMPACT_RELATION_SCHEMA_FIXED_PART_COUNT: u64 = 20;
+    "sealed-lattice/compact-public-key-relation-schema/v2";
+const COMPACT_RELATION_SCHEMA_FIXED_PART_COUNT: u64 = 22;
+const MAXIMUM_GENERATED_COMPACT_RELATION_BYTE_LENGTH: usize = 64 * 1024;
+const GENERATED_COMPACT_PUBLIC_KEY_RELATION_BYTES: &[u8] =
+    include_bytes!("compact_public_key_relation.generated.json");
 
-const RELATION_PLAN_VARIANT_HASH_FIELD_TAG: u16 = 0x0001;
-const RING_DEGREE_FIELD_TAG: u16 = 0x0002;
-const EXTENSION_DEGREE_FIELD_TAG: u16 = 0x0003;
-const STRUCTURED_PUBLIC_RING_PRODUCT_COUNT_FIELD_TAG: u16 = 0x0004;
-const ORDERED_RELATIONS_FIELD_TAG: u16 = 0x0005;
-const ORDERED_QUOTIENT_INTERVALS_FIELD_TAG: u16 = 0x0006;
-const ORDERED_PUBLIC_VECTORS_FIELD_TAG: u16 = 0x0007;
-const ORDERED_PRIVATE_SMALL_VECTORS_FIELD_TAG: u16 = 0x0008;
-const ORDERED_WITNESS_SEGMENTS_FIELD_TAG: u16 = 0x0009;
-const ORDERED_CONSTRAINT_SEGMENTS_FIELD_TAG: u16 = 0x000a;
-const PUBLIC_INPUT_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x000b;
-const WITNESS_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x000c;
-const PADDED_PUBLIC_INPUT_ELEMENT_COUNT_FIELD_TAG: u16 = 0x000d;
-const PADDED_WITNESS_ELEMENT_COUNT_FIELD_TAG: u16 = 0x000e;
-const OPERATIVE_CONSTRAINT_COUNT_FIELD_TAG: u16 = 0x000f;
-const PADDED_CONSTRAINT_COUNT_FIELD_TAG: u16 = 0x0010;
-const QUOTIENT_LOOKUP_TABLE_VALUE_COUNT_FIELD_TAG: u16 = 0x0011;
-const QUOTIENT_LOOKUP_TABLE_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x0012;
-const LOOKUP_SOUNDNESS_NUMERATOR_FIELD_TAG: u16 = 0x0013;
-const LOOKUP_CHALLENGE_EXCLUDES_BASE_SUBFIELD_FIELD_TAG: u16 = 0x0014;
+fn serialize_compact_relation_hash<Serializer>(
+    hash: &[u8; Hash512::BYTE_LENGTH],
+    serializer: Serializer,
+) -> Result<Serializer::Ok, Serializer::Error>
+where
+    Serializer: serde::Serializer,
+{
+    serde::Serialize::serialize(hash.as_slice(), serializer)
+}
+
+fn deserialize_compact_relation_hash<'de, Deserializer>(
+    deserializer: Deserializer,
+) -> Result<[u8; Hash512::BYTE_LENGTH], Deserializer::Error>
+where
+    Deserializer: serde::Deserializer<'de>,
+{
+    let bytes = <Vec<u8> as serde::Deserialize>::deserialize(deserializer)?;
+    bytes.try_into().map_err(|bytes: Vec<u8>| {
+        serde::de::Error::invalid_length(bytes.len(), &"exactly 64 hash bytes")
+    })
+}
+
+const COMPLETE_RELATION_PLAN_HASH_FIELD_TAG: u16 = 0x0001;
+const RELATION_PLAN_VARIANT_HASH_FIELD_TAG: u16 = 0x0002;
+const ASSIGNMENT_SOURCE_CATALOG_DIGEST_FIELD_TAG: u16 = 0x0003;
+const RING_DEGREE_FIELD_TAG: u16 = 0x0004;
+const EXTENSION_DEGREE_FIELD_TAG: u16 = 0x0005;
+const STRUCTURED_PUBLIC_RING_PRODUCT_COUNT_FIELD_TAG: u16 = 0x0006;
+const ORDERED_RELATIONS_FIELD_TAG: u16 = 0x0007;
+const ORDERED_QUOTIENT_INTERVALS_FIELD_TAG: u16 = 0x0008;
+const ORDERED_PUBLIC_VECTORS_FIELD_TAG: u16 = 0x0009;
+const ORDERED_PRIVATE_SMALL_VECTORS_FIELD_TAG: u16 = 0x000a;
+const ORDERED_WITNESS_SEGMENTS_FIELD_TAG: u16 = 0x000b;
+const ORDERED_CONSTRAINT_SEGMENTS_FIELD_TAG: u16 = 0x000c;
+const PUBLIC_INPUT_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x000d;
+const WITNESS_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x000e;
+const PADDED_PUBLIC_INPUT_ELEMENT_COUNT_FIELD_TAG: u16 = 0x000f;
+const PADDED_WITNESS_ELEMENT_COUNT_FIELD_TAG: u16 = 0x0010;
+const OPERATIVE_CONSTRAINT_COUNT_FIELD_TAG: u16 = 0x0011;
+const PADDED_CONSTRAINT_COUNT_FIELD_TAG: u16 = 0x0012;
+const QUOTIENT_LOOKUP_TABLE_VALUE_COUNT_FIELD_TAG: u16 = 0x0013;
+const QUOTIENT_LOOKUP_TABLE_RING_VECTOR_COUNT_FIELD_TAG: u16 = 0x0014;
+const LOOKUP_SOUNDNESS_NUMERATOR_FIELD_TAG: u16 = 0x0015;
+const LOOKUP_CHALLENGE_EXCLUDES_BASE_SUBFIELD_FIELD_TAG: u16 = 0x0016;
 
 const STRUCTURED_RELATION_RECORD_TAG: u16 = 0x0101;
 const DIRECT_TERM_RECORD_TAG: u16 = 0x0111;
@@ -104,9 +131,10 @@ mod generation_state;
 )]
 mod structured_r1cs;
 
-use super::setup_key_relation_adapter::SetupKeyRelationSourcePolynomialAdapter;
-#[cfg(test)]
-use authenticated_assignment::CompactAuthenticatedAssignmentCatalog;
+use super::setup_key_relation_adapter::{
+    CompactPublicKeySourcePolynomialAdapter, selected_compact_public_key_assignment_source_catalog,
+};
+pub(crate) use authenticated_assignment::CompactAuthenticatedAssignmentCatalog;
 use authenticated_assignment::validate_compact_authenticated_assignment;
 use authenticated_assignment::{
     CompactAuthenticatedAssignmentCursor, CompactAuthenticatedAssignmentPoll,
@@ -126,7 +154,10 @@ pub(crate) use structured_r1cs::{
     compact_structured_r1cs_row_source_geometry, compact_structured_witness_covector_geometry,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactRingVectorReference {
     column_ordinals: [u32; 2],
 }
@@ -145,14 +176,15 @@ impl CompactRingVectorReference {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum CompactPublicKeyRelationFamily {
     PublicKeyShare,
     OrdinaryAnchor,
     FinalAnchor,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) enum CompactStructuredLinearTerm {
     Direct {
         vector: CompactRingVectorReference,
@@ -172,7 +204,8 @@ pub(crate) enum CompactStructuredLinearTerm {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactStructuredRelation {
     family: CompactPublicKeyRelationFamily,
     data_modulus_index: u16,
@@ -180,7 +213,8 @@ pub(crate) struct CompactStructuredRelation {
     ordered_terms: Vec<CompactStructuredLinearTerm>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactExactQuotientInterval {
     family: CompactPublicKeyRelationFamily,
     data_modulus_index: u16,
@@ -195,7 +229,9 @@ pub(crate) struct CompactExactQuotientInterval {
     residual_maximum: i128,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(crate) enum CompactWitnessSegmentKind {
     ModularQuotients,
     LookupMultiplicities,
@@ -205,20 +241,24 @@ pub(crate) enum CompactWitnessSegmentKind {
     LookupInverses,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub(crate) enum CompactSmallVectorKind {
     ShiftedTernary,
     ShiftedEtaTwo,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactSmallVectorDescriptor {
     vector: CompactRingVectorReference,
     kind: CompactSmallVectorKind,
     centered_offset: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactWitnessSegment {
     kind: CompactWitnessSegmentKind,
     first_element: u64,
@@ -448,7 +488,7 @@ impl CompactCrossEpochCopyGeometry {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum CompactR1csConstraintKind {
     ExactIntegerLift,
     LookupInverse,
@@ -462,16 +502,32 @@ pub(crate) enum CompactR1csConstraintKind {
     ZeroPadding,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactR1csConstraintSegment {
     kind: CompactR1csConstraintKind,
     first_row: u64,
     row_count: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CompactPublicKeyRelationCatalog {
+    #[serde(
+        serialize_with = "serialize_compact_relation_hash",
+        deserialize_with = "deserialize_compact_relation_hash"
+    )]
+    complete_relation_plan_hash: [u8; 64],
+    #[serde(
+        serialize_with = "serialize_compact_relation_hash",
+        deserialize_with = "deserialize_compact_relation_hash"
+    )]
     relation_plan_variant_hash: [u8; 64],
+    #[serde(
+        serialize_with = "serialize_compact_relation_hash",
+        deserialize_with = "deserialize_compact_relation_hash"
+    )]
+    assignment_source_catalog_digest: [u8; 64],
     ring_degree: u64,
     extension_degree: u32,
     structured_public_ring_product_count: u64,
@@ -494,8 +550,34 @@ pub(crate) struct CompactPublicKeyRelationCatalog {
 }
 
 impl CompactPublicKeyRelationCatalog {
+    pub(crate) const fn complete_relation_plan_hash(&self) -> [u8; 64] {
+        self.complete_relation_plan_hash
+    }
+
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
         self.relation_plan_variant_hash
+    }
+
+    pub(crate) const fn assignment_source_catalog_digest(&self) -> [u8; 64] {
+        self.assignment_source_catalog_digest
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bind_generated_authorities(
+        &mut self,
+        complete_relation_plan_hash: [u8; 64],
+        assignment_source_catalog_digest: [u8; 64],
+    ) -> Result<(), RelationPlanError> {
+        if self.complete_relation_plan_hash != [0_u8; 64]
+            || self.assignment_source_catalog_digest != [0_u8; 64]
+            || complete_relation_plan_hash == [0_u8; 64]
+            || assignment_source_catalog_digest == [0_u8; 64]
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        self.complete_relation_plan_hash = complete_relation_plan_hash;
+        self.assignment_source_catalog_digest = assignment_source_catalog_digest;
+        Ok(())
     }
 
     pub(crate) const fn ring_degree(&self) -> u64 {
@@ -601,8 +683,16 @@ impl CompactPublicKeyRelationCatalog {
         );
 
         digest.absorb_tagged(
+            COMPLETE_RELATION_PLAN_HASH_FIELD_TAG,
+            &[&self.complete_relation_plan_hash],
+        )?;
+        digest.absorb_tagged(
             RELATION_PLAN_VARIANT_HASH_FIELD_TAG,
             &[&self.relation_plan_variant_hash],
+        )?;
+        digest.absorb_tagged(
+            ASSIGNMENT_SOURCE_CATALOG_DIGEST_FIELD_TAG,
+            &[&self.assignment_source_catalog_digest],
         )?;
         digest.absorb_u64(RING_DEGREE_FIELD_TAG, self.ring_degree)?;
         digest.absorb_u32(EXTENSION_DEGREE_FIELD_TAG, self.extension_degree)?;
@@ -952,6 +1042,94 @@ impl CompactPublicKeyRelationCatalog {
         }
         Ok(())
     }
+
+    /// Checks every relation invariant that does not require reconstructing
+    /// the compiler's complete column catalog. Exact compiler and source-layout
+    /// correspondence is separately enforced by the generated-artifact test.
+    fn check_generated_geometry(&self) -> Result<(), RelationPlanError> {
+        let (input, context) = selected_input_and_context()?;
+        let expected_relation_count = input
+            .data_modulus_indices
+            .len()
+            .checked_add(
+                input
+                    .commitment_data_modulus_indices
+                    .len()
+                    .checked_mul(
+                        usize::from(input.commitment_module_rank)
+                            .checked_add(1)
+                            .ok_or(RelationPlanError::CountOverflow)?,
+                    )
+                    .ok_or(RelationPlanError::CountOverflow)?,
+            )
+            .ok_or(RelationPlanError::CountOverflow)?;
+        if self.complete_relation_plan_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || self.relation_plan_variant_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || self.assignment_source_catalog_digest == [0_u8; Hash512::BYTE_LENGTH]
+            || self.ring_degree != input.ring_degree
+            || self.ring_degree
+                != u64::try_from(POLYNOMIAL_DEGREE).map_err(|_| RelationPlanError::CountOverflow)?
+            || self.extension_degree != QUINTIC_EXTENSION_DEGREE
+            || context.base_field_modulus != GOLDILOCKS_BASE_FIELD_MODULUS
+            || u32::from(context.challenge_extension_degree) != QUINTIC_EXTENSION_DEGREE
+            || usize::try_from(self.extension_degree)
+                .map_err(|_| RelationPlanError::CountOverflow)?
+                != super::super::PROOF_CHALLENGE_EXTENSION_DEGREE
+            || self.ordered_relations.len() != expected_relation_count
+            || self.ordered_relations.len() != self.ordered_quotient_intervals.len()
+            || !self.lookup_challenge_excludes_base_subfield
+            || self.structured_public_ring_product_count
+                != PUBLIC_KEY_SHARE_PRODUCT_COUNT + ANCHOR_PRODUCT_COUNT
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        for (relation, interval) in self
+            .ordered_relations
+            .iter()
+            .zip(&self.ordered_quotient_intervals)
+        {
+            let expected_product_count = match relation.family {
+                CompactPublicKeyRelationFamily::PublicKeyShare
+                | CompactPublicKeyRelationFamily::FinalAnchor => 1,
+                CompactPublicKeyRelationFamily::OrdinaryAnchor => {
+                    u64::from(input.commitment_module_rank)
+                        .checked_add(1)
+                        .ok_or(RelationPlanError::CountOverflow)?
+                }
+            };
+            if relation.modulus != data_modulus(relation.data_modulus_index)?
+                || *interval
+                    != exact_quotient_interval(
+                        relation.family,
+                        relation.data_modulus_index,
+                        relation.modulus,
+                        self.ring_degree,
+                        input.plaintext_modulus,
+                        expected_product_count,
+                    )?
+            {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
+        }
+        check_contiguous_witness_segments(
+            &self.ordered_witness_segments,
+            self.padded_witness_element_count,
+        )?;
+        check_contiguous_constraint_segments(
+            &self.ordered_constraint_segments,
+            self.padded_constraint_count,
+        )?;
+        structured_r1cs::CompactStructuredR1csCatalog::derive(self)?;
+        self.cross_epoch_copy_geometry()?;
+        if self.padded_public_input_element_count != self.padded_witness_element_count
+            || self.padded_constraint_count != 2 * self.padded_witness_element_count
+            || self.operative_constraint_count >= self.padded_constraint_count
+            || self.maximum_residual_interval_width()? >= GOLDILOCKS_BASE_FIELD_MODULUS
+        {
+            return Err(RelationPlanError::NoWrapBoundViolated);
+        }
+        Ok(())
+    }
 }
 
 struct CompactRelationSchemaDigestWriter {
@@ -1108,13 +1286,22 @@ fn selected_input_and_context()
 
 pub(crate) fn selected_compact_public_key_relation_catalog()
 -> Result<CompactPublicKeyRelationCatalog, RelationPlanError> {
-    let (input, context) = selected_input_and_context()?;
-    let compiled = compile_public_key_share_relation_with_source_layout(&input, &context)?;
-    compiled.relation_plan.check(&context)?;
-    let variant = compiled.relation_plan.select_variant(None, None)?;
-    let catalog =
-        derive_compact_public_key_relation_catalog(&input, variant, &compiled.source_layout)?;
-    catalog.check(&input, &context, variant)?;
+    if GENERATED_COMPACT_PUBLIC_KEY_RELATION_BYTES.len()
+        > MAXIMUM_GENERATED_COMPACT_RELATION_BYTE_LENGTH
+    {
+        return Err(RelationPlanError::CanonicalEncoding);
+    }
+    let canonical_bytes = GENERATED_COMPACT_PUBLIC_KEY_RELATION_BYTES
+        .strip_suffix(b"\n")
+        .ok_or(RelationPlanError::CanonicalEncoding)?;
+    let catalog: CompactPublicKeyRelationCatalog = serde_json::from_slice(canonical_bytes)
+        .map_err(|_| RelationPlanError::CanonicalEncoding)?;
+    if serde_json::to_vec(&catalog).map_err(|_| RelationPlanError::CanonicalEncoding)?
+        != canonical_bytes
+    {
+        return Err(RelationPlanError::CanonicalEncoding);
+    }
+    catalog.check_generated_geometry()?;
     Ok(catalog)
 }
 
@@ -1125,10 +1312,9 @@ pub(crate) fn selected_compact_public_key_relation_catalog()
 /// source sequence. It cannot accept an ordinal-keyed caller map or detached
 /// public-input bytes.
 pub(crate) struct PreparedCompactPublicKeyAssignmentSources {
-    relation_plan_variant: RelationPlanVariant,
     relation: CompactPublicKeyRelationCatalog,
     assignment_cursor: CompactAuthenticatedAssignmentCursor,
-    source_polynomials: SetupKeyRelationSourcePolynomialAdapter,
+    source_polynomials: CompactPublicKeySourcePolynomialAdapter,
     public_input_bindings: CompactPublicInputBindings,
     public_input_wire_geometry: CompactPublicInputWireGeometry,
     proof_wire_geometry: CompactProofWireGeometry,
@@ -1160,18 +1346,14 @@ impl PreparedCompactPublicKeyAssignmentSources {
     pub(crate) fn poll_source_loading(
         &mut self,
     ) -> Result<CompactAuthenticatedAssignmentPoll, CommonProofProverError> {
-        self.assignment_cursor.next_source(
-            &self.relation,
-            &self.relation_plan_variant,
-            &mut self.source_polynomials,
-        )
+        self.assignment_cursor
+            .next_source(&self.relation, &mut self.source_polynomials)
     }
 
     pub(crate) fn source_request_context(
         &self,
     ) -> Result<CommonProofSourcePolynomialRequestContext, CommonProofProverError> {
-        self.source_polynomials
-            .compact_public_key_assignment_request_context()
+        Ok(self.source_polynomials.request_context())
     }
 
     pub(crate) fn source_provider_memory_accounting(
@@ -1186,15 +1368,13 @@ impl PreparedCompactPublicKeyAssignmentSources {
         std::rc::Rc<crate::bgv::setup::SetupGenerationCompactPublicKeyDevelopmentAuthority>,
         CommonProofProverError,
     > {
-        self.source_polynomials
-            .retain_compact_public_key_deferred_authority()
+        self.source_polynomials.retain_deferred_authority()
     }
 
     pub(crate) fn finish_source_loading(
         self,
     ) -> Result<PreparedCompactPublicKeyBaseAssignment, CommonProofProverError> {
         let Self {
-            relation_plan_variant,
             relation,
             assignment_cursor,
             source_polynomials,
@@ -1205,17 +1385,8 @@ impl PreparedCompactPublicKeyAssignmentSources {
             compact_construction_identity_hash,
             checkpoint_schedule_digest,
         } = self;
-        let (input, relation_context) = selected_input_and_context()?;
-        let compiled =
-            compile_public_key_share_relation_with_source_layout(&input, &relation_context)?;
-        compiled.relation_plan.check(&relation_context)?;
-        let expected_relation_plan_variant = compiled.relation_plan.select_variant(None, None)?;
-        if relation_plan_variant != *expected_relation_plan_variant {
-            return Err(CommonProofProverError::InvalidInput);
-        }
-        relation.check(&input, &relation_context, &relation_plan_variant)?;
-        let base_assignment = assignment_cursor.finish(&relation, &relation_plan_variant)?;
-        source_polynomials.finish_compact_public_key_assignment_sources()?;
+        let base_assignment = assignment_cursor.finish(&relation)?;
+        source_polynomials.finish_compact_sources()?;
         let (canonical_public_input_bytes, decoded_public_input) =
             encode_compact_public_key_assignment_public_input(
                 &relation,
@@ -1223,7 +1394,6 @@ impl PreparedCompactPublicKeyAssignmentSources {
                 public_input_wire_geometry,
                 public_input_bindings,
             )?;
-        drop((relation_plan_variant, relation_context));
         Ok(PreparedCompactPublicKeyBaseAssignment {
             relation,
             base_assignment,
@@ -1245,15 +1415,8 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         return Err(CommonProofProverError::InvalidInput);
     }
     let (input, relation_context) = selected_input_and_context()?;
-    let compiled = compile_public_key_share_relation_with_source_layout(&input, &relation_context)?;
-    compiled.relation_plan.check(&relation_context)?;
-    let relation_plan_variant = compiled.relation_plan.select_variant(None, None)?.clone();
-    let relation = derive_compact_public_key_relation_catalog(
-        &input,
-        &relation_plan_variant,
-        &compiled.source_layout,
-    )?;
-    relation.check(&input, &relation_context, &relation_plan_variant)?;
+    let relation = selected_compact_public_key_relation_catalog()?;
+    let source_catalog = selected_compact_public_key_assignment_source_catalog(&relation)?;
     let contract = selected_compact_public_key_proof_contract()
         .map_err(|_| CommonProofProverError::InvalidInput)?;
     let verifier_inputs = contract.verifier_inputs();
@@ -1286,23 +1449,21 @@ pub(crate) fn prepare_compact_public_key_assignment_sources(
         .checkpoint_schedule
         .checkpoint_schedule_digest();
     drop(contract);
-    let source_polynomials =
-        SetupKeyRelationSourcePolynomialAdapter::new_compact_public_key_assignment(
-            source,
-            &compiled.relation_plan,
-            relation_plan_variant.clone(),
-            relation_context.clone(),
-            usize::try_from(input.ring_degree)
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-            compiled.source_layout,
-        )?;
-    let assignment_cursor = CompactAuthenticatedAssignmentCursor::new(
+    if relation.ring_degree() != input.ring_degree {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    let (source_polynomials, assignment_catalog) = CompactPublicKeySourcePolynomialAdapter::new(
+        source,
         &relation,
-        &relation_plan_variant,
-        source_polynomials.compact_public_key_assignment_request_context()?,
+        relation_context,
+        source_catalog,
+    )?;
+    let assignment_cursor = CompactAuthenticatedAssignmentCursor::new_from_catalog(
+        &relation,
+        assignment_catalog,
+        source_polynomials.request_context(),
     )?;
     Ok(PreparedCompactPublicKeyAssignmentSources {
-        relation_plan_variant,
         relation,
         assignment_cursor,
         source_polynomials,
@@ -1754,7 +1915,9 @@ pub(crate) fn derive_compact_public_key_relation_catalog(
         .ok_or(RelationPlanError::CountOverflow)?;
 
     Ok(CompactPublicKeyRelationCatalog {
+        complete_relation_plan_hash: [0_u8; Hash512::BYTE_LENGTH],
         relation_plan_variant_hash: variant.canonical_hash()?,
+        assignment_source_catalog_digest: [0_u8; Hash512::BYTE_LENGTH],
         ring_degree,
         extension_degree: QUINTIC_EXTENSION_DEGREE,
         structured_public_ring_product_count: relations
@@ -2179,6 +2342,24 @@ mod tests {
                 .canonical_schema_digest()
                 .expect("mutated scalar schema digest")
         );
+
+        let mut changed_complete_plan = catalog.clone();
+        changed_complete_plan.complete_relation_plan_hash[0] ^= 1;
+        assert_ne!(
+            digest,
+            changed_complete_plan
+                .canonical_schema_digest()
+                .expect("mutated complete-plan schema digest")
+        );
+
+        let mut changed_assignment_source = catalog;
+        changed_assignment_source.assignment_source_catalog_digest[0] ^= 1;
+        assert_ne!(
+            digest,
+            changed_assignment_source
+                .canonical_schema_digest()
+                .expect("mutated assignment-source schema digest")
+        );
     }
 
     #[test]
@@ -2218,6 +2399,44 @@ mod tests {
         assert_eq!(
             missing_constraint.check(&input, &context, variant),
             Err(RelationPlanError::InvalidConstraint)
+        );
+    }
+
+    #[test]
+    fn generated_compact_relation_is_the_checked_production_compiler_output() {
+        let (input, context, compiled) = selected_compilation().expect("selected compilation");
+        let variant = compiled
+            .relation_plan
+            .select_variant(None, None)
+            .expect("selected variant");
+        let (independently_derived, _) =
+            super::super::setup_key_relation_adapter::derive_bound_compact_public_key_catalogs(
+                &input,
+                &compiled.relation_plan,
+                variant,
+                &compiled.source_layout,
+            )
+            .expect("bound compact public-key catalogs");
+        independently_derived
+            .check(&input, &context, variant)
+            .expect("independently checked compact public-key catalog");
+        let selected = selected_compact_public_key_relation_catalog()
+            .expect("generated compact relation decodes");
+        assert_eq!(selected, independently_derived);
+        assert_eq!(
+            selected
+                .canonical_schema_digest()
+                .expect("selected schema digest"),
+            independently_derived
+                .canonical_schema_digest()
+                .expect("independently derived schema digest"),
+        );
+        assert_eq!(
+            serde_json::to_vec(&independently_derived)
+                .expect("independently derived relation serializes"),
+            GENERATED_COMPACT_PUBLIC_KEY_RELATION_BYTES
+                .strip_suffix(b"\n")
+                .expect("generated relation has one source-file newline"),
         );
     }
 }

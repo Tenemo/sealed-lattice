@@ -781,8 +781,8 @@ fn construction_fixture() -> ConstructionFixture {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let (inner_instance, _) = code_fixture(&inner_relation, inner_messages, 251);
-    let (outer_instance, _) = code_fixture(&outer_relation, outer_messages, 301);
+    let (inner_instance, inner_masks) = code_fixture(&inner_relation, inner_messages, 251);
+    let (outer_instance, outer_masks) = code_fixture(&outer_relation, outer_messages, 301);
     let point = vec![ProofChallengeExtensionElement::ZERO; 5];
     let pre_evaluation = ProofChallengeExtensionElement::ZERO;
     let main_evaluation = ProofChallengeExtensionElement::ZERO;
@@ -819,23 +819,19 @@ fn construction_fixture() -> ConstructionFixture {
     let cross_epoch_handoff = Box::leak(Box::new(cross_epoch_handoff));
     let matrices = Box::leak(Box::new(SixtyFourElementR1csMatrices));
     let public_input = Box::leak(Box::new([CompactChallengeField::ZERO; 64]));
-    let cfw_statement = SemanticCfwStatement::new(
-        [0x91; 64],
-        matrices,
-        public_input,
-        code_relations,
-        committed_instances,
-        cross_epoch_handoff,
+    let expected_cfw_witness = semantic_cfw_witness_from_code_witnesses(
+        geometry,
+        main_source.clone(),
+        inner_masks,
+        outer_masks,
+        cross_masks.clone(),
     )
-    .expect("reduced CFW statement derives");
-    let cfw_witness = semantic_cfw_errbr(&cfw_statement, cross_masks.clone())
-        .expect("the reduced CFW commitments decode")
-        .witness;
+    .expect("the reduced committed witnesses define the CFW witness");
     let prepared = PreparedCompactCfwProver::prepare(
         matrices,
         public_input,
-        &cfw_witness.r1cs_witness,
-        cfw_witness.mask_material.clone(),
+        &expected_cfw_witness.r1cs_witness,
+        expected_cfw_witness.mask_material.clone(),
     )
     .expect("the reduced CFW witness prepares");
     let auxiliary_target = prepared.auxiliary_target();
@@ -847,6 +843,32 @@ fn construction_fixture() -> ConstructionFixture {
             ))
         })
         .collect::<Vec<_>>();
+    let relation_plan_hash = [0x91; 64];
+    let canonical_public_input_binding = [0xa1; 64];
+    let initial_verifier_prefix = CompactCfwInitialVerifierPrefix::for_focused_semantic_test(
+        relation_plan_hash,
+        canonical_public_input_binding,
+        auxiliary_target,
+        constraint_challenge,
+        equality_point.clone(),
+    );
+    let cfw_statement = SemanticCfwStatement::new(
+        SemanticCfwInitialStatementBinding::new(
+            relation_plan_hash,
+            canonical_public_input_binding,
+            &initial_verifier_prefix,
+        ),
+        matrices,
+        public_input,
+        code_relations,
+        committed_instances,
+        cross_epoch_handoff,
+    )
+    .expect("reduced CFW statement derives");
+    let cfw_witness = semantic_cfw_errbr(&cfw_statement, cross_masks.clone())
+        .expect("the reduced CFW commitments decode")
+        .witness;
+    assert_eq!(cfw_witness, expected_cfw_witness);
     let mut prover = prepared
         .begin(constraint_challenge, equality_point.clone())
         .expect("the reduced CFW sumcheck begins");

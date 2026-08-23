@@ -40,10 +40,7 @@ use crate::bgv::proof_suite::ProofChallengeExtensionElement;
 use crate::bgv::proof_suite::compact_cfw::{
     CompactChallengeField, compact_cfw_zero_evader_weights,
 };
-use crate::bgv::proof_suite::compact_cfw_initial_transition::{
-    compact_cfw_initial_transition_soundness_numerator,
-    verify_compact_cfw_initial_transition_bad_event,
-};
+use crate::bgv::proof_suite::compact_cfw_initial_transition::compact_cfw_initial_transition_soundness_numerator;
 use p3_field::PrimeCharacteristicRing;
 
 pub(super) type SemanticBadEventFamily = CompactFactorOneBadEventFamily;
@@ -458,22 +455,12 @@ fn validate_cross_epoch_certificate(
 fn validate_cfw_initial_certificate(
     certificate: &SemanticCfwBadTransition,
 ) -> Result<(), CompactFactorOneSemanticError> {
-    let SemanticCfwBadTransition::InitialConsistency {
-        auxiliary_difference,
-        masked_constraint_hypercube_residuals,
-        constraint_combining_challenge,
-        equality_point,
-    } = certificate
-    else {
+    let SemanticCfwBadTransition::InitialConsistency(event) = certificate else {
         return Err(CompactFactorOneSemanticError::InvalidGeometry);
     };
-    verify_compact_cfw_initial_transition_bad_event(
-        *auxiliary_difference,
-        masked_constraint_hypercube_residuals,
-        *constraint_combining_challenge,
-        equality_point,
-    )
-    .map_err(|_| CompactFactorOneSemanticError::InvalidGeometry)?;
+    if event.soundness_numerator() == 0 {
+        return Err(CompactFactorOneSemanticError::InvalidGeometry);
+    }
     Ok(())
 }
 
@@ -878,21 +865,6 @@ mod tests {
         assert_eq!(
             families(SemanticVerifierMoveOwner::CrossEpochPoint, cross_epoch),
             [SemanticBadEventFamily::CrossEpochMultilinearIdentity]
-        );
-
-        let cfw_initial =
-            SemanticVerifierMoveBadTransition::Cfw(SemanticCfwBadTransition::InitialConsistency {
-                auxiliary_difference: CompactChallengeField::ZERO,
-                masked_constraint_hypercube_residuals: vec![
-                    CompactChallengeField::ZERO,
-                    compact_field(1),
-                ],
-                constraint_combining_challenge: compact_field(7),
-                equality_point: vec![CompactChallengeField::ZERO],
-            });
-        assert_eq!(
-            families(SemanticVerifierMoveOwner::CfwInitialRandomness, cfw_initial,),
-            [SemanticBadEventFamily::CfwInitialConsistencyIdentity]
         );
 
         let cfw_sumcheck =

@@ -11,6 +11,7 @@ import {
     generateAcceptedSetupCompactPublicKeyShareInClosedWorker,
     generateAcceptedSetupPublicKeyShareInClosedWorker,
     generateAcceptedSetupSameSecretInClosedWorker,
+    type CompactPublicKeyGenerationOperationObservation,
     verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
     verifyGeneratedAcceptedSetupSameSecretInClosedWorker,
 } from '#packages/wasm/src/accepted-setup-key-relation-generation-runtime';
@@ -810,6 +811,9 @@ const compactGenerationInput = (
         }>,
     ) => unknown,
     signal?: AbortSignal,
+    observeOperation?: (
+        observation: CompactPublicKeyGenerationOperationObservation,
+    ) => void,
 ) => ({
     canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
     checkpointLineageIdentifier: new Uint8Array(32).fill(7),
@@ -818,6 +822,7 @@ const compactGenerationInput = (
     productionOperationIdentifiers: Object.freeze({}),
     setupGenerationAuthority: Object.freeze({}),
     setupIntentObject: Object.freeze({}),
+    ...(observeOperation === undefined ? {} : { observeOperation }),
     ...(signal === undefined ? {} : { signal }),
     workerKernel: Object.freeze({ kernel: runtime.kernel }),
     yieldControl: () => Promise.resolve(),
@@ -1086,6 +1091,8 @@ describe('generated accepted-setup key-relation verification', () => {
 describe('accepted-setup compact public-key generation', () => {
     it('returns exact unverified bytes after both storage owners complete', async () => {
         const runtime = createFakeRuntime();
+        const operationObservations: CompactPublicKeyGenerationOperationObservation[] =
+            [];
         const openings: Array<
             Readonly<{
                 runtimeBindingHash: number[];
@@ -1094,32 +1101,39 @@ describe('accepted-setup compact public-key generation', () => {
         > = [];
         const result =
             await generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
-                compactGenerationInput(runtime, (opening) => {
-                    openings.push({
-                        runtimeBindingHash: Array.from(
-                            opening.runtimeBindingHash,
-                        ),
-                        storageOwner: opening.storageOwner,
-                    });
-                    return Object.freeze({
-                        copyBrowserStorageAccounting: () =>
-                            Object.freeze({
-                                claimedBufferCount: 1n,
-                                claimedByteLength: 2n,
-                                maximumLiveBufferByteLength: 3n,
-                                maximumLiveBufferCount: 1,
-                                releasedBufferCount: 4n,
-                                releasedByteLength: 5n,
-                                secretRecordOpenByteLength: 6n,
-                                secretRecordOpenCount: 7n,
-                                secretRecordSealByteLength: 8n,
-                                secretRecordSealCount: 9n,
-                                transferredBufferCount: 10n,
-                                transferredByteLength: 11n,
-                            }),
-                        executeTransaction: () => Promise.resolve([]),
-                    });
-                }) as never,
+                compactGenerationInput(
+                    runtime,
+                    (opening) => {
+                        openings.push({
+                            runtimeBindingHash: Array.from(
+                                opening.runtimeBindingHash,
+                            ),
+                            storageOwner: opening.storageOwner,
+                        });
+                        return Object.freeze({
+                            copyBrowserStorageAccounting: () =>
+                                Object.freeze({
+                                    claimedBufferCount: 1n,
+                                    claimedByteLength: 2n,
+                                    maximumLiveBufferByteLength: 3n,
+                                    maximumLiveBufferCount: 1,
+                                    releasedBufferCount: 4n,
+                                    releasedByteLength: 5n,
+                                    secretRecordOpenByteLength: 6n,
+                                    secretRecordOpenCount: 7n,
+                                    secretRecordSealByteLength: 8n,
+                                    secretRecordSealCount: 9n,
+                                    transferredBufferCount: 10n,
+                                    transferredByteLength: 11n,
+                                }),
+                            executeTransaction: () => Promise.resolve([]),
+                        });
+                    },
+                    undefined,
+                    (observation) => {
+                        operationObservations.push(observation);
+                    },
+                ) as never,
             );
 
         expect(result.canonicalPublicInputBytes).toEqual(
@@ -1184,6 +1198,68 @@ describe('accepted-setup compact public-key generation', () => {
         expect(runtime.selectedSuiteReleases).toEqual([11]);
         expect(runtime.compactPollOutcomes).toEqual([]);
         expect(runtime.allocations.size).toBe(0);
+        expect(
+            operationObservations.map(
+                (observation) => observation.operationOwnerIdentifier,
+            ),
+        ).toEqual([
+            'setup-generation-authorization',
+            'setup-intent-authorization',
+            'kernel-preparation',
+            'selected-suite-release',
+            'kernel-poll',
+            'storage-request-copy-and-decode',
+            'storage-open',
+            'storage-transaction',
+            'storage-response-encode-and-supply',
+            'storage-request-cleanup',
+            'kernel-poll',
+            'storage-request-copy-and-decode',
+            'storage-open',
+            'storage-transaction',
+            'storage-response-encode-and-supply',
+            'storage-request-cleanup',
+            'kernel-poll',
+            'kernel-poll',
+            'external-memory-accounting-copy',
+            'transport-bindings-copy',
+            'canonical-public-input-copy',
+            'canonical-proof-copy',
+            'kernel-release',
+        ]);
+        for (const observation of operationObservations) {
+            expect(observation.startedAtMilliseconds).toBeGreaterThanOrEqual(0);
+            expect(observation.finishedAtMilliseconds).toBeGreaterThanOrEqual(
+                observation.startedAtMilliseconds,
+            );
+            expect(observation.durationMilliseconds).toBe(
+                observation.finishedAtMilliseconds -
+                    observation.startedAtMilliseconds,
+            );
+        }
+        expect(
+            operationObservations.filter(
+                (observation) =>
+                    observation.operationOwnerIdentifier === 'kernel-poll',
+            ),
+        ).toMatchObject([
+            {
+                pollKind: 'storage-request-ready',
+                storageOwner: 'responseTrees',
+            },
+            { pollKind: 'storage-request-ready', storageOwner: 'cfw' },
+            {
+                checkpointSafeBoundaryOrdinal: 0,
+                completedWorkUnitCount: 0,
+                firstOrdinal: 0,
+                generationStageIdentifier: 'cfw',
+                pollKind: 'progress',
+            },
+            {
+                pollKind: 'complete',
+                precedingGenerationStageIdentifier: 'cfw',
+            },
+        ]);
     });
 
     it('cancels retained producer authority when cancellation precedes polling', async () => {
@@ -1191,6 +1267,7 @@ describe('accepted-setup compact public-key generation', () => {
         const controller = new AbortController();
         controller.abort('focused cancellation');
         const openExternalMemory = vi.fn();
+        const operationOwnerIdentifiers: string[] = [];
 
         await expect(
             generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
@@ -1198,6 +1275,11 @@ describe('accepted-setup compact public-key generation', () => {
                     runtime,
                     openExternalMemory,
                     controller.signal,
+                    (observation) => {
+                        operationOwnerIdentifiers.push(
+                            observation.operationOwnerIdentifier,
+                        );
+                    },
                 ) as never,
             ),
         ).rejects.toThrow(/cancel/u);
@@ -1206,6 +1288,72 @@ describe('accepted-setup compact public-key generation', () => {
         expect(runtime.compactCancelledHandles).toEqual([61]);
         expect(runtime.selectedSuiteReleases).toEqual([11]);
         expect(runtime.compactPollOutcomes).toHaveLength(4);
+        expect(runtime.allocations.size).toBe(0);
+        expect(operationOwnerIdentifiers).toEqual([
+            'setup-generation-authorization',
+            'setup-intent-authorization',
+            'kernel-preparation',
+            'selected-suite-release',
+            'kernel-cancellation',
+        ]);
+    });
+
+    it('does not cancel an already released producer when timing observation fails', async () => {
+        const runtime = createFakeRuntime();
+        const observationFailure = new Error('timing observer failed');
+
+        await expect(
+            generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactGenerationInput(
+                    runtime,
+                    () =>
+                        Object.freeze({
+                            executeTransaction: () => Promise.resolve([]),
+                        }),
+                    undefined,
+                    (observation) => {
+                        if (
+                            observation.operationOwnerIdentifier ===
+                            'kernel-release'
+                        ) {
+                            throw observationFailure;
+                        }
+                    },
+                ) as never,
+            ),
+        ).rejects.toBe(observationFailure);
+        expect(runtime.compactReleasedCompletedHandles).toEqual([61]);
+        expect(runtime.compactCancelledHandles).toEqual([]);
+        expect(runtime.selectedSuiteReleases).toEqual([11]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('reports timing observation failure separately from a kernel trap', async () => {
+        const runtime = createFakeRuntime();
+        const observationFailure = new Error('poll timing observer failed');
+        const openExternalMemory = vi.fn();
+
+        await expect(
+            generateAcceptedSetupCompactPublicKeyShareInClosedWorker(
+                compactGenerationInput(
+                    runtime,
+                    openExternalMemory,
+                    undefined,
+                    (observation) => {
+                        if (
+                            observation.operationOwnerIdentifier ===
+                            'kernel-poll'
+                        ) {
+                            throw observationFailure;
+                        }
+                    },
+                ) as never,
+            ),
+        ).rejects.toBe(observationFailure);
+        expect(openExternalMemory).not.toHaveBeenCalled();
+        expect(runtime.compactReleasedCompletedHandles).toEqual([]);
+        expect(runtime.compactCancelledHandles).toEqual([61]);
+        expect(runtime.selectedSuiteReleases).toEqual([11]);
         expect(runtime.allocations.size).toBe(0);
     });
 

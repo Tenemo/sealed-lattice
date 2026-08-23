@@ -2138,7 +2138,7 @@ mod tests {
     fn selected_simulator(
         private_key: [u8; 64],
     ) -> (
-        super::super::compact_proof_contract::CompactPublicKeyProofContract,
+        std::rc::Rc<super::super::compact_proof_contract::CompactPublicKeyProofContract>,
         CompactMaskingCoefficientMapCertificate,
     ) {
         let contract = selected_compact_public_key_proof_contract().expect("selected contract");

@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+compact-public-key-catalog-regeneration = []
 primitive-measurement-evidence = []
 theorem-evidence = []
 

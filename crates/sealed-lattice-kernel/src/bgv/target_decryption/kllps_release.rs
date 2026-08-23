@@ -66,8 +66,9 @@ use crate::{
     hashing::hash_framed_parts_512,
 };
 
-pub(crate) const KLLPS_PARTICIPANT_COUNT: usize = 10;
-pub(crate) const KLLPS_RECONSTRUCTION_THRESHOLD: usize = 4;
+pub(crate) const KLLPS_PARTICIPANT_COUNT: usize = FOUNDATION_PROFILE.participant_count as usize;
+pub(crate) const KLLPS_RECONSTRUCTION_THRESHOLD: usize =
+    FOUNDATION_PROFILE.reconstruction_threshold as usize;
 pub(crate) const KLLPS_DENOMINATOR_CLEARING_FACTOR: u64 = 4;
 pub(crate) const KLLPS_THRESHOLD_SIMULATION_BIT_LENGTH: u32 = 96;
 pub(crate) const KLLPS_PAIRED_TARGET_ROLE_COUNT: usize = 2;

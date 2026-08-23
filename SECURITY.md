@@ -119,8 +119,11 @@ and implementation issues below.
   direct exact-width verifier-message transcript, and deterministic transport,
   binding, chronology, source, and equation faults refuse. The direct transcript
   removes the rejected two-stage domain extender and introduces no separate
-  domain-extension term in the ideal-oracle arithmetic. A compiler-derived,
-  source-bound lemma checks the initial CFW interactive uniform-message bound.
+  domain-extension term in the ideal-oracle arithmetic. The current source-bound
+  initial-transition lemma derives the challenge geometry and checks the
+  polynomial identity only for caller-supplied auxiliary-difference and residual
+  data; it does not derive those values from a false production predecessor, so
+  that transition remains conditional.
   The family still lacks proofs that the shared fixed-Keccak interface is modeled
   safely, emitted proof bytes reveal no witness information, and committed trees
   hide private data. Full Fiat--Shamir composition and probability accounting

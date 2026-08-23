@@ -5069,7 +5069,7 @@ mod tests {
     use crate::bgv::proof_suite::field::ProofBaseFieldElement;
 
     fn selected() -> (
-        super::super::compact_proof_contract::CompactPublicKeyProofContract,
+        std::rc::Rc<super::super::compact_proof_contract::CompactPublicKeyProofContract>,
         CompactMaskingCoefficientMapCertificate,
     ) {
         let contract = selected_compact_public_key_proof_contract().expect("selected contract");

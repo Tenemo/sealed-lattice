@@ -414,9 +414,7 @@ fn encrypted_evaluator_matches_direct_stable_top_k_across_covering_matrix() {
 #[ignore = "guarded production authenticated-store evaluator and threshold-release evidence"]
 fn production_evaluator_execution_releases_four_threshold_shares() {
     let harness = EncryptedEvaluatorHarness::new_for_authenticated_store_execution();
-    let aggregate_scores = [
-        90, 90, 89, 74, 74, 63, 51, 51, 40, 39, 28, 28, 17, 16, 9, 9, 4, 3, 1, 0,
-    ];
+    let aggregate_scores: [u64; ORACLE_OPTION_COUNT] = [90, 90, 89, 74, 74, 63, 51, 51, 1, 0];
     let expected_inputs = semantic_oracle::aggregate_character_inputs(&aggregate_scores);
     let aggregate_ciphertexts = harness.encrypt_aggregate_character_inputs(
         &expected_inputs,

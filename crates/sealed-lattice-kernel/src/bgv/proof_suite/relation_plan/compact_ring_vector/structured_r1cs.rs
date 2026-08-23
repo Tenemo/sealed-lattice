@@ -5618,10 +5618,7 @@ mod tests {
                 .source_request_context()
                 .expect("compact request context")
                 .relation_plan_variant_hash(),
-            prepared_sources
-                .relation_plan_variant
-                .canonical_hash()
-                .expect("compact variant hash")
+            prepared_sources.relation.relation_plan_variant_hash()
         );
         let provider_memory_accounting = prepared_sources
             .source_provider_memory_accounting()
@@ -5638,13 +5635,23 @@ mod tests {
 
         let phase_started_at = Instant::now();
         println!("compact public-key focused owner phase: load 202 authenticated columns");
-        let expected_relation_plan_variant_hash = prepared_sources
-            .relation_plan_variant
-            .canonical_hash()
-            .expect("compact variant hash");
+        let expected_relation_plan_variant_hash =
+            prepared_sources.relation.relation_plan_variant_hash();
+        let (selected_relation_input, selected_relation_context) =
+            super::super::selected_input_and_context()
+                .expect("selected public-key relation inputs");
+        let selected_relation = super::super::compile_public_key_share_relation_with_source_layout(
+            &selected_relation_input,
+            &selected_relation_context,
+        )
+        .expect("selected public-key relation compiles for independent coin-capacity evidence");
+        let selected_relation_plan_variant = selected_relation
+            .relation_plan
+            .select_variant(None, None)
+            .expect("selected public-key relation variant");
         let private_coin_coordinate_capacity =
             CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(
-                &prepared_sources.relation_plan_variant,
+                selected_relation_plan_variant,
             )
             .expect("compact private-coin coordinate capacity derives");
         let mut generation_state = CompactPublicKeyGenerationState::new(prepared_sources);

@@ -72,7 +72,7 @@ export const buildGuardedRustEnvironment = (input: {
     return {
         ...environment,
         CARGO_BUILD_JOBS: serializedThreadCount,
-        CARGO_INCREMENTAL: '1',
+        CARGO_INCREMENTAL: '0',
         CARGO_TARGET_DIR: input.targetDirectoryPath,
         RAYON_NUM_THREADS: serializedThreadCount,
         RUST_BACKTRACE: 'full',
@@ -135,7 +135,7 @@ export const buildGuardedRustKernelCommand = (
         setupMessages: [
             `${input.runName}: filter [${testFilter}], 1 serialized test thread; ` +
                 `${input.useReleaseProfile === true ? 'release' : 'test'} profile; hard inherited process-memory ceiling ${memoryLimitGigabytes} GiB.`,
-            `Pinned target directory: ${input.targetDirectoryPath}. Incremental compilation: on. Run logs stay under logs/.`,
+            `Pinned target directory: ${input.targetDirectoryPath}. Incremental compilation: off. Run logs stay under logs/.`,
         ],
     };
 };

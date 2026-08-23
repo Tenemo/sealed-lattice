@@ -25,9 +25,10 @@ use zeroize::Zeroizing;
 
 #[cfg(test)]
 use super::super::super::setup_key_relation_adapter::{
-    CompactPublicKeyDevelopmentAnchorCoefficientSource,
-    CompactPublicKeyDevelopmentCoefficientSource,
+    CompactPublicKeyAssignmentSourceCatalog, CompactPublicKeyDevelopmentAnchorCoefficientSource,
+    CompactPublicKeyDevelopmentCoefficientSource, derive_bound_compact_public_key_catalogs,
     derive_compact_public_key_development_source_polynomials,
+    derive_generated_compact_public_key_development_source_polynomials,
 };
 #[cfg(test)]
 use super::super::authenticated_assignment::{
@@ -35,10 +36,7 @@ use super::super::authenticated_assignment::{
     CompactAuthenticatedAssignmentPoll, CompactLookupInverseMaterializationPoll,
 };
 #[cfg(test)]
-use super::super::{
-    CompactPublicKeyRelationCatalog, derive_compact_public_key_relation_catalog,
-    selected_input_and_context,
-};
+use super::super::{CompactPublicKeyRelationCatalog, selected_input_and_context};
 #[cfg(test)]
 use super::*;
 use crate::bgv::proof_suite::prover::{
@@ -1389,6 +1387,7 @@ struct ReducedRelationFixture {
     relation_plan_variant: RelationPlanVariant,
     relation: CompactPublicKeyRelationCatalog,
     assignment_catalog: CompactAuthenticatedAssignmentCatalog,
+    source_catalog: CompactPublicKeyAssignmentSourceCatalog,
 }
 
 #[cfg(test)]
@@ -1855,12 +1854,13 @@ fn reduced_relation() -> ReducedRelationFixture {
         .select_variant(None, None)
         .expect("reduced relation variant")
         .clone();
-    let relation = derive_compact_public_key_relation_catalog(
+    let (relation, source_catalog) = derive_bound_compact_public_key_catalogs(
         &input,
+        &compiled.relation_plan,
         &relation_plan_variant,
         &compiled.source_layout,
     )
-    .expect("reduced compact relation derives");
+    .expect("reduced bound compact catalogs derive");
     let assignment_catalog =
         CompactAuthenticatedAssignmentCatalog::derive(&relation, &relation_plan_variant)
             .expect("reduced authenticated assignment derives");
@@ -1871,6 +1871,7 @@ fn reduced_relation() -> ReducedRelationFixture {
         relation_plan_variant,
         relation,
         assignment_catalog,
+        source_catalog,
     }
 }
 
@@ -2203,6 +2204,30 @@ fn production_small_chain_private_randomness_binds_attempt_geometry_and_live_cur
 }
 
 #[test]
+fn generated_sparse_source_derivations_match_the_general_relation_interpreter() {
+    let fixture = reduced_relation();
+    let coefficient_source = reduced_production_coefficient_source(&fixture)
+        .expect("the reduced production coefficient authority derives");
+    let requested_column_ordinals = fixture.assignment_catalog.source_column_ordinals();
+    let general = derive_compact_public_key_development_source_polynomials(
+        &coefficient_source,
+        &fixture.relation_plan_variant,
+        &fixture.relation_context,
+        &fixture.source_layout,
+        &requested_column_ordinals,
+    )
+    .expect("the general relation interpreter derives every compact source");
+    let generated = derive_generated_compact_public_key_development_source_polynomials(
+        &coefficient_source,
+        &fixture.relation_context,
+        &fixture.source_catalog,
+    )
+    .expect("the generated sparse catalog derives every compact source");
+    assert_eq!(general.len(), 202);
+    assert_eq!(generated, general);
+}
+
+#[test]
 fn production_small_chain_source_authority_authenticates_exact_derived_coefficients() {
     let fixture = reduced_relation();
     let coefficient_source = reduced_production_coefficient_source(&fixture)
@@ -2392,7 +2417,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     let mut authenticated_source_read_count = 0_usize;
     loop {
         match assignment_cursor
-            .next_source(&relation, &relation_plan_variant, &mut source_provider)
+            .next_source(&relation, &mut source_provider)
             .expect("authenticated source loading advances")
         {
             CompactAuthenticatedAssignmentPoll::AuthenticatedSourceReadRequired => {
@@ -2417,7 +2442,7 @@ fn production_small_chain_reconciles_authenticated_cfw_cross_epoch_and_sequentia
     assert_eq!(loaded_source_count, 202);
     assert_eq!(authenticated_source_read_count, 202);
     let base_assignment = assignment_cursor
-        .finish(&relation, &relation_plan_variant)
+        .finish(&relation)
         .expect("authenticated assignment loading finishes");
     assert_ne!(base_assignment.source_replay_binding(), [0_u8; 64]);
     let source_replay_binding = base_assignment.source_replay_binding();
