@@ -6,16 +6,32 @@
 //! suite.
 
 mod binary_field;
+mod context;
+mod geometry;
 mod output_sharing;
+mod random_state;
+mod random_tape;
 
+#[cfg(test)]
+mod randomness_tests;
 #[cfg(test)]
 mod tests;
 
 use core::fmt;
 
 use crate::encoding::CanonicalError;
+use crate::tally_circuit::TallyCircuitError;
 
 pub(crate) use binary_field::BinaryFieldElement256;
+pub(crate) use context::TallyPreparationContext;
+pub(crate) use geometry::TallyPreparationGeometry;
+#[cfg(test)]
+pub(crate) use random_state::parse_tally_preparation_random_state;
+#[cfg(test)]
+pub(crate) use random_tape::{ExplicitJointRandomTape, SeededJointRandomTape};
+pub(crate) use random_tape::{
+    SEEDED_RANDOM_TAPE_BLOCK_BYTE_LENGTH, TallyPreparationRandomTapeSource,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TallyPreparationError {
@@ -55,7 +71,36 @@ pub(crate) enum TallyPreparationError {
         version: u64,
     },
     TrailingShareArtifactBytes,
+    GeometryMismatch,
+    ArithmeticOverflow,
+    WireIndexOutOfRange {
+        wire_index: u32,
+        wire_count: usize,
+    },
+    RandomTapeParticipantCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    RandomTapeByteLengthMismatch {
+        participant_position: usize,
+        expected: usize,
+        actual: usize,
+    },
+    RandomSeedCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    RandomSourceByteLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    RandomTapeExhausted,
+    RandomTapeNotFullyConsumed {
+        expected: usize,
+        consumed: usize,
+    },
     IntegerConversion,
+    TallyCircuit(TallyCircuitError),
     CanonicalEncoding(CanonicalError),
 }
 
@@ -119,9 +164,49 @@ impl fmt::Display for TallyPreparationError {
             Self::TrailingShareArtifactBytes => {
                 formatter.write_str("degree-three mask share artifact has trailing bytes")
             }
+            Self::GeometryMismatch => formatter
+                .write_str("tally preparation geometry does not match the compiled circuit"),
+            Self::ArithmeticOverflow => {
+                formatter.write_str("tally preparation arithmetic overflow")
+            }
+            Self::WireIndexOutOfRange {
+                wire_index,
+                wire_count,
+            } => write!(
+                formatter,
+                "wire {wire_index} is outside the preparation wire count {wire_count}"
+            ),
+            Self::RandomTapeParticipantCountMismatch { expected, actual } => write!(
+                formatter,
+                "received {actual} explicit random tapes; expected {expected}"
+            ),
+            Self::RandomTapeByteLengthMismatch {
+                participant_position,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "explicit random tape for participant {participant_position} has {actual} bytes; expected {expected}"
+            ),
+            Self::RandomSeedCountMismatch { expected, actual } => write!(
+                formatter,
+                "received {actual} random tape seeds; expected {expected}"
+            ),
+            Self::RandomSourceByteLengthMismatch { expected, actual } => write!(
+                formatter,
+                "random source exposes {actual} bytes; preparation geometry requires {expected}"
+            ),
+            Self::RandomTapeExhausted => {
+                formatter.write_str("random tape ended before the requested output")
+            }
+            Self::RandomTapeNotFullyConsumed { expected, consumed } => write!(
+                formatter,
+                "random tape consumed {consumed} of {expected} required bytes"
+            ),
             Self::IntegerConversion => {
                 formatter.write_str("tally preparation integer conversion failed")
             }
+            Self::TallyCircuit(error) => error.fmt(formatter),
             Self::CanonicalEncoding(error) => error.fmt(formatter),
         }
     }
@@ -132,5 +217,11 @@ impl std::error::Error for TallyPreparationError {}
 impl From<CanonicalError> for TallyPreparationError {
     fn from(error: CanonicalError) -> Self {
         Self::CanonicalEncoding(error)
+    }
+}
+
+impl From<TallyCircuitError> for TallyPreparationError {
+    fn from(error: TallyCircuitError) -> Self {
+        Self::TallyCircuit(error)
     }
 }

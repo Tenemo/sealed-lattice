@@ -49,6 +49,7 @@ fn completion_profile_full_ranking_reproduces_reference_geometry() {
     let geometry = compiled_circuit.geometry();
 
     assert_eq!(geometry.input_bit_count, 410);
+    assert_eq!(geometry.constant_operation_count, 2);
     assert_eq!(geometry.conjunction_gate_count, 3_465);
     assert_eq!(geometry.exclusive_or_gate_count, 4_005);
     assert_eq!(geometry.negation_gate_count, 1_140);
@@ -57,6 +58,7 @@ fn completion_profile_full_ranking_reproduces_reference_geometry() {
     assert_eq!(geometry.score_bit_width, 4);
     assert_eq!(geometry.aggregate_score_bit_width, 7);
     assert_eq!(geometry.option_position_bit_width, 4);
+    assert_eq!(geometry.total_wire_count, 9_022);
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use crate::{
     encoding::{CanonicalReader, append_bytes, append_varuint},
@@ -63,6 +64,10 @@ impl DegreeThreeMaskPolynomial {
         (0..participant_count)
             .map(|roster_position| self.share(participant_count, roster_position))
             .collect()
+    }
+
+    pub(crate) fn zeroize(&mut self) {
+        self.coefficients.zeroize();
     }
 }
 

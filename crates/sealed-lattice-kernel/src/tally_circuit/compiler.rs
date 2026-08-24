@@ -346,6 +346,8 @@ fn wire_index_from_usize(value: usize) -> Result<WireIndex, TallyCircuitError> {
 struct BooleanCircuitBuilder {
     input_bit_count: usize,
     operations: Vec<BooleanOperation>,
+    false_constant_wire: Option<WireIndex>,
+    true_constant_wire: Option<WireIndex>,
     constant_operation_count: usize,
     conjunction_gate_count: usize,
     exclusive_or_gate_count: usize,
@@ -358,6 +360,8 @@ impl BooleanCircuitBuilder {
         Ok(Self {
             input_bit_count,
             operations: Vec::new(),
+            false_constant_wire: None,
+            true_constant_wire: None,
             constant_operation_count: 0,
             conjunction_gate_count: 0,
             exclusive_or_gate_count: 0,
@@ -366,11 +370,25 @@ impl BooleanCircuitBuilder {
     }
 
     fn append_constant(&mut self, value: bool) -> Result<WireIndex, TallyCircuitError> {
+        let existing_wire = if value {
+            self.true_constant_wire
+        } else {
+            self.false_constant_wire
+        };
+        if let Some(existing_wire) = existing_wire {
+            return Ok(existing_wire);
+        }
         self.constant_operation_count = self
             .constant_operation_count
             .checked_add(1)
             .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-        self.append_operation(BooleanOperation::Constant(value))
+        let wire = self.append_operation(BooleanOperation::Constant(value))?;
+        if value {
+            self.true_constant_wire = Some(wire);
+        } else {
+            self.false_constant_wire = Some(wire);
+        }
+        Ok(wire)
     }
 
     fn append_exclusive_or(

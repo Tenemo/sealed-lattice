@@ -32,7 +32,7 @@ pub(crate) const TALLY_CIRCUIT_IDENTITY_DOMAIN: &str = "sealed-lattice/tally-cir
 ///
 /// The score bounds are separate framed inputs so this descriptor contains
 /// only the structural rules whose implementation must change together.
-pub(crate) const TALLY_CIRCUIT_COMPILER_DEFINITION: &[u8] = b"presence-first;participant-major-option-major-little-endian-score;participant-validity;presence-gated-carry-save-sums;strict-stable-partial-bubble-sort;little-endian-option-position;sequential-operation-wires";
+pub(crate) const TALLY_CIRCUIT_COMPILER_DEFINITION: &[u8] = b"presence-first;participant-major-option-major-little-endian-score;participant-validity;presence-gated-carry-save-sums;strict-stable-partial-bubble-sort;little-endian-option-position;shared-canonical-constant-wires;sequential-operation-wires";
 
 pub(crate) type WireIndex = u32;
 
@@ -145,6 +145,14 @@ pub(crate) struct CompiledTallyCircuit {
 }
 
 impl CompiledTallyCircuit {
+    pub(crate) fn compile(profile: TallyCircuitProfile) -> Result<Self, TallyCircuitError> {
+        compiler::compile_tally_circuit(profile)
+    }
+
+    pub(crate) fn compiler_identity() -> Result<[u8; 64], TallyCircuitError> {
+        compiler::tally_circuit_compiler_identity()
+    }
+
     pub(crate) const fn profile(&self) -> TallyCircuitProfile {
         self.profile
     }

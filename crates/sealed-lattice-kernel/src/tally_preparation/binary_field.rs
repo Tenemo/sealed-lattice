@@ -1,4 +1,5 @@
 use subtle::{Choice, ConstantTimeEq};
+use zeroize::Zeroize;
 
 use super::TallyPreparationError;
 
@@ -142,5 +143,11 @@ impl BinaryFieldElement256 {
 impl ConstantTimeEq for BinaryFieldElement256 {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.polynomial_limbs.ct_eq(&other.polynomial_limbs)
+    }
+}
+
+impl Zeroize for BinaryFieldElement256 {
+    fn zeroize(&mut self) {
+        self.polynomial_limbs.zeroize();
     }
 }
