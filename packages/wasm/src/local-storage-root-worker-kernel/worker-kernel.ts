@@ -30,6 +30,10 @@ import {
 } from '@sealed-lattice/types';
 
 import type {
+    AggregateThresholdShareRecipientAuthority,
+    ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+} from '../aggregate-threshold-share-authenticated-recipient.js';
+import type {
     CommonProofApplicationFreshnessCoordinate,
     VerifiedCommonProofCapability,
 } from '../common-proof-worker-runtime.js';
@@ -40,19 +44,20 @@ import { resolveLocalStorageRootKernelContext } from '../transcript-core-bridge/
 
 import {
     type ClosedWorkerPreparedCommonProofApplication,
+    type ClosedWorkerProductionOperationAuthority,
+    type ClosedWorkerProductionOperationIdentifiers,
     type ClosedWorkerSetupMailboxRandomnessOperations,
-    type ClosedWorkerStructuredCommitmentOpeningOperations,
     type WorkerActionRandomnessKernelRunner,
     type WorkerActionRandomnessRecordContext,
     type WorkerFoundationStateProducerRunner,
     type WorkerSealedActionRandomnessSession,
     type WorkerSetupMailboxRandomnessInput,
-    type WorkerStructuredCommitmentOpeningInput,
     closedWorkerCommonProofScratchStorage,
     requireClosedWorkerCommonProofScratchStorage,
     workerActionRandomnessKernelRunners,
     workerCommonProofApplicationRunners,
     workerFoundationStateProducerRunners,
+    workerProductionOperationAuthorityRunners,
 } from './authorities.js';
 import { WasmBrowserActionStorageWorkerKernel } from './runtime.js';
 type TerminalSetupCheckpointKernelCommandRunner = Readonly<{
@@ -325,11 +330,9 @@ const createWorkerKernelFromLoadedKernel = (input: {
             Promise.resolve().then(() =>
                 workerKernel.openClosedSetupMailboxRandomness(operationInput),
             ),
-        openStructuredCommitmentOpenings: (operationInput) =>
-            Promise.resolve().then(() =>
-                workerKernel.openClosedStructuredCommitmentOpenings(
-                    operationInput,
-                ),
+        openAggregateThresholdShareRecipientAuthority: (operationInput) =>
+            workerKernel.openClosedAggregateThresholdShareRecipientAuthority(
+                operationInput,
             ),
         durableBindingForStateObject: (stateObjectIdentifier) =>
             workerKernel.durableBindingForStateObject(stateObjectIdentifier),
@@ -357,6 +360,13 @@ const createWorkerKernelFromLoadedKernel = (input: {
             workerKernel.prepareClosedCommonProofApplication(
                 capability,
                 predecessor,
+            ),
+    });
+    workerProductionOperationAuthorityRunners.set(workerKernel, {
+        withAuthority: (identifiers, operation) =>
+            workerKernel.withClosedWorkerProductionOperationAuthority(
+                identifiers,
+                operation,
             ),
     });
     return workerKernel;
@@ -435,8 +445,8 @@ export const createWasmBrowserActionStorageWorkerKernel = (input: {
                 await resolvedWorkerKernel,
                 operationInput,
             ),
-        openStructuredCommitmentOpenings: async (operationInput) =>
-            openClosedWorkerStructuredCommitmentOpenings(
+        openAggregateThresholdShareRecipientAuthority: async (operationInput) =>
+            openClosedWorkerAggregateThresholdShareRecipientAuthority(
                 await resolvedWorkerKernel,
                 operationInput,
             ),
@@ -479,6 +489,14 @@ export const createWasmBrowserActionStorageWorkerKernel = (input: {
                 await resolvedWorkerKernel,
                 capability,
                 predecessor,
+            ),
+    });
+    workerProductionOperationAuthorityRunners.set(deferredWorkerKernel, {
+        withAuthority: async (identifiers, operation) =>
+            withClosedWorkerProductionOperationAuthority(
+                await resolvedWorkerKernel,
+                identifiers,
+                operation,
             ),
     });
     return deferredWorkerKernel;
@@ -581,19 +599,19 @@ export const openClosedWorkerSetupMailboxRandomness = (
     ).openSetupMailboxRandomness(input);
 };
 
-export const openClosedWorkerStructuredCommitmentOpenings = (
+export const openClosedWorkerAggregateThresholdShareRecipientAuthority = (
     workerKernel: BrowserActionStorageWorkerKernel,
-    input: WorkerStructuredCommitmentOpeningInput,
-): Promise<ClosedWorkerStructuredCommitmentOpeningOperations> => {
+    input: ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+): Promise<AggregateThresholdShareRecipientAuthority> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new BrowserActionStorageCustodyError(
             'Unavailable',
-            'Structured-commitment openings may only be consumed inside the dedicated custody worker.',
+            'Aggregate recipient authority may only be opened inside the dedicated custody worker.',
         );
     }
     return requireWorkerActionRandomnessRunner(
         workerKernel,
-    ).openStructuredCommitmentOpenings(input);
+    ).openAggregateThresholdShareRecipientAuthority(input);
 };
 
 export const prepareClosedWorkerVerifiedCommonProofApplication = (
@@ -615,6 +633,29 @@ export const prepareClosedWorkerVerifiedCommonProofApplication = (
         );
     }
     return runner.prepare(capability, predecessor);
+};
+
+export const withClosedWorkerProductionOperationAuthority = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    identifiers: ClosedWorkerProductionOperationIdentifiers,
+    operation: (
+        authority: ClosedWorkerProductionOperationAuthority,
+    ) => Promise<void> | void,
+): Promise<void> => {
+    if (typeof globalThis.document !== 'undefined') {
+        throw new BrowserActionStorageCustodyError(
+            'Unavailable',
+            'Production-operation authorities may only be borrowed inside the dedicated custody worker.',
+        );
+    }
+    const runner = workerProductionOperationAuthorityRunners.get(workerKernel);
+    if (runner === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The action storage worker does not belong to this WASM runtime.',
+        );
+    }
+    return runner.withAuthority(identifiers, operation);
 };
 
 export const openClosedWorkerVerifiedStateDurableBinding = (

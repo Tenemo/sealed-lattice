@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::evaluator::engine::signed_residue;
 
 // Lagrange interpolation over the plaintext field: given f(0), f(1), ...,
 // f(n-1), return the coefficients (lowest degree first) of the unique degree

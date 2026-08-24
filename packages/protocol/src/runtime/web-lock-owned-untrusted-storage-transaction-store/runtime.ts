@@ -1,4 +1,7 @@
-import { openAuthenticatedCheckpointStoreWithProtection } from '../authenticated-checkpoint-store.js';
+import {
+    openAuthenticatedCheckpointStoreWithProtection,
+    type AuthenticatedCheckpointPhysicalAccountingScope,
+} from '../authenticated-checkpoint-store.js';
 import {
     createRuntimeRecordProtectionFromSession,
     releaseRuntimeRecordProtection,
@@ -92,6 +95,7 @@ import {
 } from './records.js';
 
 export {
+    commonProofSecretRecordOverheadByteLength,
     commonProofStorageCapacityProfile,
     deriveWebLockStorageNamespaceName,
     requireCommonProofStorageCapacity,
@@ -1792,10 +1796,42 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                         maximumDeletionBatchRecordCount:
                             commonProofDeletionBatchRecordCount,
                     });
+                let checkpointPhysicalAccountingScope:
+                    | AuthenticatedCheckpointPhysicalAccountingScope
+                    | undefined;
                 try {
+                    if (commonProofInput.checkpoint !== undefined) {
+                        const checkpointLineageIdentifier =
+                            'operationIdentity' in commonProofInput.checkpoint
+                                ? commonProofInput.checkpoint.operationIdentity
+                                      .checkpointLineageIdentifier
+                                : commonProofInput.checkpoint.resumeDescriptor.checkpointLineageIdentifier.slice();
+                        try {
+                            checkpointPhysicalAccountingScope =
+                                await commonProofInput.checkpoint.store.openPhysicalAccountingScope(
+                                    checkpointLineageIdentifier,
+                                );
+                        } finally {
+                            checkpointLineageIdentifier.fill(0);
+                        }
+                    }
+                    const {
+                        checkpoint: configuredCheckpoint,
+                        ...commonProofInputWithoutCheckpoint
+                    } = commonProofInput;
                     return openCommonProofBrowserCustody({
-                        ...commonProofInput,
+                        ...commonProofInputWithoutCheckpoint,
                         capacityReservation,
+                        ...(configuredCheckpoint === undefined ||
+                        checkpointPhysicalAccountingScope === undefined
+                            ? {}
+                            : {
+                                  checkpoint: {
+                                      ...configuredCheckpoint,
+                                      physicalAccountingScope:
+                                          checkpointPhysicalAccountingScope,
+                                  },
+                              }),
                         limits: {
                             maximumExternalMemoryByteLength:
                                 commonProofScratchByteLength,
@@ -1811,6 +1847,14 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                         workerKernel: configuration.workerKernel,
                     });
                 } catch (error) {
+                    if (
+                        commonProofInput.checkpoint !== undefined &&
+                        checkpointPhysicalAccountingScope !== undefined
+                    ) {
+                        await commonProofInput.checkpoint.store.releasePhysicalAccountingScope(
+                            checkpointPhysicalAccountingScope,
+                        );
+                    }
                     await capacityReservation.release();
                     throw error;
                 }

@@ -5,9 +5,15 @@
 //! prime, the exact maximum two-adic root order, and polynomial
 //! irreducibility; the constants are not trusted merely because they compile.
 
+#[cfg(test)]
 use std::sync::OnceLock;
 
+use zeroize::Zeroize;
+
 pub(crate) const PROOF_BASE_FIELD_MODULUS: u64 = 18_446_744_069_414_584_321;
+const GOLDILOCKS_TWO_TO_64_RESIDUE: u64 = (1_u64 << 32) - 1;
+#[cfg(any(target_arch = "wasm32", test))]
+const GOLDILOCKS_LOW_WORD_MASK: u64 = u32::MAX as u64;
 pub(crate) const PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR: u64 = 1_753_635_133_440_165_772;
 pub(crate) const PROOF_CHALLENGE_EXTENSION_DEGREE: usize = 5;
 pub(crate) const PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS: [u64;
@@ -15,7 +21,9 @@ pub(crate) const PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS: [u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProofFieldError {
+    #[cfg(test)]
     CompositeBaseModulus,
+    #[cfg(test)]
     InvalidTwoAdicGenerator,
     InvalidExtensionPolynomial,
     NonCanonicalElement,
@@ -24,6 +32,12 @@ pub(crate) enum ProofFieldError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ProofBaseFieldElement(u64);
+
+impl Zeroize for ProofBaseFieldElement {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
 
 impl ProofBaseFieldElement {
     pub(crate) const ZERO: Self = Self(0);
@@ -37,7 +51,7 @@ impl ProofBaseFieldElement {
     }
 
     pub(crate) fn from_reduced(value: u128) -> Self {
-        Self((value % u128::from(PROOF_BASE_FIELD_MODULUS)) as u64)
+        Self(reduce_goldilocks_u128(value))
     }
 
     pub(crate) const fn canonical(self) -> u64 {
@@ -45,7 +59,19 @@ impl ProofBaseFieldElement {
     }
 
     pub(crate) fn add(self, other: Self) -> Self {
-        Self::from_reduced(u128::from(self.0) + u128::from(other.0))
+        let (word_sum, carried_two_to_64) = self.0.overflowing_add(other.0);
+        let folded_sum = if carried_two_to_64 {
+            // Canonical operands make this addition non-overflowing: the
+            // largest carried word is 2^64 - 2*(2^32 - 1) - 2.
+            word_sum + GOLDILOCKS_TWO_TO_64_RESIDUE
+        } else {
+            word_sum
+        };
+        Self(
+            folded_sum
+                .checked_sub(PROOF_BASE_FIELD_MODULUS)
+                .unwrap_or(folded_sum),
+        )
     }
 
     pub(crate) fn subtract(self, other: Self) -> Self {
@@ -64,8 +90,14 @@ impl ProofBaseFieldElement {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn multiply(self, other: Self) -> Self {
         Self::from_reduced(u128::from(self.0) * u128::from(other.0))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn multiply(self, other: Self) -> Self {
+        Self(multiply_goldilocks_words(self.0, other.0))
     }
 
     pub(crate) fn square(self) -> Self {
@@ -93,9 +125,74 @@ impl ProofBaseFieldElement {
     }
 }
 
+// For p = 2^64 - 2^32 + 1, every 2^64 factor can be replaced by
+// 2^32 - 1. Four fixed folds reduce the complete u128 input range to one u64
+// representative; one final subtraction makes it canonical. The fixed fold
+// count also avoids a value-dependent reduction loop on witness arithmetic.
+fn reduce_goldilocks_u128(value: u128) -> u64 {
+    let mut folded = value;
+    for _ in 0..4 {
+        let low = folded as u64;
+        let high = (folded >> 64) as u64;
+        folded = u128::from(low) + u128::from(high) * u128::from(GOLDILOCKS_TWO_TO_64_RESIDUE);
+    }
+    debug_assert_eq!(folded >> 64, 0);
+    let candidate = folded as u64;
+    candidate
+        .checked_sub(PROOF_BASE_FIELD_MODULUS)
+        .unwrap_or(candidate)
+}
+
+// wasm32 lowers a u128 product to a software helper. Reconstructing its high
+// and low halves from four u32-limb products keeps the hot proof-field path in
+// native WebAssembly integer operations. For high = high_low + 2^32 *
+// high_high, the Goldilocks identity 2^64 = 2^32 - 1 gives
+// high * 2^64 = high_low * (2^32 - 1) - high_high (mod p).
+#[cfg(any(target_arch = "wasm32", test))]
+fn multiply_goldilocks_words(left: u64, right: u64) -> u64 {
+    let left_low = left & GOLDILOCKS_LOW_WORD_MASK;
+    let left_high = left >> 32;
+    let right_low = right & GOLDILOCKS_LOW_WORD_MASK;
+    let right_high = right >> 32;
+
+    let low_by_low = left_low * right_low;
+    let low_by_high = left_low * right_high;
+    let high_by_low = left_high * right_low;
+    let high_by_high = left_high * right_high;
+    let middle = (low_by_low >> 32)
+        .wrapping_add(low_by_high & GOLDILOCKS_LOW_WORD_MASK)
+        .wrapping_add(high_by_low & GOLDILOCKS_LOW_WORD_MASK);
+    let product_low = (low_by_low & GOLDILOCKS_LOW_WORD_MASK) | (middle << 32);
+    let product_high = high_by_high
+        .wrapping_add(low_by_high >> 32)
+        .wrapping_add(high_by_low >> 32)
+        .wrapping_add(middle >> 32);
+
+    let product_high_high = product_high >> 32;
+    let product_high_low = product_high & GOLDILOCKS_LOW_WORD_MASK;
+    let (mut reduced_low, subtraction_borrowed) = product_low.overflowing_sub(product_high_high);
+    if subtraction_borrowed {
+        reduced_low = reduced_low.wrapping_sub(GOLDILOCKS_TWO_TO_64_RESIDUE);
+    }
+    let high_residue = product_high_low * GOLDILOCKS_TWO_TO_64_RESIDUE;
+    let (mut candidate, addition_carried) = reduced_low.overflowing_add(high_residue);
+    if addition_carried {
+        candidate = candidate.wrapping_add(GOLDILOCKS_TWO_TO_64_RESIDUE);
+    }
+    candidate
+        .checked_sub(PROOF_BASE_FIELD_MODULUS)
+        .unwrap_or(candidate)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProofChallengeExtensionElement {
     coordinates: [ProofBaseFieldElement; PROOF_CHALLENGE_EXTENSION_DEGREE],
+}
+
+impl Zeroize for ProofChallengeExtensionElement {
+    fn zeroize(&mut self) {
+        self.coordinates.zeroize();
+    }
 }
 
 impl ProofChallengeExtensionElement {
@@ -183,8 +280,7 @@ impl ProofChallengeExtensionElement {
             }
         }
 
-        // Y^5 = 3. Descending reduction is required because a coefficient
-        // above degree nine in a future profile could itself reduce again.
+        // Y^5 = 3. Reduce high-degree coefficients in descending order.
         for degree in (PROOF_CHALLENGE_EXTENSION_DEGREE..unreduced.len()).rev() {
             let coefficient = unreduced[degree];
             unreduced[degree - PROOF_CHALLENGE_EXTENSION_DEGREE] = unreduced
@@ -249,6 +345,7 @@ impl ProofChallengeExtensionElement {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn validate_proof_field_profile() -> Result<(), ProofFieldError> {
     static VALIDATION: OnceLock<Result<(), ProofFieldError>> = OnceLock::new();
     *VALIDATION.get_or_init(|| {
@@ -269,6 +366,7 @@ pub(crate) fn validate_proof_field_profile() -> Result<(), ProofFieldError> {
     })
 }
 
+#[cfg(test)]
 fn validate_maximum_two_adic_generator(
     modulus: u64,
     generator: u64,
@@ -291,6 +389,7 @@ fn validate_maximum_two_adic_generator(
     Ok(())
 }
 
+#[cfg(test)]
 fn is_prime_u64(candidate: u64) -> bool {
     if candidate < 2 {
         return false;
@@ -331,10 +430,12 @@ fn is_prime_u64(candidate: u64) -> bool {
     true
 }
 
+#[cfg(test)]
 fn modular_multiply(left: u64, right: u64, modulus: u64) -> u64 {
     ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64
 }
 
+#[cfg(test)]
 fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u64 {
     let mut result = 1_u64;
     while exponent != 0 {
@@ -347,6 +448,7 @@ fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u64 {
     result
 }
 
+#[cfg(test)]
 fn is_irreducible_monic_polynomial(modulus: u64, coefficients: &[u64]) -> bool {
     let degree = coefficients.len();
     if degree == 0
@@ -389,6 +491,7 @@ fn is_irreducible_monic_polynomial(modulus: u64, coefficients: &[u64]) -> bool {
     ))
 }
 
+#[cfg(test)]
 fn distinct_prime_factors(mut value: usize) -> Vec<usize> {
     let mut factors = Vec::new();
     let mut candidate = 2_usize;
@@ -407,6 +510,7 @@ fn distinct_prime_factors(mut value: usize) -> Vec<usize> {
     factors
 }
 
+#[cfg(test)]
 fn polynomial_power_mod(
     base: &[u64],
     mut exponent: u64,
@@ -433,6 +537,7 @@ fn polynomial_power_mod(
     result
 }
 
+#[cfg(test)]
 fn polynomial_multiply(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     if polynomial_is_zero(left) || polynomial_is_zero(right) {
         return vec![0];
@@ -449,6 +554,7 @@ fn polynomial_multiply(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     product
 }
 
+#[cfg(test)]
 fn polynomial_subtract(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     let mut difference = vec![0_u64; left.len().max(right.len())];
     for (index, output) in difference.iter_mut().enumerate() {
@@ -460,6 +566,7 @@ fn polynomial_subtract(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     difference
 }
 
+#[cfg(test)]
 fn polynomial_remainder(mut dividend: Vec<u64>, divisor: &[u64], modulus: u64) -> Vec<u64> {
     trim_polynomial(&mut dividend);
     let divisor_degree = polynomial_degree(divisor);
@@ -481,6 +588,7 @@ fn polynomial_remainder(mut dividend: Vec<u64>, divisor: &[u64], modulus: u64) -
     dividend
 }
 
+#[cfg(test)]
 fn polynomial_gcd(mut left: Vec<u64>, mut right: Vec<u64>, modulus: u64) -> Vec<u64> {
     trim_polynomial(&mut left);
     trim_polynomial(&mut right);
@@ -500,6 +608,7 @@ fn polynomial_gcd(mut left: Vec<u64>, mut right: Vec<u64>, modulus: u64) -> Vec<
     left
 }
 
+#[cfg(test)]
 fn polynomial_degree(polynomial: &[u64]) -> usize {
     polynomial
         .iter()
@@ -507,10 +616,12 @@ fn polynomial_degree(polynomial: &[u64]) -> usize {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 fn polynomial_is_zero(polynomial: &[u64]) -> bool {
     polynomial.iter().all(|coefficient| *coefficient == 0)
 }
 
+#[cfg(test)]
 fn trim_polynomial(polynomial: &mut Vec<u64>) {
     while polynomial.len() > 1 && polynomial.last() == Some(&0) {
         polynomial.pop();
@@ -520,10 +631,12 @@ fn trim_polynomial(polynomial: &mut Vec<u64>) {
     }
 }
 
+#[cfg(test)]
 fn modular_add(left: u64, right: u64, modulus: u64) -> u64 {
     ((u128::from(left) + u128::from(right)) % u128::from(modulus)) as u64
 }
 
+#[cfg(test)]
 fn modular_subtract(left: u64, right: u64, modulus: u64) -> u64 {
     if left >= right {
         left - right
@@ -584,6 +697,107 @@ mod tests {
             ProofBaseFieldElement::from_canonical(PROOF_BASE_FIELD_MODULUS),
             Err(ProofFieldError::NonCanonicalElement),
         );
+    }
+
+    #[test]
+    fn goldilocks_reduction_matches_reference_modulo_across_the_complete_word_boundary() {
+        let modulus_wide = u128::from(PROOF_BASE_FIELD_MODULUS);
+        let boundary_values = [
+            0_u128,
+            1,
+            u128::from(GOLDILOCKS_TWO_TO_64_RESIDUE - 1),
+            u128::from(GOLDILOCKS_TWO_TO_64_RESIDUE),
+            modulus_wide - 1,
+            modulus_wide,
+            modulus_wide + 1,
+            u128::from(u64::MAX),
+            u128::from(u64::MAX) + 1,
+            modulus_wide * modulus_wide - 1,
+            u128::MAX - 1,
+            u128::MAX,
+        ];
+        for value in boundary_values {
+            assert_eq!(
+                reduce_goldilocks_u128(value),
+                (value % modulus_wide) as u64,
+                "boundary reduction for {value}",
+            );
+        }
+
+        let mut deterministic_state = 0x9e37_79b9_7f4a_7c15_u64;
+        for sample_ordinal in 0..20_000_u32 {
+            deterministic_state ^= deterministic_state << 13;
+            deterministic_state ^= deterministic_state >> 7;
+            deterministic_state ^= deterministic_state << 17;
+            let high = deterministic_state;
+            deterministic_state = deterministic_state
+                .wrapping_mul(0xd134_2543_de82_ef95)
+                .wrapping_add(u64::from(sample_ordinal));
+            let low = deterministic_state;
+            let value = (u128::from(high) << 64) | u128::from(low);
+            assert_eq!(
+                reduce_goldilocks_u128(value),
+                (value % modulus_wide) as u64,
+                "deterministic reduction sample {sample_ordinal}",
+            );
+        }
+    }
+
+    #[test]
+    fn optimized_base_operations_match_reference_arithmetic_for_aggressive_operands() {
+        let operands = [
+            0,
+            1,
+            2,
+            GOLDILOCKS_TWO_TO_64_RESIDUE - 1,
+            GOLDILOCKS_TWO_TO_64_RESIDUE,
+            PROOF_BASE_FIELD_MODULUS / 2,
+            PROOF_BASE_FIELD_MODULUS - 3,
+            PROOF_BASE_FIELD_MODULUS - 2,
+            PROOF_BASE_FIELD_MODULUS - 1,
+        ];
+        let modulus_wide = u128::from(PROOF_BASE_FIELD_MODULUS);
+        for left in operands {
+            for right in operands {
+                let left_element = ProofBaseFieldElement::from_canonical(left)
+                    .expect("left boundary operand is canonical");
+                let right_element = ProofBaseFieldElement::from_canonical(right)
+                    .expect("right boundary operand is canonical");
+                assert_eq!(
+                    left_element.add(right_element).canonical(),
+                    ((u128::from(left) + u128::from(right)) % modulus_wide) as u64,
+                );
+                assert_eq!(
+                    left_element.multiply(right_element).canonical(),
+                    ((u128::from(left) * u128::from(right)) % modulus_wide) as u64,
+                );
+                assert_eq!(
+                    multiply_goldilocks_words(left, right),
+                    ((u128::from(left) * u128::from(right)) % modulus_wide) as u64,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn word_limb_multiplication_matches_reference_arithmetic_across_a_broad_corpus() {
+        let modulus_wide = u128::from(PROOF_BASE_FIELD_MODULUS);
+        let mut deterministic_state = 0x243f_6a88_85a3_08d3_u64;
+        for sample_ordinal in 0..100_000_u32 {
+            deterministic_state ^= deterministic_state << 13;
+            deterministic_state ^= deterministic_state >> 7;
+            deterministic_state ^= deterministic_state << 17;
+            let left = deterministic_state % PROOF_BASE_FIELD_MODULUS;
+            deterministic_state = deterministic_state
+                .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                .wrapping_add(u64::from(sample_ordinal));
+            let right = deterministic_state % PROOF_BASE_FIELD_MODULUS;
+            assert_eq!(
+                multiply_goldilocks_words(left, right),
+                ((u128::from(left) * u128::from(right)) % modulus_wide) as u64,
+                "deterministic word-limb product {sample_ordinal}",
+            );
+        }
     }
 
     #[test]

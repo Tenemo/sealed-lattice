@@ -1,17 +1,14 @@
 import { readFile } from 'node:fs/promises';
 
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
+    configurableOptionCountRange,
     configurableParticipantCountRange,
     deriveFoundationRosterParameters,
     foundationProfile,
-    isParticipantIdentity,
     isProtocolHash,
-    parseParticipantIdentity,
     refusalReasonCodes,
-    type ParticipantIdentity,
-    type ProtocolHash,
 } from '@sealed-lattice/types';
 
 describe('foundation contract', () => {
@@ -25,7 +22,7 @@ describe('foundation contract', () => {
             maximumScore: 10,
             maximumWasmMemoryByteLength: 671_088_640,
             minimumScore: 1,
-            optionCount: 20,
+            optionCount: 10,
             participantCount: 10,
             protocolName: 'sealed-lattice',
             protocolVersion: 1,
@@ -33,6 +30,14 @@ describe('foundation contract', () => {
             stateWitnessQuorum: 7,
             streamChunkByteLength: 1_048_576,
         });
+    });
+
+    it('publishes the bounded option-count family separately from the selected profile', () => {
+        expect(configurableOptionCountRange).toEqual({
+            maximum: 20,
+            minimum: 2,
+        });
+        expect(foundationProfile.optionCount).toBe(10);
     });
 
     it('derives the configurable roster family without selecting it', () => {
@@ -132,50 +137,6 @@ describe('foundation contract', () => {
             {},
         ]) {
             expect(isProtocolHash(invalidHash)).toBe(false);
-        }
-    });
-
-    it('parses only the canonical participant identity string form', () => {
-        const canonicalIdentities = [
-            '0'.repeat(128),
-            'f'.repeat(128),
-            '0123456789abcdef'.repeat(8),
-        ];
-        for (const canonicalIdentity of canonicalIdentities) {
-            const identity = parseParticipantIdentity(canonicalIdentity);
-            const compatibleProtocolHash: ProtocolHash = identity;
-
-            expect(identity).toBe(canonicalIdentity);
-            expect(compatibleProtocolHash).toBe(canonicalIdentity);
-            expect(isParticipantIdentity(identity)).toBe(true);
-            expectTypeOf(identity).toEqualTypeOf<ParticipantIdentity>();
-        }
-        expectTypeOf<ProtocolHash>().not.toMatchTypeOf<ParticipantIdentity>();
-    });
-
-    it('refuses malformed and noncanonical participant identities', () => {
-        const canonicalIdentity = 'a'.repeat(128);
-        const invalidIdentities: readonly unknown[] = [
-            '',
-            canonicalIdentity.slice(1),
-            `${canonicalIdentity}0`,
-            `A${canonicalIdentity.slice(1)}`,
-            `g${canonicalIdentity.slice(1)}`,
-            ` ${canonicalIdentity.slice(1)}`,
-            `${canonicalIdentity.slice(0, -1)}\n`,
-            ` ${canonicalIdentity}`,
-            `${canonicalIdentity}\n`,
-            `ａ${canonicalIdentity.slice(1)}`,
-            0,
-            undefined,
-            {},
-        ];
-
-        for (const invalidIdentity of invalidIdentities) {
-            expect(isParticipantIdentity(invalidIdentity)).toBe(false);
-            expect(() => parseParticipantIdentity(invalidIdentity)).toThrow(
-                /128 lowercase hexadecimal/u,
-            );
         }
     });
 });

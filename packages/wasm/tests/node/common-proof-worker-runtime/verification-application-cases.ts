@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     abortVerifiedCommonProofApplication,
+    applyClosedWorkerVerifiedCommonProofCapability,
     confirmVerifiedCommonProofApplication,
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     prepareVerifiedCommonProofApplication,
@@ -176,7 +177,7 @@ describe('common-proof verification and application runtime', () => {
         expect(yieldCount).toBe(6);
         expect(issuedChunks).toHaveLength(4);
         for (const issuedChunk of issuedChunks) {
-            expect(issuedChunk.every((byte) => byte === 0)).toBe(true);
+            expect(issuedChunk.byteLength).toBe(0);
         }
         expect(Object.keys(capability)).toEqual(['release']);
         capability.release();
@@ -186,7 +187,7 @@ describe('common-proof verification and application runtime', () => {
         );
     });
 
-    it('zeros a transferred verification chunk whose authenticated length is wrong', async () => {
+    it('destroys a transferred verification chunk whose authenticated length is wrong', async () => {
         let cancellationCount = 0;
         const runtime = createMockKernelRuntime((memory) => ({
             sealed_lattice_common_proof_begin_verification: (
@@ -213,7 +214,43 @@ describe('common-proof verification and application runtime', () => {
                 readCommittedChunk: () => Promise.resolve(transferredChunk),
             }),
         ).rejects.toMatchObject({ code: 'WrongStorageResult' });
-        expect([...transferredChunk]).toEqual([0, 0, 0]);
+        expect(transferredChunk.byteLength).toBe(0);
+        expect(cancellationCount).toBe(1);
+    });
+
+    it('rejects a verification chunk subview without clearing or detaching adjacent bytes', async () => {
+        let cancellationCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_common_proof_begin_verification: (
+                preparedVerificationHandle,
+                statusPointer,
+            ) => {
+                expect(preparedVerificationHandle).toBe(67);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 77;
+            },
+            sealed_lattice_common_proof_verification_cancel: (
+                operationHandle,
+            ) => {
+                expect(operationHandle).toBe(77);
+                cancellationCount += 1;
+                return 0;
+            },
+        }));
+        const backingBytes = new Uint8Array(6).fill(0x9b);
+        const transferredSubview = backingBytes.subarray(1, 5);
+        transferredSubview.set([5, 8, 13, 21]);
+
+        await expect(
+            runPreparedCommonProofVerificationWorker(runtime, 67, {
+                declaredByteLength: 4,
+                readCommittedChunk: () => Promise.resolve(transferredSubview),
+            }),
+        ).rejects.toMatchObject({ code: 'WrongStorageResult' });
+        expect([...transferredSubview]).toEqual([0, 0, 0, 0]);
+        expect(backingBytes[0]).toBe(0x9b);
+        expect(backingBytes[5]).toBe(0x9b);
+        expect(backingBytes.buffer.byteLength).toBe(6);
         expect(cancellationCount).toBe(1);
     });
 
@@ -588,7 +625,7 @@ describe('common-proof verification and application runtime', () => {
         ).rejects.toMatchObject({ code: 'Cancelled' });
         expect(absorbedChunkCount).toBe(1);
         expect(cancellationCount).toBe(1);
-        expect(issuedChunk?.every((byte) => byte === 0)).toBe(true);
+        expect(issuedChunk?.byteLength).toBe(0);
     });
 
     it('retires the verifier when hostile poll metadata requests an uncommitted chunk', async () => {
@@ -637,6 +674,58 @@ describe('common-proof verification and application runtime', () => {
             }),
         ).rejects.toMatchObject({ code: 'KernelFailure' });
         expect(cancellationCount).toBe(1);
+    });
+
+    it('retains generic verifier authority until the exact Rust handoff reports consumption', async () => {
+        const refusedFixture = await createVerifiedApplicationFixture();
+        expect(
+            applyClosedWorkerVerifiedCommonProofCapability(
+                refusedFixture.capability,
+                refusedFixture.runtime,
+                (capabilityHandle) => {
+                    expect(capabilityHandle).toBe(82);
+                    return Object.freeze({
+                        consumed: false,
+                        result: 'refused',
+                    });
+                },
+            ),
+        ).toBe('refused');
+        refusedFixture.capability.release();
+        expect(refusedFixture.observations.releasedCapabilityCount).toBe(1);
+
+        const consumedFixture = await createVerifiedApplicationFixture();
+        expect(
+            applyClosedWorkerVerifiedCommonProofCapability(
+                consumedFixture.capability,
+                consumedFixture.runtime,
+                (capabilityHandle) => {
+                    expect(capabilityHandle).toBe(82);
+                    return Object.freeze({
+                        consumed: true,
+                        result: 'accepted',
+                    });
+                },
+            ),
+        ).toBe('accepted');
+        expect(() => consumedFixture.capability.release()).toThrowError(
+            expect.objectContaining({ code: 'KernelFailure' }),
+        );
+        expect(consumedFixture.observations.releasedCapabilityCount).toBe(0);
+
+        const failedFixture = await createVerifiedApplicationFixture();
+        const finishFailure = new Error('exact family preflight failed');
+        expect(() =>
+            applyClosedWorkerVerifiedCommonProofCapability(
+                failedFixture.capability,
+                failedFixture.runtime,
+                () => {
+                    throw finishFailure;
+                },
+            ),
+        ).toThrow(finishFailure);
+        failedFixture.capability.release();
+        expect(failedFixture.observations.releasedCapabilityCount).toBe(1);
     });
 
     it('applies only a genuinely completed verifier capability to one exact authenticated successor', async () => {

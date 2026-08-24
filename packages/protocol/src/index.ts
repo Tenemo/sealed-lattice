@@ -86,6 +86,11 @@ export type {
     BrowserLocalAuthenticatedMailboxStorage,
     BrowserLocalAuthenticatedMailboxStorageConfiguration,
 } from './runtime/authenticated-mailbox-storage.js';
+export { createRecipientVssAuthenticatedMailboxPlaintextSink } from './runtime/recipient-vss-authenticated-mailbox-sink.js';
+export type {
+    RecipientVssAuthenticatedMailboxPlaintextSink,
+    RecipientVssAuthenticatedMailboxPlaintextSinkConfiguration,
+} from './runtime/recipient-vss-authenticated-mailbox-sink.js';
 export { DurableStateWitnessServiceError } from './runtime/durable-state-witness-service.js';
 export type {
     DurableStateWitnessService,
@@ -95,6 +100,23 @@ export type {
     TransferableDurableStateWitnessService,
 } from './runtime/durable-state-witness-service.js';
 export { AuthenticatedCheckpointStoreError } from './runtime/authenticated-checkpoint-store.js';
+export { createBallotAggregationCheckpointCustody } from './runtime/ballot-aggregation-checkpoint-custody.js';
+export {
+    openAcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
+    openCompactPublicKeyAlgebraicVerificationCheckpointCustody,
+} from './runtime/compact-public-key-algebraic-verification-checkpoint-custody.js';
+export type {
+    AcceptedSetupCompactPublicKeyVerificationCheckpointCustodyInput,
+    AcceptedSetupCompactPublicKeyVerificationCheckpointResume,
+    CompactPublicKeyAlgebraicVerificationCheckpointCustodyInput,
+    CompactPublicKeyAlgebraicVerificationCheckpointResume,
+    OpenedAcceptedSetupCompactPublicKeyVerificationCheckpointCustody,
+    OpenedCompactPublicKeyAlgebraicVerificationCheckpointCustody,
+} from './runtime/compact-public-key-algebraic-verification-checkpoint-custody.js';
+export {
+    createRuntimeBuildCheckpointBoundaryPolicy,
+    RuntimeBuildCheckpointBoundaryPolicyError,
+} from './runtime/runtime-build-checkpoint-boundary-policy.js';
 export { openBrowserLocalActionCryptographicProvider } from './runtime/browser-local-action-cryptographic-provider.js';
 export type {
     BrowserLocalActionCryptographicProvider,
@@ -107,55 +129,16 @@ export type {
     CheckpointBoundary,
     CheckpointBoundaryPolicy,
     CheckpointOperationIdentity,
-    CheckpointRandomCursor,
-    CheckpointRandomCursorKernel,
     ExpectedCheckpointBoundary,
     ResumedCheckpoint,
     TransferableAuthenticatedCheckpointStore,
 } from './runtime/authenticated-checkpoint-store.js';
-export { deriveCollectiveBgvSetupRosterHash } from './roster/index.js';
-export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
 export type {
-    CanonicalProofMaterialChunkPull,
-    SetupProofMaterialStream,
-    SetupProofMaterialStreamSet,
-} from './setup/setup-proof-material-transport.js';
-export {
-    createBinaryChunkedPublicKeyShareMaterialBundle,
-    createPublicKeyShareSuccinctProofSet,
-    createPublicKeyShareSet,
-    publicKeyShareCoefficientVectorHashDomain,
-} from './setup/public-key-share-records.js';
-export {
-    createGaloisKeyShareBatches,
-    createRelinearizationKeyShareRounds,
-} from './setup/evaluation-key-proof-records.js';
+    RuntimeBuildCheckpointBoundaryBinding,
+    RuntimeBuildCheckpointBoundaryPolicyInput,
+} from './runtime/runtime-build-checkpoint-boundary-policy.js';
+export { deriveCollectiveBgvSetupRosterHash } from './roster/hashes.js';
+export type { CollectiveBgvSetupRosterEntryInput } from './roster/hashes.js';
 export { copyCanonicalStreamDescriptor } from './setup/canonical-stream-descriptor.js';
 export { createSetupPackageVerificationInput } from './setup/setup-package-assembly.js';
-export {
-    createVssShareAcceptanceRecord,
-    createVssShareAcceptanceSet,
-    createVssShareComplaintRecord,
-} from './setup/vss-share-verification-records.js';
-export type {
-    PublicKeyShareContributionInput,
-    PublicKeyShareMaterialContributionInput,
-    PublicKeyShareMaterialStream,
-    PublicKeyShareSuccinctProofSetInput,
-    TransportedPublicKeyShareProofMaterialSet,
-    PublicKeyShareSet,
-} from './setup/public-key-share-records.js';
-export type {
-    SetupPackage,
-    SetupPackageVerificationInput,
-} from './setup/setup-package-assembly.js';
-export type {
-    TransportedSameSecretBridgeProofMaterialSet,
-    TransportedVssShareLinkageProofMaterialSet,
-} from './setup/vss-commitments.js';
-export type {
-    CollectiveBgvSetupContext,
-    PrivateVssEnvelopeVerificationReference,
-    VssShareAcceptanceRecord,
-    VssShareComplaintRecord,
-} from './setup/vss-share-verification-records.js';
+export type { SetupPackageVerificationInput } from './setup/setup-package-assembly.js';

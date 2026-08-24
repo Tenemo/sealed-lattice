@@ -3,6 +3,8 @@
 //! The implementation is intentionally single-threaded and allocation-bounded
 //! so the same code path is available to native Rust and `wasm32`.
 
+use zeroize::{Zeroize, Zeroizing};
+
 use super::{
     PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement,
     ProofChallengeExtensionElement, ProofFieldError,
@@ -31,6 +33,328 @@ pub(crate) struct ProofEvaluationDomain {
     size: usize,
     generator: ProofBaseFieldElement,
     coset_offset: ProofBaseFieldElement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BoundedProofPolynomialTransformStage {
+    Resize,
+    ForwardCosetScale,
+    BitReverse,
+    Butterflies,
+    InverseNormalize,
+    InverseCosetScale,
+    TrimInverse,
+    Complete,
+}
+
+pub(crate) trait ProofTransformValue: Copy + PartialEq + Zeroize {
+    const ZERO: Self;
+
+    fn add(self, other: Self) -> Self;
+    fn subtract(self, other: Self) -> Self;
+    fn multiply_base(self, scalar: ProofBaseFieldElement) -> Self;
+}
+
+impl ProofTransformValue for ProofBaseFieldElement {
+    const ZERO: Self = Self::ZERO;
+
+    fn add(self, other: Self) -> Self {
+        self.add(other)
+    }
+
+    fn subtract(self, other: Self) -> Self {
+        self.subtract(other)
+    }
+
+    fn multiply_base(self, scalar: ProofBaseFieldElement) -> Self {
+        self.multiply(scalar)
+    }
+}
+
+impl ProofTransformValue for ProofChallengeExtensionElement {
+    const ZERO: Self = Self::ZERO;
+
+    fn add(self, other: Self) -> Self {
+        self.add(other)
+    }
+
+    fn subtract(self, other: Self) -> Self {
+        self.subtract(other)
+    }
+
+    fn multiply_base(self, scalar: ProofBaseFieldElement) -> Self {
+        self.multiply_base(scalar)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BoundedProofPolynomialTransformPoll {
+    pub(crate) completed_work_unit_count: u64,
+    pub(crate) is_complete: bool,
+}
+
+/// Allocation-stable scalar transform whose poll bound covers coefficient
+/// initialization, bit reversal, every butterfly, inverse normalization, and
+/// coset scaling. The transform owns its one operative buffer and exposes it
+/// only after completion.
+pub(crate) struct BoundedProofPolynomialTransform<Value>
+where
+    Value: ProofTransformValue,
+{
+    values: Zeroizing<Vec<Value>>,
+    domain: ProofEvaluationDomain,
+    inverse: bool,
+    stage: BoundedProofPolynomialTransformStage,
+    next_index: usize,
+    block_size: usize,
+    next_butterfly_index: usize,
+    running_coset_power: ProofBaseFieldElement,
+    transform_root: ProofBaseFieldElement,
+    inverse_size: ProofBaseFieldElement,
+}
+
+impl<Value> BoundedProofPolynomialTransform<Value>
+where
+    Value: ProofTransformValue,
+{
+    fn begin(
+        domain: ProofEvaluationDomain,
+        mut values: Zeroizing<Vec<Value>>,
+        inverse: bool,
+    ) -> Result<Self, ProofPolynomialError> {
+        if inverse {
+            if values.len() != domain.size {
+                return Err(ProofPolynomialError::InputLengthMismatch);
+            }
+        } else if values.len() > domain.size {
+            return Err(ProofPolynomialError::DegreeBoundExceeded);
+        } else {
+            let missing_value_count = domain.size - values.len();
+            values
+                .try_reserve_exact(missing_value_count)
+                .map_err(|_| ProofPolynomialError::SizeOverflow)?;
+        }
+        let transform_root = if inverse {
+            domain.generator.inverse()?
+        } else {
+            domain.generator
+        };
+        let inverse_size = if inverse {
+            ProofBaseFieldElement::from_canonical(
+                u64::try_from(domain.size).map_err(|_| ProofPolynomialError::SizeOverflow)?,
+            )?
+            .inverse()?
+        } else {
+            ProofBaseFieldElement::ONE
+        };
+        Ok(Self {
+            values,
+            domain,
+            inverse,
+            stage: if inverse {
+                BoundedProofPolynomialTransformStage::BitReverse
+            } else {
+                BoundedProofPolynomialTransformStage::Resize
+            },
+            next_index: 0,
+            block_size: 2,
+            next_butterfly_index: 0,
+            running_coset_power: ProofBaseFieldElement::ONE,
+            transform_root,
+            inverse_size,
+        })
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        maximum_work_unit_count: u64,
+    ) -> Result<BoundedProofPolynomialTransformPoll, ProofPolynomialError> {
+        let maximum_work_unit_count = usize::try_from(maximum_work_unit_count)
+            .map_err(|_| ProofPolynomialError::SizeOverflow)?;
+        if maximum_work_unit_count == 0 {
+            return Err(ProofPolynomialError::SizeOverflow);
+        }
+        let mut completed_work_unit_count = 0_usize;
+        loop {
+            if self.stage == BoundedProofPolynomialTransformStage::Complete {
+                return Ok(BoundedProofPolynomialTransformPoll {
+                    completed_work_unit_count: u64::try_from(completed_work_unit_count)
+                        .map_err(|_| ProofPolynomialError::SizeOverflow)?,
+                    is_complete: true,
+                });
+            }
+            if completed_work_unit_count == maximum_work_unit_count {
+                return Ok(BoundedProofPolynomialTransformPoll {
+                    completed_work_unit_count: u64::try_from(completed_work_unit_count)
+                        .map_err(|_| ProofPolynomialError::SizeOverflow)?,
+                    is_complete: false,
+                });
+            }
+            let remaining_work_unit_count = maximum_work_unit_count
+                .checked_sub(completed_work_unit_count)
+                .ok_or(ProofPolynomialError::SizeOverflow)?;
+            match self.stage {
+                BoundedProofPolynomialTransformStage::Resize => {
+                    let appended_count =
+                        (self.domain.size - self.values.len()).min(remaining_work_unit_count);
+                    self.values
+                        .extend(core::iter::repeat_n(Value::ZERO, appended_count));
+                    completed_work_unit_count += appended_count;
+                    if self.values.len() == self.domain.size {
+                        self.stage = BoundedProofPolynomialTransformStage::ForwardCosetScale;
+                    }
+                }
+                BoundedProofPolynomialTransformStage::ForwardCosetScale => {
+                    let end = self
+                        .next_index
+                        .saturating_add(remaining_work_unit_count)
+                        .min(self.domain.size);
+                    for value in &mut self.values[self.next_index..end] {
+                        *value = value.multiply_base(self.running_coset_power);
+                        self.running_coset_power =
+                            self.running_coset_power.multiply(self.domain.coset_offset);
+                    }
+                    completed_work_unit_count += end - self.next_index;
+                    self.next_index = end;
+                    if end == self.domain.size {
+                        self.next_index = 0;
+                        self.stage = BoundedProofPolynomialTransformStage::BitReverse;
+                    }
+                }
+                BoundedProofPolynomialTransformStage::BitReverse => {
+                    let end = self
+                        .next_index
+                        .saturating_add(remaining_work_unit_count)
+                        .min(self.domain.size);
+                    let bit_count = self.domain.size.trailing_zeros();
+                    for index in self.next_index..end {
+                        let reversed = index.reverse_bits() >> (usize::BITS - bit_count);
+                        if reversed > index {
+                            self.values.swap(index, reversed);
+                        }
+                    }
+                    completed_work_unit_count += end - self.next_index;
+                    self.next_index = end;
+                    if end == self.domain.size {
+                        self.next_index = 0;
+                        self.stage = BoundedProofPolynomialTransformStage::Butterflies;
+                    }
+                }
+                BoundedProofPolynomialTransformStage::Butterflies => {
+                    let butterfly_count = self.domain.size / 2;
+                    let end = self
+                        .next_butterfly_index
+                        .saturating_add(remaining_work_unit_count)
+                        .min(butterfly_count);
+                    let half_block_size = self.block_size / 2;
+                    let twiddle_step = self.transform_root.power(
+                        u64::try_from(self.domain.size / self.block_size)
+                            .map_err(|_| ProofPolynomialError::SizeOverflow)?,
+                    );
+                    let mut butterfly_index = self.next_butterfly_index;
+                    while butterfly_index < end {
+                        let block_index = butterfly_index / half_block_size;
+                        let within_block_index = butterfly_index % half_block_size;
+                        let block_end = end.min(
+                            block_index
+                                .checked_add(1)
+                                .and_then(|index| index.checked_mul(half_block_size))
+                                .ok_or(ProofPolynomialError::SizeOverflow)?,
+                        );
+                        let mut twiddle = twiddle_step.power(
+                            u64::try_from(within_block_index)
+                                .map_err(|_| ProofPolynomialError::SizeOverflow)?,
+                        );
+                        while butterfly_index < block_end {
+                            let local_index = butterfly_index % half_block_size;
+                            let left_index = block_index
+                                .checked_mul(self.block_size)
+                                .and_then(|offset| offset.checked_add(local_index))
+                                .ok_or(ProofPolynomialError::SizeOverflow)?;
+                            let right_index = left_index
+                                .checked_add(half_block_size)
+                                .ok_or(ProofPolynomialError::SizeOverflow)?;
+                            let left = self.values[left_index];
+                            let right = self.values[right_index].multiply_base(twiddle);
+                            self.values[left_index] = left.add(right);
+                            self.values[right_index] = left.subtract(right);
+                            twiddle = twiddle.multiply(twiddle_step);
+                            butterfly_index += 1;
+                        }
+                    }
+                    completed_work_unit_count += end - self.next_butterfly_index;
+                    self.next_butterfly_index = end;
+                    if end == butterfly_count {
+                        self.next_butterfly_index = 0;
+                        self.block_size = self
+                            .block_size
+                            .checked_mul(2)
+                            .ok_or(ProofPolynomialError::SizeOverflow)?;
+                        if self.block_size > self.domain.size {
+                            self.stage = if self.inverse {
+                                BoundedProofPolynomialTransformStage::InverseNormalize
+                            } else {
+                                BoundedProofPolynomialTransformStage::Complete
+                            };
+                        }
+                    }
+                }
+                BoundedProofPolynomialTransformStage::InverseNormalize => {
+                    let end = self
+                        .next_index
+                        .saturating_add(remaining_work_unit_count)
+                        .min(self.domain.size);
+                    for value in &mut self.values[self.next_index..end] {
+                        *value = value.multiply_base(self.inverse_size);
+                    }
+                    completed_work_unit_count += end - self.next_index;
+                    self.next_index = end;
+                    if end == self.domain.size {
+                        self.next_index = 0;
+                        self.running_coset_power = ProofBaseFieldElement::ONE;
+                        self.stage = BoundedProofPolynomialTransformStage::InverseCosetScale;
+                    }
+                }
+                BoundedProofPolynomialTransformStage::InverseCosetScale => {
+                    let end = self
+                        .next_index
+                        .saturating_add(remaining_work_unit_count)
+                        .min(self.domain.size);
+                    let offset_inverse = self.domain.coset_offset.inverse()?;
+                    for value in &mut self.values[self.next_index..end] {
+                        *value = value.multiply_base(self.running_coset_power);
+                        self.running_coset_power =
+                            self.running_coset_power.multiply(offset_inverse);
+                    }
+                    completed_work_unit_count += end - self.next_index;
+                    self.next_index = end;
+                    if end == self.domain.size {
+                        self.stage = BoundedProofPolynomialTransformStage::TrimInverse;
+                    }
+                }
+                BoundedProofPolynomialTransformStage::TrimInverse => {
+                    let mut inspected_count = 0_usize;
+                    while inspected_count < remaining_work_unit_count {
+                        inspected_count += 1;
+                        if self.values.len() == 1 || self.values.last() != Some(&Value::ZERO) {
+                            self.stage = BoundedProofPolynomialTransformStage::Complete;
+                            break;
+                        }
+                        self.values.pop();
+                    }
+                    completed_work_unit_count += inspected_count;
+                }
+                BoundedProofPolynomialTransformStage::Complete => unreachable!(),
+            }
+        }
+    }
+
+    pub(crate) fn into_values(mut self) -> Result<Zeroizing<Vec<Value>>, ProofPolynomialError> {
+        if self.stage != BoundedProofPolynomialTransformStage::Complete {
+            return Err(ProofPolynomialError::InputLengthMismatch);
+        }
+        Ok(core::mem::take(&mut self.values))
+    }
 }
 
 impl ProofEvaluationDomain {
@@ -95,6 +419,29 @@ impl ProofEvaluationDomain {
         self.coset_offset
     }
 
+    pub(crate) fn begin_bounded_base_evaluation(
+        self,
+        values: Zeroizing<Vec<ProofBaseFieldElement>>,
+    ) -> Result<BoundedProofPolynomialTransform<ProofBaseFieldElement>, ProofPolynomialError> {
+        BoundedProofPolynomialTransform::begin(self, values, false)
+    }
+
+    pub(crate) fn begin_bounded_extension_evaluation(
+        self,
+        values: Zeroizing<Vec<ProofChallengeExtensionElement>>,
+    ) -> Result<BoundedProofPolynomialTransform<ProofChallengeExtensionElement>, ProofPolynomialError>
+    {
+        BoundedProofPolynomialTransform::begin(self, values, false)
+    }
+
+    pub(crate) fn begin_bounded_extension_interpolation(
+        self,
+        values: Zeroizing<Vec<ProofChallengeExtensionElement>>,
+    ) -> Result<BoundedProofPolynomialTransform<ProofChallengeExtensionElement>, ProofPolynomialError>
+    {
+        BoundedProofPolynomialTransform::begin(self, values, true)
+    }
+
     pub(crate) fn point(
         self,
         position: usize,
@@ -106,17 +453,6 @@ impl ProofEvaluationDomain {
             self.generator
                 .power(u64::try_from(position).map_err(|_| ProofPolynomialError::SizeOverflow)?),
         ))
-    }
-
-    pub(crate) fn folded(self) -> Result<Self, ProofPolynomialError> {
-        if self.size <= 2 {
-            return Err(ProofPolynomialError::InvalidDomainSize);
-        }
-        Ok(Self {
-            size: self.size / 2,
-            generator: self.generator.square(),
-            coset_offset: self.coset_offset.square(),
-        })
     }
 
     pub(crate) fn evaluate_base_polynomial(
@@ -134,6 +470,25 @@ impl ProofEvaluationDomain {
         }
         radix_two_base_transform(&mut evaluations, self.generator, false)?;
         Ok(evaluations)
+    }
+
+    /// Converts one owned base-field coefficient buffer into evaluations in
+    /// place. The buffer is extended to the domain size before the transform,
+    /// so streaming family adapters never retain a second whole-domain copy.
+    pub(crate) fn evaluate_base_polynomial_in_place(
+        self,
+        coefficients: &mut Vec<ProofBaseFieldElement>,
+    ) -> Result<(), ProofPolynomialError> {
+        if coefficients.len() > self.size {
+            return Err(ProofPolynomialError::DegreeBoundExceeded);
+        }
+        coefficients.resize(self.size, ProofBaseFieldElement::ZERO);
+        let mut offset_power = ProofBaseFieldElement::ONE;
+        for coefficient in coefficients.iter_mut() {
+            *coefficient = coefficient.multiply(offset_power);
+            offset_power = offset_power.multiply(self.coset_offset);
+        }
+        radix_two_base_transform(coefficients, self.generator, false)
     }
 
     pub(crate) fn interpolate_base_polynomial(
@@ -155,6 +510,29 @@ impl ProofEvaluationDomain {
         Ok(coefficients)
     }
 
+    /// Converts one owned base-field evaluation buffer into coefficients in
+    /// place. This is the generation path for replayed relation columns, where
+    /// retaining a second trace-sized allocation would defeat streaming
+    /// custody.
+    pub(crate) fn interpolate_base_polynomial_in_place(
+        self,
+        evaluations: &mut Vec<ProofBaseFieldElement>,
+    ) -> Result<(), ProofPolynomialError> {
+        if evaluations.len() != self.size {
+            return Err(ProofPolynomialError::InputLengthMismatch);
+        }
+        radix_two_base_transform(evaluations, self.generator, true)?;
+        let offset_inverse = self.coset_offset.inverse()?;
+        let mut offset_inverse_power = ProofBaseFieldElement::ONE;
+        for coefficient in evaluations.iter_mut() {
+            *coefficient = coefficient.multiply(offset_inverse_power);
+            offset_inverse_power = offset_inverse_power.multiply(offset_inverse);
+        }
+        trim_trailing_base_zeroes(evaluations);
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub(crate) fn evaluate_extension_polynomial(
         self,
         coefficients: &[ProofChallengeExtensionElement],
@@ -191,6 +569,7 @@ impl ProofEvaluationDomain {
         radix_two_extension_transform(coefficients, self.generator, false)
     }
 
+    #[cfg(test)]
     pub(crate) fn interpolate_extension_polynomial(
         self,
         evaluations: &[ProofChallengeExtensionElement],
@@ -238,148 +617,6 @@ pub(crate) fn evaluate_extension_at(
         ProofChallengeExtensionElement::ZERO,
         |accumulated, coefficient| accumulated.multiply(point).add(*coefficient),
     )
-}
-
-pub(crate) fn divide_extension_polynomial_by_linear(
-    coefficients: &[ProofChallengeExtensionElement],
-    point: ProofChallengeExtensionElement,
-) -> Result<
-    (
-        Vec<ProofChallengeExtensionElement>,
-        ProofChallengeExtensionElement,
-    ),
-    ProofPolynomialError,
-> {
-    if coefficients.is_empty() {
-        return Err(ProofPolynomialError::InputLengthMismatch);
-    }
-    if coefficients.len() == 1 {
-        return Ok((Vec::new(), coefficients[0]));
-    }
-    let mut quotient = vec![ProofChallengeExtensionElement::ZERO; coefficients.len() - 1];
-    let mut running = *coefficients
-        .last()
-        .ok_or(ProofPolynomialError::InputLengthMismatch)?;
-    for coefficient_index in (1..coefficients.len()).rev() {
-        quotient[coefficient_index - 1] = running;
-        running = coefficients[coefficient_index - 1].add(running.multiply(point));
-    }
-    trim_trailing_extension_zeroes(&mut quotient);
-    Ok((quotient, running))
-}
-
-/// Divides an owned extension polynomial by `X - point` without allocating a
-/// second coefficient vector. On success the input contains the quotient and
-/// the returned value is the remainder.
-pub(crate) fn divide_extension_polynomial_by_linear_in_place(
-    coefficients: &mut Vec<ProofChallengeExtensionElement>,
-    point: ProofChallengeExtensionElement,
-) -> Result<ProofChallengeExtensionElement, ProofPolynomialError> {
-    let Some(mut running) = coefficients.last().copied() else {
-        return Err(ProofPolynomialError::InputLengthMismatch);
-    };
-    if coefficients.len() == 1 {
-        coefficients.clear();
-        return Ok(running);
-    }
-    for coefficient_index in (1..coefficients.len()).rev() {
-        let lower_coefficient = coefficients[coefficient_index - 1];
-        coefficients[coefficient_index - 1] = running;
-        running = lower_coefficient.add(running.multiply(point));
-    }
-    coefficients.truncate(coefficients.len() - 1);
-    trim_trailing_extension_zeroes(coefficients);
-    Ok(running)
-}
-
-pub(crate) fn fold_extension_evaluations(
-    evaluations: &[ProofChallengeExtensionElement],
-    domain: ProofEvaluationDomain,
-    challenge: ProofChallengeExtensionElement,
-) -> Result<Vec<ProofChallengeExtensionElement>, ProofPolynomialError> {
-    if evaluations.len() != domain.size || evaluations.len() < 2 {
-        return Err(ProofPolynomialError::InputLengthMismatch);
-    }
-    let half_size = evaluations.len() / 2;
-    let inverse_two = ProofBaseFieldElement::from_canonical(2)?.inverse()?;
-    let mut folded = Vec::new();
-    folded
-        .try_reserve_exact(half_size)
-        .map_err(|_| ProofPolynomialError::SizeOverflow)?;
-    for position in 0..half_size {
-        let positive = evaluations[position];
-        let negative = evaluations[position + half_size];
-        let point = domain.point(position)?;
-        folded.push(fold_extension_pair_with_inverse_two(
-            positive,
-            negative,
-            point,
-            challenge,
-            inverse_two,
-        )?);
-    }
-    Ok(folded)
-}
-
-/// Folds an owned FRI layer into its lower half in place. The unread positive
-/// and negative inputs are never overwritten before they are consumed.
-pub(crate) fn fold_extension_evaluations_in_place(
-    evaluations: &mut Vec<ProofChallengeExtensionElement>,
-    domain: ProofEvaluationDomain,
-    challenge: ProofChallengeExtensionElement,
-) -> Result<(), ProofPolynomialError> {
-    if evaluations.len() != domain.size || evaluations.len() < 2 {
-        return Err(ProofPolynomialError::InputLengthMismatch);
-    }
-    let half_size = evaluations.len() / 2;
-    let inverse_two = ProofBaseFieldElement::from_canonical(2)?.inverse()?;
-    for position in 0..half_size {
-        let positive = evaluations[position];
-        let negative = evaluations[position + half_size];
-        let point = domain.point(position)?;
-        evaluations[position] = fold_extension_pair_with_inverse_two(
-            positive,
-            negative,
-            point,
-            challenge,
-            inverse_two,
-        )?;
-    }
-    evaluations.truncate(half_size);
-    Ok(())
-}
-
-/// Verifies or constructs one exact radix-two FRI fold from evaluations at
-/// `x` and `-x` to the evaluation at `x^2`.
-pub(crate) fn fold_extension_pair(
-    positive: ProofChallengeExtensionElement,
-    negative: ProofChallengeExtensionElement,
-    point: ProofBaseFieldElement,
-    challenge: ProofChallengeExtensionElement,
-) -> Result<ProofChallengeExtensionElement, ProofPolynomialError> {
-    let inverse_two = ProofBaseFieldElement::from_canonical(2)?.inverse()?;
-    fold_extension_pair_with_inverse_two(positive, negative, point, challenge, inverse_two)
-}
-
-fn fold_extension_pair_with_inverse_two(
-    positive: ProofChallengeExtensionElement,
-    negative: ProofChallengeExtensionElement,
-    point: ProofBaseFieldElement,
-    challenge: ProofChallengeExtensionElement,
-    inverse_two: ProofBaseFieldElement,
-) -> Result<ProofChallengeExtensionElement, ProofPolynomialError> {
-    let inverse_two_point = point.inverse()?.multiply(inverse_two);
-    let even = positive.add(negative).multiply_base(inverse_two);
-    let odd = positive.subtract(negative).multiply_base(inverse_two_point);
-    Ok(even.add(challenge.multiply(odd)))
-}
-
-pub(crate) fn extension_polynomial_degree(
-    coefficients: &[ProofChallengeExtensionElement],
-) -> Option<usize> {
-    coefficients
-        .iter()
-        .rposition(|coefficient| !coefficient.is_zero())
 }
 
 fn radix_two_base_transform(
@@ -515,12 +752,22 @@ mod tests {
             let base_evaluations = domain
                 .evaluate_base_polynomial(&base_coefficients)
                 .expect("base evaluation");
+            let mut in_place_base_coefficients = base_coefficients.clone();
+            domain
+                .evaluate_base_polynomial_in_place(&mut in_place_base_coefficients)
+                .expect("in-place base evaluation");
+            assert_eq!(in_place_base_coefficients, base_evaluations);
             assert_eq!(
                 domain
                     .interpolate_base_polynomial(&base_evaluations)
                     .expect("base interpolation"),
                 base_coefficients,
             );
+            let mut in_place_base_evaluations = base_evaluations;
+            domain
+                .interpolate_base_polynomial_in_place(&mut in_place_base_evaluations)
+                .expect("in-place base interpolation");
+            assert_eq!(in_place_base_evaluations, base_coefficients);
 
             let extension_coefficients = (0..size / 2 + 1)
                 .map(|index| {
@@ -536,6 +783,11 @@ mod tests {
             let extension_evaluations = domain
                 .evaluate_extension_polynomial(&extension_coefficients)
                 .expect("extension evaluation");
+            let mut in_place_extension_coefficients = extension_coefficients.clone();
+            domain
+                .evaluate_extension_polynomial_in_place(&mut in_place_extension_coefficients)
+                .expect("in-place extension evaluation");
+            assert_eq!(in_place_extension_coefficients, extension_evaluations);
             assert_eq!(
                 domain
                     .interpolate_extension_polynomial(&extension_evaluations)
@@ -546,104 +798,117 @@ mod tests {
     }
 
     #[test]
-    fn linear_division_recovers_quotient_and_remainder() {
-        let point = extension([4, 1, 0, 0, 0]);
-        let coefficients = vec![
-            extension([9, 2, 1, 0, 0]),
-            extension([3, 0, 5, 0, 0]),
-            extension([7, 1, 0, 2, 0]),
-            extension([1, 0, 0, 0, 1]),
-        ];
-        let (quotient, remainder) = divide_extension_polynomial_by_linear(&coefficients, point)
-            .expect("division by a monic linear polynomial");
-        assert_eq!(remainder, evaluate_extension_at(&coefficients, point));
+    fn bounded_transforms_match_canonical_bytes_under_aggressive_poll_budgets() {
+        for size in [2_usize, 8, 64] {
+            let domain = ProofEvaluationDomain::new(size, PROOF_EVALUATION_COSET_OFFSET)
+                .expect("valid proof domain");
+            let base_coefficients = (0..size / 2 + 1)
+                .map(|index| base((index as u64 + 3).pow(3)))
+                .collect::<Vec<_>>();
+            let extension_coefficients = (0..size / 2 + 1)
+                .map(|index| {
+                    extension([
+                        index as u64 + 1,
+                        index as u64 * 2 + 3,
+                        index as u64 * 5 + 7,
+                        index as u64 * 11 + 13,
+                        index as u64 * 17 + 19,
+                    ])
+                })
+                .collect::<Vec<_>>();
+            let expected_base_evaluations = domain
+                .evaluate_base_polynomial(&base_coefficients)
+                .expect("canonical base evaluation");
+            let expected_extension_evaluations = domain
+                .evaluate_extension_polynomial(&extension_coefficients)
+                .expect("canonical extension evaluation");
+            let butterfly_count = size / 2 * size.ilog2() as usize;
+            let expected_forward_work_unit_count =
+                (size - base_coefficients.len()) + size + size + butterfly_count;
+            let expected_inverse_work_unit_count =
+                size + butterfly_count + size + size + (size - extension_coefficients.len()) + 1;
 
-        let recovered = quotient.iter().copied().enumerate().fold(
-            vec![remainder],
-            |mut product, (index, coefficient)| {
-                if product.len() <= index + 1 {
-                    product.resize(index + 2, ProofChallengeExtensionElement::ZERO);
+            for maximum_work_unit_count in [1_u64, 2, 3, 17, 257] {
+                let mut base_transform = domain
+                    .begin_bounded_base_evaluation(Zeroizing::new(base_coefficients.clone()))
+                    .expect("bounded base evaluation");
+                let mut observed_base_work_unit_count = 0_u64;
+                loop {
+                    let poll = base_transform
+                        .advance(maximum_work_unit_count)
+                        .expect("bounded base poll");
+                    assert!(poll.completed_work_unit_count > 0);
+                    assert!(poll.completed_work_unit_count <= maximum_work_unit_count);
+                    observed_base_work_unit_count += poll.completed_work_unit_count;
+                    if poll.is_complete {
+                        break;
+                    }
                 }
-                product[index] = product[index].subtract(coefficient.multiply(point));
-                product[index + 1] = product[index + 1].add(coefficient);
-                product
-            },
-        );
-        assert_eq!(recovered, coefficients);
-    }
+                assert_eq!(
+                    observed_base_work_unit_count,
+                    expected_forward_work_unit_count as u64,
+                );
+                assert_eq!(
+                    base_transform
+                        .into_values()
+                        .expect("completed base transform")
+                        .as_slice(),
+                    expected_base_evaluations,
+                );
 
-    #[test]
-    fn in_place_linear_division_matches_allocating_division_without_growing_storage() {
-        let point = extension([4, 1, 0, 0, 0]);
-        let cases = [
-            vec![extension([7, 0, 0, 0, 0])],
-            vec![
-                ProofChallengeExtensionElement::ZERO,
-                ProofChallengeExtensionElement::ZERO,
-                ProofChallengeExtensionElement::ZERO,
-            ],
-            vec![
-                extension([9, 2, 1, 0, 0]),
-                extension([3, 0, 5, 0, 0]),
-                extension([7, 1, 0, 2, 0]),
-                extension([1, 0, 0, 0, 1]),
-            ],
-        ];
-        for coefficients in cases {
-            let (expected_quotient, expected_remainder) =
-                divide_extension_polynomial_by_linear(&coefficients, point)
-                    .expect("the allocating reference division succeeds");
-            let mut in_place = coefficients;
-            let original_capacity = in_place.capacity();
-            let remainder = divide_extension_polynomial_by_linear_in_place(&mut in_place, point)
-                .expect("the in-place division succeeds");
-            assert_eq!(in_place, expected_quotient);
-            assert_eq!(remainder, expected_remainder);
-            assert_eq!(in_place.capacity(), original_capacity);
+                let mut extension_transform = domain
+                    .begin_bounded_extension_evaluation(Zeroizing::new(
+                        extension_coefficients.clone(),
+                    ))
+                    .expect("bounded extension evaluation");
+                loop {
+                    let poll = extension_transform
+                        .advance(maximum_work_unit_count)
+                        .expect("bounded extension poll");
+                    assert!(poll.completed_work_unit_count > 0);
+                    assert!(poll.completed_work_unit_count <= maximum_work_unit_count);
+                    if poll.is_complete {
+                        break;
+                    }
+                }
+                assert_eq!(
+                    extension_transform
+                        .into_values()
+                        .expect("completed extension transform")
+                        .as_slice(),
+                    expected_extension_evaluations,
+                );
+
+                let mut inverse_transform = domain
+                    .begin_bounded_extension_interpolation(Zeroizing::new(
+                        expected_extension_evaluations.clone(),
+                    ))
+                    .expect("bounded extension interpolation");
+                let mut observed_inverse_work_unit_count = 0_u64;
+                loop {
+                    let poll = inverse_transform
+                        .advance(maximum_work_unit_count)
+                        .expect("bounded inverse poll");
+                    assert!(poll.completed_work_unit_count > 0);
+                    assert!(poll.completed_work_unit_count <= maximum_work_unit_count);
+                    observed_inverse_work_unit_count += poll.completed_work_unit_count;
+                    if poll.is_complete {
+                        break;
+                    }
+                }
+                assert_eq!(
+                    observed_inverse_work_unit_count,
+                    expected_inverse_work_unit_count as u64,
+                );
+                assert_eq!(
+                    inverse_transform
+                        .into_values()
+                        .expect("completed inverse transform")
+                        .as_slice(),
+                    extension_coefficients,
+                );
+            }
         }
-
-        let mut empty = Vec::new();
-        assert_eq!(
-            divide_extension_polynomial_by_linear_in_place(&mut empty, point),
-            Err(ProofPolynomialError::InputLengthMismatch),
-        );
-    }
-
-    #[test]
-    fn fri_fold_matches_even_and_odd_coefficient_folding() {
-        let domain = ProofEvaluationDomain::new(32, PROOF_EVALUATION_COSET_OFFSET)
-            .expect("valid proof domain");
-        let coefficients = (0..17)
-            .map(|index| extension([index as u64 + 1, index as u64, 0, 0, 0]))
-            .collect::<Vec<_>>();
-        let challenge = extension([13, 8, 5, 3, 2]);
-        let evaluations = domain
-            .evaluate_extension_polynomial(&coefficients)
-            .expect("extension evaluation");
-        let folded =
-            fold_extension_evaluations(&evaluations, domain, challenge).expect("valid FRI fold");
-
-        let folded_coefficients = (0..coefficients.len().div_ceil(2))
-            .map(|index| {
-                let even = coefficients
-                    .get(index * 2)
-                    .copied()
-                    .unwrap_or(ProofChallengeExtensionElement::ZERO);
-                let odd = coefficients
-                    .get(index * 2 + 1)
-                    .copied()
-                    .unwrap_or(ProofChallengeExtensionElement::ZERO);
-                even.add(challenge.multiply(odd))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            folded,
-            domain
-                .folded()
-                .expect("folded domain")
-                .evaluate_extension_polynomial(&folded_coefficients)
-                .expect("folded polynomial evaluation"),
-        );
     }
 
     #[test]

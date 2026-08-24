@@ -27,6 +27,10 @@ type ValidationLane = {
     readonly name: string;
 };
 
+export type ParsedCheckArguments = {
+    readonly includeDesktopBrowser: boolean;
+};
+
 export type ValidationLaneResult = {
     readonly durationMilliseconds: number;
     readonly exitCode: number;
@@ -75,6 +79,28 @@ const scopeCommandRunObserver = (
 });
 
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
+const includeDesktopBrowserArgument = '--include-desktop-browser';
+const usage = `Usage: run-check.ts [${includeDesktopBrowserArgument}].`;
+
+export const parseCheckArguments = (
+    commandArguments: readonly string[],
+): ParsedCheckArguments => {
+    let includeDesktopBrowser = false;
+
+    for (const argument of commandArguments) {
+        if (argument !== includeDesktopBrowserArgument) {
+            throw new Error(`Unknown argument: ${argument}. ${usage}`);
+        }
+        if (includeDesktopBrowser) {
+            throw new Error(
+                `${includeDesktopBrowserArgument} may be specified only once. ${usage}`,
+            );
+        }
+        includeDesktopBrowser = true;
+    }
+
+    return { includeDesktopBrowser };
+};
 
 const createCargoCommand = (
     description: string,
@@ -130,6 +156,16 @@ export const buildCheckGatingLanes = (
     ),
 ];
 
+export const buildCheckDesktopBrowserLane = (
+    packageManagerRunner: PackageManagerRunner,
+): ValidationLane =>
+    createPackageManagerLane(
+        packageManagerRunner,
+        'Desktop browser tests',
+        'browser-desktop',
+        ['run', 'test:browser:built'],
+    );
+
 const buildRustKernelLane = (
     packageManagerRunner: PackageManagerRunner,
 ): ValidationLane => ({
@@ -184,25 +220,17 @@ export const buildCheckParallelLanes = (
             logFileSlug,
             commandArguments,
         );
-    const vitestLane = (
-        name: string,
-        projectName: 'node' | 'node-kernel-fast' | 'node-protocol',
-    ): ValidationLane =>
-        lane(name, projectName, [
-            'exec',
-            'vitest',
-            '--project',
-            projectName,
-            '--run',
-        ]);
-
     return [
         lane('Lint', 'lint', ['run', 'lint']),
         buildRustKernelLane(packageManagerRunner),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        vitestLane('Node tests (fast)', 'node'),
-        vitestLane('Node tests (protocol)', 'node-protocol'),
-        vitestLane('Node tests (kernel fast)', 'node-kernel-fast'),
+        lane('Node tests', 'node', [
+            'run',
+            'test:node:built',
+            '--',
+            '--maxWorkers',
+            '50%',
+        ]),
     ];
 };
 
@@ -373,13 +401,22 @@ const overallExitCode = (results: readonly ValidationLaneResult[]): number => {
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
+    const parsedArguments = parseCheckArguments(rawArguments);
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
     const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
+    const desktopBrowserLane = parsedArguments.includeDesktopBrowser
+        ? buildCheckDesktopBrowserLane(packageManagerRunner)
+        : undefined;
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
-        lanes: [...gatingLanes, ...parallelLanes].map((lane) => lane.name),
-        scriptName: 'check',
+        lanes: [
+            ...gatingLanes,
+            ...parallelLanes,
+            ...(desktopBrowserLane === undefined ? [] : [desktopBrowserLane]),
+        ].map((lane) => lane.name),
+        scriptName:
+            desktopBrowserLane === undefined ? 'check' : 'check:desktop',
     });
     const results: ValidationLaneResult[] = [];
     const reporter = new CheckReporter();
@@ -438,6 +475,18 @@ const main = async (): Promise<void> => {
                     second.durationMilliseconds - first.durationMilliseconds,
             ),
         );
+        const routineExitCode = overallExitCode(results);
+        if (routineExitCode !== 0) {
+            printValidationSummary(results, runLog, reporter.failureDetails());
+            process.exitCode = routineExitCode;
+            return;
+        }
+
+        if (desktopBrowserLane !== undefined) {
+            results.push(
+                await runGatingLane(desktopBrowserLane, runLog, reporter),
+            );
+        }
         printValidationSummary(results, runLog, reporter.failureDetails());
         process.exitCode = overallExitCode(results);
     } catch (error) {

@@ -3,9 +3,9 @@ import { foundationProfile } from '@sealed-lattice/types';
 
 import type {
     AuthenticatedCheckpointStore,
+    CheckpointOperationIdentity,
     AuthenticatedCheckpointStoreLimits,
     CheckpointBoundaryPolicy,
-    CheckpointRandomCursorKernel,
     TransferableAuthenticatedCheckpointStore,
 } from '../authenticated-checkpoint-store.js';
 import type { RuntimeRecordProtection } from '../authenticated-runtime-record.js';
@@ -40,8 +40,10 @@ import type {
 // separately and do not participate in proof or suite validity.
 export const commonProofScratchByteLength = 1_073_741_824n;
 export const commonProofLiveObjectCount = 4_096;
-const commonProofDataChunkByteLength = 49_152n;
-const commonProofSecretRecordOverheadByteLength = 968n;
+const commonProofDataChunkByteLength = BigInt(
+    foundationProfile.streamChunkByteLength,
+);
+export const commonProofSecretRecordOverheadByteLength = 968n;
 const commonProofObjectHeaderPayloadByteLength = 9n;
 const commonProofCanonicalOutputChunkByteLength = 1_048_576n;
 const commonProofMaximumOutputChunkCount = 5n;
@@ -128,9 +130,16 @@ const commonProofMaximumAdditionalAuthenticatedRepairHeadPlaintextByteLengthBigI
     commonProofMaximumIndexValueByteLength;
 const commonProofMaximumAdditionalOwnedRecordCountBigInt =
     (commonProofLogicalRecordCountBigInt + 1n) * 2n + 1n;
-const commonProofMaximumRecordStorageByteLengthBigInt =
+const commonProofMaximumSecretRecordStorageByteLength =
+    commonProofDataChunkByteLength + commonProofSecretRecordOverheadByteLength;
+const commonProofMaximumPublicRecordStorageByteLength =
     commonProofCanonicalOutputChunkByteLength +
     commonProofPublicRecordOverheadByteLength;
+const commonProofMaximumRecordStorageByteLengthBigInt =
+    commonProofMaximumSecretRecordStorageByteLength >
+    commonProofMaximumPublicRecordStorageByteLength
+        ? commonProofMaximumSecretRecordStorageByteLength
+        : commonProofMaximumPublicRecordStorageByteLength;
 const commonProofMaximumTransactionChangeCountBigInt = BigInt(
     commonProofDeletionBatchRecordCount,
 );
@@ -338,18 +347,22 @@ export type WebLockOwnedBrowserActionStorageCustody = Readonly<{
     ): Promise<RuntimeRecordProtection>;
     openCommonProofCustody?(input: {
         actionRandomnessCommitment: Uint8Array;
-        checkpoint?: Readonly<{
-            cursorKernel: CheckpointRandomCursorKernel;
-            resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
-            store: AuthenticatedCheckpointStore;
-        }>;
+        applicationStatementSchemaIdentifier: number;
+        checkpoint?:
+            | Readonly<{
+                  operationIdentity: CheckpointOperationIdentity;
+                  store: AuthenticatedCheckpointStore;
+              }>
+            | Readonly<{
+                  resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+                  store: AuthenticatedCheckpointStore;
+              }>;
         commonProofEnvironmentIdentifier: Uint8Array;
         commonProofRuntimeBindingHash: Uint8Array;
         proofAttemptLineageIdentifier: Uint8Array;
     }): Promise<CommonProofBrowserCustody>;
     openCheckpointStore(input: {
         boundaryPolicy: CheckpointBoundaryPolicy;
-        cursorKernel: CheckpointRandomCursorKernel;
         limits: AuthenticatedCheckpointStoreLimits;
     }): Promise<TransferableAuthenticatedCheckpointStore>;
     openRootAndAuthenticatedStore(input: {

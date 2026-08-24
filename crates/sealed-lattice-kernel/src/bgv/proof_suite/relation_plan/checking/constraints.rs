@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
-use num_traits::Zero;
 
 use crate::foundation::ProofApplicationSlotCeilings;
 
@@ -72,14 +71,25 @@ impl RelationPlanChecker<'_> {
                 _ => {}
             }
             for ordinal in tree.ordered_column_ordinals() {
-                if *ordinal as usize >= variant.ordered_columns.len()
+                let column = variant
+                    .ordered_columns
+                    .get(*ordinal as usize)
+                    .ok_or(RelationPlanError::InvalidRoot)?;
+                if matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
                     || !owned_columns.insert(*ordinal)
                 {
                     return Err(RelationPlanError::InvalidRoot);
                 }
             }
         }
-        if owned_columns.len() != variant.ordered_columns.len() {
+        let tree_owned_column_count = variant
+            .ordered_columns
+            .iter()
+            .filter(|column| {
+                !matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
+            })
+            .count();
+        if owned_columns.len() != tree_owned_column_count {
             return Err(RelationPlanError::MissingRoot);
         }
         Ok(())
@@ -95,6 +105,13 @@ impl RelationPlanChecker<'_> {
         }
         let mut roles = BTreeSet::new();
         let mut checked_zeroifiers = Vec::<Vec<RelationExpressionInstruction>>::new();
+        let quotient_decomposition_stride = variant.quotient_decomposition_stride(self.context)?;
+        if quotient_decomposition_stride > self.context.quotient_component_degree_bound_exclusive {
+            return Err(RelationPlanError::DegreeBoundExceeded);
+        }
+        let quotient_coefficient_capacity = quotient_decomposition_stride
+            .checked_mul(u64::from(self.context.quotient_component_count))
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
         for constraint in &variant.ordered_constraints {
             if !roles.insert((
                 constraint.constraint_role,
@@ -108,7 +125,7 @@ impl RelationPlanChecker<'_> {
                 self.context,
                 false,
             )?;
-            if numerator.degree >= variant.opening_degree_bound_exclusive {
+            if numerator.degree >= variant.evaluation_domain_size {
                 return Err(RelationPlanError::DegreeBoundExceeded);
             }
             let zeroifier = check_expression(
@@ -119,6 +136,13 @@ impl RelationPlanChecker<'_> {
             )?;
             if zeroifier.degree == 0 && zeroifier.constant_value == Some(0) {
                 return Err(RelationPlanError::InvalidZeroifier);
+            }
+            let quotient_coefficient_count = numerator
+                .degree
+                .checked_sub(zeroifier.degree)
+                .map_or(1, |quotient_degree| quotient_degree + 1);
+            if quotient_coefficient_count > quotient_coefficient_capacity {
+                return Err(RelationPlanError::DegreeBoundExceeded);
             }
             if !checked_zeroifiers
                 .iter()
@@ -303,7 +327,7 @@ impl RelationPlanChecker<'_> {
             .iter()
             .copied()
             .flat_map(|modulus_reference| {
-                (0..self.context.non_native_modular_identity_challenge_count).flat_map(
+                (0..self.context.non_native_alpha_repetition_count).flat_map(
                     move |challenge_ordinal| {
                         (0_u16..2).map(move |batch_ordinal| {
                             (modulus_reference, challenge_ordinal, batch_ordinal)
@@ -314,6 +338,19 @@ impl RelationPlanChecker<'_> {
             .collect::<BTreeSet<_>>();
         let mut seen_batch_coordinates = BTreeSet::new();
         let mut matched_constraint_ordinals = BTreeSet::new();
+        let first_identity_constraint = variant
+            .ordered_coefficient_local_identity_batches
+            .first()
+            .and_then(|batch| {
+                variant
+                    .ordered_constraints
+                    .get(batch.constraint_ordinal as usize)
+            })
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let expected_identity_zeroifier = packed_coefficient_local_identity_zeroifier(
+            variant.trace_domain_size,
+            &first_identity_constraint.zeroifier_postfix_expression,
+        )?;
 
         for batch in &variant.ordered_coefficient_local_identity_batches {
             let modulus_ordinal = u16::try_from(
@@ -323,7 +360,10 @@ impl RelationPlanChecker<'_> {
                     .map_err(|_| RelationPlanError::MissingModulus)?,
             )
             .map_err(|_| RelationPlanError::CountOverflow)?;
-            if batch.challenge_ordinal >= self.context.non_native_modular_identity_challenge_count
+            let modulus = self.context.resolved_modulus(batch.modulus_reference)?;
+            let alpha_bad_polynomial_degree = batch.alpha_bad_polynomial_degree()?;
+            if modulus <= alpha_bad_polynomial_degree
+                || batch.challenge_ordinal >= self.context.non_native_alpha_repetition_count
                 || batch.batch_ordinal >= 2
                 || batch.ordered_residuals.is_empty()
                 || !seen_batch_coordinates.insert((
@@ -433,8 +473,7 @@ impl RelationPlanChecker<'_> {
                 || !constraint
                     .ordered_injective_integer_factor_expressions
                     .is_empty()
-                || constraint.zeroifier_postfix_expression
-                    != full_trace_zeroifier_expression(variant.trace_domain_size)
+                || constraint.zeroifier_postfix_expression != expected_identity_zeroifier
                 || constraint.numerator_postfix_expression
                     != batch.numerator_postfix_expression(modulus_ordinal)?
             {
@@ -524,6 +563,14 @@ impl RelationPlanChecker<'_> {
         }
 
         let mut residuals_by_modulus = BTreeMap::<SuiteModulusReference, BTreeSet<Vec<u8>>>::new();
+        let first_identity_constraint = deterministic_constraints
+            .first()
+            .map(|(_, constraint)| *constraint)
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let expected_identity_zeroifier = packed_coefficient_local_identity_zeroifier(
+            variant.trace_domain_size,
+            &first_identity_constraint.zeroifier_postfix_expression,
+        )?;
         for (deterministic_ordinal, (_, constraint)) in
             deterministic_constraints.into_iter().enumerate()
         {
@@ -532,8 +579,7 @@ impl RelationPlanChecker<'_> {
                 || !constraint
                     .ordered_injective_integer_factor_expressions
                     .is_empty()
-                || constraint.zeroifier_postfix_expression
-                    != full_trace_zeroifier_expression(variant.trace_domain_size)
+                || constraint.zeroifier_postfix_expression != expected_identity_zeroifier
                 || constraint.numerator_postfix_expression.is_empty()
                 || constraint
                     .numerator_postfix_expression
@@ -645,6 +691,33 @@ impl RelationPlanChecker<'_> {
     }
 }
 
+fn packed_coefficient_local_identity_zeroifier(
+    trace_domain_size: u64,
+    zeroifier_postfix_expression: &[RelationExpressionInstruction],
+) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
+    // Coefficient-local identities hold on the logical-row subgroup, not on
+    // every coset of the packed trace. The relation owner is the sole packing
+    // authority, so the compiler and checker cannot silently drift apart.
+    let identity_domain_size = match zeroifier_postfix_expression {
+        [
+            RelationExpressionInstruction::EvaluationVariable,
+            RelationExpressionInstruction::NonnegativePower(identity_domain_size),
+            RelationExpressionInstruction::BaseFieldConstant(1),
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+        ] => *identity_domain_size,
+        _ => return Err(RelationPlanError::InvalidConstraint),
+    };
+    if identity_domain_size == 0
+        || !identity_domain_size.is_power_of_two()
+        || !trace_domain_size.is_multiple_of(identity_domain_size)
+        || !(trace_domain_size / identity_domain_size).is_power_of_two()
+    {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    Ok(full_trace_zeroifier_expression(identity_domain_size))
+}
+
 pub(in crate::bgv::proof_suite::relation_plan) fn zeroifier_roots_are_confined_to_trace_domain(
     expression: &[RelationExpressionInstruction],
     trace_domain_size: u64,
@@ -660,7 +733,11 @@ pub(in crate::bgv::proof_suite::relation_plan) fn zeroifier_roots_are_confined_t
             RelationExpressionInstruction::BaseFieldConstant(1),
             RelationExpressionInstruction::Negation,
             RelationExpressionInstruction::Addition,
-        ] => *exponent == trace_domain_size,
+            // When the exponent divides the trace-domain order, every root of
+            // X^exponent - 1 belongs to the unique trace subgroup. This covers
+            // exact constraints on a plan-fixed subgroup without broadening the
+            // accepted root set beyond the trace domain.
+        ] => *exponent != 0 && trace_domain_size.is_multiple_of(*exponent),
         [
             RelationExpressionInstruction::TraceDomainExceptRoots {
                 trace_domain_size: encoded_trace_domain_size,
@@ -701,4 +778,50 @@ pub(in crate::bgv::proof_suite::relation_plan) fn full_trace_zeroifier_expressio
         RelationExpressionInstruction::Negation,
         RelationExpressionInstruction::Addition,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{full_trace_zeroifier_expression, packed_coefficient_local_identity_zeroifier};
+    use crate::bgv::proof_suite::relation_plan::committed_material::{
+        COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, CommittedMaterialRelationPlanInput,
+    };
+
+    #[test]
+    fn coefficient_local_zeroifier_uses_the_relation_owned_packing_factor() {
+        let input = CommittedMaterialRelationPlanInput {
+            ring_degree: 32,
+            evaluation_domain_size: 1_024,
+            opening_degree_bound_exclusive: 512,
+            material_column_degree_bound_exclusive: 10,
+            trace_packing_factor: COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
+            participant_count: 3,
+            threshold: 2,
+            sharing_data_modulus_indices: vec![0],
+            trace_mask_degree_bound_exclusive: 14,
+        };
+        let message_trace_domain_size = input
+            .message_trace_domain_size()
+            .expect("test message trace domain derives");
+        let relation_trace_domain_size = input
+            .relation_trace_domain_size()
+            .expect("test relation trace domain derives");
+        assert_eq!(
+            relation_trace_domain_size,
+            message_trace_domain_size * COMMITTED_MATERIAL_TRACE_PACKING_FACTOR
+        );
+        let zeroifier = full_trace_zeroifier_expression(message_trace_domain_size);
+        assert_eq!(
+            packed_coefficient_local_identity_zeroifier(relation_trace_domain_size, &zeroifier,)
+                .expect("packed coefficient-local zeroifier derives"),
+            zeroifier
+        );
+        assert!(
+            packed_coefficient_local_identity_zeroifier(
+                relation_trace_domain_size,
+                &full_trace_zeroifier_expression(12),
+            )
+            .is_err()
+        );
+    }
 }

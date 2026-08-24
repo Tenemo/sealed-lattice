@@ -8,29 +8,105 @@ import {
 } from '../../../src/common-proof-worker-runtime.js';
 
 import {
+    commonProofApplicationStatementSchemaIdentifier,
+    createCommonProofGenerationCursorFixtureBytes,
     createExpectedWorkerCheckpointBoundary,
     createInstalledCommonProofGenerationFixture,
     createWorkerCheckpointBoundary,
+    openReservedInstalledCommonProofGenerationFixture,
     openReadyCommonProofApplication,
     openSameRealmCommonProofApplicationHost,
     workerCheckpointStateBytes,
 } from './custody-fixtures.js';
 import {
     applicationHandoffIndexKeySuffix,
-    bytesFromHex,
     consumesCommonProofApplicationHandoff,
 } from './wire-fixtures.js';
 
 import {
     closeCommonProofExecutionEnvironmentInInstalledCustodyWorker,
     copyInstalledCommonProofCheckpointResumeDescriptor,
+    copyReservedCommonProofCheckpointLineageIdentifier,
     openCommonProofExecutionEnvironmentInInstalledCustodyWorker,
     prepareCommonProofGenerationInInstalledCustodyWorker,
+    releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker,
+    reserveCommonProofCheckpointLineageInInstalledCustodyWorker,
     retryPendingCommonProofApplicationInInstalledCustodyWorker,
     runCommonProofGenerationInInstalledCustodyWorker,
     suspendCommonProofExecutionEnvironmentForAuthenticatedResumeInInstalledCustodyWorker,
     verifyAndApplyCommonProofInInstalledCustodyWorker,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody-worker-channel';
+import type { CommonProofCheckpointResumeDescriptor } from '#packages/protocol/src/runtime/common-proof-browser-custody';
+
+type InstalledCustodyCommonProofExecutionEnvironment = Awaited<
+    ReturnType<
+        typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
+    >
+>;
+
+type SameRealmCommonProofApplicationHost = Awaited<
+    ReturnType<typeof openSameRealmCommonProofApplicationHost>
+>;
+
+const prepareFreshInstalledCommonProofGeneration = async (
+    host: SameRealmCommonProofApplicationHost,
+    checkpointCursorBytes: Uint8Array<ArrayBuffer>,
+    options: Readonly<{
+        failFirstGenerationFamilyAdapterDiscard?: boolean;
+        generationFamilyAdapterHandle?: 101 | 103;
+        resumeApplicationStatementSchemaIdentifier?: number;
+        resumeCheckpointStateByteLength?: number;
+    }> = {},
+) => {
+    const reservedGeneration =
+        await openReservedInstalledCommonProofGenerationFixture(
+            host,
+            checkpointCursorBytes,
+            options,
+        );
+    const preparedOperation =
+        await prepareCommonProofGenerationInInstalledCustodyWorker(
+            host.installedHost,
+            {
+                checkpoint: {
+                    generationMode: 'fresh',
+                    reservation:
+                        reservedGeneration.checkpointLineageReservation,
+                },
+                foundationActionRandomnessHandleIdentifier:
+                    host.actionRandomnessHandleIdentifier,
+                generationFamilyAdapter:
+                    reservedGeneration.generationFamilyAdapter,
+            },
+        );
+    return Object.freeze({
+        checkpointLineageReservation:
+            reservedGeneration.checkpointLineageReservation,
+        generationFixture: reservedGeneration.generationFixture,
+        preparedOperation,
+    });
+};
+
+const prepareResumedInstalledCommonProofGeneration = (
+    host: SameRealmCommonProofApplicationHost,
+    generationFixture: ReturnType<
+        typeof createInstalledCommonProofGenerationFixture
+    >,
+    resumeDescriptor: CommonProofCheckpointResumeDescriptor,
+) =>
+    prepareCommonProofGenerationInInstalledCustodyWorker(host.installedHost, {
+        checkpoint: {
+            generationMode: 'resumed',
+            resumeDescriptor,
+        },
+        foundationActionRandomnessHandleIdentifier:
+            host.actionRandomnessHandleIdentifier,
+        generationFamilyAdapter:
+            openClosedWorkerCommonProofGenerationFamilyAdapter(
+                generationFixture.resumeRuntime,
+                102,
+            ),
+    });
 
 describe('common-proof custody lifecycle', () => {
     it('runs cancellation, authenticated resume, output verification, and durable application through installed custody', async () => {
@@ -60,38 +136,19 @@ describe('common-proof custody lifecycle', () => {
             proofBytes: generatedProofBytes,
         });
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
-            const generationFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes);
-            const generationFamilyAdapter =
-                openClosedWorkerCommonProofGenerationFamilyAdapter(
-                    generationFixture.freshRuntime,
-                    101,
+            const freshGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
                 );
-            const preparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter,
-                    },
-                );
+            const generationFixture = freshGeneration.generationFixture;
+            const preparedOperation = freshGeneration.preparedOperation;
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
@@ -121,9 +178,11 @@ describe('common-proof custody lifecycle', () => {
             if (copiedResumeDescriptor !== undefined) {
                 copiedResumeDescriptor.checkpointLineageIdentifier.fill(0);
                 copiedResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-                for (const copiedCursorBytes of copiedResumeDescriptor.orderedPrivateRandomCursorBytes) {
-                    copiedCursorBytes.fill(0);
-                }
+                copiedResumeDescriptor.externalMemoryStateDigest.fill(0);
+                copiedResumeDescriptor.generationCursorManifestBytes.fill(0);
+                copiedResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
+                    0,
+                );
                 copiedResumeDescriptor.stableAttemptBindingHash.fill(0);
             }
             const resumeDescriptor =
@@ -131,33 +190,55 @@ describe('common-proof custody lifecycle', () => {
                     environment,
                 );
             environment = undefined;
-            const resumedGenerationFamilyAdapter =
+            const mismatchedResumeAdapter =
                 openClosedWorkerCommonProofGenerationFamilyAdapter(
                     generationFixture.resumeRuntime,
                     102,
                 );
+            const retainedCheckpointLineageFirstByte =
+                resumeDescriptor.checkpointLineageIdentifier[0] ?? 0;
+            resumeDescriptor.checkpointLineageIdentifier[0] =
+                retainedCheckpointLineageFirstByte ^ 0xff;
+            try {
+                await expect(
+                    prepareCommonProofGenerationInInstalledCustodyWorker(
+                        host.installedHost,
+                        {
+                            checkpoint: {
+                                generationMode: 'resumed',
+                                resumeDescriptor,
+                            },
+                            foundationActionRandomnessHandleIdentifier:
+                                host.actionRandomnessHandleIdentifier,
+                            generationFamilyAdapter: mismatchedResumeAdapter,
+                        },
+                    ),
+                ).rejects.toMatchObject({
+                    code: 'RecordAuthenticationFailed',
+                });
+            } finally {
+                resumeDescriptor.checkpointLineageIdentifier[0] =
+                    retainedCheckpointLineageFirstByte;
+            }
+            releaseClosedWorkerCommonProofGenerationFamilyAdapter(
+                mismatchedResumeAdapter,
+            );
             const resumedPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter: resumedGenerationFamilyAdapter,
-                    },
+                await prepareResumedInstalledCommonProofGeneration(
+                    host,
+                    generationFixture,
+                    resumeDescriptor,
                 );
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
-                    {
-                        preparedOperation: resumedPreparedOperation,
-                        resumeDescriptor,
-                    },
+                    { preparedOperation: resumedPreparedOperation },
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const resumeCursorBytes of resumeDescriptor.orderedPrivateRandomCursorBytes) {
-                resumeCursorBytes.fill(0);
-            }
+            resumeDescriptor.externalMemoryStateDigest.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
+            resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
             await runCommonProofGenerationInInstalledCustodyWorker(
                 environment,
@@ -171,7 +252,7 @@ describe('common-proof custody lifecycle', () => {
             expect(generationFixture.observations).toEqual({
                 acknowledgedCheckpointCount: 1,
                 cancelledOperationReleaseCount: 1,
-                discardedGenerationFamilyAdapterCount: 0,
+                discardedGenerationFamilyAdapterCount: 1,
                 freshStorageResponseCount: 4,
                 generatedCapabilityReleaseCount: 1,
                 outputReadbackCount: 1,
@@ -216,26 +297,20 @@ describe('common-proof custody lifecycle', () => {
             ).toThrowError(expect.objectContaining({ code: 'InvalidInput' }));
             environment = undefined;
 
-            const unusedGenerationFamilyAdapter =
-                openClosedWorkerCommonProofGenerationFamilyAdapter(
-                    generationFixture.freshRuntime,
-                    103,
+            const unusedGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
+                    { generationFamilyAdapterHandle: 103 },
                 );
             const operationRetiredWithActionRandomness =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter: unusedGenerationFamilyAdapter,
-                    },
-                );
+                unusedGeneration.preparedOperation;
             await host.workerScope.send(
                 'close-foundation-action-randomness',
                 host.actionRandomnessHandleIdentifier,
             );
             expect(
-                generationFixture.observations
+                unusedGeneration.generationFixture.observations
                     .discardedGenerationFamilyAdapterCount,
             ).toBe(1);
             await expect(
@@ -244,6 +319,83 @@ describe('common-proof custody lifecycle', () => {
                     { preparedOperation: operationRetiredWithActionRandomness },
                 ),
             ).rejects.toMatchObject({ code: 'InvalidInput' });
+        } finally {
+            if (environment !== undefined) {
+                await closeCommonProofExecutionEnvironmentInInstalledCustodyWorker(
+                    environment,
+                ).catch(() => undefined);
+            }
+            await host.close();
+        }
+    });
+
+    it('refuses an authenticated resume under a different application schema before family preparation', async () => {
+        const host = await openSameRealmCommonProofApplicationHost();
+        let environment:
+            | InstalledCustodyCommonProofExecutionEnvironment
+            | undefined;
+        try {
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
+            );
+            const freshGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
+                    {
+                        resumeApplicationStatementSchemaIdentifier:
+                            commonProofApplicationStatementSchemaIdentifier + 1,
+                    },
+                );
+            const generationFixture = freshGeneration.generationFixture;
+            environment =
+                await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
+                    host.installedHost,
+                    { preparedOperation: freshGeneration.preparedOperation },
+                );
+            const cancellationController = new AbortController();
+            await expect(
+                runCommonProofGenerationInInstalledCustodyWorker(environment, {
+                    signal: cancellationController.signal,
+                    yieldControl: () => {
+                        cancellationController.abort(
+                            'participant interrupted generation',
+                        );
+                        return Promise.resolve();
+                    },
+                }),
+            ).rejects.toMatchObject({ code: 'Cancelled' });
+            const resumeDescriptor =
+                await suspendCommonProofExecutionEnvironmentForAuthenticatedResumeInInstalledCustodyWorker(
+                    environment,
+                );
+            environment = undefined;
+            const resumedPreparedOperation =
+                await prepareResumedInstalledCommonProofGeneration(
+                    host,
+                    generationFixture,
+                    resumeDescriptor,
+                );
+            environment =
+                await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
+                    host.installedHost,
+                    { preparedOperation: resumedPreparedOperation },
+                );
+            resumeDescriptor.checkpointLineageIdentifier.fill(0);
+            resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
+            resumeDescriptor.externalMemoryStateDigest.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
+            resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
+            resumeDescriptor.stableAttemptBindingHash.fill(0);
+
+            await expect(
+                runCommonProofGenerationInInstalledCustodyWorker(environment, {
+                    yieldControl: () => Promise.resolve(),
+                }),
+            ).rejects.toMatchObject({
+                code: 'StorageFailure',
+            });
+            expect(generationFixture.resumeFamilyPreparationCount()).toBe(0);
         } finally {
             if (environment !== undefined) {
                 await closeCommonProofExecutionEnvironmentInInstalledCustodyWorker(
@@ -512,32 +664,19 @@ describe('common-proof custody lifecycle', () => {
     it('retains a prepared generation adapter until fail-once disposal succeeds', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
-            const generationFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes, {
-                    failFirstGenerationFamilyAdapterDiscard: true,
-                });
-            const preparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
+            const freshGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
                     {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                generationFixture.freshRuntime,
-                                101,
-                            ),
+                        failFirstGenerationFamilyAdapterDiscard: true,
                     },
                 );
+            const generationFixture = freshGeneration.generationFixture;
+            const preparedOperation = freshGeneration.preparedOperation;
 
             await expect(
                 host.workerScope.send(
@@ -580,59 +719,44 @@ describe('common-proof custody lifecycle', () => {
     it('caps one prepared-or-executing proof chain without consuming rejected source adapters', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
-            const retainedFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes);
-            const preparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                retainedFixture.freshRuntime,
-                                101,
-                            ),
-                    },
+            const retainedGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
                 );
-            const rejectedPreparedFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes);
+            const retainedFixture = retainedGeneration.generationFixture;
+            const preparedOperation = retainedGeneration.preparedOperation;
             const rejectedPreparedAdapter =
                 openClosedWorkerCommonProofGenerationFamilyAdapter(
-                    rejectedPreparedFixture.freshRuntime,
-                    101,
+                    retainedFixture.freshRuntime,
+                    103,
                 );
-            expect(() =>
+            await expect(
                 prepareCommonProofGenerationInInstalledCustodyWorker(
                     host.installedHost,
                     {
+                        checkpoint: {
+                            generationMode: 'fresh',
+                            reservation:
+                                retainedGeneration.checkpointLineageReservation,
+                        },
                         foundationActionRandomnessHandleIdentifier:
                             host.actionRandomnessHandleIdentifier,
                         generationFamilyAdapter: rejectedPreparedAdapter,
                     },
                 ),
-            ).toThrowError(expect.objectContaining({ code: 'InvalidState' }));
+            ).rejects.toMatchObject({ code: 'InvalidState' });
             releaseClosedWorkerCommonProofGenerationFamilyAdapter(
                 rejectedPreparedAdapter,
             );
             expect(
-                rejectedPreparedFixture.observations
+                retainedFixture.observations
                     .discardedGenerationFamilyAdapterCount,
             ).toBe(1);
 
@@ -644,31 +768,34 @@ describe('common-proof custody lifecycle', () => {
             expect(
                 retainedFixture.observations
                     .discardedGenerationFamilyAdapterCount,
-            ).toBe(0);
-            const rejectedExecutingFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes);
+            ).toBe(1);
             const rejectedExecutingAdapter =
                 openClosedWorkerCommonProofGenerationFamilyAdapter(
-                    rejectedExecutingFixture.freshRuntime,
-                    101,
+                    retainedFixture.freshRuntime,
+                    103,
                 );
-            expect(() =>
+            await expect(
                 prepareCommonProofGenerationInInstalledCustodyWorker(
                     host.installedHost,
                     {
+                        checkpoint: {
+                            generationMode: 'fresh',
+                            reservation:
+                                retainedGeneration.checkpointLineageReservation,
+                        },
                         foundationActionRandomnessHandleIdentifier:
                             host.actionRandomnessHandleIdentifier,
                         generationFamilyAdapter: rejectedExecutingAdapter,
                     },
                 ),
-            ).toThrowError(expect.objectContaining({ code: 'InvalidState' }));
+            ).rejects.toMatchObject({ code: 'InvalidState' });
             releaseClosedWorkerCommonProofGenerationFamilyAdapter(
                 rejectedExecutingAdapter,
             );
             expect(
-                rejectedExecutingFixture.observations
+                retainedFixture.observations
                     .discardedGenerationFamilyAdapterCount,
-            ).toBe(1);
+            ).toBe(2);
 
             await closeCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                 environment,
@@ -677,7 +804,7 @@ describe('common-proof custody lifecycle', () => {
             expect(
                 retainedFixture.observations
                     .discardedGenerationFamilyAdapterCount,
-            ).toBe(1);
+            ).toBe(3);
         } finally {
             if (environment !== undefined) {
                 await closeCommonProofExecutionEnvironmentInInstalledCustodyWorker(
@@ -685,6 +812,123 @@ describe('common-proof custody lifecycle', () => {
                 ).catch(() => undefined);
             }
             await host.close();
+        }
+    });
+
+    it('preserves a fresh reservation when the adapter reports a different checkpoint lineage', async () => {
+        const host = await openSameRealmCommonProofApplicationHost();
+        let checkpointLineageReservation:
+            | Awaited<
+                  ReturnType<
+                      typeof reserveCommonProofCheckpointLineageInInstalledCustodyWorker
+                  >
+              >
+            | undefined;
+        let generationFamilyAdapter:
+            | ReturnType<
+                  typeof openClosedWorkerCommonProofGenerationFamilyAdapter
+              >
+            | undefined;
+        try {
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
+            );
+            checkpointLineageReservation =
+                await reserveCommonProofCheckpointLineageInInstalledCustodyWorker(
+                    host.installedHost,
+                );
+            const reservedCheckpointLineageIdentifier =
+                copyReservedCommonProofCheckpointLineageIdentifier(
+                    checkpointLineageReservation,
+                );
+            const mismatchedCheckpointLineageIdentifier =
+                reservedCheckpointLineageIdentifier.slice();
+            mismatchedCheckpointLineageIdentifier[0] =
+                (mismatchedCheckpointLineageIdentifier[0] ?? 0) ^ 0xff;
+            const generationFixture =
+                createInstalledCommonProofGenerationFixture(cursorBytes, {
+                    checkpointLineageIdentifier:
+                        mismatchedCheckpointLineageIdentifier,
+                });
+            mismatchedCheckpointLineageIdentifier.fill(0);
+            generationFamilyAdapter =
+                openClosedWorkerCommonProofGenerationFamilyAdapter(
+                    generationFixture.freshRuntime,
+                    101,
+                );
+
+            await expect(
+                prepareCommonProofGenerationInInstalledCustodyWorker(
+                    host.installedHost,
+                    {
+                        checkpoint: {
+                            generationMode: 'fresh',
+                            reservation: checkpointLineageReservation,
+                        },
+                        foundationActionRandomnessHandleIdentifier:
+                            host.actionRandomnessHandleIdentifier,
+                        generationFamilyAdapter,
+                    },
+                ),
+            ).rejects.toMatchObject({ code: 'InvalidInput' });
+            const retainedCheckpointLineageIdentifier =
+                copyReservedCommonProofCheckpointLineageIdentifier(
+                    checkpointLineageReservation,
+                );
+            expect(retainedCheckpointLineageIdentifier).toEqual(
+                reservedCheckpointLineageIdentifier,
+            );
+            retainedCheckpointLineageIdentifier.fill(0);
+            reservedCheckpointLineageIdentifier.fill(0);
+
+            releaseClosedWorkerCommonProofGenerationFamilyAdapter(
+                generationFamilyAdapter,
+            );
+            generationFamilyAdapter = undefined;
+            expect(
+                generationFixture.observations
+                    .discardedGenerationFamilyAdapterCount,
+            ).toBe(1);
+
+            const releasedReservation = checkpointLineageReservation;
+            await releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker(
+                host.installedHost,
+                releasedReservation,
+            );
+            checkpointLineageReservation = undefined;
+            expect(() =>
+                copyReservedCommonProofCheckpointLineageIdentifier(
+                    releasedReservation,
+                ),
+            ).toThrowError(expect.objectContaining({ code: 'InvalidInput' }));
+
+            const replacementReservation =
+                await reserveCommonProofCheckpointLineageInInstalledCustodyWorker(
+                    host.installedHost,
+                );
+            await releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker(
+                host.installedHost,
+                replacementReservation,
+            );
+        } finally {
+            try {
+                if (generationFamilyAdapter !== undefined) {
+                    releaseClosedWorkerCommonProofGenerationFamilyAdapter(
+                        generationFamilyAdapter,
+                    );
+                }
+            } finally {
+                try {
+                    if (checkpointLineageReservation !== undefined) {
+                        await releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker(
+                            host.installedHost,
+                            checkpointLineageReservation,
+                        );
+                    }
+                } finally {
+                    await host.close();
+                }
+            }
         }
     });
 
@@ -702,7 +946,7 @@ describe('common-proof custody lifecycle', () => {
                 );
                 const opened = (await host.workerScope.send(
                     'begin-checkpoint',
-                    [streamAttemptIdentifier],
+                    streamAttemptIdentifier,
                 )) as Readonly<{ checkpointIdentifier: string }>;
                 checkpointIdentifiers.push(opened.checkpointIdentifier);
             }
@@ -713,9 +957,10 @@ describe('common-proof custody lifecycle', () => {
             const retainedRefusedSource =
                 refusedStreamAttemptIdentifier.slice();
             await expect(
-                host.workerScope.send('begin-checkpoint', [
+                host.workerScope.send(
+                    'begin-checkpoint',
                     refusedStreamAttemptIdentifier,
-                ]),
+                ),
             ).rejects.toMatchObject({ code: 'InvalidState' });
             expect(refusedStreamAttemptIdentifier).toEqual(
                 retainedRefusedSource,
@@ -731,9 +976,10 @@ describe('common-proof custody lifecycle', () => {
                 'evict-checkpoint',
                 releasedCheckpointIdentifier,
             );
-            const retried = (await host.workerScope.send('begin-checkpoint', [
+            const retried = (await host.workerScope.send(
+                'begin-checkpoint',
                 refusedStreamAttemptIdentifier,
-            ])) as Readonly<{ checkpointIdentifier: string }>;
+            )) as Readonly<{ checkpointIdentifier: string }>;
             checkpointIdentifiers.push(retried.checkpointIdentifier);
 
             for (const checkpointIdentifier of checkpointIdentifiers) {
@@ -753,9 +999,10 @@ describe('common-proof custody lifecycle', () => {
         const host = await openSameRealmCommonProofApplicationHost();
         const checkpointIdentifiers: string[] = [];
         try {
+            const boundary = createWorkerCheckpointBoundary();
             const persisted = (await host.workerScope.send(
                 'begin-checkpoint',
-                [],
+                boundary.privateRandomnessStreamAttemptIdentifier.slice(),
             )) as Readonly<{ checkpointIdentifier: string }>;
             checkpointIdentifiers.push(persisted.checkpointIdentifier);
             const description = (await host.workerScope.send(
@@ -765,7 +1012,7 @@ describe('common-proof custody lifecycle', () => {
             const publicationIdentifier = (await host.workerScope.send(
                 'begin-checkpoint-publication',
                 {
-                    boundary: createWorkerCheckpointBoundary(),
+                    boundary,
                     checkpointIdentifier: persisted.checkpointIdentifier,
                 },
             )) as string;
@@ -786,7 +1033,7 @@ describe('common-proof custody lifecycle', () => {
             ) {
                 const opened = (await host.workerScope.send(
                     'begin-checkpoint',
-                    [new Uint8Array(32).fill(checkpointIndex + 0x40)],
+                    new Uint8Array(32).fill(checkpointIndex + 0x40),
                 )) as Readonly<{ checkpointIdentifier: string }>;
                 unrelatedCheckpointIdentifiers.push(
                     opened.checkpointIdentifier,
@@ -846,9 +1093,10 @@ describe('common-proof custody lifecycle', () => {
         const host = await openSameRealmCommonProofApplicationHost();
         const checkpointIdentifiers: string[] = [];
         try {
+            const boundary = createWorkerCheckpointBoundary();
             const opened = (await host.workerScope.send(
                 'begin-checkpoint',
-                [],
+                boundary.privateRandomnessStreamAttemptIdentifier.slice(),
             )) as Readonly<{ checkpointIdentifier: string }>;
             checkpointIdentifiers.push(opened.checkpointIdentifier);
             const description = (await host.workerScope.send(
@@ -863,7 +1111,7 @@ describe('common-proof custody lifecycle', () => {
             const publicationIdentifier = (await host.workerScope.send(
                 'begin-checkpoint-publication',
                 {
-                    boundary: createWorkerCheckpointBoundary(),
+                    boundary,
                     checkpointIdentifier: opened.checkpointIdentifier,
                 },
             )) as string;
@@ -907,7 +1155,7 @@ describe('common-proof custody lifecycle', () => {
             ).rejects.toMatchObject({ code: 'InvalidState' });
             await expect(
                 host.workerScope.send('begin-checkpoint-publication', {
-                    boundary: createWorkerCheckpointBoundary(),
+                    boundary,
                     checkpointIdentifier: opened.checkpointIdentifier,
                 }),
             ).rejects.toMatchObject({ code: 'InvalidState' });
@@ -1139,39 +1387,22 @@ describe('common-proof custody lifecycle', () => {
     it('retains an authenticated resume descriptor until fail-once adapter disposal succeeds', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
-            const generationFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes, {
-                    failFirstGenerationFamilyAdapterDiscard: true,
-                });
-            const freshPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
+            const freshGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
                     {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                generationFixture.freshRuntime,
-                                101,
-                            ),
+                        failFirstGenerationFamilyAdapterDiscard: true,
                     },
                 );
+            const generationFixture = freshGeneration.generationFixture;
+            const freshPreparedOperation = freshGeneration.preparedOperation;
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
@@ -1198,38 +1429,32 @@ describe('common-proof custody lifecycle', () => {
                 initialResumeDescriptor.checkpointLineageIdentifier.slice();
             const expectedEnvironmentIdentifier =
                 initialResumeDescriptor.commonProofEnvironmentIdentifier.slice();
-            const expectedCursors =
-                initialResumeDescriptor.orderedPrivateRandomCursorBytes.map(
-                    (cursor) => cursor.slice(),
-                );
+            const expectedExternalMemoryStateDigest =
+                initialResumeDescriptor.externalMemoryStateDigest.slice();
+            const expectedCursorManifest =
+                initialResumeDescriptor.generationCursorManifestBytes.slice();
+            const expectedPrivateRandomnessStreamAttemptIdentifier =
+                initialResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.slice();
             const expectedStableAttemptBindingHash =
                 initialResumeDescriptor.stableAttemptBindingHash.slice();
             const resumedPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                generationFixture.resumeRuntime,
-                                102,
-                            ),
-                    },
+                await prepareResumedInstalledCommonProofGeneration(
+                    host,
+                    generationFixture,
+                    initialResumeDescriptor,
                 );
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
-                    {
-                        preparedOperation: resumedPreparedOperation,
-                        resumeDescriptor: initialResumeDescriptor,
-                    },
+                    { preparedOperation: resumedPreparedOperation },
                 );
             initialResumeDescriptor.checkpointLineageIdentifier.fill(0);
             initialResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const resumeCursorBytes of initialResumeDescriptor.orderedPrivateRandomCursorBytes) {
-                resumeCursorBytes.fill(0);
-            }
+            initialResumeDescriptor.externalMemoryStateDigest.fill(0);
+            initialResumeDescriptor.generationCursorManifestBytes.fill(0);
+            initialResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
+                0,
+            );
             initialResumeDescriptor.stableAttemptBindingHash.fill(0);
 
             await expect(
@@ -1262,25 +1487,31 @@ describe('common-proof custody lifecycle', () => {
             expect([
                 ...retriedResumeDescriptor.commonProofEnvironmentIdentifier,
             ]).toEqual([...expectedEnvironmentIdentifier]);
+            expect([
+                ...retriedResumeDescriptor.externalMemoryStateDigest,
+            ]).toEqual([...expectedExternalMemoryStateDigest]);
+            expect([
+                ...retriedResumeDescriptor.generationCursorManifestBytes,
+            ]).toEqual([...expectedCursorManifest]);
             expect(
-                retriedResumeDescriptor.orderedPrivateRandomCursorBytes.map(
-                    (cursor) => [...cursor],
-                ),
-            ).toEqual(expectedCursors.map((cursor) => [...cursor]));
+                retriedResumeDescriptor.privateRandomnessStreamAttemptIdentifier,
+            ).toEqual(expectedPrivateRandomnessStreamAttemptIdentifier);
             expect([
                 ...retriedResumeDescriptor.stableAttemptBindingHash,
             ]).toEqual([...expectedStableAttemptBindingHash]);
             retriedResumeDescriptor.checkpointLineageIdentifier.fill(0);
             retriedResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const cursor of retriedResumeDescriptor.orderedPrivateRandomCursorBytes) {
-                cursor.fill(0);
-            }
+            retriedResumeDescriptor.externalMemoryStateDigest.fill(0);
+            retriedResumeDescriptor.generationCursorManifestBytes.fill(0);
+            retriedResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
+                0,
+            );
             retriedResumeDescriptor.stableAttemptBindingHash.fill(0);
             expectedCheckpointLineageIdentifier.fill(0);
             expectedEnvironmentIdentifier.fill(0);
-            for (const cursor of expectedCursors) {
-                cursor.fill(0);
-            }
+            expectedExternalMemoryStateDigest.fill(0);
+            expectedCursorManifest.fill(0);
+            expectedPrivateRandomnessStreamAttemptIdentifier?.fill(0);
             expectedStableAttemptBindingHash.fill(0);
         } finally {
             if (environment !== undefined) {
@@ -1299,37 +1530,19 @@ describe('common-proof custody lifecycle', () => {
             proofBytes: generatedProofBytes,
         });
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
-            const generationFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes);
-            const freshPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                generationFixture.freshRuntime,
-                                101,
-                            ),
-                    },
+            const freshGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
                 );
+            const generationFixture = freshGeneration.generationFixture;
+            const freshPreparedOperation = freshGeneration.preparedOperation;
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
@@ -1353,31 +1566,21 @@ describe('common-proof custody lifecycle', () => {
                 );
             environment = undefined;
             const resumedPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                generationFixture.resumeRuntime,
-                                102,
-                            ),
-                    },
+                await prepareResumedInstalledCommonProofGeneration(
+                    host,
+                    generationFixture,
+                    resumeDescriptor,
                 );
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
-                    {
-                        preparedOperation: resumedPreparedOperation,
-                        resumeDescriptor,
-                    },
+                    { preparedOperation: resumedPreparedOperation },
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const cursor of resumeDescriptor.orderedPrivateRandomCursorBytes) {
-                cursor.fill(0);
-            }
+            resumeDescriptor.externalMemoryStateDigest.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
+            resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
             await runCommonProofGenerationInInstalledCustodyWorker(
                 environment,
@@ -1435,38 +1638,19 @@ describe('common-proof custody lifecycle', () => {
                 }),
         });
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
-            const generationFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes);
-            const generationFamilyAdapter =
-                openClosedWorkerCommonProofGenerationFamilyAdapter(
-                    generationFixture.freshRuntime,
-                    101,
+            const freshGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
                 );
-            const preparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter,
-                    },
-                );
+            const generationFixture = freshGeneration.generationFixture;
+            const preparedOperation = freshGeneration.preparedOperation;
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
@@ -1505,39 +1689,22 @@ describe('common-proof custody lifecycle', () => {
     it('permanently retires an installed resumed environment when checkpoint restoration is unusable', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
-            const generationFixture =
-                createInstalledCommonProofGenerationFixture(cursorBytes, {
-                    resumeCheckpointStateByteLength: 38,
-                });
-            const freshPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
+            const freshGeneration =
+                await prepareFreshInstalledCommonProofGeneration(
+                    host,
+                    cursorBytes,
                     {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                generationFixture.freshRuntime,
-                                101,
-                            ),
+                        resumeCheckpointStateByteLength: 38,
                     },
                 );
+            const generationFixture = freshGeneration.generationFixture;
+            const freshPreparedOperation = freshGeneration.preparedOperation;
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
@@ -1561,31 +1728,21 @@ describe('common-proof custody lifecycle', () => {
                 );
             environment = undefined;
             const resumedPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter:
-                            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                                generationFixture.resumeRuntime,
-                                102,
-                            ),
-                    },
+                await prepareResumedInstalledCommonProofGeneration(
+                    host,
+                    generationFixture,
+                    resumeDescriptor,
                 );
             environment =
                 await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                     host.installedHost,
-                    {
-                        preparedOperation: resumedPreparedOperation,
-                        resumeDescriptor,
-                    },
+                    { preparedOperation: resumedPreparedOperation },
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const resumeCursorBytes of resumeDescriptor.orderedPrivateRandomCursorBytes) {
-                resumeCursorBytes.fill(0);
-            }
+            resumeDescriptor.externalMemoryStateDigest.fill(0);
+            resumeDescriptor.generationCursorManifestBytes.fill(0);
+            resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
 
             const retiredEnvironment = environment;

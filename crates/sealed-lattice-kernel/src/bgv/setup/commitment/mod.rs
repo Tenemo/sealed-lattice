@@ -1,79 +1,73 @@
 #[cfg(test)]
-use num_bigint::BigInt;
-use num_bigint::BigUint;
+use crate::bgv::coefficient_codec::coefficient_vector_hash512;
 #[cfg(test)]
-use num_traits::ToPrimitive;
+use crate::hashing::derive_canonical_object_hash;
+#[cfg(test)]
 use serde_json::{Value, json};
 
 use crate::{
     bgv::{
-        coefficient_codec::coefficient_vector_hash512,
         modular_arithmetic::{add_mod_fast, mul_mod_fast},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_canonical_object_hash,
 };
 
 #[cfg(test)]
 mod algebra;
 mod commitment_parameters;
+#[cfg(test)]
 mod computation;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the canonical commitment decoder is live while deterministic anchor construction remains owned by later exact-family adapters and tests"
-    )
-)]
 mod lattice_anchor;
 mod matrix;
+#[cfg(test)]
 mod opening;
+#[cfg(test)]
 mod serialization;
 mod validation;
+#[cfg(test)]
 mod worker_response;
 
 #[cfg(test)]
 pub(super) use algebra::*;
+pub(super) use commitment_parameters::SETUP_COMMITMENT_ROW_COUNT;
 #[cfg(test)]
 pub(super) use commitment_parameters::setup_coefficient_fits_commitment_modulus_product;
+#[cfg(test)]
 use commitment_parameters::setup_coefficients_fit_commitment_modulus_product;
+#[cfg(test)]
+use commitment_parameters::setup_signed_coefficient_fits_centered_commitment_modulus_product;
 pub(crate) use commitment_parameters::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
     SETUP_COMMITMENT_RANDOMNESS_WIDTH,
 };
-pub(super) use commitment_parameters::{
-    SETUP_COMMITMENT_ROW_COUNT, setup_commitment_randomness_coefficient_bound,
-    setup_commitment_randomness_distribution_purpose,
-};
 #[cfg(test)]
-use commitment_parameters::{
-    setup_big_signed_coefficient_fits_centered_commitment_modulus_product,
-    setup_signed_coefficient_fits_centered_commitment_modulus_product,
+pub(super) use commitment_parameters::{
+    setup_commitment_randomness_coefficient_bound, setup_commitment_randomness_distribution_purpose,
 };
-pub(super) use matrix::*;
+pub(in crate::bgv) use matrix::*;
 #[cfg(test)]
 pub(super) use opening::*;
+#[cfg(test)]
 pub(super) use serialization::*;
 
-pub(crate) use computation::compute_setup_commitment_from_typed_opening;
+#[cfg(test)]
+use computation::compute_setup_signed_lifted_commitment_for_degree;
 #[cfg(test)]
 pub(super) use computation::{
-    compute_setup_big_signed_lifted_commitment, compute_setup_commitment_for_tests,
-    compute_setup_commitment_from_typed_opening_for_degree,
+    compute_setup_commitment_for_degree, compute_setup_commitment_from_typed_opening_for_degree,
 };
-#[cfg(test)]
-use computation::{
-    compute_setup_commitment_for_degree, compute_setup_signed_lifted_commitment_for_degree,
-};
-pub(crate) use lattice_anchor::parse_lattice_anchor_commitment_canonical_bytes;
+pub(crate) use lattice_anchor::selected_lattice_anchor_commitment_canonical_byte_length;
 #[cfg(test)]
 pub(crate) use lattice_anchor::{
-    LatticeAnchorCommitment, lattice_anchor_commitment_canonical_bytes,
+    LatticeAnchorCommitment, compute_lattice_anchor_commitment_for_development_degree,
 };
-pub(crate) use worker_response::setup_commitment_worker_response_bytes;
+pub(crate) use lattice_anchor::{
+    compute_lattice_anchor_commitment, lattice_anchor_commitment_canonical_bytes,
+    parse_lattice_anchor_commitment_canonical_bytes,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StructuralMatrixPolynomial {
@@ -82,6 +76,7 @@ pub(super) enum StructuralMatrixPolynomial {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub(super) struct SetupCommitmentLimb {
     pub(super) commitment_modulus_index: usize,
     pub(super) modulus: u64,
@@ -89,6 +84,7 @@ pub(super) struct SetupCommitmentLimb {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct SetupCommitmentValue {
     pub(super) source_rns_limb_index: usize,
     pub(super) shamir_coefficient_index: u64,
@@ -100,7 +96,6 @@ pub(crate) struct SetupCommitmentValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupCommitmentOpeningVerification {
     pub(super) commitment_root: String,
-    pub(super) randomness_infinity_bound: i128,
     pub(super) message_coefficient_bound: u128,
 }
 

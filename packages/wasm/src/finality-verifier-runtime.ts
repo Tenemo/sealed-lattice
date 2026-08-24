@@ -1,6 +1,7 @@
 import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 import { foundationProfile } from '@sealed-lattice/types';
 
+import { isUint8Array } from './byte-array.js';
 import {
     resolveVerifiedTranscriptObjectKernelAuthorization,
     type VerifiedTranscriptObject,
@@ -127,6 +128,7 @@ type VerifiedEvaluatorReplayRecord = {
     active: boolean;
     handle: number;
     kernel: TranscriptCoreKernel;
+    release(handle: number): number;
 };
 
 type VerifiedFinalityRecord = {
@@ -135,11 +137,40 @@ type VerifiedFinalityRecord = {
     session: FinalityVerifierSessionImplementation;
 };
 
+type VerifiedFinalityKernelAuthorization = Readonly<{
+    capabilityMemory: WebAssembly.Memory;
+    capabilityPointer: number;
+    finalityHandle: number;
+    sessionHandle: number;
+}>;
+
 const verifiedEvaluatorReplayRecords = new WeakMap<
     object,
     VerifiedEvaluatorReplayRecord
 >();
 const verifiedFinalityRecords = new WeakMap<object, VerifiedFinalityRecord>();
+
+export const resolveVerifiedFinalityKernelAuthorization = (
+    verifiedFinality: VerifiedFinality,
+    kernel: TranscriptCoreKernel,
+): VerifiedFinalityKernelAuthorization => {
+    if (
+        (typeof verifiedFinality !== 'object' &&
+            typeof verifiedFinality !== 'function') ||
+        verifiedFinality === null
+    ) {
+        throw new TypeError(
+            'The verified finality was not issued by the WASM finality verifier.',
+        );
+    }
+    const record = verifiedFinalityRecords.get(verifiedFinality);
+    if (record === undefined || !record.active) {
+        throw new TypeError(
+            'The verified finality is unavailable or was not issued by the WASM finality verifier.',
+        );
+    }
+    return record.session.kernelAuthorization(record, kernel);
+};
 
 class FinalityVerifierInternalError extends Error {
     public readonly failureCause: unknown;
@@ -166,17 +197,6 @@ const refused = <Value>(
 const valid = <Value>(value: Value): VerificationResult<Value> =>
     Object.freeze({ isValid: true, value });
 
-const isUint8Array = (value: unknown): value is Uint8Array => {
-    try {
-        return (
-            ArrayBuffer.isView(value) &&
-            Object.prototype.toString.call(value) === '[object Uint8Array]'
-        );
-    } catch {
-        return false;
-    }
-};
-
 const decodeStatus = (status: number): RefusalReason | undefined => {
     return decodeWasmRefusalStatus(
         status,
@@ -194,6 +214,47 @@ const requireWasm32Handle = (value: unknown, label: string): void => {
     ) {
         throw new TypeError(`The ${label} is invalid.`);
     }
+};
+
+/**
+ * Mints the TypeScript wrapper only from a verifier-owned replay handle
+ * produced in the same WASM worker. This is an internal package seam and is
+ * deliberately not re-exported from the public package entry point.
+ */
+export const createVerifiedEvaluatorReplayKernelAuthority = (input: {
+    handle: number;
+    kernel: TranscriptCoreKernel;
+    release(handle: number): number;
+}): VerifiedEvaluatorReplay => {
+    requireWasm32Handle(input.handle, 'verified evaluator replay handle');
+    if (typeof input.release !== 'function') {
+        throw new TypeError(
+            'The verified evaluator replay release operation is invalid.',
+        );
+    }
+    const capability = Object.freeze(Object.create(null) as object);
+    verifiedEvaluatorReplayRecords.set(capability, {
+        active: true,
+        handle: input.handle,
+        kernel: input.kernel,
+        release: (handle) => input.release(handle),
+    });
+    return capability as VerifiedEvaluatorReplay;
+};
+
+/** Releases one live replay capability after finality no longer needs it. */
+export const releaseVerifiedEvaluatorReplay = (
+    verifiedEvaluatorReplay: VerifiedEvaluatorReplay,
+): void => {
+    const record = verifiedEvaluatorReplayRecords.get(verifiedEvaluatorReplay);
+    if (record === undefined || !record.active) {
+        throw new FinalityVerifierRefusalError('consumedState');
+    }
+    const refusalReason = decodeStatus(record.release(record.handle));
+    if (refusalReason !== undefined) {
+        throw new FinalityVerifierRefusalError(refusalReason);
+    }
+    record.active = false;
 };
 
 const requireBytes = (
@@ -366,6 +427,30 @@ class FinalityVerifierSessionImplementation implements FinalityVerifierSession {
 
     public state(): 'active' | 'cancelled' {
         return this.#state;
+    }
+
+    public kernelAuthorization(
+        record: VerifiedFinalityRecord,
+        kernel: TranscriptCoreKernel,
+    ): VerifiedFinalityKernelAuthorization {
+        if (
+            this.#state !== 'active' ||
+            !record.active ||
+            record.session !== this
+        ) {
+            throw new TypeError('The verified finality is unavailable.');
+        }
+        if (kernel !== this.#kernel) {
+            throw new TypeError(
+                'The verified finality belongs to another WASM kernel.',
+            );
+        }
+        return Object.freeze({
+            capabilityMemory: this.#context.memory,
+            capabilityPointer: this.#capabilityPointer,
+            finalityHandle: record.handle,
+            sessionHandle: this.#handle,
+        });
     }
 
     public verify(

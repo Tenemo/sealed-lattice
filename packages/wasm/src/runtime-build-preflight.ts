@@ -1,3 +1,5 @@
+import { foundationProfile, type RefusalReason } from '@sealed-lattice/types';
+
 import {
     createRuntimeAssetHashAccumulator,
     createRuntimeBuildManifestHashAccumulator,
@@ -16,6 +18,9 @@ import {
     type RuntimeBuildManifest,
     type SuiteArtifactReference,
 } from './runtime-build-canonical.js';
+import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
+import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
+import { WasmStatusBoundary } from './wasm-status-boundary.js';
 
 export class RuntimeBuildPreflightError extends Error {
     public readonly cause: unknown;
@@ -73,6 +78,19 @@ export type RuntimeBuildWorkerPreflight<WorkerChannel> = Readonly<{
         assetReference: RuntimeAssetReference;
         source: RuntimeBuildByteSource;
     }): Promise<void>;
+}>;
+
+export type RuntimeBuildVerifiedKernelOwner<WorkerChannel> = Readonly<{
+    finish(): Promise<WorkerChannel>;
+    kernel: TranscriptCoreKernel;
+    terminate(): Promise<void> | void;
+}>;
+
+export type RuntimeBuildKernelWorkerLifecycle<WorkerChannel> = Readonly<{
+    instantiateVerifiedWasm(input: {
+        assetReference: RuntimeAssetReference;
+        canonicalBytes: Uint8Array;
+    }): Promise<RuntimeBuildVerifiedKernelOwner<WorkerChannel>>;
 }>;
 
 declare const runtimeBuildAuthorityBindingBrand: unique symbol;
@@ -257,6 +275,364 @@ const collectBoundedSource = async (
         );
     }
     return bytes;
+};
+
+const suiteArtifactReferencesEqual = (
+    left: SuiteArtifactReference,
+    right: SuiteArtifactReference,
+): boolean =>
+    left.artifactKind === right.artifactKind &&
+    left.byteLength === right.byteLength &&
+    runtimeBuildBytesEqual(left.artifactHash, right.artifactHash);
+
+const requireSuiteArtifactReferenceCatalog = (
+    actual: readonly SuiteArtifactReference[],
+    expected: readonly SuiteArtifactReference[],
+): void => {
+    if (
+        actual.length !== expected.length ||
+        actual.some(
+            (reference, index) =>
+                expected[index] === undefined ||
+                !suiteArtifactReferencesEqual(reference, expected[index]),
+        )
+    ) {
+        return fail(
+            'The worker suite-artifact references do not match the canonical suite record.',
+        );
+    }
+};
+
+const runtimeBuildSuiteArtifactStatusBoundary = new WasmStatusBoundary({
+    createInternalError: (message) => new RuntimeBuildPreflightError(message),
+    createRefusalError: (refusalReason: RefusalReason) =>
+        new RuntimeBuildPreflightError(
+            `The kernel refused the suite artifact: ${refusalReason}.`,
+        ),
+    createResourceError: () =>
+        new RuntimeBuildPreflightError(
+            'The suite artifact exceeds a kernel resource bound.',
+        ),
+    internalFailureMessage:
+        'The kernel failed internally while verifying a suite artifact.',
+    unknownStatusMessage:
+        'The kernel returned an unknown suite-artifact verification status.',
+});
+
+const requireKernelAllocation = (
+    pointer: number,
+    byteLength: number,
+    memory: WebAssembly.Memory,
+    label: string,
+): number => {
+    const normalizedPointer = pointer >>> 0;
+    const end = normalizedPointer + byteLength;
+    if (
+        normalizedPointer === 0 ||
+        !Number.isSafeInteger(end) ||
+        end > memory.buffer.byteLength ||
+        memory.buffer.byteLength > foundationProfile.maximumWasmMemoryByteLength
+    ) {
+        return fail(`The kernel returned an invalid ${label} allocation.`);
+    }
+    return normalizedPointer;
+};
+
+const zeroKernelAllocation = (
+    memory: WebAssembly.Memory,
+    pointer: number,
+    byteLength: number,
+): void => {
+    if (pointer !== 0 && pointer + byteLength <= memory.buffer.byteLength) {
+        new Uint8Array(memory.buffer, pointer, byteLength).fill(0);
+    }
+};
+
+export const createRuntimeBuildKernelWorkerPreflight = <WorkerChannel>(
+    lifecycle: RuntimeBuildKernelWorkerLifecycle<WorkerChannel>,
+): RuntimeBuildWorkerPreflight<WorkerChannel> => {
+    let kernelOwner: RuntimeBuildVerifiedKernelOwner<WorkerChannel> | undefined;
+    let canonicalSuiteRecordBytes: Uint8Array | undefined;
+    let artifactReferences: readonly SuiteArtifactReference[] | undefined;
+    let nextArtifactIndex = 0;
+    let operationInProgress = false;
+    let stage: 'wasm' | 'suite' | 'artifacts' | 'finished' | 'terminated' =
+        'wasm';
+    const verifiedArtifactPaths = new Set<string>();
+
+    const runOperation = async <Result>(
+        operationName: string,
+        operation: () => Result | Promise<Result>,
+    ): Promise<Result> => {
+        if (operationInProgress) {
+            return fail(
+                `The runtime-build worker cannot overlap ${operationName}.`,
+            );
+        }
+        operationInProgress = true;
+        try {
+            return await operation();
+        } finally {
+            operationInProgress = false;
+        }
+    };
+
+    const verifySuiteArtifact = async (input: {
+        artifactReference: SuiteArtifactReference;
+        canonicalPath: string;
+        source: RuntimeBuildByteSource;
+    }): Promise<void> => {
+        if (
+            stage !== 'artifacts' ||
+            kernelOwner === undefined ||
+            canonicalSuiteRecordBytes === undefined ||
+            artifactReferences === undefined
+        ) {
+            return fail(
+                'The runtime-build worker received a suite artifact out of order.',
+            );
+        }
+        const verifiedCanonicalSuiteRecordBytes = canonicalSuiteRecordBytes;
+        const expectedReference = artifactReferences[nextArtifactIndex];
+        if (
+            expectedReference === undefined ||
+            !suiteArtifactReferencesEqual(
+                input.artifactReference,
+                expectedReference,
+            )
+        ) {
+            return fail(
+                'The runtime-build worker received the wrong suite-artifact reference.',
+            );
+        }
+        const canonicalPath = requireCanonicalRuntimePath(input.canonicalPath);
+        if (verifiedArtifactPaths.has(canonicalPath)) {
+            return fail(
+                'The runtime-build worker received a repeated suite-artifact path.',
+            );
+        }
+        const artifactByteLength = Number(expectedReference.byteLength);
+        if (
+            !Number.isSafeInteger(artifactByteLength) ||
+            artifactByteLength <= 0 ||
+            artifactByteLength >
+                maximumSuiteArtifactByteLengthForKind(
+                    expectedReference.artifactKind,
+                )
+        ) {
+            return fail(
+                'The runtime-build worker suite artifact exceeds its kind-specific bound.',
+            );
+        }
+
+        const context = resolveCommonProofKernelContext(kernelOwner.kernel);
+        const verifyExport =
+            context?.wasmExports
+                .sealed_lattice_foundation_verify_suite_artifact;
+        if (context === undefined || typeof verifyExport !== 'function') {
+            return fail(
+                'The verified kernel lacks suite-artifact semantic preflight.',
+            );
+        }
+
+        let artifactPointer = 0;
+        let suiteRecordPointer = 0;
+        try {
+            artifactPointer = requireKernelAllocation(
+                context.allocate(artifactByteLength),
+                artifactByteLength,
+                context.memory,
+                'suite-artifact',
+            );
+            suiteRecordPointer = requireKernelAllocation(
+                context.allocate(verifiedCanonicalSuiteRecordBytes.byteLength),
+                verifiedCanonicalSuiteRecordBytes.byteLength,
+                context.memory,
+                'suite-record',
+            );
+            new Uint8Array(
+                context.memory.buffer,
+                suiteRecordPointer,
+                verifiedCanonicalSuiteRecordBytes.byteLength,
+            ).set(verifiedCanonicalSuiteRecordBytes);
+
+            let offset = 0;
+            for await (const untrustedChunk of input.source) {
+                const chunk = copyChunk(untrustedChunk);
+                if (chunk.byteLength > artifactByteLength - offset) {
+                    return fail(
+                        'A suite-artifact stream exceeds its declared length.',
+                    );
+                }
+                for (
+                    let chunkOffset = 0;
+                    chunkOffset < chunk.byteLength;
+                    chunkOffset += foundationProfile.streamChunkByteLength
+                ) {
+                    const end = Math.min(
+                        chunk.byteLength,
+                        chunkOffset + foundationProfile.streamChunkByteLength,
+                    );
+                    new Uint8Array(context.memory.buffer).set(
+                        chunk.subarray(chunkOffset, end),
+                        artifactPointer + offset + chunkOffset,
+                    );
+                }
+                offset += chunk.byteLength;
+            }
+            if (offset !== artifactByteLength) {
+                return fail(
+                    'A suite-artifact stream is shorter than its declared length.',
+                );
+            }
+
+            const status = context.runExclusive(
+                'suite-artifact semantic preflight',
+                () =>
+                    verifyExport(
+                        suiteRecordPointer,
+                        verifiedCanonicalSuiteRecordBytes.byteLength,
+                        expectedReference.artifactKind,
+                        artifactPointer,
+                        artifactByteLength,
+                    ),
+            );
+            runtimeBuildSuiteArtifactStatusBoundary.throwIfError(status);
+            verifiedArtifactPaths.add(canonicalPath);
+            nextArtifactIndex += 1;
+        } finally {
+            if (artifactPointer !== 0) {
+                zeroKernelAllocation(
+                    context.memory,
+                    artifactPointer,
+                    artifactByteLength,
+                );
+                context.deallocate(artifactPointer, artifactByteLength);
+            }
+            if (suiteRecordPointer !== 0) {
+                zeroKernelAllocation(
+                    context.memory,
+                    suiteRecordPointer,
+                    verifiedCanonicalSuiteRecordBytes.byteLength,
+                );
+                context.deallocate(
+                    suiteRecordPointer,
+                    verifiedCanonicalSuiteRecordBytes.byteLength,
+                );
+            }
+        }
+    };
+
+    return Object.freeze({
+        finish: (): Promise<WorkerChannel> =>
+            runOperation('runtime-build finish', async () => {
+                if (
+                    stage !== 'artifacts' ||
+                    kernelOwner === undefined ||
+                    artifactReferences === undefined ||
+                    nextArtifactIndex !== artifactReferences.length
+                ) {
+                    return fail(
+                        'The runtime-build worker cannot finish before every suite artifact passes.',
+                    );
+                }
+                canonicalSuiteRecordBytes?.fill(0);
+                canonicalSuiteRecordBytes = undefined;
+                stage = 'finished';
+                return kernelOwner.finish();
+            }),
+        terminate: async (): Promise<void> => {
+            if (stage === 'terminated') {
+                return;
+            }
+            canonicalSuiteRecordBytes?.fill(0);
+            canonicalSuiteRecordBytes = undefined;
+            artifactReferences = undefined;
+            stage = 'terminated';
+            await kernelOwner?.terminate();
+        },
+        verifySuiteArtifact: (input): Promise<void> =>
+            runOperation('suite-artifact verification', () =>
+                verifySuiteArtifact(input),
+            ),
+        verifySuiteRecord: (input): Promise<void> =>
+            runOperation('suite-record verification', () => {
+                if (stage !== 'suite' || kernelOwner === undefined) {
+                    return fail(
+                        'The runtime-build worker received a suite record out of order.',
+                    );
+                }
+                const suiteRecordBytes = input.canonicalBytes.slice();
+                try {
+                    const decodedReferences =
+                        decodeSuiteArtifactReferences(suiteRecordBytes);
+                    requireSuiteArtifactReferenceCatalog(
+                        input.artifactReferences,
+                        decodedReferences,
+                    );
+                    const verification =
+                        kernelOwner.kernel.verifyFoundationSuiteRecord({
+                            canonicalBytesHex:
+                                runtimeBuildBytesToHex(suiteRecordBytes),
+                        });
+                    if (
+                        !verification.isValid ||
+                        verification.value.suiteId !==
+                            runtimeBuildBytesToHex(input.suiteIdentifier)
+                    ) {
+                        return fail(
+                            'The kernel refused the canonical runtime suite record.',
+                        );
+                    }
+                    canonicalSuiteRecordBytes = suiteRecordBytes;
+                    artifactReferences = decodedReferences;
+                    stage = 'artifacts';
+                } catch (error) {
+                    suiteRecordBytes.fill(0);
+                    throw error;
+                }
+            }),
+        verifyWasm: (input): Promise<void> =>
+            runOperation('WASM verification', async () => {
+                if (stage !== 'wasm') {
+                    return fail(
+                        'The runtime-build worker received WASM bytes out of order.',
+                    );
+                }
+                const byteLength = Number(input.assetReference.byteLength);
+                if (
+                    !Number.isSafeInteger(byteLength) ||
+                    byteLength <= 0 ||
+                    byteLength >
+                        runtimeBuildCanonicalLimits.maximumCopiedExecutableAssetByteLength
+                ) {
+                    return fail(
+                        'The runtime-build worker WASM asset exceeds its copied-buffer bound.',
+                    );
+                }
+                const canonicalBytes = await collectBoundedSource(
+                    input.source,
+                    byteLength,
+                );
+                try {
+                    kernelOwner = await lifecycle.instantiateVerifiedWasm({
+                        assetReference: input.assetReference,
+                        canonicalBytes,
+                    });
+                    if (
+                        resolveCommonProofKernelContext(kernelOwner.kernel) ===
+                        undefined
+                    ) {
+                        return fail(
+                            'The verified kernel lacks its authenticated runtime context.',
+                        );
+                    }
+                    stage = 'suite';
+                } finally {
+                    canonicalBytes.fill(0);
+                }
+            }),
+    });
 };
 
 const streamIntoCache = async (input: {

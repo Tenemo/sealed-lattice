@@ -1,3 +1,6 @@
+#[cfg(test)]
+use core::mem::size_of;
+
 use super::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
     SETUP_COMMITMENT_ROW_COUNT, StructuralMatrixPolynomial, add_mod_fast, forward_negacyclic_ntt,
@@ -120,6 +123,42 @@ pub(crate) fn lattice_anchor_commitment_canonical_bytes(
     .map_err(canonical_codec_error)
 }
 
+/// Exact selected-shape encoding length without constructing the complete
+/// commitment rows. This follows the same tuple and homogeneous-list layout
+/// used by `lattice_anchor_commitment_canonical_bytes`.
+pub(crate) fn selected_lattice_anchor_commitment_canonical_byte_length(
+    commitment_data_prime_index: usize,
+) -> CanonicalResult<usize> {
+    let modulus = selected_commitment_prime(commitment_data_prime_index)?;
+    let field_element_byte_length = field_element_byte_length(modulus);
+    let field_list_byte_length = 6_usize
+        .checked_add(
+            POLYNOMIAL_DEGREE
+                .checked_mul(field_element_byte_length)
+                .ok_or_else(|| {
+                    invalid_commitment_input("lattice commitment row byte length overflows")
+                })?,
+        )
+        .ok_or_else(|| invalid_commitment_input("lattice commitment row byte length overflows"))?;
+    let row_tuple_byte_length = 8_usize
+        .checked_add(6)
+        .and_then(|length| length.checked_add(field_list_byte_length))
+        .ok_or_else(|| {
+            invalid_commitment_input("lattice commitment row tuple byte length overflows")
+        })?;
+    let row_list_byte_length = SETUP_COMMITMENT_ROW_COUNT
+        .checked_mul(row_tuple_byte_length)
+        .and_then(|length| length.checked_add(6))
+        .ok_or_else(|| {
+            invalid_commitment_input("lattice commitment row list byte length overflows")
+        })?;
+    8_usize
+        .checked_add(6 + size_of::<u16>())
+        .and_then(|length| length.checked_add(6))
+        .and_then(|length| length.checked_add(row_list_byte_length))
+        .ok_or_else(|| invalid_commitment_input("lattice commitment byte length overflows"))
+}
+
 pub(crate) fn parse_lattice_anchor_commitment_canonical_bytes(
     canonical_bytes: &[u8],
 ) -> CanonicalResult<LatticeAnchorCommitment> {
@@ -154,13 +193,34 @@ pub(crate) fn parse_lattice_anchor_commitment_canonical_bytes(
     })
 }
 
-fn compute_lattice_anchor_commitment_for_degree(
+pub(crate) fn compute_lattice_anchor_commitment<OpeningPolynomial>(
     public_matrix_seed_hash: &str,
     commitment_data_prime_index: usize,
     secret_contribution_coefficients: &[i8],
-    opening_polynomials: &[Vec<i8>],
+    opening_polynomials: &[OpeningPolynomial],
+) -> CanonicalResult<LatticeAnchorCommitment>
+where
+    OpeningPolynomial: AsRef<[i8]>,
+{
+    compute_lattice_anchor_commitment_for_degree(
+        public_matrix_seed_hash,
+        commitment_data_prime_index,
+        secret_contribution_coefficients,
+        opening_polynomials,
+        POLYNOMIAL_DEGREE,
+    )
+}
+
+fn compute_lattice_anchor_commitment_for_degree<OpeningPolynomial>(
+    public_matrix_seed_hash: &str,
+    commitment_data_prime_index: usize,
+    secret_contribution_coefficients: &[i8],
+    opening_polynomials: &[OpeningPolynomial],
     ring_degree: usize,
-) -> CanonicalResult<LatticeAnchorCommitment> {
+) -> CanonicalResult<LatticeAnchorCommitment>
+where
+    OpeningPolynomial: AsRef<[i8]>,
+{
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
     let modulus = selected_commitment_prime(commitment_data_prime_index)?;
     validate_anchor_ring_degree(ring_degree)?;
@@ -176,7 +236,11 @@ fn compute_lattice_anchor_commitment_for_degree(
         ));
     }
     for opening_polynomial in opening_polynomials {
-        validate_centered_ternary_vector(opening_polynomial, ring_degree, "opening polynomial")?;
+        validate_centered_ternary_vector(
+            opening_polynomial.as_ref(),
+            ring_degree,
+            "opening polynomial",
+        )?;
     }
 
     let message_residues = secret_contribution_coefficients
@@ -187,6 +251,7 @@ fn compute_lattice_anchor_commitment_for_degree(
         .iter()
         .map(|polynomial| {
             polynomial
+                .as_ref()
                 .iter()
                 .map(|coefficient| centered_i8_to_residue(*coefficient, modulus))
                 .collect::<Vec<_>>()
@@ -264,6 +329,26 @@ fn compute_lattice_anchor_commitment_for_degree(
         ring_degree,
         rows,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn compute_lattice_anchor_commitment_for_development_degree<OpeningPolynomial>(
+    public_matrix_seed_hash: &str,
+    commitment_data_prime_index: usize,
+    secret_contribution_coefficients: &[i8],
+    opening_polynomials: &[OpeningPolynomial],
+    ring_degree: usize,
+) -> CanonicalResult<LatticeAnchorCommitment>
+where
+    OpeningPolynomial: AsRef<[i8]>,
+{
+    compute_lattice_anchor_commitment_for_degree(
+        public_matrix_seed_hash,
+        commitment_data_prime_index,
+        secret_contribution_coefficients,
+        opening_polynomials,
+        ring_degree,
+    )
 }
 
 fn selected_commitment_prime(commitment_data_prime_index: usize) -> CanonicalResult<u64> {
@@ -540,6 +625,10 @@ mod tests {
                 .collect(),
         };
         let canonical_bytes = lattice_anchor_commitment_canonical_bytes(&commitment)?;
+        assert_eq!(
+            canonical_bytes.len(),
+            selected_lattice_anchor_commitment_canonical_byte_length(1)?
+        );
         assert_eq!(
             parse_lattice_anchor_commitment_canonical_bytes(&canonical_bytes)?,
             commitment

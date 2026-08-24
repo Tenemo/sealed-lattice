@@ -1,16 +1,15 @@
-#[cfg(test)]
 use std::ops::Range;
 
 use num_bigint::BigUint;
-#[cfg(test)]
-use num_traits::One;
+use zeroize::Zeroize;
 
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::{
-    bgv::parameters::{DATA_PRIMES, SPECIAL_PRIMES},
+    bgv::parameters::SPECIAL_PRIMES,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = DATA_PRIMES.len();
+pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = 3;
 pub(crate) const KEY_SWITCH_SPECIAL_PRIMES: [u64; SPECIAL_PRIMES.len()] = SPECIAL_PRIMES;
 
 pub(crate) fn key_switch_special_basis_modulus_product() -> BigUint {
@@ -18,6 +17,46 @@ pub(crate) fn key_switch_special_basis_modulus_product() -> BigUint {
         .iter()
         .map(|modulus| BigUint::from(*modulus))
         .product()
+}
+
+/// Requires the special-basis modulus to strictly dominate every active
+/// decomposition-block modulus. Hybrid modulus down relies on this inequality;
+/// equality is not sufficient for centered reconstruction.
+pub(crate) fn validate_key_switch_special_basis_dominates_data_blocks(
+    data_moduli: &[u64],
+    special_moduli: &[u64],
+    data_primes_per_block: usize,
+) -> CanonicalResult<()> {
+    if data_moduli.is_empty()
+        || special_moduli.is_empty()
+        || data_primes_per_block == 0
+        || data_moduli
+            .iter()
+            .chain(special_moduli)
+            .any(|modulus| *modulus < 2)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "hybrid key-switch dominance requires non-empty valid moduli and a positive block size",
+        ));
+    }
+    let special_basis_modulus = special_moduli
+        .iter()
+        .map(|modulus| BigUint::from(*modulus))
+        .product::<BigUint>();
+    for data_block in data_moduli.chunks(data_primes_per_block) {
+        let data_block_modulus = data_block
+            .iter()
+            .map(|modulus| BigUint::from(*modulus))
+            .product::<BigUint>();
+        if special_basis_modulus <= data_block_modulus {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "hybrid key-switch special basis does not strictly dominate an active data block",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Canonical little-endian residue width for one modulus-owned stream.
@@ -40,7 +79,6 @@ pub(crate) fn canonical_residue_byte_length(modulus: u64) -> CanonicalResult<usi
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg(test)]
 pub(crate) struct KeySwitchDecompositionTopology {
     level: usize,
     data_primes_per_block: usize,
@@ -48,7 +86,20 @@ pub(crate) struct KeySwitchDecompositionTopology {
     extended_moduli: Vec<u64>,
 }
 
-#[cfg(test)]
+impl Zeroize for KeySwitchDecompositionTopology {
+    fn zeroize(&mut self) {
+        self.level.zeroize();
+        self.data_primes_per_block.zeroize();
+        for block_range in &mut self.data_block_ranges {
+            block_range.start.zeroize();
+            block_range.end.zeroize();
+        }
+        self.data_block_ranges.clear();
+        self.data_block_ranges.spare_capacity_mut().zeroize();
+        self.extended_moduli.zeroize();
+    }
+}
+
 impl KeySwitchDecompositionTopology {
     pub(crate) fn for_level(level: usize) -> CanonicalResult<Self> {
         Self::for_level_with_data_primes_per_block(level, KEY_SWITCH_DATA_PRIMES_PER_BLOCK)
@@ -77,27 +128,18 @@ impl KeySwitchDecompositionTopology {
             ));
         }
 
+        validate_key_switch_special_basis_dominates_data_blocks(
+            &DATA_PRIMES[..data_prime_count],
+            &KEY_SWITCH_SPECIAL_PRIMES,
+            data_primes_per_block,
+        )?;
+
         let data_block_ranges: Vec<Range<usize>> = (0..data_prime_count)
             .step_by(data_primes_per_block)
             .map(|block_start| {
                 block_start..data_prime_count.min(block_start + data_primes_per_block)
             })
             .collect();
-        let special_basis_modulus_product = key_switch_special_basis_modulus_product();
-        let has_undersized_special_basis = data_block_ranges.iter().any(|data_block_range| {
-            DATA_PRIMES[data_block_range.clone()]
-                .iter()
-                .fold(BigUint::one(), |product, modulus| {
-                    product * BigUint::from(*modulus)
-                })
-                >= special_basis_modulus_product
-        });
-        if has_undersized_special_basis {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "hybrid key-switch special-basis product must exceed every data-block product",
-            ));
-        }
         let mut extended_moduli = DATA_PRIMES[..data_prime_count].to_vec();
         extended_moduli.extend(KEY_SWITCH_SPECIAL_PRIMES);
 
@@ -117,6 +159,7 @@ impl KeySwitchDecompositionTopology {
         self.level + 1
     }
 
+    #[cfg(test)]
     pub(crate) fn data_primes_per_block(&self) -> usize {
         self.data_primes_per_block
     }
@@ -149,6 +192,7 @@ impl KeySwitchDecompositionTopology {
         self.extended_moduli.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn special_limb_count(&self) -> usize {
         KEY_SWITCH_SPECIAL_PRIMES.len()
     }
@@ -185,6 +229,7 @@ impl KeySwitchDecompositionTopology {
         checked_component_byte_length(self.data_block_count(), ring_degree, bytes_per_coefficient)
     }
 
+    #[cfg(test)]
     pub(crate) fn projection_indices_for_level(
         &self,
         projected_level: usize,
@@ -203,7 +248,6 @@ impl KeySwitchDecompositionTopology {
     }
 }
 
-#[cfg(test)]
 fn checked_component_byte_length(
     data_block_count: usize,
     ring_degree: usize,
@@ -220,7 +264,6 @@ fn checked_component_byte_length(
         .ok_or_else(component_byte_length_overflow)
 }
 
-#[cfg(test)]
 fn component_byte_length_overflow() -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
@@ -231,6 +274,7 @@ fn component_byte_length_overflow() -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
     #[test]
     fn topology_uses_contiguous_data_blocks_and_the_full_special_basis() {
@@ -279,40 +323,112 @@ mod tests {
     }
 
     #[test]
+    fn special_basis_dominance_is_strict_and_covers_every_active_block() {
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3, 5], &[7], 2).is_ok()
+        );
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3], &[6], 2).is_err(),
+            "an equal special and data-block product must be rejected"
+        );
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3], &[5], 2).is_err(),
+            "a smaller special-basis product must be rejected"
+        );
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3, 5], &[5], 2).is_err(),
+            "every block, not only the final partial block, must be dominated"
+        );
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[], &[7], 1).is_err());
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[2], &[], 1).is_err());
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[2], &[7], 0).is_err());
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[1], &[7], 1).is_err());
+    }
+
+    #[test]
+    fn every_level_and_block_size_matches_the_exact_dominance_inequality() {
+        let special_basis_modulus_product = key_switch_special_basis_modulus_product();
+        for level in 0..DATA_PRIMES.len() {
+            for data_primes_per_block in 1..=DATA_PRIMES.len() + 1 {
+                let expected_to_pass =
+                    DATA_PRIMES[..=level]
+                        .chunks(data_primes_per_block)
+                        .all(|data_block| {
+                            let data_block_modulus_product = data_block
+                                .iter()
+                                .map(|modulus| BigUint::from(*modulus))
+                                .product::<BigUint>();
+                            special_basis_modulus_product > data_block_modulus_product
+                        });
+                assert_eq!(
+                    KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(
+                        level,
+                        data_primes_per_block,
+                    )
+                    .is_ok(),
+                    expected_to_pass,
+                    "dominance decision drifted at level {level} and block size {data_primes_per_block}",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn component_lengths_distinguish_compact_wire_bytes_from_resident_words() {
         let topology = KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(
             DATA_PRIMES.len() - 1,
             KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
         )
         .expect("full selected topology");
+        let coefficient_count = topology
+            .data_block_count()
+            .checked_mul(POLYNOMIAL_DEGREE)
+            .expect("selected component coefficient count");
+        let wire_bytes_per_coefficient = topology
+            .extended_moduli()
+            .iter()
+            .map(|modulus| canonical_residue_byte_length(*modulus).expect("selected residue width"))
+            .sum::<usize>();
+        let expected_wire_byte_length = coefficient_count
+            .checked_mul(wire_bytes_per_coefficient)
+            .and_then(|length| u64::try_from(length).ok())
+            .expect("selected wire length fits u64");
+        let expected_resident_byte_length = coefficient_count
+            .checked_mul(topology.extended_limb_count())
+            .and_then(|length| length.checked_mul(std::mem::size_of::<u64>()))
+            .and_then(|length| u64::try_from(length).ok())
+            .expect("selected resident length fits u64");
 
         assert_eq!(
             topology
-                .canonical_component_wire_byte_length(32_768)
+                .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)
                 .expect("wire length"),
-            6_684_672
+            expected_wire_byte_length
         );
         assert_eq!(
             topology
-                .resident_component_byte_length(32_768)
+                .resident_component_byte_length(POLYNOMIAL_DEGREE)
                 .expect("resident length"),
-            8_912_896
+            expected_resident_byte_length
         );
+        assert!(expected_wire_byte_length < expected_resident_byte_length);
         assert!(topology.resident_component_byte_length(usize::MAX).is_err());
     }
 
     #[test]
-    fn complete_special_basis_product_exceeds_every_selected_data_block_product() {
+    fn selected_topology_keeps_exact_block_geometry_with_dominating_special_modulus() {
         let topology = KeySwitchDecompositionTopology::for_level(DATA_PRIMES.len() - 1)
             .expect("full selected topology");
         let special_basis_modulus_product = key_switch_special_basis_modulus_product();
+        let selected_block_ranges = [0..3, 3..6, 6..9, 9..12, 12..15, 15..18, 18..21, 21..23];
 
-        assert_eq!(topology.data_block_count(), 1);
-        for data_block_index in 0..topology.data_block_count() {
-            let data_block_range = topology
-                .data_block_range(data_block_index)
-                .expect("selected data block");
-            let data_block_modulus_product = DATA_PRIMES[data_block_range]
+        assert_eq!(topology.data_block_count(), selected_block_ranges.len());
+        for (block_index, expected_block_range) in selected_block_ranges.into_iter().enumerate() {
+            let block_range = topology
+                .data_block_range(block_index)
+                .expect("selected block range");
+            assert_eq!(block_range, expected_block_range);
+            let data_block_modulus_product = DATA_PRIMES[block_range]
                 .iter()
                 .map(|modulus| BigUint::from(*modulus))
                 .product::<BigUint>();

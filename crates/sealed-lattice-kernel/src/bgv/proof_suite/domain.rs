@@ -1,118 +1,88 @@
-use std::sync::OnceLock;
+use crate::foundation::{PRIVATE_PROOF_SALT_PURPOSE, ProofApplicationSlotCeilings};
 
-use crate::{
-    foundation::{PRIVATE_PROOF_SALT_PURPOSE, ProofApplicationSlotCeilings},
-    hashing::hash_framed_parts_512 as hash512,
-};
-
-const PROOF_TRANSCRIPT_DOMAIN_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/transcript-domain-identifier/v1";
-const PROOF_TRANSCRIPT_DOMAIN_LABEL: &[u8] = b"sealed-lattice/common-proof-transcript/v1";
-const PROOF_TRANSCRIPT_DOMAIN_ENCODING_VERSION: u16 = 1;
-const PROOF_RANDOMNESS_ASSIGNMENT_COUNT: usize = 9;
+const PROOF_RANDOMNESS_ASSIGNMENT_COUNT: usize = 12;
+#[cfg(test)]
+pub(crate) const TRACE_MASK_RANDOMNESS_PURPOSE_CLASS: u16 = 1;
+#[cfg(test)]
+pub(crate) const TELESCOPING_MASK_RANDOMNESS_PURPOSE_CLASS: u16 = 2;
+#[cfg(test)]
+pub(crate) const OPENING_MASK_RANDOMNESS_PURPOSE_CLASS: u16 = 3;
+#[cfg(test)]
+const PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES: [u16; 3] = [
+    TRACE_MASK_RANDOMNESS_PURPOSE_CLASS,
+    TELESCOPING_MASK_RANDOMNESS_PURPOSE_CLASS,
+    OPENING_MASK_RANDOMNESS_PURPOSE_CLASS,
+];
+pub(crate) const HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS: u16 = 4;
 
 #[derive(Clone, Copy)]
 struct ProofRandomnessAssignment {
     family_schema_identifier: u16,
-    first_mask_purpose: u16,
-    last_mask_purpose: u16,
+    relation_witness_is_private: bool,
 }
 
 impl ProofRandomnessAssignment {
+    const fn secret_bearing(family_schema_identifier: u16) -> Self {
+        Self {
+            family_schema_identifier,
+            relation_witness_is_private: true,
+        }
+    }
+
+    const fn public_witness(family_schema_identifier: u16) -> Self {
+        Self {
+            family_schema_identifier,
+            relation_witness_is_private: false,
+        }
+    }
+
     const fn contains(self, purpose: u16) -> bool {
-        purpose == PRIVATE_PROOF_SALT_PURPOSE
-            || (purpose >= self.first_mask_purpose && purpose <= self.last_mask_purpose)
+        purpose == HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS
+            || (self.relation_witness_is_private
+                && (purpose == PRIVATE_PROOF_SALT_PURPOSE || matches!(purpose, 1..=3)))
     }
 }
 
-// These are the operative mask-purpose allocations consumed by the generated
-// secret-bearing relation plans. Public-only families are intentionally absent:
-// they allocate neither private masks nor a private proof-salt stream.
+// Every family receives an independently keyed aggregate-wide hiding stream.
+// Only secret-bearing relation plans receive relation-mask and row-pad streams.
 const PROOF_RANDOMNESS_ASSIGNMENTS: [ProofRandomnessAssignment; PROOF_RANDOMNESS_ASSIGNMENT_COUNT] = [
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 1,
-        last_mask_purpose: 2,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 3,
-        last_mask_purpose: 4,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 5,
-        last_mask_purpose: 6,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 7,
-        last_mask_purpose: 8,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 9,
-        last_mask_purpose: 40,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 41,
-        last_mask_purpose: 42,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 43,
-        last_mask_purpose: 44,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 45,
-        last_mask_purpose: 46,
-    },
-    ProofRandomnessAssignment {
-        family_schema_identifier:
-            ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-        first_mask_purpose: 47,
-        last_mask_purpose: 48,
-    },
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::public_witness(
+        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::public_witness(
+        ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::public_witness(
+        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
+    ProofRandomnessAssignment::secret_bearing(
+        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ),
 ];
-
-pub(crate) fn common_proof_transcript_domain_id() -> [u8; 64] {
-    static DOMAIN_IDENTIFIER: OnceLock<[u8; 64]> = OnceLock::new();
-    *DOMAIN_IDENTIFIER.get_or_init(|| {
-        let mut canonical_assignment_bytes =
-            Vec::with_capacity(4 + PROOF_RANDOMNESS_ASSIGNMENTS.len() * 6);
-        canonical_assignment_bytes
-            .extend_from_slice(&PROOF_TRANSCRIPT_DOMAIN_ENCODING_VERSION.to_le_bytes());
-        canonical_assignment_bytes
-            .extend_from_slice(&(PROOF_RANDOMNESS_ASSIGNMENT_COUNT as u16).to_le_bytes());
-        for assignment in PROOF_RANDOMNESS_ASSIGNMENTS {
-            canonical_assignment_bytes
-                .extend_from_slice(&assignment.family_schema_identifier.to_le_bytes());
-            canonical_assignment_bytes
-                .extend_from_slice(&assignment.first_mask_purpose.to_le_bytes());
-            canonical_assignment_bytes
-                .extend_from_slice(&assignment.last_mask_purpose.to_le_bytes());
-        }
-
-        hash512(
-            PROOF_TRANSCRIPT_DOMAIN_HASH_DOMAIN,
-            &[
-                PROOF_TRANSCRIPT_DOMAIN_LABEL,
-                &PRIVATE_PROOF_SALT_PURPOSE.to_le_bytes(),
-                &canonical_assignment_bytes,
-            ],
-        )
-    })
-}
 
 pub(crate) fn common_proof_randomness_purpose_is_assigned(
     family_schema_identifier: u16,
@@ -135,39 +105,56 @@ mod tests {
     struct ProofRandomnessAssignmentVector {
         family_name: String,
         family_schema_identifier: u16,
-        first_purpose: u16,
-        last_purpose: u16,
+        relation_witness_is_private: bool,
     }
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
-    struct ProofRandomnessPurposeRangesVector {
-        private_proof_salt_purpose: u16,
-        ranges: Vec<ProofRandomnessAssignmentVector>,
+    struct ProofRandomnessPurposeClassesVector {
+        trace: u16,
+        telescoping: u16,
+        opening: u16,
     }
 
-    #[test]
-    fn transcript_domain_identifier_is_deterministic_and_nonzero() {
-        let first = common_proof_transcript_domain_id();
-        let second = common_proof_transcript_domain_id();
-        assert_eq!(first, second);
-        assert_ne!(first, [0_u8; 64]);
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ProofRandomnessCoordinatesVector {
+        private_proof_salt_purpose: u16,
+        hiding_argument_purpose: u16,
+        mask_purpose_classes: ProofRandomnessPurposeClassesVector,
+        families: Vec<ProofRandomnessAssignmentVector>,
     }
 
     #[test]
     fn proof_randomness_assignments_accept_only_bound_family_ranges() {
+        let assigned_family_schema_identifiers = PROOF_RANDOMNESS_ASSIGNMENTS
+            .iter()
+            .map(|assignment| assignment.family_schema_identifier)
+            .collect::<std::collections::BTreeSet<_>>();
         for assignment in PROOF_RANDOMNESS_ASSIGNMENTS {
+            for relation_mask_purpose in PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES {
+                assert_eq!(
+                    common_proof_randomness_purpose_is_assigned(
+                        assignment.family_schema_identifier,
+                        relation_mask_purpose,
+                    ),
+                    assignment.relation_witness_is_private,
+                );
+            }
             assert!(common_proof_randomness_purpose_is_assigned(
                 assignment.family_schema_identifier,
-                assignment.first_mask_purpose,
+                HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS,
             ));
-            assert!(common_proof_randomness_purpose_is_assigned(
+            assert_eq!(
+                common_proof_randomness_purpose_is_assigned(
+                    assignment.family_schema_identifier,
+                    PRIVATE_PROOF_SALT_PURPOSE,
+                ),
+                assignment.relation_witness_is_private,
+            );
+            assert!(!common_proof_randomness_purpose_is_assigned(
                 assignment.family_schema_identifier,
-                assignment.last_mask_purpose,
-            ));
-            assert!(common_proof_randomness_purpose_is_assigned(
-                assignment.family_schema_identifier,
-                PRIVATE_PROOF_SALT_PURPOSE,
+                5,
             ));
             assert!(!common_proof_randomness_purpose_is_assigned(
                 assignment.family_schema_identifier,
@@ -186,32 +173,75 @@ mod tests {
                 public_only_family,
                 1,
             ));
+            assert!(common_proof_randomness_purpose_is_assigned(
+                public_only_family,
+                HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS,
+            ));
         }
-        assert!(!common_proof_randomness_purpose_is_assigned(0xffff, 1));
-        assert!(!common_proof_randomness_purpose_is_assigned(0x1211, 3));
-        assert!(!common_proof_randomness_purpose_is_assigned(0x1217, 41));
+        let adjacent_unassigned_family_schema_identifiers = assigned_family_schema_identifiers
+            .iter()
+            .flat_map(|family_schema_identifier| {
+                [
+                    family_schema_identifier.checked_sub(1),
+                    family_schema_identifier.checked_add(1),
+                ]
+            })
+            .flatten()
+            .filter(|family_schema_identifier| {
+                !assigned_family_schema_identifiers.contains(family_schema_identifier)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(!adjacent_unassigned_family_schema_identifiers.is_empty());
+        for family_schema_identifier in adjacent_unassigned_family_schema_identifiers {
+            for purpose in [
+                PRIVATE_PROOF_SALT_PURPOSE,
+                TRACE_MASK_RANDOMNESS_PURPOSE_CLASS,
+                TELESCOPING_MASK_RANDOMNESS_PURPOSE_CLASS,
+                OPENING_MASK_RANDOMNESS_PURPOSE_CLASS,
+                HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS,
+            ] {
+                assert!(!common_proof_randomness_purpose_is_assigned(
+                    family_schema_identifier,
+                    purpose,
+                ));
+            }
+        }
     }
 
     #[test]
     fn proof_randomness_assignments_match_the_shared_runtime_vector() {
-        let vector: ProofRandomnessPurposeRangesVector =
-            serde_json::from_str(include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../test-vectors/private-randomness-purpose-ranges.json"
-            )))
-            .expect("private-randomness purpose-range vector must parse");
+        let vector: ProofRandomnessCoordinatesVector = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/private-randomness-proof-coordinates.json"
+        )))
+        .expect("private-randomness proof-coordinate vector must parse");
         assert_eq!(
             vector.private_proof_salt_purpose,
             PRIVATE_PROOF_SALT_PURPOSE
         );
-        assert_eq!(vector.ranges.len(), PROOF_RANDOMNESS_ASSIGNMENTS.len());
+        assert_eq!(
+            [
+                vector.mask_purpose_classes.trace,
+                vector.mask_purpose_classes.telescoping,
+                vector.mask_purpose_classes.opening,
+            ],
+            PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES,
+        );
+        assert_eq!(
+            vector.hiding_argument_purpose,
+            HIDING_ARGUMENT_RANDOMNESS_PURPOSE_CLASS,
+        );
+        assert_eq!(vector.families.len(), PROOF_RANDOMNESS_ASSIGNMENTS.len());
 
         let expected_family_names = [
             "sameSecret",
             "publicKeyShare",
+            "collectivePublicKeyAggregate",
             "relinearizationRoundOne",
+            "relinearizationRoundOneAggregate",
             "relinearizationRoundTwo",
             "galoisKeyShare",
+            "evaluatorKeyAggregate",
             "ballotValidity",
             "targetShareProof",
             "vssShareLinkage",
@@ -219,7 +249,7 @@ mod tests {
         ];
         for ((assignment, expected), expected_family_name) in PROOF_RANDOMNESS_ASSIGNMENTS
             .into_iter()
-            .zip(vector.ranges)
+            .zip(vector.families)
             .zip(expected_family_names)
         {
             assert_eq!(expected.family_name, expected_family_name);
@@ -227,8 +257,10 @@ mod tests {
                 assignment.family_schema_identifier,
                 expected.family_schema_identifier
             );
-            assert_eq!(assignment.first_mask_purpose, expected.first_purpose);
-            assert_eq!(assignment.last_mask_purpose, expected.last_purpose);
+            assert_eq!(
+                assignment.relation_witness_is_private,
+                expected.relation_witness_is_private,
+            );
         }
     }
 }

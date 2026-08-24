@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 
+use crate::bgv::proof_suite::row_code_whir::selected_row_code_whir_trace_mask_degree_bound_exclusive;
+
 use super::super::{
     bounds::{
         RelationBoundCertificate, RelationConstraintDescriptor, SemanticCellDescriptor,
@@ -27,14 +29,14 @@ use super::super::{
     },
     model::{
         ProofPrivacyMode, RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
-        RelationElementKind, RelationEmbeddingKind, RelationPlanError, RelationSelectorPathStep,
-        RelationTreeDescriptor, RelationValueLayout, RelationVerifierSource, SelectorPathStepKind,
-        SuiteModulusReference,
+        RelationPlanError, RelationSelectorPathStep, RelationTreeDescriptor, RelationValueLayout,
+        RelationVerifierSource, SelectorPathStepKind, SuiteModulusReference,
     },
 };
 use super::{
-    BoundedMaterialDigitWitnessLayout, BoundedUnsignedColumn, KeyRelationGeometry,
-    KeyRelationPlanBuilder, KeyVerifierSourceKey, MATERIAL_DIGIT_RADIX, ProofTreePhase, TRIT_RADIX,
+    BoundedMaterialDigitWitnessLayout, BoundedUnsignedColumn, EXACT_INTEGER_LIFT_RADIX,
+    EXACT_INTEGER_LIFT_RADIX_TRIT_COUNT, KeyRelationGeometry, KeyRelationPlanBuilder,
+    KeyVerifierSourceKey, MATERIAL_DIGIT_RADIX, ProofTreePhase, TRIT_RADIX,
     TRUSTEE_QUOTIENT_HIGH_RADIX, UpperBoundComparatorWitnessLayout,
 };
 
@@ -57,6 +59,13 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             source_ordinals,
             ordered_columns: Vec::new(),
             semantic_cells_by_column: BTreeMap::new(),
+            exact_radix_digits_by_column: BTreeMap::new(),
+            exact_carry_columns_by_component: BTreeMap::new(),
+            full_ring_suffix_columns_by_dependency: BTreeMap::new(),
+            full_ring_transpose_columns_by_dependency: BTreeMap::new(),
+            linear_evaluation_columns_by_dependency: BTreeMap::new(),
+            product_accumulator_columns_by_dependency: BTreeMap::new(),
+            reversed_columns_by_source_halves: BTreeMap::new(),
             bound_trees: Vec::new(),
             base_tree_columns: Vec::new(),
             auxiliary_tree_columns: Vec::new(),
@@ -390,13 +399,113 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 recomposition_constraint_ordinal,
                 modulus_reference,
                 radix: TRIT_RADIX,
-                ordered_digit_column_ordinals,
+                ordered_digit_column_ordinals: ordered_digit_column_ordinals.clone(),
                 ordered_comparator_constraint_ordinals,
                 ordered_difference_digit_column_ordinals,
                 ordered_borrow_column_ordinals,
             },
         )?;
+        self.register_exact_radix_decomposition(
+            target_column_ordinal,
+            modulus_reference,
+            Some(&ordered_digit_column_ordinals),
+        )?;
         Ok(target_column_ordinal)
+    }
+
+    pub(in crate::bgv::proof_suite::relation_plan) fn register_exact_radix_decomposition(
+        &mut self,
+        target_column_ordinal: u32,
+        modulus_reference: SuiteModulusReference,
+        existing_trit_column_ordinals: Option<&[u32]>,
+    ) -> Result<Vec<u32>, RelationPlanError> {
+        if let Some(digits) = self
+            .exact_radix_digits_by_column
+            .get(&target_column_ordinal)
+        {
+            return Ok(digits.clone());
+        }
+        let modulus = self.modulus(modulus_reference)?;
+        let trit_count = minimum_unsigned_radix_digit_count(modulus - 1, TRIT_RADIX)?;
+        if existing_trit_column_ordinals.is_some_and(|trits| trits.len() != trit_count) {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let exact_digit_count = trit_count.div_ceil(EXACT_INTEGER_LIFT_RADIX_TRIT_COUNT);
+        let mut exact_digit_columns = Vec::with_capacity(exact_digit_count);
+        for exact_digit_ordinal in 0..exact_digit_count {
+            let first_trit = exact_digit_ordinal
+                .checked_mul(EXACT_INTEGER_LIFT_RADIX_TRIT_COUNT)
+                .ok_or(RelationPlanError::CountOverflow)?;
+            let end_trit = (first_trit + EXACT_INTEGER_LIFT_RADIX_TRIT_COUNT).min(trit_count);
+            let exact_digit_column = self.push_prover_column(ProofTreePhase::Base)?;
+            let owned_trits;
+            let exact_digit_trits = if let Some(existing_trits) = existing_trit_column_ordinals {
+                &existing_trits[first_trit..end_trit]
+            } else {
+                owned_trits = self.add_trit_columns(end_trit - first_trit, ProofTreePhase::Base)?;
+                &owned_trits
+            };
+            self.certify_unsigned_recomposition(exact_digit_column, TRIT_RADIX, exact_digit_trits)?;
+            exact_digit_columns.push(exact_digit_column);
+        }
+        self.add_full_trace_constraint(
+            radix_recomposition_expression(
+                target_column_ordinal,
+                EXACT_INTEGER_LIFT_RADIX,
+                None,
+                &exact_digit_columns,
+                self.context.base_field_modulus,
+            )?,
+            true,
+        )?;
+        if self
+            .exact_radix_digits_by_column
+            .insert(target_column_ordinal, exact_digit_columns.clone())
+            .is_some()
+        {
+            return Err(RelationPlanError::DuplicateItem);
+        }
+        Ok(exact_digit_columns)
+    }
+
+    pub(in crate::bgv::proof_suite::relation_plan) fn add_centered_integer_column(
+        &mut self,
+        maximum_absolute_value: &BigUint,
+    ) -> Result<u32, RelationPlanError> {
+        let mut trit_count = 1_usize;
+        loop {
+            let capacity = BigUint::from(TRIT_RADIX)
+                .pow(u32::try_from(trit_count).map_err(|_| RelationPlanError::CountOverflow)?);
+            let offset = (&capacity - BigUint::one()) / BigUint::from(2_u8);
+            if &offset >= maximum_absolute_value {
+                let offset_u64 =
+                    u64::try_from(&offset).map_err(|_| RelationPlanError::IntegerBoundOverflow)?;
+                let target = self.push_prover_column(ProofTreePhase::Base)?;
+                let trits = self.add_trit_columns(trit_count, ProofTreePhase::Base)?;
+                let expression = radix_recomposition_expression(
+                    target,
+                    TRIT_RADIX,
+                    Some(&offset),
+                    &trits,
+                    self.context.base_field_modulus,
+                )?;
+                let constraint_ordinal = self.add_full_trace_constraint(expression, false)?;
+                self.insert_semantic_cell(
+                    target,
+                    SignedIntegerInterval::new(-i128::from(offset_u64), i128::from(offset_u64)),
+                    RelationBoundCertificate::ShiftedRadixRecomposition {
+                        constraint_ordinal,
+                        radix: TRIT_RADIX,
+                        offset,
+                        ordered_digit_column_ordinals: trits,
+                    },
+                )?;
+                return Ok(target);
+            }
+            trit_count = trit_count
+                .checked_add(1)
+                .ok_or(RelationPlanError::CountOverflow)?;
+        }
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_upper_bound_comparator(
@@ -463,6 +572,7 @@ impl KeyRelationPlanBuilder<'_> {
             return Err(RelationPlanError::InvalidOpening);
         }
         let trace_mask_degree_bound_exclusive = derived_trace_mask_degree_bound(
+            self.application_statement_schema_identifier,
             &self.ordered_columns,
             &required_rotations_by_column,
             self.geometry.trace_domain_size()?,
@@ -516,12 +626,12 @@ impl KeyRelationPlanBuilder<'_> {
             )
             .collect::<Result<Vec<_>, RelationPlanError>>()?;
 
-        let ordered_opening_points = (0..self.context.deep_point_count)
-            .flat_map(|deep_point_ordinal| {
+        let ordered_opening_points = (0..self.context.out_of_domain_point_count)
+            .flat_map(|out_of_domain_point_ordinal| {
                 used_rotations
                     .iter()
                     .map(move |rotation| RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
@@ -547,14 +657,14 @@ impl KeyRelationPlanBuilder<'_> {
                     .get(*column_ordinal as usize)
                     .ok_or(RelationPlanError::InvalidOpening)?
                     .source_degree_bound_exclusive;
-                for deep_point_ordinal in 0..self.context.deep_point_count {
+                for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                     for rotation in required_rotations_by_column
                         .get(column_ordinal)
                         .ok_or(RelationPlanError::InvalidOpening)?
                     {
                         let opening_point_ordinal = opening_point_ordinals
                             .get(&RelationOpeningPointDescriptor {
-                                deep_point_ordinal,
+                                out_of_domain_point_ordinal,
                                 trace_rotation_is_negative: rotation.0,
                                 trace_rotation_magnitude: rotation.1,
                                 conjugate_index: 0,
@@ -574,10 +684,10 @@ impl KeyRelationPlanBuilder<'_> {
             }
         }
         for quotient_ordinal in 0..self.context.quotient_component_count {
-            for deep_point_ordinal in 0..self.context.deep_point_count {
+            for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                 let opening_point_ordinal = opening_point_ordinals
                     .get(&RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: false,
                         trace_rotation_magnitude: 0,
                         conjugate_index: 0,
@@ -607,22 +717,21 @@ impl KeyRelationPlanBuilder<'_> {
                 .ok_or(RelationPlanError::DegreeBoundExceeded)?,
         });
 
-        let mut next_mask_purpose = self.geometry.first_mask_purpose;
+        let mut next_trace_mask_ordinal = 0_u32;
         let mut ordered_masks = Vec::new();
         for (column_ordinal, column) in self.ordered_columns.iter().enumerate() {
             if matches!(column.origin, RelationColumnOrigin::Prover) {
                 ordered_masks.push(RelationMaskDescriptor {
-                    mask_purpose: next_mask_purpose,
+                    mask_ordinal: next_trace_mask_ordinal,
                     mask_kind: RelationMaskKind::Trace,
                     target_class: RelationMaskTargetClass::Column,
                     target_ordinal: u32::try_from(column_ordinal)
                         .map_err(|_| RelationPlanError::CountOverflow)?,
                     mask_degree_bound_exclusive: trace_mask_degree_bound_exclusive,
                 });
-                next_mask_purpose = next_mask_purpose
+                next_trace_mask_ordinal = next_trace_mask_ordinal
                     .checked_add(1)
-                    .filter(|purpose| *purpose < 0xff00)
-                    .ok_or(RelationPlanError::MaskPurposeExhausted)?;
+                    .ok_or(RelationPlanError::CountOverflow)?;
             }
         }
         let quotient_component_count = self.context.quotient_component_count;
@@ -652,19 +761,15 @@ impl KeyRelationPlanBuilder<'_> {
             .ok_or(RelationPlanError::InvalidMaskGrammar)?;
         for quotient_ordinal in 0..quotient_component_count - 1 {
             ordered_masks.push(RelationMaskDescriptor {
-                mask_purpose: next_mask_purpose,
+                mask_ordinal: quotient_ordinal,
                 mask_kind: RelationMaskKind::Telescoping,
                 target_class: RelationMaskTargetClass::QuotientComponent,
                 target_ordinal: quotient_ordinal,
                 mask_degree_bound_exclusive: telescoping_degree,
             });
-            next_mask_purpose = next_mask_purpose
-                .checked_add(1)
-                .filter(|purpose| *purpose < 0xff00)
-                .ok_or(RelationPlanError::MaskPurposeExhausted)?;
         }
         ordered_masks.push(RelationMaskDescriptor {
-            mask_purpose: next_mask_purpose,
+            mask_ordinal: 0,
             mask_kind: RelationMaskKind::OpeningBatch,
             target_class: RelationMaskTargetClass::Batch,
             target_ordinal: 0,
@@ -708,6 +813,7 @@ impl KeyRelationPlanBuilder<'_> {
 }
 
 pub(in crate::bgv::proof_suite::relation_plan) fn derived_trace_mask_degree_bound(
+    application_statement_schema_identifier: u16,
     ordered_columns: &[RelationColumnDescriptor],
     required_rotations_by_column: &BTreeMap<u32, BTreeSet<(bool, u64)>>,
     trace_domain_size: u64,
@@ -725,24 +831,47 @@ pub(in crate::bgv::proof_suite::relation_plan) fn derived_trace_mask_degree_boun
                 .len(),
         )
         .map_err(|_| RelationPlanError::CountOverflow)?;
-        let deep_opening_view_count = u64::from(context.challenge_extension_degree)
-            .checked_mul(u64::from(context.deep_point_count))
+        let out_of_domain_opening_view_count = u64::from(context.challenge_extension_degree)
+            .checked_mul(u64::from(context.out_of_domain_point_count))
             .and_then(|count| count.checked_mul(rotation_count))
             .ok_or(RelationPlanError::CountOverflow)?;
-        let query_view_count = u64::from(context.unique_query_count)
-            .checked_mul(2)
-            .and_then(|count| count.checked_mul(rotation_count))
-            .ok_or(RelationPlanError::CountOverflow)?;
+        // A sampled row-code coordinate opens the physical column once. The
+        // relation's rotations add direct out-of-domain evaluations, but they
+        // do not duplicate a row-code query opening.
+        let query_view_count = u64::from(context.phase_column_query_coordinate_count);
         maximum_view_count = maximum_view_count.max(
-            deep_opening_view_count
+            out_of_domain_opening_view_count
                 .checked_add(query_view_count)
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
     }
-    if maximum_view_count == 0 || maximum_view_count > trace_domain_size {
+    construction_owned_trace_mask_degree_bound(
+        application_statement_schema_identifier,
+        maximum_view_count,
+        trace_domain_size,
+        context,
+    )
+}
+
+pub(in crate::bgv::proof_suite::relation_plan) fn construction_owned_trace_mask_degree_bound(
+    application_statement_schema_identifier: u16,
+    minimum_direct_view_rank: u64,
+    trace_domain_size: u64,
+    context: &RelationPlanCheckContext,
+) -> Result<u64, RelationPlanError> {
+    let mask_degree_bound_exclusive = selected_row_code_whir_trace_mask_degree_bound_exclusive(
+        application_statement_schema_identifier,
+        trace_domain_size,
+        context,
+    )
+    .unwrap_or(minimum_direct_view_rank);
+    if minimum_direct_view_rank == 0
+        || mask_degree_bound_exclusive < minimum_direct_view_rank
+        || mask_degree_bound_exclusive > trace_domain_size
+    {
         Err(RelationPlanError::InvalidMaskGrammar)
     } else {
-        Ok(maximum_view_count)
+        Ok(mask_degree_bound_exclusive)
     }
 }
 
@@ -764,6 +893,31 @@ pub(in crate::bgv::proof_suite::relation_plan) fn statement_root_source(
         },
         RelationVerifierSource::ApplicationStatement {
             value_path,
+            value_layout: RelationValueLayout::scalar_hash(),
+        },
+    )
+}
+
+pub(in crate::bgv::proof_suite::relation_plan) fn nested_statement_root_source(
+    field_ordinal: u64,
+    list_ordinal: u64,
+    nested_field_ordinal: u64,
+) -> (KeyVerifierSourceKey, RelationVerifierSource) {
+    (
+        KeyVerifierSourceKey::NestedStatementRoot {
+            field_ordinal,
+            list_ordinal,
+            nested_field_ordinal,
+        },
+        RelationVerifierSource::ApplicationStatement {
+            value_path: vec![
+                RelationSelectorPathStep::tuple_field(field_ordinal),
+                RelationSelectorPathStep {
+                    step_kind: SelectorPathStepKind::LiteralListIndex,
+                    argument: list_ordinal,
+                },
+                RelationSelectorPathStep::tuple_field(nested_field_ordinal),
+            ],
             value_layout: RelationValueLayout::scalar_hash(),
         },
     )
@@ -793,7 +947,7 @@ pub(in crate::bgv::proof_suite::relation_plan) fn bdlop_matrix_source(
                 u64::from(column),
             ],
             statement_binding_path: vec![RelationSelectorPathStep::tuple_field(0)],
-            value_layout: centered_residue_vector(modulus_reference, ring_degree),
+            value_layout: least_nonnegative_residue_vector(modulus_reference, ring_degree),
         },
     )
 }
@@ -987,21 +1141,9 @@ pub(in crate::bgv::proof_suite::relation_plan) fn public_key_common_reference_so
             protocol_source_kind: 6,
             source_coordinates: vec![u64::from(data_modulus_index)],
             statement_binding_path: vec![RelationSelectorPathStep::tuple_field(0)],
-            value_layout: centered_residue_vector(modulus_reference, ring_degree),
+            value_layout: least_nonnegative_residue_vector(modulus_reference, ring_degree),
         },
     )
-}
-
-pub(in crate::bgv::proof_suite::relation_plan) fn centered_residue_vector(
-    modulus_reference: SuiteModulusReference,
-    element_count: u64,
-) -> RelationValueLayout {
-    RelationValueLayout {
-        element_kind: RelationElementKind::Residue,
-        residue_modulus: Some(modulus_reference),
-        shape: vec![element_count],
-        embedding_kind: RelationEmbeddingKind::Centered,
-    }
 }
 
 pub(in crate::bgv::proof_suite::relation_plan) fn least_nonnegative_residue_vector(

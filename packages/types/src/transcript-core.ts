@@ -1,8 +1,6 @@
 export const canonicalErrorCodeValues = [
     'ComponentMismatch',
     'DuplicateField',
-    'FixtureMismatch',
-    'InvalidChunkSize',
     'InvalidEnum',
     'InvalidProtocolObject',
     'InvalidHex',
@@ -12,7 +10,6 @@ export const canonicalErrorCodeValues = [
     'MalformedVarUint',
     'NonCanonicalVarUint',
     'TrailingBytes',
-    'UnsupportedObjectType',
     'UnsupportedObjectVersion',
 ] as const;
 

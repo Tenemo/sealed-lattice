@@ -1,4 +1,4 @@
-import type { ProtocolHash } from '@sealed-lattice/types';
+import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import { openFoundationCeremonyRuntime } from '#packages/wasm/src/index';
@@ -15,11 +15,14 @@ const openRuntimeWithMethods = (methods: Readonly<Record<string, unknown>>) =>
 
 const manifestInput = () => ({
     displayTitle: 'Foundation vote',
-    optionDefinitions: Array.from({ length: 20 }, (_unused, optionIndex) => ({
-        displayLabel: `Option ${String(optionIndex)}`,
-        optionIdentifier: `option-${String(optionIndex)}`,
-        optionIndex,
-    })),
+    optionDefinitions: Array.from(
+        { length: foundationProfile.optionCount },
+        (_unused, optionIndex) => ({
+            displayLabel: `Option ${String(optionIndex)}`,
+            optionIdentifier: `option-${String(optionIndex)}`,
+            optionIndex,
+        }),
+    ),
 });
 
 const detachBytes = (): Uint8Array => {

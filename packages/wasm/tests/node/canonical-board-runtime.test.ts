@@ -1,4 +1,4 @@
-import { foundationProfile } from '@sealed-lattice/types';
+import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,6 +9,7 @@ import {
     type CanonicalBoardKernelContext,
     type CanonicalBoardContextInput,
 } from '../../src/canonical-board-runtime.js';
+import { mlDsa65SignatureByteLength } from '../../src/state-verifier-runtime/contracts.js';
 import type { TranscriptCoreKernel } from '../../src/transcript-core-bridge/kernel-types.js';
 
 const contextInput = (): CanonicalBoardContextInput => ({
@@ -37,6 +38,10 @@ const requireValid = <Value>(result: {
 
 type FakeKernel = Readonly<{
     allocations: ReadonlyMap<number, number>;
+    candidateListCancellations: number[];
+    candidateListFinishStatus: { value: number };
+    candidateListFinishes: number[];
+    candidateListPreparations: readonly (readonly number[])[];
     cancelledHandles: readonly number[];
     context: CanonicalBoardKernelContext;
     framedCarrierInputs: readonly Uint8Array[];
@@ -46,8 +51,14 @@ type FakeKernel = Readonly<{
 const createFakeKernel = (verifyStatus = 0): FakeKernel => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     const allocations = new Map<number, number>();
+    const candidateListCancellations: number[] = [];
+    const candidateListFinishStatus = { value: 0 };
+    const candidateListFinishes: number[] = [];
+    const candidateListPreparations: number[][] = [];
     const cancelledHandles: number[] = [];
     const framedCarrierInputs: Uint8Array[] = [];
+    let candidateListPublicationState: 'available' | 'prepared' | 'spent' =
+        'available';
     let nextPointer = 8;
     const ensureCapacity = (requiredByteLength: number): void => {
         const missingByteLength = requiredByteLength - memory.buffer.byteLength;
@@ -80,6 +91,22 @@ const createFakeKernel = (verifyStatus = 0): FakeKernel => {
         ) => {
             new DataView(memory.buffer).setUint32(statusPointer, 0, true);
             return 3;
+        },
+        cancelBallotCandidateList: (
+            _sessionHandle,
+            _capabilityPointer,
+            _capabilityLength,
+            preparedCarrierHandle,
+        ) => {
+            if (
+                candidateListPublicationState !== 'prepared' ||
+                preparedCarrierHandle !== 41
+            ) {
+                return refusalReasonCodes.consumedState;
+            }
+            candidateListPublicationState = 'available';
+            candidateListCancellations.push(preparedCarrierHandle);
+            return 0;
         },
         cancel: (sessionHandle) => {
             cancelledHandles.push(sessionHandle);
@@ -135,7 +162,105 @@ const createFakeKernel = (verifyStatus = 0): FakeKernel => {
             );
             return 0;
         },
+        finishBallotCandidateList: (
+            _sessionHandle,
+            _capabilityPointer,
+            _capabilityLength,
+            preparedCarrierHandle,
+            signaturePointer,
+            signatureLength,
+            outputPointer,
+            outputLength,
+        ) => {
+            if (
+                candidateListPublicationState !== 'prepared' ||
+                preparedCarrierHandle !== 41
+            ) {
+                return refusalReasonCodes.consumedState;
+            }
+            candidateListPublicationState = 'spent';
+            candidateListFinishes.push(preparedCarrierHandle);
+            if (
+                signatureLength !== mlDsa65SignatureByteLength ||
+                outputLength !== 5 ||
+                new Uint8Array(
+                    memory.buffer,
+                    signaturePointer,
+                    signatureLength,
+                ).some((byte) => byte !== 0x5a)
+            ) {
+                return refusalReasonCodes.wrongTypeOrLength;
+            }
+            if (candidateListFinishStatus.value !== 0) {
+                return candidateListFinishStatus.value;
+            }
+            new Uint8Array(memory.buffer).set(
+                [0xc1, 0xc2, 0xc3, 0xc4, 0xc5],
+                outputPointer,
+            );
+            return 0;
+        },
         memory,
+        prepareBallotCandidateList: (
+            _sessionHandle,
+            _capabilityPointer,
+            _capabilityLength,
+            framedHandlesPointer,
+            framedHandlesLength,
+            canonicalCarrierLengthOutputPointer,
+            signatureMessageOutputPointer,
+            signatureMessageOutputLength,
+            statusPointer,
+        ) => {
+            if (candidateListPublicationState !== 'available') {
+                new DataView(memory.buffer).setUint32(
+                    statusPointer,
+                    refusalReasonCodes.consumedState,
+                    true,
+                );
+                return 0;
+            }
+            const framedHandles = new Uint8Array(
+                memory.buffer,
+                framedHandlesPointer,
+                framedHandlesLength,
+            );
+            const view = new DataView(
+                framedHandles.buffer,
+                framedHandles.byteOffset,
+                framedHandles.byteLength,
+            );
+            const handleCount = view.getUint32(0, true);
+            if (
+                signatureMessageOutputLength !== 64 ||
+                framedHandlesLength !== 4 + handleCount * 4
+            ) {
+                new DataView(memory.buffer).setUint32(
+                    statusPointer,
+                    refusalReasonCodes.wrongTypeOrLength,
+                    true,
+                );
+                return 0;
+            }
+            candidateListPreparations.push(
+                Array.from({ length: handleCount }, (_, handleIndex) =>
+                    view.getUint32(4 + handleIndex * 4, true),
+                ),
+            );
+            candidateListPublicationState = 'prepared';
+            new DataView(memory.buffer).setUint32(
+                canonicalCarrierLengthOutputPointer,
+                5,
+                true,
+            );
+            new Uint8Array(memory.buffer).fill(
+                0xa5,
+                signatureMessageOutputPointer,
+                signatureMessageOutputPointer + 64,
+            );
+            new DataView(memory.buffer).setUint32(statusPointer, 0, true);
+            return 41;
+        },
         release: () => 0,
         runExclusive: (_operationName, operation) => operation(),
         verifyUnordered: (
@@ -173,6 +298,10 @@ const createFakeKernel = (verifyStatus = 0): FakeKernel => {
     registerCanonicalBoardKernelContext(kernel, context);
     return {
         allocations,
+        candidateListCancellations,
+        candidateListFinishStatus,
+        candidateListFinishes,
+        candidateListPreparations,
         cancelledHandles,
         context,
         framedCarrierInputs,
@@ -189,20 +318,9 @@ describe('canonical board WASM runtime', () => {
                 kernel: fake.kernel,
             }),
         );
-        const untrustedCarrier = Object.defineProperty(
-            {
-                canonicalCarrier: Uint8Array.of(0x71, 0x72, 0x73),
-                claimedProducer: 'relay-selected',
-            },
-            'claimedFamily',
-            {
-                get: () => {
-                    throw new Error(
-                        'unknown relay metadata must remain unread',
-                    );
-                },
-            },
-        );
+        const untrustedCarrier = {
+            canonicalCarrier: Uint8Array.of(0x71, 0x72, 0x73),
+        };
         const first = requireValid(
             session.verifyUnorderedCarriers([untrustedCarrier]),
         )[0];
@@ -289,6 +407,152 @@ describe('canonical board WASM runtime', () => {
         expect(fake.allocations.size).toBe(1);
         session.close();
         expect(fake.allocations.size).toBe(0);
+    });
+
+    it('produces one candidate-list carrier from board-owned ballot packages', () => {
+        const fake = createFakeKernel();
+        const session = requireValid(
+            openCanonicalBoardVerifierSession({
+                contextInput: contextInput(),
+                kernel: fake.kernel,
+            }),
+        );
+        const [ballotPackageObject] = requireValid(
+            session.verifyUnorderedCarriers([
+                { canonicalCarrier: Uint8Array.of(0x71) },
+            ]),
+        );
+        if (ballotPackageObject === undefined) {
+            throw new Error('The fake ballot package was not verified.');
+        }
+        const observedSignatureMessages: Uint8Array[] = [];
+        const signatureOperation = Object.freeze({
+            signBallotCandidateListMessage: (
+                signatureMessageHash: Uint8Array,
+            ) => {
+                observedSignatureMessages.push(signatureMessageHash.slice());
+                return new Uint8Array(mlDsa65SignatureByteLength).fill(0x5a);
+            },
+        });
+
+        expect(
+            session.produceBallotCandidateListCarrier({
+                ballotPackageObjects: [ballotPackageObject],
+                signatureOperation,
+            }),
+        ).toEqual({
+            isValid: true,
+            value: {
+                canonicalBallotCandidateListCarrier: Uint8Array.of(
+                    0xc1,
+                    0xc2,
+                    0xc3,
+                    0xc4,
+                    0xc5,
+                ),
+            },
+        });
+        expect(observedSignatureMessages).toEqual([
+            new Uint8Array(64).fill(0xa5),
+        ]);
+        expect(fake.candidateListPreparations).toEqual([[7]]);
+        expect(fake.candidateListFinishes).toEqual([41]);
+        expect(fake.candidateListCancellations).toEqual([]);
+        expect(
+            session.produceBallotCandidateListCarrier({
+                ballotPackageObjects: [ballotPackageObject],
+                signatureOperation,
+            }),
+        ).toEqual({
+            isValid: false,
+            refusalReason: 'consumedState',
+        });
+
+        session.close();
+        expect(fake.allocations.size).toBe(0);
+    });
+
+    it('cancels before finish but spends every exact candidate-list signature attempt', () => {
+        const cancelledFake = createFakeKernel();
+        const cancelledSession = requireValid(
+            openCanonicalBoardVerifierSession({
+                contextInput: contextInput(),
+                kernel: cancelledFake.kernel,
+            }),
+        );
+        const [cancelledBallotPackageObject] = requireValid(
+            cancelledSession.verifyUnorderedCarriers([
+                { canonicalCarrier: Uint8Array.of(0x72) },
+            ]),
+        );
+        if (cancelledBallotPackageObject === undefined) {
+            throw new Error('The fake ballot package was not verified.');
+        }
+        expect(
+            cancelledSession.produceBallotCandidateListCarrier({
+                ballotPackageObjects: [cancelledBallotPackageObject],
+                signatureOperation: {
+                    signBallotCandidateListMessage: () =>
+                        new Uint8Array(mlDsa65SignatureByteLength - 1),
+                },
+            }),
+        ).toEqual({
+            isValid: false,
+            refusalReason: 'wrongTypeOrLength',
+        });
+        expect(cancelledFake.candidateListCancellations).toEqual([41]);
+        expect(
+            cancelledSession.produceBallotCandidateListCarrier({
+                ballotPackageObjects: [cancelledBallotPackageObject],
+                signatureOperation: {
+                    signBallotCandidateListMessage: () =>
+                        new Uint8Array(mlDsa65SignatureByteLength).fill(0x5a),
+                },
+            }).isValid,
+        ).toBe(true);
+        cancelledSession.close();
+
+        const refusedFake = createFakeKernel();
+        refusedFake.candidateListFinishStatus.value =
+            refusalReasonCodes.invalidSignature;
+        const refusedSession = requireValid(
+            openCanonicalBoardVerifierSession({
+                contextInput: contextInput(),
+                kernel: refusedFake.kernel,
+            }),
+        );
+        const [refusedBallotPackageObject] = requireValid(
+            refusedSession.verifyUnorderedCarriers([
+                { canonicalCarrier: Uint8Array.of(0x73) },
+            ]),
+        );
+        if (refusedBallotPackageObject === undefined) {
+            throw new Error('The fake ballot package was not verified.');
+        }
+        const exactSignatureOperation = {
+            signBallotCandidateListMessage: () =>
+                new Uint8Array(mlDsa65SignatureByteLength).fill(0x5a),
+        };
+        expect(
+            refusedSession.produceBallotCandidateListCarrier({
+                ballotPackageObjects: [refusedBallotPackageObject],
+                signatureOperation: exactSignatureOperation,
+            }),
+        ).toEqual({
+            isValid: false,
+            refusalReason: 'invalidSignature',
+        });
+        expect(refusedFake.candidateListCancellations).toEqual([]);
+        expect(
+            refusedSession.produceBallotCandidateListCarrier({
+                ballotPackageObjects: [refusedBallotPackageObject],
+                signatureOperation: exactSignatureOperation,
+            }),
+        ).toEqual({
+            isValid: false,
+            refusalReason: 'consumedState',
+        });
+        refusedSession.close();
     });
 
     it('refuses an oversized aggregate carrier batch before WASM allocation', () => {

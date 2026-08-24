@@ -1,9 +1,9 @@
 import {
-    describeClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
-    releaseClosedWorkerCommonProofVerificationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
+    verifyAcceptedSetupCompactPublicKeyShareInClosedWorker,
+    type AcceptedSetupCompactPublicKeyVerificationInput,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type CommonProofGenerationWorkerOptions,
@@ -11,6 +11,7 @@ import {
     type VerifiedCommonProofCapability,
 } from '@sealed-lattice/wasm';
 
+import type { CheckpointOperationIdentity } from '../authenticated-checkpoint-store.js';
 import {
     BrowserActionStorageCustodyError,
     type BrowserActionStorageCustodyErrorCode,
@@ -22,10 +23,8 @@ import type {
 } from '../common-proof-browser-custody.js';
 
 import {
-    bytesEqual,
     copyBoundedBytes,
     copyBytes,
-    maximumCheckpointCollectionLength,
     maximumCheckpointDescriptorByteLength,
     mutationIdentifierByteLength,
     storageRootCommitmentByteLength,
@@ -116,6 +115,67 @@ export type CustodyWorkerLike = Pick<
 
 type InstalledCustodyWorkerHost = () => Promise<void>;
 
+export type InstalledAcceptedSetupCompactPublicKeyCheckpointDescription =
+    Readonly<{
+        checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
+        safeBoundaryOrdinal: number;
+    }>;
+
+type InstalledAcceptedSetupCompactPublicKeyVerificationInput = Omit<
+    AcceptedSetupCompactPublicKeyVerificationInput,
+    'options'
+> &
+    Readonly<{
+        checkpoint:
+            | Readonly<{
+                  mode: 'fresh';
+              }>
+            | Readonly<{
+                  checkpointLineageIdentifier: Uint8Array;
+                  mode: 'resumed';
+                  safeBoundaryOrdinal: number;
+              }>;
+        onCheckpointPublished?(
+            description: InstalledAcceptedSetupCompactPublicKeyCheckpointDescription,
+        ): Promise<void> | void;
+        options?: Readonly<{
+            maximumWorkUnitCountPerPoll?: number;
+            signal?: AbortSignal;
+            yieldControl?: () => Promise<void>;
+        }>;
+    }>;
+
+export const installedCustodyWorkerHostAcceptedSetupCompactPublicKeyVerifiers =
+    new WeakMap<
+        InstalledCustodyWorkerHost,
+        (
+            input: InstalledAcceptedSetupCompactPublicKeyVerificationInput,
+        ) => ReturnType<
+            typeof verifyAcceptedSetupCompactPublicKeyShareInClosedWorker
+        >
+    >();
+
+/** Internal accepted-family entry that executes inside the installed worker. */
+export const verifyAcceptedSetupCompactPublicKeyShareInInstalledCustodyWorker =
+    (
+        installedHost: InstalledCustodyWorkerHost,
+        input: InstalledAcceptedSetupCompactPublicKeyVerificationInput,
+    ): ReturnType<
+        typeof verifyAcceptedSetupCompactPublicKeyShareInClosedWorker
+    > => {
+        const verify =
+            installedCustodyWorkerHostAcceptedSetupCompactPublicKeyVerifiers.get(
+                installedHost,
+            );
+        if (verify === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The installed custody worker host cannot verify accepted-setup compact public-key proofs.',
+            );
+        }
+        return verify(input);
+    };
+
 export type InstalledCommonProofCapabilityTransfer = Readonly<{
     capability: VerifiedCommonProofCapability;
     restore(): void;
@@ -147,6 +207,9 @@ export type InstalledCommonProofApplicationInput = Readonly<{
 export const installedCommonProofExecutionEnvironmentBrand = Symbol(
     'installed-common-proof-execution-environment',
 );
+export const installedCommonProofCheckpointLineageReservationBrand = Symbol(
+    'installed-common-proof-checkpoint-lineage-reservation',
+);
 export const installedCommonProofPreparedOperationBrand = Symbol(
     'installed-common-proof-prepared-operation',
 );
@@ -155,21 +218,25 @@ export type InstalledCommonProofExecutionEnvironment = Readonly<{
     readonly [installedCommonProofExecutionEnvironmentBrand]: true;
 }>;
 
+export type InstalledCommonProofCheckpointLineageReservation = Readonly<{
+    readonly [installedCommonProofCheckpointLineageReservationBrand]: true;
+}>;
+
 export type InstalledCommonProofPreparedOperation = Readonly<{
     readonly [installedCommonProofPreparedOperationBrand]: true;
 }>;
 
 type OpenInstalledCommonProofExecutionEnvironmentInput = Readonly<{
     preparedOperation: InstalledCommonProofPreparedOperation;
-    resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
 }>;
 
 export type ResolvedInstalledCommonProofExecutionEnvironmentInput = Readonly<{
+    applicationStatementSchemaIdentifier: number;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
-    commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     foundationActionRandomnessHandleIdentifier: string;
     generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
     proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+    checkpointOperationIdentity?: CheckpointOperationIdentity;
     resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
 }>;
 
@@ -181,9 +248,9 @@ export const destroyCommonProofCheckpointResumeDescriptor = (
     }
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
-    for (const cursorBytes of descriptor.orderedPrivateRandomCursorBytes) {
-        cursorBytes.fill(0);
-    }
+    descriptor.externalMemoryStateDigest.fill(0);
+    descriptor.generationCursorManifestBytes.fill(0);
+    descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
 };
 
@@ -191,9 +258,10 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     descriptor: CommonProofCheckpointResumeDescriptor,
 ): CommonProofCheckpointResumeDescriptor => {
     if (
-        !Array.isArray(descriptor.orderedPrivateRandomCursorBytes) ||
-        descriptor.orderedPrivateRandomCursorBytes.length >
-            maximumCheckpointCollectionLength ||
+        !(descriptor.generationCursorManifestBytes instanceof Uint8Array) ||
+        descriptor.generationCursorManifestBytes.byteLength === 0 ||
+        descriptor.generationCursorManifestBytes.byteLength >
+            maximumCheckpointDescriptorByteLength ||
         !Number.isSafeInteger(descriptor.safeBoundaryOrdinal) ||
         descriptor.safeBoundaryOrdinal < 0 ||
         descriptor.safeBoundaryOrdinal > 0xffff_ffff
@@ -203,25 +271,13 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
             'The common-proof checkpoint resume descriptor is malformed or outside the worker-channel copy bound.',
         );
     }
-    let cursorAggregateByteLength = 0;
-    for (const cursorBytes of descriptor.orderedPrivateRandomCursorBytes) {
-        if (
-            !(cursorBytes instanceof Uint8Array) ||
-            cursorBytes.byteLength === 0 ||
-            cursorBytes.byteLength >
-                maximumCheckpointDescriptorByteLength -
-                    cursorAggregateByteLength
-        ) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The common-proof checkpoint cursors are malformed or exceed the aggregate worker-channel copy bound.',
-            );
-        }
-        cursorAggregateByteLength += cursorBytes.byteLength;
-    }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
-    const orderedPrivateRandomCursorBytes: Uint8Array<ArrayBuffer>[] = [];
+    let externalMemoryStateDigest = new Uint8Array(0);
+    let generationCursorManifestBytes = new Uint8Array(0);
+    let privateRandomnessStreamAttemptIdentifier:
+        | Uint8Array<ArrayBuffer>
+        | undefined;
     let stableAttemptBindingHash = new Uint8Array(0);
     try {
         checkpointLineageIdentifier = Uint8Array.from(
@@ -238,21 +294,30 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
                 'Checkpoint common-proof environment identifier',
             ),
         );
-        for (
-            let cursorIndex = 0;
-            cursorIndex < descriptor.orderedPrivateRandomCursorBytes.length;
-            cursorIndex += 1
-        ) {
-            orderedPrivateRandomCursorBytes.push(
-                Uint8Array.from(
-                    copyBoundedBytes(
-                        descriptor.orderedPrivateRandomCursorBytes[cursorIndex],
-                        maximumCheckpointDescriptorByteLength,
-                        `Common-proof checkpoint cursor ${String(cursorIndex)}`,
-                    ),
-                ),
-            );
-        }
+        externalMemoryStateDigest = Uint8Array.from(
+            copyBytes(
+                descriptor.externalMemoryStateDigest,
+                storageRootCommitmentByteLength,
+                'Checkpoint external-memory state digest',
+            ),
+        );
+        generationCursorManifestBytes = Uint8Array.from(
+            copyBoundedBytes(
+                descriptor.generationCursorManifestBytes,
+                maximumCheckpointDescriptorByteLength,
+                'Common-proof checkpoint cursor manifest',
+            ),
+        );
+        privateRandomnessStreamAttemptIdentifier =
+            descriptor.privateRandomnessStreamAttemptIdentifier === undefined
+                ? undefined
+                : Uint8Array.from(
+                      copyBytes(
+                          descriptor.privateRandomnessStreamAttemptIdentifier,
+                          mutationIdentifierByteLength,
+                          'Common-proof private-randomness stream-attempt identifier',
+                      ),
+                  );
         stableAttemptBindingHash = Uint8Array.from(
             copyBytes(
                 descriptor.stableAttemptBindingHash,
@@ -263,26 +328,29 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
-            orderedPrivateRandomCursorBytes: Object.freeze(
-                orderedPrivateRandomCursorBytes,
-            ),
+            externalMemoryStateDigest,
+            generationCursorManifestBytes,
+            ...(privateRandomnessStreamAttemptIdentifier === undefined
+                ? {}
+                : { privateRandomnessStreamAttemptIdentifier }),
             safeBoundaryOrdinal: descriptor.safeBoundaryOrdinal,
             stableAttemptBindingHash,
         });
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
-        for (const cursorBytes of orderedPrivateRandomCursorBytes) {
-            cursorBytes.fill(0);
-        }
+        externalMemoryStateDigest.fill(0);
+        generationCursorManifestBytes.fill(0);
+        privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);
         throw error;
     }
 };
 
 export type InstalledCommonProofPreparedOperationRecord = {
+    applicationStatementSchemaIdentifier: number;
+    checkpointOperationIdentity?: CheckpointOperationIdentity;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
-    commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     consumed: boolean;
     foundationActionRandomnessHandleIdentifier: string;
     generationFamilyAdapter:
@@ -290,6 +358,7 @@ export type InstalledCommonProofPreparedOperationRecord = {
         | undefined;
     installedHost: InstalledCustodyWorkerHost;
     proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+    resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
 };
 
 export const installedCommonProofPreparedOperationRecords = new WeakMap<
@@ -297,23 +366,117 @@ export const installedCommonProofPreparedOperationRecords = new WeakMap<
     InstalledCommonProofPreparedOperationRecord
 >();
 
+type InstalledCommonProofCheckpointLineageReservationRecord = {
+    checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
+    installedHost: InstalledCustodyWorkerHost;
+    state: 'available' | 'consumed';
+};
+
+export const installedCommonProofCheckpointLineageReservationRecords =
+    new WeakMap<
+        InstalledCommonProofCheckpointLineageReservation,
+        InstalledCommonProofCheckpointLineageReservationRecord
+    >();
+
+export const installedCustodyWorkerHostCommonProofCheckpointLineageReservers =
+    new WeakMap<
+        InstalledCustodyWorkerHost,
+        () => Promise<InstalledCommonProofCheckpointLineageReservation>
+    >();
+
+export const installedCustodyWorkerHostCommonProofCheckpointLineageReleasers =
+    new WeakMap<
+        InstalledCustodyWorkerHost,
+        (
+            reservation: InstalledCommonProofCheckpointLineageReservation,
+        ) => Promise<void>
+    >();
+
+export const reserveCommonProofCheckpointLineageInInstalledCustodyWorker = (
+    installedHost: InstalledCustodyWorkerHost,
+): Promise<InstalledCommonProofCheckpointLineageReservation> => {
+    const reserveLineage =
+        installedCustodyWorkerHostCommonProofCheckpointLineageReservers.get(
+            installedHost,
+        );
+    if (reserveLineage === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The installed custody worker host cannot reserve common-proof checkpoint lineage.',
+        );
+    }
+    return reserveLineage();
+};
+
+export const copyReservedCommonProofCheckpointLineageIdentifier = (
+    reservation: InstalledCommonProofCheckpointLineageReservation,
+): Uint8Array<ArrayBuffer> => {
+    const record =
+        installedCommonProofCheckpointLineageReservationRecords.get(
+            reservation,
+        );
+    if (record === undefined || record.state !== 'available') {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The common-proof checkpoint-lineage reservation is unavailable.',
+        );
+    }
+    return record.checkpointLineageIdentifier.slice();
+};
+
+export const releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker =
+    (
+        installedHost: InstalledCustodyWorkerHost,
+        reservation: InstalledCommonProofCheckpointLineageReservation,
+    ): Promise<void> => {
+        const releaseLineage =
+            installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.get(
+                installedHost,
+            );
+        if (releaseLineage === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The installed custody worker host cannot release common-proof checkpoint lineage.',
+            );
+        }
+        return releaseLineage(reservation);
+    };
+
 export const installedCustodyWorkerHostCommonProofGenerationPreparers =
     new WeakMap<
         InstalledCustodyWorkerHost,
         (input: {
+            checkpoint:
+                | Readonly<{
+                      generationMode: 'fresh';
+                      reservation: InstalledCommonProofCheckpointLineageReservation;
+                  }>
+                | Readonly<{
+                      generationMode: 'resumed';
+                      resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+                  }>;
             foundationActionRandomnessHandleIdentifier: string;
             generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
-        }) => InstalledCommonProofPreparedOperation
+        }) => Promise<InstalledCommonProofPreparedOperation>
     >();
 
 /** Internal exact-family adapter entry; intentionally absent from the protocol root. */
 export const prepareCommonProofGenerationInInstalledCustodyWorker = (
     installedHost: InstalledCustodyWorkerHost,
     input: {
+        checkpoint:
+            | Readonly<{
+                  generationMode: 'fresh';
+                  reservation: InstalledCommonProofCheckpointLineageReservation;
+              }>
+            | Readonly<{
+                  generationMode: 'resumed';
+                  resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+              }>;
         foundationActionRandomnessHandleIdentifier: string;
         generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
     },
-): InstalledCommonProofPreparedOperation => {
+): Promise<InstalledCommonProofPreparedOperation> => {
     const prepareOperation =
         installedCustodyWorkerHostCommonProofGenerationPreparers.get(
             installedHost,
@@ -331,9 +494,9 @@ export type InstalledCommonProofExecutionEnvironmentRecord = {
     applyVerifiedCommonProof(
         input: InstalledCommonProofApplicationInput,
     ): Promise<void>;
+    applicationStatementSchemaIdentifier: number;
     closed: boolean;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
-    commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     custody: CommonProofBrowserCustody;
     foundationActionRandomnessHandleIdentifier: string;
     generationCompleted: boolean;
@@ -567,7 +730,6 @@ const finishInstalledCommonProofTerminalCleanup = (
         );
     }
     record.commonProofRuntimeBindingHash.fill(0);
-    record.commonProofVerificationBindingHash.fill(0);
     record.proofAttemptLineageIdentifier.fill(0);
     destroyCommonProofCheckpointResumeDescriptor(
         record.suspendedResumeDescriptor,
@@ -981,36 +1143,6 @@ export const verifyAndApplyCommonProofInInstalledCustodyWorker = async (
                 'InvalidState',
                 'The common-proof execution environment already owns a pending application retry.',
             );
-        }
-        const verificationDescription =
-            describeClosedWorkerCommonProofVerificationFamilyAdapter(
-                input.verificationFamilyAdapter,
-            );
-        try {
-            if (
-                !bytesEqual(
-                    verificationDescription.commonProofVerificationBindingHash,
-                    record.commonProofVerificationBindingHash,
-                )
-            ) {
-                try {
-                    releaseClosedWorkerCommonProofVerificationFamilyAdapter(
-                        input.verificationFamilyAdapter,
-                    );
-                } catch (releaseError) {
-                    throw new BrowserActionStorageCustodyError(
-                        'OwnedWorkerFailure',
-                        'The mismatched common-proof verifier preparation could not be retired.',
-                        releaseError,
-                    );
-                }
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The prepared common-proof verifier belongs to another proof attempt.',
-                );
-            }
-        } finally {
-            verificationDescription.commonProofVerificationBindingHash.fill(0);
         }
         return runInstalledCommonProofApplication(
             environment,

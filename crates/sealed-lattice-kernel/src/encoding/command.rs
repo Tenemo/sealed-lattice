@@ -31,9 +31,6 @@ enum TranscriptCoreCommand {
     DecodePrivateRandomCursor,
     DescribeBgvRnsParameters,
     DescribeCollectiveBgvSetupParameters,
-    VerifyCollectiveBgvSetup,
-    VerifyPrivateVssShareEnvelope,
-    DeriveSuccinctSetupStatementHash,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -134,43 +131,11 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DecodePrivateRandomCursor => {
             super::private_randomness_command::decode_private_random_cursor(&request)
         }
-        TranscriptCoreCommand::VerifyCollectiveBgvSetup => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "accepted setup verification requires an opaque material-ownership session",
-        )),
         TranscriptCoreCommand::DescribeBgvRnsParameters
-        | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
-        | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
-        | TranscriptCoreCommand::DeriveSuccinctSetupStatementHash => {
+        | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
             run_bgv_command(command, &request)
         }
     }
-}
-
-pub(super) fn run_accepted_setup_command_inner(
-    input: &[u8],
-    session_handle: u32,
-) -> CanonicalResult<Value> {
-    let request = parse_transcript_core_request(input)?;
-    let command = request
-        .get("command")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "command must be a string",
-            )
-        })?;
-    if parse_transcript_core_command(command)? != TranscriptCoreCommand::VerifyCollectiveBgvSetup {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "accepted-setup session can execute only VerifyCollectiveBgvSetup",
-        ));
-    }
-    crate::bgv::verify_collective_bgv_setup_package_with_session_from_request(
-        &request,
-        session_handle,
-    )
 }
 
 fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> CanonicalResult<Value> {
@@ -180,12 +145,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
             crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request(request)
-        }
-        TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
-            crate::bgv::setup::verify_private_vss_share_envelope_from_request(request)
-        }
-        TranscriptCoreCommand::DeriveSuccinctSetupStatementHash => {
-            crate::bgv::setup::derive_succinct_setup_statement_hash_from_request(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

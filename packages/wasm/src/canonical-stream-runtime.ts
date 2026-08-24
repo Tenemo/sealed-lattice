@@ -1,5 +1,6 @@
 import { foundationProfile, type RefusalReason } from '@sealed-lattice/types';
 
+import { isArrayBuffer } from './byte-array.js';
 import { pumpCanonicalStreamChunks } from './canonical-stream-chunk-pump.js';
 import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
 import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
@@ -117,7 +118,6 @@ export type CanonicalStreamRuntimeCounterSnapshot = Readonly<{
     failedSessionCount: number;
     javascriptToWasmPayloadCopyCount: number;
     maximumObservedCopiedPayloadByteLength: number;
-    maximumObservedResidentPayloadChunkCount: number;
     maximumObservedWasmMemoryByteLength: number;
     startedSessionCount: number;
     wasmToJavascriptPayloadCopyCount: number;
@@ -185,6 +185,29 @@ export type CanonicalStreamWorkerRuntime = Readonly<{
 }>;
 
 type CanonicalStreamKernelContext = Readonly<{
+    aggregateThresholdShareBeginRecipientAuthority?: (
+        actionRandomnessHandle: number,
+        localRecipientRosterPosition: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessHandleBytesPointer: number,
+        orderedPublicRandomnessHandleBytesByteLength: number,
+        orderedDealerTerminalHandleBytesPointer: number,
+        orderedDealerTerminalHandleBytesByteLength: number,
+        statusPointer: number,
+    ) => number;
+    aggregateThresholdShareAbsorbAuthenticatedRecipientPayload?: (
+        recipientAuthorityHandle: number,
+        authenticatedPlaintextCapabilityHandle: number,
+        canonicalSignedEnvelopePointer: number,
+        canonicalSignedEnvelopeLength: number,
+        canonicalPlaintextPointer: number,
+        canonicalPlaintextLength: number,
+    ) => number;
+    aggregateThresholdShareDiscardRecipientAuthority?: (
+        recipientAuthorityHandle: number,
+    ) => number;
     allocate(length: number): number;
     beginVerifier(
         streamDomain: number,
@@ -198,38 +221,6 @@ type CanonicalStreamKernelContext = Readonly<{
         totalByteLength: number,
         statusPointer: number,
     ): number;
-    bgvAbsorbChunk?: (
-        handle: number,
-        chunkIndex: number,
-        chunkPointer: number,
-        chunkLength: number,
-    ) => number;
-    bgvBegin?: (
-        familyCode: number,
-        materialRootPointer: number,
-        materialRootLength: number,
-        descriptorPointer: number,
-        descriptorLength: number,
-        statusPointer: number,
-        totalByteLengthPointer: number,
-    ) => number;
-    bgvCancel?: (handle: number) => number;
-    bgvFinish?: (handle: number) => number;
-    bgvMaterialReaderBegin?: (
-        familyCode: number,
-        materialRootPointer: number,
-        materialRootLength: number,
-        statusPointer: number,
-        totalByteLengthPointer: number,
-    ) => number;
-    bgvMaterialReaderCancel?: (handle: number) => number;
-    bgvMaterialReaderFinish?: (handle: number) => number;
-    bgvMaterialReaderReadChunk?: (
-        handle: number,
-        chunkIndex: number,
-        outputPointer: number,
-        outputLength: number,
-    ) => number;
     cancel(handle: number): number;
     deallocate(pointer: number, length: number): void;
     absorbChunk(
@@ -292,6 +283,65 @@ type CanonicalStreamKernelContext = Readonly<{
         tagPointer: number,
         tagLength: number,
     ) => number;
+    setupGenerationAuthorityBegin?: (
+        selectedSuiteHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessObjectHandlesPointer: number,
+        orderedPublicRandomnessObjectHandlesByteLength: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationAuthorityRelease?: (authorityHandle: number) => number;
+    setupGenerationPublicKeyShareBodyByteLength?: (
+        authorityHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationPublicKeyShareBodyOpen?: (
+        authorityHandle: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationPublicKeyShareSourceByteLength?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationPublicKeyShareBodyRead?: (
+        sourceHandle: number,
+        expectedOffset: bigint,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    setupGenerationPublicKeyShareBodyCancel?: (sourceHandle: number) => number;
+    setupGenerationRecipientVssPayloadByteLength?: (
+        authorityHandle: number,
+        recipientRosterPosition: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationRecipientVssPayloadOpen?: (
+        authorityHandle: number,
+        recipientRosterPosition: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationRecipientVssPayloadSourceByteLength?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationRecipientVssPayloadSourceRecipientRosterPosition?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationRecipientVssPayloadRead?: (
+        sourceHandle: number,
+        expectedOffset: bigint,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    setupGenerationRecipientVssPayloadCancel?: (sourceHandle: number) => number;
     runExclusive<Result>(
         operationName: string,
         operation: () => Result,
@@ -349,9 +399,6 @@ const isCanonicalStreamDomain = (
 ): value is CanonicalStreamDomain =>
     Number.isSafeInteger(value) && canonicalStreamDomainCodes.has(value);
 
-const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
-    Object.prototype.toString.call(value) === '[object ArrayBuffer]';
-
 const assertSafeNonNegativeInteger = (value: number, label: string): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
         throw new CanonicalStreamRefusalError('wrongTypeOrLength');
@@ -389,7 +436,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             failedSessionCount: 0,
             javascriptToWasmPayloadCopyCount: 0,
             maximumObservedCopiedPayloadByteLength: 0,
-            maximumObservedResidentPayloadChunkCount: 0,
             maximumObservedWasmMemoryByteLength:
                 context.memory.buffer.byteLength,
             startedSessionCount: 0,
@@ -1008,10 +1054,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         this.#counters.maximumObservedCopiedPayloadByteLength = Math.max(
             this.#counters.maximumObservedCopiedPayloadByteLength,
             bytes.byteLength,
-        );
-        this.#counters.maximumObservedResidentPayloadChunkCount = Math.max(
-            this.#counters.maximumObservedResidentPayloadChunkCount,
-            2,
         );
         return pointer;
     }

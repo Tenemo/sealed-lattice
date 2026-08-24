@@ -4,7 +4,6 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DIAGNOSTIC_OBJECT_VERSION: &str = "sealed-lattice-process-memory-guard-event-v1";
 const EXPECTED_ALLOCATION_REFUSAL_ENVIRONMENT_VARIABLE: &str =
     "SEALED_LATTICE_PROCESS_MEMORY_GUARD_EXPECTED_ALLOCATION_REFUSAL";
 
@@ -370,7 +369,6 @@ impl DiagnosticsWriter {
         add_fields: impl FnOnce(&mut JsonObject),
     ) -> Result<(), String> {
         let mut record = JsonObject::default();
-        record.string("objectVersion", DIAGNOSTIC_OBJECT_VERSION);
         record.string("eventType", event_type);
         record.unsigned("sequence", self.sequence);
         let (timestamp_iso, timestamp_unix_milliseconds) = current_timestamp();

@@ -6,7 +6,10 @@ import {
 } from './heavy-test-progress.js';
 import { runWithLocalRunLog } from './local-run-log.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
-import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
+import {
+    verifyCompleteRustLaneOwnership,
+    verifyFocusedRustLaneSelection,
+} from './rust-focused-lane-selection.js';
 import {
     cargoTestArgumentsForRustKernelFast,
     heavyRustKernelTestNamePrefix,
@@ -90,7 +93,12 @@ export const runRustKernelTests = async (
         async (runLog) => {
             const parsedArguments = parseRustKernelArguments(rawArguments);
             const command = buildRustKernelTestCommand(parsedArguments);
-            if (parsedArguments.testFilter !== undefined) {
+            if (parsedArguments.testFilter === undefined) {
+                await verifyCompleteRustLaneOwnership({
+                    environment: command.env,
+                    runLog,
+                });
+            } else {
                 await verifyFocusedRustLaneSelection({
                     environment: command.env,
                     lane: 'rust-kernel-fast',

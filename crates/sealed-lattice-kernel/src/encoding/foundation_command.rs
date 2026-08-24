@@ -1,8 +1,8 @@
 use serde_json::{Map, Value, json};
 
 use super::command_fields::{
-    invalid_value, required_array, required_lowercase_hex_bytes, required_object,
-    required_rust_parseable_u64_decimal, required_string,
+    invalid_value, required_array, required_canonical_u64_decimal, required_lowercase_hex_bytes,
+    required_object, required_string, required_u16,
 };
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::{
@@ -51,7 +51,7 @@ pub(super) fn encode_foundation_action_definition(request: &Value) -> CanonicalR
     let request = required_object(request, "command request")?;
     let action_definition = ActionDefinition::new(
         required_u16(request, "topCount")?,
-        required_rust_parseable_u64_decimal(request, "submissionCutoffUnixMilliseconds")?,
+        required_canonical_u64_decimal(request, "submissionCutoffUnixMilliseconds")?,
     )
     .map_err(schema_error)?;
     let canonical_bytes = action_definition.encode().map_err(schema_error)?;
@@ -284,14 +284,6 @@ fn ingress_display_text(
             format!("{field_name} is not accepted display text: {error}"),
         )
     })
-}
-
-fn required_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<u16> {
-    let value = object
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| invalid_value(format!("{field_name} must be an unsigned integer")))?;
-    u16::try_from(value).map_err(|_| invalid_value(format!("{field_name} must fit u16")))
 }
 
 fn required_hash(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<Hash512> {

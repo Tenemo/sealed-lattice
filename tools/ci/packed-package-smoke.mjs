@@ -1,34 +1,23 @@
-const { verifyPrivateVssShare } = await import('sealed-lattice');
-
-if (typeof verifyPrivateVssShare !== 'function') {
-    throw new Error('The packed private VSS verifier is not callable.');
-}
-
-const verification = await verifyPrivateVssShare({
-    setupContext: {
-        ceremonyId: 'packed-package-smoke',
-        manifestHash: '0'.repeat(128),
-        rosterHash: '1'.repeat(128),
-        setupParametersHash: '2'.repeat(128),
-        setupEpoch: 'packed-package-smoke',
-        participantCount: 3,
-    },
-    publicMatrixSeedHash: '3'.repeat(128),
-    sourceTrusteeCoefficientCommitmentRecord: {
-        objectType: 'VssSourceTrusteeCoefficientCommitments',
-    },
-    sourceTrusteeCoefficientCommitmentMaterialRecords: [],
-    privateEnvelope: {
-        objectType: 'PrivateVssShareEnvelope',
-    },
-});
+const { createCanonicalBoardPolicy, verifyCanonicalBoardPolicy } =
+    await import('sealed-lattice');
 
 if (
-    verification.isValid !== false ||
-    verification.refusalReason !== 'wrongHashOrRoot'
+    typeof createCanonicalBoardPolicy !== 'function' ||
+    typeof verifyCanonicalBoardPolicy !== 'function'
 ) {
+    throw new Error('The packed canonical board-policy API is not callable.');
+}
+
+const canonicalBoardPolicy = await createCanonicalBoardPolicy({
+    boardOriginIdentifier: 'https://board.example',
+});
+const verification = await verifyCanonicalBoardPolicy(
+    canonicalBoardPolicy.canonicalBytes,
+);
+
+if (!verification.isValid) {
     throw new Error(
-        'The packed private VSS verifier did not execute the WASM rejection path.',
+        'The packed canonical board-policy API did not execute the WASM acceptance path.',
     );
 }
 

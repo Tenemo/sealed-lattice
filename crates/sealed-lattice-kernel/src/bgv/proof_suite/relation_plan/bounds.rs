@@ -6,7 +6,9 @@ use crate::foundation::{CanonicalItem, CanonicalTuple};
 use super::{
     expressions::{
         RelationExpressionInstruction, canonical_nested_list, canonical_u32_list,
-        canonical_u64_list,
+        canonical_u64_list, checked_resident_payload_add,
+        resident_big_signed_integer_payload_byte_length,
+        resident_big_unsigned_integer_payload_byte_length, resident_vec_storage_byte_length,
     },
     model::{RelationPlanError, SuiteModulusReference, canonical_encoding_error},
     schema::{
@@ -28,6 +30,13 @@ pub(crate) struct SignedIntegerInterval {
 }
 
 impl SignedIntegerInterval {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_resident_payload_add(
+            resident_big_signed_integer_payload_byte_length(&self.minimum)?,
+            resident_big_signed_integer_payload_byte_length(&self.maximum)?,
+        )
+    }
+
     pub(super) fn new(minimum: i128, maximum: i128) -> Self {
         Self {
             minimum: BigInt::from(minimum),
@@ -192,6 +201,49 @@ pub(crate) enum RelationBoundCertificate {
 }
 
 impl RelationBoundCertificate {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        match self {
+            Self::Trinary { .. } | Self::Binary { .. } => Ok(0),
+            Self::UnsignedRadixRecomposition {
+                ordered_digit_column_ordinals,
+                ..
+            } => resident_vec_storage_byte_length(ordered_digit_column_ordinals),
+            Self::ShiftedRadixRecomposition {
+                offset,
+                ordered_digit_column_ordinals,
+                ..
+            } => checked_resident_payload_add(
+                resident_big_unsigned_integer_payload_byte_length(offset)?,
+                resident_vec_storage_byte_length(ordered_digit_column_ordinals)?,
+            ),
+            Self::CanonicalModulusRecomposition {
+                ordered_digit_column_ordinals,
+                ordered_comparator_constraint_ordinals,
+                ordered_difference_digit_column_ordinals,
+                ordered_borrow_column_ordinals,
+                ..
+            } => [
+                resident_vec_storage_byte_length(ordered_digit_column_ordinals)?,
+                resident_vec_storage_byte_length(ordered_comparator_constraint_ordinals)?,
+                resident_vec_storage_byte_length(ordered_difference_digit_column_ordinals)?,
+                resident_vec_storage_byte_length(ordered_borrow_column_ordinals)?,
+            ]
+            .into_iter()
+            .try_fold(0_u64, checked_resident_payload_add),
+            Self::FiniteIntegerSet { ordered_values, .. } => {
+                let value_storage = resident_vec_storage_byte_length(ordered_values)?;
+                ordered_values
+                    .iter()
+                    .try_fold(value_storage, |total, value| {
+                        checked_resident_payload_add(
+                            total,
+                            resident_big_signed_integer_payload_byte_length(value)?,
+                        )
+                    })
+            }
+        }
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(match self {
             Self::Trinary { constraint_ordinal } => CanonicalTuple::new(
@@ -316,6 +368,14 @@ pub(crate) struct SemanticCellDescriptor {
 }
 
 impl SemanticCellDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_resident_payload_add(
+            self.claimed_interval.resident_owned_payload_byte_length()?,
+            self.bound_certificate
+                .resident_owned_payload_byte_length()?,
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         let [minimum, maximum] = self.claimed_interval.canonical_items()?;
         Ok(CanonicalTuple::new(
@@ -345,6 +405,41 @@ pub(crate) struct RelationConstraintDescriptor {
 }
 
 impl RelationConstraintDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        let expression_payload_byte_length = |expression: &RelationExpressionInstruction| {
+            expression.resident_owned_payload_byte_length()
+        };
+        let mut total = [
+            resident_vec_storage_byte_length(&self.role_coordinates)?,
+            resident_vec_storage_byte_length(&self.numerator_postfix_expression)?,
+            resident_vec_storage_byte_length(&self.zeroifier_postfix_expression)?,
+            resident_vec_storage_byte_length(&self.ordered_injective_integer_factor_expressions)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_resident_payload_add)?;
+        for expression in self
+            .numerator_postfix_expression
+            .iter()
+            .chain(&self.zeroifier_postfix_expression)
+        {
+            total =
+                checked_resident_payload_add(total, expression_payload_byte_length(expression)?)?;
+        }
+        for factor_expression in &self.ordered_injective_integer_factor_expressions {
+            total = checked_resident_payload_add(
+                total,
+                resident_vec_storage_byte_length(factor_expression)?,
+            )?;
+            for expression in factor_expression {
+                total = checked_resident_payload_add(
+                    total,
+                    expression_payload_byte_length(expression)?,
+                )?;
+            }
+        }
+        Ok(total)
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             RELATION_CONSTRAINT_SCHEMA_IDENTIFIER,

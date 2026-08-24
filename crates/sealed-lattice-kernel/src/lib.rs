@@ -7,22 +7,41 @@
 #![recursion_limit = "256"]
 
 pub(crate) mod bgv;
+mod diagnostic_clock;
 mod encoding;
 pub mod foundation;
 pub(crate) mod hashing;
-pub(crate) mod protocol_signatures;
 pub(crate) mod transcript_core;
 
 use core::{ptr, slice};
 use std::vec::Vec;
 
-use bgv::{
-    absorb_bgv_canonical_stream_chunk, active_accepted_setup_proof_binding_session,
-    begin_accepted_setup_canonical_stream, begin_accepted_setup_proof_binding_session,
-    begin_bgv_canonical_material_reader, begin_bgv_canonical_stream,
-    cancel_accepted_setup_proof_binding_session, cancel_bgv_canonical_material_reader,
-    cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
-    read_bgv_canonical_material_chunk,
+use bgv::proof_suite::{
+    AggregateThresholdShareGenerationMode, AggregateThresholdShareRuntimeError,
+    absorb_authenticated_recipient_vss_payload, aggregate_threshold_share_runtime_error_status,
+    begin_aggregate_threshold_share_recipient_authority,
+    bind_generated_aggregate_threshold_share_proof_to_board,
+    cancel_aggregate_threshold_share_private_share_acceptance_carrier,
+    discard_aggregate_threshold_share_generation_board_binding_source,
+    discard_aggregate_threshold_share_recipient_authority,
+    discard_aggregate_threshold_share_verification_terminal_source,
+    finish_aggregate_threshold_share_private_share_acceptance_carrier,
+    finish_aggregate_threshold_share_verification, prepare_aggregate_threshold_share_generation,
+    prepare_aggregate_threshold_share_private_share_acceptance_carrier,
+    prepare_aggregate_threshold_share_verification,
+};
+use bgv::proof_suite::{
+    begin_setup_generation_authority, cancel_setup_generation_public_key_share_body_by_identifier,
+    cancel_setup_generation_recipient_payload,
+    open_setup_generation_public_key_share_body_by_identifier,
+    open_setup_generation_recipient_payload,
+    read_setup_generation_public_key_share_body_by_identifier,
+    read_setup_generation_recipient_payload, release_setup_generation_authority_by_identifier,
+    setup_generation_public_key_share_body_byte_length_by_identifier,
+    setup_generation_public_key_share_source_byte_length_by_identifier,
+    setup_generation_recipient_payload_byte_length,
+    setup_generation_recipient_payload_source_byte_length,
+    setup_generation_recipient_payload_source_recipient_roster_position,
 };
 use foundation::{
     CanonicalStreamRuntimeBegin, FINALITY_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
@@ -38,72 +57,16 @@ use foundation::{
     finish_mailbox_gcm_authentication, finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
     finish_state_output_intent_verification, finish_state_output_verification,
     release_verified_finality, release_verified_state_object, run_action_randomness_command,
-    run_local_storage_root_command, run_state_producer_command, verify_finality,
-    verify_state_reservation, verify_state_reservation_intent,
+    run_local_storage_root_command, run_state_producer_command, verify_canonical_suite_artifact,
+    verify_finality, verify_state_reservation, verify_state_reservation_intent,
 };
 
-use encoding::run_accepted_setup_command;
 pub use encoding::run_transcript_core_command;
 
-#[doc(hidden)]
-pub fn evaluator_candidate_search_probe(axis: &str) -> String {
-    use num_traits::Signed;
-
-    let input = bgv::evaluator::candidate_evidence::EvaluatorCandidateInput::implemented()
-        .expect("implemented evaluator input derives");
-    let (minimum_ballot_count, maximum_ballot_count) = match axis {
-        "single" => (1, 1),
-        "multi" => (2, input.maximum_ballot_count),
-        _ => panic!("probe axis must be single or multi"),
-    };
-    let mut lines = Vec::new();
-    for working_level in input.target_ciphertext_level..input.data_primes.len() {
-        let mut minimum_margin = None;
-        let mut failure = None;
-        for ballot_count in minimum_ballot_count..=maximum_ballot_count {
-            let bounds = match bgv::evaluator::noise_recurrence::direct_ballot_target_noise_bounds_at_working_level(
-                    input.participant_count,
-                    ballot_count,
-                    input.option_count,
-                    input.minimum_score,
-                    input.maximum_score,
-                    working_level,
-                ) {
-                Ok(bounds) => bounds,
-                Err(error) => {
-                    failure = Some(format!("error:{}:{}", error.code.as_str(), error.message));
-                    break;
-                }
-            };
-            for bound in bounds {
-                for margin in [
-                    bound.target_identifier.minimum_decryption_margin,
-                    bound.target_order.minimum_decryption_margin,
-                ] {
-                    minimum_margin = Some(match minimum_margin {
-                        Some(current_margin) if current_margin <= margin => current_margin,
-                        _ => margin,
-                    });
-                }
-            }
-        }
-        if let Some(failure) = failure {
-            lines.push(format!("level={working_level};{failure}"));
-            continue;
-        }
-        let margin = minimum_margin.expect("target rows are nonempty");
-        let positive = margin.is_positive();
-        lines.push(format!(
-            "level={working_level};margin-sign:{};margin-bits:{}",
-            if positive { "positive" } else { "nonpositive" },
-            margin.magnitude().bits()
-        ));
-        if positive {
-            break;
-        }
-    }
-    lines.join("\n")
-}
+#[cfg(feature = "primitive-measurement-evidence")]
+use bgv::proof_suite::{
+    run_primitive_measurement, selected_compact_cfw_storage_diagnostic_schedule,
+};
 
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
     Box::into_raw(bytes.into_boxed_slice()) as *mut u8
@@ -126,6 +89,77 @@ pub extern "C" fn sealed_lattice_allocate(length: usize) -> *mut u8 {
     }
 
     leak_bytes(vec![0_u8; length])
+}
+
+/// Runs one bounded primitive measurement in the opt-in measurement artifact.
+///
+/// The export is absent from the ordinary kernel. Status zero returns one
+/// canonical measurement record. Status one returns the internal refusal text
+/// so a long-running browser measurement never loses its root cause.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or point to writable memory for one
+/// `usize` value in this WebAssembly module's linear memory.
+/// `output_status_pointer` must be null or point to writable memory for one
+/// `u32` value in this WebAssembly module's linear memory.
+#[cfg(feature = "primitive-measurement-evidence")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_primitive_measurement_with_length(
+    case_identifier: u32,
+    output_length_pointer: *mut usize,
+    output_status_pointer: *mut u32,
+) -> *mut u8 {
+    let (output, status) = match run_primitive_measurement(case_identifier) {
+        Ok(output) => (output, 0_u32),
+        Err(error) => (error.into_bytes(), 1_u32),
+    };
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    if !output_status_pointer.is_null() {
+        unsafe {
+            output_status_pointer.write(status);
+        }
+    }
+    leak_bytes(output)
+}
+
+/// Returns the compiler-derived selected compact CFW browser-storage schedule.
+///
+/// The export exists only in the opt-in measurement artifact and grants no
+/// proof, verification, activation, capability, or qualification authority.
+/// Status zero returns canonical JSON. Status one returns the refusal text.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or point to writable memory for one
+/// `usize` value in this WebAssembly module's linear memory.
+/// `output_status_pointer` must be null or point to writable memory for one
+/// `u32` value in this WebAssembly module's linear memory.
+#[cfg(feature = "primitive-measurement-evidence")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_cfw_storage_diagnostic_schedule_with_length(
+    output_length_pointer: *mut usize,
+    output_status_pointer: *mut u32,
+) -> *mut u8 {
+    let (output, status) = match selected_compact_cfw_storage_diagnostic_schedule() {
+        Ok(output) => (output, 0_u32),
+        Err(error) => (error.into_bytes(), 1_u32),
+    };
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    if !output_status_pointer.is_null() {
+        unsafe {
+            output_status_pointer.write(status);
+        }
+    }
+    leak_bytes(output)
 }
 
 /// # Safety
@@ -197,6 +231,34 @@ unsafe fn canonical_stream_input<'input>(pointer: *const u8, length: usize) -> &
     }
 }
 
+/// Verifies one canonical suite artifact against its canonical suite record.
+///
+/// Returns zero on success or the canonical refusal-reason code on failure.
+///
+/// # Safety
+///
+/// Each pointer must either be null with a zero length or point to readable
+/// bytes of the corresponding length in WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_foundation_verify_suite_artifact(
+    suite_record_pointer: *const u8,
+    suite_record_byte_length: usize,
+    artifact_kind_code: u32,
+    artifact_pointer: *const u8,
+    artifact_byte_length: usize,
+) -> u32 {
+    let Ok(artifact_kind_code) = u16::try_from(artifact_kind_code) else {
+        return u32::from(foundation::RefusalReason::UnsupportedVersionOrSuite.canonical_code());
+    };
+    let suite_record =
+        unsafe { canonical_stream_input(suite_record_pointer, suite_record_byte_length) };
+    let artifact = unsafe { canonical_stream_input(artifact_pointer, artifact_byte_length) };
+    match verify_canonical_suite_artifact(suite_record, artifact_kind_code, artifact) {
+        Ok(()) => 0,
+        Err(error) => u32::from(error.refusal_reason.canonical_code()),
+    }
+}
+
 unsafe fn canonical_stream_input_mut<'input>(pointer: *mut u8, length: usize) -> &'input mut [u8] {
     if length == 0 || pointer.is_null() {
         &mut []
@@ -231,6 +293,615 @@ unsafe fn write_usize_if_present(pointer: *mut usize, value: usize) {
     }
 }
 
+/// Begins the single browser-owned aggregate-threshold-share recipient
+/// authority from the authenticated public-randomness transcript and the
+/// exact roster-ordered VSS terminal catalog. No roots, rows, seeds, or
+/// aggregate coefficients cross this boundary.
+///
+/// The public-randomness catalog contains all setup-intent handles in roster
+/// order, then all commitment handles, then all reveal handles, encoded as
+/// little-endian `u32` values. The dealer-terminal catalog contains exactly one
+/// little-endian `u32` verified VSS terminal handle per participant in roster
+/// order. A successful call consumes every dealer terminal.
+///
+/// # Safety
+///
+/// Each non-null input pointer must name its declared readable range. A
+/// non-null status pointer must name one writable `u32`.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_begin_recipient_authority(
+    action_randomness_handle: u32,
+    local_recipient_roster_position: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    ordered_public_randomness_handle_bytes_pointer: *const u8,
+    ordered_public_randomness_handle_bytes_byte_length: usize,
+    ordered_dealer_terminal_handle_bytes_pointer: *const u8,
+    ordered_dealer_terminal_handle_bytes_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result: Result<u32, AggregateThresholdShareRuntimeError> = (|| {
+        let local_recipient_roster_position = u16::try_from(local_recipient_roster_position)
+            .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+        let board_verifier_session_capability = unsafe {
+            canonical_stream_input(
+                board_verifier_session_capability_pointer,
+                board_verifier_session_capability_byte_length,
+            )
+        };
+        let ordered_public_randomness_handle_bytes = unsafe {
+            canonical_stream_input(
+                ordered_public_randomness_handle_bytes_pointer,
+                ordered_public_randomness_handle_bytes_byte_length,
+            )
+        };
+        let ordered_dealer_terminal_handle_bytes = unsafe {
+            canonical_stream_input(
+                ordered_dealer_terminal_handle_bytes_pointer,
+                ordered_dealer_terminal_handle_bytes_byte_length,
+            )
+        };
+        let ordered_public_randomness_object_handles =
+            decode_u32_list(ordered_public_randomness_handle_bytes)
+                .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
+        let ordered_dealer_terminal_handles = decode_u32_list(ordered_dealer_terminal_handle_bytes)
+            .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
+        begin_aggregate_threshold_share_recipient_authority(
+            action_randomness_handle,
+            local_recipient_roster_position,
+            board_verifier_session_handle,
+            board_verifier_session_capability,
+            &ordered_public_randomness_object_handles,
+            &ordered_dealer_terminal_handles,
+        )
+    })();
+    match result {
+        Ok(authority_handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            authority_handle
+        }
+        Err(error) => {
+            unsafe {
+                write_u32_if_present(
+                    status_pointer,
+                    aggregate_threshold_share_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+/// One-shot consumes an authenticated mailbox-plaintext capability into the
+/// exact recipient authority. The envelope and plaintext are accepted
+/// only when their canonical bytes reproduce the dealer's verified terminal
+/// bindings.
+///
+/// # Safety
+///
+/// Each input pointer must be non-null and name its non-empty declared
+/// readable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_absorb_authenticated_recipient_payload(
+    recipient_authority_handle: u32,
+    authenticated_plaintext_capability_handle: u32,
+    canonical_signed_envelope_pointer: *const u8,
+    canonical_signed_envelope_length: usize,
+    canonical_plaintext_pointer: *const u8,
+    canonical_plaintext_length: usize,
+) -> u32 {
+    if canonical_signed_envelope_pointer.is_null()
+        || canonical_signed_envelope_length == 0
+        || canonical_plaintext_pointer.is_null()
+        || canonical_plaintext_length == 0
+    {
+        return aggregate_threshold_share_runtime_error_status(
+            AggregateThresholdShareRuntimeError::InvalidInput,
+        );
+    }
+    let canonical_signed_envelope_bytes = unsafe {
+        slice::from_raw_parts(
+            canonical_signed_envelope_pointer,
+            canonical_signed_envelope_length,
+        )
+    };
+    let canonical_plaintext_bytes =
+        unsafe { slice::from_raw_parts(canonical_plaintext_pointer, canonical_plaintext_length) };
+    absorb_authenticated_recipient_vss_payload(
+        recipient_authority_handle,
+        authenticated_plaintext_capability_handle,
+        canonical_signed_envelope_bytes,
+        canonical_plaintext_bytes,
+    )
+    .map_or_else(aggregate_threshold_share_runtime_error_status, |()| 0)
+}
+
+const AGGREGATE_THRESHOLD_SHARE_CHECKPOINT_LINEAGE_BYTE_LENGTH: usize = 32;
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn prepare_aggregate_threshold_share_generation_from_ffi_inputs(
+    selected_suite_handle: u32,
+    recipient_authority_handle: u32,
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability_pointer: *const u8,
+    state_verifier_session_capability_byte_length: usize,
+    verified_reservation_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    setup_intent_object_handle: u32,
+    checkpoint_lineage_identifier_pointer: *const u8,
+    checkpoint_lineage_identifier_byte_length: usize,
+    board_binding_source_handle_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+    generation_mode: AggregateThresholdShareGenerationMode,
+) -> u32 {
+    let result: Result<(u32, u32), AggregateThresholdShareRuntimeError> = (|| {
+        if board_binding_source_handle_output_pointer.is_null()
+            || checkpoint_lineage_identifier_pointer.is_null()
+            || checkpoint_lineage_identifier_byte_length
+                != AGGREGATE_THRESHOLD_SHARE_CHECKPOINT_LINEAGE_BYTE_LENGTH
+        {
+            return Err(AggregateThresholdShareRuntimeError::InvalidInput);
+        }
+        let state_verifier_session_capability = unsafe {
+            canonical_stream_input(
+                state_verifier_session_capability_pointer,
+                state_verifier_session_capability_byte_length,
+            )
+        };
+        let board_verifier_session_capability = unsafe {
+            canonical_stream_input(
+                board_verifier_session_capability_pointer,
+                board_verifier_session_capability_byte_length,
+            )
+        };
+        let checkpoint_lineage_identifier: [u8;
+            AGGREGATE_THRESHOLD_SHARE_CHECKPOINT_LINEAGE_BYTE_LENGTH] = unsafe {
+            slice::from_raw_parts(
+                checkpoint_lineage_identifier_pointer,
+                checkpoint_lineage_identifier_byte_length,
+            )
+        }
+        .try_into()
+        .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+        prepare_aggregate_threshold_share_generation(
+            selected_suite_handle,
+            recipient_authority_handle,
+            action_randomness_handle,
+            state_verifier_session_handle,
+            state_verifier_session_capability,
+            verified_reservation_handle,
+            board_verifier_session_handle,
+            board_verifier_session_capability,
+            setup_intent_object_handle,
+            checkpoint_lineage_identifier,
+            generation_mode,
+        )
+    })();
+    match result {
+        Ok((adapter_handle, board_binding_source_handle)) => {
+            unsafe {
+                board_binding_source_handle_output_pointer.write(board_binding_source_handle);
+                write_u32_if_present(status_pointer, 0);
+            }
+            adapter_handle
+        }
+        Err(error) => {
+            unsafe {
+                write_u32_if_present(
+                    status_pointer,
+                    aggregate_threshold_share_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+/// Retains a fresh aggregate-threshold-share common-proof generation adapter
+/// from the browser-owned recipient authority. The exact statement, source-root
+/// and aggregate-root catalogs, authenticated compact committed-material
+/// sources, and proof coins remain in Rust and are bound to the authenticated
+/// action attempt. Physical source columns are regenerated on demand and
+/// dropped after their final consumer.
+///
+/// # Safety
+///
+/// Each capability pointer must name its declared readable range. The
+/// checkpoint pointer must name exactly 32 readable bytes. The board-binding
+/// output pointer must name one writable `u32`; a non-null status pointer must
+/// do the same.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_prepare_generation(
+    selected_suite_handle: u32,
+    recipient_authority_handle: u32,
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability_pointer: *const u8,
+    state_verifier_session_capability_byte_length: usize,
+    verified_reservation_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    setup_intent_object_handle: u32,
+    checkpoint_lineage_identifier_pointer: *const u8,
+    checkpoint_lineage_identifier_byte_length: usize,
+    board_binding_source_handle_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    unsafe {
+        prepare_aggregate_threshold_share_generation_from_ffi_inputs(
+            selected_suite_handle,
+            recipient_authority_handle,
+            action_randomness_handle,
+            state_verifier_session_handle,
+            state_verifier_session_capability_pointer,
+            state_verifier_session_capability_byte_length,
+            verified_reservation_handle,
+            board_verifier_session_handle,
+            board_verifier_session_capability_pointer,
+            board_verifier_session_capability_byte_length,
+            setup_intent_object_handle,
+            checkpoint_lineage_identifier_pointer,
+            checkpoint_lineage_identifier_byte_length,
+            board_binding_source_handle_output_pointer,
+            status_pointer,
+            AggregateThresholdShareGenerationMode::Fresh,
+        )
+    }
+}
+
+/// Retains a resumable aggregate-threshold-share generation adapter. The
+/// generic proof runtime can activate it only after authenticating checkpoint
+/// bytes against the exact fresh attempt and compiled checkpoint schedule.
+///
+/// # Safety
+///
+/// Each capability pointer must name its declared readable range. The
+/// checkpoint pointer must name exactly 32 readable bytes. The board-binding
+/// output pointer must name one writable `u32`; a non-null status pointer must
+/// do the same.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_prepare_resumed_generation(
+    selected_suite_handle: u32,
+    recipient_authority_handle: u32,
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability_pointer: *const u8,
+    state_verifier_session_capability_byte_length: usize,
+    verified_reservation_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    setup_intent_object_handle: u32,
+    checkpoint_lineage_identifier_pointer: *const u8,
+    checkpoint_lineage_identifier_byte_length: usize,
+    board_binding_source_handle_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    unsafe {
+        prepare_aggregate_threshold_share_generation_from_ffi_inputs(
+            selected_suite_handle,
+            recipient_authority_handle,
+            action_randomness_handle,
+            state_verifier_session_handle,
+            state_verifier_session_capability_pointer,
+            state_verifier_session_capability_byte_length,
+            verified_reservation_handle,
+            board_verifier_session_handle,
+            board_verifier_session_capability_pointer,
+            board_verifier_session_capability_byte_length,
+            setup_intent_object_handle,
+            checkpoint_lineage_identifier_pointer,
+            checkpoint_lineage_identifier_byte_length,
+            board_binding_source_handle_output_pointer,
+            status_pointer,
+            AggregateThresholdShareGenerationMode::Resume,
+        )
+    }
+}
+
+/// Retains the exact private-share acceptance envelope after the generated
+/// aggregate proof has reached canonical completion. Every payload field is
+/// derived inside Rust from the generation statement and proof capability.
+///
+/// # Safety
+///
+/// The roster pointer must name its declared readable range. The carrier
+/// length output must name one writable `u32`, the signature-message output
+/// must name 64 writable bytes, and a non-null status pointer must name one
+/// writable `u32`.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_prepare_private_share_acceptance_carrier(
+    generated_common_proof_handle: u32,
+    board_binding_source_handle: u32,
+    canonical_roster_pointer: *const u8,
+    canonical_roster_byte_length: usize,
+    canonical_carrier_byte_length_output_pointer: *mut u32,
+    signature_message_output_pointer: *mut u8,
+    signature_message_output_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result: Result<u32, AggregateThresholdShareRuntimeError> = (|| {
+        if canonical_carrier_byte_length_output_pointer.is_null()
+            || signature_message_output_pointer.is_null()
+            || signature_message_output_byte_length != foundation::Hash512::BYTE_LENGTH
+        {
+            return Err(AggregateThresholdShareRuntimeError::InvalidInput);
+        }
+        let canonical_roster_bytes = unsafe {
+            canonical_stream_input(canonical_roster_pointer, canonical_roster_byte_length)
+        };
+        let description = prepare_aggregate_threshold_share_private_share_acceptance_carrier(
+            generated_common_proof_handle,
+            board_binding_source_handle,
+            canonical_roster_bytes,
+        )?;
+        let canonical_carrier_byte_length =
+            u32::try_from(description.canonical_carrier_byte_length())
+                .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+        unsafe {
+            canonical_carrier_byte_length_output_pointer.write(canonical_carrier_byte_length);
+            slice::from_raw_parts_mut(
+                signature_message_output_pointer,
+                signature_message_output_byte_length,
+            )
+            .copy_from_slice(description.signature_message().as_bytes());
+        }
+        Ok(description.handle())
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            handle
+        }
+        Err(error) => {
+            unsafe {
+                write_u32_if_present(
+                    status_pointer,
+                    aggregate_threshold_share_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+/// Completes a prepared private-share acceptance only after the exact roster
+/// participant signature verifies. The signing handle is spent by every
+/// finish attempt, including a refused signature.
+///
+/// # Safety
+///
+/// The signature pointer must name one ML-DSA-65 signature and the output
+/// pointer must name the exact writable length returned by preparation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_finish_private_share_acceptance_carrier(
+    board_binding_source_handle: u32,
+    prepared_carrier_handle: u32,
+    signature_pointer: *const u8,
+    signature_byte_length: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let signature_bytes =
+        unsafe { canonical_stream_input(signature_pointer, signature_byte_length) };
+    let Ok(signature): Result<[u8; foundation::ML_DSA_65_SIGNATURE_BYTE_LENGTH], _> =
+        signature_bytes.try_into()
+    else {
+        return aggregate_threshold_share_runtime_error_status(
+            AggregateThresholdShareRuntimeError::InvalidInput,
+        );
+    };
+    let expected_output_byte_length =
+        match foundation::prepared_signed_carrier_byte_length(prepared_carrier_handle) {
+            Ok(byte_length) => byte_length,
+            Err(reason) => {
+                return aggregate_threshold_share_runtime_error_status(
+                    AggregateThresholdShareRuntimeError::Refusal(reason),
+                );
+            }
+        };
+    if output_pointer.is_null() || output_byte_length != expected_output_byte_length {
+        return aggregate_threshold_share_runtime_error_status(
+            AggregateThresholdShareRuntimeError::InvalidInput,
+        );
+    }
+    let result = finish_aggregate_threshold_share_private_share_acceptance_carrier(
+        board_binding_source_handle,
+        prepared_carrier_handle,
+        signature,
+    );
+    match result {
+        Ok(canonical_carrier) if canonical_carrier.len() == output_byte_length => {
+            unsafe {
+                slice::from_raw_parts_mut(output_pointer, output_byte_length)
+                    .copy_from_slice(&canonical_carrier)
+            };
+            0
+        }
+        Ok(_) => aggregate_threshold_share_runtime_error_status(
+            AggregateThresholdShareRuntimeError::InvalidInput,
+        ),
+        Err(error) => aggregate_threshold_share_runtime_error_status(error),
+    }
+}
+
+/// Cancels one still-prepared private-share acceptance and restores the typed
+/// publication authority for a fresh preparation.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_aggregate_threshold_share_cancel_private_share_acceptance_carrier(
+    board_binding_source_handle: u32,
+    prepared_carrier_handle: u32,
+) -> u32 {
+    cancel_aggregate_threshold_share_private_share_acceptance_carrier(
+        board_binding_source_handle,
+        prepared_carrier_handle,
+    )
+    .map_or_else(aggregate_threshold_share_runtime_error_status, |()| 0)
+}
+
+/// Consumes a generated aggregate-threshold-share proof only after the exact
+/// verified private-share-acceptance board carrier reproduces the generated
+/// canonical statement, roots, proof descriptor, and application binding.
+///
+/// # Safety
+///
+/// The board capability pointer must name its declared readable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_bind_generated_proof_to_board(
+    generated_common_proof_handle: u32,
+    board_binding_source_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    private_share_acceptance_object_handle: u32,
+) -> u32 {
+    let board_verifier_session_capability = unsafe {
+        canonical_stream_input(
+            board_verifier_session_capability_pointer,
+            board_verifier_session_capability_byte_length,
+        )
+    };
+    bind_generated_aggregate_threshold_share_proof_to_board(
+        generated_common_proof_handle,
+        board_binding_source_handle,
+        board_verifier_session_handle,
+        board_verifier_session_capability,
+        private_share_acceptance_object_handle,
+    )
+    .map_or_else(aggregate_threshold_share_runtime_error_status, |()| 0)
+}
+
+/// Permanently discards a generation board-binding source after its common
+/// prover adapter is cancelled or its result can no longer be trusted.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_aggregate_threshold_share_discard_generation_board_binding_source(
+    board_binding_source_handle: u32,
+) -> u32 {
+    discard_aggregate_threshold_share_generation_board_binding_source(board_binding_source_handle)
+        .map_or_else(aggregate_threshold_share_runtime_error_status, |()| 0)
+}
+
+/// Opens verification for one roster participant's exact aggregate-threshold
+/// board carrier and retains a one-shot terminal source. The returned generic
+/// adapter can verify only the board-bound statement and proof descriptor.
+///
+/// # Safety
+///
+/// The board capability pointer must name its declared readable range. The
+/// terminal-source output pointer must name one writable `u32`; a non-null
+/// status pointer must do the same.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_prepare_verification(
+    selected_suite_handle: u32,
+    recipient_authority_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    private_share_acceptance_object_handle: u32,
+    terminal_source_handle_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result: Result<(u32, u32), AggregateThresholdShareRuntimeError> = (|| {
+        if terminal_source_handle_output_pointer.is_null() {
+            return Err(AggregateThresholdShareRuntimeError::InvalidInput);
+        }
+        let board_verifier_session_capability = unsafe {
+            canonical_stream_input(
+                board_verifier_session_capability_pointer,
+                board_verifier_session_capability_byte_length,
+            )
+        };
+        prepare_aggregate_threshold_share_verification(
+            selected_suite_handle,
+            recipient_authority_handle,
+            board_verifier_session_handle,
+            board_verifier_session_capability,
+            private_share_acceptance_object_handle,
+        )
+    })();
+    match result {
+        Ok((adapter_handle, terminal_source_handle)) => {
+            unsafe {
+                terminal_source_handle_output_pointer.write(terminal_source_handle);
+                write_u32_if_present(status_pointer, 0);
+            }
+            adapter_handle
+        }
+        Err(error) => {
+            unsafe {
+                write_u32_if_present(
+                    status_pointer,
+                    aggregate_threshold_share_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+/// Consumes one positive generic proof capability into the exact participant
+/// terminal slot. It returns one only when this was the tenth distinct roster
+/// terminal and the recipient authority transitioned to its completed
+/// accepted-setup handoff; otherwise it returns zero with status zero.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_aggregate_threshold_share_finish_verification(
+    verified_common_proof_handle: u32,
+    terminal_source_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    match finish_aggregate_threshold_share_verification(
+        verified_common_proof_handle,
+        terminal_source_handle,
+    ) {
+        Ok(qualification_complete) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            u32::from(qualification_complete)
+        }
+        Err(error) => {
+            unsafe {
+                write_u32_if_present(
+                    status_pointer,
+                    aggregate_threshold_share_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+/// Permanently discards an aggregate-threshold verification terminal source
+/// after its generic verifier is cancelled or reset.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_aggregate_threshold_share_discard_verification_terminal_source(
+    terminal_source_handle: u32,
+) -> u32 {
+    discard_aggregate_threshold_share_verification_terminal_source(terminal_source_handle)
+        .map_or_else(aggregate_threshold_share_runtime_error_status, |()| 0)
+}
+
+/// Permanently discards an active or completed aggregate-threshold-share
+/// recipient authority. Its handle is stale after this call.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_aggregate_threshold_share_discard_recipient_authority(
+    recipient_authority_handle: u32,
+) -> u32 {
+    discard_aggregate_threshold_share_recipient_authority(recipient_authority_handle)
+        .map_or_else(aggregate_threshold_share_runtime_error_status, |()| 0)
+}
+
 unsafe fn write_canonical_stream_begin(
     result: Result<CanonicalStreamRuntimeBegin, u32>,
     status_pointer: *mut u32,
@@ -252,6 +923,320 @@ unsafe fn write_canonical_stream_begin(
             0
         }
     }
+}
+
+/// Builds one browser-owned setup-generation authority from live selected-suite,
+/// canonical-board, action-randomness, and state-verifier capabilities. The
+/// ordered board handles must contain setup intents, commitments, and reveals,
+/// each in roster order. No setup witness bytes enter this boundary.
+///
+/// # Safety
+///
+/// Every input pointer must name its declared readable range. The ordered
+/// object-handle range contains little-endian `u32` handles. A non-null status
+/// pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_authority_begin(
+    selected_suite_handle: u32,
+    board_verifier_session_handle: u32,
+    board_verifier_session_capability_pointer: *const u8,
+    board_verifier_session_capability_byte_length: usize,
+    ordered_public_randomness_object_handles_pointer: *const u8,
+    ordered_public_randomness_object_handles_byte_length: usize,
+    action_randomness_handle: u32,
+    state_verifier_session_handle: u32,
+    state_verifier_session_capability_pointer: *const u8,
+    state_verifier_session_capability_byte_length: usize,
+    verified_reservation_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let board_verifier_session_capability = unsafe {
+        canonical_stream_input(
+            board_verifier_session_capability_pointer,
+            board_verifier_session_capability_byte_length,
+        )
+    };
+    let ordered_public_randomness_object_handle_bytes = unsafe {
+        canonical_stream_input(
+            ordered_public_randomness_object_handles_pointer,
+            ordered_public_randomness_object_handles_byte_length,
+        )
+    };
+    let Some(ordered_public_randomness_object_handles) =
+        decode_u32_list(ordered_public_randomness_object_handle_bytes)
+    else {
+        unsafe {
+            write_u32_if_present(
+                status_pointer,
+                u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code()),
+            )
+        };
+        return 0;
+    };
+    let state_verifier_session_capability = unsafe {
+        canonical_stream_input(
+            state_verifier_session_capability_pointer,
+            state_verifier_session_capability_byte_length,
+        )
+    };
+    match begin_setup_generation_authority(
+        selected_suite_handle,
+        board_verifier_session_handle,
+        board_verifier_session_capability,
+        &ordered_public_randomness_object_handles,
+        action_randomness_handle,
+        state_verifier_session_handle,
+        state_verifier_session_capability,
+        verified_reservation_handle,
+    ) {
+        Ok(handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            handle.identifier()
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Returns the exact raw full-Q public-key-share body length before its source
+/// is opened. The body is the limb-major, coefficient-major little-endian
+/// `u64` payload consumed by the selected collective-key corpus.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_body_byte_length(
+    authority_handle: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    match setup_generation_public_key_share_body_byte_length_by_identifier(authority_handle) {
+        Ok(byte_length) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            byte_length
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Opens the authority-owned raw public-key-share body exactly once without
+/// copying its retained coefficient matrix.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_body_open(
+    authority_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    match open_setup_generation_public_key_share_body_by_identifier(authority_handle) {
+        Ok(source_handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            source_handle
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Returns the exact body length bound to an opened public-key-share source.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_source_byte_length(
+    source_handle: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    match setup_generation_public_key_share_source_byte_length_by_identifier(source_handle) {
+        Ok(byte_length) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            byte_length
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Writes the next exact sequential public-key-share body range directly into
+/// caller-owned WASM memory. The source removes itself after its final byte.
+///
+/// # Safety
+///
+/// The output pointer must name its declared writable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_body_read(
+    source_handle: u32,
+    expected_offset: u64,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length == 0
+        || output_byte_length > foundation::FOUNDATION_PROFILE.stream_chunk_byte_length
+    {
+        let _ = cancel_setup_generation_public_key_share_body_by_identifier(source_handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    read_setup_generation_public_key_share_body_by_identifier(
+        source_handle,
+        expected_offset,
+        output,
+    )
+    .map_or_else(|status| status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_setup_generation_public_key_share_body_cancel(
+    source_handle: u32,
+) -> u32 {
+    cancel_setup_generation_public_key_share_body_by_identifier(source_handle)
+        .map_or_else(|status| status, |()| 0)
+}
+
+/// Returns the exact canonical 0x2107 byte length before the recipient slot is
+/// opened and consumed.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_recipient_vss_payload_byte_length(
+    authority_handle: u32,
+    recipient_roster_position: u16,
+    status_pointer: *mut u32,
+) -> u64 {
+    match setup_generation_recipient_payload_byte_length(
+        authority_handle,
+        recipient_roster_position,
+    ) {
+        Ok(byte_length) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            byte_length
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Transfers one recipient payload out of its authority exactly once and into
+/// an opaque sequential source.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_recipient_vss_payload_open(
+    authority_handle: u32,
+    recipient_roster_position: u16,
+    status_pointer: *mut u32,
+) -> u32 {
+    match open_setup_generation_recipient_payload(authority_handle, recipient_roster_position) {
+        Ok(source_handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            source_handle
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Returns the exact byte length retained by one opened recipient source.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_recipient_vss_payload_source_byte_length(
+    source_handle: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    match setup_generation_recipient_payload_source_byte_length(source_handle) {
+        Ok(byte_length) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            byte_length
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Returns the roster position bound to one opened recipient source.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_recipient_vss_payload_source_recipient_roster_position(
+    source_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    match setup_generation_recipient_payload_source_recipient_roster_position(source_handle) {
+        Ok(recipient_roster_position) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            u32::from(recipient_roster_position)
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Copies the next exact sequential recipient-payload range into caller-owned
+/// WASM memory. The source automatically removes itself after its final byte.
+///
+/// # Safety
+///
+/// The output pointer must name its declared writable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_recipient_vss_payload_read(
+    source_handle: u32,
+    expected_offset: u64,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_byte_length == 0 {
+        let _ = cancel_setup_generation_recipient_payload(source_handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    read_setup_generation_recipient_payload(source_handle, expected_offset, output)
+        .map_or_else(|status| status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_setup_generation_recipient_vss_payload_cancel(
+    source_handle: u32,
+) -> u32 {
+    cancel_setup_generation_recipient_payload(source_handle).map_or_else(|status| status, |()| 0)
+}
+
+/// Releases an authority and zeroizes every unopened payload and any source
+/// opened from it.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_setup_generation_authority_release(authority_handle: u32) -> u32 {
+    release_setup_generation_authority_by_identifier(authority_handle)
+        .map_or_else(|status| status, |()| 0)
 }
 
 /// Begins the sole active canonical-stream writer in this WASM instance.
@@ -531,7 +1516,9 @@ pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_finish_authentication(
     finish_mailbox_gcm_authentication(handle, &tag).map_or_else(|status| status, |()| 0)
 }
 
-/// Decrypts one already-authenticated staged ciphertext fragment in place.
+/// Provisionally decrypts one staged second-pass ciphertext fragment in place.
+/// The complete second-pass ciphertext must match the first-pass authenticated
+/// digest before the runtime mints a plaintext capability.
 ///
 /// # Safety
 ///
@@ -560,211 +1547,6 @@ pub extern "C" fn sealed_lattice_mailbox_gcm_finish_decryptor(handle: u32) -> u3
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_mailbox_gcm_cancel(handle: u32) -> u32 {
     cancel_mailbox_gcm(handle).map_or_else(|status| status, |()| 0)
-}
-
-/// Begins a BGV large-object sink whose framing and integrity are owned by the
-/// canonical stream verifier.
-///
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. Every non-null
-/// output pointer must point to one writable `u32` in WASM memory.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_begin(
-    family_code: u32,
-    material_root_pointer: *const u8,
-    material_root_length: usize,
-    descriptor_pointer: *const u8,
-    descriptor_length: usize,
-    status_pointer: *mut u32,
-    total_byte_length_pointer: *mut u32,
-) -> u32 {
-    let material_root =
-        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
-    let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let result = begin_bgv_canonical_stream(family_code, material_root, descriptor);
-    unsafe { write_canonical_stream_begin(result, status_pointer, total_byte_length_pointer) }
-}
-
-/// Opens an opaque accepted-setup material-ownership session before any setup
-/// source is streamed.
-///
-/// # Safety
-///
-/// `status_pointer` must be null or point to one writable `u32`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_begin(
-    status_pointer: *mut u32,
-) -> u32 {
-    match begin_accepted_setup_proof_binding_session() {
-        Ok(session_handle) => {
-            unsafe { write_u32_if_present(status_pointer, 0) };
-            session_handle
-        }
-        Err(_) => {
-            unsafe {
-                write_u32_if_present(
-                    status_pointer,
-                    foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
-                )
-            };
-            0
-        }
-    }
-}
-
-/// Begins an accepted-setup stream whose finished material remains owned by
-/// the owning setup session until terminal verification or cancellation.
-///
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. Every non-null
-/// output pointer must point to one writable `u32` in WASM memory.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
-    setup_session_handle: u32,
-    family_code: u32,
-    material_root_pointer: *const u8,
-    material_root_length: usize,
-    descriptor_pointer: *const u8,
-    descriptor_length: usize,
-    status_pointer: *mut u32,
-    total_byte_length_pointer: *mut u32,
-) -> u32 {
-    let accepted_setup_session =
-        match active_accepted_setup_proof_binding_session(setup_session_handle) {
-            Ok(session) => session,
-            Err(_) => {
-                unsafe {
-                    write_canonical_stream_begin(
-                        Err(foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
-                        status_pointer,
-                        total_byte_length_pointer,
-                    )
-                };
-                return 0;
-            }
-        };
-    let material_root =
-        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
-    let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let result = begin_accepted_setup_canonical_stream(
-        family_code,
-        material_root,
-        descriptor,
-        accepted_setup_session,
-    );
-    unsafe { write_canonical_stream_begin(result, status_pointer, total_byte_length_pointer) }
-}
-
-/// Cancels an accepted-setup session and drains every material root it owns.
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_accepted_setup_session_cancel(session_handle: u32) -> u32 {
-    cancel_accepted_setup_proof_binding_session(session_handle).map_or_else(
-        |_| foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
-        |()| 0,
-    )
-}
-
-/// Executes terminal accepted-setup verification under the already-open opaque
-/// material session. The session handle is a direct ABI value, not a field of
-/// the protocol request.
-///
-/// # Safety
-///
-/// Input pointers must name their declared readable ranges.
-/// `output_length_pointer` must be null or point to one writable `usize`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_command_with_length(
-    pointer: *const u8,
-    length: usize,
-    session_handle: u32,
-    output_length_pointer: *mut usize,
-) -> *mut u8 {
-    let input = unsafe { canonical_stream_input(pointer, length) };
-    let output = run_accepted_setup_command(input, session_handle);
-    // Terminal verification consumes the session on every ordinary outcome. If
-    // parsing or command selection failed before dispatch, cancel the still-live
-    // session so its reserved and finished roots are drained.
-    let _ = cancel_accepted_setup_proof_binding_session(session_handle);
-    let output_length = output.len();
-    if !output_length_pointer.is_null() {
-        unsafe { output_length_pointer.write(output_length) };
-    }
-    leak_bytes(output)
-}
-
-/// # Safety
-///
-/// Every input pointer must name its declared readable range.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_absorb_chunk(
-    handle: u32,
-    chunk_index: u32,
-    chunk_pointer: *const u8,
-    chunk_length: usize,
-) -> u32 {
-    let chunk = unsafe { canonical_stream_input(chunk_pointer, chunk_length) };
-    absorb_bgv_canonical_stream_chunk(handle, chunk_index, chunk)
-        .map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_stream_finish(handle: u32) -> u32 {
-    finish_bgv_canonical_stream(handle).map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_stream_cancel(handle: u32) -> u32 {
-    cancel_bgv_canonical_stream(handle).map_or_else(|status| status, |()| 0)
-}
-
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. Non-null output
-/// pointers must each point to one writable value of the declared type.
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_begin(
-    family_code: u32,
-    material_root_pointer: *const u8,
-    material_root_length: usize,
-    status_pointer: *mut u32,
-    total_byte_length_pointer: *mut u32,
-) -> u32 {
-    let material_root =
-        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
-    let result = begin_bgv_canonical_material_reader(family_code, material_root);
-    unsafe { write_canonical_stream_begin(result, status_pointer, total_byte_length_pointer) }
-}
-
-/// # Safety
-///
-/// The output pointer must name its declared writable range.
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_read_chunk(
-    handle: u32,
-    chunk_index: u32,
-    output_pointer: *mut u8,
-    output_length: usize,
-) -> u32 {
-    if output_pointer.is_null() {
-        return foundation::RefusalReason::WrongTypeOrLength.canonical_code() as u32;
-    }
-    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_length) };
-    read_bgv_canonical_material_chunk(handle, chunk_index, output)
-        .map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_finish(handle: u32) -> u32 {
-    finish_bgv_canonical_material_reader(handle).map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_cancel(handle: u32) -> u32 {
-    cancel_bgv_canonical_material_reader(handle).map_or_else(|status| status, |()| 0)
 }
 
 /// Opens the sole finality-verifier session in this WASM instance. The session
@@ -1512,6 +2294,8 @@ pub unsafe extern "C" fn sealed_lattice_action_randomness_command(
 mod tests {
     use super::{
         sealed_lattice_allocate, sealed_lattice_deallocate,
+        sealed_lattice_setup_generation_authority_begin,
+        sealed_lattice_setup_generation_recipient_vss_payload_read,
         sealed_lattice_transcript_core_command_with_length,
     };
     use core::ptr;
@@ -1539,5 +2323,48 @@ mod tests {
         unsafe {
             sealed_lattice_deallocate(response, response_length);
         }
+    }
+
+    #[test]
+    fn setup_generation_authority_boundary_rejects_misaligned_handle_bytes() {
+        let malformed_handle_bytes = [1_u8, 2, 3];
+        let board_capability = [0_u8; 32];
+        let state_capability = [0_u8; 32];
+        let mut status = 0_u32;
+
+        let authority_handle = unsafe {
+            sealed_lattice_setup_generation_authority_begin(
+                1,
+                1,
+                board_capability.as_ptr(),
+                board_capability.len(),
+                malformed_handle_bytes.as_ptr(),
+                malformed_handle_bytes.len(),
+                1,
+                1,
+                state_capability.as_ptr(),
+                state_capability.len(),
+                1,
+                &mut status,
+            )
+        };
+
+        assert_eq!(authority_handle, 0);
+        assert_eq!(
+            status,
+            u32::from(crate::foundation::RefusalReason::WrongTypeOrLength.canonical_code())
+        );
+    }
+
+    #[test]
+    fn setup_generation_recipient_read_rejects_empty_output_and_cancels() {
+        let status = unsafe {
+            sealed_lattice_setup_generation_recipient_vss_payload_read(1, 0, ptr::null_mut(), 0)
+        };
+
+        assert_eq!(
+            status,
+            u32::from(crate::foundation::RefusalReason::WrongTypeOrLength.canonical_code())
+        );
     }
 }

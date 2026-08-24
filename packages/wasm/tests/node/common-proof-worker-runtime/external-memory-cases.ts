@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    clearCommonProofExternalMemoryRequest,
+    encodeCommonProofExternalMemoryResponseInto,
+    maximumEncodedResponseByteLength,
+} from '../../../src/common-proof-worker-runtime/external-memory.js';
+import {
     CommonProofWorkerRuntimeError,
     decodeCommonProofExternalMemoryRequest,
     encodeCommonProofExternalMemoryResponse,
@@ -93,8 +98,9 @@ describe('common-proof external-memory runtime', () => {
                 requestSequence: BigInt(operationIndex + 1),
                 runtimeBindingHash,
             });
-            const decodedOperation =
-                decodeCommonProofExternalMemoryRequest(request).operations[0];
+            const decodedRequest =
+                decodeCommonProofExternalMemoryRequest(request);
+            const decodedOperation = decodedRequest.operations[0];
             expect(decodedOperation?.operationKind).toBe(
                 assignedOperation.expectedOperationKind,
             );
@@ -107,6 +113,7 @@ describe('common-proof external-memory runtime', () => {
                     ? assignedOperation.expectedProtection
                     : undefined;
             expect(decodedProtection).toBe(expectedProtection);
+            clearCommonProofExternalMemoryRequest(decodedRequest);
         }
     });
 
@@ -139,6 +146,8 @@ describe('common-proof external-memory runtime', () => {
         }
         expect([...append.bytes]).toEqual([...appendBytes]);
         expect(append.bytes.buffer).not.toBe(request.buffer);
+        clearCommonProofExternalMemoryRequest(decoded);
+        expect(append.bytes.byteLength).toBe(0);
 
         const readRequest = decodeCommonProofExternalMemoryRequest(
             fourByteReadRequest(binding, 2n),
@@ -152,13 +161,72 @@ describe('common-proof external-memory runtime', () => {
                 operationIndex: 0,
             },
         ]);
-        expect([...transferredRead]).toEqual([0, 0, 0, 0]);
+        expect(transferredRead.byteLength).toBe(0);
         const responseView = new DataView(response.buffer);
         expect(responseView.getUint16(0, true)).toBe(1);
         expect(responseView.getUint16(2, true)).toBe(2);
         expect(responseView.getBigUint64(4, true)).toBe(2n);
         expect(responseView.getUint32(76, true)).toBe(1);
         expect(response.byteLength).toBe(80 + 88 + 4);
+    });
+
+    it('reuses one bounded response buffer without retaining request or read bytes', () => {
+        const reusableResponseBuffer = new Uint8Array(
+            maximumEncodedResponseByteLength,
+        );
+        const responseBuffer = reusableResponseBuffer.buffer;
+        const readRequest = decodeCommonProofExternalMemoryRequest(
+            fourByteReadRequest(runtimeBinding(0x39), 1n),
+        );
+        const readBytes = Uint8Array.from([9, 8, 7, 6]);
+        const readResponse = encodeCommonProofExternalMemoryResponseInto(
+            readRequest,
+            [
+                {
+                    bytes: readBytes,
+                    objectOrdinal: 7,
+                    offset: 3n,
+                    operationIndex: 0,
+                },
+            ],
+            reusableResponseBuffer,
+        );
+        expect(readResponse.buffer).toBe(responseBuffer);
+        expect(readResponse.byteLength).toBe(80 + 88 + 4);
+        expect(readBytes.byteLength).toBe(0);
+
+        readResponse.fill(0);
+        const appendRequest = decodeCommonProofExternalMemoryRequest(
+            encodeRequest({
+                maximumPayloadByteLength: 4n,
+                operations: [
+                    {
+                        kind: 2,
+                        objectOrdinal: 7,
+                        payload: Uint8Array.from([4, 3, 2, 1]),
+                        payloadByteLength: 4n,
+                        position: 0n,
+                        protection: 0,
+                    },
+                ],
+                requestSequence: 2n,
+                runtimeBindingHash: runtimeBinding(0x39),
+            }),
+        );
+        const appendOperation = appendRequest.operations[0];
+        if (appendOperation?.operationKind !== 'append') {
+            throw new Error(
+                'The reusable-buffer append request was not decoded.',
+            );
+        }
+        const appendResponse = encodeCommonProofExternalMemoryResponseInto(
+            appendRequest,
+            [],
+            reusableResponseBuffer,
+        );
+        expect(appendResponse.buffer).toBe(responseBuffer);
+        expect(appendResponse.byteLength).toBe(80);
+        expect(appendOperation.bytes.byteLength).toBe(0);
     });
 
     it('rejects truncation, trailing bytes, wrong digests, and noncanonical operation order', () => {
@@ -245,9 +313,10 @@ describe('common-proof external-memory runtime', () => {
             requestSequence: 3n,
             runtimeBindingHash: binding,
         });
-        expect(
-            decodeCommonProofExternalMemoryRequest(deleteRequest).operations,
-        ).toHaveLength(2);
+        const decodedDeleteRequest =
+            decodeCommonProofExternalMemoryRequest(deleteRequest);
+        expect(decodedDeleteRequest.operations).toHaveLength(2);
+        clearCommonProofExternalMemoryRequest(decodedDeleteRequest);
     });
 
     it('rejects substituted single-read storage results', () => {
@@ -299,16 +368,17 @@ describe('common-proof external-memory runtime', () => {
         expect(decodedView.requestSequence).toBe(1n);
         expect([...decodedView.runtimeBindingHash]).toEqual([...binding]);
         expect(decodedView.operations).toHaveLength(1);
+        clearCommonProofExternalMemoryRequest(decodedView);
 
-        const appendPayload = new Uint8Array(49_152).fill(0x5a);
+        const appendPayload = new Uint8Array(1_048_576).fill(0x5a);
         const maximumRequest = encodeRequest({
-            maximumPayloadByteLength: 49_152n,
+            maximumPayloadByteLength: 1_048_576n,
             operations: [
                 {
                     kind: 2,
                     objectOrdinal: 9,
                     payload: appendPayload,
-                    payloadByteLength: 49_152n,
+                    payloadByteLength: 1_048_576n,
                     position: 0n,
                     protection: 0,
                 },
@@ -322,23 +392,21 @@ describe('common-proof external-memory runtime', () => {
         if (appendOperation?.operationKind !== 'append') {
             throw new Error('The maximum append operation was not decoded.');
         }
-        expect(appendOperation.bytes.byteLength).toBe(49_152);
+        expect(appendOperation.bytes.byteLength).toBe(1_048_576);
         expect(appendOperation.bytes.buffer).not.toBe(maximumRequest.buffer);
-        maximumRequest.fill(0);
-        expect(appendOperation.bytes[0]).toBe(0x5a);
-        expect(appendOperation.bytes[appendOperation.bytes.length - 1]).toBe(
-            0x5a,
-        );
+        expect(maximumRequest.byteLength).toBe(0);
+        clearCommonProofExternalMemoryRequest(decoded);
+        expect(appendOperation.bytes.byteLength).toBe(0);
 
-        const overlongAppendPayload = new Uint8Array(49_153).fill(0x6b);
+        const overlongAppendPayload = new Uint8Array(1_048_577).fill(0x6b);
         const overlongAppendRequest = encodeRequest({
-            maximumPayloadByteLength: 49_153n,
+            maximumPayloadByteLength: 1_048_577n,
             operations: [
                 {
                     kind: 2,
                     objectOrdinal: 9,
                     payload: overlongAppendPayload,
-                    payloadByteLength: 49_153n,
+                    payloadByteLength: 1_048_577n,
                     position: 0n,
                     protection: 0,
                 },
@@ -348,6 +416,56 @@ describe('common-proof external-memory runtime', () => {
         });
         expect(() =>
             decodeCommonProofExternalMemoryRequest(overlongAppendRequest),
-        ).toThrowError(expect.objectContaining({ code: 'MalformedRequest' }));
+        ).toThrowError(expect.objectContaining({ code: 'ResourceLimit' }));
+    });
+
+    it('clears transferred append custody after response success and refusal', () => {
+        const appendRequest = (): Uint8Array<ArrayBuffer> =>
+            encodeRequest({
+                maximumPayloadByteLength: 4n,
+                operations: [
+                    {
+                        kind: 2,
+                        objectOrdinal: 7,
+                        payload: Uint8Array.from([9, 8, 7, 6]),
+                        payloadByteLength: 4n,
+                        position: 0n,
+                        protection: 0,
+                    },
+                ],
+                requestSequence: 1n,
+                runtimeBindingHash: runtimeBinding(0x38),
+            });
+
+        const successfulRequest =
+            decodeCommonProofExternalMemoryRequest(appendRequest());
+        const successfulAppend = successfulRequest.operations[0];
+        if (successfulAppend?.operationKind !== 'append') {
+            throw new Error('The successful append request was not decoded.');
+        }
+        expect(
+            encodeCommonProofExternalMemoryResponse(successfulRequest, []),
+        ).toBeInstanceOf(Uint8Array);
+        expect(successfulAppend.bytes.byteLength).toBe(0);
+
+        const refusedRequest =
+            decodeCommonProofExternalMemoryRequest(appendRequest());
+        const refusedAppend = refusedRequest.operations[0];
+        if (refusedAppend?.operationKind !== 'append') {
+            throw new Error('The refused append request was not decoded.');
+        }
+        const rejectedReadBytes = Uint8Array.from([5, 4, 3, 2]);
+        expect(() =>
+            encodeCommonProofExternalMemoryResponse(refusedRequest, [
+                {
+                    bytes: rejectedReadBytes,
+                    objectOrdinal: 7,
+                    offset: 0n,
+                    operationIndex: 0,
+                },
+            ]),
+        ).toThrowError(expect.objectContaining({ code: 'WrongStorageResult' }));
+        expect(refusedAppend.bytes.byteLength).toBe(0);
+        expect(rejectedReadBytes.byteLength).toBe(0);
     });
 });

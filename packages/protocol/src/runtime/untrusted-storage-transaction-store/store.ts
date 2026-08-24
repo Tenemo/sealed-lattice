@@ -41,6 +41,7 @@ import {
     type UntrustedStorageRepairReport,
     type UntrustedStorageTransactionStoreOpenResult,
     type UntrustedStorageAuthenticatedHeadSnapshot,
+    type UntrustedStoragePhysicalAccountingSnapshot,
     type UntrustedStorageExclusiveCapacityReservation,
     type UntrustedStorageExclusiveCapacityReservationInput,
     type IdentifierKind,
@@ -62,6 +63,7 @@ export type {
     UntrustedStorageAdapter,
     UntrustedStorageAtomicMutation,
     UntrustedStorageAuthenticatedHeadSnapshot,
+    UntrustedStoragePhysicalAccountingSnapshot,
     UntrustedStorageAuthenticatedRepairProtection,
     UntrustedStorageAuthenticationInput,
     UntrustedStorageAuthenticator,
@@ -77,6 +79,26 @@ export type {
     UntrustedStorageWrite,
     UntrustedStorageWriteLease,
 } from './records.js';
+
+const destroyOwnedStorageBytes = (bytes: Uint8Array | undefined): void => {
+    if (bytes === undefined) {
+        return;
+    }
+    if (!(bytes.buffer instanceof ArrayBuffer)) {
+        bytes.fill(0);
+        return;
+    }
+    const buffer = bytes.buffer;
+    if (buffer.byteLength === 0) {
+        return;
+    }
+    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+        bytes.fill(0);
+        return;
+    }
+    new Uint8Array(buffer).fill(0);
+    structuredClone(buffer, { transfer: [buffer] });
+};
 
 export class UntrustedStorageTransactionStore {
     readonly #adapter: UntrustedStorageAdapter;
@@ -100,6 +122,12 @@ export class UntrustedStorageTransactionStore {
         | ExclusiveCapacityReservationRecord
         | undefined;
     #exclusiveOperationTail: Promise<void> = Promise.resolve();
+    #storageRequestCount = 0;
+    #storageTransactionCount = 0;
+    #physicalReadByteLength = 0;
+    #physicalReadCallCount = 0;
+    #physicalWriteByteLength = 0;
+    #physicalWriteCallCount = 0;
     readonly #authenticatedRepair: AuthenticatedRepairRuntime | undefined;
     readonly #storageInstanceIdentity: Uint8Array | undefined;
 
@@ -205,30 +233,34 @@ export class UntrustedStorageTransactionStore {
             for (const indexKey of indexKeys) {
                 const indexValue =
                     await this.#requiredListedIndexValue(indexKey);
-                let objectKey: string;
                 try {
-                    objectKey = this.#decodeIndexValue(indexValue);
-                } catch (error) {
-                    if (
-                        error instanceof UntrustedStorageTransactionError &&
-                        error.code === 'CorruptIndex'
-                    ) {
+                    let objectKey: string;
+                    try {
+                        objectKey = this.#decodeIndexValue(indexValue);
+                    } catch (error) {
+                        if (
+                            error instanceof UntrustedStorageTransactionError &&
+                            error.code === 'CorruptIndex'
+                        ) {
+                            corruptIndexKeys.add(indexKey);
+                            continue;
+                        }
+                        throw error;
+                    }
+                    if (!objectKeySet.has(objectKey)) {
                         corruptIndexKeys.add(indexKey);
                         continue;
                     }
-                    throw error;
+                    const referencingIndexKeys =
+                        referencedObjectToIndexKeys.get(objectKey) ?? [];
+                    referencingIndexKeys.push(indexKey);
+                    referencedObjectToIndexKeys.set(
+                        objectKey,
+                        referencingIndexKeys,
+                    );
+                } finally {
+                    destroyOwnedStorageBytes(indexValue);
                 }
-                if (!objectKeySet.has(objectKey)) {
-                    corruptIndexKeys.add(indexKey);
-                    continue;
-                }
-                const referencingIndexKeys =
-                    referencedObjectToIndexKeys.get(objectKey) ?? [];
-                referencingIndexKeys.push(indexKey);
-                referencedObjectToIndexKeys.set(
-                    objectKey,
-                    referencingIndexKeys,
-                );
             }
 
             for (const referencingIndexKeys of referencedObjectToIndexKeys.values()) {
@@ -267,7 +299,6 @@ export class UntrustedStorageTransactionStore {
             }
 
             return {
-                removedCorruptIndexCount: 0,
                 removedUnreferencedObjectCount:
                     authenticatedCleanupCount +
                     (authenticatedHeadIsPresent
@@ -283,8 +314,21 @@ export class UntrustedStorageTransactionStore {
     public async reserveExclusiveCapacity(
         input: UntrustedStorageExclusiveCapacityReservationInput,
     ): Promise<UntrustedStorageExclusiveCapacityReservation> {
+        let storageRequestCountAtStart = 0;
+        let storageTransactionCountAtStart = 0;
+        let physicalReadByteLengthAtStart = 0;
+        let physicalReadCallCountAtStart = 0;
+        let physicalWriteByteLengthAtStart = 0;
+        let physicalWriteCallCountAtStart = 0;
         const reservation = await this.#runExclusive(async () => {
+            storageRequestCountAtStart = this.#storageRequestCount;
+            storageTransactionCountAtStart = this.#storageTransactionCount;
+            physicalReadByteLengthAtStart = this.#physicalReadByteLength;
+            physicalReadCallCountAtStart = this.#physicalReadCallCount;
+            physicalWriteByteLengthAtStart = this.#physicalWriteByteLength;
+            physicalWriteCallCountAtStart = this.#physicalWriteCallCount;
             await this.#ensureAuthenticatedRepairReady();
+            await this.#initializeAuthenticatedRepairHeadForCapacityReservation();
             if (
                 this.#authenticatedRepair === undefined ||
                 this.#authenticatedRepair.currentHead === undefined ||
@@ -375,6 +419,7 @@ export class UntrustedStorageTransactionStore {
                 prefixes,
             );
             let matchingStoredValueByteLength = 0;
+            let matchingOwnedRecordCount = 0;
             for (const logicalRecordKey of matchingRecordKeys) {
                 const indexValue = await this.#readOwnedIndexValue(
                     this.#indexKey(logicalRecordKey),
@@ -391,14 +436,29 @@ export class UntrustedStorageTransactionStore {
                             'authenticated capacity inventory references a missing index.',
                         );
                     }
+                    matchingOwnedRecordCount = checkedAdd(
+                        matchingOwnedRecordCount,
+                        1,
+                        'authenticated capacity inventory record count',
+                    );
                     const objectKey = this.#decodeIndexValue(indexValue);
                     objectValue = await this.#readOwnedObjectValue(objectKey);
                     if (objectValue === undefined) {
-                        throw new UntrustedStorageTransactionError(
-                            'AuthenticationFailed',
-                            'authenticated capacity inventory references a missing object.',
+                        // Capacity ownership must still open so the authenticated
+                        // operation can refuse and retire a tampered lineage. The
+                        // later record read remains the cryptographic authority.
+                        matchingStoredValueByteLength = checkedAdd(
+                            matchingStoredValueByteLength,
+                            indexValue.byteLength,
+                            'authenticated capacity inventory bytes',
                         );
+                        continue;
                     }
+                    matchingOwnedRecordCount = checkedAdd(
+                        matchingOwnedRecordCount,
+                        1,
+                        'authenticated capacity inventory record count',
+                    );
                     await this.#assertAuthenticatedRepairObjectDigest(
                         logicalRecordKey,
                         objectValue,
@@ -413,8 +473,8 @@ export class UntrustedStorageTransactionStore {
                         'authenticated capacity inventory bytes',
                     );
                 } finally {
-                    indexValue?.fill(0);
-                    objectValue?.fill(0);
+                    destroyOwnedStorageBytes(indexValue);
+                    destroyOwnedStorageBytes(objectValue);
                 }
             }
 
@@ -480,7 +540,7 @@ export class UntrustedStorageTransactionStore {
                 await this.#listedKeys(this.#rootPrefix)
             ).length;
             const baselineOwnedRecordCount =
-                currentOwnedRecordCount - matchingRecordKeys.length * 2;
+                currentOwnedRecordCount - matchingOwnedRecordCount;
             const requiredOwnedRecordCount = checkedAdd(
                 baselineOwnedRecordCount,
                 input.maximumAdditionalOwnedRecordCount,
@@ -497,10 +557,34 @@ export class UntrustedStorageTransactionStore {
                 );
             }
             const record: ExclusiveCapacityReservationRecord = {
+                accounting: {
+                    deletedByteLength: 0,
+                    deletionCount: 0,
+                    deletionDurationMilliseconds: 0,
+                    physicalReadByteLengthAtEnd: undefined,
+                    physicalReadByteLengthAtStart,
+                    physicalReadCallCountAtEnd: undefined,
+                    physicalReadCallCountAtStart,
+                    physicalStoredByteLength: currentStoredValueByteLength,
+                    physicalStoredPeakByteLength: currentStoredValueByteLength,
+                    physicalValueByteLengths: new Map(),
+                    physicalWriteByteLengthAtEnd: undefined,
+                    physicalWriteByteLengthAtStart,
+                    physicalWriteCallCountAtEnd: undefined,
+                    physicalWriteCallCountAtStart,
+                    repairHashCallCount: 0,
+                    repairHashedByteLength: 0,
+                    storageRequestCountAtEnd: undefined,
+                    storageRequestCountAtStart,
+                    storageTransactionCountAtEnd: undefined,
+                    storageTransactionCountAtStart,
+                },
                 identifier: Symbol('exclusive-capacity-reservation'),
                 logicalRecordKeyPrefixes: prefixes,
                 maximumDeletionBatchRecordCount:
                     input.maximumDeletionBatchRecordCount,
+                physicalQuotaReservedByteLength: requiredStoredValueByteLength,
+                physicalStoredStartByteLength: currentStoredValueByteLength,
                 released: false,
             };
             this.#exclusiveCapacityReservation = record;
@@ -508,6 +592,8 @@ export class UntrustedStorageTransactionStore {
         });
 
         return Object.freeze({
+            copyPhysicalStorageAccounting: () =>
+                this.#copyPhysicalStorageAccounting(reservation),
             copyAuthenticatedLogicalRecordKeys: (prefix) =>
                 this.#runExclusive(() =>
                     this.#copyExclusiveCapacityReservationRecordKeys(
@@ -601,40 +687,120 @@ export class UntrustedStorageTransactionStore {
             await this.#ensureAuthenticatedRepairReady();
             const indexKey = this.#indexKey(input.logicalRecordKey);
             const indexValue = await this.#readOwnedIndexValue(indexKey);
-            this.#assertAuthenticatedRepairMapping(
-                input.logicalRecordKey,
-                indexValue,
-            );
-            if (indexValue === undefined) {
-                return undefined;
-            }
-            const objectKey = this.#decodeIndexValue(indexValue);
-            const bytes = await this.#readOwnedObjectValue(objectKey);
-            if (bytes === undefined) {
-                throw new UntrustedStorageTransactionError(
-                    'CorruptIndex',
-                    'storage index references a missing object.',
+            let bytes: Uint8Array | undefined;
+            let rereadIndexValue: Uint8Array | undefined;
+            try {
+                this.#assertAuthenticatedRepairMapping(
+                    input.logicalRecordKey,
+                    indexValue,
                 );
-            }
-            await this.#authenticate(
-                input.authenticate,
-                input.logicalRecordKey,
-                bytes,
-            );
-            await this.#assertAuthenticatedRepairObjectDigest(
-                input.logicalRecordKey,
-                bytes,
-            );
-            const rereadIndexValue = await this.#readOwnedIndexValue(indexKey);
-            if (!bytesEqual(indexValue, rereadIndexValue)) {
-                throw new UntrustedStorageTransactionError(
-                    'Conflict',
-                    'storage index changed during authenticated read.',
+                if (indexValue === undefined) {
+                    return undefined;
+                }
+                const objectKey = this.#decodeIndexValue(indexValue);
+                bytes = await this.#readOwnedObjectValue(objectKey);
+                if (bytes === undefined) {
+                    throw new UntrustedStorageTransactionError(
+                        'CorruptIndex',
+                        'storage index references a missing object.',
+                    );
+                }
+                await this.#authenticate(
+                    input.authenticate,
+                    input.logicalRecordKey,
+                    bytes,
                 );
-            }
-            await this.#assertAuthenticatedRepairHeadUnchanged();
+                await this.#assertAuthenticatedRepairObjectDigest(
+                    input.logicalRecordKey,
+                    bytes,
+                );
+                rereadIndexValue = await this.#readOwnedIndexValue(indexKey);
+                if (!bytesEqual(indexValue, rereadIndexValue)) {
+                    throw new UntrustedStorageTransactionError(
+                        'Conflict',
+                        'storage index changed during authenticated read.',
+                    );
+                }
+                await this.#assertAuthenticatedRepairHeadUnchanged();
 
-            return bytes.slice();
+                return bytes.slice();
+            } finally {
+                destroyOwnedStorageBytes(indexValue);
+                destroyOwnedStorageBytes(bytes);
+                destroyOwnedStorageBytes(rereadIndexValue);
+            }
+        });
+    }
+
+    /**
+     * Authenticates one committed record and lends its exact owned adapter
+     * buffer to a consumer that must consume or detach it before returning.
+     * The store rechecks the index and authenticated head after the consumer
+     * completes, so a concurrent or callback-induced coordinate change still
+     * fails closed without another payload-sized return copy.
+     */
+    public async consumeAuthenticated(input: {
+        logicalRecordKey: string;
+        consume: UntrustedStorageAuthenticator;
+    }): Promise<boolean> {
+        return this.#runExclusive(async () => {
+            await this.#ensureAuthenticatedRepairReady();
+            const indexKey = this.#indexKey(input.logicalRecordKey);
+            const indexValue = await this.#readOwnedIndexValue(indexKey);
+            let bytes: Uint8Array | undefined;
+            let rereadIndexValue: Uint8Array | undefined;
+            try {
+                this.#assertAuthenticatedRepairMapping(
+                    input.logicalRecordKey,
+                    indexValue,
+                );
+                if (indexValue === undefined) {
+                    return false;
+                }
+                const objectKey = this.#decodeIndexValue(indexValue);
+                bytes = await this.#readOwnedObjectValue(objectKey);
+                if (bytes === undefined) {
+                    throw new UntrustedStorageTransactionError(
+                        'CorruptIndex',
+                        'storage index references a missing object.',
+                    );
+                }
+                await this.#assertAuthenticatedRepairObjectDigest(
+                    input.logicalRecordKey,
+                    bytes,
+                );
+                try {
+                    await input.consume({
+                        bytes,
+                        logicalRecordKey: input.logicalRecordKey,
+                    });
+                } catch (error) {
+                    throw new UntrustedStorageTransactionError(
+                        'AuthenticationFailed',
+                        'stored bytes failed caller-supplied authentication.',
+                        error,
+                    );
+                }
+                if (bytes.byteLength !== 0) {
+                    throw new UntrustedStorageTransactionError(
+                        'AuthenticationFailed',
+                        'authenticated record consumer did not consume its owned bytes.',
+                    );
+                }
+                rereadIndexValue = await this.#readOwnedIndexValue(indexKey);
+                if (!bytesEqual(indexValue, rereadIndexValue)) {
+                    throw new UntrustedStorageTransactionError(
+                        'Conflict',
+                        'storage index changed during authenticated read.',
+                    );
+                }
+                await this.#assertAuthenticatedRepairHeadUnchanged();
+                return true;
+            } finally {
+                destroyOwnedStorageBytes(indexValue);
+                destroyOwnedStorageBytes(bytes);
+                destroyOwnedStorageBytes(rereadIndexValue);
+            }
         });
     }
 
@@ -662,6 +828,7 @@ export class UntrustedStorageTransactionStore {
             let derivedDigest: Uint8Array | undefined;
             try {
                 callbackInput = digestInput.slice();
+                this.#recordRepairHash(callbackInput.byteLength);
                 derivedDigest =
                     await repair.protection.deriveDigest(callbackInput);
                 if (
@@ -861,6 +1028,18 @@ export class UntrustedStorageTransactionStore {
         for (const transaction of ownedTransactions) {
             await this.#abortTransaction(transaction);
         }
+        reservation.accounting.storageRequestCountAtEnd =
+            this.#storageRequestCount;
+        reservation.accounting.storageTransactionCountAtEnd =
+            this.#storageTransactionCount;
+        reservation.accounting.physicalReadByteLengthAtEnd =
+            this.#physicalReadByteLength;
+        reservation.accounting.physicalReadCallCountAtEnd =
+            this.#physicalReadCallCount;
+        reservation.accounting.physicalWriteByteLengthAtEnd =
+            this.#physicalWriteByteLength;
+        reservation.accounting.physicalWriteCallCountAtEnd =
+            this.#physicalWriteCallCount;
         reservation.released = true;
         reservation.logicalRecordKeyPrefixes.clear();
         this.#exclusiveCapacityReservation = undefined;
@@ -991,95 +1170,113 @@ export class UntrustedStorageTransactionStore {
         }
         const indexKey = this.#indexKey(input.logicalRecordKey);
         const expectedIndexValue = await this.#readOwnedIndexValue(indexKey);
-        this.#assertAuthenticatedRepairMapping(
-            input.logicalRecordKey,
-            expectedIndexValue,
-        );
-        const existingObjectKey =
-            expectedIndexValue === undefined
-                ? undefined
-                : this.#decodeIndexValue(expectedIndexValue);
-        const existingObjectValue =
-            existingObjectKey === undefined
-                ? undefined
-                : await this.#readOwnedObjectValue(existingObjectKey);
-        if (
-            existingObjectKey !== undefined &&
-            existingObjectValue === undefined
-        ) {
-            throw new UntrustedStorageTransactionError(
-                'CorruptIndex',
-                'storage index references a missing object.',
-            );
-        }
-        if (existingObjectValue !== undefined) {
-            await this.#assertAuthenticatedRepairObjectDigest(
+        let existingObjectValue: Uint8Array | undefined;
+        let ownershipRetainedByTransaction = false;
+        try {
+            this.#assertAuthenticatedRepairMapping(
                 input.logicalRecordKey,
-                existingObjectValue,
+                expectedIndexValue,
             );
-        }
-        if (
-            input.expectedCurrentValue !== undefined &&
-            !bytesEqual(
-                existingObjectValue,
-                input.expectedCurrentValue ?? undefined,
-            )
-        ) {
-            throw new UntrustedStorageTransactionError(
-                'Conflict',
-                'logical record changed after the caller inspected it.',
+            const existingObjectKey =
+                expectedIndexValue === undefined
+                    ? undefined
+                    : this.#decodeIndexValue(expectedIndexValue);
+            existingObjectValue =
+                existingObjectKey === undefined
+                    ? undefined
+                    : await this.#readOwnedObjectValue(existingObjectKey);
+            if (
+                existingObjectKey !== undefined &&
+                existingObjectValue === undefined
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'CorruptIndex',
+                    'storage index references a missing object.',
+                );
+            }
+            if (existingObjectValue !== undefined) {
+                await this.#assertAuthenticatedRepairObjectDigest(
+                    input.logicalRecordKey,
+                    existingObjectValue,
+                );
+            }
+            if (
+                input.expectedCurrentValue !== undefined &&
+                !bytesEqual(
+                    existingObjectValue,
+                    input.expectedCurrentValue ?? undefined,
+                )
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'Conflict',
+                    'logical record changed after the caller inspected it.',
+                );
+            }
+            const leaseIdentifier = this.#issueIdentifier('lease');
+            const objectKey = `${this.#objectPrefix}${transaction.identifier}/${leaseIdentifier}`;
+            const collidingObjectValue =
+                await this.#readOwnedObjectValue(objectKey);
+            try {
+                if (collidingObjectValue !== undefined) {
+                    throw new UntrustedStorageTransactionError(
+                        'AdapterFailure',
+                        'lease identifier collides with a stored object.',
+                    );
+                }
+            } finally {
+                destroyOwnedStorageBytes(collidingObjectValue);
+            }
+            const indexValueByteLength =
+                textEncoder.encode(objectKey).byteLength;
+            const priorIndexValueByteLength =
+                expectedIndexValue?.byteLength ?? 0;
+            const lease: LeaseRecord = {
+                authenticate: undefined,
+                declaredByteLength: input.declaredByteLength,
+                expectedExistingObjectValue: existingObjectValue,
+                expectedIndexValue,
+                existingObjectKey,
+                indexKey,
+                indexValueGrowthByteLength: Math.max(
+                    0,
+                    indexValueByteLength - priorIndexValueByteLength,
+                ),
+                logicalRecordKey: input.logicalRecordKey,
+                objectKey,
+                state: 'issued',
+            };
+            const prospectiveStoredValueByteLength = checkedAdd(
+                await this.#measureStoredValueByteLength(),
+                checkedAdd(
+                    this.#reservedStoredValueByteLength(),
+                    this.#leaseReservationByteLength(lease),
+                    'storage reservation',
+                ),
+                'stored value byte length',
             );
-        }
-        const leaseIdentifier = this.#issueIdentifier('lease');
-        const objectKey = `${this.#objectPrefix}${transaction.identifier}/${leaseIdentifier}`;
-        if ((await this.#readOwnedObjectValue(objectKey)) !== undefined) {
-            throw new UntrustedStorageTransactionError(
-                'AdapterFailure',
-                'lease identifier collides with a stored object.',
-            );
-        }
-        const indexValueByteLength = textEncoder.encode(objectKey).byteLength;
-        const priorIndexValueByteLength = expectedIndexValue?.byteLength ?? 0;
-        const lease: LeaseRecord = {
-            authenticate: undefined,
-            declaredByteLength: input.declaredByteLength,
-            expectedExistingObjectValue: existingObjectValue?.slice(),
-            expectedIndexValue: expectedIndexValue?.slice(),
-            existingObjectKey,
-            indexKey,
-            indexValueGrowthByteLength: Math.max(
-                0,
-                indexValueByteLength - priorIndexValueByteLength,
-            ),
-            logicalRecordKey: input.logicalRecordKey,
-            objectKey,
-            state: 'issued',
-        };
-        const prospectiveStoredValueByteLength = checkedAdd(
-            await this.#measureStoredValueByteLength(),
-            checkedAdd(
-                this.#reservedStoredValueByteLength(),
-                this.#leaseReservationByteLength(lease),
-                'storage reservation',
-            ),
-            'stored value byte length',
-        );
-        if (
-            prospectiveStoredValueByteLength >
-            this.#limits.maximumStoredValueByteLength
-        ) {
-            throw new UntrustedStorageTransactionError(
-                'QuotaExceeded',
-                'storage reservation exceeds maximumStoredValueByteLength.',
-            );
-        }
-        transaction.totalDeclaredByteLength = totalDeclaredByteLength;
-        transaction.changes.set(input.logicalRecordKey, {
-            kind: 'write',
-            lease,
-        });
+            if (
+                prospectiveStoredValueByteLength >
+                this.#limits.maximumStoredValueByteLength
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'QuotaExceeded',
+                    'storage reservation exceeds maximumStoredValueByteLength.',
+                );
+            }
+            transaction.totalDeclaredByteLength = totalDeclaredByteLength;
+            transaction.changes.set(input.logicalRecordKey, {
+                kind: 'write',
+                lease,
+            });
+            ownershipRetainedByTransaction = true;
 
-        return this.#leaseHandle(transaction, lease);
+            return this.#leaseHandle(transaction, lease);
+        } finally {
+            if (!ownershipRetainedByTransaction) {
+                destroyOwnedStorageBytes(expectedIndexValue);
+                destroyOwnedStorageBytes(existingObjectValue);
+            }
+        }
     }
 
     #leaseHandle(
@@ -1133,7 +1330,7 @@ export class UntrustedStorageTransactionStore {
                 'lease write exceeds maximumStoredValueByteLength.',
             );
         }
-        await this.#adapter.write(lease.objectKey, bytes.slice());
+        await this.#writeAdapterValue(lease.objectKey, bytes.slice());
         lease.state = 'writing';
     }
 
@@ -1150,11 +1347,15 @@ export class UntrustedStorageTransactionStore {
             );
         }
         const storedBytes = await this.#requiredLeaseBytes(lease);
-        await this.#authenticate(
-            authenticate,
-            lease.logicalRecordKey,
-            storedBytes,
-        );
+        try {
+            await this.#authenticate(
+                authenticate,
+                lease.logicalRecordKey,
+                storedBytes,
+            );
+        } finally {
+            destroyOwnedStorageBytes(storedBytes);
+        }
         lease.authenticate = authenticate;
         lease.state = 'sealed';
     }
@@ -1206,52 +1407,65 @@ export class UntrustedStorageTransactionStore {
         }
         const indexKey = this.#indexKey(logicalRecordKey);
         const expectedIndexValue = await this.#readOwnedIndexValue(indexKey);
-        this.#assertAuthenticatedRepairMapping(
-            logicalRecordKey,
-            expectedIndexValue,
-        );
-        const existingObjectKey =
-            expectedIndexValue === undefined
-                ? undefined
-                : this.#decodeIndexValue(expectedIndexValue);
-        const existingObjectValue =
-            existingObjectKey === undefined
-                ? undefined
-                : await this.#readOwnedObjectValue(existingObjectKey);
-        if (
-            existingObjectKey !== undefined &&
-            existingObjectValue === undefined
-        ) {
-            throw new UntrustedStorageTransactionError(
-                'CorruptIndex',
-                'storage index references a missing object.',
-            );
-        }
-        if (existingObjectValue !== undefined) {
-            await this.#assertAuthenticatedRepairObjectDigest(
+        let existingObjectValue: Uint8Array | undefined;
+        let ownershipRetainedByTransaction = false;
+        try {
+            this.#assertAuthenticatedRepairMapping(
                 logicalRecordKey,
-                existingObjectValue,
+                expectedIndexValue,
             );
+            const existingObjectKey =
+                expectedIndexValue === undefined
+                    ? undefined
+                    : this.#decodeIndexValue(expectedIndexValue);
+            existingObjectValue =
+                existingObjectKey === undefined
+                    ? undefined
+                    : await this.#readOwnedObjectValue(existingObjectKey);
+            if (
+                existingObjectKey !== undefined &&
+                existingObjectValue === undefined
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'CorruptIndex',
+                    'storage index references a missing object.',
+                );
+            }
+            if (existingObjectValue !== undefined) {
+                await this.#assertAuthenticatedRepairObjectDigest(
+                    logicalRecordKey,
+                    existingObjectValue,
+                );
+            }
+            if (
+                expectedCurrentValue !== undefined &&
+                !bytesEqual(
+                    existingObjectValue,
+                    expectedCurrentValue ?? undefined,
+                )
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'Conflict',
+                    'logical record changed after the caller inspected it.',
+                );
+            }
+            transaction.changes.set(logicalRecordKey, {
+                kind: 'delete',
+                deletion: {
+                    expectedExistingObjectValue: existingObjectValue,
+                    expectedIndexValue,
+                    existingObjectKey,
+                    indexKey,
+                    logicalRecordKey,
+                },
+            });
+            ownershipRetainedByTransaction = true;
+        } finally {
+            if (!ownershipRetainedByTransaction) {
+                destroyOwnedStorageBytes(expectedIndexValue);
+                destroyOwnedStorageBytes(existingObjectValue);
+            }
         }
-        if (
-            expectedCurrentValue !== undefined &&
-            !bytesEqual(existingObjectValue, expectedCurrentValue ?? undefined)
-        ) {
-            throw new UntrustedStorageTransactionError(
-                'Conflict',
-                'logical record changed after the caller inspected it.',
-            );
-        }
-        transaction.changes.set(logicalRecordKey, {
-            kind: 'delete',
-            deletion: {
-                expectedExistingObjectValue: existingObjectValue?.slice(),
-                expectedIndexValue: expectedIndexValue?.slice(),
-                existingObjectKey,
-                indexKey,
-                logicalRecordKey,
-            },
-        });
     }
 
     async #prepareAuthenticatedRepairPublication(
@@ -1271,16 +1485,21 @@ export class UntrustedStorageTransactionStore {
                 record.logicalRecordKey,
             );
             if (change.kind === 'write') {
-                records.set(
-                    encodedLogicalRecordKey,
-                    Object.freeze({
-                        objectKey: change.lease.objectKey,
-                        sealedValueDigest:
-                            await this.#deriveAuthenticatedRepairDigest(
-                                await this.#requiredLeaseBytes(change.lease),
-                            ),
-                    }),
-                );
+                const leaseBytes = await this.#requiredLeaseBytes(change.lease);
+                try {
+                    records.set(
+                        encodedLogicalRecordKey,
+                        Object.freeze({
+                            objectKey: change.lease.objectKey,
+                            sealedValueDigest:
+                                await this.#deriveAuthenticatedRepairDigest(
+                                    leaseBytes,
+                                ),
+                        }),
+                    );
+                } finally {
+                    destroyOwnedStorageBytes(leaseBytes);
+                }
             } else {
                 records.delete(encodedLogicalRecordKey);
             }
@@ -1420,19 +1639,36 @@ export class UntrustedStorageTransactionStore {
                     );
                 }
                 const leaseBytes = await this.#requiredLeaseBytes(change.lease);
-                await this.#authenticate(
-                    change.lease.authenticate,
-                    change.lease.logicalRecordKey,
-                    leaseBytes,
-                );
-                authenticatedLeaseBytes.set(change.lease, leaseBytes.slice());
+                try {
+                    await this.#authenticate(
+                        change.lease.authenticate,
+                        change.lease.logicalRecordKey,
+                        leaseBytes,
+                    );
+                    authenticatedLeaseBytes.set(
+                        change.lease,
+                        leaseBytes.slice(),
+                    );
+                } finally {
+                    destroyOwnedStorageBytes(leaseBytes);
+                }
             }
         }
-        const authenticatedRepairPublication =
-            await this.#prepareAuthenticatedRepairPublication(
-                transaction,
-                changes,
-            );
+        let authenticatedRepairPublication:
+            | AuthenticatedRepairPublication
+            | undefined;
+        try {
+            authenticatedRepairPublication =
+                await this.#prepareAuthenticatedRepairPublication(
+                    transaction,
+                    changes,
+                );
+        } catch (error) {
+            for (const leaseBytes of authenticatedLeaseBytes.values()) {
+                destroyOwnedStorageBytes(leaseBytes);
+            }
+            throw error;
+        }
         transaction.authenticatedRepairPublication =
             authenticatedRepairPublication;
         const expectedValues: UntrustedStorageExpectedValue[] = [];
@@ -1480,7 +1716,7 @@ export class UntrustedStorageTransactionStore {
         }
         let committed: boolean;
         try {
-            committed = await this.#adapter.applyAtomicMutation({
+            committed = await this.#applyAdapterAtomicMutation({
                 expectedValues,
                 writes,
                 deletes,
@@ -1488,6 +1724,16 @@ export class UntrustedStorageTransactionStore {
         } catch (error) {
             this.#restoreUncommittedTransaction(changes, transaction);
             throw error;
+        } finally {
+            for (const expectedValue of expectedValues) {
+                destroyOwnedStorageBytes(expectedValue.value ?? undefined);
+            }
+            for (const write of writes) {
+                destroyOwnedStorageBytes(write.value);
+            }
+            for (const leaseBytes of authenticatedLeaseBytes.values()) {
+                destroyOwnedStorageBytes(leaseBytes);
+            }
         }
         if (!committed) {
             this.#restoreUncommittedTransaction(changes, transaction);
@@ -1506,6 +1752,7 @@ export class UntrustedStorageTransactionStore {
                 );
             }
             repair.currentHead = authenticatedRepairPublication.head;
+            destroyOwnedStorageBytes(repair.currentSealedHeadBytes);
             repair.currentSealedHeadBytes =
                 authenticatedRepairPublication.sealedHeadBytes.slice();
         }
@@ -1524,6 +1771,9 @@ export class UntrustedStorageTransactionStore {
             }
         }
         transaction.pendingCleanupObjectKeys.clear();
+        destroyOwnedStorageBytes(
+            transaction.authenticatedRepairPublication?.sealedHeadBytes,
+        );
         transaction.authenticatedRepairPublication = undefined;
     }
 
@@ -1535,36 +1785,53 @@ export class UntrustedStorageTransactionStore {
                 const observedIndexValue = await this.#readOwnedIndexValue(
                     change.lease.indexKey,
                 );
-                if (
-                    !bytesEqual(
-                        observedIndexValue,
-                        textEncoder.encode(change.lease.objectKey),
-                    )
-                ) {
-                    throw new UntrustedStorageTransactionError(
-                        'AdapterFailure',
-                        'committed storage index failed publication reread.',
+                try {
+                    if (
+                        !bytesEqual(
+                            observedIndexValue,
+                            textEncoder.encode(change.lease.objectKey),
+                        )
+                    ) {
+                        throw new UntrustedStorageTransactionError(
+                            'AdapterFailure',
+                            'committed storage index failed publication reread.',
+                        );
+                    }
+                    if (change.lease.authenticate === undefined) {
+                        throw new UntrustedStorageTransactionError(
+                            'InvalidState',
+                            'committed write lease is missing its authenticator.',
+                        );
+                    }
+                    const leaseBytes = await this.#requiredLeaseBytes(
+                        change.lease,
                     );
+                    try {
+                        await this.#authenticate(
+                            change.lease.authenticate,
+                            change.lease.logicalRecordKey,
+                            leaseBytes,
+                        );
+                    } finally {
+                        destroyOwnedStorageBytes(leaseBytes);
+                    }
+                } finally {
+                    destroyOwnedStorageBytes(observedIndexValue);
                 }
-                if (change.lease.authenticate === undefined) {
-                    throw new UntrustedStorageTransactionError(
-                        'InvalidState',
-                        'committed write lease is missing its authenticator.',
-                    );
+            } else {
+                const observedIndexValue = await this.#readOwnedIndexValue(
+                    change.deletion.indexKey,
+                );
+                try {
+                    if (observedIndexValue !== undefined) {
+                        throw new UntrustedStorageTransactionError(
+                            'AdapterFailure',
+                            'deleted storage index remained visible after commit.',
+                        );
+                    }
+                } finally {
+                    destroyOwnedStorageBytes(observedIndexValue);
                 }
-                await this.#authenticate(
-                    change.lease.authenticate,
-                    change.lease.logicalRecordKey,
-                    await this.#requiredLeaseBytes(change.lease),
-                );
-            } else if (
-                (await this.#readOwnedIndexValue(change.deletion.indexKey)) !==
-                undefined
-            ) {
-                throw new UntrustedStorageTransactionError(
-                    'AdapterFailure',
-                    'deleted storage index remained visible after commit.',
-                );
             }
         }
         const authenticatedRepairPublication =
@@ -1572,36 +1839,40 @@ export class UntrustedStorageTransactionStore {
         if (authenticatedRepairPublication !== undefined) {
             const observedSealedHeadBytes =
                 await this.#readOwnedRepairHeadValue();
-            if (
-                !bytesEqual(
-                    observedSealedHeadBytes,
+            try {
+                if (
+                    !bytesEqual(
+                        observedSealedHeadBytes,
+                        authenticatedRepairPublication.sealedHeadBytes,
+                    )
+                ) {
+                    throw new UntrustedStorageTransactionError(
+                        'AuthenticationFailed',
+                        'committed authenticated repair head failed publication reread.',
+                    );
+                }
+                const observedHead = await this.#openAuthenticatedRepairHead(
                     authenticatedRepairPublication.sealedHeadBytes,
-                )
-            ) {
-                throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'committed authenticated repair head failed publication reread.',
                 );
-            }
-            const observedHead = await this.#openAuthenticatedRepairHead(
-                authenticatedRepairPublication.sealedHeadBytes,
-            );
-            const expectedHeadBytes = encodeAuthenticatedRepairHead(
-                authenticatedRepairPublication.head,
-            );
-            const observedHeadBytes =
-                encodeAuthenticatedRepairHead(observedHead);
-            const headMatches = bytesEqual(
-                expectedHeadBytes,
-                observedHeadBytes,
-            );
-            expectedHeadBytes.fill(0);
-            observedHeadBytes.fill(0);
-            if (!headMatches) {
-                throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'committed authenticated repair head changed during publication.',
+                const expectedHeadBytes = encodeAuthenticatedRepairHead(
+                    authenticatedRepairPublication.head,
                 );
+                const observedHeadBytes =
+                    encodeAuthenticatedRepairHead(observedHead);
+                const headMatches = bytesEqual(
+                    expectedHeadBytes,
+                    observedHeadBytes,
+                );
+                expectedHeadBytes.fill(0);
+                observedHeadBytes.fill(0);
+                if (!headMatches) {
+                    throw new UntrustedStorageTransactionError(
+                        'AuthenticationFailed',
+                        'committed authenticated repair head changed during publication.',
+                    );
+                }
+            } finally {
+                destroyOwnedStorageBytes(observedSealedHeadBytes);
             }
         }
         for (const change of transaction.changes.values()) {
@@ -1627,10 +1898,12 @@ export class UntrustedStorageTransactionStore {
         for (const change of transaction.changes.values()) {
             const record =
                 change.kind === 'write' ? change.lease : change.deletion;
-            record.expectedExistingObjectValue?.fill(0);
-            record.expectedIndexValue?.fill(0);
+            destroyOwnedStorageBytes(record.expectedExistingObjectValue);
+            destroyOwnedStorageBytes(record.expectedIndexValue);
         }
-        transaction.authenticatedRepairPublication?.sealedHeadBytes.fill(0);
+        destroyOwnedStorageBytes(
+            transaction.authenticatedRepairPublication?.sealedHeadBytes,
+        );
         transaction.authenticatedRepairPublication = undefined;
         transaction.changes.clear();
     }
@@ -1815,69 +2088,139 @@ export class UntrustedStorageTransactionStore {
             return objectKeys.length;
         }
 
-        const head = await this.#openAuthenticatedRepairHead(sealedHeadBytes);
-        if (head.repairIdentity !== repair.expectedRepairIdentity) {
-            throw new UntrustedStorageTransactionError(
-                'AuthenticationFailed',
-                'authenticated repair head belongs to another storage authority.',
+        try {
+            const head =
+                await this.#openAuthenticatedRepairHead(sealedHeadBytes);
+            if (head.repairIdentity !== repair.expectedRepairIdentity) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair head belongs to another storage authority.',
+                );
+            }
+            if (head.records.size !== indexKeys.length) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair head does not match the committed storage index count.',
+                );
+            }
+            const referencedObjectKeys = new Set<string>();
+            for (const indexKey of indexKeys) {
+                const encodedLogicalRecordKey = indexKey.slice(
+                    this.#indexPrefix.length,
+                );
+                const expectedRecord = head.records.get(
+                    encodedLogicalRecordKey,
+                );
+                if (expectedRecord === undefined) {
+                    throw new UntrustedStorageTransactionError(
+                        'AuthenticationFailed',
+                        'authenticated repair head omits a committed storage index.',
+                    );
+                }
+                const indexValue =
+                    await this.#requiredListedIndexValue(indexKey);
+                let objectValue: Uint8Array | undefined;
+                try {
+                    const objectKey = this.#decodeIndexValue(indexValue);
+                    if (objectKey !== expectedRecord.objectKey) {
+                        throw new UntrustedStorageTransactionError(
+                            'AuthenticationFailed',
+                            'authenticated repair head conflicts with a committed storage index.',
+                        );
+                    }
+                    objectValue = await this.#readOwnedObjectValue(objectKey);
+                    if (objectValue === undefined) {
+                        throw new UntrustedStorageTransactionError(
+                            'AuthenticationFailed',
+                            'authenticated repair head references a missing committed object.',
+                        );
+                    }
+                    if (
+                        (await this.#deriveAuthenticatedRepairDigest(
+                            objectValue,
+                        )) !== expectedRecord.sealedValueDigest
+                    ) {
+                        throw new UntrustedStorageTransactionError(
+                            'AuthenticationFailed',
+                            'authenticated repair head detects changed committed object bytes.',
+                        );
+                    }
+                    referencedObjectKeys.add(objectKey);
+                } finally {
+                    destroyOwnedStorageBytes(indexValue);
+                    destroyOwnedStorageBytes(objectValue);
+                }
+            }
+            const unreferencedObjectKeys = objectKeys.filter(
+                (objectKey) => !referencedObjectKeys.has(objectKey),
             );
+            await this.#deleteUnreferencedObjects(
+                unreferencedObjectKeys,
+                'authenticated repair abandoned-write cleanup',
+            );
+            repair.currentHead = head;
+            repair.currentSealedHeadBytes = sealedHeadBytes.slice();
+            repair.initialized = true;
+
+            return unreferencedObjectKeys.length;
+        } finally {
+            destroyOwnedStorageBytes(sealedHeadBytes);
         }
-        if (head.records.size !== indexKeys.length) {
-            throw new UntrustedStorageTransactionError(
-                'AuthenticationFailed',
-                'authenticated repair head does not match the committed storage index count.',
-            );
+    }
+
+    async #initializeAuthenticatedRepairHeadForCapacityReservation(): Promise<void> {
+        const repair = this.#authenticatedRepair;
+        if (
+            repair === undefined ||
+            repair.currentHead !== undefined ||
+            repair.currentSealedHeadBytes !== undefined
+        ) {
+            return;
         }
-        const referencedObjectKeys = new Set<string>();
-        for (const indexKey of indexKeys) {
-            const encodedLogicalRecordKey = indexKey.slice(
-                this.#indexPrefix.length,
-            );
-            const expectedRecord = head.records.get(encodedLogicalRecordKey);
-            if (expectedRecord === undefined) {
-                throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'authenticated repair head omits a committed storage index.',
-                );
-            }
-            const indexValue = await this.#requiredListedIndexValue(indexKey);
-            const objectKey = this.#decodeIndexValue(indexValue);
-            if (objectKey !== expectedRecord.objectKey) {
-                throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'authenticated repair head conflicts with a committed storage index.',
-                );
-            }
-            const objectValue = await this.#readOwnedObjectValue(objectKey);
-            if (objectValue === undefined) {
-                throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'authenticated repair head references a missing committed object.',
-                );
-            }
+        const head = Object.freeze({
+            lastTransactionIdentifier: this.#issueIdentifier('transaction'),
+            predecessorHeadDigest: '0'.repeat(128),
+            recordVersion: authenticatedRepairHeadRecordVersion,
+            records: new Map(),
+            repairIdentity: repair.expectedRepairIdentity,
+            transitionSequence: 1n,
+        });
+        const sealedHeadBytes = await this.#sealAuthenticatedRepairHead(head);
+        try {
             if (
-                (await this.#deriveAuthenticatedRepairDigest(objectValue)) !==
-                expectedRecord.sealedValueDigest
+                sealedHeadBytes.byteLength >
+                    this.#limits.maximumStoredValueByteLength ||
+                this.#limits.maximumOwnedRecordCount < 1
             ) {
                 throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'authenticated repair head detects changed committed object bytes.',
+                    'QuotaExceeded',
+                    'authenticated empty repair head exceeds the configured storage capacity.',
                 );
             }
-            referencedObjectKeys.add(objectKey);
+            const committed = await this.#applyAdapterAtomicMutation({
+                deletes: [],
+                expectedValues: [
+                    { key: this.#repairHeadKey, value: undefined },
+                ],
+                writes: [
+                    {
+                        key: this.#repairHeadKey,
+                        value: sealedHeadBytes.slice(),
+                    },
+                ],
+            });
+            if (!committed) {
+                throw new UntrustedStorageTransactionError(
+                    'Conflict',
+                    'authenticated empty repair head changed before capacity reservation.',
+                );
+            }
+            repair.currentHead = head;
+            repair.currentSealedHeadBytes = sealedHeadBytes.slice();
+            await this.#assertAuthenticatedRepairHeadUnchanged();
+        } finally {
+            sealedHeadBytes.fill(0);
         }
-        const unreferencedObjectKeys = objectKeys.filter(
-            (objectKey) => !referencedObjectKeys.has(objectKey),
-        );
-        await this.#deleteUnreferencedObjects(
-            unreferencedObjectKeys,
-            'authenticated repair abandoned-write cleanup',
-        );
-        repair.currentHead = head;
-        repair.currentSealedHeadBytes = sealedHeadBytes.slice();
-        repair.initialized = true;
-
-        return unreferencedObjectKeys.length;
     }
 
     #authorizedEmptyHeadDigestInput(
@@ -1933,11 +2276,15 @@ export class UntrustedStorageTransactionStore {
             return;
         }
         const observedHeadBytes = await this.#readOwnedRepairHeadValue();
-        if (!bytesEqual(observedHeadBytes, repair.currentSealedHeadBytes)) {
-            throw new UntrustedStorageTransactionError(
-                'AuthenticationFailed',
-                'authenticated repair head changed outside the committed transaction chain.',
-            );
+        try {
+            if (!bytesEqual(observedHeadBytes, repair.currentSealedHeadBytes)) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair head changed outside the committed transaction chain.',
+                );
+            }
+        } finally {
+            destroyOwnedStorageBytes(observedHeadBytes);
         }
     }
 
@@ -2042,24 +2389,32 @@ export class UntrustedStorageTransactionStore {
                 'authenticated repair protection is not configured.',
             );
         }
-        let digest: Uint8Array;
+        let digest: Uint8Array | undefined;
+        const digestInput = bytes.slice();
         try {
-            digest = await repair.protection.deriveDigest(bytes.slice());
+            this.#recordRepairHash(digestInput.byteLength);
+            digest = await repair.protection.deriveDigest(digestInput);
         } catch (error) {
             throw new UntrustedStorageTransactionError(
                 'AuthenticationFailed',
                 'authenticated repair head digest derivation failed.',
                 error,
             );
+        } finally {
+            destroyOwnedStorageBytes(digestInput);
         }
-        if (!isUint8Array(digest) || digest.byteLength !== 64) {
-            throw new UntrustedStorageTransactionError(
-                'AuthenticationFailed',
-                'authenticated repair head digest has an invalid length.',
-            );
-        }
+        try {
+            if (!isUint8Array(digest) || digest.byteLength !== 64) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair head digest has an invalid length.',
+                );
+            }
 
-        return bytesToHex(digest);
+            return bytesToHex(digest);
+        } finally {
+            destroyOwnedStorageBytes(digest);
+        }
     }
 
     async #sealAuthenticatedRepairHead(
@@ -2112,7 +2467,7 @@ export class UntrustedStorageTransactionStore {
     }
 
     async #requiredLeaseBytes(lease: LeaseRecord): Promise<Uint8Array> {
-        const storedBytes = await this.#adapter.read(lease.objectKey);
+        const storedBytes = await this.#readAdapterValue(lease.objectKey);
         if (storedBytes === undefined) {
             throw new UntrustedStorageTransactionError(
                 'AdapterFailure',
@@ -2126,7 +2481,7 @@ export class UntrustedStorageTransactionStore {
             );
         }
 
-        return this.#copyBoundedAdapterValue({
+        return this.#takeBoundedAdapterValue({
             maximumByteLength: lease.declaredByteLength,
             oversizedErrorCode: 'MalformedLength',
             oversizedMessage: 'staged lease bytes exceed declaredByteLength.',
@@ -2178,9 +2533,10 @@ export class UntrustedStorageTransactionStore {
         logicalRecordKey: string,
         bytes: Uint8Array,
     ): Promise<void> {
+        const authenticationBytes = bytes.slice();
         try {
             await authenticate({
-                bytes: bytes.slice(),
+                bytes: authenticationBytes,
                 logicalRecordKey,
             });
         } catch (error) {
@@ -2189,6 +2545,8 @@ export class UntrustedStorageTransactionStore {
                 'stored bytes failed caller-supplied authentication.',
                 error,
             );
+        } finally {
+            authenticationBytes.fill(0);
         }
     }
 
@@ -2274,11 +2632,289 @@ export class UntrustedStorageTransactionStore {
         return reservedByteLength;
     }
 
+    #copyPhysicalStorageAccounting(
+        reservation: ExclusiveCapacityReservationRecord,
+    ): UntrustedStoragePhysicalAccountingSnapshot {
+        const accounting = reservation.accounting;
+        const storageRequestCount =
+            (accounting.storageRequestCountAtEnd ?? this.#storageRequestCount) -
+            accounting.storageRequestCountAtStart;
+        const storageTransactionCount =
+            (accounting.storageTransactionCountAtEnd ??
+                this.#storageTransactionCount) -
+            accounting.storageTransactionCountAtStart;
+        const physicalReadByteLength =
+            (accounting.physicalReadByteLengthAtEnd ??
+                this.#physicalReadByteLength) -
+            accounting.physicalReadByteLengthAtStart;
+        const physicalReadCallCount =
+            (accounting.physicalReadCallCountAtEnd ??
+                this.#physicalReadCallCount) -
+            accounting.physicalReadCallCountAtStart;
+        const physicalWriteByteLength =
+            (accounting.physicalWriteByteLengthAtEnd ??
+                this.#physicalWriteByteLength) -
+            accounting.physicalWriteByteLengthAtStart;
+        const physicalWriteCallCount =
+            (accounting.physicalWriteCallCountAtEnd ??
+                this.#physicalWriteCallCount) -
+            accounting.physicalWriteCallCountAtStart;
+        if (storageRequestCount < storageTransactionCount) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'physical storage request accounting fell below its transaction count.',
+            );
+        }
+        return Object.freeze({
+            deletedByteLength: accounting.deletedByteLength,
+            deletionCount: accounting.deletionCount,
+            deletionDurationMilliseconds:
+                accounting.deletionDurationMilliseconds,
+            physicalReadByteLength,
+            physicalReadCallCount,
+            repairHashCallCount: accounting.repairHashCallCount,
+            repairHashedByteLength: accounting.repairHashedByteLength,
+            storageRequestCount,
+            storageTransactionCount,
+            physicalWriteByteLength,
+            physicalWriteCallCount,
+            physicalQuotaByteLength: this.#limits.maximumStoredValueByteLength,
+            physicalQuotaHeadroomByteLength:
+                this.#limits.maximumStoredValueByteLength -
+                reservation.physicalQuotaReservedByteLength,
+            physicalQuotaReservedByteLength:
+                reservation.physicalQuotaReservedByteLength,
+            physicalStoredEndByteLength: accounting.physicalStoredByteLength,
+            physicalStoredPeakByteLength:
+                accounting.physicalStoredPeakByteLength,
+            physicalStoredStartByteLength:
+                reservation.physicalStoredStartByteLength,
+        });
+    }
+
+    #recordStorageOperation(requestCount: number): void {
+        assertSafeNonNegativeInteger(requestCount, 'storage request count');
+        this.#storageRequestCount = checkedAdd(
+            this.#storageRequestCount,
+            requestCount,
+            'storage request accounting',
+        );
+        this.#storageTransactionCount = checkedAdd(
+            this.#storageTransactionCount,
+            1,
+            'storage transaction accounting',
+        );
+    }
+
+    #observePhysicalValue(key: string, value: Uint8Array | undefined): void {
+        this.#exclusiveCapacityReservation?.accounting.physicalValueByteLengths.set(
+            key,
+            value?.byteLength,
+        );
+    }
+
+    #replacePhysicalValue(
+        key: string,
+        nextByteLength: number | undefined,
+        expectedPreviousByteLength?: number,
+    ): void {
+        const reservation = this.#exclusiveCapacityReservation;
+        if (reservation === undefined) {
+            return;
+        }
+        const accounting = reservation.accounting;
+        const observedPreviousByteLength =
+            accounting.physicalValueByteLengths.get(key);
+        const previousByteLength =
+            expectedPreviousByteLength ?? observedPreviousByteLength ?? 0;
+        const nextStoredByteLength =
+            accounting.physicalStoredByteLength -
+            previousByteLength +
+            (nextByteLength ?? 0);
+        if (
+            !Number.isSafeInteger(nextStoredByteLength) ||
+            nextStoredByteLength < 0 ||
+            nextStoredByteLength > this.#limits.maximumStoredValueByteLength
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'physical storage accounting diverged from the configured quota.',
+            );
+        }
+        accounting.physicalStoredByteLength = nextStoredByteLength;
+        accounting.physicalStoredPeakByteLength = Math.max(
+            accounting.physicalStoredPeakByteLength,
+            nextStoredByteLength,
+        );
+        accounting.physicalValueByteLengths.set(key, nextByteLength);
+        if (nextByteLength === undefined && previousByteLength > 0) {
+            accounting.deletedByteLength = checkedAdd(
+                accounting.deletedByteLength,
+                previousByteLength,
+                'physical deletion byte accounting',
+            );
+            accounting.deletionCount = checkedAdd(
+                accounting.deletionCount,
+                1,
+                'physical deletion count accounting',
+            );
+        }
+    }
+
+    #recordDeletionDuration(startedAtMilliseconds: number): void {
+        const accounting = this.#exclusiveCapacityReservation?.accounting;
+        if (accounting === undefined) {
+            return;
+        }
+        accounting.deletionDurationMilliseconds += Math.max(
+            0,
+            this.#readMonotonicClockMilliseconds() - startedAtMilliseconds,
+        );
+    }
+
+    #recordRepairHash(byteLength: number): void {
+        const accounting = this.#exclusiveCapacityReservation?.accounting;
+        if (accounting === undefined) {
+            return;
+        }
+        accounting.repairHashCallCount = checkedAdd(
+            accounting.repairHashCallCount,
+            1,
+            'repair hash call accounting',
+        );
+        accounting.repairHashedByteLength = checkedAdd(
+            accounting.repairHashedByteLength,
+            byteLength,
+            'repair hash byte accounting',
+        );
+    }
+
+    async #readAdapterValue(key: string): Promise<Uint8Array | undefined> {
+        this.#recordStorageOperation(1);
+        const value = await this.#adapter.read(key);
+        this.#physicalReadCallCount = checkedAdd(
+            this.#physicalReadCallCount,
+            1,
+            'physical storage read call accounting',
+        );
+        this.#physicalReadByteLength = checkedAdd(
+            this.#physicalReadByteLength,
+            value?.byteLength ?? 0,
+            'physical storage read byte accounting',
+        );
+        this.#observePhysicalValue(key, value);
+        return value;
+    }
+
+    async #writeAdapterValue(key: string, value: Uint8Array): Promise<void> {
+        this.#recordStorageOperation(1);
+        await this.#adapter.write(key, value);
+        this.#physicalWriteCallCount = checkedAdd(
+            this.#physicalWriteCallCount,
+            1,
+            'physical storage write call accounting',
+        );
+        this.#physicalWriteByteLength = checkedAdd(
+            this.#physicalWriteByteLength,
+            value.byteLength,
+            'physical storage write byte accounting',
+        );
+        this.#replacePhysicalValue(key, value.byteLength);
+    }
+
+    async #deleteAdapterValue(key: string): Promise<void> {
+        const reservation = this.#exclusiveCapacityReservation;
+        if (
+            reservation !== undefined &&
+            !reservation.accounting.physicalValueByteLengths.has(key)
+        ) {
+            await this.#readAdapterValue(key);
+        }
+        const startedAtMilliseconds = this.#readMonotonicClockMilliseconds();
+        this.#recordStorageOperation(1);
+        await this.#adapter.delete(key);
+        this.#replacePhysicalValue(key, undefined);
+        this.#recordDeletionDuration(startedAtMilliseconds);
+    }
+
+    async #listAdapterKeys(prefix: string): Promise<readonly string[]> {
+        this.#recordStorageOperation(1);
+        return this.#adapter.listKeys(prefix);
+    }
+
+    async #applyAdapterAtomicMutation(input: {
+        expectedValues: readonly UntrustedStorageExpectedValue[];
+        writes: readonly UntrustedStorageWrite[];
+        deletes: readonly string[];
+    }): Promise<boolean> {
+        this.#recordStorageOperation(input.expectedValues.length);
+        const startedAtMilliseconds = this.#readMonotonicClockMilliseconds();
+        const committed = await this.#adapter.applyAtomicMutation(input);
+        this.#physicalReadCallCount = checkedAdd(
+            this.#physicalReadCallCount,
+            input.expectedValues.length,
+            'physical storage comparison read call accounting',
+        );
+        if (!committed) {
+            return false;
+        }
+        for (const expectedValue of input.expectedValues) {
+            this.#physicalReadByteLength = checkedAdd(
+                this.#physicalReadByteLength,
+                expectedValue.value?.byteLength ?? 0,
+                'physical storage comparison read byte accounting',
+            );
+        }
+        if (input.writes.length + input.deletes.length > 0) {
+            this.#storageRequestCount = checkedAdd(
+                this.#storageRequestCount,
+                input.writes.length + input.deletes.length,
+                'storage request accounting',
+            );
+        }
+        for (const write of input.writes) {
+            this.#physicalWriteCallCount = checkedAdd(
+                this.#physicalWriteCallCount,
+                1,
+                'physical storage mutation write call accounting',
+            );
+            this.#physicalWriteByteLength = checkedAdd(
+                this.#physicalWriteByteLength,
+                write.value.byteLength,
+                'physical storage mutation write byte accounting',
+            );
+        }
+        const expectedByteLengths = new Map(
+            input.expectedValues.map(({ key, value }) => [
+                key,
+                value?.byteLength ?? 0,
+            ]),
+        );
+        for (const write of input.writes) {
+            this.#replacePhysicalValue(
+                write.key,
+                write.value.byteLength,
+                expectedByteLengths.get(write.key) ?? 0,
+            );
+        }
+        for (const key of input.deletes) {
+            this.#replacePhysicalValue(
+                key,
+                undefined,
+                expectedByteLengths.get(key) ?? 0,
+            );
+        }
+        if (input.deletes.length > 0) {
+            this.#recordDeletionDuration(startedAtMilliseconds);
+        }
+        return true;
+    }
+
     async #measureStoredValueByteLength(): Promise<number> {
         const keys = await this.#listedKeys(this.#rootPrefix);
         let byteLength = 0;
         for (const key of keys) {
-            const value = await this.#adapter.read(key);
+            const value = await this.#readAdapterValue(key);
             if (value === undefined) {
                 throw new UntrustedStorageTransactionError(
                     'AdapterFailure',
@@ -2332,7 +2968,7 @@ export class UntrustedStorageTransactionStore {
     }
 
     async #listedKeys(prefix: string): Promise<string[]> {
-        const listedKeys = await this.#adapter.listKeys(prefix);
+        const listedKeys = await this.#listAdapterKeys(prefix);
         if (
             !Array.isArray(listedKeys) ||
             listedKeys.length > this.#limits.maximumOwnedRecordCount
@@ -2374,12 +3010,12 @@ export class UntrustedStorageTransactionStore {
     }
 
     async #readOwnedIndexValue(key: string): Promise<Uint8Array | undefined> {
-        const value = await this.#adapter.read(key);
+        const value = await this.#readAdapterValue(key);
         if (value === undefined) {
             return undefined;
         }
 
-        return this.#copyBoundedAdapterValue({
+        return this.#takeBoundedAdapterValue({
             maximumByteLength: this.#maximumIndexValueByteLength,
             oversizedErrorCode: 'CorruptIndex',
             oversizedMessage:
@@ -2389,12 +3025,12 @@ export class UntrustedStorageTransactionStore {
     }
 
     async #readOwnedObjectValue(key: string): Promise<Uint8Array | undefined> {
-        const value = await this.#adapter.read(key);
+        const value = await this.#readAdapterValue(key);
         if (value === undefined) {
             return undefined;
         }
 
-        return this.#copyBoundedAdapterValue({
+        return this.#takeBoundedAdapterValue({
             maximumByteLength: this.#limits.maximumLeaseByteLength,
             oversizedErrorCode: 'MalformedLength',
             oversizedMessage: 'stored object exceeds maximumLeaseByteLength.',
@@ -2403,12 +3039,12 @@ export class UntrustedStorageTransactionStore {
     }
 
     async #readOwnedRepairHeadValue(): Promise<Uint8Array | undefined> {
-        const value = await this.#adapter.read(this.#repairHeadKey);
+        const value = await this.#readAdapterValue(this.#repairHeadKey);
         if (value === undefined) {
             return undefined;
         }
 
-        return this.#copyBoundedAdapterValue({
+        return this.#takeBoundedAdapterValue({
             maximumByteLength: this.#limits.maximumStoredValueByteLength,
             oversizedErrorCode: 'AuthenticationFailed',
             oversizedMessage:
@@ -2417,19 +3053,39 @@ export class UntrustedStorageTransactionStore {
         });
     }
 
-    #copyBoundedAdapterValue(input: {
+    #takeBoundedAdapterValue(input: {
         maximumByteLength: number;
         oversizedErrorCode: UntrustedStorageTransactionErrorCode;
         oversizedMessage: string;
         value: Uint8Array;
     }): Uint8Array {
-        this.#boundedAdapterValueByteLength(input);
         try {
-            return input.value.slice();
+            this.#boundedAdapterValueByteLength(input);
         } catch (error) {
+            destroyOwnedStorageBytes(input.value);
+            throw error;
+        }
+        if (
+            !(input.value.buffer instanceof ArrayBuffer) ||
+            input.value.byteOffset !== 0 ||
+            input.value.byteLength !== input.value.buffer.byteLength
+        ) {
+            destroyOwnedStorageBytes(input.value);
             throw new UntrustedStorageTransactionError(
                 'AdapterFailure',
-                'storage adapter returned bytes that could not be copied.',
+                'storage adapter returned bytes without exact full-buffer ownership.',
+            );
+        }
+        try {
+            const ownedBuffer = structuredClone(input.value.buffer, {
+                transfer: [input.value.buffer],
+            });
+            return new Uint8Array(ownedBuffer);
+        } catch (error) {
+            destroyOwnedStorageBytes(input.value);
+            throw new UntrustedStorageTransactionError(
+                'AdapterFailure',
+                'storage adapter returned bytes that could not transfer ownership.',
                 error,
             );
         }
@@ -2465,7 +3121,7 @@ export class UntrustedStorageTransactionStore {
         const failures: unknown[] = [];
         for (const key of [...new Set(keys)].sort()) {
             try {
-                await this.#adapter.delete(key);
+                await this.#deleteAdapterValue(key);
             } catch (error) {
                 failedKeys.push(key);
                 failures.push(error);
@@ -2490,10 +3146,36 @@ export class UntrustedStorageTransactionStore {
         }
         let deleted: boolean;
         try {
+            const reservation = this.#exclusiveCapacityReservation;
+            if (reservation !== undefined) {
+                for (const objectKey of uniqueObjectKeys) {
+                    if (
+                        !reservation.accounting.physicalValueByteLengths.has(
+                            objectKey,
+                        )
+                    ) {
+                        await this.#readAdapterValue(objectKey);
+                    }
+                }
+            }
+            const startedAtMilliseconds =
+                this.#readMonotonicClockMilliseconds();
+            this.#recordStorageOperation(1);
             deleted = await this.#adapter.deleteUnreferencedObjects({
                 indexPrefix: this.#indexPrefix,
                 objectKeys: uniqueObjectKeys,
             });
+            if (deleted) {
+                this.#storageRequestCount = checkedAdd(
+                    this.#storageRequestCount,
+                    uniqueObjectKeys.length,
+                    'storage request accounting',
+                );
+                for (const objectKey of uniqueObjectKeys) {
+                    this.#replacePhysicalValue(objectKey, undefined);
+                }
+                this.#recordDeletionDuration(startedAtMilliseconds);
+            }
         } catch (error) {
             throw new UntrustedStorageTransactionError(
                 'CleanupFailed',

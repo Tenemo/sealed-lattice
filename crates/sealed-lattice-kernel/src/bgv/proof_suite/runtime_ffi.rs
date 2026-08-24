@@ -2,43 +2,70 @@
 //!
 //! A schema-valid suite record is data, not authority. This boundary mints a
 //! process-local handle only after the canonical record passes the complete
-//! selected-suite derivation. The current selected suite remains fail-closed,
-//! so a successful proof operation cannot be opened until that blocker is
-//! resolved; there is no alternate fixture suite or raw-plan export.
+//! selected-suite derivation. Exact-family operations remain fail-closed until
+//! an accepted board object derives the verifier statement and the family owns
+//! its private-witness or verified-input capability. There is no alternate
+//! fixture suite or raw-plan export.
 
-use core::slice;
+use core::{mem::size_of, slice};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use zeroize::Zeroizing;
 
+use crate::bgv::setup::{
+    commit_source_verified_compact_public_key_proof, discard_compact_public_key_verification_source,
+};
 use crate::foundation::{
     AuthenticatedCheckpointContinuationSource, CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
-    LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH, RefusalReason, SuiteRecord,
+    LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH, RefusalReason, SelectedSuiteCapability,
+    StreamDescriptor, SuiteRecord, VerifiedBoardApplicationSource,
     resolve_browser_worker_authenticated_storage_head_source,
     resolve_browser_worker_authenticated_storage_transition_source, select_suite_record,
 };
 
+use super::compact_proof_contract::selected_compact_public_key_proof_contract;
+use super::compact_proof_wire::CompactPublicInputBindings;
+use super::compact_public_key_algebraic_verifier::{
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
+    CompactPublicKeyAlgebraicVerification, CompactPublicKeyAlgebraicVerificationError,
+    CompactPublicKeyAlgebraicVerificationPoll,
+};
+use super::compact_public_key_verifier::{
+    validate_selected_compact_public_key_transport, verify_selected_compact_public_key_transport,
+};
+use super::relation_plan::{
+    CompactPublicKeyGenerationRuntime, CompactPublicKeyGenerationRuntimeError,
+    CompactPublicKeyGenerationRuntimePoll, CompactPublicKeyGenerationRuntimeStage,
+    CompactPublicKeyGenerationStorageOwner,
+};
 use super::runtime::{
+    CommonProofVerificationReadbackAccounting, ExpectedCommonProofPackageBindings,
     common_proof_registry_entry_count, require_common_proof_worker_process_admission_capacity,
     require_common_proof_worker_process_ownership_limits,
 };
 use super::{
-    AuthenticatedCommonProofGenerationCheckpoint, COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH,
-    CommonProofGenerationOperationHandle, CommonProofGenerationPreparationError,
-    CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll, CommonProofRuntimeError,
-    CommonProofRuntimeRegistry, CommonProofUpstreamInputRegistry,
-    CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError,
-    CommonProofVerificationWorkerPoll, ConsumedVerifiedCommonProofCapability,
-    DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH, GeneratedCommonProofCapabilityHandle,
-    PendingCommonProofAuthorizationHandle, PreparedCommonProofGeneration,
-    PreparedCommonProofVerification, VerifiedCommonProofCapabilityHandle,
+    ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+    ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_SAFE_BOUNDARY_COUNT,
+    AcceptedCompactPublicKeyVerification, AcceptedCompactPublicKeyVerificationPoll,
+    AuthenticatedCommonProofGenerationCheckpoint, BorrowedVerifiedCommonProofCapability,
+    COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofAuthenticatedSourceReadRequest,
+    CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationOperationHandle,
+    CommonProofGenerationPreparationError, CommonProofGenerationWorkerError,
+    CommonProofGenerationWorkerPoll, CommonProofRuntimeError, CommonProofRuntimeRegistry,
+    CommonProofUpstreamInputRegistry, CommonProofVerificationOperationHandle,
+    CommonProofVerificationWorkerError, CommonProofVerificationWorkerPoll,
+    ConsumedVerifiedCommonProofCapability, DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH,
+    ExactSameSecretAuthenticatedTranscriptPrefixRequest, GeneratedCommonProofCapabilityHandle,
+    PendingCommonProofAuthorizationHandle, PreparedAcceptedCompactPublicKeyVerification,
+    PreparedCommonProofGeneration, PreparedCommonProofVerification,
+    PreparedExactSameSecretTranscriptPrefix, SourceVerifiedCompactPublicKeyProof,
+    VerifiedCommonProofCapabilityHandle, VerifiedCompactPublicKeyStatementAuthority,
     durable_authorization_frame_digest,
 };
 
 const NO_SECOND_POLL_VALUE: u32 = u32::MAX;
 const VERIFICATION_POLL_NEEDS_READBACK: u32 = 1;
-const VERIFICATION_POLL_PREFIX_ACCEPTED: u32 = 2;
-const VERIFICATION_POLL_QUERY_HEADER_ACCEPTED: u32 = 3;
-const VERIFICATION_POLL_QUERY_TREE_ACCEPTED: u32 = 4;
 const VERIFICATION_POLL_COMPLETE: u32 = 5;
 const GENERATION_POLL_PROGRESS: u32 = 1;
 const GENERATION_POLL_STORAGE_REQUEST_READY: u32 = 2;
@@ -47,6 +74,102 @@ const GENERATION_POLL_OUTPUT_READBACK_REQUIRED: u32 = 4;
 const GENERATION_POLL_COMPLETE: u32 = 5;
 const GENERATION_POLL_CANCELLED: u32 = 6;
 const GENERATION_POLL_RESUME_COMPLETE: u32 = 7;
+const GENERATION_POLL_AUTHENTICATED_SOURCE_READ_READY: u32 = 8;
+const GENERATION_POLL_AUTHENTICATED_TRANSCRIPT_PREFIX_REQUIRED: u32 = 9;
+const COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT: usize = 10;
+const COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH: usize =
+    size_of::<u32>() * 2 + size_of::<f64>() * 2;
+const AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH: usize = 160;
+const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT: usize = 20;
+const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH: usize =
+    GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT * size_of::<u64>();
+const VERIFICATION_READBACK_ACCOUNTING_WORD_COUNT: usize = 4;
+const VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH: usize =
+    VERIFICATION_READBACK_ACCOUNTING_WORD_COUNT * size_of::<u64>();
+const COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT: usize = 4;
+const COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH: usize =
+    COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT * Hash512::BYTE_LENGTH;
+const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS: u32 = 1;
+const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE: u32 = 5;
+const COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE: u32 = 7;
+const COMPACT_PUBLIC_KEY_VERIFICATION_PROOF_INPUT: u32 = 1;
+const COMPACT_PUBLIC_KEY_VERIFICATION_PUBLIC_INPUT: u32 = 2;
+
+fn write_diagnostic_u64(output: &mut [u8], word_index: usize, value: u64) {
+    let offset = word_index * size_of::<u64>();
+    output[offset..offset + size_of::<u64>()].copy_from_slice(&value.to_le_bytes());
+}
+
+fn encode_generation_external_memory_accounting(
+    accounting: CommonProofGenerationExternalMemoryAccounting,
+) -> [u8; GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH] {
+    let requirement = accounting.compiled_requirement();
+    let actual = accounting.actual_usage();
+    let prefix = accounting.deterministic_prefix_replay_usage();
+    let mut output = [0_u8; GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH];
+    let values = [
+        u64::from(requirement.step_count()),
+        u64::from(requirement.maximum_chunk_byte_length()),
+        requirement.maximum_transaction_payload_byte_length(),
+        u64::from(requirement.distinct_physical_object_count()),
+        u64::from(requirement.object_lifecycle_count()),
+        requirement.peak_stored_byte_length(),
+        requirement.total_written_byte_length(),
+        requirement.total_read_byte_length(),
+        requirement.transaction_count(),
+        actual.total_written_byte_length(),
+        actual.total_read_byte_length(),
+        actual.peak_stored_byte_length(),
+        actual.transaction_count(),
+        u64::from(actual.deleted_object_count()),
+        if prefix.is_some() { 1 } else { 0 },
+        prefix.map_or(0, |usage| usage.total_written_byte_length()),
+        prefix.map_or(0, |usage| usage.total_read_byte_length()),
+        prefix.map_or(0, |usage| usage.peak_stored_byte_length()),
+        prefix.map_or(0, |usage| usage.transaction_count()),
+        prefix.map_or(0, |usage| u64::from(usage.deleted_object_count())),
+    ];
+    for (word_index, value) in values.into_iter().enumerate() {
+        write_diagnostic_u64(&mut output, word_index, value);
+    }
+    output
+}
+
+fn encode_verification_readback_accounting(
+    accounting: CommonProofVerificationReadbackAccounting,
+) -> [u8; VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH] {
+    let mut output = [0_u8; VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH];
+    let values = [
+        accounting.logical_required_range_count(),
+        accounting.logical_required_byte_length(),
+        accounting.supplied_full_chunk_count(),
+        accounting.supplied_full_chunk_byte_length(),
+    ];
+    for (word_index, value) in values.into_iter().enumerate() {
+        write_diagnostic_u64(&mut output, word_index, value);
+    }
+    output
+}
+
+fn encode_authenticated_source_read_request(
+    request: CommonProofAuthenticatedSourceReadRequest,
+) -> [u8; AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH] {
+    let mut encoded = [0_u8; AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH];
+    encoded[..64].copy_from_slice(&request.source_material_root());
+    encoded[64..128].copy_from_slice(&request.source_stream_digest());
+    encoded[128..136].copy_from_slice(&request.source_stream_total_byte_length().to_le_bytes());
+    encoded[136..144].copy_from_slice(&request.source_stream_byte_offset().to_le_bytes());
+    encoded[144..152].copy_from_slice(&request.storage_byte_offset().to_le_bytes());
+    encoded[152..156].copy_from_slice(&request.source_byte_length().to_le_bytes());
+    encoded[156..160].copy_from_slice(&request.authentication_chunk_index().to_le_bytes());
+    encoded
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_common_proof_generation_authenticated_source_request_byte_length()
+-> u32 {
+    AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH as u32
+}
 
 #[unsafe(no_mangle)]
 pub const extern "C" fn sealed_lattice_common_proof_generation_checkpoint_state_byte_length() -> u32
@@ -54,24 +177,1112 @@ pub const extern "C" fn sealed_lattice_common_proof_generation_checkpoint_state_
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH as u32
 }
 
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_common_proof_generation_external_memory_accounting_byte_length()
+-> u32 {
+    GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_common_proof_verification_readback_accounting_byte_length()
+-> u32 {
+    VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_transport_bindings_byte_length() -> u32 {
+    COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length()
+-> u32 {
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count()
+-> u32 {
+    COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length()
+-> u32 {
+    ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count()
+-> u32 {
+    ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_SAFE_BOUNDARY_COUNT
+}
+
+fn decode_compact_public_key_transport_bindings(
+    canonical_bindings: &[u8],
+) -> Result<CompactPublicInputBindings, RefusalReason> {
+    if canonical_bindings.len() != COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let bindings: [[u8; Hash512::BYTE_LENGTH]; COMPACT_PUBLIC_KEY_TRANSPORT_BINDING_COUNT] =
+        canonical_bindings
+            .chunks_exact(Hash512::BYTE_LENGTH)
+            .map(|binding| binding.try_into())
+            .collect::<Result<Vec<_>, _>>()
+            .ok()
+            .and_then(|bindings| bindings.try_into().ok())
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+    Ok(CompactPublicInputBindings::new(
+        Hash512::from_bytes(bindings[0]),
+        Hash512::from_bytes(bindings[1]),
+        Hash512::from_bytes(bindings[2]),
+        Hash512::from_bytes(bindings[3]),
+    ))
+}
+
+/// Validates the selected compact public-key transport without minting a
+/// proof or workflow capability.
+///
+/// This release boundary strictly decodes both byte streams, derives the full
+/// Fiat-Shamir query schedule, and verifies every salted Merkle opening. It
+/// does not verify the CFW or WHIR equations, so status zero is transport
+/// acceptance only and is never a cryptographic verification result.
+///
+/// The binding frame is the exact concatenation of suite identifier,
+/// application-statement hash, manifest hash, and relation-plan hash.
+///
+/// # Safety
+///
+/// Each pointer must either be null with a zero byte length or name its full
+/// readable byte range in WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_validate_transport(
+    bindings_pointer: *const u8,
+    bindings_byte_length: usize,
+    proof_pointer: *const u8,
+    proof_byte_length: usize,
+    public_input_pointer: *const u8,
+    public_input_byte_length: usize,
+) -> u32 {
+    let bindings = unsafe { input_bytes(bindings_pointer, bindings_byte_length) };
+    let proof = unsafe { input_bytes(proof_pointer, proof_byte_length) };
+    let public_input = unsafe { input_bytes(public_input_pointer, public_input_byte_length) };
+    let result = decode_compact_public_key_transport_bindings(bindings).and_then(|bindings| {
+        validate_selected_compact_public_key_transport(bindings, proof, public_input)
+            .map_err(|error| error.refusal_reason())
+    });
+    match result {
+        Ok(()) => 0,
+        Err(refusal_reason) => u32::from(refusal_reason.canonical_code()),
+    }
+}
+
+struct CompactPublicKeyAlgebraicVerificationInput {
+    bindings: CompactPublicInputBindings,
+    canonical_proof_bytes: Vec<u8>,
+    expected_proof_byte_length: usize,
+    canonical_public_input_bytes: Vec<u8>,
+    expected_public_input_byte_length: usize,
+    canonical_checkpoint_bytes: Option<Box<[u8]>>,
+}
+
+fn copy_compact_public_key_verification_input(input: &[u8]) -> Result<Box<[u8]>, RefusalReason> {
+    if input.is_empty() {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let mut owned = Vec::new();
+    owned
+        .try_reserve_exact(input.len())
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    owned.extend_from_slice(input);
+    Ok(owned.into_boxed_slice())
+}
+
+impl CompactPublicKeyAlgebraicVerificationInput {
+    fn new(
+        canonical_bindings: &[u8],
+        expected_proof_byte_length: usize,
+        expected_public_input_byte_length: usize,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<Self, u32> {
+        let bindings = decode_compact_public_key_transport_bindings(canonical_bindings)
+            .map_err(refusal_status)?;
+        let contract = selected_compact_public_key_proof_contract()
+            .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+        let verifier_inputs = contract.verifier_inputs();
+        if expected_proof_byte_length == 0 || expected_public_input_byte_length == 0 {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        if expected_proof_byte_length
+            > verifier_inputs
+                .proof_wire_geometry
+                .maximum_canonical_byte_length()
+            || expected_public_input_byte_length
+                > verifier_inputs
+                    .public_input_wire_geometry
+                    .exact_canonical_byte_length()
+        {
+            return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
+        }
+        if !canonical_checkpoint_bytes.is_empty()
+            && canonical_checkpoint_bytes.len()
+                != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH
+        {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        let mut canonical_proof_bytes = Vec::new();
+        canonical_proof_bytes
+            .try_reserve_exact(expected_proof_byte_length)
+            .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+        let mut canonical_public_input_bytes = Vec::new();
+        canonical_public_input_bytes
+            .try_reserve_exact(expected_public_input_byte_length)
+            .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+        let canonical_checkpoint_bytes = if canonical_checkpoint_bytes.is_empty() {
+            None
+        } else {
+            let mut owned_checkpoint = Vec::new();
+            owned_checkpoint
+                .try_reserve_exact(canonical_checkpoint_bytes.len())
+                .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+            owned_checkpoint.extend_from_slice(canonical_checkpoint_bytes);
+            Some(owned_checkpoint.into_boxed_slice())
+        };
+        Ok(Self {
+            bindings,
+            canonical_proof_bytes,
+            expected_proof_byte_length,
+            canonical_public_input_bytes,
+            expected_public_input_byte_length,
+            canonical_checkpoint_bytes,
+        })
+    }
+
+    fn absorb_chunk(
+        &mut self,
+        input_kind: u32,
+        byte_offset: usize,
+        chunk_bytes: &[u8],
+    ) -> Result<(), u32> {
+        if chunk_bytes.is_empty() {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        if chunk_bytes.len() > FOUNDATION_PROFILE.stream_chunk_byte_length {
+            return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
+        }
+        let (destination, expected_byte_length) = match input_kind {
+            COMPACT_PUBLIC_KEY_VERIFICATION_PROOF_INPUT => (
+                &mut self.canonical_proof_bytes,
+                self.expected_proof_byte_length,
+            ),
+            COMPACT_PUBLIC_KEY_VERIFICATION_PUBLIC_INPUT => (
+                &mut self.canonical_public_input_bytes,
+                self.expected_public_input_byte_length,
+            ),
+            _ => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+        };
+        if byte_offset != destination.len() {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        let resulting_byte_length = byte_offset
+            .checked_add(chunk_bytes.len())
+            .ok_or_else(|| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+        if resulting_byte_length > expected_byte_length {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        destination.extend_from_slice(chunk_bytes);
+        Ok(())
+    }
+
+    fn finish(self) -> Result<CompactPublicKeyAlgebraicVerification, u32> {
+        if self.canonical_proof_bytes.len() != self.expected_proof_byte_length
+            || self.canonical_public_input_bytes.len() != self.expected_public_input_byte_length
+        {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        let transport = verify_selected_compact_public_key_transport(
+            self.bindings,
+            self.canonical_proof_bytes.into_boxed_slice(),
+            self.canonical_public_input_bytes.into_boxed_slice(),
+        )
+        .map_err(|error| refusal_status(error.refusal_reason()))?;
+        match self.canonical_checkpoint_bytes {
+            Some(checkpoint_bytes) => {
+                CompactPublicKeyAlgebraicVerification::resume(transport, &checkpoint_bytes)
+            }
+            None => CompactPublicKeyAlgebraicVerification::begin(transport),
+        }
+        .map_err(compact_public_key_algebraic_verification_error_status)
+    }
+}
+
+pub(in crate::bgv) fn retain_accepted_setup_compact_public_key_verification_source(
+    statement_authority: VerifiedCompactPublicKeyStatementAuthority,
+    terminal_source_handle: u32,
+) -> Result<u32, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .retain_accepted_setup_compact_public_key_prepared_verification(
+                statement_authority,
+                terminal_source_handle,
+            )
+    })
+}
+
+/// Reserves Rust-owned custody for one compact proof and public-input pair.
+/// The two large canonical streams enter only through exact sequential chunks;
+/// no JavaScript-to-WASM copy may exceed the selected stream-chunk bound.
+///
+/// # Safety
+///
+/// The binding and optional checkpoint pointers must name their complete
+/// readable ranges. A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_begin_algebraic_verification_input(
+    bindings_pointer: *const u8,
+    bindings_byte_length: usize,
+    proof_byte_length: usize,
+    public_input_byte_length: usize,
+    checkpoint_pointer: *const u8,
+    checkpoint_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let capacity_result = COMMON_PROOF_WASM_RUNTIME_REGISTRY
+        .with(|registry| registry.borrow().require_new_entry_capacity(true));
+    if let Err(error) = capacity_result {
+        unsafe {
+            write_status(status_pointer, runtime_error_status(error));
+        }
+        return 0;
+    }
+
+    let bindings = unsafe { input_bytes(bindings_pointer, bindings_byte_length) };
+    let checkpoint = unsafe { input_bytes(checkpoint_pointer, checkpoint_byte_length) };
+    let result = (|| {
+        let input = CompactPublicKeyAlgebraicVerificationInput::new(
+            bindings,
+            proof_byte_length,
+            public_input_byte_length,
+            checkpoint,
+        )?;
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .retain_compact_public_key_verification_input(input)
+                .map_err(runtime_error_status)
+        })
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe {
+                write_status(status_pointer, 0);
+            }
+            handle
+        }
+        Err(status) => {
+            unsafe {
+                write_status(status_pointer, status);
+            }
+            0
+        }
+    }
+}
+
+/// # Safety
+///
+/// The chunk pointer must name its declared readable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk(
+    input_handle: u32,
+    input_kind: u32,
+    byte_offset: usize,
+    chunk_pointer: *const u8,
+    chunk_byte_length: usize,
+) -> u32 {
+    let chunk_bytes = unsafe { input_bytes(chunk_pointer, chunk_byte_length) };
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .compact_public_key_verification_inputs
+            .get_mut(&input_handle)
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))
+            .and_then(|input| input.absorb_chunk(input_kind, byte_offset, chunk_bytes))
+            .map_or_else(core::convert::identity, |()| 0)
+    })
+}
+
+/// Consumes complete staged input, validates the exact transport, and retains
+/// the bounded algebraic verifier. A refusal never returns a live handle.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_finish_algebraic_verification_input(
+    input_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let input = registry
+            .compact_public_key_verification_inputs
+            .remove(&input_handle)
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        let verification = input.finish()?;
+        registry
+            .retain_compact_public_key_verification(verification)
+            .map_err(runtime_error_status)
+    });
+    match result {
+        Ok(handle) => {
+            unsafe {
+                write_status(status_pointer, 0);
+            }
+            handle
+        }
+        Err(status) => {
+            unsafe {
+                write_status(status_pointer, status);
+            }
+            0
+        }
+    }
+}
+
+/// Discards incomplete staged verifier input without creating an operation.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_cancel_algebraic_verification_input(
+    input_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .compact_public_key_verification_inputs
+            .remove(&input_handle)
+            .map_or_else(|| refusal_status(RefusalReason::ConsumedState), |_| 0)
+    })
+}
+
+/// Advances one bounded CFW or WHIR-fold verifier slice. The terminal poll
+/// destroys the accepted byte owner without minting a capability.
+///
+/// # Safety
+///
+/// All three output pointers must name one writable `u32` in WebAssembly linear
+/// memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_algebraic_verification_poll(
+    operation_handle: u32,
+    maximum_work_unit_count: u32,
+    poll_kind_pointer: *mut u32,
+    completed_work_unit_count_pointer: *mut u32,
+    checkpoint_safe_boundary_ordinal_pointer: *mut u32,
+) -> u32 {
+    if maximum_work_unit_count == 0
+        || poll_kind_pointer.is_null()
+        || completed_work_unit_count_pointer.is_null()
+        || checkpoint_safe_boundary_ordinal_pointer.is_null()
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let mut verification = registry
+            .compact_public_key_verifications
+            .remove(&operation_handle)
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        match verification.advance(u64::from(maximum_work_unit_count)) {
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::WorkCompleted {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal.unwrap_or(NO_SECOND_POLL_VALUE),
+                ))
+            }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::ResumeComplete {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                ))
+            }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirWorkCompleted {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal.unwrap_or(NO_SECOND_POLL_VALUE),
+                ))
+            }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirResumeComplete {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                ))
+            }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::WhirCompleted {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                let completed_work_unit_count = u32::try_from(completed_work_unit_count)
+                    .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+                if registry
+                    .compact_public_key_verifications
+                    .insert(operation_handle, verification)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                ))
+            }
+            Ok(CompactPublicKeyAlgebraicVerificationPoll::Complete(terminal)) => {
+                drop((*terminal).into_transport());
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE,
+                    0,
+                    NO_SECOND_POLL_VALUE,
+                ))
+            }
+            Err(error) => Err(compact_public_key_algebraic_verification_error_status(
+                error,
+            )),
+        }
+    });
+    let (poll_kind, completed_work_unit_count, checkpoint_safe_boundary_ordinal) = match result {
+        Ok(output) => output,
+        Err(status) => return status,
+    };
+    unsafe {
+        poll_kind_pointer.write(poll_kind);
+        completed_work_unit_count_pointer.write(completed_work_unit_count);
+        checkpoint_safe_boundary_ordinal_pointer.write(checkpoint_safe_boundary_ordinal);
+    }
+    0
+}
+
+/// Copies the canonical source-bound safe cursor for one live verifier. The
+/// bytes contain no opaque transform state and can restore only by deterministic
+/// replay from genesis.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the reported checkpoint byte length in
+/// writable WebAssembly linear memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length != COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let checkpoint = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .compact_public_key_verifications
+            .get(&operation_handle)
+            .ok_or(CompactPublicKeyAlgebraicVerificationError::CheckpointUnavailable)?
+            .canonical_checkpoint_bytes()
+    });
+    let checkpoint = match checkpoint {
+        Ok(checkpoint) => checkpoint,
+        Err(error) => return compact_public_key_algebraic_verification_error_status(error),
+    };
+    unsafe {
+        output_pointer.copy_from_nonoverlapping(checkpoint.as_ptr(), checkpoint.len());
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_cancel_algebraic_verification(
+    operation_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .compact_public_key_verifications
+            .remove(&operation_handle)
+            .map_or_else(|| refusal_status(RefusalReason::ConsumedState), |_| 0)
+    })
+}
+
+fn prepare_accepted_setup_compact_public_key_algebraic_verification(
+    prepared: &AcceptedSetupCompactPublicKeyPreparedVerification,
+    canonical_proof_bytes: &[u8],
+    canonical_public_input_bytes: &[u8],
+    canonical_checkpoint_bytes: Option<&[u8]>,
+) -> Result<PreparedAcceptedCompactPublicKeyVerification, u32> {
+    let proof = copy_compact_public_key_verification_input(canonical_proof_bytes)
+        .map_err(refusal_status)?;
+    let public_input = copy_compact_public_key_verification_input(canonical_public_input_bytes)
+        .map_err(refusal_status)?;
+    let transport = verify_selected_compact_public_key_transport(
+        prepared
+            .statement_authority
+            .expected_public_input_bindings(),
+        proof,
+        public_input,
+    )
+    .map_err(|error| refusal_status(error.refusal_reason()))?;
+    PreparedAcceptedCompactPublicKeyVerification::prepare(transport, canonical_checkpoint_bytes)
+        .map_err(refusal_status)
+}
+
+fn begin_accepted_setup_compact_public_key_verification(
+    prepared_handle: u32,
+    canonical_proof_bytes: &[u8],
+    canonical_public_input_bytes: &[u8],
+    canonical_checkpoint_bytes: Option<&[u8]>,
+) -> Result<u32, u32> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let prepared = registry
+            .accepted_setup_compact_public_key_prepared_verifications
+            .remove(&prepared_handle)
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        let prepared_verification =
+            match prepare_accepted_setup_compact_public_key_algebraic_verification(
+                &prepared,
+                canonical_proof_bytes,
+                canonical_public_input_bytes,
+                canonical_checkpoint_bytes,
+            ) {
+                Ok(verification) => verification,
+                Err(status) => {
+                    if registry
+                        .accepted_setup_compact_public_key_prepared_verifications
+                        .insert(prepared_handle, prepared)
+                        .is_some()
+                    {
+                        return Err(refusal_status(RefusalReason::ConsumedState));
+                    }
+                    return Err(status);
+                }
+            };
+        if registry
+            .accepted_setup_compact_public_key_verification_operations
+            .insert(
+                prepared_handle,
+                AcceptedSetupCompactPublicKeyVerificationOperation {
+                    terminal_source_handle: prepared.terminal_source_handle,
+                    verification: AcceptedCompactPublicKeyVerification::from_prepared(
+                        prepared.statement_authority,
+                        prepared_verification,
+                    ),
+                },
+            )
+            .is_some()
+        {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        Ok(prepared_handle)
+    })
+}
+
+/// Begins the source-bound accepted-setup compact public-key verifier. The
+/// selected suite, statement hash, manifest hash, and relation hash are read
+/// only from the retained authority; callers cannot supply a detached binding
+/// frame.
+///
+/// # Safety
+///
+/// Each input pointer must either be null with a zero byte length or name its
+/// full readable range. A non-null status pointer must name one writable
+/// `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_compact_public_key_begin_verification(
+    prepared_handle: u32,
+    proof_pointer: *const u8,
+    proof_byte_length: usize,
+    public_input_pointer: *const u8,
+    public_input_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let proof = unsafe { input_bytes(proof_pointer, proof_byte_length) };
+    let public_input = unsafe { input_bytes(public_input_pointer, public_input_byte_length) };
+    match begin_accepted_setup_compact_public_key_verification(
+        prepared_handle,
+        proof,
+        public_input,
+        None,
+    ) {
+        Ok(operation_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            operation_handle
+        }
+        Err(status) => {
+            unsafe { write_status(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Restores one source-bound accepted-setup verifier by replaying the exact
+/// proof and public-input bytes from genesis to a source-bound safe cursor.
+///
+/// # Safety
+///
+/// Each input pointer must either be null with a zero byte length or name its
+/// full readable range. A non-null status pointer must name one writable
+/// `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_compact_public_key_resume_verification(
+    prepared_handle: u32,
+    proof_pointer: *const u8,
+    proof_byte_length: usize,
+    public_input_pointer: *const u8,
+    public_input_byte_length: usize,
+    checkpoint_pointer: *const u8,
+    checkpoint_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let proof = unsafe { input_bytes(proof_pointer, proof_byte_length) };
+    let public_input = unsafe { input_bytes(public_input_pointer, public_input_byte_length) };
+    let checkpoint = unsafe { input_bytes(checkpoint_pointer, checkpoint_byte_length) };
+    match begin_accepted_setup_compact_public_key_verification(
+        prepared_handle,
+        proof,
+        public_input,
+        Some(checkpoint),
+    ) {
+        Ok(operation_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            operation_handle
+        }
+        Err(status) => {
+            unsafe { write_status(status_pointer, status) };
+            0
+        }
+    }
+}
+
+fn discard_accepted_setup_compact_public_key_source_status(
+    terminal_source_handle: u32,
+) -> Result<(), u32> {
+    discard_compact_public_key_verification_source(terminal_source_handle)
+        .map_err(runtime_error_status)
+}
+
+/// Advances one bounded accepted-verifier slice across CFW, terminal WHIR,
+/// public-column reconstruction, or one or more statement-root cosets. The
+/// same handle becomes a positive compact proof capability only after every
+/// phase completes.
+///
+/// # Safety
+///
+/// Every output pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_compact_public_key_verification_poll(
+    operation_handle: u32,
+    maximum_work_unit_count: u32,
+    poll_kind_pointer: *mut u32,
+    completed_work_unit_count_pointer: *mut u32,
+    checkpoint_safe_boundary_ordinal_pointer: *mut u32,
+    verified_capability_handle_pointer: *mut u32,
+) -> u32 {
+    if maximum_work_unit_count == 0
+        || poll_kind_pointer.is_null()
+        || completed_work_unit_count_pointer.is_null()
+        || checkpoint_safe_boundary_ordinal_pointer.is_null()
+        || verified_capability_handle_pointer.is_null()
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let mut operation = registry
+            .accepted_setup_compact_public_key_verification_operations
+            .remove(&operation_handle)
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        match operation.verification.advance(maximum_work_unit_count) {
+            Ok(AcceptedCompactPublicKeyVerificationPoll::WorkCompleted {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                if registry
+                    .accepted_setup_compact_public_key_verification_operations
+                    .insert(operation_handle, operation)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_PROGRESS,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal.unwrap_or(NO_SECOND_POLL_VALUE),
+                    0,
+                ))
+            }
+            Ok(AcceptedCompactPublicKeyVerificationPoll::ResumeComplete {
+                completed_work_unit_count,
+                checkpoint_safe_boundary_ordinal,
+            }) => {
+                if registry
+                    .accepted_setup_compact_public_key_verification_operations
+                    .insert(operation_handle, operation)
+                    .is_some()
+                {
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_RESUME_COMPLETE,
+                    completed_work_unit_count,
+                    checkpoint_safe_boundary_ordinal,
+                    0,
+                ))
+            }
+            Ok(AcceptedCompactPublicKeyVerificationPoll::Complete(verified_proof)) => {
+                if registry
+                    .accepted_setup_compact_public_key_capabilities
+                    .insert(
+                        operation_handle,
+                        AcceptedSetupCompactPublicKeyCapability {
+                            verified_proof: *verified_proof,
+                            terminal_source_handle: operation.terminal_source_handle,
+                        },
+                    )
+                    .is_some()
+                {
+                    discard_accepted_setup_compact_public_key_source_status(
+                        operation.terminal_source_handle,
+                    )?;
+                    return Err(refusal_status(RefusalReason::ConsumedState));
+                }
+                Ok((
+                    COMPACT_PUBLIC_KEY_VERIFICATION_POLL_COMPLETE,
+                    0,
+                    NO_SECOND_POLL_VALUE,
+                    operation_handle,
+                ))
+            }
+            Err(refusal_reason) => {
+                discard_accepted_setup_compact_public_key_source_status(
+                    operation.terminal_source_handle,
+                )?;
+                Err(refusal_status(refusal_reason))
+            }
+        }
+    });
+    let (
+        poll_kind,
+        completed_work_unit_count,
+        checkpoint_safe_boundary_ordinal,
+        verified_capability_handle,
+    ) = match result {
+        Ok(output) => output,
+        Err(status) => return status,
+    };
+    unsafe {
+        poll_kind_pointer.write(poll_kind);
+        completed_work_unit_count_pointer.write(completed_work_unit_count);
+        checkpoint_safe_boundary_ordinal_pointer.write(checkpoint_safe_boundary_ordinal);
+        verified_capability_handle_pointer.write(verified_capability_handle);
+    }
+    0
+}
+
+/// Copies the deterministic-replay cursor for one live source-bound verifier.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the reported checkpoint byte length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length != ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let checkpoint = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .accepted_setup_compact_public_key_verification_operations
+            .get(&operation_handle)
+            .ok_or(RefusalReason::ConsumedState)?
+            .verification
+            .canonical_checkpoint_bytes()
+    });
+    let checkpoint = match checkpoint {
+        Ok(checkpoint) => checkpoint,
+        Err(refusal_reason) => return refusal_status(refusal_reason),
+    };
+    unsafe {
+        output_pointer.copy_from_nonoverlapping(checkpoint.as_ptr(), checkpoint.len());
+    }
+    0
+}
+
+/// Copies the four verifier-derived public-input bindings retained by one
+/// prepared accepted-setup compact public-key verification. These are the
+/// ordered source digests used by authenticated checkpoint custody; callers
+/// cannot substitute a different checkpoint lineage without the later
+/// transport and source-correspondence checks refusing it.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the compact transport-binding byte
+/// length reported by `sealed_lattice_compact_public_key_transport_bindings_byte_length`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+    prepared_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length != COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let bindings = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .accepted_setup_compact_public_key_prepared_verifications
+            .get(&prepared_handle)
+            .map(|prepared| {
+                prepared
+                    .statement_authority
+                    .expected_public_input_bindings()
+            })
+            .ok_or(RefusalReason::ConsumedState)
+    });
+    let bindings = match bindings {
+        Ok(bindings) => bindings,
+        Err(refusal_reason) => return refusal_status(refusal_reason),
+    };
+    let mut output_cursor = output_pointer;
+    for binding in bindings.ordered_hashes() {
+        unsafe {
+            output_cursor
+                .copy_from_nonoverlapping(binding.as_bytes().as_ptr(), Hash512::BYTE_LENGTH);
+            output_cursor = output_cursor.add(Hash512::BYTE_LENGTH);
+        }
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_accepted_setup_compact_public_key_finish_verification(
+    verified_capability_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let capability = match registry
+            .accepted_setup_compact_public_key_capabilities
+            .remove(&verified_capability_handle)
+        {
+            Some(capability) => capability,
+            None => return refusal_status(RefusalReason::ConsumedState),
+        };
+        match commit_source_verified_compact_public_key_proof(
+            capability.terminal_source_handle,
+            capability.verified_proof,
+        ) {
+            Ok(()) => 0,
+            Err((error, verified_proof)) => {
+                if registry
+                    .accepted_setup_compact_public_key_capabilities
+                    .insert(
+                        verified_capability_handle,
+                        AcceptedSetupCompactPublicKeyCapability {
+                            verified_proof: *verified_proof,
+                            terminal_source_handle: capability.terminal_source_handle,
+                        },
+                    )
+                    .is_some()
+                {
+                    return refusal_status(RefusalReason::ConsumedState);
+                }
+                runtime_error_status(error)
+            }
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification(
+    prepared_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let prepared = match registry
+            .accepted_setup_compact_public_key_prepared_verifications
+            .remove(&prepared_handle)
+        {
+            Some(prepared) => prepared,
+            None => return refusal_status(RefusalReason::ConsumedState),
+        };
+        match discard_compact_public_key_verification_source(prepared.terminal_source_handle) {
+            Ok(()) => 0,
+            Err(error) => {
+                if registry
+                    .accepted_setup_compact_public_key_prepared_verifications
+                    .insert(prepared_handle, prepared)
+                    .is_some()
+                {
+                    return refusal_status(RefusalReason::ConsumedState);
+                }
+                runtime_error_status(error)
+            }
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_accepted_setup_compact_public_key_cancel_verification(
+    operation_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let operation = match registry
+            .accepted_setup_compact_public_key_verification_operations
+            .remove(&operation_handle)
+        {
+            Some(operation) => operation,
+            None => return refusal_status(RefusalReason::ConsumedState),
+        };
+        match discard_compact_public_key_verification_source(operation.terminal_source_handle) {
+            Ok(()) => 0,
+            Err(error) => {
+                if registry
+                    .accepted_setup_compact_public_key_verification_operations
+                    .insert(operation_handle, operation)
+                    .is_some()
+                {
+                    return refusal_status(RefusalReason::ConsumedState);
+                }
+                runtime_error_status(error)
+            }
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_accepted_setup_compact_public_key_discard_capability(
+    verified_capability_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let capability = match registry
+            .accepted_setup_compact_public_key_capabilities
+            .remove(&verified_capability_handle)
+        {
+            Some(capability) => capability,
+            None => return refusal_status(RefusalReason::ConsumedState),
+        };
+        match discard_compact_public_key_verification_source(capability.terminal_source_handle) {
+            Ok(()) => 0,
+            Err(error) => {
+                if registry
+                    .accepted_setup_compact_public_key_capabilities
+                    .insert(verified_capability_handle, capability)
+                    .is_some()
+                {
+                    return refusal_status(RefusalReason::ConsumedState);
+                }
+                runtime_error_status(error)
+            }
+        }
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofGenerationFamilyAdapterDescription {
+    application_statement_schema_identifier: u16,
     common_proof_runtime_binding_hash: [u8; 64],
-    common_proof_verification_binding_hash: [u8; 64],
+    common_proof_generation_authorization_hash: [u8; 64],
     proof_attempt_lineage_identifier: [u8; 32],
 }
 
 impl CommonProofGenerationFamilyAdapterDescription {
     pub(crate) const fn new(
+        application_statement_schema_identifier: u16,
         common_proof_runtime_binding_hash: [u8; 64],
-        common_proof_verification_binding_hash: [u8; 64],
+        common_proof_generation_authorization_hash: [u8; 64],
         proof_attempt_lineage_identifier: [u8; 32],
     ) -> Self {
         Self {
+            application_statement_schema_identifier,
             common_proof_runtime_binding_hash,
-            common_proof_verification_binding_hash,
+            common_proof_generation_authorization_hash,
             proof_attempt_lineage_identifier,
         }
+    }
+
+    pub(crate) const fn common_proof_runtime_binding_hash(self) -> [u8; 64] {
+        self.common_proof_runtime_binding_hash
+    }
+
+    pub(crate) const fn application_statement_schema_identifier(self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub(crate) const fn common_proof_generation_authorization_hash(self) -> [u8; 64] {
+        self.common_proof_generation_authorization_hash
+    }
+
+    pub(crate) const fn proof_attempt_lineage_identifier(self) -> [u8; 32] {
+        self.proof_attempt_lineage_identifier
     }
 }
 
@@ -119,14 +1330,22 @@ impl CommonProofGenerationFamilyAdapter {
         }))
     }
 
-    fn description(&self) -> CommonProofGenerationFamilyAdapterDescription {
+    pub(crate) fn description(&self) -> CommonProofGenerationFamilyAdapterDescription {
         match self {
             Self::Fresh { prepared } => CommonProofGenerationFamilyAdapterDescription::new(
+                prepared.application_statement_schema_identifier(),
                 prepared.runtime_binding_hash(),
-                prepared.verification_binding_hash(),
+                prepared.generation_authorization_hash(),
                 prepared.proof_attempt_lineage_identifier(),
             ),
             Self::Resume(adapter) => adapter.description,
+        }
+    }
+
+    fn checkpoint_lineage_identifier(&self) -> [u8; 32] {
+        match self {
+            Self::Fresh { prepared } => prepared.checkpoint_lineage_identifier(),
+            Self::Resume(adapter) => adapter.checkpoint_lineage_identifier,
         }
     }
 
@@ -154,9 +1373,11 @@ impl CommonProofGenerationFamilyAdapter {
             }
             _ => return Err(CommonProofRuntimeError::WrongVerificationBinding.into()),
         };
-        if prepared.runtime_binding_hash() != description.common_proof_runtime_binding_hash
-            || prepared.verification_binding_hash()
-                != description.common_proof_verification_binding_hash
+        if prepared.application_statement_schema_identifier()
+            != description.application_statement_schema_identifier
+            || prepared.runtime_binding_hash() != description.common_proof_runtime_binding_hash
+            || prepared.generation_authorization_hash()
+                != description.common_proof_generation_authorization_hash
             || prepared.proof_attempt_lineage_identifier()
                 != description.proof_attempt_lineage_identifier
         {
@@ -180,6 +1401,35 @@ impl CommonProofVerificationFamilyAdapter {
     fn verification_binding_hash(&self) -> [u8; 64] {
         self.prepared.verification_binding_hash()
     }
+
+    #[cfg(test)]
+    fn statement_source(
+        &self,
+    ) -> Result<&super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.prepared.statement_source()
+    }
+
+    #[cfg(test)]
+    fn into_statement_source(
+        self,
+    ) -> Result<super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.prepared.into_statement_source()
+    }
+}
+
+struct AcceptedSetupCompactPublicKeyPreparedVerification {
+    statement_authority: VerifiedCompactPublicKeyStatementAuthority,
+    terminal_source_handle: u32,
+}
+
+struct AcceptedSetupCompactPublicKeyVerificationOperation {
+    terminal_source_handle: u32,
+    verification: AcceptedCompactPublicKeyVerification,
+}
+
+struct AcceptedSetupCompactPublicKeyCapability {
+    verified_proof: SourceVerifiedCompactPublicKeyProof,
+    terminal_source_handle: u32,
 }
 
 thread_local! {
@@ -188,6 +1438,10 @@ thread_local! {
 }
 
 struct CommonProofWasmRuntimeRegistry {
+    next_accepted_setup_compact_public_key_handle: u32,
+    next_compact_public_key_generation_handle: u32,
+    next_compact_public_key_verification_input_handle: u32,
+    next_compact_public_key_verification_handle: u32,
     next_generation_family_adapter_handle: u32,
     next_verification_family_adapter_handle: u32,
     next_prepared_generation_handle: u32,
@@ -196,7 +1450,18 @@ struct CommonProofWasmRuntimeRegistry {
     verification_family_adapters: BTreeMap<u32, CommonProofVerificationFamilyAdapter>,
     prepared_generations: BTreeMap<u32, PreparedCommonProofGeneration>,
     prepared_verifications: BTreeMap<u32, PreparedCommonProofVerification>,
+    compact_public_key_verification_inputs:
+        BTreeMap<u32, CompactPublicKeyAlgebraicVerificationInput>,
+    compact_public_key_verifications: BTreeMap<u32, CompactPublicKeyAlgebraicVerification>,
+    compact_public_key_generations: BTreeMap<u32, CompactPublicKeyGenerationRuntime>,
+    accepted_setup_compact_public_key_prepared_verifications:
+        BTreeMap<u32, AcceptedSetupCompactPublicKeyPreparedVerification>,
+    accepted_setup_compact_public_key_verification_operations:
+        BTreeMap<u32, AcceptedSetupCompactPublicKeyVerificationOperation>,
+    accepted_setup_compact_public_key_capabilities:
+        BTreeMap<u32, AcceptedSetupCompactPublicKeyCapability>,
     generation_preparation_reservations: BTreeSet<u32>,
+    verification_family_adapter_reservations: BTreeSet<u32>,
     runtime: CommonProofRuntimeRegistry,
     upstream_inputs: CommonProofUpstreamInputRegistry,
 }
@@ -204,6 +1469,10 @@ struct CommonProofWasmRuntimeRegistry {
 impl Default for CommonProofWasmRuntimeRegistry {
     fn default() -> Self {
         Self {
+            next_accepted_setup_compact_public_key_handle: 1,
+            next_compact_public_key_generation_handle: 1,
+            next_compact_public_key_verification_input_handle: 1,
+            next_compact_public_key_verification_handle: 1,
             next_generation_family_adapter_handle: 1,
             next_verification_family_adapter_handle: 1,
             next_prepared_generation_handle: 1,
@@ -212,7 +1481,14 @@ impl Default for CommonProofWasmRuntimeRegistry {
             verification_family_adapters: BTreeMap::new(),
             prepared_generations: BTreeMap::new(),
             prepared_verifications: BTreeMap::new(),
+            compact_public_key_verification_inputs: BTreeMap::new(),
+            compact_public_key_verifications: BTreeMap::new(),
+            compact_public_key_generations: BTreeMap::new(),
+            accepted_setup_compact_public_key_prepared_verifications: BTreeMap::new(),
+            accepted_setup_compact_public_key_verification_operations: BTreeMap::new(),
+            accepted_setup_compact_public_key_capabilities: BTreeMap::new(),
             generation_preparation_reservations: BTreeSet::new(),
+            verification_family_adapter_reservations: BTreeSet::new(),
             runtime: CommonProofRuntimeRegistry::default(),
             upstream_inputs: CommonProofUpstreamInputRegistry::default(),
         }
@@ -226,7 +1502,16 @@ impl CommonProofWasmRuntimeRegistry {
             self.verification_family_adapters.len(),
             self.prepared_generations.len(),
             self.prepared_verifications.len(),
+            self.compact_public_key_verification_inputs.len(),
+            self.compact_public_key_verifications.len(),
+            self.compact_public_key_generations.len(),
+            self.accepted_setup_compact_public_key_prepared_verifications
+                .len(),
+            self.accepted_setup_compact_public_key_verification_operations
+                .len(),
+            self.accepted_setup_compact_public_key_capabilities.len(),
             self.generation_preparation_reservations.len(),
+            self.verification_family_adapter_reservations.len(),
         ])
     }
 
@@ -281,6 +1566,109 @@ impl CommonProofWasmRuntimeRegistry {
         Ok(handle)
     }
 
+    fn retain_compact_public_key_verification_input(
+        &mut self,
+        input: CompactPublicKeyAlgebraicVerificationInput,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_compact_public_key_verification_input_handle;
+        if handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_compact_public_key_verification_input_handle = self
+            .next_compact_public_key_verification_input_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self
+            .compact_public_key_verification_inputs
+            .insert(handle, input)
+            .is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(handle)
+    }
+
+    fn retain_compact_public_key_verification(
+        &mut self,
+        verification: CompactPublicKeyAlgebraicVerification,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_compact_public_key_verification_handle;
+        if handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_compact_public_key_verification_handle = self
+            .next_compact_public_key_verification_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self
+            .compact_public_key_verifications
+            .insert(handle, verification)
+            .is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(handle)
+    }
+
+    fn retain_compact_public_key_generation(
+        &mut self,
+        generation: CompactPublicKeyGenerationRuntime,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_compact_public_key_generation_handle;
+        if handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_compact_public_key_generation_handle = self
+            .next_compact_public_key_generation_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self
+            .compact_public_key_generations
+            .insert(handle, generation)
+            .is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(handle)
+    }
+
+    fn retain_accepted_setup_compact_public_key_prepared_verification(
+        &mut self,
+        statement_authority: VerifiedCompactPublicKeyStatementAuthority,
+        terminal_source_handle: u32,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_accepted_setup_compact_public_key_handle;
+        if handle == 0 || terminal_source_handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_accepted_setup_compact_public_key_handle = self
+            .next_accepted_setup_compact_public_key_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self
+            .accepted_setup_compact_public_key_prepared_verifications
+            .insert(
+                handle,
+                AcceptedSetupCompactPublicKeyPreparedVerification {
+                    statement_authority,
+                    terminal_source_handle,
+                },
+            )
+            .is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(handle)
+    }
+
     fn issue_prepared_verification_handle(&mut self) -> Result<u32, CommonProofRuntimeError> {
         let handle = self.next_prepared_verification_handle;
         if handle == 0 {
@@ -317,6 +1705,12 @@ impl CommonProofWasmRuntimeRegistry {
         adapter: CommonProofVerificationFamilyAdapter,
     ) -> Result<u32, CommonProofRuntimeError> {
         self.require_new_entry_capacity(true)?;
+        let handle = self.issue_verification_family_adapter_handle()?;
+        self.verification_family_adapters.insert(handle, adapter);
+        Ok(handle)
+    }
+
+    fn issue_verification_family_adapter_handle(&mut self) -> Result<u32, CommonProofRuntimeError> {
         let handle = self.next_verification_family_adapter_handle;
         if handle == 0 {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
@@ -326,9 +1720,88 @@ impl CommonProofWasmRuntimeRegistry {
             .checked_add(1)
             .filter(|next| *next != 0)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
-        self.verification_family_adapters.insert(handle, adapter);
         Ok(handle)
     }
+}
+
+pub(crate) fn retain_compact_public_key_generation_runtime(
+    generation: CompactPublicKeyGenerationRuntime,
+) -> Result<u32, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .try_borrow_mut()
+            .map_err(|_| CommonProofRuntimeError::WrongOperationPhase)?
+            .retain_compact_public_key_generation(generation)
+    })
+}
+
+fn with_compact_public_key_generation_runtime_mut<Output>(
+    operation_handle: u32,
+    operation: impl FnOnce(
+        &mut CompactPublicKeyGenerationRuntime,
+    ) -> Result<Output, CompactPublicKeyGenerationRuntimeError>,
+) -> Result<Output, CompactPublicKeyGenerationRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.try_borrow_mut().map_err(|_| {
+            CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            )
+        })?;
+        let generation = registry
+            .compact_public_key_generations
+            .get_mut(&operation_handle)
+            .ok_or(CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::UnknownOrStaleHandle,
+            ))?;
+        operation(generation)
+    })
+}
+
+fn with_compact_public_key_generation_runtime<Output>(
+    operation_handle: u32,
+    operation: impl FnOnce(
+        &CompactPublicKeyGenerationRuntime,
+    ) -> Result<Output, CompactPublicKeyGenerationRuntimeError>,
+) -> Result<Output, CompactPublicKeyGenerationRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.try_borrow().map_err(|_| {
+            CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            )
+        })?;
+        let generation = registry
+            .compact_public_key_generations
+            .get(&operation_handle)
+            .ok_or(CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::UnknownOrStaleHandle,
+            ))?;
+        operation(generation)
+    })
+}
+
+fn release_completed_compact_public_key_generation_runtime(
+    operation_handle: u32,
+) -> Result<(), CompactPublicKeyGenerationRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.try_borrow_mut().map_err(|_| {
+            CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            )
+        })?;
+        let generation = registry
+            .compact_public_key_generations
+            .get(&operation_handle)
+            .ok_or(CompactPublicKeyGenerationRuntimeError::Runtime(
+                CommonProofRuntimeError::UnknownOrStaleHandle,
+            ))?;
+        generation
+            .canonical_proof_byte_length()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)?;
+        registry
+            .compact_public_key_generations
+            .remove(&operation_handle);
+        Ok(())
+    })
 }
 
 /// Retains a deferred exact-family prover adapter. The generic worker can
@@ -344,8 +1817,29 @@ pub(crate) fn retain_common_proof_generation_family_adapter(
     })
 }
 
+/// Borrows one selected-suite capability through its live process-local
+/// handle. Exact-family factories can derive their owned adapters inside the
+/// callback, but cannot copy, enumerate, or reconstruct suite authority from
+/// transported suite bytes.
+pub(crate) fn with_common_proof_selected_suite<Output>(
+    suite_handle_identifier: u32,
+    inspect: impl FnOnce(&SelectedSuiteCapability) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let handle = super::CommonProofSelectedSuiteCapabilityHandle::from_identifier(
+            suite_handle_identifier,
+        );
+        registry
+            .upstream_inputs
+            .selected_suite(&handle)
+            .map(inspect)
+    })
+}
+
 /// Retains one exact-family verifier adapter assembled from positive upstream
 /// capabilities. Proof bytes cannot construct this adapter.
+#[cfg(test)]
 pub(crate) fn retain_common_proof_verification_family_adapter(
     adapter: CommonProofVerificationFamilyAdapter,
 ) -> Result<u32, CommonProofRuntimeError> {
@@ -354,6 +1848,206 @@ pub(crate) fn retain_common_proof_verification_family_adapter(
             .borrow_mut()
             .retain_verification_family_adapter(adapter)
     })
+}
+
+/// Builds and retains one exact-family verifier while the selected-suite and
+/// board-derived application capabilities remain inside the common-proof
+/// registry. The callback cannot access decoded proof bytes and must consume
+/// its upstream inputs into a fully prepared verifier before returning.
+pub(crate) fn retain_common_proof_verification_family_adapter_from_upstream(
+    prepare: impl FnOnce(
+        &mut CommonProofUpstreamInputRegistry,
+    ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError>,
+) -> Result<u32, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.require_new_entry_capacity(true)?;
+        let prepared = prepare(&mut registry.upstream_inputs)?;
+        registry
+            .retain_verification_family_adapter(CommonProofVerificationFamilyAdapter::new(prepared))
+    })
+}
+
+/// Reserves the sole common-runtime destination needed by an exact-family
+/// verifier before that family consumes its unique package-owned source.
+pub(crate) fn reserve_common_proof_verification_family_adapter()
+-> Result<u32, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.require_new_entry_capacity(true)?;
+        let handle = registry.issue_verification_family_adapter_handle()?;
+        if !registry
+            .verification_family_adapter_reservations
+            .insert(handle)
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(handle)
+    })
+}
+
+/// Runs a borrowed exact-family validation while its reserved common-runtime
+/// destination remains live. The callback cannot consume package authority.
+pub(crate) fn preflight_reserved_common_proof_verification_family_adapter_from_upstream<Output>(
+    reservation_handle: u32,
+    preflight: impl FnOnce(&CommonProofUpstreamInputRegistry) -> Result<Output, CommonProofRuntimeError>,
+) -> Result<Output, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        if !registry
+            .verification_family_adapter_reservations
+            .contains(&reservation_handle)
+        {
+            return Err(CommonProofRuntimeError::UnknownOrStaleHandle);
+        }
+        preflight(&registry.upstream_inputs)
+    })
+}
+
+/// Commits one reserved adapter through an infallible ownership transition.
+/// All source, tree, and auxiliary-root validation must have completed through
+/// the borrowed preflight before this function is called.
+pub(crate) fn commit_reserved_common_proof_verification_family_adapter_from_upstream(
+    reservation_handle: u32,
+    prepare: impl FnOnce(&CommonProofUpstreamInputRegistry) -> PreparedCommonProofVerification,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        assert!(
+            registry
+                .verification_family_adapter_reservations
+                .remove(&reservation_handle),
+            "reserved common-proof verifier adapter remains live during commit"
+        );
+        let prepared = prepare(&registry.upstream_inputs);
+        assert!(
+            registry
+                .verification_family_adapters
+                .insert(
+                    reservation_handle,
+                    CommonProofVerificationFamilyAdapter::new(prepared),
+                )
+                .is_none(),
+            "reserved common-proof verifier handle is unique"
+        );
+        reservation_handle
+    })
+}
+
+pub(crate) fn cancel_common_proof_verification_family_adapter_reservation(
+    reservation_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        if registry
+            .borrow_mut()
+            .verification_family_adapter_reservations
+            .remove(&reservation_handle)
+        {
+            Ok(())
+        } else {
+            Err(CommonProofRuntimeError::UnknownOrStaleHandle)
+        }
+    })
+}
+
+/// Restores the exact family-minted statement source from an adapter that did
+/// not enter the generic worker. The fallible destination preflight runs while
+/// the adapter remains retained; only the infallible callback receives source
+/// ownership, so a rejected destination leaves the same adapter retryable.
+#[cfg(test)]
+pub(crate) fn preflight_and_restore_common_proof_verification_family_adapter_statement_source<
+    Preflight,
+    Output,
+>(
+    adapter_handle: u32,
+    preflight: impl FnOnce(
+        &super::VerifiedCommonProofStatementSource,
+    ) -> Result<Preflight, CommonProofRuntimeError>,
+    restore: impl FnOnce(super::VerifiedCommonProofStatementSource, Preflight) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    let preflight = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let source = registry
+            .verification_family_adapters
+            .get(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source()?;
+        preflight(source)
+    })?;
+    let source = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .verification_family_adapters
+            .remove(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .into_statement_source()
+    })?;
+    Ok(restore(source, preflight))
+}
+
+/// Restores the exact family-minted statement source from a prepared verifier
+/// that never entered the browser worker. The prepared handle stays live when
+/// destination preflight refuses the transition.
+#[cfg(test)]
+pub(crate) fn preflight_and_restore_prepared_common_proof_verification_statement_source<
+    Preflight,
+    Output,
+>(
+    prepared_handle: u32,
+    preflight: impl FnOnce(
+        &super::VerifiedCommonProofStatementSource,
+    ) -> Result<Preflight, CommonProofRuntimeError>,
+    restore: impl FnOnce(super::VerifiedCommonProofStatementSource, Preflight) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    let preflight = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let source = registry
+            .prepared_verifications
+            .get(&prepared_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source()?;
+        preflight(source)
+    })?;
+    let source = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .prepared_verifications
+            .remove(&prepared_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .into_statement_source()
+    })?;
+    Ok(restore(source, preflight))
+}
+
+/// Cancels an active, cancelled, or failed verifier operation and restores its
+/// original family-minted statement source. A verifier refusal may consume its
+/// decoder state, but it never consumes this independent linear authority.
+#[cfg(test)]
+pub(crate) fn preflight_and_restore_common_proof_verification_operation_statement_source<
+    Preflight,
+    Output,
+>(
+    operation_handle: u32,
+    preflight: impl FnOnce(
+        &super::VerifiedCommonProofStatementSource,
+    ) -> Result<Preflight, CommonProofRuntimeError>,
+    restore: impl FnOnce(super::VerifiedCommonProofStatementSource, Preflight) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    let operation_handle =
+        CommonProofVerificationOperationHandle::from_identifier(operation_handle);
+    let preflight = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .with_verification_statement_source(operation_handle, preflight)
+    })??;
+    let source = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .cancel_operation_and_take_statement_source(operation_handle)
+    })?;
+    Ok(restore(source, preflight))
 }
 
 /// Transfers one genuinely completed verifier capability into an exact-family
@@ -375,28 +2069,248 @@ pub(crate) fn consume_verified_common_proof_with_family_terminal<Output>(
     consume(capability)
 }
 
+/// Runs every fallible exact-family and destination check while the generic
+/// verifier capability remains retained, then retires the handle and performs
+/// an infallible typed-terminal commit. A rejected preflight is retryable with
+/// the same verifier handle.
+pub(crate) fn preflight_and_consume_verified_common_proof_with_family_terminal<
+    Preflight,
+    Output,
+>(
+    handle: &VerifiedCommonProofCapabilityHandle,
+    preflight: impl FnOnce(
+        BorrowedVerifiedCommonProofCapability<'_>,
+    ) -> Result<Preflight, CommonProofRuntimeError>,
+    consume: impl FnOnce(ConsumedVerifiedCommonProofCapability, Preflight) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    let preflight = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .with_verified_proof_for_protocol(handle, preflight)
+    })??;
+    let capability = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .consume_verified_proof_for_protocol(handle)
+    })?;
+    Ok(consume(capability, preflight))
+}
+
+/// Retires a generated proof only after an authenticated board source carries
+/// its exact output descriptor and generation coordinates.
+pub(crate) fn bind_generated_common_proof_to_verified_board_source(
+    generated_proof_handle: u32,
+    board_source: &VerifiedBoardApplicationSource,
+    board_proof_descriptor: &StreamDescriptor,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .bind_generated_proof_to_verified_board_source(
+                GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+                board_source,
+                board_proof_descriptor,
+                canonical_application_statement_bytes,
+            )
+            .map(|_| ())
+    })
+}
+
+/// Retires one generated collective setup proof only after the exact
+/// accepted-package statement source carries its descriptor and binding.
+pub(crate) fn bind_generated_common_proof_to_verified_statement_source(
+    generated_proof_handle: u32,
+    statement_source: &super::VerifiedCommonProofStatementSource,
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .bind_generated_proof_to_verified_statement_source(
+                GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+                statement_source,
+            )
+            .map(|_| ())
+    })
+}
+
+/// Retires an exact joint set of generated collective setup proofs only after
+/// every accepted-package statement source has passed borrowed preflight.
+/// No capability is consumed when any member is missing, duplicated, or bound
+/// to a different package slot.
+pub(crate) fn bind_generated_common_proofs_to_verified_statement_sources(
+    bindings: &[(u32, &super::VerifiedCommonProofStatementSource)],
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .bind_generated_proofs_to_verified_statement_sources(bindings)
+    })
+}
+
+pub(crate) fn retire_generated_common_proof_capabilities(
+    generated_proof_handles: &[u32],
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .retire_generated_proofs(generated_proof_handles)
+    })
+}
+
+pub(crate) fn preflight_generated_common_proof_pending_statement(
+    generated_proof_handle: u32,
+    expected_application_statement_schema_identifier: u16,
+    expected_roster_position: Option<u16>,
+    expected_schedule_position: Option<u32>,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .preflight_generated_proof_pending_statement(
+                &GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+                expected_application_statement_schema_identifier,
+                expected_roster_position,
+                expected_schedule_position,
+                canonical_application_statement_bytes,
+            )
+    })
+}
+
+pub(crate) fn preflight_generated_common_proof_attempt_binding(
+    generated_proof_handle: u32,
+    expected_generation_binding_hash: [u8; 64],
+    expected_attempt_identifier: [u8; 32],
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .preflight_generated_proof_attempt_binding(
+                &GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+                expected_generation_binding_hash,
+                expected_attempt_identifier,
+            )
+    })
+}
+
+pub(crate) fn preflight_generated_common_proof_pending_package(
+    generated_proof_handle: u32,
+    expected_bindings: ExpectedCommonProofPackageBindings<'_>,
+) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .preflight_generated_proof_pending_package(
+                &GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+                expected_bindings,
+            )
+    })
+}
+
+/// Borrows one positively verified proof without consuming its exact-family
+/// terminal authority and derives the descriptor that may enter a pending
+/// canonical package. The checked slot and canonical statement come from the
+/// package builder's fixed inventory; no host-supplied descriptor is read.
+pub(crate) fn preflight_verified_common_proof_pending_package(
+    verified_proof_handle: u32,
+    expected_bindings: ExpectedCommonProofPackageBindings<'_>,
+) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry.borrow().runtime.with_verified_proof_for_protocol(
+            &VerifiedCommonProofCapabilityHandle::from_identifier(verified_proof_handle),
+            |verified_proof| {
+                let statement_source = verified_proof.statement_source()?;
+                let source_authority = statement_source.application_source_authority();
+                if verified_proof.application_statement_schema_identifier()
+                    != expected_bindings.application_statement_schema_identifier
+                    || verified_proof.suite_identifier() != expected_bindings.suite_identifier
+                    || verified_proof.ceremony_context_hash()
+                        != expected_bindings.ceremony_context_hash
+                    || verified_proof.action_context_hash() != expected_bindings.action_context_hash
+                    || verified_proof.schedule_position() != expected_bindings.schedule_position
+                    || source_authority.application_statement_schema_identifier()
+                        != expected_bindings.application_statement_schema_identifier
+                    || source_authority.producer_roster_position()
+                        != expected_bindings.roster_position
+                    || source_authority.schedule_position() != expected_bindings.schedule_position
+                    || statement_source.canonical_application_statement_bytes()
+                        != expected_bindings.canonical_application_statement_bytes
+                    || source_authority.proof_stream_descriptor()
+                        != verified_proof.proof_stream_descriptor()
+                {
+                    return Err(CommonProofRuntimeError::WrongVerificationBinding);
+                }
+                Ok(verified_proof.proof_stream_descriptor().clone())
+            },
+        )?
+    })
+}
+
 /// Copies the Rust-derived routing description for one live prover adapter.
 ///
+pub(crate) fn common_proof_generation_authenticated_transcript_prefix_request(
+    operation_handle: u32,
+) -> Result<ExactSameSecretAuthenticatedTranscriptPrefixRequest, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .generation_authenticated_transcript_prefix_request(
+                CommonProofGenerationOperationHandle::from_identifier(operation_handle),
+            )
+    })
+}
+
+pub(crate) fn supply_common_proof_generation_authenticated_transcript_prefix(
+    operation_handle: u32,
+    prepared: PreparedExactSameSecretTranscriptPrefix,
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .supply_generation_authenticated_transcript_prefix(
+                CommonProofGenerationOperationHandle::from_identifier(operation_handle),
+                prepared,
+            )
+    })
+}
+
 /// # Safety
 ///
-/// Each output pointer must name its complete fixed-size writable range. A
-/// non-null status pointer must name one writable `u32` in WASM memory.
+/// Each byte output pointer must name its complete fixed-size writable range.
+/// The application-statement schema output pointer must name one writable
+/// `u32` in WASM memory. A non-null status pointer must name one writable
+/// `u32` in WASM memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_adapter(
     adapter_handle: u32,
     runtime_binding_hash_output_pointer: *mut u8,
-    verification_binding_hash_output_pointer: *mut u8,
+    generation_authorization_hash_output_pointer: *mut u8,
     proof_attempt_lineage_identifier_output_pointer: *mut u8,
+    checkpoint_lineage_identifier_output_pointer: *mut u8,
+    application_statement_schema_identifier_output_pointer: *mut u32,
     status_pointer: *mut u32,
 ) -> u32 {
     let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let registry = registry.borrow();
-        let description = registry
+        let adapter = registry
             .generation_family_adapters
             .get(&adapter_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
-            .map_err(runtime_error_status)?
-            .description();
+            .map_err(runtime_error_status)?;
+        let description = adapter.description();
+        let checkpoint_lineage_identifier = adapter.checkpoint_lineage_identifier();
         unsafe {
             copy_exact_output_bytes(
                 runtime_binding_hash_output_pointer,
@@ -404,14 +2318,23 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_
                 &description.common_proof_runtime_binding_hash,
             )?;
             copy_exact_output_bytes(
-                verification_binding_hash_output_pointer,
-                description.common_proof_verification_binding_hash.len(),
-                &description.common_proof_verification_binding_hash,
+                generation_authorization_hash_output_pointer,
+                description.common_proof_generation_authorization_hash.len(),
+                &description.common_proof_generation_authorization_hash,
             )?;
             copy_exact_output_bytes(
                 proof_attempt_lineage_identifier_output_pointer,
                 description.proof_attempt_lineage_identifier.len(),
                 &description.proof_attempt_lineage_identifier,
+            )?;
+            copy_exact_output_bytes(
+                checkpoint_lineage_identifier_output_pointer,
+                checkpoint_lineage_identifier.len(),
+                &checkpoint_lineage_identifier,
+            )?;
+            write_required_unsigned32(
+                application_statement_schema_identifier_output_pointer,
+                u32::from(description.application_statement_schema_identifier),
             )?;
         }
         Ok::<(), u32>(())
@@ -469,19 +2392,22 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_describe_verification_famil
     }
 }
 
-/// Consumes one prover adapter. Empty checkpoint input selects its fresh path;
-/// nonempty input must be the exact canonical state returned by authenticated
-/// checkpoint custody before any exact-family resume preparation runs.
+/// Consumes one prover adapter. Empty checkpoint inputs select its fresh path;
+/// nonempty inputs must be the exact canonical state and composite generation
+/// cursor manifest returned together by authenticated checkpoint custody
+/// before any exact-family resume preparation runs.
 ///
 /// # Safety
 ///
-/// The checkpoint pointer must name its declared readable range. A non-null
+/// Each checkpoint pointer must name its declared readable range. A non-null
 /// status pointer must name one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_common_proof_prepare_generation_family_adapter(
     adapter_handle: u32,
     authenticated_checkpoint_state_pointer: *const u8,
     authenticated_checkpoint_state_byte_length: usize,
+    authenticated_generation_cursor_manifest_pointer: *const u8,
+    authenticated_generation_cursor_manifest_byte_length: usize,
     status_pointer: *mut u32,
 ) -> u32 {
     let adapter_and_prepared_handle = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
@@ -519,12 +2445,22 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_prepare_generation_family_a
                         authenticated_checkpoint_state_byte_length,
                     )
                 };
-                let checkpoint = if authenticated_checkpoint_state.is_empty() {
-                    None
-                } else {
-                    Some(AuthenticatedCommonProofGenerationCheckpoint::decode(
+                let authenticated_generation_cursor_manifest = unsafe {
+                    input_bytes(
+                        authenticated_generation_cursor_manifest_pointer,
+                        authenticated_generation_cursor_manifest_byte_length,
+                    )
+                };
+                let checkpoint = match (
+                    authenticated_checkpoint_state.is_empty(),
+                    authenticated_generation_cursor_manifest.is_empty(),
+                ) {
+                    (true, true) => None,
+                    (false, false) => Some(AuthenticatedCommonProofGenerationCheckpoint::decode(
                         authenticated_checkpoint_state,
-                    )?)
+                        authenticated_generation_cursor_manifest,
+                    )?),
+                    _ => return Err(CommonProofRuntimeError::WrongVerificationBinding.into()),
                 };
                 adapter.prepare(checkpoint)
             })();
@@ -696,6 +2632,16 @@ unsafe fn write_status(status_pointer: *mut u32, status: u32) {
     }
 }
 
+unsafe fn write_required_unsigned32(output_pointer: *mut u32, value: u32) -> Result<(), u32> {
+    if output_pointer.is_null() {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    unsafe {
+        output_pointer.write(value);
+    }
+    Ok(())
+}
+
 unsafe fn copy_exact_output_bytes(
     output_pointer: *mut u8,
     output_byte_length: usize,
@@ -707,6 +2653,17 @@ unsafe fn copy_exact_output_bytes(
     let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
     output.copy_from_slice(bytes);
     Ok(())
+}
+
+unsafe fn exact_output_bytes_mut<'output>(
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+    expected_byte_length: usize,
+) -> Result<&'output mut [u8], u32> {
+    if output_pointer.is_null() || output_byte_length != expected_byte_length {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    Ok(unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) })
 }
 
 fn select_canonical_suite_record(canonical_suite_record_bytes: &[u8]) -> Result<u32, u32> {
@@ -735,13 +2692,13 @@ fn select_canonical_suite_record(canonical_suite_record_bytes: &[u8]) -> Result<
             .map_err(runtime_error_status)?;
         registry
             .upstream_inputs
-            .install_suite(selected_suite)
+            .install_suite(selected_suite, reencoded_suite_record)
             .map(|handle| handle.get())
             .map_err(runtime_error_status)
     })
 }
 
-fn runtime_error_status(error: CommonProofRuntimeError) -> u32 {
+pub(crate) fn runtime_error_status(error: CommonProofRuntimeError) -> u32 {
     match error {
         CommonProofRuntimeError::UnknownOrStaleHandle
         | CommonProofRuntimeError::CancellationRequested
@@ -768,23 +2725,66 @@ fn runtime_error_status(error: CommonProofRuntimeError) -> u32 {
     }
 }
 
+fn compact_public_key_generation_runtime_error_status(
+    error: CompactPublicKeyGenerationRuntimeError,
+) -> u32 {
+    match error {
+        CompactPublicKeyGenerationRuntimeError::WrongPhase => {
+            runtime_error_status(CommonProofRuntimeError::WrongOperationPhase)
+        }
+        CompactPublicKeyGenerationRuntimeError::Refusal(refusal_reason) => {
+            refusal_status(refusal_reason)
+        }
+        CompactPublicKeyGenerationRuntimeError::Runtime(error) => runtime_error_status(error),
+        CompactPublicKeyGenerationRuntimeError::Contract(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        CompactPublicKeyGenerationRuntimeError::Initialization(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        CompactPublicKeyGenerationRuntimeError::Generation(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::InvalidArithmeticRelation)
+        }
+        CompactPublicKeyGenerationRuntimeError::MainPreparation(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::InvalidArithmeticRelation)
+        }
+        CompactPublicKeyGenerationRuntimeError::MainPoll(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::InvalidArithmeticRelation)
+        }
+    }
+}
+
 fn verification_worker_error_status(error: CommonProofVerificationWorkerError) -> u32 {
     match error {
         CommonProofVerificationWorkerError::Runtime(error) => runtime_error_status(error),
         CommonProofVerificationWorkerError::Stream(refusal_reason) => {
             refusal_status(refusal_reason)
         }
-        CommonProofVerificationWorkerError::Verifier(_) => {
-            refusal_status(RefusalReason::InvalidProof)
-        }
+        CommonProofVerificationWorkerError::Verifier => refusal_status(RefusalReason::InvalidProof),
     }
+}
+
+fn compact_public_key_algebraic_verification_error_status(
+    error: CompactPublicKeyAlgebraicVerificationError,
+) -> u32 {
+    refusal_status(error.refusal_reason())
 }
 
 fn generation_worker_error_status(error: CommonProofGenerationWorkerError) -> u32 {
     match error {
         CommonProofGenerationWorkerError::Runtime(error) => runtime_error_status(error),
-        CommonProofGenerationWorkerError::Generation { .. }
-        | CommonProofGenerationWorkerError::Cleanup(_) => {
+        CommonProofGenerationWorkerError::AuthenticatedSource => {
+            refusal_status(RefusalReason::WrongHashOrRoot)
+        }
+        CommonProofGenerationWorkerError::Generation(_) => {
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        CommonProofGenerationWorkerError::Cleanup => {
             refusal_status(RefusalReason::OutsideSupportedProfile)
         }
     }
@@ -797,6 +2797,474 @@ fn generation_preparation_error_status(error: CommonProofGenerationPreparationEr
             refusal_status(RefusalReason::OutsideSupportedProfile)
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_generation_external_memory_usage_word_count()
+-> usize {
+    COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_compact_public_key_generation_diagnostic_record_byte_length()
+-> u32 {
+    COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_diagnostic_observation_count(
+    operation_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        let count = generation
+            .with_diagnostic_observations(|observations| observations.len())
+            .ok_or(CompactPublicKeyGenerationRuntimeError::WrongPhase)?;
+        u32::try_from(count).map_err(|_| CompactPublicKeyGenerationRuntimeError::WrongPhase)
+    });
+    match result {
+        Ok(count) => {
+            unsafe { write_status(status_pointer, 0) };
+            count
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_diagnostic_observations(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .with_diagnostic_observations(|observations| {
+                let expected_byte_length = observations
+                    .len()
+                    .checked_mul(COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH)
+                    .ok_or(CompactPublicKeyGenerationRuntimeError::WrongPhase)?;
+                if output.len() != expected_byte_length {
+                    return Err(CompactPublicKeyGenerationRuntimeError::WrongPhase);
+                }
+                for (observation_index, observation) in observations.iter().copied().enumerate() {
+                    let offset = observation_index
+                        * COMPACT_PUBLIC_KEY_GENERATION_DIAGNOSTIC_RECORD_BYTE_LENGTH;
+                    output[offset..offset + size_of::<u32>()]
+                        .copy_from_slice(&observation.owner().canonical_code().to_le_bytes());
+                    output[offset + size_of::<u32>()..offset + 2 * size_of::<u32>()].fill(0);
+                    output[offset + 2 * size_of::<u32>()..offset + 2 * size_of::<u32>() + 8]
+                        .copy_from_slice(
+                            &observation
+                                .started_at_milliseconds()
+                                .to_bits()
+                                .to_le_bytes(),
+                        );
+                    output[offset + 2 * size_of::<u32>() + 8..offset + 2 * size_of::<u32>() + 16]
+                        .copy_from_slice(
+                            &observation
+                                .finished_at_milliseconds()
+                                .to_bits()
+                                .to_le_bytes(),
+                        );
+                }
+                Ok(())
+            })
+            .ok_or(CompactPublicKeyGenerationRuntimeError::WrongPhase)?
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+/// Advances one bounded scalar compact-producer step. The returned poll code
+/// follows the common generation progress, storage-request, and completion
+/// codes. Stage and ordinal outputs are diagnostic progress only.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_poll(
+    operation_handle: u32,
+    maximum_work_unit_count: u32,
+    stage_output_pointer: *mut u32,
+    first_ordinal_output_pointer: *mut u32,
+    completed_work_unit_count_output_pointer: *mut u32,
+    checkpoint_ready_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    if maximum_work_unit_count == 0
+        || stage_output_pointer.is_null()
+        || first_ordinal_output_pointer.is_null()
+        || completed_work_unit_count_output_pointer.is_null()
+        || checkpoint_ready_output_pointer.is_null()
+    {
+        unsafe {
+            write_status(
+                status_pointer,
+                refusal_status(RefusalReason::WrongTypeOrLength),
+            )
+        };
+        return 0;
+    }
+    let result = with_compact_public_key_generation_runtime_mut(operation_handle, |generation| {
+        generation.poll(u64::from(maximum_work_unit_count))
+    });
+    match result {
+        Ok(poll) => {
+            let (poll_code, stage, first_ordinal, completed_work_unit_count, checkpoint_ready) =
+                match poll {
+                    CompactPublicKeyGenerationRuntimePoll::Progress {
+                        stage,
+                        first_ordinal,
+                        completed_work_unit_count,
+                    } => (
+                        GENERATION_POLL_PROGRESS,
+                        stage.canonical_code(),
+                        first_ordinal,
+                        completed_work_unit_count,
+                        0,
+                    ),
+                    CompactPublicKeyGenerationRuntimePoll::CheckpointReady {
+                        stage,
+                        safe_boundary_ordinal,
+                    } => (
+                        GENERATION_POLL_PROGRESS,
+                        stage.canonical_code(),
+                        safe_boundary_ordinal,
+                        0,
+                        1,
+                    ),
+                    CompactPublicKeyGenerationRuntimePoll::StorageRequestReady { owner } => (
+                        GENERATION_POLL_STORAGE_REQUEST_READY,
+                        0,
+                        owner.canonical_code(),
+                        0,
+                        0,
+                    ),
+                    CompactPublicKeyGenerationRuntimePoll::Complete => (
+                        GENERATION_POLL_COMPLETE,
+                        CompactPublicKeyGenerationRuntimeStage::Complete.canonical_code(),
+                        0,
+                        0,
+                        0,
+                    ),
+                };
+            let completed_work_unit_count = match u32::try_from(completed_work_unit_count) {
+                Ok(count) => count,
+                Err(_) => {
+                    unsafe {
+                        write_status(
+                            status_pointer,
+                            refusal_status(RefusalReason::OutsideSupportedProfile),
+                        )
+                    };
+                    return 0;
+                }
+            };
+            unsafe {
+                stage_output_pointer.write(stage);
+                first_ordinal_output_pointer.write(first_ordinal);
+                completed_work_unit_count_output_pointer.write(completed_work_unit_count);
+                checkpoint_ready_output_pointer.write(checkpoint_ready);
+                write_status(status_pointer, 0);
+            }
+            poll_code
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length(
+    operation_handle: u32,
+    storage_owner_output_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> usize {
+    if storage_owner_output_pointer.is_null() {
+        unsafe {
+            write_status(
+                status_pointer,
+                refusal_status(RefusalReason::WrongTypeOrLength),
+            )
+        };
+        return 0;
+    }
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .pending_storage_request_description()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    match result {
+        Ok((owner, byte_length)) => {
+            unsafe {
+                storage_owner_output_pointer.write(owner.canonical_code());
+                write_status(status_pointer, 0);
+            }
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_storage_request(
+    operation_handle: u32,
+    storage_owner_code: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let Some(owner) =
+        CompactPublicKeyGenerationStorageOwner::from_canonical_code(storage_owner_code)
+    else {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    };
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime_mut(operation_handle, |generation| {
+        generation
+            .copy_pending_storage_request(owner, output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_supply_storage_response(
+    operation_handle: u32,
+    storage_owner_code: u32,
+    response_pointer: *const u8,
+    response_byte_length: usize,
+) -> u32 {
+    let Some(owner) =
+        CompactPublicKeyGenerationStorageOwner::from_canonical_code(storage_owner_code)
+    else {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    };
+    if response_pointer.is_null() || response_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let response = unsafe { slice::from_raw_parts(response_pointer, response_byte_length) };
+    with_compact_public_key_generation_runtime_mut(operation_handle, |generation| {
+        generation
+            .supply_storage_response(owner, response)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_public_input_byte_length(
+    operation_handle: u32,
+    status_pointer: *mut u32,
+) -> usize {
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .canonical_public_input_byte_length()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    match result {
+        Ok(byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_proof_byte_length(
+    operation_handle: u32,
+    status_pointer: *mut u32,
+) -> usize {
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .canonical_proof_byte_length()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    match result {
+        Ok(byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    compact_public_key_generation_runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_public_input(
+    operation_handle: u32,
+    source_offset: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .copy_canonical_public_input(source_offset, output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_proof(
+    operation_handle: u32,
+    source_offset: usize,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_byte_length == 0 {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .copy_canonical_proof(source_offset, output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+/// Copies the four producer-derived transport bindings for the completed
+/// canonical public input and proof. The binding order is suite identifier,
+/// application-statement hash, manifest hash, and relation-plan hash, exactly
+/// as consumed by the compact transport and algebraic verifier boundaries.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the compact transport-binding byte
+/// length reported by `sealed_lattice_compact_public_key_transport_bindings_byte_length`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_transport_bindings(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length != COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .copy_transport_bindings(output)
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    })
+    .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_compact_public_key_generation_copy_external_memory_usage(
+    operation_handle: u32,
+    output_pointer: *mut u64,
+    output_word_count: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_word_count != COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT
+    {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let result = with_compact_public_key_generation_runtime(operation_handle, |generation| {
+        generation
+            .external_memory_usages()
+            .map_err(CompactPublicKeyGenerationRuntimeError::Runtime)
+    });
+    let (response_usage, cfw_usage) = match result {
+        Ok(usages) => usages,
+        Err(error) => return compact_public_key_generation_runtime_error_status(error),
+    };
+    let words = [
+        response_usage.total_written_byte_length(),
+        response_usage.total_read_byte_length(),
+        response_usage.peak_stored_byte_length(),
+        response_usage.transaction_count(),
+        u64::from(response_usage.deleted_object_count()),
+        cfw_usage.total_written_byte_length(),
+        cfw_usage.total_read_byte_length(),
+        cfw_usage.peak_stored_byte_length(),
+        cfw_usage.transaction_count(),
+        u64::from(cfw_usage.deleted_object_count()),
+    ];
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_word_count) };
+    output.copy_from_slice(&words);
+    0
+}
+
+/// Releases a compact producer only after its canonical outputs and terminal
+/// accounting are available. Completion does not mint verification authority.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_release_completed(
+    operation_handle: u32,
+) -> u32 {
+    release_completed_compact_public_key_generation_runtime(operation_handle)
+        .map_or_else(compact_public_key_generation_runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_compact_public_key_generation_cancel(
+    operation_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = match registry.try_borrow_mut() {
+            Ok(registry) => registry,
+            Err(_) => return runtime_error_status(CommonProofRuntimeError::WrongOperationPhase),
+        };
+        let Some(mut generation) = registry
+            .compact_public_key_generations
+            .remove(&operation_handle)
+        else {
+            return runtime_error_status(CommonProofRuntimeError::UnknownOrStaleHandle);
+        };
+        generation.cancel();
+        0
+    })
 }
 
 /// # Safety
@@ -839,6 +3307,70 @@ pub extern "C" fn sealed_lattice_common_proof_release_suite(handle: u32) -> u32 
             .upstream_inputs
             .release_suite(handle)
             .map_or_else(runtime_error_status, |()| 0)
+    })
+}
+
+/// Returns the exact positively selected canonical suite-record length.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_selected_suite_record_byte_length(
+    handle: u32,
+    status_pointer: *mut u32,
+) -> usize {
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .upstream_inputs
+            .canonical_suite_record_bytes(handle)
+            .map(<[u8]>::len)
+    });
+    match result {
+        Ok(byte_length) => {
+            unsafe {
+                write_status(status_pointer, 0);
+            }
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(status_pointer, runtime_error_status(error));
+            }
+            0
+        }
+    }
+}
+
+/// Copies the exact canonical bytes retained by positive suite selection.
+///
+/// # Safety
+///
+/// The output pointer must name its declared writable range in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_copy_selected_suite_record(
+    handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let canonical_suite_record_bytes = match registry
+            .upstream_inputs
+            .canonical_suite_record_bytes(handle)
+        {
+            Ok(bytes) => bytes,
+            Err(error) => return runtime_error_status(error),
+        };
+        unsafe {
+            copy_exact_output_bytes(
+                output_pointer,
+                output_byte_length,
+                canonical_suite_record_bytes,
+            )
+        }
+        .map_or_else(core::convert::identity, |()| 0)
     })
 }
 
@@ -885,25 +3417,34 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_begin_generation(
 }
 
 /// Resumes one freshly prepared exact-family prover by replaying its
-/// deterministic prefix from counter zero. The state bytes must have come
-/// from the authenticated custody checkpoint channel; copied manifest fields
-/// cannot construct the `PreparedActionProofAttemptSource` consumed here.
+/// deterministic prefix from counter zero and then reinstalling the exact
+/// authenticated transcript cursor at the matched durable boundary. The
+/// state and composite cursor manifest must have come from one authenticated
+/// custody checkpoint.
 ///
 /// # Safety
 ///
-/// The checkpoint pointer must name its declared readable range. A non-null
+/// Each checkpoint pointer must name its declared readable range. A non-null
 /// status pointer must name one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_common_proof_resume_generation(
     prepared_generation_handle: u32,
     authenticated_checkpoint_state_pointer: *const u8,
     authenticated_checkpoint_state_byte_length: usize,
+    authenticated_generation_cursor_manifest_pointer: *const u8,
+    authenticated_generation_cursor_manifest_byte_length: usize,
     status_pointer: *mut u32,
 ) -> u32 {
     let authenticated_checkpoint_state = unsafe {
         input_bytes(
             authenticated_checkpoint_state_pointer,
             authenticated_checkpoint_state_byte_length,
+        )
+    };
+    let authenticated_generation_cursor_manifest = unsafe {
+        input_bytes(
+            authenticated_generation_cursor_manifest_pointer,
+            authenticated_generation_cursor_manifest_byte_length,
         )
     };
     let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
@@ -923,6 +3464,7 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_resume_generation(
         registry.runtime.resume_owned_generation_with_handle(
             prepared,
             authenticated_checkpoint_state,
+            authenticated_generation_cursor_manifest,
             operation_handle,
         )
     });
@@ -984,6 +3526,19 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_generation_poll(
             encoded_request_byte_length,
             NO_SECOND_POLL_VALUE,
         ),
+        Ok(CommonProofGenerationWorkerPoll::AuthenticatedSourceReadReady {
+            source_byte_length,
+            authentication_chunk_index,
+        }) => (
+            GENERATION_POLL_AUTHENTICATED_SOURCE_READ_READY,
+            source_byte_length,
+            authentication_chunk_index,
+        ),
+        Ok(CommonProofGenerationWorkerPoll::AuthenticatedTranscriptPrefixRequired) => (
+            GENERATION_POLL_AUTHENTICATED_TRANSCRIPT_PREFIX_REQUIRED,
+            0,
+            NO_SECOND_POLL_VALUE,
+        ),
         Ok(CommonProofGenerationWorkerPoll::OutputChunkReady {
             chunk_index,
             chunk_byte_length,
@@ -1021,11 +3576,11 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_generation_describe_checkpo
     operation_handle: u32,
     safe_boundary_ordinal_pointer: *mut u32,
     state_byte_length_pointer: *mut u32,
-    cursor_count_pointer: *mut u32,
+    cursor_manifest_byte_length_pointer: *mut u32,
 ) -> u32 {
     if safe_boundary_ordinal_pointer.is_null()
         || state_byte_length_pointer.is_null()
-        || cursor_count_pointer.is_null()
+        || cursor_manifest_byte_length_pointer.is_null()
     {
         return refusal_status(RefusalReason::WrongTypeOrLength);
     }
@@ -1046,8 +3601,11 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_generation_describe_checkpo
             },
             Err(error) => return runtime_error_status(error),
         };
-        let cursor_count = match registry.runtime.generation_checkpoint_cursor_count(handle) {
-            Ok(count) => match u32::try_from(count) {
+        let cursor_manifest_byte_length = match registry
+            .runtime
+            .generation_checkpoint_cursor_manifest(handle)
+        {
+            Ok(manifest) => match u32::try_from(manifest.len()) {
                 Ok(value) => value,
                 Err(_) => return refusal_status(RefusalReason::OutsideSupportedProfile),
             },
@@ -1056,7 +3614,10 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_generation_describe_checkpo
         unsafe {
             write_status(safe_boundary_ordinal_pointer, safe_boundary_ordinal);
             write_status(state_byte_length_pointer, state_byte_length);
-            write_status(cursor_count_pointer, cursor_count);
+            write_status(
+                cursor_manifest_byte_length_pointer,
+                cursor_manifest_byte_length,
+            );
         }
         0
     })
@@ -1087,63 +3648,23 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_generation_copy_checkpoint_
 
 /// # Safety
 ///
-/// A non-null status pointer must name one writable `u32` in WASM memory.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length(
-    operation_handle: u32,
-    cursor_index: u32,
-    status_pointer: *mut u32,
-) -> u32 {
-    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .runtime
-            .generation_checkpoint_cursor(
-                CommonProofGenerationOperationHandle::from_identifier(operation_handle),
-                cursor_index as usize,
-            )
-            .and_then(|cursor| {
-                u32::try_from(cursor.len())
-                    .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
-            })
-    });
-    match result {
-        Ok(byte_length) => {
-            unsafe {
-                write_status(status_pointer, 0);
-            }
-            byte_length
-        }
-        Err(error) => {
-            unsafe {
-                write_status(status_pointer, runtime_error_status(error));
-            }
-            0
-        }
-    }
-}
-
-/// # Safety
-///
-/// The output pointer must name exactly the selected canonical cursor's
+/// The output pointer must name exactly the canonical compact cursor manifest's
 /// writable range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_common_proof_generation_copy_checkpoint_cursor(
+pub unsafe extern "C" fn sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest(
     operation_handle: u32,
-    cursor_index: u32,
     output_pointer: *mut u8,
     output_byte_length: usize,
 ) -> u32 {
     COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let registry = registry.borrow();
-        let cursor = match registry.runtime.generation_checkpoint_cursor(
+        let cursor_manifest = match registry.runtime.generation_checkpoint_cursor_manifest(
             CommonProofGenerationOperationHandle::from_identifier(operation_handle),
-            cursor_index as usize,
         ) {
-            Ok(cursor) => cursor,
+            Ok(cursor_manifest) => cursor_manifest,
             Err(error) => return runtime_error_status(error),
         };
-        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, cursor) }
+        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, cursor_manifest) }
             .map_or_else(|status| status, |()| 0)
     })
 }
@@ -1212,15 +3733,27 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_generation_copy_storage_req
     output_byte_length: usize,
 ) -> u32 {
     COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let request = match registry.runtime.generation_storage_request(
-            CommonProofGenerationOperationHandle::from_identifier(operation_handle),
-        ) {
-            Ok(request) => request,
+        let operation_handle =
+            CommonProofGenerationOperationHandle::from_identifier(operation_handle);
+        let expected_byte_length = match registry
+            .borrow()
+            .runtime
+            .generation_storage_request_byte_length(operation_handle)
+        {
+            Ok(byte_length) => byte_length,
             Err(error) => return runtime_error_status(error),
         };
-        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, request) }
-            .map_or_else(|status| status, |()| 0)
+        let output = match unsafe {
+            exact_output_bytes_mut(output_pointer, output_byte_length, expected_byte_length)
+        } {
+            Ok(output) => output,
+            Err(status) => return status,
+        };
+        registry
+            .borrow_mut()
+            .runtime
+            .encode_generation_storage_request_into(operation_handle, output)
+            .map_or_else(runtime_error_status, |()| 0)
     })
 }
 
@@ -1242,6 +3775,66 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_generation_supply_storage_r
                 CommonProofGenerationOperationHandle::from_identifier(operation_handle),
                 response,
             )
+            .map_or_else(generation_worker_error_status, |()| 0)
+    })
+}
+
+/// # Safety
+///
+/// The output pointer must name exactly the fixed authenticated-source request
+/// record's writable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_generation_copy_authenticated_source_request(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let request = match registry
+            .runtime
+            .generation_authenticated_source_read_request(
+                CommonProofGenerationOperationHandle::from_identifier(operation_handle),
+            ) {
+            Ok(request) => request,
+            Err(error) => return runtime_error_status(error),
+        };
+        let encoded = encode_authenticated_source_read_request(request);
+        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, &encoded) }
+            .map_or_else(|status| status, |()| 0)
+    })
+}
+
+/// # Safety
+///
+/// The source pointer must name the exact readable range requested by Rust.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_generation_supply_authenticated_source_range(
+    operation_handle: u32,
+    source_pointer: *const u8,
+    source_byte_length: usize,
+) -> u32 {
+    let handle = CommonProofGenerationOperationHandle::from_identifier(operation_handle);
+    let expected_byte_length = match COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .generation_authenticated_source_read_request(handle)
+            .map(|request| request.source_byte_length())
+    }) {
+        Ok(expected_byte_length) => expected_byte_length,
+        Err(error) => return runtime_error_status(error),
+    };
+    if usize::try_from(expected_byte_length).ok() != Some(source_byte_length) {
+        return refusal_status(RefusalReason::WrongTypeOrLength);
+    }
+    let authenticated_bytes = unsafe { input_bytes(source_pointer, source_byte_length) };
+    let authenticated_bytes = Zeroizing::new(authenticated_bytes.to_vec().into_boxed_slice());
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .supply_generation_authenticated_source_range(handle, authenticated_bytes)
             .map_or_else(generation_worker_error_status, |()| 0)
     })
 }
@@ -1360,6 +3953,37 @@ pub extern "C" fn sealed_lattice_common_proof_generation_retire_failed(
                 operation_handle,
             ))
             .map_or_else(runtime_error_status, |()| 0)
+    })
+}
+
+/// Copies process-local production scratch accounting after terminal output
+/// authentication and before the generation operation is consumed. The
+/// diagnostic record is not a canonical protocol object and is never bound
+/// into the generated proof or capability.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the diagnostic record's writable
+/// range in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_generation_copy_external_memory_accounting(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let accounting = match registry
+            .borrow()
+            .runtime
+            .generation_external_memory_accounting(
+                CommonProofGenerationOperationHandle::from_identifier(operation_handle),
+            ) {
+            Ok(accounting) => accounting,
+            Err(error) => return runtime_error_status(error),
+        };
+        let encoded = encode_generation_external_memory_accounting(accounting);
+        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, &encoded) }
+            .map_or_else(core::convert::identity, |()| 0)
     })
 }
 
@@ -1513,19 +4137,6 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_verification_poll(
             first_chunk_index,
             second_chunk_index.unwrap_or(NO_SECOND_POLL_VALUE),
         ),
-        Ok(CommonProofVerificationWorkerPoll::PrefixAccepted) => {
-            (VERIFICATION_POLL_PREFIX_ACCEPTED, 0, NO_SECOND_POLL_VALUE)
-        }
-        Ok(CommonProofVerificationWorkerPoll::QueryHeaderAccepted) => (
-            VERIFICATION_POLL_QUERY_HEADER_ACCEPTED,
-            0,
-            NO_SECOND_POLL_VALUE,
-        ),
-        Ok(CommonProofVerificationWorkerPoll::QueryTreeAccepted { catalog_index }) => (
-            VERIFICATION_POLL_QUERY_TREE_ACCEPTED,
-            u32::from(catalog_index),
-            NO_SECOND_POLL_VALUE,
-        ),
         Ok(CommonProofVerificationWorkerPoll::Complete) => {
             (VERIFICATION_POLL_COMPLETE, 0, NO_SECOND_POLL_VALUE)
         }
@@ -1560,6 +4171,33 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_verification_supply_readbac
                 chunk_bytes,
             )
             .map_or_else(verification_worker_error_status, |()| 0)
+    })
+}
+
+/// Copies process-local verifier traversal traffic before the verification
+/// worker is consumed. The diagnostic record is not a proof field, verifier
+/// result, capability, or durable authorization input.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the diagnostic record's writable
+/// range in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_verification_copy_readback_accounting(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let accounting = match registry.borrow().runtime.verification_readback_accounting(
+            CommonProofVerificationOperationHandle::from_identifier(operation_handle),
+        ) {
+            Ok(accounting) => accounting,
+            Err(error) => return runtime_error_status(error),
+        };
+        let encoded = encode_verification_readback_accounting(accounting);
+        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, &encoded) }
+            .map_or_else(core::convert::identity, |()| 0)
     })
 }
 
@@ -1833,6 +4471,23 @@ pub extern "C" fn sealed_lattice_common_proof_verification_cancel(operation_hand
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        bgv::{
+            proof_suite::{
+                CommonProofRelationPlanCapability, VerifiedCommonProofStatementSource,
+                VerifiedStatementOwnedTree, canonical_selected_vss_share_linkage_statement,
+                compile_vss_share_linkage_relation_plan,
+                selected_committed_material_relation_plan_input, selected_proof_runtime_limits,
+                selected_relation_plan_check_context,
+            },
+            setup::VerifiedPublicRandomness,
+        },
+        foundation::{
+            ParticipantIdentity, ProofApplicationSlotCeilings, selected_suite_capability_for_tests,
+        },
+    };
+    use core::mem::size_of;
+    use std::cell::RefCell;
 
     struct IsolatedCommonProofWasmRuntimeRegistry;
 
@@ -1857,11 +4512,851 @@ mod tests {
 
     fn refusing_generation_family_adapter() -> CommonProofGenerationFamilyAdapter {
         CommonProofGenerationFamilyAdapter::resume(
-            CommonProofGenerationFamilyAdapterDescription::new([0x11; 64], [0x22; 64], [0x33; 32]),
+            CommonProofGenerationFamilyAdapterDescription::new(
+                0x1213, [0x11; 64], [0x22; 64], [0x33; 32],
+            ),
             [0x44; 32],
             Hash512::from_bytes([0x55; 64]),
             Box::new(|_| Err(CommonProofRuntimeError::WrongVerificationBinding.into())),
         )
+    }
+
+    fn test_root(domain: u8, ordinal: usize) -> [u8; Hash512::BYTE_LENGTH] {
+        let mut root = [domain; Hash512::BYTE_LENGTH];
+        root[..size_of::<u64>()].copy_from_slice(
+            &u64::try_from(ordinal)
+                .expect("selected catalog ordinal fits u64")
+                .to_le_bytes(),
+        );
+        root[Hash512::BYTE_LENGTH - 1] = domain;
+        root
+    }
+
+    #[test]
+    fn compact_public_key_transport_binding_frame_requires_four_exact_hashes_in_order() {
+        let selected_contract =
+            super::super::compact_proof_contract::CompactPublicKeyProofContract::decode_selected()
+                .expect("the selected compact proof contract is valid");
+        let ordered_bindings = [
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes(
+                selected_contract
+                    .verifier_inputs()
+                    .relation
+                    .relation_plan_variant_hash(),
+            ),
+        ];
+        let canonical_bindings = ordered_bindings
+            .iter()
+            .flat_map(|binding| binding.as_bytes().iter().copied())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            sealed_lattice_compact_public_key_transport_bindings_byte_length() as usize,
+            4 * Hash512::BYTE_LENGTH,
+        );
+        assert_eq!(
+            decode_compact_public_key_transport_bindings(&canonical_bindings),
+            Ok(CompactPublicInputBindings::new(
+                ordered_bindings[0],
+                ordered_bindings[1],
+                ordered_bindings[2],
+                ordered_bindings[3],
+            )),
+        );
+
+        for malformed_length in [canonical_bindings.len() - 1, canonical_bindings.len() + 1] {
+            let mut malformed = canonical_bindings.clone();
+            malformed.resize(malformed_length, 0xa5);
+            assert_eq!(
+                decode_compact_public_key_transport_bindings(&malformed),
+                Err(RefusalReason::WrongTypeOrLength),
+            );
+            assert_eq!(
+                unsafe {
+                    sealed_lattice_compact_public_key_validate_transport(
+                        malformed.as_ptr(),
+                        malformed.len(),
+                        core::ptr::null(),
+                        0,
+                        core::ptr::null(),
+                        0,
+                    )
+                },
+                refusal_status(RefusalReason::WrongTypeOrLength),
+            );
+        }
+
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_validate_transport(
+                    canonical_bindings.as_ptr(),
+                    canonical_bindings.len(),
+                    core::ptr::null(),
+                    0,
+                    core::ptr::null(),
+                    0,
+                )
+            },
+            refusal_status(RefusalReason::MalformedEncoding),
+            "an exact binding frame reaches strict proof decoding",
+        );
+    }
+
+    #[test]
+    fn compact_public_key_algebraic_verification_boundary_refuses_malformed_and_stale_operations() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let selected_contract =
+            super::super::compact_proof_contract::CompactPublicKeyProofContract::decode_selected()
+                .expect("the selected compact proof contract is valid");
+        let canonical_bindings = [
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes(
+                selected_contract
+                    .verifier_inputs()
+                    .relation
+                    .relation_plan_variant_hash(),
+            ),
+        ]
+        .iter()
+        .flat_map(|binding| binding.as_bytes().iter().copied())
+        .collect::<Vec<_>>();
+        let malformed_proof = [0xa5_u8];
+        let malformed_public_input = [0x5a_u8];
+        let mut status = u32::MAX;
+        let input_handle = unsafe {
+            sealed_lattice_compact_public_key_begin_algebraic_verification_input(
+                canonical_bindings.as_ptr(),
+                canonical_bindings.len(),
+                malformed_proof.len(),
+                malformed_public_input.len(),
+                core::ptr::null(),
+                0,
+                &mut status,
+            )
+        };
+        assert_ne!(input_handle, 0);
+        assert_eq!(status, 0);
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk(
+                    input_handle,
+                    COMPACT_PUBLIC_KEY_VERIFICATION_PROOF_INPUT,
+                    0,
+                    malformed_proof.as_ptr(),
+                    malformed_proof.len(),
+                )
+            },
+            0
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk(
+                    input_handle,
+                    COMPACT_PUBLIC_KEY_VERIFICATION_PUBLIC_INPUT,
+                    0,
+                    malformed_public_input.as_ptr(),
+                    malformed_public_input.len(),
+                )
+            },
+            0
+        );
+        let handle = unsafe {
+            sealed_lattice_compact_public_key_finish_algebraic_verification_input(
+                input_handle,
+                &mut status,
+            )
+        };
+        assert_eq!(handle, 0);
+        assert_eq!(status, refusal_status(RefusalReason::MalformedEncoding));
+        assert_eq!(
+            sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length()
+                as usize,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+        );
+        assert_eq!(
+            sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count(),
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_SAFE_BOUNDARY_COUNT,
+        );
+        let mut checkpoint =
+            [0_u8; COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH];
+        status = u32::MAX;
+        let resumed_input_handle = unsafe {
+            sealed_lattice_compact_public_key_begin_algebraic_verification_input(
+                canonical_bindings.as_ptr(),
+                canonical_bindings.len(),
+                malformed_proof.len(),
+                malformed_public_input.len(),
+                checkpoint.as_ptr(),
+                checkpoint.len(),
+                &mut status,
+            )
+        };
+        assert_ne!(resumed_input_handle, 0);
+        assert_eq!(status, 0);
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk(
+                    resumed_input_handle,
+                    COMPACT_PUBLIC_KEY_VERIFICATION_PROOF_INPUT,
+                    0,
+                    malformed_proof.as_ptr(),
+                    malformed_proof.len(),
+                )
+            },
+            0
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk(
+                    resumed_input_handle,
+                    COMPACT_PUBLIC_KEY_VERIFICATION_PUBLIC_INPUT,
+                    0,
+                    malformed_public_input.as_ptr(),
+                    malformed_public_input.len(),
+                )
+            },
+            0
+        );
+        let resumed_handle = unsafe {
+            sealed_lattice_compact_public_key_finish_algebraic_verification_input(
+                resumed_input_handle,
+                &mut status,
+            )
+        };
+        assert_eq!(resumed_handle, 0);
+        assert_eq!(status, refusal_status(RefusalReason::MalformedEncoding));
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            assert!(
+                registry
+                    .borrow()
+                    .compact_public_key_verification_inputs
+                    .is_empty()
+            );
+            assert!(
+                registry
+                    .borrow()
+                    .compact_public_key_verifications
+                    .is_empty()
+            );
+        });
+
+        status = u32::MAX;
+        let cancelled_input_handle = unsafe {
+            sealed_lattice_compact_public_key_begin_algebraic_verification_input(
+                canonical_bindings.as_ptr(),
+                canonical_bindings.len(),
+                malformed_proof.len(),
+                malformed_public_input.len(),
+                core::ptr::null(),
+                0,
+                &mut status,
+            )
+        };
+        assert_ne!(cancelled_input_handle, 0);
+        assert_eq!(status, 0);
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk(
+                    cancelled_input_handle,
+                    COMPACT_PUBLIC_KEY_VERIFICATION_PROOF_INPUT,
+                    1,
+                    malformed_proof.as_ptr(),
+                    malformed_proof.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            sealed_lattice_compact_public_key_cancel_algebraic_verification_input(
+                cancelled_input_handle,
+            ),
+            0,
+        );
+        assert_eq!(
+            sealed_lattice_compact_public_key_cancel_algebraic_verification_input(
+                cancelled_input_handle,
+            ),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+
+        let proof_byte_length_above_contract = selected_contract
+            .verifier_inputs()
+            .proof_wire_geometry
+            .maximum_canonical_byte_length()
+            .checked_add(1)
+            .expect("the selected proof limit increments");
+        status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_begin_algebraic_verification_input(
+                    canonical_bindings.as_ptr(),
+                    canonical_bindings.len(),
+                    proof_byte_length_above_contract,
+                    malformed_public_input.len(),
+                    core::ptr::null(),
+                    0,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(
+            status,
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        );
+
+        let mut poll_kind = u32::MAX;
+        let mut completed_work_unit_count = u32::MAX;
+        let mut checkpoint_safe_boundary_ordinal = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_algebraic_verification_poll(
+                    17,
+                    0,
+                    &mut poll_kind,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_safe_boundary_ordinal,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_algebraic_verification_poll(
+                    17,
+                    1,
+                    &mut poll_kind,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_safe_boundary_ordinal,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(poll_kind, u32::MAX);
+        assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(checkpoint_safe_boundary_ordinal, u32::MAX);
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint(
+                    17,
+                    checkpoint.as_mut_ptr(),
+                    checkpoint.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint(
+                    17,
+                    checkpoint.as_mut_ptr(),
+                    checkpoint.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            sealed_lattice_compact_public_key_cancel_algebraic_verification(17),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+    }
+
+    #[test]
+    fn compact_public_key_generation_boundary_refuses_malformed_and_stale_operations() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        assert_eq!(
+            sealed_lattice_compact_public_key_generation_external_memory_usage_word_count(),
+            COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT,
+        );
+
+        let mut stage = u32::MAX;
+        let mut first_ordinal = u32::MAX;
+        let mut completed_work_unit_count = u32::MAX;
+        let mut checkpoint_ready = u32::MAX;
+        let mut status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_poll(
+                    23,
+                    0,
+                    &mut stage,
+                    &mut first_ordinal,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_ready,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(status, refusal_status(RefusalReason::WrongTypeOrLength));
+        assert_eq!(stage, u32::MAX);
+        assert_eq!(first_ordinal, u32::MAX);
+        assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(checkpoint_ready, u32::MAX);
+
+        status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_poll(
+                    23,
+                    1,
+                    &mut stage,
+                    &mut first_ordinal,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_ready,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        assert_eq!(stage, u32::MAX);
+        assert_eq!(first_ordinal, u32::MAX);
+        assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(checkpoint_ready, u32::MAX);
+
+        let mut storage_owner = u32::MAX;
+        status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length(
+                    23,
+                    &mut storage_owner,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        assert_eq!(storage_owner, u32::MAX);
+
+        let mut byte = 0xa5;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_storage_request(
+                    23, 0, &mut byte, 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_storage_request(
+                    23,
+                    CompactPublicKeyGenerationStorageOwner::ResponseTrees.canonical_code(),
+                    &mut byte,
+                    1,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_supply_storage_response(
+                    23,
+                    CompactPublicKeyGenerationStorageOwner::Cfw.canonical_code(),
+                    &byte,
+                    1,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+
+        for byte_length in [
+            sealed_lattice_compact_public_key_generation_public_input_byte_length,
+            sealed_lattice_compact_public_key_generation_proof_byte_length,
+        ] {
+            status = u32::MAX;
+            assert_eq!(byte_length(23, &mut status), 0);
+            assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        }
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_public_input(23, 0, &mut byte, 1)
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_proof(
+                    23,
+                    usize::MAX,
+                    &mut byte,
+                    1,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+
+        let mut transport_bindings = [0xa5_u8; COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_transport_bindings(
+                    23,
+                    transport_bindings.as_mut_ptr(),
+                    transport_bindings.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_transport_bindings(
+                    23,
+                    transport_bindings.as_mut_ptr(),
+                    transport_bindings.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert!(transport_bindings.iter().all(|byte| *byte == 0xa5));
+
+        let mut usage = [u64::MAX; COMPACT_PUBLIC_KEY_GENERATION_EXTERNAL_MEMORY_USAGE_WORD_COUNT];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_external_memory_usage(
+                    23,
+                    usage.as_mut_ptr(),
+                    usage.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_compact_public_key_generation_copy_external_memory_usage(
+                    23,
+                    usage.as_mut_ptr(),
+                    usage.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert!(usage.iter().all(|word| *word == u64::MAX));
+        assert_eq!(
+            sealed_lattice_compact_public_key_generation_release_completed(23),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            sealed_lattice_compact_public_key_generation_cancel(23),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+    }
+
+    #[test]
+    fn accepted_compact_verifier_reports_geometry_and_refuses_stale_handles() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        assert_eq!(
+            sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length()
+                as usize,
+            ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+        );
+        assert_eq!(
+            sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count(),
+            ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_SAFE_BOUNDARY_COUNT,
+        );
+        assert_ne!(
+            ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+            COMPACT_PUBLIC_KEY_ALGEBRAIC_VERIFICATION_CHECKPOINT_BYTE_LENGTH,
+        );
+        let mut source_digests = [0xa5_u8; COMPACT_PUBLIC_KEY_TRANSPORT_BINDINGS_BYTE_LENGTH];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+                    19,
+                    source_digests.as_mut_ptr(),
+                    source_digests.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert!(source_digests.iter().all(|byte| *byte == 0xa5));
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+                    19,
+                    source_digests.as_mut_ptr(),
+                    source_digests.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert!(source_digests.iter().all(|byte| *byte == 0xa5));
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests(
+                    19,
+                    core::ptr::null_mut(),
+                    source_digests.len(),
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        let mut poll_kind = u32::MAX;
+        let mut completed_work_unit_count = u32::MAX;
+        let mut checkpoint_safe_boundary_ordinal = u32::MAX;
+        let mut verified_capability_handle = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_verification_poll(
+                    19,
+                    0,
+                    &mut poll_kind,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_safe_boundary_ordinal,
+                    &mut verified_capability_handle,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_verification_poll(
+                    19,
+                    1,
+                    &mut poll_kind,
+                    &mut completed_work_unit_count,
+                    &mut checkpoint_safe_boundary_ordinal,
+                    &mut verified_capability_handle,
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(poll_kind, u32::MAX);
+        assert_eq!(completed_work_unit_count, u32::MAX);
+        assert_eq!(checkpoint_safe_boundary_ordinal, u32::MAX);
+        assert_eq!(verified_capability_handle, u32::MAX);
+
+        let mut checkpoint =
+            [0_u8; ACCEPTED_COMPACT_PUBLIC_KEY_VERIFICATION_CHECKPOINT_BYTE_LENGTH];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint(
+                    19,
+                    checkpoint.as_mut_ptr(),
+                    checkpoint.len(),
+                )
+            },
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        assert_eq!(
+            unsafe {
+                sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint(
+                    19,
+                    checkpoint.as_mut_ptr(),
+                    checkpoint.len() - 1,
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength),
+        );
+        assert_eq!(
+            sealed_lattice_accepted_setup_compact_public_key_cancel_verification(19),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+    }
+
+    fn test_proof_stream_descriptor(proof_byte_length: usize) -> StreamDescriptor {
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
+        let chunk_count = proof_byte_length
+            .checked_add(chunk_byte_length - 1)
+            .expect("selected proof byte length fits usize")
+            / chunk_byte_length;
+        StreamDescriptor {
+            total_byte_length: u64::try_from(proof_byte_length)
+                .expect("selected proof byte length fits u64"),
+            ordered_chunk_digests: vec![Hash512::from_bytes([0xd1; 64]); chunk_count].into(),
+            full_object_digest: Hash512::from_bytes([0xd2; 64]),
+        }
+    }
+
+    fn exact_vss_prepared_verification_fixture() -> (PreparedCommonProofVerification, usize) {
+        let selected_suite = selected_suite_capability_for_tests();
+        let suite_identifier = Hash512::from_bytes(selected_suite.suite_identifier());
+        let manifest_hash = Hash512::from_bytes([0x18; 64]);
+        let ceremony_context_hash = Hash512::from_bytes([0x22; 64]);
+        let action_context_hash = Hash512::from_bytes([0x33; 64]);
+        let roster_hash = Hash512::from_bytes([0x44; 64]);
+        let public_setup_seed = Hash512::from_bytes([0x55; 64]);
+        let ordered_participant_identities = (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                ParticipantIdentity::from_bytes(test_root(0x70, usize::from(roster_position)))
+            })
+            .collect::<Vec<_>>();
+        let verified_public_randomness = VerifiedPublicRandomness::from_test_values(
+            suite_identifier,
+            manifest_hash,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+            ordered_participant_identities,
+            public_setup_seed,
+        );
+        let relation_input = selected_committed_material_relation_plan_input()
+            .expect("selected committed-material relation input");
+        let sharing_limb_count = relation_input.sharing_data_modulus_indices.len();
+        let reconstruction_threshold = usize::from(relation_input.threshold);
+        let participant_count = usize::from(relation_input.participant_count);
+        let coefficient_root_count = sharing_limb_count
+            .checked_mul(reconstruction_threshold)
+            .expect("selected coefficient root count fits usize");
+        let recipient_root_count = sharing_limb_count
+            .checked_mul(participant_count)
+            .expect("selected recipient root count fits usize");
+        let ordered_coefficient_roots = (0..coefficient_root_count)
+            .map(|root_ordinal| test_root(0xa1, root_ordinal))
+            .collect::<Vec<_>>();
+        let ordered_recipient_roots = (0..recipient_root_count)
+            .map(|root_ordinal| test_root(0xb2, root_ordinal))
+            .collect::<Vec<_>>();
+        let dealer_roster_position = 3_u16;
+        let dealer_identity = verified_public_randomness.ordered_participant_identities()
+            [usize::from(dealer_roster_position)]
+        .into_bytes();
+        let canonical_application_statement_bytes = canonical_selected_vss_share_linkage_statement(
+            FOUNDATION_PROFILE.protocol_version,
+            suite_identifier.into_bytes(),
+            ceremony_context_hash.into_bytes(),
+            action_context_hash.into_bytes(),
+            roster_hash.into_bytes(),
+            public_setup_seed.into_bytes(),
+            dealer_identity,
+            dealer_roster_position,
+            &ordered_coefficient_roots,
+            &ordered_recipient_roots,
+        )
+        .expect("selected VSS statement is canonical");
+        let statement_schema_identifier =
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
+            .expect("selected VSS relation context");
+        let compiled_relation_plan =
+            compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
+                .expect("selected VSS relation plan");
+        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
+            &compiled_relation_plan,
+            &relation_context,
+            None,
+            None,
+        )
+        .expect("selected VSS relation capability");
+        let limits =
+            selected_proof_runtime_limits(&canonical_application_statement_bytes, &relation_plan)
+                .expect("selected VSS proof limits");
+        let proof_byte_length = limits
+            .maximum_proof_byte_length()
+            .checked_sub(1)
+            .expect("the test proof is smaller than the absolute proof bound");
+        let statement_source =
+            VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
+                &verified_public_randomness,
+                canonical_application_statement_bytes,
+                test_proof_stream_descriptor(proof_byte_length),
+                relation_plan,
+                limits,
+            )
+            .expect("exact selected VSS statement source");
+        let statement_byte_allocation = statement_source
+            .canonical_application_statement_bytes()
+            .as_ptr() as usize;
+        let statement_trees =
+            VerifiedStatementOwnedTree::from_verified_committed_material_statement_source(
+                &statement_source,
+                &verified_public_randomness,
+            )
+            .expect("selected VSS statement tree catalog");
+        let prepared = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let suite_handle = registry
+                .upstream_inputs
+                .install_suite(selected_suite, vec![0x51])
+                .expect("selected suite authority is retained");
+            registry
+                .upstream_inputs
+                .prepare_statement_tree_family_verification_without_evaluator(
+                    &suite_handle,
+                    statement_source,
+                    statement_trees,
+                )
+                .expect("exact VSS verifier is prepared")
+        });
+        (prepared, statement_byte_allocation)
+    }
+
+    #[test]
+    fn selected_suite_bytes_have_exact_copy_bounds_and_end_with_the_handle_lifecycle() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let exact_suite_bytes = vec![0x31, 0x42, 0x53, 0x64, 0x75];
+        let selected_suite_handle = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .upstream_inputs
+                .install_suite(
+                    selected_suite_capability_for_tests(),
+                    exact_suite_bytes.clone(),
+                )
+                .expect("selected suite and its exact bytes are retained")
+                .get()
+        });
+
+        let mut status = u32::MAX;
+        let byte_length = unsafe {
+            sealed_lattice_common_proof_selected_suite_record_byte_length(
+                selected_suite_handle,
+                &mut status,
+            )
+        };
+        assert_eq!(status, 0);
+        assert_eq!(byte_length, exact_suite_bytes.len());
+
+        let mut short_output = vec![0_u8; byte_length - 1];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_copy_selected_suite_record(
+                    selected_suite_handle,
+                    short_output.as_mut_ptr(),
+                    short_output.len(),
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength)
+        );
+
+        let mut copied_suite_bytes = vec![0_u8; byte_length];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_copy_selected_suite_record(
+                    selected_suite_handle,
+                    copied_suite_bytes.as_mut_ptr(),
+                    copied_suite_bytes.len(),
+                )
+            },
+            0
+        );
+        assert_eq!(copied_suite_bytes, exact_suite_bytes);
+
+        assert_eq!(
+            sealed_lattice_common_proof_release_suite(selected_suite_handle),
+            0
+        );
+        status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_selected_suite_record_byte_length(
+                    selected_suite_handle,
+                    &mut status,
+                )
+            },
+            0
+        );
+        assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        assert_eq!(
+            sealed_lattice_common_proof_release_suite(selected_suite_handle),
+            refusal_status(RefusalReason::ConsumedState)
+        );
     }
 
     #[test]
@@ -1920,6 +5415,8 @@ mod tests {
                     adapter_handle,
                     core::ptr::null(),
                     0,
+                    core::ptr::null(),
+                    0,
                     &mut status,
                 )
             },
@@ -1942,6 +5439,187 @@ mod tests {
         assert_eq!(
             sealed_lattice_common_proof_discard_generation_family_adapter(adapter_handle),
             0,
+        );
+    }
+
+    #[test]
+    fn verifier_adapter_and_prepared_discard_restore_the_exact_statement_source() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let (prepared, statement_byte_allocation) = exact_vss_prepared_verification_fixture();
+        let adapter_handle = retain_common_proof_verification_family_adapter(
+            CommonProofVerificationFamilyAdapter::new(prepared),
+        )
+        .expect("the exact verifier adapter is retained");
+
+        let rejected_restore: Result<(), CommonProofRuntimeError> =
+            preflight_and_restore_common_proof_verification_family_adapter_statement_source(
+                adapter_handle,
+                |_| Err(CommonProofRuntimeError::WrongVerificationBinding),
+                |_, ()| (),
+            );
+        assert_eq!(
+            rejected_restore,
+            Err(CommonProofRuntimeError::WrongVerificationBinding),
+            "a rejected destination cannot consume the adapter source",
+        );
+        let restored_adapter_source = RefCell::new(None);
+        preflight_and_restore_common_proof_verification_family_adapter_statement_source(
+            adapter_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    statement_byte_allocation,
+                    "adapter preflight borrows the original statement allocation",
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_adapter_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("adapter discard restores its exact statement source");
+        let source = restored_adapter_source
+            .into_inner()
+            .expect("adapter restoration returns one source");
+        assert_eq!(
+            source.canonical_application_statement_bytes().as_ptr() as usize,
+            statement_byte_allocation,
+            "adapter restoration moves rather than reconstructs the source",
+        );
+
+        let (prepared, prepared_statement_byte_allocation) =
+            exact_vss_prepared_verification_fixture();
+        let adapter_handle = retain_common_proof_verification_family_adapter(
+            CommonProofVerificationFamilyAdapter::new(prepared),
+        )
+        .expect("the second exact verifier adapter is retained");
+        let mut status = u32::MAX;
+        let prepared_handle = unsafe {
+            sealed_lattice_common_proof_prepare_verification_family_adapter(
+                adapter_handle,
+                &mut status,
+            )
+        };
+        assert_ne!(prepared_handle, 0);
+        assert_eq!(status, 0);
+        let restored_prepared_source = RefCell::new(None);
+        preflight_and_restore_prepared_common_proof_verification_statement_source(
+            prepared_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    prepared_statement_byte_allocation,
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_prepared_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("prepared-verifier discard restores its exact statement source");
+        assert_eq!(
+            restored_prepared_source
+                .into_inner()
+                .expect("prepared restoration returns one source")
+                .canonical_application_statement_bytes()
+                .as_ptr() as usize,
+            prepared_statement_byte_allocation,
+            "prepared restoration moves rather than reconstructs the source",
+        );
+    }
+
+    #[test]
+    fn verifier_cancellation_and_failure_restore_the_exact_statement_source() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let begin_operation = |prepared: PreparedCommonProofVerification| {
+            let adapter_handle = retain_common_proof_verification_family_adapter(
+                CommonProofVerificationFamilyAdapter::new(prepared),
+            )
+            .expect("the exact verifier adapter is retained");
+            let mut status = u32::MAX;
+            let prepared_handle = unsafe {
+                sealed_lattice_common_proof_prepare_verification_family_adapter(
+                    adapter_handle,
+                    &mut status,
+                )
+            };
+            assert_ne!(prepared_handle, 0);
+            assert_eq!(status, 0);
+            let operation_handle = unsafe {
+                sealed_lattice_common_proof_begin_verification(prepared_handle, &mut status)
+            };
+            assert_ne!(operation_handle, 0);
+            assert_eq!(status, 0);
+            operation_handle
+        };
+
+        let (prepared, cancellation_statement_byte_allocation) =
+            exact_vss_prepared_verification_fixture();
+        let operation_handle = begin_operation(prepared);
+        let restored_cancelled_source = RefCell::new(None);
+        preflight_and_restore_common_proof_verification_operation_statement_source(
+            operation_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    cancellation_statement_byte_allocation,
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_cancelled_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("worker cancellation restores its exact statement source");
+        assert_eq!(
+            restored_cancelled_source
+                .into_inner()
+                .expect("cancelled operation returns one source")
+                .canonical_application_statement_bytes()
+                .as_ptr() as usize,
+            cancellation_statement_byte_allocation,
+        );
+
+        let (prepared, failed_statement_byte_allocation) =
+            exact_vss_prepared_verification_fixture();
+        let failed_operation_handle = begin_operation(prepared);
+        let mut finish_status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_verification_finish(
+                    failed_operation_handle,
+                    &mut finish_status,
+                )
+            },
+            0,
+        );
+        assert_eq!(
+            finish_status,
+            refusal_status(RefusalReason::ConsumedState),
+            "finishing before canonical input completion is a verifier-phase refusal",
+        );
+        let restored_failed_source = RefCell::new(None);
+        preflight_and_restore_common_proof_verification_operation_statement_source(
+            failed_operation_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    failed_statement_byte_allocation,
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_failed_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("verifier failure retains and restores its exact statement source");
+        assert_eq!(
+            restored_failed_source
+                .into_inner()
+                .expect("failed operation returns one source")
+                .canonical_application_statement_bytes()
+                .as_ptr() as usize,
+            failed_statement_byte_allocation,
         );
     }
 }

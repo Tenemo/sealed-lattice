@@ -11,6 +11,12 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.2.0(jiti@2.6.1))
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
+      '@noble/post-quantum':
+        specifier: 0.6.1
+        version: 0.6.1
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3

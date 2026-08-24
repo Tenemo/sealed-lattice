@@ -1,7 +1,10 @@
 import { fileURLToPath } from 'node:url';
 
 import type { ActiveLocalRunLog } from './local-run-log.js';
-import { runCommandAndCaptureOutput } from './run-command.js';
+import {
+    runCommandAndCaptureOutput,
+    type CommandInvocation,
+} from './run-command.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -24,33 +27,59 @@ const parseLibtestListOutput = (output: string): readonly string[] =>
         ),
     ].sort((left, right) => left.localeCompare(right));
 
-const listFocusedTests = async (input: {
+const classifyRustTestInventory = (input: {
+    readonly allTests: readonly string[];
+    readonly ignoredTests: readonly string[];
+}): readonly RustTestInventoryEntry[] => {
+    const ignoredTestSet = new Set(input.ignoredTests);
+
+    return input.allTests.map((testName) => ({
+        ignored: ignoredTestSet.has(testName),
+        testName,
+    }));
+};
+
+export const buildRustTestInventoryArguments = (input: {
+    readonly cargoFeatures?: readonly string[];
+    readonly ignoredOnly: boolean;
+    readonly useReleaseProfile?: boolean;
+}): readonly string[] => [
+    'test',
+    '--locked',
+    '-p',
+    'sealed-lattice-kernel',
+    ...(input.useReleaseProfile === true ? ['--release'] : []),
+    ...(input.cargoFeatures === undefined || input.cargoFeatures.length === 0
+        ? []
+        : ['--features', input.cargoFeatures.join(',')]),
+    '--',
+    ...(input.ignoredOnly ? ['--ignored'] : ['--include-ignored']),
+    '--list',
+    '--format',
+    'terse',
+];
+
+const listRustTests = async (input: {
+    readonly cargoFeatures?: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
     readonly ignoredOnly: boolean;
+    readonly inventoryCommandTransform?: (
+        command: CommandInvocation,
+    ) => CommandInvocation;
     readonly runLog?: ActiveLocalRunLog;
-    readonly testFilter: string;
+    readonly useReleaseProfile?: boolean;
 }): Promise<readonly string[]> => {
-    const arguments_ = [
-        'test',
-        '--locked',
-        '-p',
-        'sealed-lattice-kernel',
-        input.testFilter,
-        '--',
-        ...(input.ignoredOnly ? ['--ignored'] : ['--include-ignored']),
-        '--list',
-        '--format',
-        'terse',
-    ];
+    const arguments_ = buildRustTestInventoryArguments(input);
+    const command: CommandInvocation = {
+        args: arguments_,
+        command: 'cargo',
+        description: 'list complete Rust test inventory',
+        env: input.environment,
+        logFileSlug: 'cargo-test-inventory',
+        workingDirectoryPath: repositoryRoot,
+    };
     const result = await runCommandAndCaptureOutput(
-        {
-            args: arguments_,
-            command: 'cargo',
-            description: `list focused Rust tests (${input.testFilter})`,
-            env: input.environment,
-            logFileSlug: 'cargo-test-inventory',
-            workingDirectoryPath: repositoryRoot,
-        },
+        input.inventoryCommandTransform?.(command) ?? command,
         { runLog: input.runLog },
     );
     if (result.exitCode !== 0 || result.terminationSignal !== null) {
@@ -62,21 +91,23 @@ const listFocusedTests = async (input: {
     return parseLibtestListOutput(result.stdout);
 };
 
-export const collectFocusedRustKernelTestInventory = async (input: {
+export const collectRustKernelTestInventory = async (input: {
+    readonly cargoFeatures?: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
+    readonly inventoryCommandTransform?: (
+        command: CommandInvocation,
+    ) => CommandInvocation;
     readonly runLog?: ActiveLocalRunLog;
-    readonly testFilter: string;
+    readonly useReleaseProfile?: boolean;
 }): Promise<readonly RustTestInventoryEntry[]> => {
-    const allTests = await listFocusedTests({
+    const allTests = await listRustTests({
         ...input,
         ignoredOnly: false,
     });
-    const ignoredTests = new Set(
-        await listFocusedTests({ ...input, ignoredOnly: true }),
-    );
+    const ignoredTests = await listRustTests({
+        ...input,
+        ignoredOnly: true,
+    });
 
-    return allTests.map((testName) => ({
-        ignored: ignoredTests.has(testName),
-        testName,
-    }));
+    return classifyRustTestInventory({ allTests, ignoredTests });
 };

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
     closeSync,
     existsSync,
@@ -69,7 +70,6 @@ type LocalRunLogMetadata = {
     };
     readonly lanes: readonly string[];
     readonly nodeVersion: string;
-    readonly objectVersion: 'sealed-lattice-local-run-log-metadata-v2';
     readonly operatingSystem: {
         readonly platform: NodeJS.Platform;
         readonly release: string;
@@ -92,9 +92,10 @@ type LocalRunLogSummary = {
     readonly exitCode: number;
     readonly failedCommandId?: string;
     readonly finishedAtIso: string;
-    readonly objectVersion: 'sealed-lattice-local-run-log-summary-v2';
     readonly lastCommandId?: string;
     readonly processStatus: ReturnType<typeof normalizeProcessStatus>;
+    readonly repositoryCommitHash: string;
+    readonly repositoryTreeDirty: boolean;
     readonly resourceExtrema: {
         readonly minimumHostFreeMemoryBytes: number;
         readonly peakHeapUsedBytes: number;
@@ -110,6 +111,11 @@ type LocalRunLogSummary = {
     readonly startedAtIso: string;
 };
 
+type RepositorySnapshot = {
+    readonly repositoryCommitHash: string;
+    readonly repositoryTreeDirty: boolean;
+};
+
 type ResourceSample = {
     readonly activeCommandIds: readonly string[];
     readonly elapsedMilliseconds: number;
@@ -118,7 +124,6 @@ type ResourceSample = {
         readonly totalBytes: number;
     };
     readonly millisecondsSinceLastOutput: number;
-    readonly objectVersion: 'sealed-lattice-local-run-resource-sample-v1';
     readonly occurredAtIso: string;
     readonly processMemory: {
         readonly arrayBuffersBytes: number;
@@ -200,6 +205,55 @@ const repositoryRootDirectoryPath = path.resolve(
     '..',
     '..',
 );
+
+const readRepositorySnapshot = (): RepositorySnapshot => {
+    const statusRecords = execFileSync(
+        'git',
+        [
+            'status',
+            '--porcelain=v2',
+            '--branch',
+            '--untracked-files=normal',
+            '--ignore-submodules=none',
+        ],
+        {
+            cwd: repositoryRootDirectoryPath,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        },
+    )
+        .split(/\r?\n/u)
+        .filter((record) => record.length > 0);
+    const branchObjectIdentifierPrefix = '# branch.oid ';
+    const branchObjectIdentifierRecords = statusRecords.filter((record) =>
+        record.startsWith(branchObjectIdentifierPrefix),
+    );
+    const [branchObjectIdentifierRecord] = branchObjectIdentifierRecords;
+    if (
+        branchObjectIdentifierRecord === undefined ||
+        branchObjectIdentifierRecords.length !== 1
+    ) {
+        throw new Error(
+            'Git status did not report exactly one branch object identifier.',
+        );
+    }
+    const repositoryCommitHash = branchObjectIdentifierRecord.slice(
+        branchObjectIdentifierPrefix.length,
+    );
+    if (!/^[0-9a-f]{40}$/u.test(repositoryCommitHash)) {
+        throw new Error(
+            'Git status did not report an exact 40-hex commit hash.',
+        );
+    }
+
+    return {
+        repositoryCommitHash,
+        repositoryTreeDirty: statusRecords.some(
+            (record) => !record.startsWith('# '),
+        ),
+    };
+};
 
 const defaultLogRootDirectoryPath = (): string =>
     path.join(repositoryRootDirectoryPath, 'logs');
@@ -296,6 +350,7 @@ class LocalRunLog implements ActiveLocalRunLog {
     #resourceSampleInterval: NodeJS.Timeout;
     #resourceSampleSequenceNumber = 0;
     #resourcesFileDescriptor: number;
+    #repositorySnapshot: RepositorySnapshot;
     #scriptName: string;
     #startedAtIso: string;
     #startedAtMilliseconds: number;
@@ -307,6 +362,7 @@ class LocalRunLog implements ActiveLocalRunLog {
         readonly processEventSource?: ProcessEventSource;
         readonly resourceSampleIntervalMilliseconds: number;
         readonly resourcesPath: string;
+        readonly repositorySnapshot: RepositorySnapshot;
         readonly runDirectoryPath: string;
         readonly scriptName: string;
         readonly startedAtIso: string;
@@ -322,6 +378,7 @@ class LocalRunLog implements ActiveLocalRunLog {
             input.processEventSource ??
             (process as unknown as ProcessEventSource);
         this.#resourcesFileDescriptor = openSync(input.resourcesPath, 'ax');
+        this.#repositorySnapshot = input.repositorySnapshot;
         this.#scriptName = input.scriptName;
         this.#startedAtIso = input.startedAtIso;
         this.#startedAtMilliseconds = input.startedAtMilliseconds;
@@ -415,8 +472,9 @@ class LocalRunLog implements ActiveLocalRunLog {
             ...(this.#lastCommandId === undefined
                 ? {}
                 : { lastCommandId: this.#lastCommandId }),
-            objectVersion: 'sealed-lattice-local-run-log-summary-v2',
             processStatus,
+            repositoryCommitHash: this.#repositorySnapshot.repositoryCommitHash,
+            repositoryTreeDirty: this.#repositorySnapshot.repositoryTreeDirty,
             resourceExtrema: {
                 minimumHostFreeMemoryBytes: this.#minimumHostFreeMemoryBytes,
                 peakHeapUsedBytes: this.#peakHeapUsedBytes,
@@ -554,7 +612,6 @@ class LocalRunLog implements ActiveLocalRunLog {
                 performance.now() - this.#startedAtMilliseconds,
             ),
             eventType: event.eventType,
-            objectVersion: 'sealed-lattice-local-run-event-v1',
             occurredAtIso: new Date().toISOString(),
             sequenceNumber: ++this.#eventSequenceNumber,
         };
@@ -586,6 +643,8 @@ class LocalRunLog implements ActiveLocalRunLog {
         const lines = [
             `Result: ${summary.resultClassification}`,
             `Script: ${summary.scriptName}`,
+            `Repository commit: ${summary.repositoryCommitHash}`,
+            `Repository tree dirty: ${summary.repositoryTreeDirty}`,
             `Started: ${summary.startedAtIso}`,
             `Finished: ${summary.finishedAtIso}`,
             `Runtime: ${summary.durationMilliseconds} ms`,
@@ -786,7 +845,6 @@ class LocalRunLog implements ActiveLocalRunLog {
             millisecondsSinceLastOutput: Math.round(
                 nowMilliseconds - this.#lastOutputAtMilliseconds,
             ),
-            objectVersion: 'sealed-lattice-local-run-resource-sample-v1',
             occurredAtIso: new Date().toISOString(),
             processMemory: {
                 arrayBuffersBytes: processMemory.arrayBuffers,
@@ -834,6 +892,7 @@ export const createLocalRunLog = async (
     const startedAtMilliseconds = performance.now();
     const startedAt = input.now ?? new Date();
     const startedAtIso = startedAt.toISOString();
+    const repositorySnapshot = readRepositorySnapshot();
     const rootDirectoryPath =
         input.rootDirectoryPath ?? defaultLogRootDirectoryPath();
     const runDirectoryPath = await allocateRunDirectory(
@@ -867,7 +926,6 @@ export const createLocalRunLog = async (
         },
         lanes: input.lanes,
         nodeVersion: process.version,
-        objectVersion: 'sealed-lattice-local-run-log-metadata-v2',
         operatingSystem: {
             platform: os.platform(),
             release: os.release(),
@@ -898,6 +956,7 @@ export const createLocalRunLog = async (
             input.resourceSampleIntervalMilliseconds ??
             defaultResourceSampleIntervalMilliseconds,
         resourcesPath: path.join(runDirectoryPath, 'resources.jsonl'),
+        repositorySnapshot,
         runDirectoryPath,
         scriptName: input.scriptName,
         startedAtIso,

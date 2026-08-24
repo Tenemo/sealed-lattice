@@ -58,6 +58,7 @@ import {
     createStateVerifierTestVector,
     type StateVerifierTestVector,
 } from '#packages/wasm/tests/state-verifier-test-vectors';
+import { canonicalStreamChunkBuffers as chunkBuffers } from '#tests/support/canonical-stream-chunk-buffers';
 
 const serviceLimits = {
     maximumExactOutputByteLength:
@@ -70,7 +71,6 @@ const serviceLimits = {
 const objectSignatureContext = new TextEncoder().encode(
     'sealed-lattice/object-signature/v1',
 );
-const stateOutputIntentObjectType = 0x0052;
 const stateWitnessVoteObjectType = 0x0053;
 
 const byteArraysEqual = (left: Uint8Array, right: Uint8Array): boolean =>
@@ -86,23 +86,6 @@ const requireValid = <Value>(result: {
         throw new Error(result.refusalReason ?? 'verification failed');
     }
     return result.value as Value;
-};
-
-const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
-    const chunks: ArrayBuffer[] = [];
-    for (
-        let offset = 0;
-        offset < bytes.byteLength;
-        offset += foundationProfile.streamChunkByteLength
-    ) {
-        chunks.push(
-            bytes.slice(
-                offset,
-                offset + foundationProfile.streamChunkByteLength,
-            ).buffer,
-        );
-    }
-    return chunks;
 };
 
 const descriptorFor = (
@@ -185,28 +168,29 @@ const createSignedCarrier = (
 const createConflictingOutputIntent = (
     vector: StateVerifierTestVector,
 ): Readonly<{ canonicalCarrier: Uint8Array; exactOutputBytes: Uint8Array }> => {
-    const exactOutputBytes = vector.exactOutputBytes.slice();
-    exactOutputBytes[exactOutputBytes.byteLength - 1] ^= 1;
-    const exactOutputHash = foundationHash512(
-        'sealed-lattice/state/exact-output/v1',
-        unsigned16Item(stateCapabilityKinds.targetRelease),
-        unsigned64Item(BigInt(exactOutputBytes.byteLength)),
-        variableBytesItem(exactOutputBytes),
-    );
+    const conflictingVector = createStateVerifierTestVector({
+        actionContextHash: vector.actionContextHash,
+        ceremonyContextHash: vector.ceremonyContextHash,
+        suiteIdentifier: vector.suiteIdentifier,
+        targetReleaseOutputSeedByte: 0xd3,
+    });
+    if (
+        !byteArraysEqual(
+            conflictingVector.reservation.objectHash,
+            vector.reservation.objectHash,
+        ) ||
+        byteArraysEqual(
+            conflictingVector.exactOutputBytes,
+            vector.exactOutputBytes,
+        )
+    ) {
+        throw new Error(
+            'The conflicting output fixture did not preserve its reservation while changing its exact output.',
+        );
+    }
     return {
-        canonicalCarrier: createSignedCarrier(vector, {
-            objectType: stateOutputIntentObjectType,
-            payloadBytes: canonicalTuple(
-                0x1611,
-                hashItem(vector.reservation.objectHash),
-                hashItem(exactOutputHash),
-            ),
-            producerParticipantIdentity: vector.subjectParticipantIdentity,
-            producerRosterPosition: 0,
-            producerSequence: 0n,
-            signaturePurpose: 'state-output-intent',
-        }).canonicalCarrier,
-        exactOutputBytes,
+        canonicalCarrier: conflictingVector.output.canonicalIntentCarrier,
+        exactOutputBytes: conflictingVector.exactOutputBytes,
     };
 };
 
@@ -407,7 +391,7 @@ describe('durable state witness service', () => {
     it('persists one fixed common-proof authorization frame and rereads the exact authenticated bytes', async () => {
         const { adapter, service } = await openService();
         const authorizationFrame = Uint8Array.from(
-            { length: 746 },
+            { length: 742 },
             (_, byteIndex) => (byteIndex * 149 + 31) & 0xff,
         );
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x6d);
@@ -466,7 +450,7 @@ describe('durable state witness service', () => {
             throw error;
         }
 
-        const authorizationFrame = new Uint8Array(746).fill(0x83);
+        const authorizationFrame = new Uint8Array(742).fill(0x83);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x47);
         await expect(
             persistCommonProofApplicationAuthorization(service, {
@@ -532,7 +516,7 @@ describe('durable state witness service', () => {
 
     it('reports a published-or-indeterminate disposition before committed readback failure', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0x8e);
+        const authorizationFrame = new Uint8Array(742).fill(0x8e);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x4c);
         const publicationDispositions: string[] = [];
         adapter.afterAtomicMutation = (mutation) => {
@@ -561,7 +545,7 @@ describe('durable state witness service', () => {
 
     it('reports definite nonpublication after adapter rejection and permits an exact retry', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0x72);
+        const authorizationFrame = new Uint8Array(742).fill(0x72);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x39);
         const firstPublicationDispositions: string[] = [];
         adapter.failAtomicMutationAfter(1);
@@ -596,7 +580,7 @@ describe('durable state witness service', () => {
 
     it('reports definite nonpublication after staging failure and permits an exact retry', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0x91);
+        const authorizationFrame = new Uint8Array(742).fill(0x91);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x58);
         const firstPublicationDispositions: string[] = [];
         adapter.failNextWriteCount = 1;
@@ -631,7 +615,7 @@ describe('durable state witness service', () => {
 
     it('reports definite nonpublication after transient pretransaction read failure', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = new Uint8Array(746).fill(0xa4);
+        const authorizationFrame = new Uint8Array(742).fill(0xa4);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x27);
         const firstPublicationDispositions: string[] = [];
         adapter.failNextReadCount = 1;

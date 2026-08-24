@@ -85,10 +85,8 @@ impl ProofApplicationBinding {
         proof_header_hash: Hash512,
         proof_stream_descriptor: StreamDescriptor,
     ) -> SchemaResult<Self> {
-        // Exercise both nested values' canonical validation before retaining
-        // the binding. The stored tuple never trusts a caller-side projection.
-        let _ = application_slot.encode()?;
-        let _ = proof_stream_descriptor.encode()?;
+        let _ = application_slot.canonical_tuple()?;
+        let _ = proof_stream_descriptor.canonical_tuple()?;
         Ok(Self {
             application_slot,
             proof_header_hash,
@@ -116,8 +114,7 @@ impl ProofApplicationBinding {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
         require_header(&tuple, PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, 3)?;
         let application_slot_tuple = read_nested_tuple(&tuple.items[0], limits)?;
-        let application_slot =
-            ProofApplicationSlot::decode(&application_slot_tuple.encode()?, limits)?;
+        let application_slot = ProofApplicationSlot::decode_tuple(&application_slot_tuple)?;
         let proof_header_hash = read_hash(&tuple.items[1])?;
         let stream_descriptor_tuple = read_nested_tuple(&tuple.items[2], limits)?;
         let proof_stream_descriptor = StreamDescriptor::from_tuple(&stream_descriptor_tuple)?;
@@ -125,10 +122,7 @@ impl ProofApplicationBinding {
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        let application_slot_tuple = CanonicalTuple::decode(
-            &self.application_slot.encode()?,
-            &CanonicalDecodeLimits::default(),
-        )?;
+        let application_slot_tuple = self.application_slot.canonical_tuple()?;
         Ok(CanonicalTuple::new(
             PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
@@ -145,6 +139,68 @@ impl ProofApplicationBinding {
 pub struct ProofFamilyApplicationCeiling {
     pub application_statement_schema_identifier: u16,
     pub application_slot_ceiling: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProofFamilyApplicationInventoryEntry {
+    application_statement_schema_identifier: u16,
+    physical_proof_application_count: u32,
+    logical_relation_instance_count: u32,
+}
+
+impl ProofFamilyApplicationInventoryEntry {
+    pub const fn application_statement_schema_identifier(&self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub const fn physical_proof_application_count(&self) -> u32 {
+        self.physical_proof_application_count
+    }
+
+    pub const fn logical_relation_instance_count(&self) -> u32 {
+        self.logical_relation_instance_count
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProofFamilyApplicationInventory {
+    ordered_family_entries: [ProofFamilyApplicationInventoryEntry; 12],
+}
+
+impl ProofFamilyApplicationInventory {
+    pub const fn ordered_family_entries(&self) -> &[ProofFamilyApplicationInventoryEntry; 12] {
+        &self.ordered_family_entries
+    }
+
+    pub fn family_entry(
+        &self,
+        application_statement_schema_identifier: u16,
+    ) -> Option<&ProofFamilyApplicationInventoryEntry> {
+        self.ordered_family_entries.iter().find(|family| {
+            family.application_statement_schema_identifier
+                == application_statement_schema_identifier
+        })
+    }
+
+    pub fn total_physical_proof_application_count(&self) -> SchemaResult<u32> {
+        self.ordered_family_entries
+            .iter()
+            .try_fold(0_u32, |total, family| {
+                total
+                    .checked_add(family.physical_proof_application_count)
+                    .ok_or_else(proof_family_count_overflow)
+            })
+    }
+
+    pub fn total_logical_relation_instance_count(&self) -> SchemaResult<u32> {
+        self.ordered_family_entries
+            .iter()
+            .try_fold(0_u32, |total, family| {
+                total
+                    .checked_add(family.logical_relation_instance_count)
+                    .ok_or_else(proof_family_count_overflow)
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,12 +244,12 @@ impl ProofApplicationSlotCeilings {
     pub fn derive(
         roster_size: u16,
         selected_relinearization_position_count: u32,
-        selected_galois_position_count: u32,
+        selected_galois_batch_count: u32,
         maximum_candidate_packages_per_action: u32,
     ) -> SchemaResult<Self> {
         if roster_size == 0
             || selected_relinearization_position_count == 0
-            || selected_galois_position_count == 0
+            || selected_galois_batch_count == 0
             || maximum_candidate_packages_per_action == 0
         {
             return Err(schema_error(
@@ -205,13 +261,10 @@ impl ProofApplicationSlotCeilings {
         let roster_size = u32::from(roster_size);
         let relinearization_trustee_slot_count = roster_size
             .checked_mul(selected_relinearization_position_count)
-            .ok_or_else(slot_count_overflow)?;
+            .ok_or_else(proof_family_count_overflow)?;
         let galois_trustee_slot_count = roster_size
-            .checked_mul(selected_galois_position_count)
-            .ok_or_else(slot_count_overflow)?;
-        let evaluator_aggregate_slot_count = selected_relinearization_position_count
-            .checked_add(selected_galois_position_count)
-            .ok_or_else(slot_count_overflow)?;
+            .checked_mul(selected_galois_batch_count)
+            .ok_or_else(proof_family_count_overflow)?;
         let ordered_family_ceilings = [
             family_ceiling(
                 Self::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
@@ -246,10 +299,7 @@ impl ProofApplicationSlotCeilings {
                 Self::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
                 galois_trustee_slot_count,
             ),
-            family_ceiling(
-                Self::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                evaluator_aggregate_slot_count,
-            ),
+            family_ceiling(Self::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER, 1),
             family_ceiling(
                 Self::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
                 maximum_candidate_packages_per_action,
@@ -265,7 +315,7 @@ impl ProofApplicationSlotCeilings {
                 .try_fold(0_u32, |total, family| {
                     total
                         .checked_add(family.application_slot_ceiling)
-                        .ok_or_else(slot_count_overflow)
+                        .ok_or_else(proof_family_count_overflow)
                 })?;
         Ok(Self {
             ordered_family_ceilings,
@@ -279,6 +329,57 @@ impl ProofApplicationSlotCeilings {
 
     pub const fn total_application_slot_ceiling(&self) -> u32 {
         self.total_application_slot_ceiling
+    }
+
+    /// Derives the lifecycle-ordered physical and logical proof-family inventory.
+    pub fn derive_proof_family_application_inventory(
+        &self,
+        galois_key_share_relation_instance_count_per_batch: u32,
+        evaluator_key_aggregate_relation_instance_count_per_proof: u32,
+    ) -> SchemaResult<ProofFamilyApplicationInventory> {
+        if galois_key_share_relation_instance_count_per_batch == 0
+            || evaluator_key_aggregate_relation_instance_count_per_proof == 0
+        {
+            return Err(schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "proof-family logical expansion counts must be positive",
+            ));
+        }
+
+        let empty_family_entry = ProofFamilyApplicationInventoryEntry {
+            application_statement_schema_identifier: 0,
+            physical_proof_application_count: 0,
+            logical_relation_instance_count: 0,
+        };
+        let mut ordered_family_entries = [empty_family_entry; 12];
+        for (family_index, family) in self.ordered_family_ceilings.iter().enumerate() {
+            let logical_relation_instance_count_per_proof =
+                match family.application_statement_schema_identifier {
+                    Self::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                        galois_key_share_relation_instance_count_per_batch
+                    }
+                    Self::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                        evaluator_key_aggregate_relation_instance_count_per_proof
+                    }
+                    _ => 1,
+                };
+            let logical_relation_instance_count = family
+                .application_slot_ceiling
+                .checked_mul(logical_relation_instance_count_per_proof)
+                .ok_or_else(proof_family_count_overflow)?;
+            ordered_family_entries[family_index] = ProofFamilyApplicationInventoryEntry {
+                application_statement_schema_identifier: family
+                    .application_statement_schema_identifier,
+                physical_proof_application_count: family.application_slot_ceiling,
+                logical_relation_instance_count,
+            };
+        }
+        let inventory = ProofFamilyApplicationInventory {
+            ordered_family_entries,
+        };
+        let _ = inventory.total_physical_proof_application_count()?;
+        let _ = inventory.total_logical_relation_instance_count()?;
+        Ok(inventory)
     }
 
     pub fn family_ceiling(&self, application_statement_schema_identifier: u16) -> Option<u32> {
@@ -349,10 +450,10 @@ const fn schema_error(
     }
 }
 
-const fn slot_count_overflow() -> FoundationSchemaError {
+const fn proof_family_count_overflow() -> FoundationSchemaError {
     schema_error(
         RefusalReason::OutsideSupportedProfile,
-        "proof application slot count overflows the supported counter",
+        "proof-family count overflows the supported counter",
     )
 }
 
@@ -447,21 +548,193 @@ mod tests {
             (0x1215, 3),
             (0x1216, 15),
             (0x1217, 20),
-            (0x1218, 7),
+            (0x1218, 1),
             (0x1302, 17),
             (0x1621, 5),
         ];
         for (family, ceiling) in expected {
             assert_eq!(ceilings.family_ceiling(family), Some(ceiling));
         }
-        assert_eq!(ceilings.total_application_slot_ceiling(), 103);
+        assert_eq!(ceilings.total_application_slot_ceiling(), 97);
+        let inventory = ceilings
+            .derive_proof_family_application_inventory(6, 7)
+            .expect("proof-family application inventory derives");
+        assert_eq!(
+            inventory
+                .total_physical_proof_application_count()
+                .expect("physical proof-application total derives"),
+            97
+        );
+        assert_eq!(
+            inventory
+                .total_logical_relation_instance_count()
+                .expect("logical relation-instance total derives"),
+            203
+        );
         assert_eq!(ceilings.family_ceiling(0xffff), None);
     }
 
     #[test]
-    fn family_slot_ceilings_reject_zero_and_overflow() {
-        assert!(ProofApplicationSlotCeilings::derive(0, 1, 1, 1).is_err());
-        assert!(ProofApplicationSlotCeilings::derive(1, 0, 1, 1).is_err());
-        assert!(ProofApplicationSlotCeilings::derive(u16::MAX, u32::MAX, 1, 1).is_err());
+    fn selected_proof_family_inventory_derives_every_physical_and_logical_count() {
+        let ceilings = ProofApplicationSlotCeilings::derive(
+            crate::foundation::FOUNDATION_PROFILE.participant_count,
+            1,
+            1,
+            crate::foundation::SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+        )
+        .expect("selected proof-family ceilings derive");
+        let inventory = ceilings
+            .derive_proof_family_application_inventory(6, 7)
+            .expect("selected proof-family inventory derives");
+        assert_eq!(
+            inventory.ordered_family_entries().map(|family| {
+                (
+                    family.application_statement_schema_identifier(),
+                    family.physical_proof_application_count(),
+                    family.logical_relation_instance_count(),
+                )
+            }),
+            [
+                (0x2110, 10, 10),
+                (0x2111, 10, 10),
+                (0x1211, 10, 10),
+                (0x1212, 10, 10),
+                (0x1213, 1, 1),
+                (0x1214, 10, 10),
+                (0x1215, 1, 1),
+                (0x1216, 10, 10),
+                (0x1217, 10, 60),
+                (0x1218, 1, 7),
+                (0x1302, 20, 20),
+                (0x1621, 10, 10),
+            ]
+        );
+        assert_eq!(
+            inventory
+                .total_physical_proof_application_count()
+                .expect("selected physical proof-application total derives"),
+            103
+        );
+        assert_eq!(
+            inventory
+                .total_logical_relation_instance_count()
+                .expect("selected logical relation-instance total derives"),
+            159
+        );
+    }
+
+    #[test]
+    fn proof_family_inventory_is_structural_for_every_roster_size() {
+        for roster_size in 3_u16..=20 {
+            let maximum_candidate_packages_per_action = u32::from(roster_size) * 2;
+            let ceilings = ProofApplicationSlotCeilings::derive(
+                roster_size,
+                1,
+                1,
+                maximum_candidate_packages_per_action,
+            )
+            .expect("structural proof-family ceilings derive");
+            let inventory = ceilings
+                .derive_proof_family_application_inventory(6, 7)
+                .expect("structural proof-family inventory derives");
+            let roster_size = u32::from(roster_size);
+            assert_eq!(
+                inventory.ordered_family_entries().map(|family| (
+                    family.physical_proof_application_count(),
+                    family.logical_relation_instance_count(),
+                )),
+                [
+                    (roster_size, roster_size),
+                    (roster_size, roster_size),
+                    (roster_size, roster_size),
+                    (roster_size, roster_size),
+                    (1, 1),
+                    (roster_size, roster_size),
+                    (1, 1),
+                    (roster_size, roster_size),
+                    (roster_size, roster_size * 6),
+                    (1, 7),
+                    (
+                        maximum_candidate_packages_per_action,
+                        maximum_candidate_packages_per_action,
+                    ),
+                    (roster_size, roster_size),
+                ]
+            );
+            assert_eq!(
+                inventory
+                    .total_physical_proof_application_count()
+                    .expect("structural physical proof-application total derives"),
+                roster_size * 10 + 3
+            );
+            assert_eq!(
+                inventory
+                    .total_logical_relation_instance_count()
+                    .expect("structural logical relation-instance total derives"),
+                roster_size * 15 + 9
+            );
+        }
+    }
+
+    #[test]
+    fn proof_family_inventory_rejects_zero_and_overflow() {
+        for invalid_inputs in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {
+            assert_eq!(
+                ProofApplicationSlotCeilings::derive(
+                    invalid_inputs.0,
+                    invalid_inputs.1,
+                    invalid_inputs.2,
+                    invalid_inputs.3,
+                )
+                .expect_err("zero proof-family input must be rejected")
+                .refusal_reason,
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
+
+        for hostile_inputs in [
+            (u16::MAX, u32::MAX, 1, 1),
+            (u16::MAX, 1, u32::MAX, 1),
+            (u16::MAX, 1, 1, u32::MAX),
+        ] {
+            assert_eq!(
+                ProofApplicationSlotCeilings::derive(
+                    hostile_inputs.0,
+                    hostile_inputs.1,
+                    hostile_inputs.2,
+                    hostile_inputs.3,
+                )
+                .expect_err("overflowing proof-family input must be rejected")
+                .refusal_reason,
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
+
+        let ceilings = ProofApplicationSlotCeilings::derive(1, 1, 1, 1)
+            .expect("minimal proof-family ceilings derive");
+        for invalid_expansion_counts in [(0, 1), (1, 0)] {
+            assert_eq!(
+                ceilings
+                    .derive_proof_family_application_inventory(
+                        invalid_expansion_counts.0,
+                        invalid_expansion_counts.1,
+                    )
+                    .expect_err("zero logical expansion count must be rejected")
+                    .refusal_reason,
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
+        for hostile_expansion_counts in [(u32::MAX, 1), (1, u32::MAX)] {
+            assert_eq!(
+                ceilings
+                    .derive_proof_family_application_inventory(
+                        hostile_expansion_counts.0,
+                        hostile_expansion_counts.1,
+                    )
+                    .expect_err("overflowing logical inventory must be rejected")
+                    .refusal_reason,
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
     }
 }

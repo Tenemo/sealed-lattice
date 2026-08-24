@@ -62,6 +62,7 @@ pub(crate) fn ciphertext_add(left: &Ciphertext, right: &Ciphertext) -> Canonical
     })
 }
 
+#[cfg(test)]
 pub(crate) fn ciphertext_negate(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
     let primes = ciphertext.primes();
     let components = ciphertext
@@ -88,46 +89,9 @@ pub(crate) fn ciphertext_negate(ciphertext: &Ciphertext) -> CanonicalResult<Ciph
     })
 }
 
+#[cfg(test)]
 pub(crate) fn ciphertext_sub(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<Ciphertext> {
     ciphertext_add(left, &ciphertext_negate(right)?)
-}
-
-fn centered_plaintext_scalar(scalar: i64) -> i64 {
-    let residue = signed_residue(scalar, PLAINTEXT_MODULUS);
-    if residue > PLAINTEXT_MODULUS / 2 {
-        i64::try_from(i128::from(residue) - i128::from(PLAINTEXT_MODULUS))
-            .expect("centered plaintext scalar fits i64")
-    } else {
-        i64::try_from(residue).expect("centered plaintext scalar fits i64")
-    }
-}
-
-pub(crate) fn scalar_mul(ciphertext: &Ciphertext, scalar: i64) -> CanonicalResult<Ciphertext> {
-    let primes = ciphertext.primes();
-    let centered_scalar = centered_plaintext_scalar(scalar);
-    let components = ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            component
-                .iter()
-                .enumerate()
-                .map(|(limb_index, limb)| {
-                    let modulus = primes[limb_index];
-                    let scalar_lift = signed_residue(centered_scalar, modulus);
-                    limb.iter()
-                        .map(|value| mul_mod(*value, scalar_lift, modulus))
-                        .collect::<CanonicalResult<Vec<_>>>()
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    Ok(Ciphertext {
-        components,
-        level: ciphertext.level,
-        decrypt_scaling: ciphertext.decrypt_scaling,
-    })
 }
 
 pub(crate) fn add_plaintext_coefficients(
@@ -379,6 +343,56 @@ pub(crate) fn modulus_switch(ciphertext: &Ciphertext) -> CanonicalResult<Ciphert
             dropped_modulus % PLAINTEXT_MODULUS,
             PLAINTEXT_MODULUS,
         )?,
+    })
+}
+
+// Bring a ciphertext to an exact active data-basis prefix. A ciphertext already
+// at or below the requested level is returned unchanged; the compiled evaluator
+// validates its monotone level schedule before execution.
+pub(crate) fn modulus_switch_to(
+    ciphertext: &Ciphertext,
+    target_level: usize,
+) -> CanonicalResult<Ciphertext> {
+    let mut current = ciphertext.clone();
+    while current.level > target_level {
+        current = modulus_switch(&current)?;
+    }
+
+    Ok(current)
+}
+
+// Rewrite a ciphertext so its tracked plaintext-field scaling is one. BGV
+// modulus switching leaves the raw plaintext multiplied by the inverse of the
+// tracked factor; multiplying every residue by that factor restores the
+// unscaled plaintext and makes same-level ciphertexts additively compatible.
+pub(crate) fn normalize_scaling(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
+    if ciphertext.decrypt_scaling == 1 {
+        return Ok(ciphertext.clone());
+    }
+    let primes = ciphertext.primes();
+    let factor = ciphertext.decrypt_scaling;
+    let components = ciphertext
+        .components
+        .iter()
+        .map(|component| {
+            component
+                .iter()
+                .enumerate()
+                .map(|(limb_index, limb)| {
+                    let modulus = primes[limb_index];
+                    let factor_in_limb = factor % modulus;
+                    limb.iter()
+                        .map(|value| mul_mod(*value, factor_in_limb, modulus))
+                        .collect::<CanonicalResult<Vec<_>>>()
+                })
+                .collect::<CanonicalResult<Vec<_>>>()
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(Ciphertext {
+        components,
+        level: ciphertext.level,
+        decrypt_scaling: 1,
     })
 }
 

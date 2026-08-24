@@ -42,13 +42,19 @@ class DeterministicInMemoryStorageAdapter implements UntrustedStorageAdapter {
     public failNextDeleteCount = 0;
     public forceNextAtomicConflict = false;
     public returnAliasedReads = false;
+    public returnSubviewReads = false;
     #mostRecentlyReturnedBuffer: Uint8Array | undefined;
 
     public read(key: string): Promise<Uint8Array | undefined> {
         const storedValue = this.#values.get(key);
-        const returnedValue = this.returnAliasedReads
+        let returnedValue = this.returnAliasedReads
             ? storedValue
             : storedValue?.slice();
+        if (this.returnSubviewReads && returnedValue !== undefined) {
+            const paddedValue = new Uint8Array(returnedValue.byteLength + 2);
+            paddedValue.set(returnedValue, 1);
+            returnedValue = paddedValue.subarray(1, paddedValue.byteLength - 1);
+        }
         this.#mostRecentlyReturnedBuffer = returnedValue;
         return Promise.resolve(returnedValue);
     }
@@ -374,6 +380,67 @@ describe('untrusted storage transaction store', () => {
         await expectStorageError(transaction.abort(), 'InvalidState');
     });
 
+    it('consumes an authenticated owned record without a return copy and rechecks its coordinate', async () => {
+        const { adapter, store } = await openTestStore();
+        const firstBytes = new Uint8Array([1, 2, 3, 4]);
+        await writeRecord(store, 'record-a', firstBytes);
+        await writeRecord(store, 'record-b', new Uint8Array([8, 7, 6]));
+        const secondObjectKey = textDecoder.decode(
+            requiredRawValue(adapter, indexKey('test-runtime', 'record-b')),
+        );
+        let consumedBytes: Uint8Array | undefined;
+
+        await expectStorageError(
+            store.consumeAuthenticated({
+                consume: ({ bytes, logicalRecordKey }) => {
+                    expect(logicalRecordKey).toBe('record-a');
+                    expect(bytes).toEqual(firstBytes);
+                    expect(bytes.byteOffset).toBe(0);
+                    expect(bytes.byteLength).toBe(bytes.buffer.byteLength);
+                    consumedBytes = bytes;
+                    structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+                    adapter.rawWrite(
+                        indexKey('test-runtime', 'record-a'),
+                        textEncoder.encode(secondObjectKey),
+                    );
+                },
+                logicalRecordKey: 'record-a',
+            }),
+            'Conflict',
+        );
+        expect(consumedBytes?.byteLength).toBe(0);
+    });
+
+    it('rejects an authenticated consumer that retains or receives non-owned adapter bytes', async () => {
+        const first = await openTestStore({ namespace: 'retained-consumer' });
+        await writeRecord(first.store, 'record', new Uint8Array([1, 2, 3, 4]));
+        let retainedBytes: Uint8Array | undefined;
+        await expectStorageError(
+            first.store.consumeAuthenticated({
+                consume: ({ bytes }) => {
+                    retainedBytes = bytes;
+                },
+                logicalRecordKey: 'record',
+            }),
+            'AuthenticationFailed',
+        );
+        expect(retainedBytes?.byteLength).toBe(0);
+
+        const second = await openTestStore({ namespace: 'subview-adapter' });
+        await writeRecord(second.store, 'record', new Uint8Array([4, 3, 2, 1]));
+        second.adapter.returnSubviewReads = true;
+        await expectStorageError(
+            second.store.readAuthenticated({
+                authenticate: exactAuthenticator(
+                    'record',
+                    new Uint8Array([4, 3, 2, 1]),
+                ),
+                logicalRecordKey: 'record',
+            }),
+            'AdapterFailure',
+        );
+    });
+
     it('replaces and deletes records without exposing old physical objects', async () => {
         const { adapter, store } = await openTestStore();
         await writeRecord(store, 'record-a', new Uint8Array([1, 2]));
@@ -671,7 +738,7 @@ describe('untrusted storage transaction store', () => {
         await lease.seal(authenticator);
         adapter.returnAliasedReads = true;
 
-        await expectStorageError(transaction.commit(), 'Conflict');
+        await expectStorageError(transaction.commit(), 'AuthenticationFailed');
         expect(lease.state()).toBe('sealed');
         expect(
             adapter.rawRead(indexKey('test-runtime', 'aliased-lease')),
@@ -1255,7 +1322,6 @@ describe('untrusted storage transaction store', () => {
 
         const afterCrash = await openTestStore({ adapter });
         expect(afterCrash.repairReport).toMatchObject({
-            removedCorruptIndexCount: 0,
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,
         });

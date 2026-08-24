@@ -4,7 +4,8 @@ use super::{
     checking::full_trace_zeroifier_expression,
     compiled_plan::RelationPlanCheckContext,
     expressions::{
-        RelationExpressionInstruction, canonical_nested_list, modular_power, strictly_sorted_unique,
+        RelationExpressionInstruction, canonical_nested_list, checked_resident_payload_add,
+        modular_power, resident_vec_storage_byte_length, strictly_sorted_unique,
     },
     model::{
         RelationChallengeRole, RelationPlanError, SuiteModulusReference, canonical_encoding_error,
@@ -18,17 +19,24 @@ use super::{
         INTEGER_LIFT_FULL_RING_NEGACYCLIC_PRODUCT_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_LINEAR_TERM_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_MODULUS_COEFFICIENT_SCHEMA_IDENTIFIER,
+        INTEGER_LIFT_MODULUS_RADIX_DIGIT_COEFFICIENT_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_NEGACYCLIC_AUTOMORPHISM_PERMUTATION_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_REVERSED_COLUMN_BINDING_SCHEMA_IDENTIFIER, SCHEMA_VERSION,
     },
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RelationIntegerLiftCoefficient {
     Constant(u64),
     Modulus {
         modulus_reference: SuiteModulusReference,
         multiplier: u16,
+    },
+    ModulusRadixDigit {
+        modulus_reference: SuiteModulusReference,
+        multiplier: u16,
+        radix: u64,
+        digit_ordinal: u16,
     },
 }
 
@@ -52,11 +60,47 @@ impl RelationIntegerLiftCoefficient {
                     CanonicalItem::unsigned16(multiplier),
                 ],
             ),
+            Self::ModulusRadixDigit {
+                modulus_reference,
+                multiplier,
+                radix,
+                digit_ordinal,
+            } => CanonicalTuple::new(
+                INTEGER_LIFT_MODULUS_RADIX_DIGIT_COEFFICIENT_SCHEMA_IDENTIFIER,
+                SCHEMA_VERSION,
+                vec![
+                    CanonicalItem::nested_tuple(&modulus_reference.canonical_tuple())
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::unsigned16(multiplier),
+                    CanonicalItem::unsigned64(radix),
+                    CanonicalItem::unsigned16(digit_ordinal),
+                ],
+            ),
         })
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) fn resolved_modulus_radix_digit(
+    modulus_reference: SuiteModulusReference,
+    multiplier: u16,
+    radix: u64,
+    digit_ordinal: u16,
+    context: &RelationPlanCheckContext,
+) -> Result<u64, RelationPlanError> {
+    if multiplier == 0 || !(2..context.base_field_modulus).contains(&radix) {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    let mut value = u128::from(context.resolved_modulus(modulus_reference)?)
+        .checked_mul(u128::from(multiplier))
+        .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+    let radix = u128::from(radix);
+    for _ in 0..digit_ordinal {
+        value /= radix;
+    }
+    u64::try_from(value % radix).map_err(|_| RelationPlanError::IntegerBoundOverflow)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RelationIntegerLiftLinearTermDescriptor {
     pub(crate) negative: bool,
     pub(crate) column_ordinal: u32,
@@ -90,8 +134,6 @@ impl RelationIntegerLiftLinearTermDescriptor {
 #[repr(u16)]
 pub(crate) enum RelationIntegerLiftConvolutionKind {
     Negacyclic = 1,
-    OrdinaryLowHalf = 2,
-    OrdinaryHighHalf = 3,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,7 +147,7 @@ pub(crate) struct RelationIntegerLiftConvolutionProductDescriptor {
     pub(crate) reversed_transpose_column_ordinal: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
 pub(crate) enum RelationIntegerLiftFullRingHalf {
     Low = 1,
@@ -235,12 +277,6 @@ impl RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor {
             ],
         )
     }
-
-    pub(super) fn canonical_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
-        self.canonical_tuple()
-            .encode()
-            .map_err(canonical_encoding_error)
-    }
 }
 
 impl RelationIntegerLiftConvolutionProductDescriptor {
@@ -269,8 +305,6 @@ impl RelationIntegerLiftConvolutionProductDescriptor {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RelationIntegerLiftComponentDescriptor {
-    pub(crate) quotient_is_negative: bool,
-    pub(crate) quotient_column_ordinal: u32,
     pub(crate) ordered_linear_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
     pub(crate) ordered_convolution_products: Vec<RelationIntegerLiftConvolutionProductDescriptor>,
     pub(crate) ordered_full_ring_negacyclic_products:
@@ -280,13 +314,21 @@ pub(crate) struct RelationIntegerLiftComponentDescriptor {
 }
 
 impl RelationIntegerLiftComponentDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        [
+            resident_vec_storage_byte_length(&self.ordered_linear_terms)?,
+            resident_vec_storage_byte_length(&self.ordered_convolution_products)?,
+            resident_vec_storage_byte_length(&self.ordered_full_ring_negacyclic_products)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_resident_payload_add)
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             INTEGER_LIFT_COMPONENT_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
             vec![
-                CanonicalItem::boolean(self.quotient_is_negative),
-                CanonicalItem::unsigned32(self.quotient_column_ordinal),
                 canonical_nested_list(
                     self.ordered_linear_terms
                         .iter()
@@ -328,18 +370,45 @@ pub(crate) struct RelationIntegerLiftBatchDescriptor {
 }
 
 impl RelationIntegerLiftBatchDescriptor {
+    pub(crate) fn theta_bad_polynomial_degree(
+        &self,
+        trace_domain_size: u64,
+    ) -> Result<u64, RelationPlanError> {
+        theta_bad_polynomial_degree_for_topology(
+            trace_domain_size,
+            self.ordered_components
+                .iter()
+                .any(|component| !component.ordered_convolution_products.is_empty()),
+            self.ordered_components
+                .iter()
+                .any(|component| !component.ordered_full_ring_negacyclic_products.is_empty()),
+            !self.ordered_negacyclic_automorphism_permutations.is_empty(),
+        )
+    }
+
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        let mut total = [
+            resident_vec_storage_byte_length(&self.ordered_reversed_column_bindings)?,
+            resident_vec_storage_byte_length(&self.ordered_negacyclic_automorphism_permutations)?,
+            resident_vec_storage_byte_length(&self.ordered_components)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_resident_payload_add)?;
+        for component in &self.ordered_components {
+            total = checked_resident_payload_add(
+                total,
+                component.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        Ok(total)
+    }
+
     pub(crate) const fn modulus_reference(&self) -> SuiteModulusReference {
         self.modulus_reference
     }
 
     pub(crate) const fn challenge_ordinal(&self) -> u16 {
         self.challenge_ordinal
-    }
-
-    pub(crate) fn negacyclic_automorphism_permutations(
-        &self,
-    ) -> &[RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor] {
-        &self.ordered_negacyclic_automorphism_permutations
     }
 
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
@@ -379,6 +448,37 @@ impl RelationIntegerLiftBatchDescriptor {
     }
 }
 
+fn theta_bad_polynomial_degree_for_topology(
+    trace_domain_size: u64,
+    has_convolution_product: bool,
+    has_full_ring_product: bool,
+    has_automorphism_multiset: bool,
+) -> Result<u64, RelationPlanError> {
+    let linear_identity_degree = trace_domain_size
+        .checked_sub(1)
+        .ok_or(RelationPlanError::InvalidDomain)?;
+    if has_automorphism_multiset {
+        return trace_domain_size
+            .checked_mul(2)
+            .and_then(|degree| degree.checked_sub(1))
+            .ok_or(RelationPlanError::CountOverflow);
+    }
+    if has_convolution_product || has_full_ring_product {
+        return trace_domain_size
+            .checked_mul(2)
+            .and_then(|degree| degree.checked_sub(2))
+            .ok_or(RelationPlanError::CountOverflow);
+    }
+    Ok(linear_identity_degree)
+}
+
+pub(crate) const fn theta_sampling_field_exceeds_bad_polynomial_degree(
+    sampling_field_size: u64,
+    bad_polynomial_degree: u64,
+) -> bool {
+    sampling_field_size > bad_polynomial_degree
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RelationCoefficientLocalResidualDescriptor {
     pub(crate) unit_ordinal: u32,
@@ -386,6 +486,18 @@ pub(crate) struct RelationCoefficientLocalResidualDescriptor {
 }
 
 impl RelationCoefficientLocalResidualDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.residual_postfix_expression.iter().try_fold(
+            resident_vec_storage_byte_length(&self.residual_postfix_expression)?,
+            |total, expression| {
+                checked_resident_payload_add(
+                    total,
+                    expression.resident_owned_payload_byte_length()?,
+                )
+            },
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             COEFFICIENT_LOCAL_RESIDUAL_SCHEMA_IDENTIFIER,
@@ -413,6 +525,33 @@ pub(crate) struct RelationCoefficientLocalIdentityBatchDescriptor {
 }
 
 impl RelationCoefficientLocalIdentityBatchDescriptor {
+    pub(crate) const fn modulus_reference(&self) -> SuiteModulusReference {
+        self.modulus_reference
+    }
+
+    pub(crate) const fn challenge_ordinal(&self) -> u16 {
+        self.challenge_ordinal
+    }
+
+    pub(crate) fn alpha_bad_polynomial_degree(&self) -> Result<u64, RelationPlanError> {
+        u64::try_from(
+            self.ordered_residuals
+                .len()
+                .checked_sub(1)
+                .ok_or(RelationPlanError::InvalidConstraint)?,
+        )
+        .map_err(|_| RelationPlanError::CountOverflow)
+    }
+
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.ordered_residuals.iter().try_fold(
+            resident_vec_storage_byte_length(&self.ordered_residuals)?,
+            |total, residual| {
+                checked_resident_payload_add(total, residual.resident_owned_payload_byte_length()?)
+            },
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             COEFFICIENT_LOCAL_IDENTITY_BATCH_SCHEMA_IDENTIFIER,
@@ -559,10 +698,19 @@ impl RelationIntegerLiftBatchDescriptor {
                 component,
                 self.modulus_reference,
                 &theta_expression,
+                point_zero.clone(),
                 point_last.clone(),
                 except_last.clone(),
+                context,
             )?);
         }
+        let mut observed_programs = std::collections::BTreeSet::new();
+        programs.retain(|program| {
+            observed_programs.insert((
+                program.numerator_postfix_expression.clone(),
+                program.zeroifier_postfix_expression.clone(),
+            ))
+        });
         Ok(programs)
     }
 }
@@ -995,44 +1143,6 @@ pub(super) fn integer_lift_product_constraint_programs(
                 );
                 (boundary, recurrence, except_zero)
             }
-            RelationIntegerLiftConvolutionKind::OrdinaryLowHalf => {
-                let boundary = subtract_integer_lift_expressions(
-                    integer_lift_column_expression(transpose, false, 0),
-                    integer_lift_column_expression(suffix, false, 1),
-                );
-                let mut theta_to_ring_degree = theta_expression.to_vec();
-                theta_to_ring_degree.push(RelationExpressionInstruction::NonnegativePower(
-                    trace_domain_size,
-                ));
-                let recurrence = add_integer_lift_expressions(
-                    subtract_integer_lift_expressions(
-                        integer_lift_column_expression(transpose, false, 0),
-                        multiply_integer_lift_expressions(
-                            theta_expression.to_vec(),
-                            integer_lift_column_expression(transpose, false, 1),
-                        ),
-                    ),
-                    multiply_integer_lift_expressions(
-                        theta_to_ring_degree,
-                        integer_lift_column_expression(multiplicand, false, 1),
-                    ),
-                );
-                (boundary, recurrence, except_last.clone())
-            }
-            RelationIntegerLiftConvolutionKind::OrdinaryHighHalf => {
-                let boundary = integer_lift_column_expression(transpose, false, 0);
-                let recurrence = subtract_integer_lift_expressions(
-                    subtract_integer_lift_expressions(
-                        integer_lift_column_expression(transpose, false, 0),
-                        integer_lift_column_expression(multiplicand, false, 1),
-                    ),
-                    multiply_integer_lift_expressions(
-                        theta_expression.to_vec(),
-                        integer_lift_column_expression(transpose, false, 1),
-                    ),
-                );
-                (boundary, recurrence, except_last.clone())
-            }
         };
 
     Ok(vec![
@@ -1057,13 +1167,14 @@ pub(super) fn integer_lift_product_constraint_programs(
 
 pub(super) fn integer_lift_component_constraint_programs(
     component: &RelationIntegerLiftComponentDescriptor,
-    modulus_reference: SuiteModulusReference,
+    _modulus_reference: SuiteModulusReference,
     theta_expression: &[RelationExpressionInstruction],
+    point_zero: Vec<RelationExpressionInstruction>,
     point_last: Vec<RelationExpressionInstruction>,
     except_last: Vec<RelationExpressionInstruction>,
+    context: &RelationPlanCheckContext,
 ) -> Result<Vec<RelationIntegerLiftConstraintProgram>, RelationPlanError> {
-    let coefficient_expression =
-        integer_lift_component_coefficient_expression(component, modulus_reference)?;
+    let coefficient_expression = integer_lift_component_coefficient_expression(component, context)?;
     let linear_evaluation = component.linear_evaluation_column_ordinal;
     let linear_last = subtract_integer_lift_expressions(
         integer_lift_column_expression(linear_evaluation, false, 0),
@@ -1082,6 +1193,7 @@ pub(super) fn integer_lift_component_constraint_programs(
 
     let product_expression = integer_lift_component_product_expression(component)?;
     let accumulator = component.product_accumulator_column_ordinal;
+    let accumulator_initial = integer_lift_column_expression(accumulator, false, 0);
     let accumulator_step = subtract_integer_lift_expressions(
         subtract_integer_lift_expressions(
             integer_lift_column_expression(accumulator, false, 1),
@@ -1104,6 +1216,10 @@ pub(super) fn integer_lift_component_constraint_programs(
             zeroifier_postfix_expression: except_last.clone(),
         },
         RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: accumulator_initial,
+            zeroifier_postfix_expression: point_zero,
+        },
+        RelationIntegerLiftConstraintProgram {
             numerator_postfix_expression: accumulator_step,
             zeroifier_postfix_expression: except_last,
         },
@@ -1116,25 +1232,13 @@ pub(super) fn integer_lift_component_constraint_programs(
 
 pub(super) fn integer_lift_component_coefficient_expression(
     component: &RelationIntegerLiftComponentDescriptor,
-    modulus_reference: SuiteModulusReference,
+    context: &RelationPlanCheckContext,
 ) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
-    let mut terms = component
+    let terms = component
         .ordered_linear_terms
         .iter()
-        .map(integer_lift_linear_term_expression)
+        .map(|term| integer_lift_linear_term_expression(term, context))
         .collect::<Result<Vec<_>, _>>()?;
-    let quotient = multiply_integer_lift_expressions(
-        vec![RelationExpressionInstruction::NonNativeModulusConstant {
-            modulus_reference,
-            multiplier: 1,
-        }],
-        integer_lift_column_expression(component.quotient_column_ordinal, false, 0),
-    );
-    terms.push(if component.quotient_is_negative {
-        negate_integer_lift_expression(quotient)
-    } else {
-        quotient
-    });
     sum_integer_lift_expressions(terms)
 }
 
@@ -1216,11 +1320,16 @@ pub(super) fn integer_lift_component_product_expression(
                 }
             }),
     );
-    sum_integer_lift_expressions(terms)
+    if terms.is_empty() {
+        Ok(vec![RelationExpressionInstruction::BaseFieldConstant(0)])
+    } else {
+        sum_integer_lift_expressions(terms)
+    }
 }
 
 pub(super) fn integer_lift_linear_term_expression(
     term: &RelationIntegerLiftLinearTermDescriptor,
+    context: &RelationPlanCheckContext,
 ) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
     let shifted_column = subtract_integer_lift_expressions(
         integer_lift_column_expression(term.column_ordinal, false, 0),
@@ -1239,6 +1348,18 @@ pub(super) fn integer_lift_linear_term_expression(
             modulus_reference,
             multiplier,
         },
+        RelationIntegerLiftCoefficient::ModulusRadixDigit {
+            modulus_reference,
+            multiplier,
+            radix,
+            digit_ordinal,
+        } => RelationExpressionInstruction::BaseFieldConstant(resolved_modulus_radix_digit(
+            modulus_reference,
+            multiplier,
+            radix,
+            digit_ordinal,
+            context,
+        )?),
     };
     let expression = multiply_integer_lift_expressions(vec![coefficient], shifted_column);
     Ok(if term.negative {
@@ -1387,4 +1508,55 @@ pub(super) fn integer_lift_trace_root(
         row_ordinal,
         context.base_field_modulus,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RelationPlanError, theta_bad_polynomial_degree_for_topology,
+        theta_sampling_field_exceeds_bad_polynomial_degree,
+    };
+
+    #[test]
+    fn theta_bad_polynomial_degree_is_derived_from_every_batch_topology() {
+        let trace_domain_size = 32_768;
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, false, false, false,),
+            Ok(32_767),
+            "linear and reversed-column identities have degree N - 1",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, true, false, false,),
+            Ok(65_534),
+            "convolution identities have degree 2N - 2",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, false, true, false,),
+            Ok(65_534),
+            "full-ring identities have degree 2N - 2",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, true, true, true,),
+            Ok(65_535),
+            "the automorphism multiset is the maximum mixed-topology degree",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(0, false, false, false),
+            Err(RelationPlanError::InvalidDomain),
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(u64::MAX, true, false, false),
+            Err(RelationPlanError::CountOverflow),
+        );
+    }
+
+    #[test]
+    fn theta_sampling_field_must_strictly_exceed_the_derived_degree() {
+        assert!(!theta_sampling_field_exceeds_bad_polynomial_degree(
+            65_534, 65_534,
+        ));
+        assert!(theta_sampling_field_exceeds_bad_polynomial_degree(
+            65_535, 65_534,
+        ));
+    }
 }

@@ -1,6 +1,7 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
 import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 
+import { isUint8Array } from './byte-array.js';
 import {
     bytesToHex,
     textEncoder,
@@ -122,17 +123,6 @@ const snapshotSafeInteger = (value: unknown, fieldName: string): number => {
         throw new TypeError(`${fieldName} must be a safe integer.`);
     }
     return value;
-};
-
-const isUint8Array = (value: unknown): value is Uint8Array => {
-    try {
-        return (
-            ArrayBuffer.isView(value) &&
-            Object.prototype.toString.call(value) === '[object Uint8Array]'
-        );
-    } catch {
-        return false;
-    }
 };
 
 const copyCanonicalBytes = (value: unknown, fieldName: string): Uint8Array => {

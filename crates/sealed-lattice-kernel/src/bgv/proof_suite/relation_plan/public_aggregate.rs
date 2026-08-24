@@ -44,8 +44,7 @@ pub(crate) struct EvaluatorKeyAggregateEntryPlanInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EvaluatorKeyAggregateVariantInput {
     pub(crate) top_count: u16,
-    pub(crate) entry_ordinal: u32,
-    pub(crate) entry: EvaluatorKeyAggregateEntryPlanInput,
+    pub(crate) ordered_entries: Vec<EvaluatorKeyAggregateEntryPlanInput>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,14 +80,13 @@ impl PublicAggregateRelationGeometry {
 
     fn validate(&self, context: &RelationPlanCheckContext) -> Result<(), RelationPlanError> {
         RelationPlanChecker::new(context).check_context()?;
-        self.trace_domain_size()?;
+        let trace_domain_size = self.trace_domain_size()?;
         if self.ring_degree < 2
             || !self.ring_degree.is_power_of_two()
             || self.evaluation_domain_size == 0
             || !self.evaluation_domain_size.is_power_of_two()
             || self.opening_degree_bound_exclusive <= 1
-            || self.public_polynomial_column_degree_bound_exclusive == 0
-            || self.public_polynomial_column_degree_bound_exclusive > self.ring_degree
+            || self.public_polynomial_column_degree_bound_exclusive != trace_domain_size
             || self.participant_count < 2
         {
             return Err(RelationPlanError::InvalidDomain);
@@ -100,17 +98,16 @@ impl PublicAggregateRelationGeometry {
                     .ok_or(RelationPlanError::DegreeBoundExceeded)?,
             )
             .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        if exact_product_degree >= self.opening_degree_bound_exclusive {
+        if exact_product_degree >= self.evaluation_domain_size {
             return Err(RelationPlanError::DegreeBoundExceeded);
         }
         let next_degree_domain = self
             .opening_degree_bound_exclusive
             .checked_next_power_of_two()
             .ok_or(RelationPlanError::CountOverflow)?;
-        if next_degree_domain
-            .checked_mul(u64::from(context.evaluation_blowup_factor))
-            .ok_or(RelationPlanError::CountOverflow)?
-            != self.evaluation_domain_size
+        if !self
+            .evaluation_domain_size
+            .is_multiple_of(next_degree_domain)
         {
             return Err(RelationPlanError::InvalidDomain);
         }
@@ -237,55 +234,76 @@ pub(crate) fn compile_evaluator_key_aggregate_relation_plan(
     context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
     input.geometry.validate(context)?;
-    if input.ordered_variants.is_empty()
-        || input.ordered_variants[0].top_count != 1
-        || input.ordered_variants[0].entry_ordinal != 0
+    let complete_ordered_entries = input
+        .ordered_variants
+        .first()
+        .map(|variant| variant.ordered_entries.as_slice())
+        .ok_or(RelationPlanError::NonCanonicalOrder)?;
+    if input.ordered_variants.len()
+        != usize::from(crate::foundation::FOUNDATION_PROFILE.option_count)
         || input
             .ordered_variants
-            .last()
-            .map(|variant| variant.top_count)
-            != Some(20)
-        || !input.ordered_variants.windows(2).all(|window| {
-            (window[1].top_count == window[0].top_count
-                && window[1].entry_ordinal == window[0].entry_ordinal + 1)
-                || (window[1].top_count == window[0].top_count + 1 && window[1].entry_ordinal == 0)
-        })
+            .iter()
+            .enumerate()
+            .any(|(variant_ordinal, variant)| {
+                variant.top_count
+                    != u16::try_from(variant_ordinal)
+                        .ok()
+                        .and_then(|ordinal| ordinal.checked_add(1))
+                        .unwrap_or(0)
+                    || variant.ordered_entries.is_empty()
+                    || variant.ordered_entries.as_slice() != complete_ordered_entries
+            })
     {
-        return Err(RelationPlanError::InvalidVariantSelector);
+        return Err(RelationPlanError::NonCanonicalOrder);
     }
     let participant_count = usize::from(input.geometry.participant_count);
     let variants = input
         .ordered_variants
         .iter()
         .map(|variant| {
-            let entry = &variant.entry;
-            input
-                .geometry
-                .validate_component_moduli(&entry.ordered_runtime_component_moduli, context)?;
-            let components = [AggregateComponent {
-                source_root_paths: (0..participant_count)
-                    .map(|source_ordinal| {
-                        root_in_evaluator_entry_source_list_path(0, source_ordinal)
-                            .ok_or(RelationPlanError::CountOverflow)
+            let components = variant
+                .ordered_entries
+                .iter()
+                .enumerate()
+                .map(|(entry_ordinal, entry)| {
+                    input.geometry.validate_component_moduli(
+                        &entry.ordered_runtime_component_moduli,
+                        context,
+                    )?;
+                    Ok(AggregateComponent {
+                        source_root_paths: (0..participant_count)
+                            .map(|source_ordinal| {
+                                root_in_evaluator_entry_source_list_path(
+                                    entry_ordinal,
+                                    source_ordinal,
+                                )
+                                .ok_or(RelationPlanError::CountOverflow)
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        aggregate_root_path: root_in_evaluator_entry_aggregate_list_path(
+                            entry_ordinal,
+                            0,
+                        )
+                        .ok_or(RelationPlanError::CountOverflow)?,
+                        ordered_moduli: entry.ordered_runtime_component_moduli.clone(),
+                        constraint_role_coordinates: vec![
+                            u64::try_from(entry_ordinal)
+                                .map_err(|_| RelationPlanError::CountOverflow)?,
+                            u64::from(entry.schedule_position),
+                        ],
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
-                aggregate_root_path: root_in_evaluator_entry_aggregate_list_path(0, 0)
-                    .ok_or(RelationPlanError::CountOverflow)?,
-                ordered_moduli: entry.ordered_runtime_component_moduli.clone(),
-                constraint_role_coordinates: vec![
-                    u64::from(variant.entry_ordinal),
-                    u64::from(entry.schedule_position),
-                ],
-            }];
+                })
+                .collect::<Result<Vec<_>, RelationPlanError>>()?;
             compile_public_aggregate_variant(
                 &input.geometry,
-                Some(variant.entry_ordinal),
+                None,
                 Some(variant.top_count),
                 &components,
                 context,
             )
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, RelationPlanError>>()?;
     finish_plan(
         EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
         variants,
@@ -413,13 +431,15 @@ fn compile_public_aggregate_variant(
         }
     }
 
-    let ordered_opening_points = (0..context.deep_point_count)
-        .map(|deep_point_ordinal| RelationOpeningPointDescriptor {
-            deep_point_ordinal,
-            trace_rotation_is_negative: false,
-            trace_rotation_magnitude: 0,
-            conjugate_index: 0,
-        })
+    let ordered_opening_points = (0..context.out_of_domain_point_count)
+        .map(
+            |out_of_domain_point_ordinal| RelationOpeningPointDescriptor {
+                out_of_domain_point_ordinal,
+                trace_rotation_is_negative: false,
+                trace_rotation_magnitude: 0,
+                conjugate_index: 0,
+            },
+        )
         .collect::<Vec<_>>();
     let mut ordered_opening_claims = Vec::new();
     for (tree_ordinal, tree) in ordered_trees.iter().enumerate() {
@@ -656,20 +676,18 @@ mod tests {
             base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
                 as u16,
-            evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
                 maximum_two_adic_order / evaluation_domain_size,
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: 2,
+            out_of_domain_point_count: 2,
             quotient_component_count: 2,
             quotient_component_degree_bound_exclusive: 64,
-            fri_fold_count: 3,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 8,
-            non_native_modular_identity_challenge_count: 2,
+            phase_column_query_coordinate_count: 8,
+            non_native_theta_repetition_count: 2,
+            non_native_alpha_repetition_count: 2,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli: vec![
                 ResolvedSuiteModulus::new(SuiteModulusReference::data(0), 97),
@@ -683,7 +701,7 @@ mod tests {
             ring_degree: 16,
             evaluation_domain_size: 128,
             opening_degree_bound_exclusive: 64,
-            public_polynomial_column_degree_bound_exclusive: 16,
+            public_polynomial_column_degree_bound_exclusive: 8,
             participant_count: 3,
         }
     }
@@ -721,7 +739,88 @@ mod tests {
     }
 
     #[test]
-    fn later_deep_candidate_rejects_a_cross_ordinal_translated_collision() {
+    fn quotient_decomposition_allows_a_numerator_wider_than_the_opening_bound() {
+        let mut context = check_context();
+        context.quotient_component_count = 8;
+        context.quotient_component_degree_bound_exclusive = 8;
+        let mut decomposed_geometry = geometry();
+        decomposed_geometry.participant_count = 10;
+
+        let plan = compile_collective_public_key_aggregate_relation_plan(
+            &CollectivePublicKeyAggregatePlanInput {
+                geometry: decomposed_geometry.clone(),
+                ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+            },
+            &context,
+        )
+        .expect("the exact quotient decomposition covers the wider numerator");
+        let numerator_maximum_degree = u64::from(decomposed_geometry.participant_count)
+            * (decomposed_geometry.public_polynomial_column_degree_bound_exclusive - 1);
+        let quotient_coefficient_count = numerator_maximum_degree
+            - decomposed_geometry
+                .trace_domain_size()
+                .expect("trace domain")
+            + 1;
+
+        assert_eq!(numerator_maximum_degree, 70);
+        assert!(numerator_maximum_degree >= decomposed_geometry.opening_degree_bound_exclusive);
+        assert_eq!(quotient_coefficient_count, 63);
+        assert!(
+            quotient_coefficient_count
+                <= u64::from(context.quotient_component_count)
+                    * decomposed_geometry
+                        .trace_domain_size()
+                        .expect("trace domain")
+        );
+        assert_eq!(plan.variants()[0].opening_degree_bound_exclusive(), 64);
+
+        decomposed_geometry.participant_count = 11;
+        assert!(matches!(
+            compile_collective_public_key_aggregate_relation_plan(
+                &CollectivePublicKeyAggregatePlanInput {
+                    geometry: decomposed_geometry,
+                    ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+                },
+                &context,
+            ),
+            Err(RelationPlanError::DegreeBoundExceeded)
+        ));
+    }
+
+    #[test]
+    fn public_aggregate_geometry_requires_the_exact_half_ring_column_domain() {
+        for invalid_column_degree_bound_exclusive in [0, 7, 9, 16] {
+            let mut invalid_geometry = geometry();
+            invalid_geometry.public_polynomial_column_degree_bound_exclusive =
+                invalid_column_degree_bound_exclusive;
+            assert!(matches!(
+                compile_collective_public_key_aggregate_relation_plan(
+                    &CollectivePublicKeyAggregatePlanInput {
+                        geometry: invalid_geometry,
+                        ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+                    },
+                    &check_context(),
+                ),
+                Err(RelationPlanError::InvalidDomain)
+            ));
+        }
+
+        let mut odd_ring_geometry = geometry();
+        odd_ring_geometry.ring_degree = 15;
+        assert!(matches!(
+            compile_collective_public_key_aggregate_relation_plan(
+                &CollectivePublicKeyAggregatePlanInput {
+                    geometry: odd_ring_geometry,
+                    ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+                },
+                &check_context(),
+            ),
+            Err(RelationPlanError::InvalidDomain)
+        ));
+    }
+
+    #[test]
+    fn later_out_of_domain_candidate_rejects_a_cross_ordinal_translated_collision() {
         let context = check_context();
         let plan = compile_collective_public_key_aggregate_relation_plan(
             &CollectivePublicKeyAggregatePlanInput {
@@ -734,13 +833,13 @@ mod tests {
         let mut variant = plan.variants()[0].clone();
         variant.ordered_opening_points = vec![
             RelationOpeningPointDescriptor {
-                deep_point_ordinal: 0,
+                out_of_domain_point_ordinal: 0,
                 trace_rotation_is_negative: false,
                 trace_rotation_magnitude: 0,
                 conjugate_index: 0,
             },
             RelationOpeningPointDescriptor {
-                deep_point_ordinal: 1,
+                out_of_domain_point_ordinal: 1,
                 trace_rotation_is_negative: false,
                 trace_rotation_magnitude: 0,
                 conjugate_index: 0,
@@ -764,7 +863,7 @@ mod tests {
                 let translated_candidate = prior_point.multiply_base(trace_generator_inverse);
                 (translated_candidate != prior_point
                     && variant
-                        .deep_point_candidate_is_forbidden(
+                        .out_of_domain_point_candidate_is_forbidden(
                             &context,
                             1,
                             translated_candidate,
@@ -779,7 +878,7 @@ mod tests {
         variant.ordered_opening_points[1].trace_rotation_magnitude = 1;
         assert!(
             variant
-                .deep_point_candidate_is_forbidden(
+                .out_of_domain_point_candidate_is_forbidden(
                     &context,
                     1,
                     translated_candidate,
@@ -806,6 +905,67 @@ mod tests {
             plan.check(&check_context()),
             Err(RelationPlanError::InvalidConstraint)
         );
+    }
+
+    #[test]
+    fn honest_nonconstant_carry_trace_satisfies_the_finite_factor_relation() {
+        let context = check_context();
+        let plan = compile_collective_public_key_aggregate_relation_plan(
+            &CollectivePublicKeyAggregatePlanInput {
+                geometry: geometry(),
+                ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+            },
+            &context,
+        )
+        .expect("exact collective public-key aggregate plan");
+        let variant = &plan.variants()[0];
+        let checked_challenges = variant
+            .checked_application_challenges(&context, &[])
+            .expect("the public aggregate has no application challenges");
+        let evaluation_generator =
+            ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+                .expect("the test evaluation generator is canonical");
+        let trace_generator =
+            evaluation_generator.power(variant.evaluation_domain_size / variant.trace_domain_size);
+
+        for trace_ordinal in 0..variant.trace_domain_size {
+            let source_values = match trace_ordinal % 3 {
+                0 => [trace_ordinal % 17, 2, 3],
+                1 => [96, 1, 0],
+                _ => [96, 96, 96],
+            };
+            let source_sum = source_values.into_iter().sum::<u64>();
+            let aggregate_value = source_sum % 97;
+            let carry = source_sum / 97;
+            assert_eq!(carry, trace_ordinal % 3);
+            let ordered_values = [
+                source_values[0],
+                source_values[1],
+                source_values[2],
+                aggregate_value,
+            ];
+            let evaluation = variant
+                .evaluate_constraint_programs_at_point(
+                    &context,
+                    0,
+                    ProofChallengeExtensionElement::from_base(trace_generator.power(trace_ordinal)),
+                    &checked_challenges,
+                    &mut |column_ordinal, _, _| {
+                        ordered_values
+                            .get(usize::try_from(column_ordinal).unwrap())
+                            .copied()
+                            .ok_or(RelationPlanError::InvalidColumn)
+                            .and_then(|value| {
+                                ProofBaseFieldElement::from_canonical(value)
+                                    .map(ProofChallengeExtensionElement::from_base)
+                                    .map_err(|_| RelationPlanError::InvalidColumn)
+                            })
+                    },
+                )
+                .expect("the honest aggregate constraint evaluates on the trace");
+            assert!(evaluation.zeroifier.is_zero());
+            assert!(evaluation.numerator.is_zero());
+        }
     }
 
     #[test]
@@ -853,28 +1013,20 @@ mod tests {
         assert_eq!(rkg_plan.variants()[0].schedule_position(), Some(2));
         assert_eq!(rkg_plan.variants()[1].schedule_position(), Some(7));
 
-        let evaluator_variants = (1..=20)
-            .flat_map(|top_count| {
-                [
-                    EvaluatorKeyAggregateVariantInput {
-                        top_count,
-                        entry_ordinal: 0,
-                        entry: EvaluatorKeyAggregateEntryPlanInput {
-                            schedule_position: 3,
-                            ordered_runtime_component_moduli: vec![SuiteModulusReference::data(0)],
-                        },
-                    },
-                    EvaluatorKeyAggregateVariantInput {
-                        top_count,
-                        entry_ordinal: 1,
-                        entry: EvaluatorKeyAggregateEntryPlanInput {
-                            schedule_position: 1,
-                            ordered_runtime_component_moduli: vec![SuiteModulusReference::special(
-                                0,
-                            )],
-                        },
-                    },
-                ]
+        let evaluator_entries = vec![
+            EvaluatorKeyAggregateEntryPlanInput {
+                schedule_position: 3,
+                ordered_runtime_component_moduli: vec![SuiteModulusReference::data(0)],
+            },
+            EvaluatorKeyAggregateEntryPlanInput {
+                schedule_position: 1,
+                ordered_runtime_component_moduli: vec![SuiteModulusReference::special(0)],
+            },
+        ];
+        let evaluator_variants = (1..=crate::foundation::FOUNDATION_PROFILE.option_count)
+            .map(|top_count| EvaluatorKeyAggregateVariantInput {
+                top_count,
+                ordered_entries: evaluator_entries.clone(),
             })
             .collect::<Vec<_>>();
         let evaluator_plan = compile_evaluator_key_aggregate_relation_plan(
@@ -884,25 +1036,41 @@ mod tests {
             },
             &context,
         )
-        .expect("exact action-selected evaluator aggregate plan");
-        assert_eq!(evaluator_plan.variants().len(), 40);
-        assert_eq!(evaluator_plan.variants()[0].schedule_position(), Some(0));
+        .expect("exact action-selected complete-list evaluator aggregate plan");
+        assert_eq!(evaluator_plan.variants().len(), evaluator_variants.len());
+        assert_eq!(evaluator_plan.variants()[0].schedule_position(), None);
         assert_eq!(evaluator_plan.variants()[0].top_count(), Some(1));
-        assert_eq!(evaluator_plan.variants()[39].schedule_position(), Some(1));
-        assert_eq!(evaluator_plan.variants()[39].top_count(), Some(20));
+        assert_eq!(
+            evaluator_plan
+                .variants()
+                .last()
+                .and_then(RelationPlanVariant::top_count),
+            Some(crate::foundation::FOUNDATION_PROFILE.option_count)
+        );
 
-        let mut incomplete_variants = evaluator_variants;
-        incomplete_variants.pop();
-        incomplete_variants.pop();
+        let mut inconsistent_evaluator_variants = evaluator_variants.clone();
+        inconsistent_evaluator_variants[7].ordered_entries[1].ordered_runtime_component_moduli =
+            vec![SuiteModulusReference::data(0)];
         assert_eq!(
             compile_evaluator_key_aggregate_relation_plan(
                 &EvaluatorKeyAggregatePlanInput {
                     geometry: geometry(),
-                    ordered_variants: incomplete_variants,
+                    ordered_variants: inconsistent_evaluator_variants,
                 },
                 &context,
             ),
-            Err(RelationPlanError::InvalidVariantSelector)
+            Err(RelationPlanError::NonCanonicalOrder),
+        );
+
+        assert_eq!(
+            compile_evaluator_key_aggregate_relation_plan(
+                &EvaluatorKeyAggregatePlanInput {
+                    geometry: geometry(),
+                    ordered_variants: evaluator_variants[..evaluator_variants.len() - 1].to_vec(),
+                },
+                &context,
+            ),
+            Err(RelationPlanError::NonCanonicalOrder)
         );
     }
 }

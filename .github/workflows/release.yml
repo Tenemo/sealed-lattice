@@ -25,7 +25,7 @@ jobs:
     validate-source:
         name: validate source
         runs-on: ubuntu-24.04
-        timeout-minutes: 10
+        timeout-minutes: 360
         permissions:
             actions: read
             contents: read
@@ -39,30 +39,16 @@ jobs:
                     exit 1
                   fi
 
-            - name: Require successful CI for the exact source
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+                  ref: ${{ github.sha }}
+            - uses: ./.github/actions/bootstrap-pnpm
+
+            - name: Wait for successful CI for the exact source
               env:
                   GH_TOKEN: ${{ github.token }}
-              run: |
-                  mapfile -t SUCCESSFUL_CI_RUN_IDS < <(
-                    gh run list \
-                      --repo "${GITHUB_REPOSITORY}" \
-                      --workflow ci.yml \
-                      --commit "${GITHUB_SHA}" \
-                      --status success \
-                      --limit 20 \
-                      --json databaseId \
-                      --jq '.[].databaseId'
-                  )
-
-                  for CI_RUN_ID in "${SUCCESSFUL_CI_RUN_IDS[@]}"; do
-                    if [[ "$(gh run view "${CI_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --json jobs --jq '[.jobs[] | select(.name == "verify" and .conclusion == "success")] | length')" -gt 0 ]]; then
-                      echo "Exact source ${GITHUB_SHA} passed CI in run ${CI_RUN_ID}."
-                      exit 0
-                    fi
-                  done
-
-                  echo "No successful ci / verify job exists for exact source ${GITHUB_SHA}." >&2
-                  exit 1
+              run: pnpm exec tsx ./tools/ci/release-gates.ts await-ci
 
     prepare-release:
         name: prepare release
@@ -124,13 +110,23 @@ jobs:
         outputs:
             release_sha: ${{ steps.release-commit.outputs.sha }}
         permissions:
-            contents: write
+            contents: read
         steps:
+            - name: Require the release deploy key
+              env:
+                  RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+              run: |
+                  if [[ -z "${RELEASE_DEPLOY_KEY}" ]]; then
+                    echo "Missing RELEASE_DEPLOY_KEY repository secret." >&2
+                    exit 1
+                  fi
+
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   fetch-depth: 0
-                  persist-credentials: false
+                  persist-credentials: true
                   ref: ${{ github.sha }}
+                  ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
             - uses: ./.github/actions/bootstrap-pnpm
 
             - name: Verify unchanged release targets
@@ -179,12 +175,11 @@ jobs:
             - name: Push release commit and tag atomically
               env:
                   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-                  GH_TOKEN: ${{ github.token }}
                   RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
               run: |
-                  gh auth setup-git
+                  git remote set-url origin "git@github.com:${GITHUB_REPOSITORY}.git"
                   if ! git push --atomic origin "HEAD:${DEFAULT_BRANCH}" "refs/tags/${RELEASE_TAG}"; then
-                    echo "The short-lived GITHUB_TOKEN could not advance ${DEFAULT_BRANCH}. Allow the release workflow to bypass the default-branch pull-request rule, then rerun from an unmodified source." >&2
+                    echo "The release deploy key could not atomically push ${DEFAULT_BRANCH} and ${RELEASE_TAG}." >&2
                     exit 1
                   fi
 

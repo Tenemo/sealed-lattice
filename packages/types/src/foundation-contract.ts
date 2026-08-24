@@ -83,36 +83,15 @@ export type SignedMailboxEnvelope = Readonly<
     }
 >;
 
-declare const participantIdentityBrand: unique symbol;
-
-/** A lowercase canonical participant identity derived from a roster ML-DSA-65 verification key. */
-export type ParticipantIdentity = ProtocolHash & {
-    readonly [participantIdentityBrand]: 'ParticipantIdentity';
-};
-
-const participantIdentityPattern = /^[0-9a-f]{128}$/u;
-
-export const isParticipantIdentity = (
-    value: unknown,
-): value is ParticipantIdentity =>
-    typeof value === 'string' && participantIdentityPattern.test(value);
-
-/** Parses the sole canonical string representation of a participant identity. */
-export const parseParticipantIdentity = (
-    value: unknown,
-): ParticipantIdentity => {
-    if (!isParticipantIdentity(value)) {
-        throw new TypeError(
-            'participant identity must contain exactly 128 lowercase hexadecimal characters.',
-        );
-    }
-
-    return value;
-};
-
 /** Roster sizes for which protocol parameters can be derived. */
 export const configurableParticipantCountRange = Object.freeze({
     minimum: 3,
+    maximum: 20,
+} as const);
+
+/** Option counts for which canonical structure and formulas are defined. */
+export const configurableOptionCountRange = Object.freeze({
+    minimum: 2,
     maximum: 20,
 } as const);
 
@@ -164,7 +143,7 @@ export const foundationProfile = Object.freeze({
     protocolName: 'sealed-lattice',
     protocolVersion: 1,
     ...prototypeRosterParameters,
-    optionCount: 20,
+    optionCount: 10,
     minimumScore: 1,
     maximumScore: 10,
     maximumIdentifierByteLength: 128,
@@ -185,11 +164,3 @@ export const stateCapabilityKinds = Object.freeze({
 
 export type StateCapabilityKind =
     (typeof stateCapabilityKinds)[keyof typeof stateCapabilityKinds];
-
-export const stateIntentKinds = Object.freeze({
-    output: 'output',
-    reservation: 'reservation',
-} as const);
-
-export type StateIntentKind =
-    (typeof stateIntentKinds)[keyof typeof stateIntentKinds];

@@ -2,7 +2,7 @@ use serde_json::{Map, Value, json};
 
 use super::command_fields::{
     invalid_value, required_canonical_u64_decimal, required_exact_lowercase_hex,
-    required_lowercase_hex_bytes, required_object, required_value,
+    required_lowercase_hex_bytes, required_object, required_u16, required_value,
 };
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::{
@@ -64,13 +64,6 @@ fn cursor_to_json(cursor: PrivateRandomCursor) -> Value {
             );
     }
     value
-}
-
-fn required_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<u16> {
-    let value = required_value(object, field_name)?
-        .as_u64()
-        .ok_or_else(|| invalid_value(format!("{field_name} must be an unsigned integer")))?;
-    u16::try_from(value).map_err(|_| invalid_value(format!("{field_name} does not fit u16")))
 }
 
 fn optional_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<Option<u16>> {

@@ -12,9 +12,13 @@ import type { TranscriptCoreKernelExports } from '../../../src/transcript-core-b
 import {
     hashByteLength,
     installedCommonProofVerificationBindingHash,
+    installedProofAttemptLineageIdentifier,
 } from './wire-fixtures.js';
 
 export const noSecondPollValue = 0xffff_ffff;
+const checkpointStableAttemptBindingHash = new Uint8Array(hashByteLength).fill(
+    0x62,
+);
 
 export const writeUnsigned32 = (
     memory: WebAssembly.Memory,
@@ -30,10 +34,34 @@ export const memoryBytes = (
     byteLength: number,
 ): Uint8Array => new Uint8Array(memory.buffer, pointer, byteLength);
 
+type LegacyCompactPublicKeyAlgebraicVerificationExports = Partial<{
+    sealed_lattice_compact_public_key_begin_algebraic_verification(
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        statusPointer: number,
+    ): number;
+    sealed_lattice_compact_public_key_resume_algebraic_verification(
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        checkpointPointer: number,
+        checkpointByteLength: number,
+        statusPointer: number,
+    ): number;
+}>;
+
 export const createMockKernelRuntime = (
     createCommonProofExports: (
         memory: WebAssembly.Memory,
-    ) => Partial<TranscriptCoreKernelExports>,
+    ) => Partial<TranscriptCoreKernelExports> &
+        LegacyCompactPublicKeyAlgebraicVerificationExports,
     initialMemoryPageCount = 64,
 ): TranscriptCoreKernelCommandRuntime => {
     const memory = new WebAssembly.Memory({
@@ -50,11 +78,232 @@ export const createMockKernelRuntime = (
         expect(pointer).toBeGreaterThan(0);
         expect(byteLength).toBeGreaterThan(0);
     };
+    const commonProofExports = createCommonProofExports(memory);
+    const legacyBegin =
+        commonProofExports.sealed_lattice_compact_public_key_begin_algebraic_verification;
+    const legacyResume =
+        commonProofExports.sealed_lattice_compact_public_key_resume_algebraic_verification;
+    let nextCompactPublicKeyInputHandle = 701;
+    const stagedCompactPublicKeyInputs = new Map<
+        number,
+        {
+            bindings: Uint8Array;
+            checkpoint: Uint8Array | undefined;
+            proof: Uint8Array;
+            proofCursor: number;
+            publicInput: Uint8Array;
+            publicInputCursor: number;
+        }
+    >();
+    const stagedCompactPublicKeyExports: Partial<TranscriptCoreKernelExports> =
+        legacyBegin === undefined && legacyResume === undefined
+            ? {}
+            : {
+                  sealed_lattice_compact_public_key_begin_algebraic_verification_input:
+                      (
+                          bindingsPointer,
+                          bindingsByteLength,
+                          proofByteLength,
+                          publicInputByteLength,
+                          checkpointPointer,
+                          checkpointByteLength,
+                          statusPointer,
+                      ) => {
+                          const inputHandle = nextCompactPublicKeyInputHandle;
+                          nextCompactPublicKeyInputHandle += 1;
+                          stagedCompactPublicKeyInputs.set(inputHandle, {
+                              bindings: memoryBytes(
+                                  memory,
+                                  bindingsPointer,
+                                  bindingsByteLength,
+                              ).slice(),
+                              checkpoint:
+                                  checkpointByteLength === 0
+                                      ? undefined
+                                      : memoryBytes(
+                                            memory,
+                                            checkpointPointer,
+                                            checkpointByteLength,
+                                        ).slice(),
+                              proof: new Uint8Array(proofByteLength),
+                              proofCursor: 0,
+                              publicInput: new Uint8Array(
+                                  publicInputByteLength,
+                              ),
+                              publicInputCursor: 0,
+                          });
+                          writeUnsigned32(memory, statusPointer, 0);
+                          return inputHandle;
+                      },
+                  sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk:
+                      (
+                          inputHandle,
+                          inputKind,
+                          byteOffset,
+                          chunkPointer,
+                          chunkByteLength,
+                      ) => {
+                          const staged =
+                              stagedCompactPublicKeyInputs.get(inputHandle);
+                          if (staged === undefined) {
+                              return 9;
+                          }
+                          const destination =
+                              inputKind === 1
+                                  ? staged.proof
+                                  : staged.publicInput;
+                          const cursor =
+                              inputKind === 1
+                                  ? staged.proofCursor
+                                  : staged.publicInputCursor;
+                          if (
+                              ![1, 2].includes(inputKind) ||
+                              byteOffset !== cursor ||
+                              byteOffset + chunkByteLength >
+                                  destination.byteLength
+                          ) {
+                              return 9;
+                          }
+                          destination.set(
+                              memoryBytes(
+                                  memory,
+                                  chunkPointer,
+                                  chunkByteLength,
+                              ),
+                              byteOffset,
+                          );
+                          if (inputKind === 1) {
+                              staged.proofCursor += chunkByteLength;
+                          } else {
+                              staged.publicInputCursor += chunkByteLength;
+                          }
+                          return 0;
+                      },
+                  sealed_lattice_compact_public_key_finish_algebraic_verification_input:
+                      (inputHandle, statusPointer) => {
+                          const staged =
+                              stagedCompactPublicKeyInputs.get(inputHandle);
+                          stagedCompactPublicKeyInputs.delete(inputHandle);
+                          if (
+                              staged === undefined ||
+                              staged.proofCursor !== staged.proof.byteLength ||
+                              staged.publicInputCursor !==
+                                  staged.publicInput.byteLength
+                          ) {
+                              writeUnsigned32(memory, statusPointer, 9);
+                              return 0;
+                          }
+                          const bindingsPointer = allocate(
+                              staged.bindings.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              bindingsPointer,
+                              staged.bindings.byteLength,
+                          ).set(staged.bindings);
+                          const proofPointer = allocate(
+                              staged.proof.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              proofPointer,
+                              staged.proof.byteLength,
+                          ).set(staged.proof);
+                          const publicInputPointer = allocate(
+                              staged.publicInput.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              publicInputPointer,
+                              staged.publicInput.byteLength,
+                          ).set(staged.publicInput);
+                          if (staged.checkpoint === undefined) {
+                              if (legacyBegin === undefined) {
+                                  writeUnsigned32(memory, statusPointer, 9);
+                                  return 0;
+                              }
+                              return legacyBegin(
+                                  bindingsPointer,
+                                  staged.bindings.byteLength,
+                                  proofPointer,
+                                  staged.proof.byteLength,
+                                  publicInputPointer,
+                                  staged.publicInput.byteLength,
+                                  statusPointer,
+                              );
+                          }
+                          if (legacyResume === undefined) {
+                              writeUnsigned32(memory, statusPointer, 9);
+                              return 0;
+                          }
+                          const checkpointPointer = allocate(
+                              staged.checkpoint.byteLength,
+                          );
+                          memoryBytes(
+                              memory,
+                              checkpointPointer,
+                              staged.checkpoint.byteLength,
+                          ).set(staged.checkpoint);
+                          return legacyResume(
+                              bindingsPointer,
+                              staged.bindings.byteLength,
+                              proofPointer,
+                              staged.proof.byteLength,
+                              publicInputPointer,
+                              staged.publicInput.byteLength,
+                              checkpointPointer,
+                              staged.checkpoint.byteLength,
+                              statusPointer,
+                          );
+                      },
+                  sealed_lattice_compact_public_key_cancel_algebraic_verification_input:
+                      (inputHandle) =>
+                          stagedCompactPublicKeyInputs.delete(inputHandle)
+                              ? 0
+                              : 9,
+              };
     const wasmExports: TranscriptCoreKernelExports = {
         memory,
         sealed_lattice_allocate: allocate,
+        sealed_lattice_common_proof_generation_copy_external_memory_accounting:
+            (_operationHandle, outputPointer, outputByteLength) => {
+                expect(outputByteLength).toBe(160);
+                const accounting = new BigUint64Array(
+                    memory.buffer,
+                    outputPointer,
+                    20,
+                );
+                accounting.set([
+                    1n,
+                    1_048_576n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                    1n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                ]);
+                return 0;
+            },
+        sealed_lattice_common_proof_generation_external_memory_accounting_byte_length:
+            () => 160,
+        sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count:
+            () => 323,
         sealed_lattice_deallocate: deallocate,
-        ...createCommonProofExports(memory),
+        ...commonProofExports,
+        ...stagedCompactPublicKeyExports,
     };
     let operationInProgress = false;
     return {
@@ -97,13 +346,69 @@ export const writeGenerationPoll = (
     return 0;
 };
 
+export const createResetSafeCommonProofCursorManifest = (
+    streamAttemptIdentifier: Uint8Array = installedProofAttemptLineageIdentifier,
+    derivationBindingHash: Uint8Array = checkpointStableAttemptBindingHash,
+    familySchemaIdentifier = 0x1217,
+): Uint8Array<ArrayBuffer> => {
+    if (streamAttemptIdentifier.byteLength !== 32) {
+        throw new TypeError(
+            'The cursor-manifest stream-attempt identifier must contain exactly 32 bytes.',
+        );
+    }
+    if (derivationBindingHash.byteLength !== hashByteLength) {
+        throw new TypeError(
+            'The cursor-manifest derivation binding hash must contain exactly 64 bytes.',
+        );
+    }
+    const prefixByteLength = 19;
+    const identityByteLength = 98;
+    const privateCoinCursorManifest = new Uint8Array(
+        prefixByteLength + identityByteLength,
+    );
+    privateCoinCursorManifest.set(
+        Uint8Array.of(0x53, 0x4c, 0x43, 0x50, 0x43, 0x4d, 0x30, 0x33),
+    );
+    const privateCoinView = new DataView(privateCoinCursorManifest.buffer);
+    privateCoinView.setUint16(8, 3, true);
+    privateCoinCursorManifest[10] = 1;
+    privateCoinView.setUint32(11, 0, true);
+    privateCoinView.setUint32(15, 0, true);
+    privateCoinView.setUint16(19, familySchemaIdentifier, true);
+    privateCoinCursorManifest.set(derivationBindingHash, 21);
+    privateCoinCursorManifest.set(streamAttemptIdentifier, 85);
+
+    const generationManifestPrefixByteLength = 88;
+    const generationCursorManifest = new Uint8Array(
+        generationManifestPrefixByteLength + privateCoinCursorManifest.length,
+    );
+    generationCursorManifest.set(
+        Uint8Array.of(0x53, 0x4c, 0x43, 0x47, 0x43, 0x4d, 0x30, 0x31),
+    );
+    const generationView = new DataView(generationCursorManifest.buffer);
+    generationView.setUint16(8, 1, true);
+    generationView.setUint16(10, 0, true);
+    generationView.setUint32(12, generationCursorManifest.byteLength, true);
+    generationView.setUint32(16, privateCoinCursorManifest.byteLength, true);
+    generationView.setUint32(20, 0, true);
+    generationCursorManifest.set(
+        privateCoinCursorManifest,
+        generationManifestPrefixByteLength,
+    );
+    privateCoinCursorManifest.fill(0);
+    return generationCursorManifest;
+};
+
 export const createCheckpointGenerationKernelFixture = (
-    checkpointCursorBytes: readonly Uint8Array[] = [
-        Uint8Array.from([1, 3, 3, 7, 9, 2, 5]),
-    ],
+    checkpointCursorManifestBytes: Uint8Array = createResetSafeCommonProofCursorManifest(),
+    options: Readonly<{
+        applicationStatementSchemaIdentifier?: number;
+        commonProofRuntimeBindingHash?: Uint8Array;
+        proofAttemptLineageIdentifier?: Uint8Array;
+    }> = {},
 ): Readonly<{
     canonicalStateBytes: Uint8Array<ArrayBuffer>;
-    cursorBytes: Uint8Array<ArrayBuffer>;
+    cursorManifestBytes: Uint8Array<ArrayBuffer>;
     observations: {
         acknowledgedCheckpointCount: number;
         discardedCheckpointCount: number;
@@ -113,8 +418,22 @@ export const createCheckpointGenerationKernelFixture = (
     stableAttemptBindingHash: Uint8Array<ArrayBuffer>;
 }> => {
     const canonicalStateBytes = new Uint8Array(37).fill(0x91);
-    const cursorBytes = Uint8Array.from(checkpointCursorBytes[0] ?? []);
-    const stableAttemptBindingHash = new Uint8Array(hashByteLength).fill(0x62);
+    const cursorManifestBytes = Uint8Array.from(checkpointCursorManifestBytes);
+    const stableAttemptBindingHash = checkpointStableAttemptBindingHash.slice();
+    const commonProofRuntimeBindingHash =
+        options.commonProofRuntimeBindingHash ?? stableAttemptBindingHash;
+    if (commonProofRuntimeBindingHash.byteLength !== hashByteLength) {
+        throw new TypeError(
+            'The fixture common-proof runtime binding hash must contain exactly 64 bytes.',
+        );
+    }
+    const proofAttemptLineageIdentifier =
+        options.proofAttemptLineageIdentifier ?? new Uint8Array(32).fill(0x74);
+    if (proofAttemptLineageIdentifier.byteLength !== 32) {
+        throw new TypeError(
+            'The fixture proof-attempt lineage identifier must contain exactly 32 bytes.',
+        );
+    }
     const observations = {
         acknowledgedCheckpointCount: 0,
         discardedCheckpointCount: 0,
@@ -123,6 +442,60 @@ export const createCheckpointGenerationKernelFixture = (
     let phase: 'checkpoint' | 'complete' | 'finished' | 'retired' =
         'checkpoint';
     const runtime = createMockKernelRuntime((memory) => ({
+        sealed_lattice_common_proof_describe_generation_family_adapter: (
+            adapterHandle,
+            runtimeBindingHashOutputPointer,
+            generationAuthorizationHashOutputPointer,
+            proofAttemptLineageIdentifierOutputPointer,
+            checkpointLineageIdentifierOutputPointer,
+            applicationStatementSchemaIdentifierOutputPointer,
+            statusPointer,
+        ) => {
+            expect(adapterHandle).toBe(71);
+            memoryBytes(
+                memory,
+                runtimeBindingHashOutputPointer,
+                hashByteLength,
+            ).set(commonProofRuntimeBindingHash);
+            memoryBytes(
+                memory,
+                generationAuthorizationHashOutputPointer,
+                hashByteLength,
+            ).fill(0x73);
+            memoryBytes(
+                memory,
+                proofAttemptLineageIdentifierOutputPointer,
+                32,
+            ).set(proofAttemptLineageIdentifier);
+            memoryBytes(
+                memory,
+                checkpointLineageIdentifierOutputPointer,
+                32,
+            ).fill(0x75);
+            writeUnsigned32(
+                memory,
+                applicationStatementSchemaIdentifierOutputPointer,
+                options.applicationStatementSchemaIdentifier ?? 0x1217,
+            );
+            writeUnsigned32(memory, statusPointer, 0);
+            return 0;
+        },
+        sealed_lattice_common_proof_prepare_generation_family_adapter: (
+            adapterHandle,
+            checkpointStatePointer,
+            checkpointStateByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
+            statusPointer,
+        ) => {
+            expect(adapterHandle).toBe(71);
+            expect(checkpointStatePointer).toBe(0);
+            expect(checkpointStateByteLength).toBe(0);
+            expect(generationCursorManifestPointer).toBe(0);
+            expect(generationCursorManifestByteLength).toBe(0);
+            writeUnsigned32(memory, statusPointer, 0);
+            return 81;
+        },
         sealed_lattice_common_proof_begin_generation: (
             preparedGenerationHandle,
             statusPointer,
@@ -154,11 +527,11 @@ export const createCheckpointGenerationKernelFixture = (
             operationHandle,
             safeBoundaryOrdinalPointer,
             stateByteLengthPointer,
-            cursorCountPointer,
+            cursorManifestByteLengthPointer,
         ) => {
             expect(operationHandle).toBe(91);
             expect(phase).toBe('checkpoint');
-            writeUnsigned32(memory, safeBoundaryOrdinalPointer, 4);
+            writeUnsigned32(memory, safeBoundaryOrdinalPointer, 0);
             writeUnsigned32(
                 memory,
                 stateByteLengthPointer,
@@ -166,8 +539,8 @@ export const createCheckpointGenerationKernelFixture = (
             );
             writeUnsigned32(
                 memory,
-                cursorCountPointer,
-                checkpointCursorBytes.length,
+                cursorManifestByteLengthPointer,
+                cursorManifestBytes.byteLength,
             );
             return 0;
         },
@@ -183,36 +556,15 @@ export const createCheckpointGenerationKernelFixture = (
             );
             return 0;
         },
-        sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length: (
-            operationHandle,
-            cursorIndex,
-            statusPointer,
-        ) => {
-            expect(operationHandle).toBe(91);
-            const selectedCursorBytes = checkpointCursorBytes[cursorIndex];
-            if (selectedCursorBytes === undefined) {
-                throw new Error('The checkpoint cursor index is unavailable.');
-            }
-            writeUnsigned32(memory, statusPointer, 0);
-            return selectedCursorBytes.byteLength;
-        },
-        sealed_lattice_common_proof_generation_copy_checkpoint_cursor: (
-            operationHandle,
-            cursorIndex,
-            outputPointer,
-            outputByteLength,
-        ) => {
-            expect(operationHandle).toBe(91);
-            const selectedCursorBytes = checkpointCursorBytes[cursorIndex];
-            if (selectedCursorBytes === undefined) {
-                throw new Error('The checkpoint cursor index is unavailable.');
-            }
-            expect(outputByteLength).toBe(selectedCursorBytes.byteLength);
-            memoryBytes(memory, outputPointer, outputByteLength).set(
-                selectedCursorBytes,
-            );
-            return 0;
-        },
+        sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest:
+            (operationHandle, outputPointer, outputByteLength) => {
+                expect(operationHandle).toBe(91);
+                expect(outputByteLength).toBe(cursorManifestBytes.byteLength);
+                memoryBytes(memory, outputPointer, outputByteLength).set(
+                    cursorManifestBytes,
+                );
+                return 0;
+            },
         sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash:
             (operationHandle, outputPointer, outputByteLength) => {
                 expect(operationHandle).toBe(91);
@@ -269,7 +621,7 @@ export const createCheckpointGenerationKernelFixture = (
     }));
     return {
         canonicalStateBytes,
-        cursorBytes,
+        cursorManifestBytes,
         observations,
         runtime,
         stableAttemptBindingHash,
@@ -298,7 +650,7 @@ export const createVerifiedApplicationFixture = async (input?: {
     }>
 > => {
     const authorizationFrame = Uint8Array.from(
-        { length: 746 },
+        { length: 742 },
         (_unused, byteIndex) => (byteIndex * 29 + 17) & 0xff,
     );
     const proofApplicationSlotHash = new Uint8Array(hashByteLength).fill(0x71);

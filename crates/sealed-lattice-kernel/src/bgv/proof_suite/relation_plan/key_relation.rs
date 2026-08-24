@@ -1,7 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem::size_of,
+};
 
-use num_bigint::{BigInt, BigUint};
-use num_traits::{One, Zero};
+use num_bigint::BigUint;
 
 use crate::bgv::setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES};
 
@@ -12,6 +14,7 @@ use super::{
     expressions::strictly_sorted_unique,
     integer_lift::{
         RelationIntegerLiftBatchDescriptor, RelationIntegerLiftComponentDescriptor,
+        RelationIntegerLiftLinearTermDescriptor,
         RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
         RelationIntegerLiftReversedColumnBindingDescriptor,
     },
@@ -21,13 +24,60 @@ use super::{
     },
 };
 
-const TRIT_RADIX: u64 = 3;
+pub(super) const TRIT_RADIX: u64 = 3;
 pub(super) const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
 pub(super) const MATERIAL_DIGIT_TRIT_COUNT: usize = 17;
-const MODULAR_QUOTIENT_BIT_COUNT: usize = 17;
-pub(super) const TRUSTEE_QUOTIENT_LOW_TRIT_COUNT: usize = 9;
-pub(super) const TRUSTEE_QUOTIENT_HIGH_RADIX: u16 = 19_683;
-pub(super) const TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE: u64 = 49_207;
+pub(crate) const MODULAR_QUOTIENT_BIT_COUNT: usize = 17;
+pub(crate) const MODULAR_QUOTIENT_VALUE_COUNT: u64 = 1_u64 << MODULAR_QUOTIENT_BIT_COUNT;
+// The canonical least-nonnegative anchor equation can attain quotient +65,536
+// but cannot attain -65,536. Keep all 17-bit values and shift the interval to
+// the exact complete range [-65,535, 65,536].
+pub(crate) const MODULAR_QUOTIENT_ENCODING_OFFSET: u64 = MODULAR_QUOTIENT_VALUE_COUNT / 2 - 1;
+#[cfg(test)]
+pub(crate) const MODULAR_QUOTIENT_MINIMUM: i64 = -(MODULAR_QUOTIENT_ENCODING_OFFSET as i64);
+#[cfg(test)]
+pub(crate) const MODULAR_QUOTIENT_MAXIMUM: i64 =
+    (MODULAR_QUOTIENT_VALUE_COUNT - MODULAR_QUOTIENT_ENCODING_OFFSET - 1) as i64;
+pub(super) const TRUSTEE_QUOTIENT_LOW_TRIT_COUNT: usize = 10;
+pub(super) const TRUSTEE_QUOTIENT_HIGH_RADIX: u16 = 59_049;
+pub(crate) const TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE: u64 = 147_622;
+pub(super) const EXACT_INTEGER_LIFT_RADIX: u64 = TRUSTEE_QUOTIENT_HIGH_RADIX as u64;
+pub(super) const EXACT_INTEGER_LIFT_RADIX_TRIT_COUNT: usize = TRUSTEE_QUOTIENT_LOW_TRIT_COUNT;
+
+pub(super) struct ExactRadixDigitColumnCatalog {
+    ordered_entries: Box<[(u32, Box<[u32]>)]>,
+}
+
+impl ExactRadixDigitColumnCatalog {
+    pub(super) fn len(&self) -> usize {
+        self.ordered_entries.len()
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = &(u32, Box<[u32]>)> {
+        self.ordered_entries.iter()
+    }
+
+    pub(super) fn values(&self) -> impl Iterator<Item = &Box<[u32]>> {
+        self.ordered_entries.iter().map(|(_, values)| values)
+    }
+}
+
+impl FromIterator<(u32, Box<[u32]>)> for ExactRadixDigitColumnCatalog {
+    fn from_iter<Entries: IntoIterator<Item = (u32, Box<[u32]>)>>(entries: Entries) -> Self {
+        Self {
+            ordered_entries: entries.into_iter().collect::<Vec<_>>().into_boxed_slice(),
+        }
+    }
+}
+
+impl<'catalog> IntoIterator for &'catalog ExactRadixDigitColumnCatalog {
+    type Item = &'catalog (u32, Box<[u32]>);
+    type IntoIter = core::slice::Iter<'catalog, (u32, Box<[u32]>)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.ordered_entries.iter()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SameSecretRelationPlanInput {
@@ -39,7 +89,6 @@ pub(crate) struct SameSecretRelationPlanInput {
     pub(crate) sharing_data_modulus_indices: Vec<u16>,
     pub(crate) commitment_data_modulus_indices: Vec<u16>,
     pub(crate) commitment_module_rank: u16,
-    pub(crate) first_mask_purpose: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,7 +101,6 @@ pub(crate) struct PublicKeyShareRelationPlanInput {
     pub(crate) commitment_data_modulus_indices: Vec<u16>,
     pub(crate) commitment_module_rank: u16,
     pub(crate) plaintext_modulus: u64,
-    pub(crate) first_mask_purpose: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +117,6 @@ pub(super) struct KeyRelationGeometry {
     commitment_module_rank: u16,
     plaintext_modulus: Option<u64>,
     schedule_position: Option<u32>,
-    first_mask_purpose: u16,
 }
 
 pub(super) struct TrusteeKeyRelationGeometryInput {
@@ -83,7 +130,6 @@ pub(super) struct TrusteeKeyRelationGeometryInput {
     pub(super) commitment_data_modulus_indices: Vec<u16>,
     pub(super) commitment_module_rank: u16,
     pub(super) plaintext_modulus: u64,
-    pub(super) first_mask_purpose: u16,
 }
 
 impl KeyRelationGeometry {
@@ -104,7 +150,6 @@ impl KeyRelationGeometry {
             commitment_module_rank: input.commitment_module_rank,
             plaintext_modulus: None,
             schedule_position: None,
-            first_mask_purpose: input.first_mask_purpose,
         }
     }
 
@@ -123,7 +168,6 @@ impl KeyRelationGeometry {
             commitment_module_rank: input.commitment_module_rank,
             plaintext_modulus: Some(input.plaintext_modulus),
             schedule_position: None,
-            first_mask_purpose: input.first_mask_purpose,
         }
     }
 
@@ -150,7 +194,6 @@ impl KeyRelationGeometry {
             commitment_module_rank: input.commitment_module_rank,
             plaintext_modulus: Some(input.plaintext_modulus),
             schedule_position: Some(input.schedule_position),
-            first_mask_purpose: input.first_mask_purpose,
         })
     }
 
@@ -161,7 +204,6 @@ impl KeyRelationGeometry {
         material_column_degree_bound_exclusive: u64,
         public_polynomial_column_degree_bound_exclusive: u64,
         target_modulus_indices: Vec<u16>,
-        first_mask_purpose: u16,
     ) -> Self {
         Self {
             ring_degree,
@@ -176,7 +218,6 @@ impl KeyRelationGeometry {
             commitment_module_rank: 0,
             plaintext_modulus: None,
             schedule_position: None,
-            first_mask_purpose,
         }
     }
 
@@ -215,8 +256,6 @@ impl KeyRelationGeometry {
                 != (self.commitment_module_rank == 0))
             || (!self.commitment_data_modulus_indices.is_empty()
                 && !strictly_sorted_unique(&self.commitment_data_modulus_indices))
-            || self.first_mask_purpose == 0
-            || self.first_mask_purpose >= 0xff00
         {
             return Err(RelationPlanError::InvalidDomain);
         }
@@ -235,14 +274,14 @@ impl KeyRelationGeometry {
                 return Err(RelationPlanError::NonCanonicalOrder);
             }
         }
-        let expected_evaluation_domain = self
+        let opening_degree_domain = self
             .opening_degree_bound_exclusive
             .checked_next_power_of_two()
-            .and_then(|degree_domain| {
-                degree_domain.checked_mul(u64::from(context.evaluation_blowup_factor))
-            })
             .ok_or(RelationPlanError::CountOverflow)?;
-        if expected_evaluation_domain != self.evaluation_domain_size {
+        if !self
+            .evaluation_domain_size
+            .is_multiple_of(opening_degree_domain)
+        {
             return Err(RelationPlanError::InvalidDomain);
         }
         if self.plaintext_modulus.is_some() {
@@ -374,6 +413,11 @@ pub(super) enum KeyVerifierSourceKey {
         field_ordinal: u64,
         list_ordinal: Option<u64>,
     },
+    NestedStatementRoot {
+        field_ordinal: u64,
+        list_ordinal: u64,
+        nested_field_ordinal: u64,
+    },
     BdlopMatrix {
         data_modulus_index: u16,
         matrix_part: u16,
@@ -439,6 +483,12 @@ pub(super) struct BoundedUnsignedColumn {
     ordered_digit_column_ordinals: Vec<u32>,
 }
 
+impl BoundedUnsignedColumn {
+    pub(super) fn ordered_digit_column_ordinals(&self) -> &[u32] {
+        &self.ordered_digit_column_ordinals
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct BoundedMaterialDigitWitnessLayout {
     pub(super) target_column_ordinal: u32,
@@ -451,21 +501,20 @@ pub(super) struct UpperBoundComparatorWitnessLayout {
     pub(super) borrow_column_ordinals: Vec<u32>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct SplitIntegerVector {
     pub(super) halves: [u32; 2],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct ShiftedSmallVector {
     pub(super) coefficients: SplitIntegerVector,
     pub(super) offset: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct ReversibleShiftedSmallVector {
     pub(super) source: ShiftedSmallVector,
-    pub(super) reversed: SplitIntegerVector,
 }
 
 #[derive(Clone, Debug)]
@@ -474,9 +523,36 @@ pub(super) struct AnchorOpeningWitness {
     hiding_errors: Vec<ShiftedSmallVector>,
 }
 
+impl AnchorOpeningWitness {
+    pub(super) fn hiding_secrets(&self) -> &[ReversibleShiftedSmallVector] {
+        &self.hiding_secrets
+    }
+
+    pub(super) fn hiding_errors(&self) -> &[ShiftedSmallVector] {
+        &self.hiding_errors
+    }
+
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum([
+            retained_vector_allocation_byte_length(&self.hiding_secrets),
+            retained_vector_allocation_byte_length(&self.hiding_errors),
+        ])
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct AnchorQuotientWitness {
     rows: Vec<[u32; 2]>,
+}
+
+impl AnchorQuotientWitness {
+    pub(super) fn rows(&self) -> &[[u32; 2]] {
+        &self.rows
+    }
+
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        retained_vector_allocation_byte_length(&self.rows)
+    }
 }
 
 pub(super) struct AnchorEquationInputs<'input> {
@@ -536,14 +612,21 @@ impl<'input> PublicKeyEquationInputs<'input> {
 
 #[derive(Clone, Debug)]
 pub(super) struct TrusteeAnchorOpeningWitness {
-    hiding_secrets: Vec<SplitIntegerVector>,
-    hiding_errors: Vec<ShiftedSmallVector>,
+    pub(super) hiding_secrets: Vec<SplitIntegerVector>,
+    pub(super) hiding_errors: Vec<ShiftedSmallVector>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct TrusteeRadixThreeQuotientWitness {
-    low_quotients: [u32; 2],
-    high_carries: [u32; 2],
+    pub(super) low_quotients: [u32; 2],
+    pub(super) high_carries: [u32; 2],
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct RecenteredVerifierVectorWitness {
+    pub(super) canonical: SplitIntegerVector,
+    pub(super) centered: ReversibleShiftedSmallVector,
+    pub(super) carry_columns: [u32; 2],
 }
 
 #[derive(Clone, Debug)]
@@ -555,7 +638,7 @@ pub(super) struct TargetCommittedMaterialVector {
 
 #[derive(Clone, Debug)]
 pub(super) struct TargetBoundedUnsignedVector {
-    pub(super) digit_columns_by_half: [[u32; 2]; 2],
+    pub(super) digit_columns_by_half: [Vec<u32>; 2],
     pub(super) trits_by_half: [Vec<u32>; 2],
     pub(super) upper_bound_comparators: Vec<UpperBoundComparatorWitnessLayout>,
 }
@@ -563,7 +646,99 @@ pub(super) struct TargetBoundedUnsignedVector {
 #[derive(Clone, Debug)]
 pub(super) struct TargetCenteredVector {
     pub(super) value: ShiftedSmallVector,
+    pub(super) trit_encoding_offset: u64,
     pub(super) trits_by_half: [Vec<u32>; 2],
+}
+
+fn retained_vector_allocation_byte_length<Value>(
+    values: &Vec<Value>,
+) -> Result<u64, RelationPlanError> {
+    u64::try_from(values.capacity())
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<Value>() as u64))
+        .ok_or(RelationPlanError::CountOverflow)
+}
+
+fn checked_retained_allocation_sum(
+    byte_lengths: impl IntoIterator<Item = Result<u64, RelationPlanError>>,
+) -> Result<u64, RelationPlanError> {
+    byte_lengths
+        .into_iter()
+        .try_fold(0_u64, |total, byte_length| {
+            total
+                .checked_add(byte_length?)
+                .ok_or(RelationPlanError::CountOverflow)
+        })
+}
+
+impl BoundedMaterialDigitWitnessLayout {
+    fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        retained_vector_allocation_byte_length(&self.trit_column_ordinals)
+    }
+}
+
+impl UpperBoundComparatorWitnessLayout {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            [
+                retained_vector_allocation_byte_length(&self.difference_digits),
+                retained_vector_allocation_byte_length(&self.borrow_column_ordinals),
+            ]
+            .into_iter()
+            .chain(
+                self.difference_digits
+                    .iter()
+                    .map(BoundedMaterialDigitWitnessLayout::retained_heap_byte_length),
+            ),
+        )
+    }
+}
+
+impl TargetCommittedMaterialVector {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            self.trits_by_half
+                .iter()
+                .map(retained_vector_allocation_byte_length)
+                .chain(std::iter::once(retained_vector_allocation_byte_length(
+                    &self.upper_bound_comparators,
+                )))
+                .chain(
+                    self.upper_bound_comparators
+                        .iter()
+                        .map(UpperBoundComparatorWitnessLayout::retained_heap_byte_length),
+                ),
+        )
+    }
+}
+
+impl TargetBoundedUnsignedVector {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            self.digit_columns_by_half
+                .iter()
+                .chain(&self.trits_by_half)
+                .map(retained_vector_allocation_byte_length)
+                .chain(std::iter::once(retained_vector_allocation_byte_length(
+                    &self.upper_bound_comparators,
+                )))
+                .chain(
+                    self.upper_bound_comparators
+                        .iter()
+                        .map(UpperBoundComparatorWitnessLayout::retained_heap_byte_length),
+                ),
+        )
+    }
+}
+
+impl TargetCenteredVector {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            self.trits_by_half
+                .iter()
+                .map(retained_vector_allocation_byte_length),
+        )
+    }
 }
 
 #[derive(Default)]
@@ -572,6 +747,24 @@ struct PendingIntegerLiftBatch {
     negacyclic_automorphism_permutations:
         Vec<RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor>,
     components: Vec<RelationIntegerLiftComponentDescriptor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(in crate::bgv::proof_suite::relation_plan) struct PendingFullRingNegacyclicProduct {
+    negative: bool,
+    selected_half: super::integer_lift::RelationIntegerLiftFullRingHalf,
+    multiplicand: SplitIntegerVector,
+    multiplier: ReversibleShiftedSmallVector,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FullRingProductAccumulatorDependency {
+    negative: bool,
+    selected_half: super::integer_lift::RelationIntegerLiftFullRingHalf,
+    multiplicand_columns: [u32; 2],
+    multiplier_columns: [u32; 2],
+    reversed_multiplier_columns: [u32; 2],
+    multiplier_offsets: [u64; 2],
 }
 
 pub(super) struct KeyRelationPlanBuilder<'context> {
@@ -584,12 +777,54 @@ pub(super) struct KeyRelationPlanBuilder<'context> {
     source_ordinals: BTreeMap<KeyVerifierSourceKey, u32>,
     ordered_columns: Vec<RelationColumnDescriptor>,
     semantic_cells_by_column: BTreeMap<u32, (SignedIntegerInterval, RelationBoundCertificate)>,
+    exact_radix_digits_by_column: BTreeMap<u32, Vec<u32>>,
+    exact_carry_columns_by_component: BTreeMap<
+        (
+            SuiteModulusReference,
+            Vec<RelationIntegerLiftLinearTermDescriptor>,
+            Vec<PendingFullRingNegacyclicProduct>,
+        ),
+        Vec<u32>,
+    >,
+    full_ring_suffix_columns_by_dependency:
+        BTreeMap<((SuiteModulusReference, u16), SplitIntegerVector), [u32; 2]>,
+    full_ring_transpose_columns_by_dependency: BTreeMap<
+        (
+            (SuiteModulusReference, u16),
+            super::integer_lift::RelationIntegerLiftFullRingHalf,
+            SplitIntegerVector,
+        ),
+        [u32; 2],
+    >,
+    linear_evaluation_columns_by_dependency: BTreeMap<
+        (
+            (SuiteModulusReference, u16),
+            Vec<RelationIntegerLiftLinearTermDescriptor>,
+        ),
+        u32,
+    >,
+    product_accumulator_columns_by_dependency: BTreeMap<
+        (
+            (SuiteModulusReference, u16),
+            Vec<FullRingProductAccumulatorDependency>,
+        ),
+        u32,
+    >,
+    reversed_columns_by_source_halves: BTreeMap<[u32; 2], SplitIntegerVector>,
     bound_trees: Vec<RelationTreeDescriptor>,
     base_tree_columns: Vec<u32>,
     auxiliary_tree_columns: Vec<u32>,
     pending_integer_lift_batches: BTreeMap<(SuiteModulusReference, u16), PendingIntegerLiftBatch>,
     ordered_integer_lift_batches: Vec<RelationIntegerLiftBatchDescriptor>,
     ordered_constraints: Vec<RelationConstraintDescriptor>,
+}
+
+impl KeyRelationPlanBuilder<'_> {
+    pub(in crate::bgv::proof_suite::relation_plan) fn exact_radix_digits_by_column(
+        &self,
+    ) -> &BTreeMap<u32, Vec<u32>> {
+        &self.exact_radix_digits_by_column
+    }
 }
 
 mod column_builder;

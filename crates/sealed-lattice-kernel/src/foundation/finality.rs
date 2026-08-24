@@ -5,9 +5,9 @@ use super::schemas::{
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalStreamDomain,
-    CanonicalStreamVerifier, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType,
-    FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
-    SignedCarrier, StateCapabilityKind, StateCertificate, StateError,
+    CanonicalStreamReadbackVerifier, CanonicalStreamVerifier, CanonicalTuple, FOUNDATION_PROFILE,
+    FoundationObjectType, FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity,
+    RefusalReason, Roster, SignedCarrier, StateCapabilityKind, StateCertificate, StateError,
     StateReservationVerificationInput, StateVerifier, StreamDescriptor, VerificationResult,
     VerifiedCanonicalStreamSummary, VerifiedStateOutput, VerifiedTranscriptObject,
     derive_canonical_stream_descriptor, hash_foundation_tuple_512,
@@ -20,6 +20,8 @@ pub const FINALITY_CERTIFICATE_SCHEMA_IDENTIFIER: u16 = 0x1616;
 
 const FINALITY_SCHEMA_VERSION: u16 = 1;
 const FINALITY_STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/finality/statement/v1";
+const TARGET_RELEASE_AUTHORIZATION_HASH_DOMAIN: &str =
+    "sealed-lattice/state/target-authorization/v1";
 
 /// The shared finality statement signed by the quorum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,25 +279,48 @@ pub struct VerifiedEvaluatorReplay {
     verified_setup_source_hash: Hash512,
     verified_aggregate_source_hash: Hash512,
     top_count: u16,
-    target_identifier_descriptor: StreamDescriptor,
-    target_order_descriptor: StreamDescriptor,
+    target_level: u16,
+    decrypt_scaling: u64,
     target_identifier_stream: VerifiedCanonicalStreamSummary,
     target_order_stream: VerifiedCanonicalStreamSummary,
+}
+
+/// Recomputed outputs of the deterministic evaluator relation. This value is
+/// crate-private and becomes authoritative only when joined to the exact
+/// board-ingested replay object below.
+pub(crate) struct VerifiedEvaluatorReplayRelationOutput {
+    pub(crate) roster_hash: Hash512,
+    pub(crate) top_count: u16,
+    pub(crate) target_level: u16,
+    pub(crate) decrypt_scaling: u64,
+    pub(crate) target_identifier_stream: VerifiedCanonicalStreamSummary,
+    pub(crate) target_order_stream: VerifiedCanonicalStreamSummary,
 }
 
 impl VerifiedEvaluatorReplay {
     pub(crate) fn from_verified_relation(
         object: &VerifiedTranscriptObject,
-        roster_hash: Hash512,
-        top_count: u16,
-        target_identifier_stream: VerifiedCanonicalStreamSummary,
-        target_order_stream: VerifiedCanonicalStreamSummary,
+        relation_output: VerifiedEvaluatorReplayRelationOutput,
         limits: &CanonicalDecodeLimits,
     ) -> SchemaResult<Self> {
+        let VerifiedEvaluatorReplayRelationOutput {
+            roster_hash,
+            top_count,
+            target_level,
+            decrypt_scaling,
+            target_identifier_stream,
+            target_order_stream,
+        } = relation_output;
         if top_count == 0 || top_count > FOUNDATION_PROFILE.option_count {
             return Err(schema_error(
                 RefusalReason::OutsideSupportedProfile,
                 "verified evaluator replay top count is outside the action profile",
+            ));
+        }
+        if decrypt_scaling == 0 {
+            return Err(schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "verified evaluator replay target scaling must be nonzero",
             ));
         }
         if object.object_type() != FoundationObjectType::EvaluatorReplay {
@@ -316,15 +341,13 @@ impl VerifiedEvaluatorReplay {
         let payload = EvaluatorReplayPayload::decode(&envelope.payload_bytes, limits)?;
         let verified_setup_source_hash = payload.verified_setup_source_hash();
         let verified_aggregate_source_hash = payload.verified_aggregate_source_hash();
-        let target_identifier_descriptor = payload.target_identifier_descriptor().clone();
-        let target_order_descriptor = payload.target_order_descriptor().clone();
         require_replay_stream(
-            &target_identifier_descriptor,
+            payload.target_identifier_descriptor(),
             &target_identifier_stream,
             CanonicalStreamDomain::ReplayTargetIdentifierCiphertext,
         )?;
         require_replay_stream(
-            &target_order_descriptor,
+            payload.target_order_descriptor(),
             &target_order_stream,
             CanonicalStreamDomain::ReplayTargetOrderCiphertext,
         )?;
@@ -337,8 +360,8 @@ impl VerifiedEvaluatorReplay {
             verified_setup_source_hash,
             verified_aggregate_source_hash,
             top_count,
-            target_identifier_descriptor,
-            target_order_descriptor,
+            target_level,
+            decrypt_scaling,
             target_identifier_stream,
             target_order_stream,
         })
@@ -346,6 +369,22 @@ impl VerifiedEvaluatorReplay {
 
     pub fn object_hash(&self) -> Hash512 {
         self.object.object_hash()
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> Hash512 {
+        self.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> Hash512 {
+        self.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> Hash512 {
+        self.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> Hash512 {
+        self.roster_hash
     }
 
     pub const fn verified_setup_source_hash(&self) -> Hash512 {
@@ -360,12 +399,20 @@ impl VerifiedEvaluatorReplay {
         self.top_count
     }
 
+    pub const fn target_level(&self) -> u16 {
+        self.target_level
+    }
+
+    pub const fn decrypt_scaling(&self) -> u64 {
+        self.decrypt_scaling
+    }
+
     pub const fn target_identifier_descriptor(&self) -> &StreamDescriptor {
-        &self.target_identifier_descriptor
+        self.target_identifier_stream.stream_descriptor()
     }
 
     pub const fn target_order_descriptor(&self) -> &StreamDescriptor {
-        &self.target_order_descriptor
+        self.target_order_stream.stream_descriptor()
     }
 
     pub const fn target_identifier_full_object_digest(&self) -> Hash512 {
@@ -386,8 +433,8 @@ impl VerifiedEvaluatorReplay {
             verified_setup_source_hash: self.verified_setup_source_hash,
             verified_aggregate_source_hash: self.verified_aggregate_source_hash,
             top_count: self.top_count,
-            target_identifier_descriptor: self.target_identifier_descriptor.clone(),
-            target_order_descriptor: self.target_order_descriptor.clone(),
+            target_level: self.target_level,
+            decrypt_scaling: self.decrypt_scaling,
             target_identifier_stream: self.target_identifier_stream.clone(),
             target_order_stream: self.target_order_stream.clone(),
         }
@@ -401,7 +448,9 @@ pub struct VerifiedFinality {
     finality_hash: Hash512,
     verified_evaluator_replay: VerifiedEvaluatorReplay,
     finality_objects: Vec<VerifiedTranscriptObject>,
-    state_outputs: Vec<VerifiedStateOutput>,
+    // Retaining these opaque outputs keeps the exact state capabilities that
+    // authorized finality alive for the lifetime of this capability.
+    _retained_state_outputs: Vec<VerifiedStateOutput>,
 }
 
 impl VerifiedFinality {
@@ -430,6 +479,14 @@ impl VerifiedFinality {
         self.verified_evaluator_replay.top_count()
     }
 
+    pub const fn target_level(&self) -> u16 {
+        self.verified_evaluator_replay.target_level()
+    }
+
+    pub const fn decrypt_scaling(&self) -> u64 {
+        self.verified_evaluator_replay.decrypt_scaling()
+    }
+
     pub const fn target_identifier_descriptor(&self) -> &StreamDescriptor {
         self.verified_evaluator_replay
             .target_identifier_descriptor()
@@ -449,6 +506,43 @@ impl VerifiedFinality {
             .target_order_full_object_digest()
     }
 
+    /// Derives the reset-safe target-release authorization only from retained
+    /// finality and verifier-authenticated target stream authority.
+    pub(crate) fn target_release_authorization_hash(&self) -> SchemaResult<Hash512> {
+        Ok(hash_foundation_tuple_512(
+            TARGET_RELEASE_AUTHORIZATION_HASH_DOMAIN,
+            &[
+                CanonicalItem::hash512(self.finality_hash.into_bytes()),
+                CanonicalItem::hash512(self.target_identifier_full_object_digest().into_bytes()),
+                CanonicalItem::hash512(self.target_order_full_object_digest().into_bytes()),
+            ],
+        )?)
+    }
+
+    /// Opens a fresh authenticated readback pass over the exact identifier
+    /// target bytes retained by the finalized replay capability.
+    pub(crate) fn open_target_identifier_readback(
+        &self,
+    ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {
+        CanonicalStreamReadbackVerifier::new(
+            CanonicalStreamDomain::ReplayTargetIdentifierCiphertext,
+            self.verified_evaluator_replay
+                .target_identifier_stream
+                .clone(),
+        )
+    }
+
+    /// Opens a fresh authenticated readback pass over the exact order target
+    /// bytes retained by the finalized replay capability.
+    pub(crate) fn open_target_order_readback(
+        &self,
+    ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {
+        CanonicalStreamReadbackVerifier::new(
+            CanonicalStreamDomain::ReplayTargetOrderCiphertext,
+            self.verified_evaluator_replay.target_order_stream.clone(),
+        )
+    }
+
     pub fn accepted_finality_object_hashes(&self) -> Vec<Hash512> {
         self.finality_objects
             .iter()
@@ -456,8 +550,9 @@ impl VerifiedFinality {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn state_outputs(&self) -> &[VerifiedStateOutput] {
-        &self.state_outputs
+        &self._retained_state_outputs
     }
 }
 
@@ -554,9 +649,9 @@ impl FinalityVerifier {
             previous_roster_position = Some(roster_position);
 
             let verified_finality_object = input.verified_finality_objects[signer_index];
+            let finality_object_hash = finality_carrier.envelope.object_hash()?;
             if verified_finality_object.object_type() != FoundationObjectType::FinalitySignature
-                || verified_finality_object.object_hash()
-                    != finality_carrier.envelope.object_hash()?
+                || verified_finality_object.object_hash() != finality_object_hash
                 || verified_finality_object.canonical_carrier_bytes()
                     != signer_input.canonical_signed_finality_carrier()
             {
@@ -617,7 +712,7 @@ impl FinalityVerifier {
             finality_hash,
             verified_evaluator_replay: input.verified_evaluator_replay.retained_clone(),
             finality_objects: retained_finality_objects,
-            state_outputs,
+            _retained_state_outputs: state_outputs,
         })
     }
 

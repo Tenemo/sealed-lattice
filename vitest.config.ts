@@ -3,10 +3,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
-import { devices } from 'playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
+import {
+    desktopBrowserProofEvidenceSessionDefinitions,
+    manualDesktopBrowserProofEvidenceTestGlobs,
+    ordinaryDesktopBrowserExcludedTestGlobs,
+} from './tools/ci/browser-test-project-selection.js';
+import {
+    manualNodeKernelProofEvidenceTestGlobs,
+    nodeKernelProofEvidenceProjectName,
+} from './tools/ci/node-kernel-proof-evidence-selection.js';
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
@@ -50,6 +58,7 @@ const nodeTestProjectDefinitions = [
         testTimeout: nodeKernelTestTimeoutMs,
     },
     {
+        exclude: manualNodeKernelProofEvidenceTestGlobs,
         fileParallelism: false,
         include: kernelNodeTestGlobs,
         projectName: 'node-kernel-fast',
@@ -60,15 +69,6 @@ const nodeTestProjectDefinitions = [
 const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
 ] as const;
-const mobileBrowserTestGlobs = [
-    'packages/crypto/tests/browser/authenticated-mailbox-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/accepted-setup-session-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/action-randomness-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
-    'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',
-] as const;
-
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
 const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;
 const testResultFilePath = testDiagnosticPaths.resultFilePath;
@@ -98,7 +98,9 @@ for (const diagnosticDirectoryPath of [
 const browserOptimizedDependencies = [
     '@noble/hashes/hkdf.js',
     '@noble/hashes/sha2.js',
+    '@noble/hashes/sha3.js',
     '@noble/hashes/utils.js',
+    '@noble/post-quantum/ml-dsa.js',
     '@noble/post-quantum/ml-kem.js',
 ] as const;
 
@@ -122,35 +124,20 @@ const testResolve = {
     tsconfigPaths: true,
 } as const;
 
-const { defaultBrowserType: _pixelDefaultBrowserType, ...pixelContextOptions } =
-    devices['Pixel 5'];
-const {
-    defaultBrowserType: _iphoneDefaultBrowserType,
-    ...iphoneContextOptions
-} = devices['iPhone 12'];
-
 const desktopBrowserInstances: BrowserInstanceOption[] = [
-    { browser: 'chromium', name: 'chromium-desktop' },
-    { browser: 'firefox', name: 'firefox-desktop' },
-    { browser: 'webkit', name: 'webkit-desktop' },
-];
-
-const mobileBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
-        name: 'pixel-5-chromium',
-        provider: playwright({
-            contextOptions: pixelContextOptions,
-        }),
-    },
-    {
-        browser: 'webkit',
-        name: 'iphone-12-webkit',
-        provider: playwright({
-            contextOptions: iphoneContextOptions,
-        }),
+        name: 'chromium-desktop',
     },
 ];
+
+const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] =
+    desktopBrowserProofEvidenceSessionDefinitions.map(
+        ({ browserEngine, vitestProjectName }) => ({
+            browser: browserEngine,
+            name: vitestProjectName,
+        }),
+    );
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
@@ -183,62 +170,86 @@ const makeNodeProject = ({
 });
 
 type BrowserProjectInput = {
+    readonly exclude?: readonly string[];
+    readonly hookTimeout?: number;
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
+    readonly retainFailureTrace?: boolean;
+    readonly testTimeout?: number;
 };
 
 const makeBrowserProject = ({
+    exclude,
+    hookTimeout,
     include,
     instances,
     projectName,
-}: BrowserProjectInput): UserWorkspaceConfig => ({
-    resolve: testResolve,
-    test: {
-        name: projectName,
-        include: [...include],
-        // Each real-WASM browser file can instantiate a large kernel and
-        // create workers. Running every file concurrently has exhausted the
-        // Firefox WebAssembly compiler and left its test process unable to
-        // shut down under otherwise valid multi-browser runs.
-        fileParallelism: false,
-        ...(nodeDiagnosticReportArguments.length === 0
-            ? {}
-            : { execArgv: nodeDiagnosticReportArguments }),
-        browser: {
-            enabled: true,
-            api: {
-                host: browserServerHost,
-                port: browserServerBasePort,
-                strictPort: false,
-            },
-            provider: playwright(),
-            headless: true,
-            instances,
-            ...(testAttachmentDirectoryPath === undefined
-                ? {}
-                : {
-                      screenshotDirectory: path.join(
-                          testAttachmentDirectoryPath,
-                          'screenshots',
-                      ),
-                      screenshotFailures: true,
-                      trace: {
-                          mode: 'retain-on-failure' as const,
-                          tracesDir: path.join(
-                              testAttachmentDirectoryPath,
-                              'traces',
-                          ),
-                      },
-                  }),
+    retainFailureTrace = false,
+    testTimeout,
+}: BrowserProjectInput): UserWorkspaceConfig => {
+    const projectAttachmentDirectoryPath =
+        testAttachmentDirectoryPath === undefined
+            ? undefined
+            : path.join(testAttachmentDirectoryPath, projectName);
+    return {
+        optimizeDeps: {
+            include: [...browserOptimizedDependencies],
         },
-    },
-});
+        resolve: testResolve,
+        test: {
+            name: projectName,
+            include: [...include],
+            ...(exclude === undefined ? {} : { exclude: [...exclude] }),
+            // Each real-WASM browser file can instantiate a large kernel and
+            // create workers. Keep the canonical Chromium lane serialized so
+            // concurrent files cannot inflate the measured working set.
+            fileParallelism: false,
+            ...(hookTimeout === undefined ? {} : { hookTimeout }),
+            ...(testTimeout === undefined ? {} : { testTimeout }),
+            ...(nodeDiagnosticReportArguments.length === 0
+                ? {}
+                : { execArgv: nodeDiagnosticReportArguments }),
+            browser: {
+                enabled: true,
+                api: {
+                    host: browserServerHost,
+                    port: browserServerBasePort,
+                    strictPort: false,
+                },
+                provider: playwright(),
+                headless: true,
+                instances,
+                // Playwright writes active .network chunks to one project-level
+                // directory before Vitest can add worker identity. Routine
+                // coverage therefore keeps tracing off. Each manual evidence
+                // command selects one isolated instance.
+                trace:
+                    retainFailureTrace &&
+                    projectAttachmentDirectoryPath !== undefined
+                        ? {
+                              mode: 'retain-on-failure' as const,
+                              tracesDir: path.join(
+                                  projectAttachmentDirectoryPath,
+                                  'traces',
+                              ),
+                          }
+                        : ('off' as const),
+                ...(projectAttachmentDirectoryPath === undefined
+                    ? {}
+                    : {
+                          screenshotDirectory: path.join(
+                              projectAttachmentDirectoryPath,
+                              'screenshots',
+                          ),
+                          screenshotFailures: true,
+                      }),
+            },
+        },
+    };
+};
 
 export default defineConfig({
-    optimizeDeps: {
-        include: [...browserOptimizedDependencies],
-    },
     resolve: testResolve,
     test: {
         ...(testResultFilePath === undefined
@@ -266,15 +277,25 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
+            makeNodeProject({
+                fileParallelism: false,
+                include: manualNodeKernelProofEvidenceTestGlobs,
+                projectName: nodeKernelProofEvidenceProjectName,
+                testTimeout: 12 * 60 * 60_000,
+            }),
             makeBrowserProject({
+                exclude: ordinaryDesktopBrowserExcludedTestGlobs,
                 include: desktopBrowserTestGlobs,
                 instances: desktopBrowserInstances,
                 projectName: 'browser-desktop',
             }),
             makeBrowserProject({
-                include: mobileBrowserTestGlobs,
-                instances: mobileBrowserInstances,
-                projectName: 'browser-mobile',
+                hookTimeout: 30 * 60_000,
+                include: manualDesktopBrowserProofEvidenceTestGlobs,
+                instances: desktopBrowserProofEvidenceInstances,
+                projectName: 'browser-desktop-proof-evidence',
+                retainFailureTrace: true,
+                testTimeout: 12 * 60 * 60_000,
             }),
         ],
     },

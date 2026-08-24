@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 
+import { foundationProfile } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
@@ -47,8 +48,6 @@ const expectedPublicRuntimeExportNames = [
     'verifyCanonicalCeremonyContext',
     'verifyCanonicalManifest',
     'verifyCanonicalSuiteRecord',
-    'verifyPrivateVssShare',
-    'verifySetupPackage',
 ] as const;
 
 describe('election foundation public package API in Node', () => {
@@ -102,7 +101,7 @@ describe('election foundation public package API in Node', () => {
     it('creates and verifies canonical manifest bytes through the packaged kernel', async () => {
         const manifest = await createCanonicalManifest({
             options: Array.from(
-                { length: 20 },
+                { length: foundationProfile.optionCount },
                 (_value, optionIndex) => `Option ${String(optionIndex)}`,
             ),
             pollId: 'public-api-ceremony',
@@ -123,9 +122,6 @@ describe('election foundation public package API in Node', () => {
             'utf8',
         );
 
-        expect(declarations).toContain(
-            'type SetupPackageVerification = VerificationResult<void>;',
-        );
         expect(declarations).not.toContain('derivePollSpecHash');
         expect(declarations).toContain(
             'declare const createCanonicalManifest:',

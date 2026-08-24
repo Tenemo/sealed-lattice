@@ -2,21 +2,23 @@ import { describe, expect, it } from 'vitest';
 
 import { parseRustKernelArguments } from '#tools/ci/run-rust-kernel-tests';
 import {
-    acceptedSetupTestModulePattern,
     cargoTestArgumentsForRustKernelFast,
     heavyRustKernelTestNamePrefix,
+    rejectedRowCodeBackendRustTestNamePrefix,
 } from '#tools/ci/rust-kernel-test-arguments';
 
 describe('Rust kernel fast runner', () => {
-    it('always excludes accepted-setup tests, including focused runs', () => {
+    it('keeps ordinary and focused tests in the fast lane without executing the rejected backend', () => {
         const argumentSets = [
             cargoTestArgumentsForRustKernelFast(),
             cargoTestArgumentsForRustKernelFast('request_validation'),
         ];
         for (const arguments_ of argumentSets) {
-            expect(arguments_).toContain('--skip');
-            expect(arguments_).toContain(acceptedSetupTestModulePattern);
             expect(arguments_).not.toContain('--ignored');
+            expect(arguments_).toContain('--skip');
+            expect(arguments_).toContain(
+                rejectedRowCodeBackendRustTestNamePrefix,
+            );
         }
         expect(argumentSets[1]).toContain('request_validation');
     });

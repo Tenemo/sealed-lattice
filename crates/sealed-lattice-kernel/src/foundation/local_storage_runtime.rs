@@ -4,8 +4,11 @@ use std::collections::HashMap;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
-use super::local_encrypted_storage::LocalRecordSealWithIdentifierInput;
-use super::runtime_input::RuntimeInputReader as InputReader;
+use super::local_encrypted_storage::{
+    BorrowedLocalRecordEnvelope, LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH,
+    LocalRecordOpenWithIdentifierInput, LocalRecordSealWithIdentifierInput,
+};
+use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionStorageRoot, CanonicalDecodeLimits,
     CommonProofExternalMemoryRecordKind, DeviceWrappedStorageRoot, Hash512,
@@ -53,8 +56,8 @@ const COMMON_PROOF_EXTERNAL_MEMORY_IDENTIFIER_CONTEXT_BYTE_LENGTH: usize = 32
 const BINDING_BYTE_LENGTH: usize = HASH_BYTE_LENGTH * 4;
 const HANDLE_BYTE_LENGTH: usize = 4;
 const MAXIMUM_CHECKPOINT_SOURCE_DIGEST_COUNT: usize = 4_096;
-const MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT: u64 = 1 << 30;
-const MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT: u64 = 1 << 40;
+pub(crate) const MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT: u64 = 1 << 30;
+pub(crate) const MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT: u64 = 1 << 40;
 
 // One active browser-foundation root owns at most one default canonical
 // foundation collection of long-lived local-record identifiers. Common-proof
@@ -78,23 +81,6 @@ pub(crate) struct BrowserWorkerAuthenticatedStorageHeadSource {
 }
 
 impl BrowserWorkerAuthenticatedStorageHeadSource {
-    #[cfg(test)]
-    pub(crate) const fn from_test_fixture(
-        local_storage_binding: LocalStorageBinding,
-        storage_root_commitment: Hash512,
-        namespace_sequence: u64,
-        authenticated_head_digest: Hash512,
-        storage_instance_identity: Hash512,
-    ) -> Self {
-        Self {
-            local_storage_binding,
-            storage_root_commitment,
-            namespace_sequence,
-            authenticated_head_digest,
-            storage_instance_identity,
-        }
-    }
-
     pub(crate) const fn local_storage_binding(&self) -> LocalStorageBinding {
         self.local_storage_binding
     }
@@ -162,30 +148,6 @@ impl BrowserWorkerAuthenticatedStorageTransitionSource {
 
     pub(crate) const fn authenticated_record_digest(&self) -> Hash512 {
         self.authenticated_record_digest
-    }
-
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) const fn from_test_fixture(
-        local_storage_binding: LocalStorageBinding,
-        storage_root_commitment: Hash512,
-        predecessor_namespace_sequence: u64,
-        predecessor_authenticated_head_digest: Hash512,
-        successor_namespace_sequence: u64,
-        successor_authenticated_head_digest: Hash512,
-        storage_instance_identity: Hash512,
-        authenticated_record_digest: Hash512,
-    ) -> Self {
-        Self {
-            local_storage_binding,
-            storage_root_commitment,
-            predecessor_namespace_sequence,
-            predecessor_authenticated_head_digest,
-            successor_namespace_sequence,
-            successor_authenticated_head_digest,
-            storage_instance_identity,
-            authenticated_record_digest,
-        }
     }
 }
 
@@ -656,21 +618,17 @@ fn open_record_request(
     if envelope_bytes.is_empty() {
         return Err(malformed_status());
     }
-    let envelope = LocalRecordEnvelope::decode(envelope_bytes, &CanonicalDecodeLimits::default())
-        .map_err(schema_status)?;
+    if envelope_bytes.len() > LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH {
+        return Err(outside_supported_profile_status());
+    }
+    let envelope =
+        BorrowedLocalRecordEnvelope::decode(envelope_bytes, &CanonicalDecodeLimits::default())
+            .map_err(schema_status)?;
     ROOT_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let lease = registry.active(request.handle, &request.capability)?;
-        open_record_with_active_lease(
-            lease,
-            request.action_randomness_commitment,
-            request.record_type,
-            request.identifier_context,
-            request.record_version,
-            request.predecessor_record_hash,
-            &envelope,
-        )
-        .map(|mut plaintext| core::mem::take(&mut *plaintext))
+        open_borrowed_record_with_active_lease(lease, request, &envelope)
+            .map(|mut plaintext| core::mem::take(&mut *plaintext))
     })
 }
 
@@ -755,9 +713,9 @@ fn seal_record_with_identifier_and_active_lease_budget(
     {
         return Err(outside_supported_profile_status());
     }
-    let envelope = lease
+    let encoded_envelope = lease
         .root
-        .seal_local_record_with_identifier(LocalRecordSealWithIdentifierInput {
+        .seal_local_record_with_identifier_canonical(LocalRecordSealWithIdentifierInput {
             action_randomness_commitment,
             record_type,
             record_identifier,
@@ -767,7 +725,6 @@ fn seal_record_with_identifier_and_active_lease_budget(
             plaintext,
         })
         .map_err(schema_status)?;
-    let encoded_envelope = envelope.encode().map_err(schema_status)?;
     lease.local_record_seal_invocation_count = next_seal_invocation_count;
     lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
     Ok(encoded_envelope)
@@ -796,6 +753,32 @@ fn open_record_with_active_lease(
             record_identifier,
             record_version,
             predecessor_record_hash,
+            envelope,
+        )
+        .into_result()
+        .map_err(refusal_status)
+}
+
+fn open_borrowed_record_with_active_lease(
+    lease: &RootLease,
+    request: &RecordRequest<'_>,
+    envelope: &BorrowedLocalRecordEnvelope<'_>,
+) -> RuntimeResult<Zeroizing<Vec<u8>>> {
+    let record_identifier = derive_record_identifier_from_context(
+        lease.root.binding(),
+        request.record_type,
+        request.identifier_context,
+    )?;
+    lease
+        .root
+        .open_borrowed_local_record_with_identifier(
+            LocalRecordOpenWithIdentifierInput {
+                action_randomness_commitment: request.action_randomness_commitment,
+                record_type: request.record_type,
+                expected_identifier: record_identifier,
+                record_version: request.record_version,
+                predecessor_record_hash: request.predecessor_record_hash,
+            },
             envelope,
         )
         .into_result()
@@ -1045,7 +1028,7 @@ fn read_record_request<'input>(
     let record_type = read_record_type(reader)?;
     let identifier_context_byte_length =
         usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
-    let identifier_context = reader.read_slice(identifier_context_byte_length)?;
+    let identifier_context = reader.read_bytes(identifier_context_byte_length)?;
     let record_version = reader.read_u64()?;
     let predecessor_record_hash = match reader.read_u8()? {
         0 => None,
@@ -1106,7 +1089,7 @@ fn derive_record_identifier_from_context(
             if statement_byte_length == 0 {
                 return Err(refusal_status(RefusalReason::WrongTypeOrLength));
             }
-            let canonical_ballot_statement_bytes = reader.read_slice(statement_byte_length)?;
+            let canonical_ballot_statement_bytes = reader.read_bytes(statement_byte_length)?;
             let ballot_encryption_attempt_identifier = reader.read_array()?;
             reader.finish()?;
             return derive_local_record_identifier(
@@ -1279,10 +1262,6 @@ const fn malformed_status() -> u32 {
 
 const fn outside_supported_profile_status() -> u32 {
     refusal_status(RefusalReason::OutsideSupportedProfile)
-}
-
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    refusal_reason.canonical_code() as u32
 }
 
 fn schema_status(error: super::FoundationSchemaError) -> u32 {

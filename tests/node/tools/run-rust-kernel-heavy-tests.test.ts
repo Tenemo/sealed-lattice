@@ -20,6 +20,8 @@ describe('Rust kernel heavy runner', () => {
         );
         expect(arguments_).toContain(heavyRustKernelTestNamePrefix);
         expect(arguments_).toContain('--ignored');
+        expect(arguments_).toContain('--nocapture');
+        expect(arguments_).not.toContain('--show-output');
         expect(arguments_).toContain('--test-threads');
     });
 
@@ -31,6 +33,12 @@ describe('Rust kernel heavy runner', () => {
         ).toEqual({
             testFilter: 'heavy_rust_kernel_expensive_relation',
         });
+    });
+
+    it('refuses proof-evidence checkpoint arguments outside their owning lane', () => {
+        expect(() =>
+            parseRustKernelHeavyArguments(['--resume-checkpoints']),
+        ).toThrow(/Unknown argument/u);
     });
 
     it('serializes heavy tests behind the verified process-memory guard', () => {

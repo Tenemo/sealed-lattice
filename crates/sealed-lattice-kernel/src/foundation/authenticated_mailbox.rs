@@ -18,6 +18,7 @@ pub const MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH: usize = ml_kem_768::CT_LEN;
 pub const MAILBOX_GCM_TAG_BYTE_LENGTH: usize = 16;
 pub const MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH: usize = 3_309;
 pub const MAILBOX_HKDF_EXTRACT_SALT_BYTE_LENGTH: usize = 48;
+pub const RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE: u16 = 2;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 
@@ -30,7 +31,6 @@ pub fn derive_setup_mailbox_slot_hash(
     source_participant_id: ParticipantIdentity,
     recipient_participant_id: ParticipantIdentity,
     producer_sequence: u64,
-    payload_type: MailboxPayloadType,
     statement_hash: Hash512,
     ordered_material_roots: &[Hash512],
 ) -> SchemaResult<Hash512> {
@@ -49,7 +49,7 @@ pub fn derive_setup_mailbox_slot_hash(
             CanonicalItem::participant_identity(source_participant_id.into_bytes()),
             CanonicalItem::participant_identity(recipient_participant_id.into_bytes()),
             CanonicalItem::unsigned64(producer_sequence),
-            CanonicalItem::unsigned16(payload_type.canonical_code()),
+            CanonicalItem::unsigned16(RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE),
             CanonicalItem::hash512(statement_hash.into_bytes()),
             CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &material_roots)?,
         ],
@@ -66,25 +66,6 @@ fn validate_mailbox_material_roots(ordered_material_roots: &[Hash512]) -> Schema
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u16)]
-pub enum MailboxPayloadType {
-    RecipientPrivateVssShare = 2,
-}
-
-impl MailboxPayloadType {
-    pub const fn canonical_code(self) -> u16 {
-        self as u16
-    }
-
-    pub const fn from_canonical_code(code: u16) -> Option<Self> {
-        match code {
-            2 => Some(Self::RecipientPrivateVssShare),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailboxKeyScheduleInput {
     pub suite_id: Hash512,
@@ -95,7 +76,6 @@ pub struct MailboxKeyScheduleInput {
     pub recipient_participant_id: ParticipantIdentity,
     pub producer_sequence: u64,
     pub envelope_attempt_identifier: [u8; MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
-    pub payload_type: MailboxPayloadType,
     pub statement_hash: Hash512,
     pub ordered_material_roots: Vec<Hash512>,
 }
@@ -126,7 +106,7 @@ impl MailboxKeyScheduleInput {
             CanonicalItem::participant_identity(self.recipient_participant_id.into_bytes()),
             CanonicalItem::unsigned64(self.producer_sequence),
             CanonicalItem::fixed_bytes(self.envelope_attempt_identifier)?,
-            CanonicalItem::unsigned16(self.payload_type.canonical_code()),
+            CanonicalItem::unsigned16(RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE),
             CanonicalItem::hash512(self.statement_hash.into_bytes()),
             CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &material_roots)?,
         ])
@@ -139,13 +119,12 @@ impl MailboxKeyScheduleInput {
                 "mailbox key-schedule input has the wrong item count",
             ));
         }
-        let payload_type = MailboxPayloadType::from_canonical_code(read_u16(&items[8])?)
-            .ok_or_else(|| {
-                schema_error(
-                    RefusalReason::UnsupportedVersionOrSuite,
-                    "mailbox payload type is unassigned",
-                )
-            })?;
+        if read_u16(&items[8])? != RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE {
+            return Err(schema_error(
+                RefusalReason::UnsupportedVersionOrSuite,
+                "mailbox payload type is unassigned",
+            ));
+        }
         Self {
             suite_id: read_hash(&items[0])?,
             ceremony_context_hash: read_hash(&items[1])?,
@@ -155,7 +134,6 @@ impl MailboxKeyScheduleInput {
             recipient_participant_id: read_participant_identity(&items[5])?,
             producer_sequence: read_u64(&items[6])?,
             envelope_attempt_identifier: read_fixed_bytes(&items[7])?,
-            payload_type,
             statement_hash: read_hash(&items[9])?,
             ordered_material_roots: read_hash_list(&items[10])?,
         }
@@ -216,7 +194,6 @@ impl MailboxAssociatedData {
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
         let items = self.key_schedule_input.canonical_items()?;
-        Self::new(self.key_schedule_input.clone())?;
         Ok(CanonicalTuple::new(
             MAILBOX_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
@@ -270,7 +247,7 @@ impl SignedMailboxEnvelope {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        MailboxAssociatedData::new(self.associated_data.key_schedule_input.clone())?;
+        self.associated_data.key_schedule_input.validate()?;
         self.ciphertext_descriptor.validate()?;
         Ok(())
     }
@@ -369,7 +346,6 @@ mod tests {
             recipient_participant_id: ParticipantIdentity::from_bytes([0x66; 64]),
             producer_sequence: 7,
             envelope_attempt_identifier: [0x77; MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
-            payload_type: MailboxPayloadType::RecipientPrivateVssShare,
             statement_hash: Hash512::from_bytes([0x88; 64]),
             ordered_material_roots: vec![
                 Hash512::from_bytes([0x91; 64]),
@@ -401,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_mailbox_schemas_round_trip_without_fixed_metadata() {
+    fn mailbox_schemas_round_trip_without_redundant_metadata() {
         let key_schedule = key_schedule_input();
         let key_schedule_bytes = key_schedule.encode().expect("key schedule encodes");
         assert_eq!(

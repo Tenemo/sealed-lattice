@@ -2,25 +2,41 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     bgv::{
+        direct_ballots::PAIR_CHARACTER_CIPHERTEXT_COUNT,
         modular_arithmetic::mul_mod,
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    foundation::Hash512,
+    foundation::{
+        FOUNDATION_PROFILE, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+        MINIMUM_CONFIGURABLE_OPTION_COUNT,
+    },
 };
 
 use super::top_k::{
-    CANONICAL_TARGET_CIPHERTEXT_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL,
+    CANONICAL_TARGET_CIPHERTEXT_LEVEL, CHARACTER_OUTPUT_LEVEL, SELECTED_RELINEARIZATION_KEY_LEVEL,
     selected_evaluator_rotation_key_schedule,
 };
 
 mod codec;
 mod compiler;
+mod executor;
+mod runtime;
 
+pub(crate) use codec::verify_canonical_program_set;
+pub(super) use compiler::evaluator_program_set_for_option_count;
 pub(crate) use compiler::selected_evaluator_program_set;
 #[cfg(test)]
-pub(crate) use compiler::selected_evaluator_program_set_bytes;
-
+pub(crate) use compiler::{
+    EvaluatorCompilerStage, EvaluatorCompilerStreamStageRegisters,
+    selected_evaluator_program_set_with_stage_registers,
+};
+pub(crate) use executor::{
+    PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
+    SelectedEvaluatorProgramExecution, VerifiedEvaluatorAggregate,
+    VerifiedEvaluatorAggregateContext, VerifiedEvaluatorAggregateExecutionAuthority,
+    VerifiedEvaluatorAggregationAuthority,
+};
 pub(crate) const EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER: u16 = 0x1500;
 pub(crate) const EVALUATOR_INSTRUCTION_SCHEMA_IDENTIFIER: u16 = 0x1501;
 pub(crate) const EVALUATOR_CONSTANT_SCHEMA_IDENTIFIER: u16 = 0x1503;
@@ -28,8 +44,8 @@ pub(crate) const EVALUATOR_INSTRUCTION_STREAM_SCHEMA_IDENTIFIER: u16 = 0x1504;
 
 const EVALUATOR_PROGRAM_SCHEMA_VERSION: u16 = 1;
 const EVALUATOR_CONSTANT_HASH_DOMAIN: &str = "sealed-lattice/evaluator/constant/v1";
-const SELECTED_OPTION_COUNT: usize = 20;
-const SELECTED_STREAM_COUNT: usize = 20;
+const SELECTED_OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
+const MAXIMUM_EVALUATOR_STREAM_COUNT: usize = MAXIMUM_CONFIGURABLE_OPTION_COUNT as usize;
 const MAXIMUM_EVALUATOR_CONSTANT_COUNT: usize = 1_024;
 const MAXIMUM_INSTRUCTIONS_PER_STREAM: usize = 4_096;
 const MAXIMUM_LIVE_REGISTER_COUNT: usize = 64;
@@ -38,20 +54,20 @@ const MAXIMUM_LIVE_REGISTER_COUNT: usize = 64;
 #[repr(u16)]
 pub(crate) enum EvaluatorConstantKind {
     CoefficientVector = 1,
-    SlotVector = 2,
 }
 
 impl EvaluatorConstantKind {
+    const fn canonical_code(self) -> u16 {
+        self as u16
+    }
+
     fn from_canonical_code(code: u16) -> CanonicalResult<Self> {
         match code {
             1 => Ok(Self::CoefficientVector),
-            2 => Ok(Self::SlotVector),
-            _ => Err(program_error("evaluator constant kind is unassigned")),
+            _ => Err(program_error(
+                "evaluator constant kind is outside the selected profile",
+            )),
         }
-    }
-
-    const fn canonical_code(self) -> u16 {
-        self as u16
     }
 }
 
@@ -80,18 +96,10 @@ impl EvaluatorConstant {
         if self.values.is_empty() {
             return Err(program_error("evaluator constant values must be nonempty"));
         }
-        match self.kind {
-            EvaluatorConstantKind::CoefficientVector if self.values.len() > POLYNOMIAL_DEGREE => {
-                return Err(program_error(
-                    "evaluator coefficient vector exceeds the selected ring degree",
-                ));
-            }
-            EvaluatorConstantKind::SlotVector if self.values.len() != POLYNOMIAL_DEGREE => {
-                return Err(program_error(
-                    "evaluator slot vector must contain exactly the selected logical slots",
-                ));
-            }
-            _ => {}
+        if self.values.len() > POLYNOMIAL_DEGREE {
+            return Err(program_error(
+                "evaluator coefficient vector exceeds the selected ring degree",
+            ));
         }
         if self
             .values
@@ -116,8 +124,6 @@ pub(crate) enum EvaluatorOpcode {
     ModulusSwitchToLevel = 1,
     NormalizeDecryptionMultiplier = 2,
     CiphertextAdd = 3,
-    CiphertextSubtract = 4,
-    CiphertextNegate = 5,
     PlaintextAdd = 6,
     PlaintextMultiply = 7,
     CiphertextMultiplyRelinearizeAndDrop = 8,
@@ -128,13 +134,15 @@ pub(crate) enum EvaluatorOpcode {
 }
 
 impl EvaluatorOpcode {
+    const fn canonical_code(self) -> u16 {
+        self as u16
+    }
+
     fn from_canonical_code(code: u16) -> CanonicalResult<Self> {
         match code {
             1 => Ok(Self::ModulusSwitchToLevel),
             2 => Ok(Self::NormalizeDecryptionMultiplier),
             3 => Ok(Self::CiphertextAdd),
-            4 => Ok(Self::CiphertextSubtract),
-            5 => Ok(Self::CiphertextNegate),
             6 => Ok(Self::PlaintextAdd),
             7 => Ok(Self::PlaintextMultiply),
             8 => Ok(Self::CiphertextMultiplyRelinearizeAndDrop),
@@ -142,12 +150,10 @@ impl EvaluatorOpcode {
             10 => Ok(Self::GaloisRotate),
             11 => Ok(Self::DropRegister),
             12 => Ok(Self::DeclareOutput),
-            _ => Err(program_error("evaluator instruction opcode is unassigned")),
+            _ => Err(program_error(
+                "evaluator opcode is outside the selected profile",
+            )),
         }
-    }
-
-    const fn canonical_code(self) -> u16 {
-        self as u16
     }
 
     const fn produces_register(self) -> bool {
@@ -201,12 +207,7 @@ impl EvaluatorInstruction {
             EvaluatorOpcode::NormalizeDecryptionMultiplier => {
                 (1, true, ImmediateRule::Nonzero, ConstantRule::Absent)
             }
-            EvaluatorOpcode::CiphertextAdd | EvaluatorOpcode::CiphertextSubtract => {
-                (2, true, ImmediateRule::Zero, ConstantRule::Absent)
-            }
-            EvaluatorOpcode::CiphertextNegate => {
-                (1, true, ImmediateRule::Zero, ConstantRule::Absent)
-            }
+            EvaluatorOpcode::CiphertextAdd => (2, true, ImmediateRule::Zero, ConstantRule::Absent),
             EvaluatorOpcode::PlaintextAdd | EvaluatorOpcode::PlaintextMultiply => {
                 (1, true, ImmediateRule::Zero, ConstantRule::Present)
             }
@@ -255,6 +256,26 @@ impl EvaluatorInstruction {
         }
         Ok(())
     }
+
+    pub(super) const fn opcode(&self) -> EvaluatorOpcode {
+        self.opcode
+    }
+
+    pub(super) const fn output_register(&self) -> Option<u32> {
+        self.output_register
+    }
+
+    pub(super) fn input_registers(&self) -> &[u32] {
+        &self.input_registers
+    }
+
+    pub(super) const fn immediate0(&self) -> u64 {
+        self.immediate0
+    }
+
+    pub(super) const fn constant_hash(&self) -> Option<Hash512> {
+        self.constant_hash
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -279,8 +300,8 @@ pub(crate) struct EvaluatorInstructionStream {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct EvaluatorGaloisKeyPosition {
-    galois_element: usize,
     catalog_level: usize,
+    galois_element: usize,
 }
 
 impl EvaluatorGaloisKeyPosition {
@@ -337,7 +358,7 @@ impl EvaluatorProgramKeyPositions {
 
 impl EvaluatorInstructionStream {
     fn new(top_count: u16, instructions: Vec<EvaluatorInstruction>) -> CanonicalResult<Self> {
-        if top_count == 0 || usize::from(top_count) > SELECTED_STREAM_COUNT {
+        if top_count == 0 || usize::from(top_count) > MAXIMUM_EVALUATOR_STREAM_COUNT {
             return Err(program_error(
                 "evaluator instruction-stream top count is outside the selected range",
             ));
@@ -355,6 +376,10 @@ impl EvaluatorInstructionStream {
 
     pub(crate) const fn top_count(&self) -> u16 {
         self.top_count
+    }
+
+    pub(super) fn instructions(&self) -> &[EvaluatorInstruction] {
+        &self.instructions
     }
 }
 
@@ -382,26 +407,26 @@ impl EvaluatorProgramSet {
         &self.streams
     }
 
+    #[cfg(test)]
     pub(crate) fn encode(&self) -> CanonicalResult<Vec<u8>> {
         codec::encode_program_set(self)
     }
 
-    pub(crate) fn decode(bytes: &[u8]) -> CanonicalResult<Self> {
-        codec::decode_program_set(bytes)
-    }
-
     /// Returns the exact sorted evaluation-key catalog positions reached by
-    /// each validated stream and by their union. Lower-level opcode uses map
-    /// to the one selected working-level key whose CRT prefix serves them; the
-    /// returned positions therefore describe serialized setup material, not a
-    /// duplicate key for every runtime level.
+    /// each validated stream and by their union. Each Galois element retains
+    /// its selected catalog level; an opcode at that level or a lower CRT
+    /// prefix maps to the same serialized setup position rather than creating
+    /// a duplicate key for every runtime level.
     pub(crate) fn key_positions(&self) -> CanonicalResult<EvaluatorProgramKeyPositions> {
         let constant_kinds_by_hash = self.validated_constant_catalog()?;
         validate_stream_catalog_shape(&self.streams)?;
+        let option_count = self.streams.len();
         let streams = self
             .streams
             .iter()
-            .map(|stream| validate_instruction_stream(stream, &constant_kinds_by_hash))
+            .map(|stream| {
+                validate_instruction_stream(stream, &constant_kinds_by_hash, option_count)
+            })
             .collect::<CanonicalResult<Vec<_>>>()?;
         let relinearization_catalog_levels = streams
             .iter()
@@ -425,8 +450,9 @@ impl EvaluatorProgramSet {
     fn validate(&self) -> CanonicalResult<()> {
         let constant_kinds_by_hash = self.validated_constant_catalog()?;
         validate_stream_catalog_shape(&self.streams)?;
+        let option_count = self.streams.len();
         for stream in &self.streams {
-            validate_instruction_stream(stream, &constant_kinds_by_hash)?;
+            validate_instruction_stream(stream, &constant_kinds_by_hash, option_count)?;
         }
         Ok(())
     }
@@ -465,9 +491,12 @@ impl EvaluatorProgramSet {
 }
 
 fn validate_stream_catalog_shape(streams: &[EvaluatorInstructionStream]) -> CanonicalResult<()> {
-    if streams.len() != SELECTED_STREAM_COUNT {
+    if !(usize::from(MINIMUM_CONFIGURABLE_OPTION_COUNT)
+        ..=usize::from(MAXIMUM_CONFIGURABLE_OPTION_COUNT))
+        .contains(&streams.len())
+    {
         return Err(program_error(
-            "evaluator program set must contain exactly twenty streams",
+            "evaluator program set stream count is outside the configurable range",
         ));
     }
     for (stream_index, stream) in streams.iter().enumerate() {
@@ -489,6 +518,7 @@ struct RegisterState {
 fn validate_instruction_stream(
     stream: &EvaluatorInstructionStream,
     constant_kinds_by_hash: &BTreeMap<[u8; Hash512::BYTE_LENGTH], EvaluatorConstantKind>,
+    option_count: usize,
 ) -> CanonicalResult<EvaluatorStreamKeyPositions> {
     let instructions = &stream.instructions;
     if instructions.len() < 2 {
@@ -533,17 +563,20 @@ fn validate_instruction_stream(
         }
     }
 
-    let supported_rotations = selected_evaluator_rotation_key_schedule(SELECTED_OPTION_COUNT)?
+    let scheduled_galois_levels = selected_evaluator_rotation_key_schedule(option_count)?
         .into_iter()
-        .map(|(galois_element, _)| galois_element)
-        .collect::<BTreeSet<_>>();
-    let mut register_states = vec![Some(RegisterState {
-        level: SELECTED_EVALUATOR_WORKING_LEVEL,
-        decryption_multiplier: 1,
-    })];
-    let mut expected_output_register = 1_u32;
+        .collect::<BTreeMap<_, _>>();
+    let mut register_states = vec![
+        Some(RegisterState {
+            level: CHARACTER_OUTPUT_LEVEL,
+            decryption_multiplier: 1,
+        });
+        PAIR_CHARACTER_CIPHERTEXT_COUNT
+    ];
+    let mut expected_output_register = u32::try_from(PAIR_CHARACTER_CIPHERTEXT_COUNT)
+        .map_err(|_| program_error("evaluator input register count does not fit u32"))?;
     let mut pending_drops = BTreeSet::new();
-    let mut maximum_live_register_count = 1_usize;
+    let mut maximum_live_register_count = 2_usize;
     let mut relinearization_catalog_levels = BTreeSet::new();
     let mut galois_catalog_positions = BTreeSet::new();
 
@@ -551,15 +584,21 @@ fn validate_instruction_stream(
         instruction.validate_shape()?;
         if instruction.opcode == EvaluatorOpcode::DropRegister {
             let register = instruction.input_registers[0];
-            if !pending_drops.remove(&register) {
+            let register_index = usize::try_from(register).map_err(|_| {
+                program_error("evaluator register number does not fit the host index")
+            })?;
+            let releases_never_used_input = register_index < PAIR_CHARACTER_CIPHERTEXT_COUNT
+                && !last_non_drop_use.contains_key(&register)
+                && instructions[..instruction_index]
+                    .iter()
+                    .all(|prior| prior.opcode == EvaluatorOpcode::DropRegister);
+            if !pending_drops.remove(&register) && !releases_never_used_input {
                 return Err(program_error(
                     "evaluator register is not dropped exactly after its last use",
                 ));
             }
             let state = register_states
-                .get_mut(usize::try_from(register).map_err(|_| {
-                    program_error("evaluator register number does not fit the host index")
-                })?)
+                .get_mut(register_index)
                 .ok_or_else(|| program_error("evaluator drop uses an undefined register"))?;
             if state.take().is_none() {
                 return Err(program_error(
@@ -583,19 +622,27 @@ fn validate_instruction_stream(
             instruction,
             &input_states,
             constant_kinds_by_hash,
-            &supported_rotations,
+            &scheduled_galois_levels,
         )?;
         match instruction.opcode {
             EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
             | EvaluatorOpcode::CiphertextMultiplyAndRelinearize => {
-                relinearization_catalog_levels.insert(SELECTED_EVALUATOR_WORKING_LEVEL);
+                relinearization_catalog_levels.insert(SELECTED_RELINEARIZATION_KEY_LEVEL);
             }
             EvaluatorOpcode::GaloisRotate => {
+                let galois_element = usize::try_from(instruction.immediate0)
+                    .map_err(|_| program_error("evaluator Galois element does not fit usize"))?;
+                let catalog_level =
+                    *scheduled_galois_levels
+                        .get(&galois_element)
+                        .ok_or_else(|| {
+                            program_error(
+                                "evaluator rotation is absent from the selected suite catalog",
+                            )
+                        })?;
                 galois_catalog_positions.insert(EvaluatorGaloisKeyPosition {
-                    galois_element: usize::try_from(instruction.immediate0).map_err(|_| {
-                        program_error("evaluator Galois element does not fit usize")
-                    })?,
-                    catalog_level: SELECTED_EVALUATOR_WORKING_LEVEL,
+                    galois_element,
+                    catalog_level,
                 });
             }
             _ => {}
@@ -686,7 +733,7 @@ fn evaluate_instruction_transition(
     instruction: &EvaluatorInstruction,
     inputs: &[RegisterState],
     constant_kinds_by_hash: &BTreeMap<[u8; Hash512::BYTE_LENGTH], EvaluatorConstantKind>,
-    supported_rotations: &BTreeSet<usize>,
+    scheduled_galois_levels: &BTreeMap<usize, usize>,
 ) -> CanonicalResult<Option<RegisterState>> {
     let first = inputs.first().copied();
     let transition = match instruction.opcode {
@@ -730,11 +777,10 @@ fn evaluate_instruction_transition(
                 decryption_multiplier: target_multiplier,
             })
         }
-        EvaluatorOpcode::CiphertextAdd | EvaluatorOpcode::CiphertextSubtract => {
+        EvaluatorOpcode::CiphertextAdd => {
             require_matching_register_states(inputs)?;
             first
         }
-        EvaluatorOpcode::CiphertextNegate => first,
         EvaluatorOpcode::PlaintextAdd | EvaluatorOpcode::PlaintextMultiply => {
             let constant_hash = instruction
                 .constant_hash
@@ -744,13 +790,7 @@ fn evaluate_instruction_transition(
                 .ok_or_else(|| {
                     program_error("evaluator instruction references an unknown constant")
                 })?;
-            if instruction.opcode == EvaluatorOpcode::PlaintextAdd
-                && *constant_kind != EvaluatorConstantKind::SlotVector
-            {
-                return Err(program_error(
-                    "evaluator plaintext addition requires a slot-vector constant",
-                ));
-            }
+            let _ = constant_kind;
             first
         }
         EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
@@ -758,7 +798,7 @@ fn evaluate_instruction_transition(
             require_matching_levels(inputs)?;
             let left = inputs[0];
             let right = inputs[1];
-            if left.level > SELECTED_EVALUATOR_WORKING_LEVEL {
+            if left.level > SELECTED_RELINEARIZATION_KEY_LEVEL {
                 return Err(program_error(
                     "evaluator multiplication requires an unavailable relinearization-key level",
                 ));
@@ -793,10 +833,17 @@ fn evaluate_instruction_transition(
             let input = first.expect("shape validation requires one input");
             let galois_element = usize::try_from(instruction.immediate0)
                 .map_err(|_| program_error("evaluator Galois element does not fit usize"))?;
+            let catalog_level = scheduled_galois_levels
+                .get(&galois_element)
+                .copied()
+                .ok_or_else(|| {
+                    program_error(
+                        "evaluator rotation is not supported by the selected suite catalog",
+                    )
+                })?;
             if galois_element == 1
                 || galois_element.is_multiple_of(2)
-                || !supported_rotations.contains(&galois_element)
-                || input.level > SELECTED_EVALUATOR_WORKING_LEVEL
+                || input.level > catalog_level
             {
                 return Err(program_error(
                     "evaluator rotation is not supported by the selected suite catalog",
@@ -842,6 +889,3 @@ fn require_matching_levels(inputs: &[RegisterState]) -> CanonicalResult<()> {
 fn program_error(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
-
-#[cfg(test)]
-mod tests;

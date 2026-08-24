@@ -3,7 +3,7 @@ use super::matrix::*;
 use super::validation::*;
 use super::*;
 
-pub(super) fn compute_setup_commitment_for_degree(
+pub(in super::super) fn compute_setup_commitment_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
     shamir_coefficient_index: u64,
@@ -66,56 +66,6 @@ pub(super) fn compute_setup_signed_lifted_commitment_for_degree(
         ring_degree,
         limbs,
     })
-}
-
-#[cfg(test)]
-fn compute_setup_big_signed_lifted_commitment_for_degree(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
-    shamir_coefficient_index: u64,
-    message_coefficients: &[BigInt],
-    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
-    ring_degree: usize,
-) -> CanonicalResult<SetupCommitmentValue> {
-    validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
-    validate_source_rns_limb(source_rns_limb_index)?;
-    validate_ring_degree(ring_degree)?;
-    validate_big_signed_message_coefficients(message_coefficients, ring_degree)?;
-    validate_randomness_shape(randomness_by_commitment_limb, ring_degree)?;
-
-    let limbs = compute_setup_commitment_limbs(
-        public_matrix_seed_hash,
-        message_coefficients,
-        randomness_by_commitment_limb,
-        ring_degree,
-        centered_big_integer_to_residue,
-    )?;
-
-    Ok(SetupCommitmentValue {
-        source_rns_limb_index,
-        shamir_coefficient_index,
-        ring_degree,
-        limbs,
-    })
-}
-
-#[cfg(test)]
-pub(in super::super) fn compute_setup_big_signed_lifted_commitment(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
-    shamir_coefficient_index: u64,
-    message_coefficients: &[BigInt],
-    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
-    ring_degree: usize,
-) -> CanonicalResult<SetupCommitmentValue> {
-    compute_setup_big_signed_lifted_commitment_for_degree(
-        public_matrix_seed_hash,
-        source_rns_limb_index,
-        shamir_coefficient_index,
-        message_coefficients,
-        randomness_by_commitment_limb,
-        ring_degree,
-    )
 }
 
 fn compute_setup_commitment_limbs<MessageCoefficient>(
@@ -228,23 +178,6 @@ fn compute_setup_commitment_limbs<MessageCoefficient>(
     Ok(limbs)
 }
 
-pub(crate) fn compute_setup_commitment_from_typed_opening(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
-    shamir_coefficient_index: u64,
-    message_coefficients: &[u128],
-    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
-) -> CanonicalResult<SetupCommitmentValue> {
-    compute_setup_commitment_from_typed_opening_for_degree(
-        public_matrix_seed_hash,
-        source_rns_limb_index,
-        shamir_coefficient_index,
-        message_coefficients,
-        randomness_by_commitment_limb,
-        POLYNOMIAL_DEGREE,
-    )
-}
-
 pub(in crate::bgv::setup) fn compute_setup_commitment_from_typed_opening_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -254,25 +187,6 @@ pub(in crate::bgv::setup) fn compute_setup_commitment_from_typed_opening_for_deg
     ring_degree: usize,
 ) -> CanonicalResult<SetupCommitmentValue> {
     validate_fresh_randomness_by_commitment_limb(randomness_by_commitment_limb, ring_degree)?;
-    compute_setup_commitment_for_degree(
-        public_matrix_seed_hash,
-        source_rns_limb_index,
-        shamir_coefficient_index,
-        message_coefficients,
-        randomness_by_commitment_limb,
-        ring_degree,
-    )
-}
-
-#[cfg(test)]
-pub(in super::super) fn compute_setup_commitment_for_tests(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
-    shamir_coefficient_index: u64,
-    message_coefficients: &[u128],
-    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
-    ring_degree: usize,
-) -> CanonicalResult<SetupCommitmentValue> {
     compute_setup_commitment_for_degree(
         public_matrix_seed_hash,
         source_rns_limb_index,

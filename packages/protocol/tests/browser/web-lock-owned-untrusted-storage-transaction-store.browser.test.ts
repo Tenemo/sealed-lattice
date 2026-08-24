@@ -334,7 +334,6 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
         await firstHandle.close();
         const secondHandle = await secondOpenRequest;
         expect(secondHandle.repairReport).toMatchObject({
-            removedCorruptIndexCount: 0,
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,
         });

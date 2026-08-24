@@ -17,4 +17,5 @@ export * from './common-proof-worker-runtime/runtime.js';
 export type {
     ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
     ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
+    CompactPublicKeyTransportBindings,
 } from './common-proof-worker-runtime/kernel-boundaries.js';

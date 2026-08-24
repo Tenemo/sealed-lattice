@@ -4,13 +4,9 @@ export type ReleaseCommandProbe = {
     readonly stdout: string;
 };
 
-type NpmPublicationDisposition =
-    | { readonly action: 'already-identical' }
-    | { readonly action: 'publish' };
+type NpmPublicationDisposition = 'already-identical' | 'publish';
 
-type GitHubReleaseDisposition =
-    | { readonly action: 'already-exists' }
-    | { readonly action: 'create' };
+type GitHubReleaseDisposition = 'already-exists' | 'create';
 
 const publicPackageManifestPath = 'packages/sdk/package.json';
 
@@ -174,11 +170,11 @@ export const resolveNpmPublication = (input: {
                 `npm latest points to sealed-lattice@${latestVersion}; expected sealed-lattice@${input.packageVersion}.`,
             );
         }
-        return { action: 'already-identical' };
+        return 'already-identical';
     }
 
     if (isNpmNotFoundProbe(input.registryLookup)) {
-        return { action: 'publish' };
+        return 'publish';
     }
 
     throw new Error(
@@ -204,7 +200,7 @@ export const resolveGitHubRelease = (input: {
                 `GitHub release ${input.tag} exists but is not an ordinary release for the expected tag.`,
             );
         }
-        return { action: 'already-exists' };
+        return 'already-exists';
     }
 
     if (
@@ -212,7 +208,7 @@ export const resolveGitHubRelease = (input: {
             'HTTP 404',
         )
     ) {
-        return { action: 'create' };
+        return 'create';
     }
 
     throw new Error(

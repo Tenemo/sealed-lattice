@@ -1,42 +1,15 @@
-use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
+use crate::foundation::{CanonicalItem, CanonicalTuple};
 
 use super::{
     checking::RelationPlanChecker,
-    expressions::{canonical_nested_list, encode_generated_tuple, hash_generated_variable_bytes},
-    layout::RelationPlanVariant,
-    model::{RelationPlanError, SuiteModulusReference, canonical_encoding_error},
-    schema::{
-        PROOF_APPLICATION_SLOT_TEMPLATE_SCHEMA_IDENTIFIER, RELATION_PLAN_HASH_DOMAIN,
-        RELATION_PLAN_SCHEMA_IDENTIFIER, SCHEMA_VERSION,
+    expressions::{
+        canonical_nested_list, encode_generated_tuple, hash_generated_variable_bytes,
+        resident_vec_storage_byte_length,
     },
+    layout::RelationPlanVariant,
+    model::{RelationPlanError, SuiteModulusReference},
+    schema::{RELATION_PLAN_HASH_DOMAIN, RELATION_PLAN_SCHEMA_IDENTIFIER, SCHEMA_VERSION},
 };
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ProofApplicationSlotTemplate {
-    pub(super) application_statement_schema_identifier: u16,
-    pub(super) schedule_position: Option<u32>,
-    pub(super) top_count: Option<u16>,
-}
-
-impl ProofApplicationSlotTemplate {
-    pub(super) fn canonical_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
-        let schedule_item = self.schedule_position.map(CanonicalItem::unsigned32);
-        let top_count_item = self.top_count.map(CanonicalItem::unsigned16);
-        CanonicalTuple::new(
-            PROOF_APPLICATION_SLOT_TEMPLATE_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.application_statement_schema_identifier),
-                CanonicalItem::optional(CanonicalItemType::Unsigned32, schedule_item.as_ref())
-                    .map_err(canonical_encoding_error)?,
-                CanonicalItem::optional(CanonicalItemType::Unsigned16, top_count_item.as_ref())
-                    .map_err(canonical_encoding_error)?,
-            ],
-        )
-        .encode()
-        .map_err(canonical_encoding_error)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RelationPlan {
@@ -72,6 +45,18 @@ pub(crate) struct CompiledRelationPlan {
 }
 
 impl CompiledRelationPlan {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.plan.variants.iter().try_fold(
+            resident_vec_storage_byte_length(&self.plan.variants)?,
+            |total, variant| {
+                total
+                    .checked_add(variant.resident_owned_payload_byte_length()?)
+                    .ok_or(RelationPlanError::CountOverflow)
+            },
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         self.plan.canonical_tuple()
     }
@@ -80,6 +65,7 @@ impl CompiledRelationPlan {
         self.plan.canonical_bytes()
     }
 
+    #[cfg(test)]
     pub(crate) fn encode_canonical_tuple(
         &self,
         canonical_tuple: &CanonicalTuple,
@@ -126,57 +112,12 @@ impl CompiledRelationPlan {
         Ok(selected)
     }
 
-    pub(crate) fn application_slot_templates(&self) -> Result<Vec<Vec<u8>>, RelationPlanError> {
-        self.plan
-            .variants
-            .iter()
-            .map(|variant| {
-                ProofApplicationSlotTemplate {
-                    application_statement_schema_identifier: self
-                        .plan
-                        .application_statement_schema_identifier,
-                    schedule_position: variant.schedule_position,
-                    top_count: variant.top_count,
-                }
-                .canonical_bytes()
-            })
-            .collect()
-    }
-
     pub(crate) fn check(
         &self,
         context: &RelationPlanCheckContext,
     ) -> Result<(), RelationPlanError> {
         RelationPlanChecker::new(context).check(self)
     }
-}
-
-pub(crate) fn merge_checked_relation_plan_variants(
-    application_statement_schema_identifier: u16,
-    plans: Vec<CompiledRelationPlan>,
-    context: &RelationPlanCheckContext,
-) -> Result<CompiledRelationPlan, RelationPlanError> {
-    if plans.is_empty()
-        || plans.iter().any(|plan| {
-            plan.application_statement_schema_identifier()
-                != application_statement_schema_identifier
-        })
-    {
-        return Err(RelationPlanError::UnsupportedApplicationFamily);
-    }
-
-    let variants = plans
-        .into_iter()
-        .flat_map(|plan| plan.plan.variants)
-        .collect::<Vec<_>>();
-    let merged = CompiledRelationPlan {
-        plan: RelationPlan {
-            application_statement_schema_identifier,
-            variants,
-        },
-    };
-    merged.check(context)?;
-    Ok(merged)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,21 +136,23 @@ impl ResolvedSuiteModulus {
 pub(crate) struct RelationPlanCheckContext {
     pub(crate) base_field_modulus: u64,
     pub(crate) challenge_extension_degree: u16,
-    pub(crate) evaluation_blowup_factor: u32,
     pub(crate) evaluation_domain_generator: u64,
     pub(crate) evaluation_coset_offset: u64,
-    pub(crate) deep_point_count: u16,
+    pub(crate) out_of_domain_point_count: u16,
     pub(crate) quotient_component_count: u32,
     pub(crate) quotient_component_degree_bound_exclusive: u64,
-    pub(crate) fri_fold_count: u16,
-    pub(crate) final_polynomial_degree_bound_exclusive: u32,
-    pub(crate) unique_query_count: u32,
-    pub(crate) non_native_modular_identity_challenge_count: u16,
+    pub(crate) phase_column_query_coordinate_count: u32,
+    pub(crate) non_native_theta_repetition_count: u16,
+    pub(crate) non_native_alpha_repetition_count: u16,
     pub(crate) maximum_fiat_shamir_candidate_draws_per_output: u32,
     pub(crate) resolved_moduli: Vec<ResolvedSuiteModulus>,
 }
 
 impl RelationPlanCheckContext {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        resident_vec_storage_byte_length(&self.resolved_moduli)
+    }
+
     pub(crate) fn resolved_modulus(
         &self,
         reference: SuiteModulusReference,

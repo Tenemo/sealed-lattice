@@ -35,7 +35,6 @@ const mlKem768SharedSecretByteLength = 32;
 
 declare const signingCapabilityBrand: unique symbol;
 declare const mailboxCapabilityBrand: unique symbol;
-declare const freshMailboxSigningPermitBrand: unique symbol;
 
 export type BrowserLocalSigningCapability = Readonly<{
     readonly [signingCapabilityBrand]: true;
@@ -43,10 +42,6 @@ export type BrowserLocalSigningCapability = Readonly<{
 
 export type BrowserLocalMailboxCapability = Readonly<{
     readonly [mailboxCapabilityBrand]: true;
-}>;
-
-type FreshMailboxSigningPermit = Readonly<{
-    readonly [freshMailboxSigningPermitBrand]: true;
 }>;
 
 type BrowserLocalResetSafeSetupMailboxScope = Readonly<
@@ -180,17 +175,8 @@ type ProviderState = {
 type SigningCapabilityState = Readonly<{ provider: ProviderState }>;
 type MailboxCapabilityState = Readonly<{ provider: ProviderState }>;
 
-type FreshMailboxSigningPermitState = {
-    readonly provider: ProviderState;
-    consumed: boolean;
-};
-
 const signingCapabilityStates = new WeakMap<object, SigningCapabilityState>();
 const mailboxCapabilityStates = new WeakMap<object, MailboxCapabilityState>();
-const freshMailboxSigningPermitStates = new WeakMap<
-    object,
-    FreshMailboxSigningPermitState
->();
 const copyExactBytes = (
     value: Uint8Array,
     expectedByteLength: number,
@@ -935,49 +921,6 @@ export const openBrowserLocalExternalKeyProvider = (
     });
 };
 
-const signClosedMailboxEnvelopeHash = (input: {
-    capability: BrowserLocalSigningCapability;
-    message: Uint8Array;
-}): Uint8Array => {
-    const provider = requireSigningProvider(input.capability);
-    if (
-        !(input.message instanceof Uint8Array) ||
-        input.message.byteLength !== 64
-    ) {
-        throw new TypeError(
-            'Closed protocol signature messages must be 64 bytes.',
-        );
-    }
-    const hedge = readEntropy(signingHedgeByteLength);
-    let signature: Uint8Array | undefined;
-    try {
-        signature = invokeSigningOperation(
-            provider,
-            input.message,
-            mailboxSignatureContext,
-            hedge,
-        );
-        requireSigningProvider(input.capability);
-        if (
-            !ml_dsa65.verify(
-                signature,
-                input.message,
-                provider.signingVerificationKey!,
-                { context: mailboxSignatureContext },
-            )
-        ) {
-            throw new BrowserLocalKeyProviderError(
-                'KeyMismatch',
-                'The browser-local signing operation no longer matches its frozen roster verification key.',
-            );
-        }
-        return signature.slice();
-    } finally {
-        hedge.fill(0);
-        signature?.fill(0);
-    }
-};
-
 export const decapsulateClosedMailboxCiphertext = (input: {
     capability: BrowserLocalMailboxCapability;
     ciphertext: Uint8Array;
@@ -1004,81 +947,6 @@ export const decapsulateClosedMailboxCiphertext = (input: {
     } finally {
         ciphertext.fill(0);
     }
-};
-
-export const encapsulateFreshMailbox = (input: {
-    signingCapability: BrowserLocalSigningCapability;
-    recipientEncapsulationKey: Uint8Array;
-}): Readonly<{
-    readonly ciphertext: Uint8Array;
-    readonly envelopeAttemptIdentifier: Uint8Array;
-    readonly sharedSecret: Uint8Array;
-    readonly signingPermit: FreshMailboxSigningPermit;
-}> => {
-    const provider = requireSigningProvider(input.signingCapability);
-    const recipientEncapsulationKey = copyExactBytes(
-        input.recipientEncapsulationKey,
-        mlKem768PublicKeyByteLength,
-        'recipientEncapsulationKey',
-    );
-    const envelopeAttemptIdentifier = readEntropy(
-        mailboxAttemptIdentifierByteLength,
-    );
-    const encapsulationCoins = readEntropy(mlKem768EncapsulationCoinByteLength);
-    try {
-        const encapsulation = ml_kem768.encapsulate(
-            recipientEncapsulationKey,
-            encapsulationCoins,
-        );
-        const signingPermit = Object.freeze({}) as FreshMailboxSigningPermit;
-        freshMailboxSigningPermitStates.set(signingPermit, {
-            provider,
-            consumed: false,
-        });
-        return Object.freeze({
-            ciphertext: encapsulation.cipherText,
-            envelopeAttemptIdentifier,
-            sharedSecret: encapsulation.sharedSecret,
-            signingPermit,
-        });
-    } catch (error) {
-        envelopeAttemptIdentifier.fill(0);
-        throw error;
-    } finally {
-        encapsulationCoins.fill(0);
-        recipientEncapsulationKey.fill(0);
-    }
-};
-
-export const signFreshMailboxEnvelope = (input: {
-    signingCapability: BrowserLocalSigningCapability;
-    signingPermit: FreshMailboxSigningPermit;
-    envelopeHash: ProtocolHash;
-}): Uint8Array => {
-    const permit = freshMailboxSigningPermitStates.get(input.signingPermit);
-    if (permit === undefined || permit.consumed) {
-        throw new BrowserLocalKeyProviderError(
-            'CapabilityUnavailable',
-            'The fresh-mailbox signing permit is unavailable or already consumed.',
-        );
-    }
-    const provider = requireSigningProvider(input.signingCapability);
-    if (permit.provider !== provider) {
-        throw new BrowserLocalKeyProviderError(
-            'CapabilityUnavailable',
-            'The fresh-mailbox signing permit belongs to another provider.',
-        );
-    }
-    const envelopeHash = requireLowercaseHex(
-        input.envelopeHash,
-        64,
-        'envelopeHash',
-    );
-    permit.consumed = true;
-    return signClosedMailboxEnvelopeHash({
-        capability: input.signingCapability,
-        message: hexToBytes(envelopeHash),
-    });
 };
 
 const resetSafeSetupMailboxInput = (

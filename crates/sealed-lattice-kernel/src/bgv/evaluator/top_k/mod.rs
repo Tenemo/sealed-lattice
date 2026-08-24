@@ -1,66 +1,95 @@
-mod ciphertext_helpers;
-mod comparison;
 mod interpolation;
-mod packed_rank;
-mod rank_lookup;
 mod rotations;
-mod score_packing;
-mod sparse_target;
-pub(crate) use ciphertext_helpers::*;
-pub(crate) use comparison::*;
 pub(crate) use interpolation::*;
-pub(crate) use packed_rank::*;
-pub(crate) use rank_lookup::*;
 pub(crate) use rotations::*;
-pub(crate) use score_packing::*;
-pub(crate) use sparse_target::*;
-use std::collections::BTreeSet;
 
-use crate::bgv::{
-    evaluator::{
-        circuit::{
-            EvaluatorContext, broadcast_constant_coefficients,
-            evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch,
-            modulus_switch_to, normalize_scaling,
-        },
-        engine::{
-            Ciphertext, add_plaintext_coefficients, ciphertext_add, ciphertext_negate,
-            ciphertext_sub, encode_slots_to_coefficients, plaintext_mul, scalar_mul,
-            signed_residue,
-        },
-    },
-    modular_arithmetic::{add_mod, integer_square_root_ceil, inverse_mod, mul_mod, sub_mod},
-};
+use crate::bgv::modular_arithmetic::{add_mod, inverse_mod, mul_mod, sub_mod};
 use crate::{
-    bgv::parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+    bgv::parameters::PLAINTEXT_MODULUS,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-// The frozen evaluator working level for the selected multi-ballot parameters:
-// the aggregate is mod-switched to this level before packing, every rotation
-// and multiplication happens at or below it, and one relinearization key plus
-// the packing/forward rotation keys are generated here (lower levels use the
-// same keys through CRT-idempotent truncation).
-pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 16;
-// Two post-packing modulus switches followed by the depth-eight comparison take
-// the selected level-16 pipeline to the level-6 output.
-pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
-// Every target stream is normalized to one common two-prime terminal basis.
-// Rank-lookups consume the available depth through level one, so the all-option
-// shortcut is explicitly switched to the same level before release.
-pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = 1;
-// Five is near the square root of the degree-19 rank lookup.
-pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
+// Each of the two pair-character product trees begins at the complete data
+// basis. The schedule fixes every switch point through character products,
+// extension trace, scatter, and the paired rank selector.
+pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 22;
+pub(crate) const CHARACTER_SWITCHED_MULTIPLICATION_DEPTH_COUNT: usize = 4;
+pub(crate) const RANK_SWITCHED_MULTIPLICATION_DEPTH_COUNT: usize = 5;
 
-const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
-
-pub(crate) struct PackedRankEvaluation {
-    pub(crate) packed_ranks: Ciphertext,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EvaluatorModulusSchedule {
+    pub(crate) character_depth_drop_counts: [usize; CHARACTER_SWITCHED_MULTIPLICATION_DEPTH_COUNT],
+    pub(crate) pre_trace_drop_count: usize,
+    pub(crate) post_trace_drop_count: usize,
+    pub(crate) post_scatter_drop_count: usize,
+    pub(crate) rank_depth_drop_counts: [usize; RANK_SWITCHED_MULTIPLICATION_DEPTH_COUNT],
 }
 
-pub(crate) struct EncryptedSparseTarget {
-    pub(crate) target_id: Ciphertext,
-    pub(crate) target_order: Ciphertext,
+pub(crate) const SELECTED_EVALUATOR_MODULUS_SCHEDULE: EvaluatorModulusSchedule =
+    EvaluatorModulusSchedule {
+        character_depth_drop_counts: [1, 2, 0, 0],
+        pre_trace_drop_count: 1,
+        post_trace_drop_count: 4,
+        post_scatter_drop_count: 1,
+        rank_depth_drop_counts: [0, 2, 2, 1, 1],
+    };
+pub(crate) const SELECTED_RELINEARIZATION_KEY_LEVEL: usize = 22;
+pub(crate) const CHARACTER_OUTPUT_LEVEL: usize = 19;
+pub(crate) const TRACE_KEY_LEVEL: usize = 18;
+pub(crate) const SCATTER_KEY_LEVEL: usize = 14;
+pub(crate) const RANK_INPUT_LEVEL: usize = 13;
+pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = 7;
+// Five is near the square root of the maximum supported degree-19 rank lookup.
+pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScheduledPowerTableProduct {
+    pub(crate) output_power: usize,
+    pub(crate) lower_power: usize,
+    pub(crate) upper_power: usize,
+    pub(crate) multiplication_depth: usize,
+}
+
+pub(crate) fn scheduled_power_table_products(
+    highest_power: usize,
+    base_multiplication_depth: usize,
+) -> CanonicalResult<Vec<ScheduledPowerTableProduct>> {
+    let mut multiplication_depths = vec![None; highest_power + 1];
+    if highest_power >= 1 {
+        multiplication_depths[1] = Some(base_multiplication_depth);
+    }
+    let mut products = Vec::with_capacity(highest_power.saturating_sub(1));
+    for output_power in 2..=highest_power {
+        let lower_power = output_power / 2;
+        let upper_power = output_power - lower_power;
+        let lower_depth = multiplication_depths[lower_power].ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "scheduled lower power is missing",
+            )
+        })?;
+        let upper_depth = multiplication_depths[upper_power].ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "scheduled upper power is missing",
+            )
+        })?;
+        let multiplication_depth =
+            lower_depth.max(upper_depth).checked_add(1).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    "scheduled multiplication depth overflowed",
+                )
+            })?;
+        multiplication_depths[output_power] = Some(multiplication_depth);
+        products.push(ScheduledPowerTableProduct {
+            output_power,
+            lower_power,
+            upper_power,
+            multiplication_depth,
+        });
+    }
+    Ok(products)
 }
 
 #[cfg(test)]

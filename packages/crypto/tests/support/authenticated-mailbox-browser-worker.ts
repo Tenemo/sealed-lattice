@@ -34,6 +34,7 @@ import {
     type AuthenticatedMailboxCarrier,
     type AuthenticatedMailboxInboundSlotAuthority,
     type AuthenticatedMailboxOutboundCache,
+    type AuthenticatedMailboxPlaintextCapability,
     type AuthenticatedMailboxPlaintextSinkBoundary,
     type AuthenticatedMailboxStagingBoundary,
     type AuthenticatedMailboxStreamBoundary,
@@ -356,6 +357,7 @@ const createPlaintextSinkBoundary = (
             let sealed = false;
             return Promise.resolve(
                 Object.freeze({
+                    authenticationRequirement: 'authenticate' as const,
                     disposition: 'fresh' as const,
                     cancel: () => {
                         for (const chunk of stagedChunks) {
@@ -380,7 +382,10 @@ const createPlaintextSinkBoundary = (
                         return Promise.resolve();
                     },
                     release: () => Promise.resolve(),
-                    seal: () => {
+                    seal: (
+                        authenticatedPlaintextCapability: AuthenticatedMailboxPlaintextCapability,
+                    ) => {
+                        authenticatedPlaintextCapability.release();
                         sealed = true;
                         return Promise.resolve();
                     },

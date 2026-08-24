@@ -13,6 +13,58 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
     input: &CommittedMaterialRelationPlanInput,
     check_context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_vss_share_linkage_relation_plan_with_range_digit_radix(input, check_context, 3)
+}
+
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+pub(crate) fn compile_vss_share_linkage_range_candidate_relation_plan(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_vss_share_linkage_relation_plan_with_range_digit_radix(
+        input,
+        check_context,
+        range_digit_radix,
+    )
+}
+
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) fn compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    let root_paths = vss_share_linkage_root_paths(input)?;
+    let builder = CommittedMaterialPlanBuilder::new_with_fused_bound_range_design(
+        VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        input,
+        check_context,
+        root_paths,
+        range_digit_radix,
+    )?;
+    compile_vss_share_linkage_relation_plan_with_builder(input, check_context, builder)
+}
+
+fn compile_vss_share_linkage_relation_plan_with_range_digit_radix(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    range_digit_radix: u64,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    let root_paths = vss_share_linkage_root_paths(input)?;
+    let builder = CommittedMaterialPlanBuilder::new_with_range_digit_radix(
+        VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        input,
+        check_context,
+        root_paths,
+        range_digit_radix,
+    )?;
+    compile_vss_share_linkage_relation_plan_with_builder(input, check_context, builder)
+}
+
+fn vss_share_linkage_root_paths(
+    input: &CommittedMaterialRelationPlanInput,
+) -> Result<Vec<Vec<super::RelationSelectorPathStep>>, RelationPlanError> {
     let sharing_limb_count = input.sharing_data_modulus_indices.len();
     let threshold = usize::from(input.threshold);
     let participant_count = usize::from(input.participant_count);
@@ -48,43 +100,48 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
         }
     }
 
-    let mut builder = CommittedMaterialPlanBuilder::new(
-        VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
-        input,
-        check_context,
-        root_paths,
-    )?;
+    Ok(root_paths)
+}
+
+fn compile_vss_share_linkage_relation_plan_with_builder(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    mut builder: CommittedMaterialPlanBuilder<'_>,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    let sharing_limb_count = input.sharing_data_modulus_indices.len();
+    let threshold = usize::from(input.threshold);
+    let participant_count = usize::from(input.participant_count);
     let mut coefficient_messages = Vec::with_capacity(sharing_limb_count);
     let mut recipient_messages = Vec::with_capacity(sharing_limb_count);
     let mut logical_root_ordinal = 0_usize;
     for sharing_limb_ordinal in 0..sharing_limb_count {
-        let mut limb_coefficients = Vec::with_capacity(threshold);
-        for _ in 0..threshold {
-            limb_coefficients.push(builder.add_material_message(
-                logical_root_ordinal,
-                sharing_limb_ordinal,
-                MaterialRootUse::Output,
-            )?);
-            logical_root_ordinal = logical_root_ordinal
-                .checked_add(1)
-                .ok_or(RelationPlanError::CountOverflow)?;
-        }
-        coefficient_messages.push(limb_coefficients);
-
-        let mut limb_recipients = Vec::with_capacity(participant_count);
-        for _ in 0..participant_count {
-            limb_recipients.push(builder.add_material_message(
-                logical_root_ordinal,
-                sharing_limb_ordinal,
-                MaterialRootUse::Output,
-            )?);
-            logical_root_ordinal = logical_root_ordinal
-                .checked_add(1)
-                .ok_or(RelationPlanError::CountOverflow)?;
-        }
-        recipient_messages.push(limb_recipients);
+        let roots_per_limb = threshold
+            .checked_add(participant_count)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let roots = (0..roots_per_limb)
+            .map(|root_offset| {
+                logical_root_ordinal
+                    .checked_add(root_offset)
+                    .map(|root_ordinal| (root_ordinal, MaterialRootUse::Output))
+                    .ok_or(RelationPlanError::CountOverflow)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let messages = builder.add_material_messages(&roots, sharing_limb_ordinal)?;
+        let (limb_coefficients, limb_recipients) = messages.split_at(threshold);
+        coefficient_messages.push(limb_coefficients.to_vec());
+        recipient_messages.push(limb_recipients.to_vec());
+        logical_root_ordinal = logical_root_ordinal
+            .checked_add(roots_per_limb)
+            .ok_or(RelationPlanError::CountOverflow)?;
     }
 
+    let quotient_count = sharing_limb_count
+        .checked_mul(2)
+        .and_then(|count| count.checked_mul(participant_count))
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let mut quotient_columns = builder
+        .add_packed_signed_quotient_columns(quotient_count, u64::from(input.threshold))?
+        .into_iter();
     let point_stride = input.point_stride()?;
     for sharing_limb_ordinal in 0..sharing_limb_count {
         let mut residuals_by_half = [Vec::new(), Vec::new()];
@@ -116,8 +173,9 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
                     physical_half_ordinal,
                     true,
                 )?;
-                let quotient_column =
-                    builder.add_signed_quotient_column(u64::from(input.threshold))?;
+                let quotient_column = quotient_columns
+                    .next()
+                    .ok_or(RelationPlanError::InvalidColumn)?;
                 builder.append_modulus_quotient_integer_term(
                     &mut terms,
                     sharing_limb_ordinal,
@@ -126,7 +184,7 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
                 residuals.push(builder.integer_residual(terms)?);
             }
         }
-        for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..check_context.non_native_alpha_repetition_count {
             for (physical_half_ordinal, residuals) in residuals_by_half.iter().enumerate() {
                 builder.add_randomized_residual_batch(
                     sharing_limb_ordinal,
@@ -138,5 +196,39 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
             }
         }
     }
+    if quotient_columns.next().is_some() {
+        return Err(RelationPlanError::InvalidColumn);
+    }
     builder.finish()
+}
+
+#[cfg(all(feature = "primitive-measurement-evidence", test))]
+mod tests {
+    use super::{
+        RelationPlanError, compile_vss_share_linkage_fused_bound_range_candidate_relation_plan,
+    };
+    use crate::bgv::proof_suite::relation_plan::SelectedVssSourceReplayMeasurement;
+
+    #[test]
+    fn fused_bound_range_compiler_refuses_wrong_radix_and_trace_packing() {
+        let (input, context) =
+            SelectedVssSourceReplayMeasurement::fused_bound_range_candidate_definition(51)
+                .expect("the radix-51 fused-bound definition derives");
+        assert!(matches!(
+            compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+                &input, &context, 50,
+            ),
+            Err(RelationPlanError::InvalidConstraint)
+        ));
+        let mut packed_input = input;
+        packed_input.trace_packing_factor = 2;
+        assert!(matches!(
+            compile_vss_share_linkage_fused_bound_range_candidate_relation_plan(
+                &packed_input,
+                &context,
+                51,
+            ),
+            Err(RelationPlanError::InvalidDomain)
+        ));
+    }
 }

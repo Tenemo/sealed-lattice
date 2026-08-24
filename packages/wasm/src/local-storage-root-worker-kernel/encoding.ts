@@ -360,46 +360,6 @@ export const encodeFoundationWitnessAuthorizedEmpty = (
         canonicalRole,
     );
 
-export const encodeStructuredCommitmentMessage = (
-    coefficients: unknown,
-): Uint8Array<ArrayBuffer> => {
-    if (!Array.isArray(coefficients)) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Structured-commitment message coefficients must be an array.',
-        );
-    }
-    const byteLength = coefficients.length * 8 + 4;
-    if (
-        !Number.isSafeInteger(byteLength) ||
-        byteLength > maximumCommandByteLength
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Structured-commitment message exceeds the supported command limit.',
-        );
-    }
-    const encoded = new Uint8Array(byteLength);
-    const view = new DataView(encoded.buffer);
-    view.setUint32(0, coefficients.length, true);
-    coefficients.forEach((coefficient: unknown, coefficientIndex) => {
-        if (
-            typeof coefficient !== 'number' ||
-            !Number.isSafeInteger(coefficient) ||
-            coefficient < 0
-        ) {
-            encoded.fill(0);
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                `Structured-commitment message coefficient ${String(coefficientIndex)} must be a nonnegative safe integer.`,
-            );
-        }
-        view.setBigUint64(4 + coefficientIndex * 8, BigInt(coefficient), true);
-    });
-
-    return encoded;
-};
-
 const encodeByteLength = (
     byteLength: number,
     label: string,

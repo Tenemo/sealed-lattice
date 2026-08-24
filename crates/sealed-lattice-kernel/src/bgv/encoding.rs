@@ -1,19 +1,20 @@
-use std::sync::OnceLock;
-
 #[cfg(test)]
 use crate::bgv::{
     base_conversion::lift_plaintext_coefficients_to_basis, parameters::BgvBasisKind,
     rns::RnsPolynomial,
 };
+#[cfg(test)]
+use crate::bgv::{
+    direct_ballots::{PAIR_CHARACTER_LANE_DEGREE, pair_character_lane_idempotent_coefficients},
+    modular_arithmetic::{add_mod, mul_mod},
+};
 use crate::{
     bgv::{
-        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt_in_place},
-        parameters::{LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        direct_ballots::{PAIR_CHARACTER_LANE_COUNT, pair_character_lane_value},
+        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
-
-static LOGICAL_TO_NATURAL_TRANSFORM_INDEX: OnceLock<Vec<usize>> = OnceLock::new();
 
 #[cfg(test)]
 pub(crate) struct EncodedBatchPlaintext {
@@ -21,370 +22,480 @@ pub(crate) struct EncodedBatchPlaintext {
     pub(crate) polynomial: RnsPolynomial,
 }
 
-// Logical slots follow the suite generator order, while the NTT implementation
-// exposes evaluations in ascending odd-exponent order. The suite arithmetic
-// derivation owns the permutation between those two orders.
+/// Encodes one base-field scalar in each of the 128 selected degree-256
+/// plaintext lanes. This is the only scalar-lane embedding used by evaluator
+/// development tests and target decoding; arbitrary extension-field lane
+/// values stay in coefficient form.
 #[cfg(test)]
-pub(crate) fn encode_batch_plaintext_slots(
-    supplied_slots: &[u64],
+pub(super) fn encode_scalar_lanes_to_plaintext_coefficients(
+    supplied_lanes: &[u64],
+) -> CanonicalResult<Vec<u64>> {
+    if supplied_lanes.len() > PAIR_CHARACTER_LANE_COUNT {
+        return Err(encoding_error(
+            CanonicalErrorCode::MalformedLength,
+            "BGV scalar-lane encoder received more lanes than the selected plaintext algebra",
+        ));
+    }
+    if supplied_lanes.iter().any(|lane| *lane >= PLAINTEXT_MODULUS) {
+        return Err(encoding_error(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "BGV scalar-lane encoder received a noncanonical plaintext value",
+        ));
+    }
+
+    let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
+    for (lane_ordinal, lane_value) in supplied_lanes.iter().copied().enumerate() {
+        if lane_value == 0 {
+            continue;
+        }
+        for (lane_coefficient_ordinal, idempotent_coefficient) in
+            pair_character_lane_idempotent_coefficients(lane_ordinal)?
+                .into_iter()
+                .enumerate()
+        {
+            let coefficient_ordinal = lane_coefficient_ordinal
+                .checked_mul(PAIR_CHARACTER_LANE_DEGREE)
+                .ok_or_else(|| {
+                    encoding_error(
+                        CanonicalErrorCode::InvalidProtocolObject,
+                        "BGV scalar-lane coefficient index overflowed",
+                    )
+                })?;
+            let contribution = mul_mod(lane_value, idempotent_coefficient, PLAINTEXT_MODULUS)?;
+            coefficients[coefficient_ordinal] = add_mod(
+                coefficients[coefficient_ordinal],
+                contribution,
+                PLAINTEXT_MODULUS,
+            )?;
+        }
+    }
+    Ok(coefficients)
+}
+
+/// Test-only reference encoder for arbitrary values in every selected
+/// degree-256 plaintext lane. Production pair-character encoding retains its
+/// sparse specialized path; this helper exists to validate that path against
+/// the complete extension algebra without adding browser work.
+#[cfg(test)]
+pub(super) fn encode_extension_lanes_to_plaintext_coefficients(
+    supplied_lanes: &[[u64; PAIR_CHARACTER_LANE_DEGREE]],
+) -> CanonicalResult<Vec<u64>> {
+    if supplied_lanes.len() > PAIR_CHARACTER_LANE_COUNT {
+        return Err(encoding_error(
+            CanonicalErrorCode::MalformedLength,
+            "BGV extension-lane encoder received more lanes than the selected plaintext algebra",
+        ));
+    }
+    if supplied_lanes
+        .iter()
+        .flatten()
+        .any(|coordinate| *coordinate >= PLAINTEXT_MODULUS)
+    {
+        return Err(encoding_error(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "BGV extension-lane encoder received a noncanonical plaintext coordinate",
+        ));
+    }
+
+    let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
+    for (lane_ordinal, lane_value) in supplied_lanes.iter().enumerate() {
+        let nonzero_coordinates = lane_value
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, coordinate)| *coordinate != 0)
+            .collect::<Vec<_>>();
+        if nonzero_coordinates.is_empty() {
+            continue;
+        }
+        let idempotent = pair_character_lane_idempotent_coefficients(lane_ordinal)?;
+        for (residue_exponent, lane_coordinate) in nonzero_coordinates {
+            for (lane_block_ordinal, idempotent_coefficient) in
+                idempotent.iter().copied().enumerate()
+            {
+                let coefficient_ordinal = lane_block_ordinal
+                    .checked_mul(PAIR_CHARACTER_LANE_DEGREE)
+                    .and_then(|block_start| block_start.checked_add(residue_exponent))
+                    .ok_or_else(|| {
+                        encoding_error(
+                            CanonicalErrorCode::InvalidProtocolObject,
+                            "BGV extension-lane coefficient index overflowed",
+                        )
+                    })?;
+                let contribution =
+                    mul_mod(lane_coordinate, idempotent_coefficient, PLAINTEXT_MODULUS)?;
+                coefficients[coefficient_ordinal] = add_mod(
+                    coefficients[coefficient_ordinal],
+                    contribution,
+                    PLAINTEXT_MODULUS,
+                )?;
+            }
+        }
+    }
+    Ok(coefficients)
+}
+
+#[cfg(test)]
+pub(super) fn decode_plaintext_coefficients_to_extension_lanes(
+    coefficients: &[u64],
+) -> CanonicalResult<Vec<[u64; PAIR_CHARACTER_LANE_DEGREE]>> {
+    if coefficients.len() != POLYNOMIAL_DEGREE {
+        return Err(encoding_error(
+            CanonicalErrorCode::MalformedLength,
+            "BGV extension-lane decoder coefficient count does not match the selected ring degree",
+        ));
+    }
+    if coefficients
+        .iter()
+        .any(|coefficient| *coefficient >= PLAINTEXT_MODULUS)
+    {
+        return Err(encoding_error(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "BGV extension-lane decoder received a noncanonical plaintext coefficient",
+        ));
+    }
+    (0..PAIR_CHARACTER_LANE_COUNT)
+        .map(|lane_ordinal| pair_character_lane_value(coefficients, lane_ordinal))
+        .collect()
+}
+
+/// Decodes the base-field scalar subspace of the selected 128 extension
+/// lanes. A target with a nonconstant extension component is malformed rather
+/// than silently projected onto its constant coefficient.
+pub(super) fn decode_plaintext_coefficients_to_scalar_lanes(
+    coefficients: &[u64],
+) -> CanonicalResult<Vec<u64>> {
+    if coefficients.len() != POLYNOMIAL_DEGREE {
+        return Err(encoding_error(
+            CanonicalErrorCode::MalformedLength,
+            "BGV scalar-lane decoder coefficient count does not match the selected ring degree",
+        ));
+    }
+    if coefficients
+        .iter()
+        .any(|coefficient| *coefficient >= PLAINTEXT_MODULUS)
+    {
+        return Err(encoding_error(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "BGV scalar-lane decoder received a noncanonical plaintext coefficient",
+        ));
+    }
+
+    (0..PAIR_CHARACTER_LANE_COUNT)
+        .map(|lane_ordinal| {
+            let lane = pair_character_lane_value(coefficients, lane_ordinal)?;
+            if lane[1..].iter().any(|coefficient| *coefficient != 0) {
+                return Err(encoding_error(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    "BGV scalar-lane decoder received a nonconstant extension-lane value",
+                ));
+            }
+            Ok(lane[0])
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn encode_batch_plaintext_lanes(
+    supplied_lanes: &[u64],
     target_level: usize,
 ) -> CanonicalResult<EncodedBatchPlaintext> {
-    let coefficients_mod_plaintext =
-        encode_logical_slots_to_plaintext_coefficients(supplied_slots)?;
+    let coefficients_mod_plaintext = encode_scalar_lanes_to_plaintext_coefficients(supplied_lanes)?;
     let polynomial = lift_plaintext_coefficients_to_basis(
         &coefficients_mod_plaintext,
         BgvBasisKind::Data,
         target_level,
     )?;
-
     Ok(EncodedBatchPlaintext {
         coefficients_mod_plaintext,
         polynomial,
     })
 }
 
-pub(super) fn encode_logical_slots_to_plaintext_coefficients(
-    supplied_slots: &[u64],
-) -> CanonicalResult<Vec<u64>> {
-    if supplied_slots.len() > POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "BGV batch encoder received more slots than the selected polynomial degree",
-        ));
-    }
-    if supplied_slots.iter().any(|slot| *slot >= PLAINTEXT_MODULUS) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "BGV batch encoder slot value is outside GF(65537)",
-        ));
-    }
-    let mut padded_slots = vec![0_u64; POLYNOMIAL_DEGREE];
-    padded_slots[..supplied_slots.len()].copy_from_slice(supplied_slots);
-    let mut coefficients_mod_plaintext = logical_slots_to_natural_transform_order(&padded_slots)?;
-    inverse_negacyclic_ntt_in_place(&mut coefficients_mod_plaintext, PLAINTEXT_MODULUS)?;
-
-    Ok(coefficients_mod_plaintext)
-}
-
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the browser-compiled evaluator decode path is not yet reached by a transcript-core command"
-    )
-)]
-pub(super) fn decode_plaintext_coefficients_to_logical_slots(
-    coefficients_mod_plaintext: &[u64],
-) -> CanonicalResult<Vec<u64>> {
-    if coefficients_mod_plaintext.len() != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "BGV scalar decoder coefficient count must match the selected polynomial degree",
-        ));
-    }
-    let natural_transform_slots =
-        forward_negacyclic_ntt(coefficients_mod_plaintext, PLAINTEXT_MODULUS)?;
-    natural_transform_slots_to_logical_order(&natural_transform_slots)
-}
-
-fn logical_slots_to_natural_transform_order(logical_slots: &[u64]) -> CanonicalResult<Vec<u64>> {
-    let mut natural_transform_slots = vec![0_u64; logical_slots.len()];
-    for (logical_slot, natural_transform_index) in logical_slots
-        .iter()
-        .zip(logical_to_natural_transform_indexes())
-    {
-        natural_transform_slots[*natural_transform_index] = *logical_slot;
-    }
-
-    Ok(natural_transform_slots)
-}
-
-fn natural_transform_slots_to_logical_order(
-    natural_transform_slots: &[u64],
-) -> CanonicalResult<Vec<u64>> {
-    Ok(logical_to_natural_transform_indexes()
-        .iter()
-        .map(|natural_transform_index| natural_transform_slots[*natural_transform_index])
-        .collect())
-}
-
-fn logical_to_natural_transform_indexes() -> &'static [usize] {
-    LOGICAL_TO_NATURAL_TRANSFORM_INDEX.get_or_init(|| {
-        let ring_order = 2 * POLYNOMIAL_DEGREE;
-        let positive_slot_count = POLYNOMIAL_DEGREE / 2;
-        let logical_slot_generator = LOGICAL_SLOT_GENERATOR;
-        let mut positive_exponents = Vec::with_capacity(positive_slot_count);
-        let mut exponent = 1_usize;
-        for _ in 0..positive_slot_count {
-            positive_exponents.push(exponent);
-            exponent = exponent * logical_slot_generator % ring_order;
-        }
-
-        positive_exponents
-            .iter()
-            .copied()
-            .chain(
-                positive_exponents
-                    .iter()
-                    .map(|positive_exponent| ring_order - positive_exponent),
-            )
-            .map(|slot_exponent| (slot_exponent - 1) / 2)
-            .collect()
-    })
-}
-
-#[cfg(test)]
-fn logical_slot_exponent(logical_slot_index: usize) -> usize {
-    2 * logical_to_natural_transform_indexes()[logical_slot_index] + 1
-}
-
-// Decoding is the inverse of encoding: recover the plaintext coefficients from
-// any limb, evaluate in natural NTT order, then apply the suite permutation.
-#[cfg(test)]
-pub(crate) fn decode_batch_plaintext_polynomial(
-    polynomial: &RnsPolynomial,
-) -> CanonicalResult<Vec<u64>> {
-    polynomial.validate()?;
-    let first_limb = polynomial.residues_by_modulus.first().ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "BGV plaintext object has no residue limbs",
-        )
-    })?;
-    let coefficients_mod_plaintext = first_limb
-        .iter()
-        .map(|coefficient| coefficient % PLAINTEXT_MODULUS)
-        .collect::<Vec<_>>();
-    for (limb_index, limb) in polynomial.residues_by_modulus.iter().enumerate().skip(1) {
-        for (coefficient_index, coefficient) in limb.iter().enumerate() {
-            if coefficient % PLAINTEXT_MODULUS != coefficients_mod_plaintext[coefficient_index] {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidProtocolObject,
-                    format!(
-                        "BGV plaintext limb {limb_index} coefficient {coefficient_index} is not a consistent plaintext lift",
-                    ),
-                ));
-            }
-        }
-    }
-
-    decode_plaintext_coefficients_to_logical_slots(&coefficients_mod_plaintext)
+fn encoding_error(code: CanonicalErrorCode, message: &'static str) -> CanonicalError {
+    CanonicalError::new(code, message)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        decode_batch_plaintext_polynomial, decode_plaintext_coefficients_to_logical_slots,
-        encode_batch_plaintext_slots, logical_slot_exponent, logical_to_natural_transform_indexes,
-    };
-    use crate::{
-        bgv::{
-            base_conversion::lift_plaintext_coefficients_to_basis,
-            ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-            parameters::{
-                BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
-            },
-        },
-        encoding::CanonicalErrorCode,
-    };
+    use super::*;
+    use crate::bgv::parameters::plaintext_extension_lane_root;
 
     #[test]
-    fn batch_encoder_round_trips_boundary_slots() {
-        let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
-        slots[0] = 65_536;
-        slots[1] = 1;
-        slots[2] = 2;
-        slots[17] = 32_768;
-        slots[POLYNOMIAL_DEGREE / 2 - 1] = 65_535;
-        slots[POLYNOMIAL_DEGREE / 2] = 31_337;
-        slots[POLYNOMIAL_DEGREE - 1] = 99;
-        let encoded = encode_batch_plaintext_slots(&slots, 0).expect("encode");
-        let decoded = decode_batch_plaintext_polynomial(&encoded.polynomial).expect("decode");
-
-        assert_eq!(decoded, slots);
-        assert_eq!(encoded.polynomial.residues_by_modulus.len(), 1);
+    fn selected_scalar_lanes_round_trip_boundaries_and_dense_values() {
+        let lanes = (0..PAIR_CHARACTER_LANE_COUNT)
+            .map(|lane_ordinal| {
+                u64::try_from(37 * lane_ordinal + 256).expect("small lane value")
+                    % PLAINTEXT_MODULUS
+            })
+            .collect::<Vec<_>>();
+        let coefficients =
+            encode_scalar_lanes_to_plaintext_coefficients(&lanes).expect("encode lanes");
+        assert_eq!(
+            decode_plaintext_coefficients_to_scalar_lanes(&coefficients).expect("decode lanes"),
+            lanes
+        );
     }
 
     #[test]
-    fn batch_encoder_round_trips_deterministic_full_slot_patterns() {
-        for (pattern_index, seed) in [0_u64, 1, u64::MAX, 0xa076_1d64_78bd_642f]
-            .into_iter()
-            .enumerate()
-        {
-            let slots = deterministic_residue_vector(seed);
-            let target_level = pattern_index % DATA_PRIMES.len();
-            let encoded =
-                encode_batch_plaintext_slots(&slots, target_level).expect("encode pattern");
-            let decoded =
-                decode_batch_plaintext_polynomial(&encoded.polynomial).expect("decode pattern");
+    fn selected_scalar_lane_codec_rejects_wrong_geometry_and_extension_values() {
+        assert!(
+            encode_scalar_lanes_to_plaintext_coefficients(&vec![0; PAIR_CHARACTER_LANE_COUNT + 1])
+                .is_err()
+        );
+        assert!(encode_scalar_lanes_to_plaintext_coefficients(&[PLAINTEXT_MODULUS]).is_err());
+        assert!(
+            decode_plaintext_coefficients_to_scalar_lanes(&vec![0; POLYNOMIAL_DEGREE - 1]).is_err()
+        );
 
-            assert_eq!(decoded, slots, "pattern {pattern_index}");
-        }
+        let mut extension_value = vec![0_u64; POLYNOMIAL_DEGREE];
+        extension_value[1] = 1;
+        assert!(decode_plaintext_coefficients_to_scalar_lanes(&extension_value).is_err());
     }
 
     #[test]
-    fn decoder_matches_direct_evaluation_for_deterministic_coefficient_patterns() {
-        let sampled_logical_indexes = [
-            0,
-            1,
-            2,
-            POLYNOMIAL_DEGREE / 2 - 1,
-            POLYNOMIAL_DEGREE / 2,
-            POLYNOMIAL_DEGREE - 1,
-        ];
-
-        for seed in [0_u64, u64::MAX, 0xe703_7ed1_a0b4_28db] {
-            let coefficients = deterministic_residue_vector(seed);
-            let natural_transform =
-                forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS).expect("forward NTT");
-            let expected_logical_slots = logical_to_natural_transform_indexes()
+    fn selected_scalar_lane_plaintext_lift_retains_every_coefficient() {
+        let encoded =
+            encode_batch_plaintext_lanes(&[0, 1, 256, 17, 99], 0).expect("encode and lift lanes");
+        assert_eq!(encoded.polynomial.level, 0);
+        assert_eq!(
+            encoded.polynomial.residues_by_modulus[0]
                 .iter()
-                .map(|natural_transform_index| natural_transform[*natural_transform_index])
-                .collect::<Vec<_>>();
-            let polynomial =
-                lift_plaintext_coefficients_to_basis(&coefficients, BgvBasisKind::Data, 1)
-                    .expect("lift coefficients");
-            let decoded =
-                decode_batch_plaintext_polynomial(&polynomial).expect("decode coefficients");
+                .map(|coefficient| coefficient % PLAINTEXT_MODULUS)
+                .collect::<Vec<_>>(),
+            encoded.coefficients_mod_plaintext
+        );
+    }
 
-            assert_eq!(decoded, expected_logical_slots);
-            for logical_index in sampled_logical_indexes {
-                let evaluation_point = modular_power(
-                    ROOT_PARAMETERS[0].negacyclic_root,
-                    logical_slot_exponent(logical_index) as u64,
-                    PLAINTEXT_MODULUS,
-                );
+    #[test]
+    fn selected_extension_lanes_round_trip_dense_and_sparse_values() {
+        let dense_lanes = (0..PAIR_CHARACTER_LANE_COUNT)
+            .map(|lane_ordinal| {
+                core::array::from_fn(|coordinate_ordinal| {
+                    u64::try_from(37 * lane_ordinal + 19 * coordinate_ordinal + lane_ordinal % 11)
+                        .expect("selected extension coordinate fits u64")
+                        % PLAINTEXT_MODULUS
+                })
+            })
+            .collect::<Vec<[u64; PAIR_CHARACTER_LANE_DEGREE]>>();
+        let dense_coefficients = encode_extension_lanes_to_plaintext_coefficients(&dense_lanes)
+            .expect("encode dense extension lanes");
+        assert_eq!(
+            decode_plaintext_coefficients_to_extension_lanes(&dense_coefficients)
+                .expect("decode dense extension lanes"),
+            dense_lanes
+        );
+
+        let mut sparse_lanes = vec![[0_u64; PAIR_CHARACTER_LANE_DEGREE]; PAIR_CHARACTER_LANE_COUNT];
+        for (lane_ordinal, coordinate_ordinal, value) in [
+            (0, 0, 1),
+            (0, PAIR_CHARACTER_LANE_DEGREE - 1, 256),
+            (63, 1, 19),
+            (64, 127, 211),
+            (127, PAIR_CHARACTER_LANE_DEGREE - 1, 1),
+        ] {
+            sparse_lanes[lane_ordinal][coordinate_ordinal] = value;
+        }
+        let sparse_coefficients = encode_extension_lanes_to_plaintext_coefficients(&sparse_lanes)
+            .expect("encode sparse extension lanes");
+        assert_eq!(
+            decode_plaintext_coefficients_to_extension_lanes(&sparse_coefficients)
+                .expect("decode sparse extension lanes"),
+            sparse_lanes
+        );
+    }
+
+    #[test]
+    fn selected_extension_lane_codec_rejects_wrong_geometry_and_noncanonical_values() {
+        assert!(
+            encode_extension_lanes_to_plaintext_coefficients(&vec![
+                [0; PAIR_CHARACTER_LANE_DEGREE];
+                PAIR_CHARACTER_LANE_COUNT + 1
+            ])
+            .is_err()
+        );
+        let mut noncanonical_lane = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
+        noncanonical_lane[PAIR_CHARACTER_LANE_DEGREE - 1] = PLAINTEXT_MODULUS;
+        assert!(encode_extension_lanes_to_plaintext_coefficients(&[noncanonical_lane]).is_err());
+        assert!(
+            decode_plaintext_coefficients_to_extension_lanes(&vec![0; POLYNOMIAL_DEGREE - 1])
+                .is_err()
+        );
+        let mut noncanonical_coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
+        noncanonical_coefficients[POLYNOMIAL_DEGREE - 1] = PLAINTEXT_MODULUS;
+        assert!(
+            decode_plaintext_coefficients_to_extension_lanes(&noncanonical_coefficients).is_err()
+        );
+    }
+
+    #[test]
+    fn sparse_full_ring_product_matches_every_extension_lane_product() {
+        let mut left_coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
+        let mut right_coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
+        for (coefficient_ordinal, value) in [
+            (0, 256),
+            (1, 17),
+            (255, 91),
+            (256, 33),
+            (16_511, 201),
+            (32_767, 7),
+        ] {
+            left_coefficients[coefficient_ordinal] = value;
+        }
+        for (coefficient_ordinal, value) in [
+            (0, 13),
+            (2, 256),
+            (254, 99),
+            (257, 41),
+            (16_384, 77),
+            (32_766, 5),
+        ] {
+            right_coefficients[coefficient_ordinal] = value;
+        }
+        let product_coefficients =
+            sparse_negacyclic_product(&left_coefficients, &right_coefficients);
+
+        for lane_ordinal in 0..PAIR_CHARACTER_LANE_COUNT {
+            let lane_root = plaintext_extension_lane_root(lane_ordinal)
+                .expect("selected extension lane root derives");
+            let left_lane = evaluate_sparse_ring_in_lane(&left_coefficients, lane_root);
+            let right_lane = evaluate_sparse_ring_in_lane(&right_coefficients, lane_root);
+            let expected_product =
+                multiply_extension_lane_values(&left_lane, &right_lane, lane_root);
+            let observed_product = evaluate_sparse_ring_in_lane(&product_coefficients, lane_root);
+            assert_eq!(observed_product, expected_product, "lane {lane_ordinal}");
+
+            if [0, 1, 63, 64, 127].contains(&lane_ordinal) {
                 assert_eq!(
-                    decoded[logical_index],
-                    evaluate_polynomial(&coefficients, evaluation_point),
-                    "seed {seed}, logical slot {logical_index}",
+                    pair_character_lane_value(&product_coefficients, lane_ordinal)
+                        .expect("production lane decoder accepts the sparse product"),
+                    observed_product,
+                    "production decoder drifted in lane {lane_ordinal}",
                 );
             }
         }
     }
 
-    #[test]
-    fn encoder_rejects_the_previous_natural_index_slot_assumption() {
-        let logical_slot_index = 2;
-        let slot_exponent = logical_slot_exponent(logical_slot_index);
-        let natural_transform_index = logical_to_natural_transform_indexes()[logical_slot_index];
-        assert_eq!(slot_exponent, 9);
-        assert_eq!(natural_transform_index, 4);
-        let evaluation_point = modular_power(
-            ROOT_PARAMETERS[0].negacyclic_root,
-            slot_exponent as u64,
-            PLAINTEXT_MODULUS,
-        );
-
-        let mut logical_slots = vec![0_u64; POLYNOMIAL_DEGREE];
-        logical_slots[logical_slot_index] = 42_424;
-        let encoded = encode_batch_plaintext_slots(&logical_slots, 0).expect("encode logical slot");
-        let previous_natural_order_coefficients =
-            inverse_negacyclic_ntt(&logical_slots, PLAINTEXT_MODULUS)
-                .expect("previous natural-order encoding");
-
-        assert_ne!(
-            encoded.coefficients_mod_plaintext,
-            previous_natural_order_coefficients,
-        );
-        assert_eq!(
-            evaluate_polynomial(&encoded.coefficients_mod_plaintext, evaluation_point,),
-            42_424,
-        );
-
-        let previous_natural_exponent = (2 * logical_slot_index + 1) as u64;
-        let previous_natural_point = modular_power(
-            ROOT_PARAMETERS[0].negacyclic_root,
-            previous_natural_exponent,
-            PLAINTEXT_MODULUS,
-        );
-        assert_eq!(
-            evaluate_polynomial(&encoded.coefficients_mod_plaintext, previous_natural_point),
-            0,
-        );
-        assert_eq!(
-            evaluate_polynomial(&previous_natural_order_coefficients, previous_natural_point),
-            42_424,
-        );
-        assert_eq!(
-            evaluate_polynomial(&previous_natural_order_coefficients, evaluation_point,),
-            0,
-        );
-    }
-
-    #[test]
-    fn batch_encoder_round_trips_all_zero_and_all_max_slots() {
-        for slots in [
-            vec![0_u64; POLYNOMIAL_DEGREE],
-            vec![65_536_u64; POLYNOMIAL_DEGREE],
-        ] {
-            let encoded = encode_batch_plaintext_slots(&slots, 1).expect("encode");
-            let decoded = decode_batch_plaintext_polynomial(&encoded.polynomial).expect("decode");
-
-            assert_eq!(decoded, slots);
-            assert_eq!(encoded.polynomial.residues_by_modulus.len(), 2);
-        }
-    }
-
-    #[test]
-    fn batch_encoder_rejects_bad_slot_values_and_levels() {
-        assert!(encode_batch_plaintext_slots(&[65_537], 0).is_err());
-        assert!(encode_batch_plaintext_slots(&vec![0_u64; POLYNOMIAL_DEGREE + 1], 0).is_err());
-        assert!(encode_batch_plaintext_slots(&[0], DATA_PRIMES.len()).is_err());
-
-        for wrong_coefficient_count in [0, POLYNOMIAL_DEGREE / 2, POLYNOMIAL_DEGREE + 1] {
-            let error =
-                decode_plaintext_coefficients_to_logical_slots(&vec![0; wrong_coefficient_count])
-                    .expect_err("wrong coefficient count must reject");
-            assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
-        }
-    }
-
-    #[test]
-    fn decoder_rejects_inconsistent_plaintext_lift_limbs() {
-        let encoded = encode_batch_plaintext_slots(&[1, 2, 3], 1).expect("encode");
-        let mut mutated_polynomial = encoded.polynomial;
-        mutated_polynomial.residues_by_modulus[1][17] += 1;
-
-        let error = decode_batch_plaintext_polynomial(&mutated_polynomial)
-            .expect_err("inconsistent lift should reject");
-
-        assert!(error.message.contains("consistent plaintext lift"));
-    }
-
-    fn deterministic_residue_vector(seed: u64) -> Vec<u64> {
-        let mut state = seed;
-        (0..POLYNOMIAL_DEGREE)
-            .map(|coefficient_index| {
-                state = state
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1_442_695_040_888_963_407)
-                    ^ (coefficient_index as u64).rotate_left(17);
-                state % PLAINTEXT_MODULUS
-            })
-            .collect()
-    }
-
-    fn evaluate_polynomial(coefficients: &[u64], point: u64) -> u64 {
-        coefficients
+    fn sparse_negacyclic_product(left: &[u64], right: &[u64]) -> Vec<u64> {
+        let mut product = vec![0_u64; POLYNOMIAL_DEGREE];
+        for (left_ordinal, left_value) in left
             .iter()
-            .rev()
-            .fold(0_u64, |accumulated_value, coefficient| {
-                ((u128::from(accumulated_value) * u128::from(point) + u128::from(*coefficient))
-                    % u128::from(PLAINTEXT_MODULUS)) as u64
-            })
+            .copied()
+            .enumerate()
+            .filter(|(_, value)| *value != 0)
+        {
+            for (right_ordinal, right_value) in right
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, value)| *value != 0)
+            {
+                let exponent = left_ordinal + right_ordinal;
+                let (coefficient_ordinal, contribution) = if exponent >= POLYNOMIAL_DEGREE {
+                    (
+                        exponent - POLYNOMIAL_DEGREE,
+                        modular_negation_for_test(modular_product_for_test(
+                            left_value,
+                            right_value,
+                        )),
+                    )
+                } else {
+                    (exponent, modular_product_for_test(left_value, right_value))
+                };
+                product[coefficient_ordinal] =
+                    modular_sum_for_test(product[coefficient_ordinal], contribution);
+            }
+        }
+        product
     }
 
-    fn modular_power(base: u64, mut exponent: u64, modulus: u64) -> u64 {
+    fn evaluate_sparse_ring_in_lane(
+        coefficients: &[u64],
+        lane_root: u64,
+    ) -> [u64; PAIR_CHARACTER_LANE_DEGREE] {
+        let mut lane = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
+        for (coefficient_ordinal, coefficient) in coefficients
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, coefficient)| *coefficient != 0)
+        {
+            let lane_block_ordinal = coefficient_ordinal / PAIR_CHARACTER_LANE_DEGREE;
+            let residue_exponent = coefficient_ordinal % PAIR_CHARACTER_LANE_DEGREE;
+            let root_power = modular_power_for_test(
+                lane_root,
+                u64::try_from(lane_block_ordinal).expect("lane block ordinal fits u64"),
+            );
+            lane[residue_exponent] = modular_sum_for_test(
+                lane[residue_exponent],
+                modular_product_for_test(coefficient, root_power),
+            );
+        }
+        lane
+    }
+
+    fn multiply_extension_lane_values(
+        left: &[u64; PAIR_CHARACTER_LANE_DEGREE],
+        right: &[u64; PAIR_CHARACTER_LANE_DEGREE],
+        lane_root: u64,
+    ) -> [u64; PAIR_CHARACTER_LANE_DEGREE] {
+        let mut product = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
+        for (left_exponent, left_value) in left
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, value)| *value != 0)
+        {
+            for (right_exponent, right_value) in right
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, value)| *value != 0)
+            {
+                let exponent = left_exponent + right_exponent;
+                let (reduced_exponent, reduction_factor) = if exponent >= PAIR_CHARACTER_LANE_DEGREE
+                {
+                    (exponent - PAIR_CHARACTER_LANE_DEGREE, lane_root)
+                } else {
+                    (exponent, 1)
+                };
+                let contribution = modular_product_for_test(
+                    modular_product_for_test(left_value, right_value),
+                    reduction_factor,
+                );
+                product[reduced_exponent] =
+                    modular_sum_for_test(product[reduced_exponent], contribution);
+            }
+        }
+        product
+    }
+
+    fn modular_power_for_test(mut base: u64, mut exponent: u64) -> u64 {
         let mut result = 1_u64;
-        let mut power = base;
         while exponent > 0 {
             if exponent & 1 == 1 {
-                result = ((u128::from(result) * u128::from(power)) % u128::from(modulus)) as u64;
+                result = modular_product_for_test(result, base);
             }
-            power = ((u128::from(power) * u128::from(power)) % u128::from(modulus)) as u64;
+            base = modular_product_for_test(base, base);
             exponent >>= 1;
         }
         result
+    }
+
+    fn modular_product_for_test(left: u64, right: u64) -> u64 {
+        u64::try_from((u128::from(left) * u128::from(right)) % u128::from(PLAINTEXT_MODULUS))
+            .expect("plaintext product fits u64")
+    }
+
+    fn modular_sum_for_test(left: u64, right: u64) -> u64 {
+        (left + right) % PLAINTEXT_MODULUS
+    }
+
+    fn modular_negation_for_test(value: u64) -> u64 {
+        if value == 0 {
+            0
+        } else {
+            PLAINTEXT_MODULUS - value
+        }
     }
 }

@@ -59,7 +59,7 @@ const actionRandomnessSessionBrand: unique symbol = Symbol(
     'sealed-lattice/action-randomness-session',
 );
 
-type ActionRandomnessSession = Readonly<{
+export type ActionRandomnessSession = Readonly<{
     readonly [actionRandomnessSessionBrand]: true;
     readonly actionRandomnessCommitment: ProtocolHash;
     readonly scope: ActionRandomnessScope;
@@ -106,6 +106,38 @@ type SessionState = {
 };
 
 const sessionStates = new WeakMap<ActionRandomnessSession, SessionState>();
+
+type ActionRandomnessKernelAuthorization = Readonly<{
+    context: ActionRandomnessKernelContext;
+    handle: number;
+}>;
+
+/**
+ * Internal same-worker handoff for exact proof-family adapters. The numeric
+ * handle remains coupled to the kernel instance that owns the randomness
+ * session and is never exposed through the public package entry point.
+ */
+export const resolveActionRandomnessKernelAuthorization = (
+    session: ActionRandomnessSession,
+    kernel: TranscriptCoreKernel,
+): ActionRandomnessKernelAuthorization => {
+    const state = sessionStates.get(session);
+    if (
+        state === undefined ||
+        state.closed ||
+        state.kernel !== kernel ||
+        resolveActionRandomnessKernelContext(kernel) !== state.context
+    ) {
+        throw new ActionRandomnessRuntimeError(
+            'WrongContext',
+            'The action-randomness session is unavailable or belongs to another WASM worker.',
+        );
+    }
+    return Object.freeze({
+        context: state.context,
+        handle: state.handle,
+    });
+};
 
 const requireHash = (value: unknown, label: string): ProtocolHash => {
     if (

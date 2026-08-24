@@ -10,7 +10,7 @@ use super::{
 };
 
 #[derive(Default)]
-struct ApplicationExtractorPhaseColumns {
+struct ApplicationChallengePhaseColumns {
     derived_base_columns: BTreeSet<u32>,
     derived_auxiliary_columns: BTreeSet<u32>,
 }
@@ -33,6 +33,18 @@ impl<'context> RelationPlanChecker<'context> {
         if plan.variants.is_empty() {
             return Err(RelationPlanError::InvalidVariantSelector);
         }
+        if plan.application_statement_schema_identifier
+            == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            && (plan.variants.len()
+                != usize::from(crate::foundation::FOUNDATION_PROFILE.option_count)
+                || plan
+                    .variants
+                    .iter()
+                    .zip(1..=crate::foundation::FOUNDATION_PROFILE.option_count)
+                    .any(|(variant, top_count)| variant.top_count != Some(top_count)))
+        {
+            return Err(RelationPlanError::NonCanonicalOrder);
+        }
         let mut selectors = BTreeSet::new();
         for variant in &plan.variants {
             self.check_variant_selector(plan.application_statement_schema_identifier, variant)?;
@@ -53,19 +65,16 @@ impl<'context> RelationPlanChecker<'context> {
         if self.context.base_field_modulus < 3
             || self.context.base_field_modulus.is_multiple_of(2)
             || self.context.challenge_extension_degree == 0
-            || self.context.evaluation_blowup_factor == 0
-            || !self.context.evaluation_blowup_factor.is_power_of_two()
             || self.context.evaluation_domain_generator == 0
             || self.context.evaluation_domain_generator >= self.context.base_field_modulus
             || self.context.evaluation_coset_offset == 0
             || self.context.evaluation_coset_offset >= self.context.base_field_modulus
-            || self.context.deep_point_count == 0
+            || self.context.out_of_domain_point_count == 0
             || self.context.quotient_component_count < 2
             || self.context.quotient_component_degree_bound_exclusive == 0
-            || self.context.fri_fold_count == 0
-            || self.context.final_polynomial_degree_bound_exclusive == 0
-            || self.context.unique_query_count == 0
-            || self.context.non_native_modular_identity_challenge_count == 0
+            || self.context.phase_column_query_coordinate_count == 0
+            || self.context.non_native_theta_repetition_count == 0
+            || self.context.non_native_alpha_repetition_count == 0
             || self.context.maximum_fiat_shamir_candidate_draws_per_output == 0
         {
             return Err(RelationPlanError::InvalidDomain);
@@ -95,7 +104,11 @@ impl<'context> RelationPlanChecker<'context> {
                 variant.schedule_position.is_some() && variant.top_count.is_none()
             }
             ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
-                variant.schedule_position.is_some() && matches!(variant.top_count, Some(1..=20))
+                variant.schedule_position.is_none()
+                    && variant.top_count.is_some_and(|top_count| {
+                        (1..=crate::foundation::FOUNDATION_PROFILE.option_count)
+                            .contains(&top_count)
+                    })
             }
             _ => variant.schedule_position.is_none() && variant.top_count.is_none(),
         };
@@ -122,25 +135,18 @@ impl<'context> RelationPlanChecker<'context> {
             variant,
             &semantic_bounds,
         )?;
-        let extractor_phase_columns = self.check_integer_lift_batches(
+        let challenge_phase_columns = self.check_integer_lift_batches(
             application_statement_schema_identifier,
             variant,
             &semantic_bounds,
         )?;
-        self.check_application_extractor_phase_ownership(variant, &extractor_phase_columns)?;
+        self.check_application_challenge_phase_ownership(variant, &challenge_phase_columns)?;
         self.check_openings(variant)?;
         self.check_masks(variant)?;
         crate::bgv::proof_suite::validate_zero_knowledge_mask_image(variant, self.context)?;
-        let challenge_catalog = variant.derived_challenge_catalog(self.context)?;
+        let challenge_catalog = variant.derived_relation_prefix_challenge_catalog(self.context)?;
         validate_challenge_catalog(&challenge_catalog, variant, self.context)?;
-        let epoch_catalogs = variant.derived_challenge_epoch_catalogs(self.context)?;
-        if epoch_catalogs.is_empty() {
-            return Err(RelationPlanError::InvalidChallengeCatalog);
-        }
-        for epoch_catalog in epoch_catalogs {
-            let _ = epoch_catalog.canonical_catalog_bytes()?;
-        }
-        let _ = variant.common_proof_transcript_schedule(self.context)?;
+        let _ = variant.common_proof_relation_prefix_schedule(self.context)?;
         Ok(())
     }
 }
@@ -151,9 +157,10 @@ mod integer_lift_bounds;
 mod model;
 mod openings;
 
-pub(super) use constraints::{
-    full_trace_zeroifier_expression, zeroifier_roots_are_confined_to_trace_domain,
-};
+pub(super) use constraints::full_trace_zeroifier_expression;
+#[cfg(test)]
+pub(super) use constraints::zeroifier_roots_are_confined_to_trace_domain;
+#[cfg(test)]
 pub(super) use integer_lift_bounds::{
     derive_semantic_cell_interval, integer_lift_maximum_absolute_product,
 };

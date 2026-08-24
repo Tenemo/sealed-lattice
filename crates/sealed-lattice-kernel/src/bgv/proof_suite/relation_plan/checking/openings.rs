@@ -29,12 +29,12 @@ impl RelationPlanChecker<'_> {
             .values()
             .flat_map(|rotations| rotations.iter().copied())
             .collect::<BTreeSet<_>>();
-        let expected_points = (0..self.context.deep_point_count)
-            .flat_map(|deep_point_ordinal| {
+        let expected_points = (0..self.context.out_of_domain_point_count)
+            .flat_map(|out_of_domain_point_ordinal| {
                 required_rotations
                     .iter()
                     .map(move |rotation| RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
@@ -43,7 +43,7 @@ impl RelationPlanChecker<'_> {
             .collect::<BTreeSet<_>>();
         let mut points = BTreeSet::new();
         for point in &variant.ordered_opening_points {
-            if point.deep_point_ordinal >= self.context.deep_point_count
+            if point.out_of_domain_point_ordinal >= self.context.out_of_domain_point_count
                 || point.conjugate_index >= self.context.challenge_extension_degree
                 || !points.insert(*point)
             {
@@ -52,6 +52,19 @@ impl RelationPlanChecker<'_> {
         }
         if points != expected_points {
             return Err(RelationPlanError::InvalidOpening);
+        }
+        let mut tree_ordinal_by_column = vec![None; variant.ordered_columns.len()];
+        for (tree_ordinal, tree) in variant.ordered_trees.iter().enumerate() {
+            let tree_ordinal =
+                u32::try_from(tree_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+            for column_ordinal in tree.ordered_column_ordinals() {
+                let owner = tree_ordinal_by_column
+                    .get_mut(*column_ordinal as usize)
+                    .ok_or(RelationPlanError::InvalidOpening)?;
+                if owner.replace(tree_ordinal).is_some() {
+                    return Err(RelationPlanError::InvalidOpening);
+                }
+            }
         }
         let mut claims = BTreeSet::new();
         for claim in &variant.ordered_opening_claims {
@@ -72,15 +85,16 @@ impl RelationPlanChecker<'_> {
                     let column_ordinal = claim
                         .column_ordinal
                         .ok_or(RelationPlanError::InvalidOpening)?;
-                    let tree = variant
-                        .ordered_trees
-                        .get(claim.source_ordinal as usize)
-                        .ok_or(RelationPlanError::InvalidOpening)?;
                     let column = variant
                         .ordered_columns
                         .get(column_ordinal as usize)
                         .ok_or(RelationPlanError::InvalidOpening)?;
-                    if !tree.ordered_column_ordinals().contains(&column_ordinal)
+                    if matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
+                        || tree_ordinal_by_column
+                            .get(column_ordinal as usize)
+                            .copied()
+                            .flatten()
+                            != Some(claim.source_ordinal)
                         || column.source_degree_bound_exclusive
                             != claim.source_degree_bound_exclusive
                     {
@@ -128,11 +142,11 @@ impl RelationPlanChecker<'_> {
                 let rotations = required_rotations_by_column
                     .get(column_ordinal)
                     .ok_or(RelationPlanError::InvalidOpening)?;
-                for deep_point_ordinal in 0..self.context.deep_point_count {
+                for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                     for rotation in rotations {
                         let opening_point_ordinal = point_ordinals
                             .get(&RelationOpeningPointDescriptor {
-                                deep_point_ordinal,
+                                out_of_domain_point_ordinal,
                                 trace_rotation_is_negative: rotation.0,
                                 trace_rotation_magnitude: rotation.1,
                                 conjugate_index: 0,
@@ -150,10 +164,10 @@ impl RelationPlanChecker<'_> {
             }
         }
         for quotient_ordinal in 0..self.context.quotient_component_count {
-            for deep_point_ordinal in 0..self.context.deep_point_count {
+            for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                 let opening_point_ordinal = point_ordinals
                     .get(&RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: false,
                         trace_rotation_magnitude: 0,
                         conjugate_index: 0,
@@ -200,20 +214,28 @@ impl RelationPlanChecker<'_> {
         if prover_columns.is_empty() || variant.ordered_masks.is_empty() {
             return Err(RelationPlanError::InvalidMaskGrammar);
         }
-        let mut purposes = BTreeSet::new();
+        let mut previous_mask_coordinate = None;
+        let mut next_mask_ordinal_by_class = [0_u32; 3];
         let mut trace_targets = BTreeSet::new();
         let mut telescoping_targets = BTreeSet::new();
         let mut batch_count = 0_usize;
         let mut trace_degree = None;
         let mut telescoping_degree = None;
         for mask in &variant.ordered_masks {
-            if mask.mask_purpose == 0
-                || mask.mask_purpose >= 0xff00
+            let mask_coordinate = mask.mask_coordinate();
+            let purpose_class_index = usize::from(mask_coordinate.purpose_class() - 1);
+            if purpose_class_index >= next_mask_ordinal_by_class.len()
+                || mask_coordinate.mask_ordinal() != next_mask_ordinal_by_class[purpose_class_index]
+                || previous_mask_coordinate.is_some_and(|previous| previous >= mask_coordinate)
                 || mask.mask_degree_bound_exclusive == 0
-                || !purposes.insert(mask.mask_purpose)
             {
                 return Err(RelationPlanError::InvalidMaskGrammar);
             }
+            next_mask_ordinal_by_class[purpose_class_index] = next_mask_ordinal_by_class
+                [purpose_class_index]
+                .checked_add(1)
+                .ok_or(RelationPlanError::CountOverflow)?;
+            previous_mask_coordinate = Some(mask_coordinate);
             match (mask.mask_kind, mask.target_class) {
                 (RelationMaskKind::Trace, RelationMaskTargetClass::Column) => {
                     if !prover_columns.contains(&mask.target_ordinal)

@@ -1,5 +1,3 @@
-import { openAcceptedSetupSession } from '../accepted-setup-session-runtime.js';
-
 import type { PublishedSdkKernel } from './kernel-contracts.js';
 import type {
     TranscriptCoreKernelCommandRuntime,
@@ -25,10 +23,8 @@ export const createCachedKernelLoader = <Kernel>(
 
 export const createPublishedSdkKernelBindings = (
     runtime: TranscriptCoreKernelCommandRuntime,
-    getKernel: () => PublishedSdkKernel,
 ): PublishedSdkKernel => {
     return {
-        beginAcceptedSetupSession: () => openAcceptedSetupSession(getKernel()),
         encodeFoundationManifest: (input) =>
             runtime.executeCommand<
                 ReturnType<PublishedSdkKernel['encodeFoundationManifest']>
@@ -117,20 +113,6 @@ export const createPublishedSdkKernelBindings = (
                 expectedCeremonyContextHash: input.expectedCeremonyContextHash,
                 expectedSuiteId: input.expectedSuiteId,
             }),
-        verifyPrivateVssShareEnvelope: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['verifyPrivateVssShareEnvelope']>
-            >({
-                command: 'VerifyPrivateVssShareEnvelope',
-                setupContext: input.setupContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                sourceTrusteeCoefficientCommitmentRecord:
-                    input.sourceTrusteeCoefficientCommitmentRecord,
-                sourceTrusteeCoefficientCommitmentMaterialRecords:
-                    input.sourceTrusteeCoefficientCommitmentMaterialRecords,
-                privateEnvelope: input.privateEnvelope,
-                expectedPrivateEnvelopeHash: input.expectedPrivateEnvelopeHash,
-            }),
     };
 };
 
@@ -143,7 +125,7 @@ export const createPublishedSdkKernelLoader = (
             transcriptCoreKernelUrl,
             options,
         );
-        const kernel = createPublishedSdkKernelBindings(runtime, () => kernel);
+        const kernel = createPublishedSdkKernelBindings(runtime);
         registerKernelContexts(kernel, runtime);
 
         return kernel;

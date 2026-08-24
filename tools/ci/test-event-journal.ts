@@ -29,7 +29,6 @@ export const createTestEventWriter = (input: {
                     performance.now() - startedAtMilliseconds,
                 ),
                 event,
-                objectVersion: 'sealed-lattice-test-diagnostic-event-v1',
                 processIdentifier: process.pid,
                 projectLabel: input.projectLabel,
                 sequence: ++sequence,

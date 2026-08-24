@@ -529,11 +529,10 @@ const runPackedPackageSmoke = async (
                 await writeFile(
                     join(consumerDirectory, 'smoke.ts'),
                     [
-                        "import { verifyPrivateVssShare, type PrivateVssShareVerification, type VerifyPrivateVssShareInput } from 'sealed-lattice';",
+                        "import { createCanonicalBoardPolicy, type CanonicalFoundationBoardPolicy } from 'sealed-lattice';",
                         '',
-                        'declare const input: VerifyPrivateVssShareInput;',
-                        'const verification: Promise<PrivateVssShareVerification> = verifyPrivateVssShare(input);',
-                        'void verification;',
+                        "const canonicalBoardPolicy: Promise<CanonicalFoundationBoardPolicy> = createCanonicalBoardPolicy({ boardOriginIdentifier: 'https://board.example' });",
+                        'void canonicalBoardPolicy;',
                         '',
                     ].join('\n'),
                     'utf8',

@@ -863,6 +863,216 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
     );
 }
 
+fn borrowed_local_record_decode_refusal(encoded: &[u8]) -> RefusalReason {
+    match BorrowedLocalRecordEnvelope::decode(encoded, &CanonicalDecodeLimits::default()) {
+        Ok(_) => panic!("the malformed borrowed local-record envelope must be refused"),
+        Err(error) => error.refusal_reason,
+    }
+}
+
+#[test]
+fn canonical_local_record_path_matches_the_owned_envelope_at_payload_boundaries() {
+    let root = test_storage_root();
+    let source_digests = [test_hash(0x91), test_hash(0x92)];
+    let identifier_input = test_checkpoint_identifier_input(&source_digests);
+    let record_identifier = derive_local_record_identifier(root.binding(), identifier_input)
+        .expect("the fixed record identifier derives");
+    let action_randomness_commitment = test_hash(0x93);
+    let nonce = [0x94; LOCAL_RECORD_NONCE_BYTE_LENGTH];
+
+    for plaintext in [
+        Vec::new(),
+        vec![0xa5],
+        (0_u8..=255).collect::<Vec<_>>(),
+        vec![0x5a; MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH],
+    ] {
+        let seal_input = LocalRecordSealWithIdentifierInput {
+            action_randomness_commitment,
+            record_type: identifier_input.record_type(),
+            record_identifier,
+            record_version: 0,
+            predecessor_record_hash: None,
+            nonce,
+            plaintext: &plaintext,
+        };
+        let owned_envelope = root
+            .seal_local_record_with_identifier(seal_input)
+            .expect("the owned local-record path seals");
+        let canonical_envelope = root
+            .seal_local_record_with_identifier_canonical(seal_input)
+            .expect("the direct canonical local-record path seals");
+        assert_eq!(
+            canonical_envelope,
+            owned_envelope
+                .encode()
+                .expect("the owned local-record envelope encodes"),
+            "the direct path must preserve the established canonical bytes"
+        );
+        assert_eq!(
+            expect_valid(
+                root.open_borrowed_local_record_with_identifier(
+                    LocalRecordOpenWithIdentifierInput {
+                        action_randomness_commitment,
+                        record_type: identifier_input.record_type(),
+                        expected_identifier: record_identifier,
+                        record_version: 0,
+                        predecessor_record_hash: None,
+                    },
+                    &BorrowedLocalRecordEnvelope::decode(
+                        &canonical_envelope,
+                        &CanonicalDecodeLimits::default(),
+                    )
+                    .expect(
+                        "the canonical local-record envelope decodes without copying ciphertext"
+                    ),
+                )
+            )
+            .as_slice(),
+            plaintext.as_slice(),
+            "the borrowed decoder must authenticate every supported boundary payload"
+        );
+    }
+}
+
+#[test]
+fn canonical_local_record_path_rejects_malformed_outer_framing_before_decryption() {
+    let root = test_storage_root();
+    let source_digests = [test_hash(0x95)];
+    let identifier_input = test_checkpoint_identifier_input(&source_digests);
+    let record_identifier = derive_local_record_identifier(root.binding(), identifier_input)
+        .expect("the fixed record identifier derives");
+    let action_randomness_commitment = test_hash(0x96);
+    let canonical_envelope = root
+        .seal_local_record_with_identifier_canonical(LocalRecordSealWithIdentifierInput {
+            action_randomness_commitment,
+            record_type: identifier_input.record_type(),
+            record_identifier,
+            record_version: 0,
+            predecessor_record_hash: None,
+            nonce: [0x97; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+            plaintext: b"borrowed canonical ciphertext",
+        })
+        .expect("the direct canonical local-record path seals");
+
+    let mut wrong_item_type = canonical_envelope.clone();
+    wrong_item_type[8..10]
+        .copy_from_slice(&CanonicalItemType::Unsigned16.canonical_code().to_le_bytes());
+    let established_wrong_item_type_refusal =
+        LocalRecordEnvelope::decode(&wrong_item_type, &CanonicalDecodeLimits::default())
+            .expect_err("the established decoder rejects an assigned type with invalid bytes")
+            .refusal_reason;
+    assert_eq!(
+        established_wrong_item_type_refusal,
+        RefusalReason::MalformedEncoding,
+    );
+    assert_eq!(
+        borrowed_local_record_decode_refusal(&wrong_item_type),
+        established_wrong_item_type_refusal,
+        "the borrowed decoder must validate assigned item types before schema types",
+    );
+
+    let first_item_byte_length = usize::try_from(u32::from_le_bytes(
+        wrong_item_type[10..14]
+            .try_into()
+            .expect("the first item length is four bytes"),
+    ))
+    .expect("the first item length fits usize");
+    let second_item_header_offset = 14 + first_item_byte_length;
+    let mut compound_wrong_item_types = wrong_item_type;
+    compound_wrong_item_types[second_item_header_offset..second_item_header_offset + 2]
+        .copy_from_slice(&CanonicalItemType::Unsigned16.canonical_code().to_le_bytes());
+    assert_eq!(
+        borrowed_local_record_decode_refusal(&compound_wrong_item_types),
+        LocalRecordEnvelope::decode(
+            &compound_wrong_item_types,
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("the established decoder rejects the first malformed assigned item")
+        .refusal_reason,
+        "a later malformed item must not reorder the first item refusal",
+    );
+
+    let malformed_associated_data_before_wrong_nonce_type = CanonicalTuple::new(
+        LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER,
+        FOUNDATION_PROTOCOL_VERSION,
+        vec![
+            CanonicalItem::variable_bytes([0x71, 0x72, 0x73])
+                .expect("the short associated-data item is canonical"),
+            CanonicalItem::ascii("wrong nonce type")
+                .expect("the wrong nonce type remains canonically encoded"),
+            CanonicalItem::variable_bytes([]).expect("the empty ciphertext item is canonical"),
+            CanonicalItem::fixed_bytes([0_u8; LOCAL_RECORD_TAG_BYTE_LENGTH])
+                .expect("the fixed tag item is canonical"),
+        ],
+    )
+    .encode()
+    .expect("the compound malformed envelope encodes canonically");
+    let established_compound_refusal = LocalRecordEnvelope::decode(
+        &malformed_associated_data_before_wrong_nonce_type,
+        &CanonicalDecodeLimits::default(),
+    )
+    .expect_err("the established decoder rejects the malformed associated data first")
+    .refusal_reason;
+    assert_eq!(
+        established_compound_refusal,
+        RefusalReason::MalformedEncoding
+    );
+    let borrowed_compound_refusal =
+        borrowed_local_record_decode_refusal(&malformed_associated_data_before_wrong_nonce_type);
+    assert_eq!(
+        borrowed_compound_refusal, established_compound_refusal,
+        "the borrowed decoder must decode each schema field before checking the next field",
+    );
+
+    let mut inconsistent_item_length = canonical_envelope.clone();
+    inconsistent_item_length[10..14].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(
+        borrowed_local_record_decode_refusal(&inconsistent_item_length),
+        RefusalReason::OutsideSupportedProfile,
+    );
+
+    let mut trailing_bytes = canonical_envelope.clone();
+    trailing_bytes.push(0);
+    assert_eq!(
+        borrowed_local_record_decode_refusal(&trailing_bytes),
+        RefusalReason::MalformedEncoding,
+    );
+
+    let mut truncated_declared_item_list = canonical_envelope[..8].to_vec();
+    truncated_declared_item_list[4..8].copy_from_slice(&3_u32.to_le_bytes());
+    let established_truncated_refusal = LocalRecordEnvelope::decode(
+        &truncated_declared_item_list,
+        &CanonicalDecodeLimits::default(),
+    )
+    .expect_err("the established decoder must reject missing declared item headers")
+    .refusal_reason;
+    assert_eq!(
+        established_truncated_refusal,
+        RefusalReason::MalformedEncoding
+    );
+    assert_eq!(
+        borrowed_local_record_decode_refusal(&truncated_declared_item_list),
+        established_truncated_refusal,
+        "the borrowed decoder must preserve truncated-list refusal semantics",
+    );
+
+    let mut unassigned_item_type = canonical_envelope;
+    unassigned_item_type[8..10].copy_from_slice(&u16::MAX.to_le_bytes());
+    let established_unassigned_type_refusal =
+        LocalRecordEnvelope::decode(&unassigned_item_type, &CanonicalDecodeLimits::default())
+            .expect_err("the established decoder must reject an unassigned item type")
+            .refusal_reason;
+    assert_eq!(
+        established_unassigned_type_refusal,
+        RefusalReason::MalformedEncoding,
+    );
+    assert_eq!(
+        borrowed_local_record_decode_refusal(&unassigned_item_type),
+        established_unassigned_type_refusal,
+        "the borrowed decoder must preserve unassigned-type refusal semantics",
+    );
+}
+
 #[test]
 fn record_versions_derive_distinct_keys_and_enforce_predecessors_and_size_caps() {
     let root = test_storage_root();

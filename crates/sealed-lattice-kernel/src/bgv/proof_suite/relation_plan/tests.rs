@@ -1,23 +1,73 @@
-use super::integer_lift::integer_lift_full_ring_product_constraint_programs;
+use super::integer_lift::{
+    integer_lift_component_constraint_programs, integer_lift_component_product_expression,
+    integer_lift_full_ring_product_constraint_programs,
+};
 use super::interpreter::signed_rotation_exponent;
 use super::*;
 
 const TEST_BASE_FIELD: u64 = 65_537;
 
+fn reduced_rate_four_opening_degree_bound_exclusive(evaluation_domain_size: u64) -> u64 {
+    let logical_polynomials_per_physical_row = 8_u64;
+    let prefix_stacking_factor = 2_u64;
+    let row_code_inverse_rate = 4_u64;
+    let row_encoding_expansion_factor = logical_polynomials_per_physical_row
+        .checked_mul(prefix_stacking_factor)
+        .and_then(|factor| factor.checked_mul(row_code_inverse_rate))
+        .expect("the reduced row-encoding expansion factor derives");
+    let logical_polynomial_coefficient_count = evaluation_domain_size
+        .checked_div(row_encoding_expansion_factor)
+        .filter(|coefficient_count| {
+            coefficient_count.checked_mul(row_encoding_expansion_factor)
+                == Some(evaluation_domain_size)
+        })
+        .expect("the reduced rate-four coefficient count derives exactly");
+    logical_polynomial_coefficient_count
+        .checked_mul(logical_polynomials_per_physical_row)
+        .expect("the reduced physical-row capacity derives")
+}
+
+fn reduced_rate_four_evaluation_domain_size(
+    ring_degree: u64,
+    trace_mask_degree_bound_exclusive: u64,
+) -> u64 {
+    let message_trace_domain_size = ring_degree
+        .checked_div(2)
+        .filter(|trace_size| trace_size.checked_mul(2) == Some(ring_degree))
+        .expect("the reduced message-trace domain derives exactly");
+    let relation_trace_domain_size = message_trace_domain_size
+        .checked_mul(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR)
+        .expect("the reduced relation-trace domain derives");
+    let maximum_prover_column_degree = relation_trace_domain_size
+        .checked_add(trace_mask_degree_bound_exclusive)
+        .and_then(|exclusive_bound| exclusive_bound.checked_sub(1))
+        .expect("the reduced prover-column degree derives");
+    let committed_material_range_constraint_arity = 3_u64;
+    let minimum_opening_degree_bound_exclusive = maximum_prover_column_degree
+        .checked_mul(committed_material_range_constraint_arity)
+        .and_then(|maximum_numerator_degree| maximum_numerator_degree.checked_add(1))
+        .and_then(u64::checked_next_power_of_two)
+        .expect("the reduced range-constraint opening capacity derives");
+    let prefix_stacking_factor = 2_u64;
+    let row_code_inverse_rate = 4_u64;
+    minimum_opening_degree_bound_exclusive
+        .checked_mul(prefix_stacking_factor)
+        .and_then(|size| size.checked_mul(row_code_inverse_rate))
+        .expect("the minimal reduced rate-four evaluation domain derives")
+}
+
 fn check_context() -> RelationPlanCheckContext {
     RelationPlanCheckContext {
         base_field_modulus: TEST_BASE_FIELD,
         challenge_extension_degree: 4,
-        evaluation_blowup_factor: 2,
         evaluation_domain_generator: 9,
         evaluation_coset_offset: 3,
-        deep_point_count: 2,
+        out_of_domain_point_count: 2,
         quotient_component_count: 4,
         quotient_component_degree_bound_exclusive: 8_200,
-        fri_fold_count: 7,
-        final_polynomial_degree_bound_exclusive: 256,
-        unique_query_count: 16,
-        non_native_modular_identity_challenge_count: 2,
+        phase_column_query_coordinate_count: 16,
+        non_native_theta_repetition_count: 2,
+        non_native_alpha_repetition_count: 3,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
         resolved_moduli: vec![
             ResolvedSuiteModulus::new(SuiteModulusReference::data(0), 97),
@@ -29,26 +79,47 @@ fn check_context() -> RelationPlanCheckContext {
 }
 
 fn committed_material_check_context() -> RelationPlanCheckContext {
-    let evaluation_domain_size = 256_u64;
+    let relation_input = committed_material_input();
+    let evaluation_domain_size = relation_input.evaluation_domain_size;
     let maximum_two_adic_order = 1_u64 << 32;
+    let quotient_component_count = 16_u64;
+    let phase_column_query_coordinate_count = 1_u64;
+    let out_of_domain_point_count = 1_u64;
+    let rounded_mask_degree = quotient_component_count
+        .checked_add(1)
+        .and_then(|count| count.checked_mul(relation_input.trace_mask_degree_bound_exclusive))
+        .and_then(|degree| degree.checked_add(quotient_component_count - 1))
+        .and_then(|degree| degree.checked_div(quotient_component_count))
+        .expect("test quotient mask degree derives");
+    let quotient_decomposition_stride = relation_input
+        .relation_trace_domain_size()
+        .expect("test relation trace domain derives")
+        .checked_add(rounded_mask_degree)
+        .expect("test quotient decomposition stride derives");
+    let minimum_telescoping_mask_degree_bound_exclusive = phase_column_query_coordinate_count
+        .checked_add(out_of_domain_point_count)
+        .expect("test telescoping mask degree derives");
     RelationPlanCheckContext {
         base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
         challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
             as u16,
-        evaluation_blowup_factor: 2,
         evaluation_domain_generator: modular_power(
             crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
             maximum_two_adic_order / evaluation_domain_size,
             crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
         ),
         evaluation_coset_offset: 7,
-        deep_point_count: 1,
-        quotient_component_count: 4,
-        quotient_component_degree_bound_exclusive: 64,
-        fri_fold_count: 4,
-        final_polynomial_degree_bound_exclusive: 8,
-        unique_query_count: 1,
-        non_native_modular_identity_challenge_count: 1,
+        out_of_domain_point_count: u16::try_from(out_of_domain_point_count)
+            .expect("test out-of-domain-point count fits"),
+        quotient_component_count: u32::try_from(quotient_component_count)
+            .expect("test quotient component count fits"),
+        quotient_component_degree_bound_exclusive: quotient_decomposition_stride
+            .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
+            .expect("test quotient component degree bound derives"),
+        phase_column_query_coordinate_count: u32::try_from(phase_column_query_coordinate_count)
+            .expect("test phase-column query-coordinate count fits"),
+        non_native_theta_repetition_count: 1,
+        non_native_alpha_repetition_count: 1,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
         resolved_moduli: vec![ResolvedSuiteModulus::new(
             SuiteModulusReference::data(0),
@@ -57,17 +128,35 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
     }
 }
 
+fn trace_zeroifier_check_context() -> RelationPlanCheckContext {
+    let mut context = committed_material_check_context();
+    context.evaluation_domain_generator = modular_power(
+        crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+        (1_u64 << 32) / 256,
+        crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
+    );
+    context
+}
+
 fn committed_material_input() -> CommittedMaterialRelationPlanInput {
+    let ring_degree = 64_u64;
+    let trace_mask_degree_bound_exclusive = ring_degree / 2;
+    let evaluation_domain_size =
+        reduced_rate_four_evaluation_domain_size(ring_degree, trace_mask_degree_bound_exclusive);
+    let opening_degree_bound_exclusive =
+        reduced_rate_four_opening_degree_bound_exclusive(evaluation_domain_size);
+    assert_eq!(evaluation_domain_size, 4_096);
+    assert_eq!(opening_degree_bound_exclusive, 512);
     CommittedMaterialRelationPlanInput {
-        ring_degree: 32,
-        evaluation_domain_size: 256,
-        opening_degree_bound_exclusive: 128,
+        ring_degree,
+        evaluation_domain_size,
+        opening_degree_bound_exclusive,
         material_column_degree_bound_exclusive: 10,
+        trace_packing_factor: COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
         participant_count: 3,
         threshold: 2,
         sharing_data_modulus_indices: vec![0],
-        trace_mask_degree_bound_exclusive: 14,
-        first_mask_purpose: 100,
+        trace_mask_degree_bound_exclusive,
     }
 }
 
@@ -191,8 +280,8 @@ fn suffix_evaluations(values: &[BigInt], theta: &BigInt) -> Vec<BigInt> {
 }
 
 #[test]
-fn trace_subgroup_zeroifier_grammar_is_recognized_exactly() {
-    let context = committed_material_check_context();
+fn trace_subgroup_zeroifier_grammar_accepts_exact_subgroups_and_rejects_other_roots() {
+    let context = trace_zeroifier_check_context();
     let trace_domain_size = 16;
     let evaluation_domain_size = 256;
     let trace_generator = modular_power(
@@ -228,8 +317,23 @@ fn trace_subgroup_zeroifier_grammar_is_recognized_exactly() {
         context.base_field_modulus,
     ));
 
-    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+    assert!(zeroifier_roots_are_confined_to_trace_domain(
         &full_trace_zeroifier_expression(trace_domain_size / 2),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    assert!(zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(trace_domain_size / 4),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(3),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(0),
         trace_domain_size,
         context.base_field_modulus,
     ));
@@ -252,18 +356,44 @@ fn trace_subgroup_zeroifier_grammar_is_recognized_exactly() {
 
 #[test]
 fn trace_zeroifier_fast_path_refuses_a_colliding_coset() {
-    let mut context = committed_material_check_context();
+    let mut context = trace_zeroifier_check_context();
     context.evaluation_coset_offset = 1;
     let checker = RelationPlanChecker::new(&context);
     assert_eq!(
         checker.check_zeroifier_on_coset(&full_trace_zeroifier_expression(16), 16, 256),
         Err(RelationPlanError::ZeroifierVanishesOnEvaluationCoset),
     );
+    assert_eq!(
+        checker.check_zeroifier_on_coset(&full_trace_zeroifier_expression(8), 16, 256),
+        Err(RelationPlanError::ZeroifierVanishesOnEvaluationCoset),
+    );
+}
+
+#[test]
+fn trace_subgroup_zeroifier_uses_the_exact_large_coset_fast_path() {
+    let mut context = trace_zeroifier_check_context();
+    let trace_domain_size = 1_u64 << 17;
+    let subgroup_size = trace_domain_size / 8;
+    let evaluation_domain_size = 1_u64 << 19;
+    context.evaluation_domain_generator = modular_power(
+        crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+        (1_u64 << 32) / evaluation_domain_size,
+        context.base_field_modulus,
+    );
+
+    assert_eq!(
+        RelationPlanChecker::new(&context).check_zeroifier_on_coset(
+            &full_trace_zeroifier_expression(subgroup_size),
+            trace_domain_size,
+            evaluation_domain_size,
+        ),
+        Ok(()),
+    );
 }
 
 #[test]
 fn oversized_arbitrary_zeroifier_fails_closed() {
-    let mut context = committed_material_check_context();
+    let mut context = trace_zeroifier_check_context();
     let evaluation_domain_size = MAXIMUM_EXHAUSTIVE_ZEROIFIER_COSET_CHECK_DOMAIN_SIZE * 2;
     context.evaluation_domain_generator = modular_power(
         crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -309,6 +439,482 @@ fn dense_negacyclic_product(left: &[BigInt], right: &[BigInt]) -> Vec<BigInt> {
     product
 }
 
+fn evaluate_dense_polynomial(coefficients: &[BigInt], point: &BigInt) -> BigInt {
+    coefficients.iter().enumerate().fold(
+        BigInt::zero(),
+        |evaluation, (coefficient_ordinal, coefficient)| {
+            evaluation
+                + coefficient
+                    * integer_power(
+                        point.clone(),
+                        u64::try_from(coefficient_ordinal)
+                            .expect("test coefficient ordinal fits u64"),
+                    )
+        },
+    )
+}
+
+fn selected_full_ring_half(
+    coefficients: &[BigInt],
+    selected_half: RelationIntegerLiftFullRingHalf,
+) -> Vec<BigInt> {
+    let half_ring_degree = coefficients.len() / 2;
+    let start = match selected_half {
+        RelationIntegerLiftFullRingHalf::Low => 0,
+        RelationIntegerLiftFullRingHalf::High => half_ring_degree,
+    };
+    coefficients[start..start + half_ring_degree].to_vec()
+}
+
+fn dense_oracle_transpose_rows(
+    multiplicand: &[BigInt],
+    selected_product_half: RelationIntegerLiftFullRingHalf,
+    multiplier_half: RelationIntegerLiftFullRingHalf,
+    point: &BigInt,
+) -> Vec<BigInt> {
+    let ring_degree = multiplicand.len();
+    let half_ring_degree = ring_degree / 2;
+    let multiplier_half_start = match multiplier_half {
+        RelationIntegerLiftFullRingHalf::Low => 0,
+        RelationIntegerLiftFullRingHalf::High => half_ring_degree,
+    };
+    (0..half_ring_degree)
+        .map(|reversed_row_ordinal| {
+            let multiplier_coefficient_ordinal =
+                multiplier_half_start + (half_ring_degree - 1 - reversed_row_ordinal);
+            let mut multiplier_basis = vec![BigInt::zero(); ring_degree];
+            multiplier_basis[multiplier_coefficient_ordinal] = BigInt::one();
+            let basis_product = dense_negacyclic_product(multiplicand, &multiplier_basis);
+            evaluate_dense_polynomial(
+                &selected_full_ring_half(&basis_product, selected_product_half),
+                point,
+            )
+        })
+        .collect()
+}
+
+const ORACLE_MULTIPLICAND_LOW_COLUMN: u32 = 0;
+const ORACLE_MULTIPLICAND_HIGH_COLUMN: u32 = 1;
+const ORACLE_MULTIPLIER_LOW_COLUMN: u32 = 2;
+const ORACLE_MULTIPLIER_HIGH_COLUMN: u32 = 3;
+const ORACLE_REVERSED_MULTIPLIER_LOW_COLUMN: u32 = 4;
+const ORACLE_REVERSED_MULTIPLIER_HIGH_COLUMN: u32 = 5;
+const ORACLE_MULTIPLICAND_LOW_SUFFIX_COLUMN: u32 = 6;
+const ORACLE_MULTIPLICAND_HIGH_SUFFIX_COLUMN: u32 = 7;
+const ORACLE_REVERSED_MULTIPLIER_LOW_TRANSPOSE_COLUMN: u32 = 8;
+const ORACLE_REVERSED_MULTIPLIER_HIGH_TRANSPOSE_COLUMN: u32 = 9;
+const ORACLE_LINEAR_SOURCE_COLUMN: u32 = 10;
+const ORACLE_LINEAR_EVALUATION_COLUMN: u32 = 11;
+const ORACLE_PRODUCT_ACCUMULATOR_COLUMN: u32 = 12;
+
+struct FullRingIntegerLiftOracleFixture {
+    component: RelationIntegerLiftComponentDescriptor,
+    columns: BTreeMap<u32, Vec<BigInt>>,
+    expected_product_expression_rows: Vec<BigInt>,
+    expected_signed_product_half: Vec<BigInt>,
+}
+
+fn full_ring_integer_lift_oracle_fixture(
+    multiplicand: &[BigInt],
+    multiplier: &[BigInt],
+    selected_product_half: RelationIntegerLiftFullRingHalf,
+    product_is_negative: bool,
+    multiplier_low_offset: u64,
+    multiplier_high_offset: u64,
+    point: &BigInt,
+) -> FullRingIntegerLiftOracleFixture {
+    assert_eq!(multiplicand.len(), multiplier.len());
+    assert_eq!(multiplicand.len(), 4);
+    let half_ring_degree = multiplicand.len() / 2;
+    let multiplicand_low = multiplicand[..half_ring_degree].to_vec();
+    let multiplicand_high = multiplicand[half_ring_degree..].to_vec();
+    let multiplier_low = multiplier[..half_ring_degree].to_vec();
+    let multiplier_high = multiplier[half_ring_degree..].to_vec();
+    let encoded_multiplier_low = multiplier_low
+        .iter()
+        .map(|coefficient| coefficient + BigInt::from(multiplier_low_offset))
+        .collect::<Vec<_>>();
+    let encoded_multiplier_high = multiplier_high
+        .iter()
+        .map(|coefficient| coefficient + BigInt::from(multiplier_high_offset))
+        .collect::<Vec<_>>();
+    let reversed_multiplier_low = encoded_multiplier_low
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>();
+    let reversed_multiplier_high = encoded_multiplier_high
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>();
+    let low_multiplier_transpose = dense_oracle_transpose_rows(
+        multiplicand,
+        selected_product_half,
+        RelationIntegerLiftFullRingHalf::Low,
+        point,
+    );
+    let high_multiplier_transpose = dense_oracle_transpose_rows(
+        multiplicand,
+        selected_product_half,
+        RelationIntegerLiftFullRingHalf::High,
+        point,
+    );
+
+    let dense_product = dense_negacyclic_product(multiplicand, multiplier);
+    let mut expected_signed_product_half =
+        selected_full_ring_half(&dense_product, selected_product_half);
+    if product_is_negative {
+        for coefficient in &mut expected_signed_product_half {
+            *coefficient = -coefficient.clone();
+        }
+    }
+    let linear_source = expected_signed_product_half
+        .iter()
+        .map(|coefficient| -coefficient)
+        .collect::<Vec<_>>();
+    let linear_evaluation = suffix_evaluations(&linear_source, point);
+
+    let product_sign = if product_is_negative {
+        -BigInt::one()
+    } else {
+        BigInt::one()
+    };
+    let expected_product_expression_rows = (0..half_ring_degree)
+        .map(|row_ordinal| {
+            let low_multiplier =
+                &reversed_multiplier_low[row_ordinal] - BigInt::from(multiplier_low_offset);
+            let high_multiplier =
+                &reversed_multiplier_high[row_ordinal] - BigInt::from(multiplier_high_offset);
+            &product_sign
+                * (&low_multiplier_transpose[row_ordinal] * low_multiplier
+                    + &high_multiplier_transpose[row_ordinal] * high_multiplier)
+        })
+        .collect::<Vec<_>>();
+    let mut product_accumulator = vec![BigInt::zero(); half_ring_degree];
+    for row_ordinal in 0..half_ring_degree - 1 {
+        product_accumulator[row_ordinal + 1] =
+            &product_accumulator[row_ordinal] + &expected_product_expression_rows[row_ordinal];
+    }
+
+    let product_descriptor = RelationIntegerLiftFullRingNegacyclicProductDescriptor {
+        negative: product_is_negative,
+        selected_half: selected_product_half,
+        multiplicand_low_column_ordinal: ORACLE_MULTIPLICAND_LOW_COLUMN,
+        multiplicand_high_column_ordinal: ORACLE_MULTIPLICAND_HIGH_COLUMN,
+        multiplier_low_column_ordinal: ORACLE_MULTIPLIER_LOW_COLUMN,
+        multiplier_high_column_ordinal: ORACLE_MULTIPLIER_HIGH_COLUMN,
+        reversed_multiplier_low_column_ordinal: ORACLE_REVERSED_MULTIPLIER_LOW_COLUMN,
+        reversed_multiplier_high_column_ordinal: ORACLE_REVERSED_MULTIPLIER_HIGH_COLUMN,
+        multiplier_low_offset,
+        multiplier_high_offset,
+        multiplicand_low_suffix_evaluation_column_ordinal: ORACLE_MULTIPLICAND_LOW_SUFFIX_COLUMN,
+        multiplicand_high_suffix_evaluation_column_ordinal: ORACLE_MULTIPLICAND_HIGH_SUFFIX_COLUMN,
+        reversed_multiplier_low_transpose_column_ordinal:
+            ORACLE_REVERSED_MULTIPLIER_LOW_TRANSPOSE_COLUMN,
+        reversed_multiplier_high_transpose_column_ordinal:
+            ORACLE_REVERSED_MULTIPLIER_HIGH_TRANSPOSE_COLUMN,
+    };
+    let component = RelationIntegerLiftComponentDescriptor {
+        ordered_linear_terms: vec![RelationIntegerLiftLinearTermDescriptor {
+            negative: false,
+            column_ordinal: ORACLE_LINEAR_SOURCE_COLUMN,
+            column_offset: 0,
+            coefficient: RelationIntegerLiftCoefficient::Constant(1),
+        }],
+        ordered_convolution_products: Vec::new(),
+        ordered_full_ring_negacyclic_products: vec![product_descriptor],
+        linear_evaluation_column_ordinal: ORACLE_LINEAR_EVALUATION_COLUMN,
+        product_accumulator_column_ordinal: ORACLE_PRODUCT_ACCUMULATOR_COLUMN,
+    };
+    let columns = BTreeMap::from([
+        (ORACLE_MULTIPLICAND_LOW_COLUMN, multiplicand_low.clone()),
+        (ORACLE_MULTIPLICAND_HIGH_COLUMN, multiplicand_high.clone()),
+        (ORACLE_MULTIPLIER_LOW_COLUMN, encoded_multiplier_low),
+        (ORACLE_MULTIPLIER_HIGH_COLUMN, encoded_multiplier_high),
+        (
+            ORACLE_REVERSED_MULTIPLIER_LOW_COLUMN,
+            reversed_multiplier_low,
+        ),
+        (
+            ORACLE_REVERSED_MULTIPLIER_HIGH_COLUMN,
+            reversed_multiplier_high,
+        ),
+        (
+            ORACLE_MULTIPLICAND_LOW_SUFFIX_COLUMN,
+            suffix_evaluations(&multiplicand_low, point),
+        ),
+        (
+            ORACLE_MULTIPLICAND_HIGH_SUFFIX_COLUMN,
+            suffix_evaluations(&multiplicand_high, point),
+        ),
+        (
+            ORACLE_REVERSED_MULTIPLIER_LOW_TRANSPOSE_COLUMN,
+            low_multiplier_transpose,
+        ),
+        (
+            ORACLE_REVERSED_MULTIPLIER_HIGH_TRANSPOSE_COLUMN,
+            high_multiplier_transpose,
+        ),
+        (ORACLE_LINEAR_SOURCE_COLUMN, linear_source),
+        (ORACLE_LINEAR_EVALUATION_COLUMN, linear_evaluation),
+        (ORACLE_PRODUCT_ACCUMULATOR_COLUMN, product_accumulator),
+    ]);
+    FullRingIntegerLiftOracleFixture {
+        component,
+        columns,
+        expected_product_expression_rows,
+        expected_signed_product_half,
+    }
+}
+
+fn assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+    fixture: &FullRingIntegerLiftOracleFixture,
+    point: &BigInt,
+    case_description: &str,
+) {
+    let trace_domain_size = fixture.expected_signed_product_half.len();
+    let theta_expression = vec![RelationExpressionInstruction::TranscriptChallenge {
+        challenge_role: RelationChallengeRole::NonNativeTheta,
+        role_coordinates: vec![0, 0],
+    }];
+    let product_descriptor = &fixture.component.ordered_full_ring_negacyclic_products[0];
+    let product_programs = integer_lift_full_ring_product_constraint_programs(
+        product_descriptor,
+        &theta_expression,
+        u64::try_from(trace_domain_size).expect("test half-ring degree fits u64"),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("full-ring product constraint programs");
+    for program_pair_ordinal in 0..4 {
+        assert_eq!(
+            evaluate_integer_lift_test_expression(
+                &product_programs[program_pair_ordinal * 2].numerator_postfix_expression,
+                trace_domain_size - 1,
+                trace_domain_size,
+                point,
+                &fixture.columns,
+            ),
+            BigInt::zero(),
+            "full-ring boundary identity failed for {case_description}, program pair {program_pair_ordinal}",
+        );
+        for row_ordinal in 0..trace_domain_size - 1 {
+            assert_eq!(
+                evaluate_integer_lift_test_expression(
+                    &product_programs[program_pair_ordinal * 2 + 1].numerator_postfix_expression,
+                    row_ordinal,
+                    trace_domain_size,
+                    point,
+                    &fixture.columns,
+                ),
+                BigInt::zero(),
+                "full-ring recurrence identity failed for {case_description}, program pair {program_pair_ordinal}, row {row_ordinal}",
+            );
+        }
+    }
+
+    let product_expression = integer_lift_component_product_expression(&fixture.component)
+        .expect("component product expression");
+    let interpreted_product_rows = (0..trace_domain_size)
+        .map(|row_ordinal| {
+            evaluate_integer_lift_test_expression(
+                &product_expression,
+                row_ordinal,
+                trace_domain_size,
+                point,
+                &fixture.columns,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        interpreted_product_rows, fixture.expected_product_expression_rows,
+        "compiled product expression diverged from the dense oracle for {case_description}",
+    );
+    assert_eq!(
+        interpreted_product_rows.iter().sum::<BigInt>(),
+        evaluate_dense_polynomial(&fixture.expected_signed_product_half, point),
+        "compiled product evaluation diverged from the dense oracle for {case_description}",
+    );
+
+    let component_programs = integer_lift_component_constraint_programs(
+        &fixture.component,
+        SuiteModulusReference::data(0),
+        &theta_expression,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &check_context(),
+    )
+    .expect("integer-lift component constraint programs");
+    for (program_ordinal, enforced_rows) in [
+        (0, vec![trace_domain_size - 1]),
+        (1, (0..trace_domain_size - 1).collect()),
+        (2, vec![0]),
+        (3, (0..trace_domain_size - 1).collect()),
+        (4, vec![trace_domain_size - 1]),
+    ] {
+        for row_ordinal in enforced_rows {
+            assert_eq!(
+                evaluate_integer_lift_test_expression(
+                    &component_programs[program_ordinal].numerator_postfix_expression,
+                    row_ordinal,
+                    trace_domain_size,
+                    point,
+                    &fixture.columns,
+                ),
+                BigInt::zero(),
+                "integer-lift component identity failed for {case_description}, program {program_ordinal}, row {row_ordinal}",
+            );
+        }
+    }
+}
+
+#[test]
+fn full_ring_integer_lift_matches_an_exhaustive_degree_four_oracle() {
+    let point = BigInt::from(11_u8);
+    for multiplicand_ordinal in 0..4 {
+        for multiplicand_sign in [-1_i8, 1] {
+            let mut multiplicand = vec![BigInt::zero(); 4];
+            multiplicand[multiplicand_ordinal] = BigInt::from(multiplicand_sign);
+            for multiplier_ordinal in 0..4 {
+                for multiplier_sign in [-1_i8, 1] {
+                    let mut multiplier = vec![BigInt::zero(); 4];
+                    multiplier[multiplier_ordinal] = BigInt::from(multiplier_sign);
+                    for selected_product_half in [
+                        RelationIntegerLiftFullRingHalf::Low,
+                        RelationIntegerLiftFullRingHalf::High,
+                    ] {
+                        for product_is_negative in [false, true] {
+                            for (multiplier_low_offset, multiplier_high_offset) in
+                                [(0_u64, 0_u64), (3, 5)]
+                            {
+                                let case_description = format!(
+                                    "multiplicand={multiplicand_sign}*X^{multiplicand_ordinal}, multiplier={multiplier_sign}*X^{multiplier_ordinal}, selected_half={selected_product_half:?}, product_is_negative={product_is_negative}, offsets=({multiplier_low_offset},{multiplier_high_offset})"
+                                );
+                                let fixture = full_ring_integer_lift_oracle_fixture(
+                                    &multiplicand,
+                                    &multiplier,
+                                    selected_product_half,
+                                    product_is_negative,
+                                    multiplier_low_offset,
+                                    multiplier_high_offset,
+                                    &point,
+                                );
+                                assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+                                    &fixture,
+                                    &point,
+                                    &case_description,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn full_ring_integer_lift_rejects_a_locally_valid_detached_product_component() {
+    let point = BigInt::from(11_u8);
+    let shared_secret = [1, 0, 0, 0].map(BigInt::from);
+    let detached_secret = [0, -1, 0, 0].map(BigInt::from);
+    let multiplier = [0, 0, 1, 0].map(BigInt::from);
+    let shared_fixture = full_ring_integer_lift_oracle_fixture(
+        &shared_secret,
+        &multiplier,
+        RelationIntegerLiftFullRingHalf::High,
+        false,
+        3,
+        5,
+        &point,
+    );
+    let mut detached_fixture = full_ring_integer_lift_oracle_fixture(
+        &detached_secret,
+        &multiplier,
+        RelationIntegerLiftFullRingHalf::High,
+        false,
+        3,
+        5,
+        &point,
+    );
+    assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+        &shared_fixture,
+        &point,
+        "honest shared-secret component",
+    );
+    assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+        &detached_fixture,
+        &point,
+        "locally valid detached component",
+    );
+
+    detached_fixture.columns.insert(
+        ORACLE_MULTIPLICAND_LOW_COLUMN,
+        shared_fixture.columns[&ORACLE_MULTIPLICAND_LOW_COLUMN].clone(),
+    );
+    detached_fixture.columns.insert(
+        ORACLE_MULTIPLICAND_HIGH_COLUMN,
+        shared_fixture.columns[&ORACLE_MULTIPLICAND_HIGH_COLUMN].clone(),
+    );
+    let theta_expression = vec![RelationExpressionInstruction::TranscriptChallenge {
+        challenge_role: RelationChallengeRole::NonNativeTheta,
+        role_coordinates: vec![0, 0],
+    }];
+    let product_programs = integer_lift_full_ring_product_constraint_programs(
+        &detached_fixture
+            .component
+            .ordered_full_ring_negacyclic_products[0],
+        &theta_expression,
+        2,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("full-ring product constraint programs");
+    let component_programs = integer_lift_component_constraint_programs(
+        &detached_fixture.component,
+        SuiteModulusReference::data(0),
+        &theta_expression,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &check_context(),
+    )
+    .expect("integer-lift component constraint programs");
+    for (program_ordinal, row_ordinal) in [(0, 1), (1, 0), (2, 0), (3, 0), (4, 1)] {
+        assert_eq!(
+            evaluate_integer_lift_test_expression(
+                &component_programs[program_ordinal].numerator_postfix_expression,
+                row_ordinal,
+                2,
+                &point,
+                &detached_fixture.columns,
+            ),
+            BigInt::zero(),
+            "the detached product remains locally valid before its shared multiplicand binding is enforced",
+        );
+    }
+    let hostile_residuals = product_programs
+        .iter()
+        .enumerate()
+        .map(|(program_ordinal, program)| {
+            let row_ordinal = if program_ordinal % 2 == 0 { 1 } else { 0 };
+            evaluate_integer_lift_test_expression(
+                &program.numerator_postfix_expression,
+                row_ordinal,
+                2,
+                &point,
+                &detached_fixture.columns,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        hostile_residuals.iter().any(|residual| !residual.is_zero()),
+        "the full-ring identities must bind a locally valid component back to the shared same-secret columns",
+    );
+}
+
 #[test]
 fn production_target_share_negacyclic_product_exceeds_the_exact_no_wrap_bound() {
     let target_modulus = crate::bgv::parameters::DATA_PRIMES[0];
@@ -329,10 +935,10 @@ fn production_target_share_negacyclic_product_exceeds_the_exact_no_wrap_bound() 
     .expect("the production negacyclic product has a valid exact interval");
     let proof_base_field_modulus = BigInt::from(crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS);
 
-    // The exact N(q - 1)^2 bound is 109 bits, so it cannot inject into the
-    // 64-bit proof base field before the modular quotient is applied.
-    assert_eq!(full_ring_convolution_bound.bits(), 109);
-    assert_eq!(proof_base_field_modulus.bits(), 64);
+    assert!(
+        full_ring_convolution_bound.bits() > proof_base_field_modulus.bits(),
+        "the exact full-ring product must not inject into the proof base field before the modular quotient is applied"
+    );
     assert!(!exact_product_interval.is_injective_modulo(&proof_base_field_modulus));
 }
 
@@ -456,6 +1062,89 @@ fn full_ring_high_half_low_multiplier_transpose_is_exact_for_dense_small_rings()
 }
 
 #[test]
+fn integer_lift_product_accumulator_rejects_a_uniform_additive_shift() {
+    const TRACE_DOMAIN_SIZE: usize = 4;
+    const SOURCE_COLUMN: u32 = 0;
+    const LINEAR_EVALUATION_COLUMN: u32 = 1;
+    const PRODUCT_ACCUMULATOR_COLUMN: u32 = 2;
+
+    let component = RelationIntegerLiftComponentDescriptor {
+        ordered_linear_terms: vec![RelationIntegerLiftLinearTermDescriptor {
+            negative: false,
+            column_ordinal: SOURCE_COLUMN,
+            column_offset: 0,
+            coefficient: RelationIntegerLiftCoefficient::Constant(1),
+        }],
+        ordered_convolution_products: Vec::new(),
+        ordered_full_ring_negacyclic_products: Vec::new(),
+        linear_evaluation_column_ordinal: LINEAR_EVALUATION_COLUMN,
+        product_accumulator_column_ordinal: PRODUCT_ACCUMULATOR_COLUMN,
+    };
+    let theta_expression = vec![RelationExpressionInstruction::TranscriptChallenge {
+        challenge_role: RelationChallengeRole::NonNativeTheta,
+        role_coordinates: vec![0, 0],
+    }];
+    let point_zero = vec![RelationExpressionInstruction::BaseFieldConstant(101)];
+    let programs = integer_lift_component_constraint_programs(
+        &component,
+        SuiteModulusReference::data(0),
+        &theta_expression,
+        point_zero.clone(),
+        vec![RelationExpressionInstruction::BaseFieldConstant(103)],
+        vec![RelationExpressionInstruction::BaseFieldConstant(107)],
+        &check_context(),
+    )
+    .expect("integer-lift component constraint programs");
+    assert_eq!(programs.len(), 5);
+    assert_eq!(programs[2].zeroifier_postfix_expression, point_zero);
+
+    let theta = BigInt::from(11_u8);
+    let base_columns = BTreeMap::from([
+        (SOURCE_COLUMN, vec![BigInt::zero(); TRACE_DOMAIN_SIZE]),
+        (
+            LINEAR_EVALUATION_COLUMN,
+            vec![BigInt::zero(); TRACE_DOMAIN_SIZE],
+        ),
+    ]);
+    let evaluate = |program_ordinal: usize, row_ordinal: usize, accumulator_rows: Vec<BigInt>| {
+        let mut columns = base_columns.clone();
+        columns.insert(PRODUCT_ACCUMULATOR_COLUMN, accumulator_rows);
+        evaluate_integer_lift_test_expression(
+            &programs[program_ordinal].numerator_postfix_expression,
+            row_ordinal,
+            TRACE_DOMAIN_SIZE,
+            &theta,
+            &columns,
+        )
+    };
+
+    let unshifted = vec![BigInt::zero(); TRACE_DOMAIN_SIZE];
+    assert_eq!(
+        evaluate(0, TRACE_DOMAIN_SIZE - 1, unshifted.clone()),
+        BigInt::zero()
+    );
+    for row_ordinal in 0..TRACE_DOMAIN_SIZE - 1 {
+        assert_eq!(evaluate(1, row_ordinal, unshifted.clone()), BigInt::zero());
+        assert_eq!(evaluate(3, row_ordinal, unshifted.clone()), BigInt::zero());
+    }
+    assert_eq!(evaluate(2, 0, unshifted.clone()), BigInt::zero());
+    assert_eq!(
+        evaluate(4, TRACE_DOMAIN_SIZE - 1, unshifted),
+        BigInt::zero()
+    );
+
+    let shifted = vec![BigInt::from(7_u8); TRACE_DOMAIN_SIZE];
+    for row_ordinal in 0..TRACE_DOMAIN_SIZE - 1 {
+        assert_eq!(evaluate(3, row_ordinal, shifted.clone()), BigInt::zero());
+    }
+    assert_eq!(
+        evaluate(4, TRACE_DOMAIN_SIZE - 1, shifted.clone()),
+        BigInt::zero()
+    );
+    assert_eq!(evaluate(2, 0, shifted), BigInt::from(7_u8));
+}
+
+#[test]
 fn signed_magnitudes_are_unique_for_arbitrary_width_bounds() {
     let zero_tuple =
         canonical_signed_integer_tuple(&BigInt::zero()).expect("canonical zero signed magnitude");
@@ -553,6 +1242,111 @@ fn bound_checker_derives_trinary_and_recomposition_intervals() {
 }
 
 #[test]
+fn bound_checker_derives_finite_set_and_recomposition_intervals() {
+    let ordered_finite_set_values = (0..9).map(BigInt::from).collect::<Vec<_>>();
+    let (finite_set_expression, ordered_finite_set_factor_expressions) =
+        finite_integer_set_constraint_expressions(0, &ordered_finite_set_values, TEST_BASE_FIELD)
+            .expect("finite-set constraint expression");
+    let constraints = vec![
+        RelationConstraintDescriptor {
+            constraint_role: 1,
+            role_coordinates: Vec::new(),
+            numerator_postfix_expression: finite_set_expression,
+            zeroifier_postfix_expression: full_trace_zeroifier_expression(16),
+            enforce_proof_base_field_no_wrap: false,
+            ordered_injective_integer_factor_expressions: ordered_finite_set_factor_expressions,
+        },
+        bound_constraint(2, trinary_constraint_expression(1)),
+        bound_constraint(
+            3,
+            radix_recomposition_expression(2, 9, None, &[0, 1], TEST_BASE_FIELD)
+                .expect("mixed-radix recomposition expression"),
+        ),
+    ];
+    let semantic_cells = vec![
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 0,
+            column_ordinal: 0,
+            claimed_interval: SignedIntegerInterval::new(0, 8),
+            bound_certificate: RelationBoundCertificate::FiniteIntegerSet {
+                constraint_ordinal: 0,
+                ordered_values: ordered_finite_set_values,
+            },
+        },
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 1,
+            column_ordinal: 1,
+            claimed_interval: SignedIntegerInterval::new(0, 2),
+            bound_certificate: RelationBoundCertificate::Trinary {
+                constraint_ordinal: 1,
+            },
+        },
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 2,
+            column_ordinal: 2,
+            claimed_interval: SignedIntegerInterval::new(0, 26),
+            bound_certificate: RelationBoundCertificate::UnsignedRadixRecomposition {
+                constraint_ordinal: 2,
+                radix: 9,
+                ordered_digit_column_ordinals: vec![0, 1],
+            },
+        },
+    ];
+    assert_eq!(
+        derive_test_interval(2, &semantic_cells, &constraints),
+        Ok(SignedIntegerInterval::new(0, 26))
+    );
+}
+
+#[test]
+fn bound_checker_rejects_a_mixed_digit_outside_the_recomposition_radix() {
+    let ordered_values = (0..=9).map(BigInt::from).collect::<Vec<_>>();
+    let (finite_set_expression, ordered_factor_expressions) =
+        finite_integer_set_constraint_expressions(0, &ordered_values, TEST_BASE_FIELD)
+            .expect("finite-set constraint expression");
+    let constraints = vec![
+        RelationConstraintDescriptor {
+            constraint_role: 1,
+            role_coordinates: Vec::new(),
+            numerator_postfix_expression: finite_set_expression,
+            zeroifier_postfix_expression: full_trace_zeroifier_expression(16),
+            enforce_proof_base_field_no_wrap: false,
+            ordered_injective_integer_factor_expressions: ordered_factor_expressions,
+        },
+        bound_constraint(
+            2,
+            radix_recomposition_expression(1, 9, None, &[0], TEST_BASE_FIELD)
+                .expect("recomposition expression"),
+        ),
+    ];
+    let semantic_cells = vec![
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 0,
+            column_ordinal: 0,
+            claimed_interval: SignedIntegerInterval::new(0, 9),
+            bound_certificate: RelationBoundCertificate::FiniteIntegerSet {
+                constraint_ordinal: 0,
+                ordered_values,
+            },
+        },
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 1,
+            column_ordinal: 1,
+            claimed_interval: SignedIntegerInterval::new(0, 9),
+            bound_certificate: RelationBoundCertificate::UnsignedRadixRecomposition {
+                constraint_ordinal: 1,
+                radix: 9,
+                ordered_digit_column_ordinals: vec![0],
+            },
+        },
+    ];
+    assert_eq!(
+        derive_test_interval(1, &semantic_cells, &constraints),
+        Err(RelationPlanError::InvalidBoundCertificate)
+    );
+}
+
+#[test]
 fn bound_checker_rejects_self_attested_or_mismatched_intervals() {
     let unrelated_constraint =
         bound_constraint(1, vec![RelationExpressionInstruction::BaseFieldConstant(0)]);
@@ -591,6 +1385,15 @@ fn bound_checker_rejects_self_attested_or_mismatched_intervals() {
 fn generated_committed_material_plans_cover_the_exact_root_directions() {
     let context = committed_material_check_context();
     let input = committed_material_input();
+    assert_eq!(
+        input
+            .relation_trace_domain_size()
+            .expect("factor-four relation trace domain"),
+        input
+            .message_trace_domain_size()
+            .expect("message trace domain")
+            * committed_material::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
+    );
     let vss_plan = compile_vss_share_linkage_relation_plan(&input, &context)
         .expect("exact VSS share-linkage relation plan");
     let aggregate_plan = compile_aggregate_threshold_share_relation_plan(&input, &context)
@@ -624,6 +1427,43 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
             .canonical_hash()
             .expect("aggregate plan hash")
     );
+
+    for plan in [&vss_plan, &aggregate_plan] {
+        let variant = &plan.variants()[0];
+        let expected_base_oracle_columns = variant
+            .ordered_columns
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| matches!(column.origin, RelationColumnOrigin::Prover))
+            .map(|(column_ordinal, _)| u32::try_from(column_ordinal).expect("column ordinal fits"))
+            .collect::<Vec<_>>();
+        let proof_created_trees = variant
+            .ordered_trees
+            .iter()
+            .filter_map(|tree| match tree {
+                RelationTreeDescriptor::ProofCreated {
+                    proof_tree_role,
+                    ordered_column_ordinals,
+                } => Some((*proof_tree_role, ordered_column_ordinals.as_slice())),
+                RelationTreeDescriptor::BoundPublic { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            proof_created_trees,
+            vec![(1, expected_base_oracle_columns.as_slice())],
+            "every proof-created committed-material column shares one base-oracle leaf"
+        );
+
+        let relation_prefix_schedule = variant
+            .common_proof_relation_prefix_schedule(&context)
+            .expect("committed-material relation-prefix schedule");
+        assert_eq!(
+            usize::try_from(relation_prefix_schedule.opening_claim_count())
+                .expect("opening-claim count fits"),
+            variant.ordered_opening_claims.len(),
+            "the row-code successor consumes every ordered out-of-domain claim"
+        );
+    }
 
     let vss_bound_uses = vss_plan.variants()[0]
         .ordered_trees
@@ -659,7 +1499,7 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
             .ordered_coefficient_local_identity_batches()
             .len(),
         vss_variant.ordered_non_native_moduli.len()
-            * usize::from(context.non_native_modular_identity_challenge_count)
+            * usize::from(context.non_native_alpha_repetition_count)
             * 2
     );
     let aggregate_variant = &aggregate_plan.variants()[0];
@@ -708,6 +1548,21 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
                     })
             })
     );
+}
+
+#[test]
+fn relation_plan_checker_rejects_duplicate_tree_column_ownership() {
+    let context = committed_material_check_context();
+    let mut plan = compile_vss_share_linkage_relation_plan(&committed_material_input(), &context)
+        .expect("the exact VSS share-linkage relation plan compiles");
+    let duplicated_tree = plan.plan.variants[0]
+        .ordered_trees
+        .first()
+        .expect("the VSS relation owns at least one bound tree")
+        .clone();
+    plan.plan.variants[0].ordered_trees.push(duplicated_tree);
+
+    assert_eq!(plan.check(&context), Err(RelationPlanError::InvalidRoot));
 }
 
 #[test]
@@ -804,7 +1659,9 @@ fn generated_plan_checker_rejects_rotated_factor_and_opening_catalog_tampering()
             _ => None,
         })
         .expect("the exact VSS plan contains a rotated monomial-action column");
-    *rotated_column = input.trace_domain_size().expect("trace domain size");
+    *rotated_column = input
+        .relation_trace_domain_size()
+        .expect("relation trace domain size");
     assert!(
         vss_plan.check(&context).is_err(),
         "a full-trace rotation cannot remain a checked coefficient-local residual",
@@ -820,7 +1677,7 @@ fn generated_plan_checker_rejects_rotated_factor_and_opening_catalog_tampering()
 }
 
 #[test]
-fn application_extractor_rejects_semantic_witness_first_committed_after_challenge() {
+fn relation_plan_rejects_semantic_witness_first_committed_after_challenge() {
     let context = committed_material_check_context();
     let input = committed_material_input();
     let mut plan = compile_vss_share_linkage_relation_plan(&input, &context)
@@ -859,4 +1716,355 @@ fn application_extractor_rejects_semantic_witness_first_committed_after_challeng
         plan.check(&context),
         Err(RelationPlanError::InvalidConstraint),
     );
+}
+
+fn compact_auxiliary_reconstruction_variant() -> RelationPlanVariant {
+    const TRACE_DOMAIN_SIZE: u64 = 8;
+    const MASK_DEGREE_BOUND_EXCLUSIVE: u64 = 3;
+    const SOURCE_COLUMN_COUNT: u32 = 20;
+    const FIRST_AUXILIARY_COLUMN_ORDINAL: u32 = SOURCE_COLUMN_COUNT;
+    const AUXILIARY_COLUMN_COUNT: u32 = 14;
+
+    let columns = (0..SOURCE_COLUMN_COUNT + AUXILIARY_COLUMN_COUNT)
+        .map(|_| RelationColumnDescriptor {
+            origin: RelationColumnOrigin::Prover,
+            value_type: RelationColumnValueType::BaseField,
+            source_degree_bound_exclusive: TRACE_DOMAIN_SIZE + MASK_DEGREE_BOUND_EXCLUSIVE,
+            canonical_residue_modulus: None,
+        })
+        .collect::<Vec<_>>();
+    let auxiliary_column_ordinals = (FIRST_AUXILIARY_COLUMN_ORDINAL
+        ..FIRST_AUXILIARY_COLUMN_ORDINAL + AUXILIARY_COLUMN_COUNT)
+        .collect::<Vec<_>>();
+    let masks = auxiliary_column_ordinals
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(mask_index, target_ordinal)| RelationMaskDescriptor {
+            mask_ordinal: u32::try_from(mask_index).expect("the compact mask ordinal fits u32"),
+            mask_kind: RelationMaskKind::Trace,
+            target_class: RelationMaskTargetClass::Column,
+            target_ordinal,
+            mask_degree_bound_exclusive: MASK_DEGREE_BOUND_EXCLUSIVE,
+        })
+        .collect::<Vec<_>>();
+    let batch = RelationIntegerLiftBatchDescriptor {
+        modulus_reference: SuiteModulusReference::data(0),
+        challenge_ordinal: 0,
+        ordered_reversed_column_bindings: vec![
+            RelationIntegerLiftReversedColumnBindingDescriptor {
+                source_column_ordinal: 10,
+                reversed_column_ordinal: 11,
+                source_prefix_evaluation_column_ordinal: 24,
+                reversed_suffix_evaluation_column_ordinal: 25,
+            },
+        ],
+        ordered_negacyclic_automorphism_permutations: vec![
+            RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor {
+                galois_element: 3,
+                mapping_verifier_source_ordinal: 0,
+                source_low_column_ordinal: 0,
+                source_high_column_ordinal: 1,
+                target_low_column_ordinal: 2,
+                target_high_column_ordinal: 3,
+                mapped_low_position_column_ordinal: 4,
+                low_negation_bit_column_ordinal: 5,
+                mapped_high_position_column_ordinal: 6,
+                high_negation_bit_column_ordinal: 7,
+                target_low_position_column_ordinal: 8,
+                target_high_position_column_ordinal: 9,
+                source_product_before_column_ordinal: 20,
+                source_low_product_column_ordinal: 21,
+                target_product_before_column_ordinal: 22,
+                target_low_product_column_ordinal: 23,
+            },
+        ],
+        ordered_components: vec![RelationIntegerLiftComponentDescriptor {
+            ordered_linear_terms: vec![
+                RelationIntegerLiftLinearTermDescriptor {
+                    negative: false,
+                    column_ordinal: 0,
+                    column_offset: 2,
+                    coefficient: RelationIntegerLiftCoefficient::Constant(3),
+                },
+                RelationIntegerLiftLinearTermDescriptor {
+                    negative: true,
+                    column_ordinal: 14,
+                    column_offset: 1,
+                    coefficient: RelationIntegerLiftCoefficient::Modulus {
+                        modulus_reference: SuiteModulusReference::data(0),
+                        multiplier: 1,
+                    },
+                },
+            ],
+            ordered_convolution_products: vec![RelationIntegerLiftConvolutionProductDescriptor {
+                negative: false,
+                convolution_kind: RelationIntegerLiftConvolutionKind::Negacyclic,
+                multiplicand_column_ordinal: 12,
+                reversed_multiplier_column_ordinal: 13,
+                multiplier_offset: 4,
+                suffix_evaluation_column_ordinal: 26,
+                reversed_transpose_column_ordinal: 27,
+            }],
+            ordered_full_ring_negacyclic_products: vec![
+                RelationIntegerLiftFullRingNegacyclicProductDescriptor {
+                    negative: true,
+                    selected_half: RelationIntegerLiftFullRingHalf::High,
+                    multiplicand_low_column_ordinal: 14,
+                    multiplicand_high_column_ordinal: 15,
+                    multiplier_low_column_ordinal: 16,
+                    multiplier_high_column_ordinal: 17,
+                    reversed_multiplier_low_column_ordinal: 18,
+                    reversed_multiplier_high_column_ordinal: 19,
+                    multiplier_low_offset: 5,
+                    multiplier_high_offset: 6,
+                    multiplicand_low_suffix_evaluation_column_ordinal: 28,
+                    multiplicand_high_suffix_evaluation_column_ordinal: 29,
+                    reversed_multiplier_low_transpose_column_ordinal: 30,
+                    reversed_multiplier_high_transpose_column_ordinal: 31,
+                },
+            ],
+            linear_evaluation_column_ordinal: 32,
+            product_accumulator_column_ordinal: 33,
+        }],
+    };
+
+    RelationPlanVariant {
+        schedule_position: None,
+        top_count: None,
+        proof_privacy_mode: ProofPrivacyMode::SecretBearing,
+        trace_domain_size: TRACE_DOMAIN_SIZE,
+        evaluation_domain_size: 32,
+        opening_degree_bound_exclusive: 16,
+        ordered_non_native_moduli: vec![SuiteModulusReference::data(0)],
+        ordered_verifier_sources: Vec::new(),
+        ordered_public_samplers: Vec::new(),
+        ordered_columns: columns,
+        ordered_semantic_cells: Vec::new(),
+        ordered_radix_convolutions: Vec::new(),
+        ordered_integer_lift_batches: vec![batch],
+        ordered_coefficient_local_identity_batches: Vec::new(),
+        ordered_trees: vec![RelationTreeDescriptor::ProofCreated {
+            proof_tree_role: crate::bgv::proof_suite::ProofTreeRole::AuxiliaryOracle as u16,
+            ordered_column_ordinals: auxiliary_column_ordinals,
+        }],
+        ordered_constraints: Vec::new(),
+        ordered_opening_points: Vec::new(),
+        ordered_opening_claims: Vec::new(),
+        ordered_masks: masks,
+    }
+}
+
+fn compact_auxiliary_source_polynomial(
+    column_ordinal: u32,
+) -> crate::bgv::proof_suite::CommonProofSourcePolynomial {
+    use crate::bgv::proof_suite::{CommonProofSourcePolynomial, ProofBaseFieldElement};
+
+    CommonProofSourcePolynomial::from_base_coefficients(
+        (0_u64..8)
+            .map(|coefficient_ordinal| {
+                ProofBaseFieldElement::from_canonical(
+                    u64::from(column_ordinal) * 97 + coefficient_ordinal * 13 + 1,
+                )
+                .expect("the compact source coefficient is canonical")
+            })
+            .collect(),
+    )
+}
+
+struct CoordinatePrivateCoins;
+
+impl crate::bgv::proof_suite::CommonProofPrivateCoinSource for CoordinatePrivateCoins {
+    type Error = core::convert::Infallible;
+
+    fn private_randomness_attempt_identifier(
+        &self,
+    ) -> crate::foundation::PrivateRandomnessAttemptIdentifier {
+        crate::foundation::PrivateRandomnessAttemptIdentifier::for_test([0xb5; 32])
+    }
+
+    fn sample_modulo(
+        &mut self,
+        coordinate: crate::bgv::proof_suite::CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        _maximum_candidate_draws_per_output: u32,
+    ) -> Result<u64, Self::Error> {
+        Ok((u64::from(coordinate.purpose_class()) + u64::from(coordinate.ordinal()) + 1) % modulus)
+    }
+
+    fn fill_raw_bytes(
+        &mut self,
+        coordinate: crate::bgv::proof_suite::CommonProofPrivateCoinCoordinate,
+        destination: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        destination.fill(
+            u8::try_from((u64::from(coordinate.ordinal()) + 1) % 251)
+                .expect("the compact private byte fits u8"),
+        );
+        Ok(())
+    }
+
+    fn replay_modulo_samples(
+        &mut self,
+        coordinate: crate::bgv::proof_suite::CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        _maximum_candidate_draws_per_output: u32,
+        destination: &mut [u64],
+    ) -> Result<(), Self::Error> {
+        destination.fill(
+            (u64::from(coordinate.purpose_class()) + u64::from(coordinate.ordinal()) + 1) % modulus,
+        );
+        Ok(())
+    }
+}
+
+#[test]
+fn private_coordinate_replay_reconstructs_every_auxiliary_program() {
+    use crate::bgv::proof_suite::{
+        CommonProofChallenge, CommonProofSourcePolynomial, ProofBaseFieldElement,
+        RelationApplicationChallengeAssignment,
+        prover::{
+            CommonProofAuxiliaryColumnReconstructionCatalog,
+            CommonProofAuxiliaryColumnReconstructionCursor,
+            CommonProofAuxiliaryColumnSynthesisCursor, replay_relation_private_mask_polynomial,
+        },
+    };
+
+    let variant = compact_auxiliary_reconstruction_variant();
+    let context = check_context();
+    let challenges = vec![
+        RelationApplicationChallengeAssignment::new(
+            CommonProofChallenge::Theta { modulus_ordinal: 0 },
+            0,
+            7,
+        )
+        .expect("the compact theta assignment is canonical"),
+    ];
+    let catalog = CommonProofAuxiliaryColumnReconstructionCatalog::new(&variant)
+        .expect("the compact auxiliary reconstruction catalog is valid");
+    assert_eq!(catalog.ordered_column_ordinals().count(), 14);
+    let mut synthesis =
+        CommonProofAuxiliaryColumnSynthesisCursor::new(&variant, &context, &challenges)
+            .expect("the compact auxiliary synthesis initializes");
+    let mut private_coins = CoordinatePrivateCoins;
+    let mut reconstructed_column_count = 0_usize;
+
+    while !synthesis.is_complete() {
+        if let Some(column_ordinal) = synthesis.next_input_column_ordinal() {
+            synthesis
+                .accept_input_column(
+                    column_ordinal,
+                    compact_auxiliary_source_polynomial(column_ordinal),
+                )
+                .expect("the requested compact source is accepted");
+            continue;
+        }
+        if synthesis.has_pending_output() {
+            let (column_ordinal, expected_polynomial) = synthesis
+                .take_next_output(&variant, &mut private_coins, 128)
+                .expect("the compact masked output derives")
+                .expect("one compact masked output is pending");
+            let private_mask = replay_relation_private_mask_polynomial(
+                &variant,
+                column_ordinal,
+                &mut private_coins,
+                128,
+            )
+            .expect("the exact private coordinate replays")
+            .expect("the masked auxiliary column has private mask material");
+            let CommonProofSourcePolynomial::Base(private_mask_coefficients) = &private_mask else {
+                panic!("the compact auxiliary mask must use the base field");
+            };
+            assert!(
+                private_mask_coefficients
+                    .iter()
+                    .any(|coefficient| *coefficient != ProofBaseFieldElement::ZERO),
+                "the parity fixture must exercise nonzero private masking",
+            );
+
+            let mut reconstruction = CommonProofAuxiliaryColumnReconstructionCursor::new(
+                &variant,
+                &context,
+                &challenges,
+                &catalog,
+                column_ordinal,
+            )
+            .expect("the exact auxiliary reconstruction initializes");
+            if reconstruction.ordered_input_column_ordinals().len() > 1 {
+                let second_input = reconstruction.ordered_input_column_ordinals()[1];
+                assert_eq!(
+                    reconstruction.accept_input_column(
+                        second_input,
+                        compact_auxiliary_source_polynomial(second_input),
+                    ),
+                    Err(crate::bgv::proof_suite::CommonProofProverError::InvalidColumn),
+                    "out-of-order dependencies must be rejected",
+                );
+            }
+            while let Some(input_column_ordinal) = reconstruction.next_input_column_ordinal() {
+                reconstruction
+                    .accept_input_column(
+                        input_column_ordinal,
+                        compact_auxiliary_source_polynomial(input_column_ordinal),
+                    )
+                    .expect("the exact reconstruction dependency is accepted");
+            }
+            let CommonProofSourcePolynomial::Base(private_mask_coefficients) = private_mask else {
+                panic!("the compact auxiliary mask must use the base field");
+            };
+            let reconstructed_polynomial = reconstruction
+                .finish(private_mask_coefficients)
+                .expect("the exact masked auxiliary polynomial reconstructs");
+            assert_eq!(reconstructed_polynomial, expected_polynomial);
+
+            let mut tampered_reconstruction = CommonProofAuxiliaryColumnReconstructionCursor::new(
+                &variant,
+                &context,
+                &challenges,
+                &catalog,
+                column_ordinal,
+            )
+            .expect("the tampered reconstruction initializes");
+            while let Some(input_column_ordinal) =
+                tampered_reconstruction.next_input_column_ordinal()
+            {
+                tampered_reconstruction
+                    .accept_input_column(
+                        input_column_ordinal,
+                        compact_auxiliary_source_polynomial(input_column_ordinal),
+                    )
+                    .expect("the tampered reconstruction dependency is accepted");
+            }
+            let CommonProofSourcePolynomial::Base(mut tampered_private_mask) =
+                replay_relation_private_mask_polynomial(
+                    &variant,
+                    column_ordinal,
+                    &mut private_coins,
+                    128,
+                )
+                .expect("the exact private coordinate replays for the mutation")
+                .expect("the masked auxiliary column has private mask material")
+            else {
+                panic!("the compact auxiliary mask must use the base field");
+            };
+            tampered_private_mask[0] = tampered_private_mask[0].add(ProofBaseFieldElement::ONE);
+            assert_ne!(
+                tampered_reconstruction
+                    .finish(tampered_private_mask)
+                    .expect("the structurally valid tampered mask reconstructs"),
+                expected_polynomial,
+                "changing private mask material must change the committed polynomial",
+            );
+            reconstructed_column_count += 1;
+            continue;
+        }
+        assert!(
+            synthesis
+                .advance_ready_task()
+                .expect("the next compact synthesis task advances"),
+            "a nonterminal synthesis cursor must have an input, output, or ready task",
+        );
+    }
+
+    assert_eq!(reconstructed_column_count, 14);
 }

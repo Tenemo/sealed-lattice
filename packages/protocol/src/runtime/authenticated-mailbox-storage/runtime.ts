@@ -14,6 +14,7 @@ import {
     readRuntimeRecord,
     sampleRuntimeIdentifier,
     stageRuntimeRecordWrite,
+    type RuntimeRecordProtection,
 } from '../authenticated-runtime-record.js';
 import type { UntrustedStorageTransaction } from '../untrusted-storage-transaction-store.js';
 
@@ -60,6 +61,7 @@ import {
     throwIfAborted,
     validateLimits,
     validateProducerSlotAuthority,
+    type AuthenticatedMailboxStorageLimits,
     type BrowserLocalAuthenticatedMailboxStorage,
     type BrowserLocalAuthenticatedMailboxStorageConfiguration,
     type OpenedStoredRecord,
@@ -78,18 +80,15 @@ export type {
     BrowserLocalAuthenticatedMailboxStorageConfiguration,
 } from './records.js';
 
-export const createBrowserLocalAuthenticatedMailboxStorage = (
-    configuration: BrowserLocalAuthenticatedMailboxStorageConfiguration,
+const createBrowserLocalAuthenticatedMailboxStorageWithProtection = (
+    configuration: Readonly<{
+        limits: AuthenticatedMailboxStorageLimits;
+        protection: RuntimeRecordProtection;
+        store: BrowserLocalAuthenticatedMailboxStorageConfiguration['store'];
+    }>,
 ): BrowserLocalAuthenticatedMailboxStorage => {
     const limits = validateLimits(configuration.limits);
-    const protection = createRuntimeRecordProtection({
-        authorityContext: configuration.authorityContext,
-        ...(configuration.cryptoProvider === undefined
-            ? {}
-            : { cryptoProvider: configuration.cryptoProvider }),
-        encryptionKey: configuration.encryptionKey,
-        maximumRecordSealingCount: limits.maximumRecordSealingCount,
-    });
+    const protection = configuration.protection;
     const authorityContext =
         copyRuntimeRecordProtectionAuthorityContext(protection);
     const issuedIdentifiers = new Set<string>();
@@ -1496,5 +1495,23 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
         inboundSlotAuthority,
         outboundCache,
         stagingBoundary,
+    });
+};
+
+export const createBrowserLocalAuthenticatedMailboxStorage = (
+    configuration: BrowserLocalAuthenticatedMailboxStorageConfiguration,
+): BrowserLocalAuthenticatedMailboxStorage => {
+    const limits = validateLimits(configuration.limits);
+    return createBrowserLocalAuthenticatedMailboxStorageWithProtection({
+        limits,
+        protection: createRuntimeRecordProtection({
+            authorityContext: configuration.authorityContext,
+            ...(configuration.cryptoProvider === undefined
+                ? {}
+                : { cryptoProvider: configuration.cryptoProvider }),
+            encryptionKey: configuration.encryptionKey,
+            maximumRecordSealingCount: limits.maximumRecordSealingCount,
+        }),
+        store: configuration.store,
     });
 };

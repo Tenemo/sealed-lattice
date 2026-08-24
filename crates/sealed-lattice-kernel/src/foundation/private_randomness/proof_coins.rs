@@ -28,6 +28,16 @@ impl PrivateRandomnessAttemptIdentifier {
     pub const fn as_bytes(&self) -> &[u8; PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
         &self.bytes
     }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(
+        bytes: [u8; PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            bytes,
+            attempt_class: AttemptClass::OrdinaryProof,
+        }
+    }
 }
 
 impl fmt::Debug for PrivateRandomnessAttemptIdentifier {
@@ -158,17 +168,20 @@ impl ProofApplicationSlot {
         self.validate()?;
         match self.application_statement_schema_identifier {
             ORDINARY_BALLOT_PROOF_FAMILY => Ok(AttemptClass::OrdinaryProof),
-            family if RESET_SAFE_PROOF_FAMILIES.contains(&family) => {
+            family
+                if RESET_SAFE_PROOF_FAMILIES.contains(&family)
+                    || super::PUBLIC_ONLY_PROOF_FAMILIES.contains(&family) =>
+            {
                 Ok(AttemptClass::ResetSafeProof)
             }
             _ => Err(schema_error(
                 RefusalReason::WrongTypeOrLength,
-                "public-only proof application slots cannot derive private proof coins",
+                "proof application slot cannot derive private proof coins",
             )),
         }
     }
 
-    fn canonical_tuple(self) -> SchemaResult<CanonicalTuple> {
+    pub(crate) fn canonical_tuple(self) -> SchemaResult<CanonicalTuple> {
         self.validate()?;
         let roster_position = self.roster_position.map(CanonicalItem::unsigned16);
         let schedule_position = self.schedule_position.map(CanonicalItem::unsigned32);
@@ -198,7 +211,7 @@ impl ProofApplicationSlot {
         Self::decode_tuple(&tuple)
     }
 
-    fn decode_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
+    pub(crate) fn decode_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
         require_header(tuple, PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER, 8)?;
         require_protocol_version(read_u16(&tuple.items[0])?)?;
         Self::new(
@@ -234,7 +247,7 @@ impl PersistentProofCoinInput {
         if application_slot.attempt_class()? != AttemptClass::ResetSafeProof {
             return Err(schema_error(
                 RefusalReason::WrongTypeOrLength,
-                "persistent proof coin input requires a reset-safe proof slot",
+                "persistent proof coin input requires a reset-safe proof or construction-hiding slot",
             ));
         }
         Ok(Self {

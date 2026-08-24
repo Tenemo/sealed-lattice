@@ -19,12 +19,8 @@ pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> Canon
     }))
 }
 
-// The bounded-domain evaluator profile binding: the score-difference domain the
-// comparison polynomial is interpolated over is a deterministic function of the
-// roster. The roster size is the maximum selected-ballot count, so this bound
-// covers every permitted nonempty subset without making the selected count an
-// unbound runtime parameter. Binding it here makes the evaluator comparison
-// domain part of the setup-parameter identity.
+// The bounded-domain evaluator profile binding. The roster fixes the complete
+// ten-ballot pair-character product and therefore its score-difference domain.
 pub(super) fn bounded_domain_evaluator_value_for_roster(
     roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<Value> {
@@ -41,7 +37,7 @@ pub(super) fn bounded_domain_evaluator_value_for_roster(
     Ok(json!({
         "objectType": "BoundedDomainEvaluatorParameters",
         "scoreDifferenceBound": score_difference_bound,
-        "directComparisonOutputLevel": crate::bgv::evaluator::top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
+        "pairCharacterOutputLevel": crate::bgv::evaluator::top_k::CHARACTER_OUTPUT_LEVEL,
     }))
 }
 
@@ -55,36 +51,26 @@ pub(super) fn evaluator_key_schedule_value() -> CanonicalResult<Value> {
     }))
 }
 
-// One relinearization key per round at the selected evaluator working level:
-// lower levels reuse the same key through CRT-idempotent truncation, so the
-// schedule carries no per-level entries.
+// One relinearization key per round at the highest multiplication level;
+// lower levels reuse it through CRT-idempotent truncation.
 pub(super) fn expected_relinearization_level_schedule() -> Value {
     Value::Array(vec![json!({
-        "level": SELECTED_EVALUATOR_WORKING_LEVEL,
+        "level": crate::bgv::evaluator::top_k::SELECTED_RELINEARIZATION_KEY_LEVEL,
     })])
 }
 
 pub(in crate::bgv::setup) fn expected_required_galois_key_schedule() -> CanonicalResult<Value> {
-    let mut entries_by_rotation_and_level = BTreeSet::new();
-    for rotation in direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
-        entries_by_rotation_and_level.insert((rotation, SELECTED_EVALUATOR_WORKING_LEVEL));
-    }
-    for rotation in packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
-        entries_by_rotation_and_level.insert((rotation, SELECTED_EVALUATOR_WORKING_LEVEL));
-    }
-    for rotation in packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
-        entries_by_rotation_and_level.insert((rotation, SELECTED_EVALUATOR_WORKING_LEVEL));
-    }
-
     Ok(Value::Array(
-        entries_by_rotation_and_level
-            .into_iter()
-            .map(|(rotation, level)| {
-                json!({
-                    "rotation": rotation,
-                    "level": level,
-                })
+        crate::bgv::evaluator::top_k::selected_evaluator_rotation_key_schedule(
+            MAXIMUM_OPTION_COUNT,
+        )?
+        .into_iter()
+        .map(|(rotation, level)| {
+            json!({
+                "rotation": rotation,
+                "level": level,
             })
-            .collect(),
+        })
+        .collect(),
     ))
 }

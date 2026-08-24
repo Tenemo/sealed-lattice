@@ -21,24 +21,13 @@ export type {
 
 import type {
     BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupVerification,
-    BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
 } from './kernel-types/bgv.js';
 
 export type {
     BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupVerification,
-    BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
 } from './kernel-types/bgv.js';
-
-export type BgvCollectiveSetupVerificationInput = Readonly<{
-    readonly setupPackage: unknown;
-    readonly expectedSetupPackageHash?: ProtocolHash;
-    readonly expectedManifestHash?: ProtocolHash;
-    readonly expectedRosterHash?: ProtocolHash;
-}>;
 
 export type FoundationOptionDefinitionIngress = Readonly<{
     readonly displayLabelUtf8Hex: string;
@@ -146,15 +135,7 @@ export type DecodedSignedMailboxEnvelope = Readonly<{
     readonly envelopeHash: ProtocolHash;
 }>;
 
-export type AcceptedSetupSession = Readonly<{
-    cancel(): void;
-    verifyCollectiveBgvSetup(
-        input: BgvCollectiveSetupVerificationInput,
-    ): BgvCollectiveSetupVerification;
-}>;
-
 export type TranscriptCoreKernel = {
-    beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
     encodeFoundationManifest(input: {
         readonly displayTitleUtf8Hex: string;
@@ -234,21 +215,12 @@ export type TranscriptCoreKernel = {
     describeCollectiveBgvSetupParameters(input?: {
         readonly participantCount?: number;
     }): BgvCollectiveSetupParametersDescription;
-    verifyPrivateVssShareEnvelope(input: {
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
-        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
-        readonly privateEnvelope: unknown;
-        readonly expectedPrivateEnvelopeHash?: ProtocolHash;
-    }): BgvPrivateVssShareEnvelopeVerification;
 };
 
 export type TranscriptCoreKernelContextOwner = object;
 
 export type PublishedSdkKernel = Pick<
     TranscriptCoreKernel,
-    | 'beginAcceptedSetupSession'
     | 'encodeFoundationActionDefinition'
     | 'encodeFoundationBoardPolicy'
     | 'encodeFoundationManifest'
@@ -258,7 +230,6 @@ export type PublishedSdkKernel = Pick<
     | 'verifyFoundationCeremonyContext'
     | 'verifyFoundationManifest'
     | 'verifyFoundationSuiteRecord'
-    | 'verifyPrivateVssShareEnvelope'
 >;
 
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
@@ -375,20 +346,196 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'DescribeCollectiveBgvSetupParameters',
           'describeCollectiveBgvSetupParameters'
-      >
-    | Readonly<
-          {
-              readonly command: 'VerifyCollectiveBgvSetup';
-          } & BgvCollectiveSetupVerificationInput
-      >
-    | KernelCommandFromMethod<
-          'VerifyPrivateVssShareEnvelope',
-          'verifyPrivateVssShareEnvelope'
       >;
+
+type RelinearizationPrepareGenerationExport = (
+    selectedSuiteHandle: number,
+    setupGenerationAuthorityHandle: number,
+    prepackageCatalogHandle: number,
+    actionRandomnessHandle: number,
+    stateVerifierSessionHandle: number,
+    stateVerifierSessionCapabilityPointer: number,
+    stateVerifierSessionCapabilityByteLength: number,
+    verifiedReservationHandle: number,
+    boardVerifierSessionHandle: number,
+    boardVerifierSessionCapabilityPointer: number,
+    boardVerifierSessionCapabilityByteLength: number,
+    setupIntentObjectHandle: number,
+    checkpointLineageIdentifierPointer: number,
+    checkpointLineageIdentifierByteLength: number,
+    generationSourceHandleOutputPointer: number,
+    statusPointer: number,
+) => number;
+
+type AggregateThresholdSharePrepareGenerationExport = (
+    selectedSuiteHandle: number,
+    recipientAuthorityHandle: number,
+    actionRandomnessHandle: number,
+    stateVerifierSessionHandle: number,
+    stateVerifierSessionCapabilityPointer: number,
+    stateVerifierSessionCapabilityByteLength: number,
+    verifiedReservationHandle: number,
+    boardVerifierSessionHandle: number,
+    boardVerifierSessionCapabilityPointer: number,
+    boardVerifierSessionCapabilityByteLength: number,
+    setupIntentObjectHandle: number,
+    checkpointLineageIdentifierPointer: number,
+    checkpointLineageIdentifierByteLength: number,
+    boardBindingSourceHandleOutputPointer: number,
+    statusPointer: number,
+) => number;
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
+    sealed_lattice_aggregate_threshold_share_begin_recipient_authority?: (
+        actionRandomnessHandle: number,
+        localRecipientRosterPosition: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessHandleBytesPointer: number,
+        orderedPublicRandomnessHandleBytesByteLength: number,
+        orderedDealerTerminalHandleBytesPointer: number,
+        orderedDealerTerminalHandleBytesByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_absorb_authenticated_recipient_payload?: (
+        recipientAuthorityHandle: number,
+        authenticatedPlaintextCapabilityHandle: number,
+        canonicalSignedEnvelopePointer: number,
+        canonicalSignedEnvelopeLength: number,
+        canonicalPlaintextPointer: number,
+        canonicalPlaintextLength: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_discard_recipient_authority?: (
+        recipientAuthorityHandle: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_prepare_generation?: AggregateThresholdSharePrepareGenerationExport;
+    sealed_lattice_aggregate_threshold_share_prepare_resumed_generation?: AggregateThresholdSharePrepareGenerationExport;
+    sealed_lattice_aggregate_threshold_share_prepare_private_share_acceptance_carrier?: (
+        generatedCommonProofHandle: number,
+        boardBindingSourceHandle: number,
+        canonicalRosterPointer: number,
+        canonicalRosterByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_finish_private_share_acceptance_carrier?: (
+        boardBindingSourceHandle: number,
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_cancel_private_share_acceptance_carrier?: (
+        boardBindingSourceHandle: number,
+        preparedCarrierHandle: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_bind_generated_proof_to_board?: (
+        generatedCommonProofHandle: number,
+        boardBindingSourceHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        privateShareAcceptanceObjectHandle: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_discard_generation_board_binding_source?: (
+        boardBindingSourceHandle: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_prepare_verification?: (
+        selectedSuiteHandle: number,
+        recipientAuthorityHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        privateShareAcceptanceObjectHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_aggregate_threshold_share_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_setup_generation_authority_begin?: (
+        selectedSuiteHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessObjectHandlesPointer: number,
+        orderedPublicRandomnessObjectHandlesByteLength: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_setup_generation_authority_release?: (
+        authorityHandle: number,
+    ) => number;
+    sealed_lattice_setup_generation_public_key_share_body_byte_length?: (
+        authorityHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_setup_generation_public_key_share_body_open?: (
+        authorityHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_setup_generation_public_key_share_source_byte_length?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_setup_generation_public_key_share_body_read?: (
+        sourceHandle: number,
+        expectedOffset: bigint,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_setup_generation_public_key_share_body_cancel?: (
+        sourceHandle: number,
+    ) => number;
+    sealed_lattice_setup_generation_recipient_vss_payload_byte_length?: (
+        authorityHandle: number,
+        recipientRosterPosition: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_setup_generation_recipient_vss_payload_open?: (
+        authorityHandle: number,
+        recipientRosterPosition: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_setup_generation_recipient_vss_payload_source_byte_length?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_setup_generation_recipient_vss_payload_source_recipient_roster_position?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_setup_generation_recipient_vss_payload_read?: (
+        sourceHandle: number,
+        expectedOffset: bigint,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_setup_generation_recipient_vss_payload_cancel?: (
+        sourceHandle: number,
+    ) => number;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_foundation_verify_suite_artifact?: (
+        suiteRecordPointer: number,
+        suiteRecordByteLength: number,
+        artifactKindCode: number,
+        artifactPointer: number,
+        artifactByteLength: number,
+    ) => number;
     sealed_lattice_action_randomness_command?: (
         command: number,
         inputPointer: number,
@@ -396,63 +543,882 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         statusPointer: number,
         outputLengthPointer: number,
     ) => number;
-    sealed_lattice_accepted_setup_canonical_stream_begin?: (
-        setupSessionHandle: number,
-        familyCode: number,
-        materialRootPointer: number,
-        materialRootLength: number,
-        descriptorPointer: number,
-        descriptorLength: number,
-        statusPointer: number,
-        totalByteLengthPointer: number,
+    sealed_lattice_accepted_setup_authority_release?: (
+        authorityHandle: number,
     ) => number;
-    sealed_lattice_accepted_setup_command_with_length?: (
-        pointer: number,
-        length: number,
+    sealed_lattice_accepted_setup_package_builder_begin?: (
+        vssRecipientAuthorityHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_package_builder_add_proof_source?: (
+        builderHandle: number,
+        proofSourceKind: number,
+        proofCapabilityHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+    ) => number;
+    sealed_lattice_accepted_setup_package_builder_finish?: (
+        builderHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_package_builder_copy_bytes?: (
+        builderHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_accepted_setup_verification_begin_from_package_builder?: (
+        builderHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_package_builder_cancel?: (
+        builderHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_verification_cancel?: (
+        assemblyHandle: number,
+    ) => number;
+    sealed_lattice_prepackage_evaluator_source_catalog_begin?: (
+        vssRecipientAuthorityHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_prepackage_evaluator_source_catalog_complete?: (
+        catalogHandle: number,
+    ) => number;
+    sealed_lattice_prepackage_evaluator_source_catalog_cancel?: (
+        catalogHandle: number,
+    ) => number;
+    sealed_lattice_prepackage_evaluator_generated_proofs_bind_package?: (
+        acceptedSetupAssemblyHandle: number,
+        prepackageCatalogHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_store_source_request_byte_length?: () => number;
+    sealed_lattice_evaluator_aggregate_begin_store_construction?: (
+        prepackageCatalogHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_store_construction_poll?: (
         sessionHandle: number,
-        outputLengthPointer: number,
-    ) => number;
-    sealed_lattice_accepted_setup_session_begin?: (
+        firstValuePointer: number,
+        secondValuePointer: number,
         statusPointer: number,
     ) => number;
-    sealed_lattice_accepted_setup_session_cancel?: (
+    sealed_lattice_evaluator_aggregate_copy_store_source_request?: (
         sessionHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
     ) => number;
-    sealed_lattice_bgv_canonical_stream_absorb_chunk?: (
-        handle: number,
-        chunkIndex: number,
-        chunkPointer: number,
-        chunkLength: number,
+    sealed_lattice_evaluator_aggregate_supply_store_source_range?: (
+        sessionHandle: number,
+        requestPointer: number,
+        requestByteLength: number,
+        sourcePointer: number,
+        sourceByteLength: number,
     ) => number;
-    sealed_lattice_bgv_canonical_stream_begin?: (
-        familyCode: number,
-        materialRootPointer: number,
-        materialRootLength: number,
-        descriptorPointer: number,
-        descriptorLength: number,
-        statusPointer: number,
-        totalByteLengthPointer: number,
-    ) => number;
-    sealed_lattice_bgv_canonical_stream_cancel?: (handle: number) => number;
-    sealed_lattice_bgv_canonical_stream_finish?: (handle: number) => number;
-    sealed_lattice_bgv_canonical_material_reader_begin?: (
-        familyCode: number,
-        materialRootPointer: number,
-        materialRootLength: number,
-        statusPointer: number,
-        totalByteLengthPointer: number,
-    ) => number;
-    sealed_lattice_bgv_canonical_material_reader_cancel?: (
-        handle: number,
-    ) => number;
-    sealed_lattice_bgv_canonical_material_reader_finish?: (
-        handle: number,
-    ) => number;
-    sealed_lattice_bgv_canonical_material_reader_read_chunk?: (
-        handle: number,
+    sealed_lattice_evaluator_aggregate_copy_store_output_chunk?: (
+        sessionHandle: number,
         chunkIndex: number,
         outputPointer: number,
-        outputLength: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_acknowledge_store_output_chunk?: (
+        sessionHandle: number,
+        chunkIndex: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_finish_store_construction?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_describe_store?: (
+        sessionHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_begin_runtime_component_tree?: (
+        sessionHandle: number,
+        selectedSuiteHandle: number,
+        logicalComponentOrdinal: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_absorb_runtime_component_chunk?: (
+        sessionHandle: number,
+        logicalComponentOrdinal: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_finish_runtime_component_tree?: (
+        sessionHandle: number,
+        logicalComponentOrdinal: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_finalize_statement?: (
+        sessionHandle: number,
+        selectedSuiteHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_application_statement_byte_length?: (
+        sessionHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_evaluator_aggregate_copy_application_statement?: (
+        sessionHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_absorb_store_material_chunk?: (
+        sessionHandle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_finish_store_material?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_prepare_generation?: (
+        sessionHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_prepare_resumed_generation?: (
+        sessionHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_commit_generated_proof?: (
+        sessionHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_contribute_package?: (
+        sessionHandle: number,
+        packageBuilderHandle: number,
+        generatedCommonProofHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_take_package_statement_source?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_prepare_verification?: (
+        selectedSuiteHandle: number,
+        sessionHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_finish_verification?: (
+        sessionHandle: number,
+        verifiedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_commit_verified_store?: (
+        sessionHandle: number,
+        acceptedSetupAssemblyHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_aggregate_discard_session?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_begin?: (
+        vssRecipientAuthorityHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_participant_body_byte_length?: () => bigint;
+    sealed_lattice_collective_public_key_aggregate_begin_participant?: (
+        sessionHandle: number,
+        rosterPosition: number,
+        canonicalDescriptorPointer: number,
+        canonicalDescriptorByteLength: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_absorb_participant_chunk?: (
+        sessionHandle: number,
+        rosterPosition: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_finish_participant?: (
+        sessionHandle: number,
+        rosterPosition: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_copy_participant_source_description?: (
+        sessionHandle: number,
+        rosterPosition: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_finish_roster?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_statement_byte_length?: (
+        sessionHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_collective_public_key_aggregate_copy_statement?: (
+        sessionHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_describe_stream?: (
+        sessionHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_copy_stream_range?: (
+        sessionHandle: number,
+        sourceByteOffset: bigint,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_prepare_generation?: (
+        sessionHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_prepare_resumed_generation?: (
+        sessionHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_commit_generated_proof?: (
+        sessionHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_contribute_package?: (
+        sessionHandle: number,
+        packageBuilderHandle: number,
+        generatedCommonProofHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_prepare_verification?: (
+        selectedSuiteHandle: number,
+        sessionHandle: number,
+        acceptedSetupAssemblyHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_collective_public_key_aggregate_discard_session?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_prepare_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        generationSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_prepare_resumed_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        generationSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_activation_begin?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        prepackageCatalogHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_activation_next_source_read?: (
+        activationHandle: number,
+        componentOrdinalPointer: number,
+        sourceMaterialRootPointer: number,
+        sourceMaterialRootByteLength: number,
+        sourceStreamDigestPointer: number,
+        sourceStreamDigestByteLength: number,
+        sourceStreamTotalByteLengthPointer: number,
+        sourceStreamByteOffsetPointer: number,
+        chunkIndexPointer: number,
+        sourceByteLengthPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_activation_absorb_source?: (
+        activationHandle: number,
+        componentOrdinal: number,
+        sourceMaterialRootPointer: number,
+        sourceMaterialRootByteLength: number,
+        sourceStreamDigestPointer: number,
+        sourceStreamDigestByteLength: number,
+        sourceStreamTotalByteLength: bigint,
+        sourceStreamByteOffset: bigint,
+        chunkIndex: number,
+        sourceBytesPointer: number,
+        sourceByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_activation_finish?: (
+        activationHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_activation_discard?: (
+        activationHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_prepare_generation?: RelinearizationPrepareGenerationExport;
+    sealed_lattice_relinearization_round_one_prepare_resumed_generation?: RelinearizationPrepareGenerationExport;
+    sealed_lattice_relinearization_round_two_prepare_generation?: RelinearizationPrepareGenerationExport;
+    sealed_lattice_relinearization_round_two_prepare_resumed_generation?: RelinearizationPrepareGenerationExport;
+    sealed_lattice_relinearization_generation_component_count?: (
+        generationSourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_generation_component_descriptor_byte_length?: (
+        generationSourceHandle: number,
+        componentOrdinal: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_generation_component_copy_descriptor?: (
+        generationSourceHandle: number,
+        componentOrdinal: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_generation_component_copy_material_root?: (
+        generationSourceHandle: number,
+        componentOrdinal: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_generation_component_total_byte_length?: (
+        generationSourceHandle: number,
+        componentOrdinal: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_relinearization_generation_component_read_chunk?: (
+        generationSourceHandle: number,
+        componentOrdinal: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_generation_source_commit?: (
+        acceptedSetupPackageBuilderHandle: number,
+        prepackageCatalogHandle: number,
+        generatedCommonProofHandle: number,
+        generationSourceHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_generation_source_discard?: (
+        generationSourceHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_construction_begin?: (
+        prepackageCatalogHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_construction_next_read?: (
+        sessionHandle: number,
+        rosterPositionPointer: number,
+        componentOrdinalPointer: number,
+        sourceMaterialRootPointer: number,
+        sourceMaterialRootByteLength: number,
+        sourceStreamDigestPointer: number,
+        sourceStreamDigestByteLength: number,
+        sourceStreamTotalByteLengthPointer: number,
+        sourceStreamByteOffsetPointer: number,
+        sourceCorpusByteOffsetPointer: number,
+        chunkIndexPointer: number,
+        sourceByteLengthPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_construction_absorb?: (
+        sessionHandle: number,
+        rosterPosition: number,
+        componentOrdinal: number,
+        sourceMaterialRootPointer: number,
+        sourceMaterialRootByteLength: number,
+        sourceStreamDigestPointer: number,
+        sourceStreamDigestByteLength: number,
+        sourceStreamTotalByteLength: bigint,
+        sourceStreamByteOffset: bigint,
+        sourceCorpusByteOffset: bigint,
+        chunkIndex: number,
+        sourceBytesPointer: number,
+        sourceByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_construction_finish?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_component_count?: (
+        sessionHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_component_descriptor_byte_length?: (
+        sessionHandle: number,
+        componentOrdinal: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_component_copy_descriptor?: (
+        sessionHandle: number,
+        componentOrdinal: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_component_copy_material_root?: (
+        sessionHandle: number,
+        componentOrdinal: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_component_total_byte_length?: (
+        sessionHandle: number,
+        componentOrdinal: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_relinearization_round_one_aggregate_component_read_chunk?: (
+        sessionHandle: number,
+        componentOrdinal: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_prepare_generation?: (
+        sessionHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_prepare_resumed_generation?: (
+        sessionHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_commit_generated_source?: (
+        acceptedSetupPackageBuilderHandle: number,
+        prepackageCatalogHandle: number,
+        generatedProofHandle: number,
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_discard?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_verification_ingress_begin?: (
+        selectedSuiteHandle: number,
+        verificationAssemblyHandle: number,
+        prepackageCatalogHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_verification_ingress_begin?: (
+        selectedSuiteHandle: number,
+        verificationAssemblyHandle: number,
+        prepackageCatalogHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_verification_ingress_begin?: (
+        selectedSuiteHandle: number,
+        verificationAssemblyHandle: number,
+        prepackageCatalogHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_verification_component_begin?: (
+        ingressHandle: number,
+        componentOrdinal: number,
+        streamDescriptorPointer: number,
+        streamDescriptorByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_verification_component_absorb_chunk?: (
+        ingressHandle: number,
+        componentOrdinal: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_relinearization_verification_component_finish?: (
+        ingressHandle: number,
+        componentOrdinal: number,
+    ) => number;
+    sealed_lattice_relinearization_prepare_verification?: (
+        ingressHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_relinearization_discard_verification_ingress?: (
+        ingressHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_one_aggregate_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_relinearization_round_two_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_commit_generated_source?: (
+        acceptedSetupPackageBuilderHandle: number,
+        prepackageCatalogHandle: number,
+        generatedCommonProofHandle: number,
+        generationSourceHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_discard_generation_source?: (
+        generationSourceHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_open?: (
+        generationSourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_component_count?: (
+        readbackHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_descriptor_byte_length?: (
+        readbackHandle: number,
+        componentOrdinal: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_copy_descriptor?: (
+        readbackHandle: number,
+        componentOrdinal: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_copy_material_root?: (
+        readbackHandle: number,
+        componentOrdinal: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_total_byte_length?: (
+        readbackHandle: number,
+        componentOrdinal: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_galois_key_share_component_readback_read_chunk?: (
+        readbackHandle: number,
+        componentOrdinal: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_finish?: (
+        generationSourceHandle: number,
+        readbackHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_readback_cancel?: (
+        generationSourceHandle: number,
+        readbackHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_verification_ingress_begin?: (
+        selectedSuiteHandle: number,
+        prepackageCatalogHandle: number,
+        rosterPosition: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_begin?: (
+        ingressHandle: number,
+        componentOrdinal: number,
+        streamDescriptorPointer: number,
+        streamDescriptorByteLength: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_absorb_chunk?: (
+        ingressHandle: number,
+        componentOrdinal: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_galois_key_share_component_finish?: (
+        ingressHandle: number,
+        componentOrdinal: number,
+    ) => number;
+    sealed_lattice_galois_key_share_prepare_verification?: (
+        selectedSuiteHandle: number,
+        ingressHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_galois_key_share_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_discard_verification_ingress?: (
+        ingressHandle: number,
+    ) => number;
+    sealed_lattice_galois_key_share_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_verification_transfer_prepackage_evaluator_sources?: (
+        assemblyHandle: number,
+        catalogHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_verification_complete_evaluator_sources?: (
+        assemblyHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_verification_complete_public_proofs?: (
+        assemblyHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_verification_finalize?: (
+        assemblyHandle: number,
+        stateSessionHandle: number,
+        stateSessionCapabilityPointer: number,
+        stateSessionCapabilityByteLength: number,
+        orderedCommitmentReservationHandlesPointer: number,
+        orderedCommitmentReservationHandlesByteLength: number,
+        terminalPackageReservationHandlesPointer: number,
+        terminalPackageReservationHandlesByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_same_secret_prepare_verification?: (
+        selectedSuiteHandle: number,
+        assemblyHandle: number,
+        vssLowDegreeEvidenceHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_same_secret_prepare_generated_verification?: (
+        selectedSuiteHandle: number,
+        assemblyHandle: number,
+        generationStatementSourceHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_same_secret_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_same_secret_finish_generated_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_same_secret_discard_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_public_key_share_prepare_verification?: (
+        selectedSuiteHandle: number,
+        assemblyHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_public_key_share_prepare_generated_verification?: (
+        selectedSuiteHandle: number,
+        assemblyHandle: number,
+        generationStatementSourceHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_public_key_share_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_public_key_share_finish_generated_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_public_key_share_discard_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_public_key_share_prepare_compact_verification?: (
+        assemblyHandle: number,
+        canonicalApplicationStatementPointer: number,
+        canonicalApplicationStatementByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_same_secret_prepare_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        vssLowDegreeEvidenceHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statementSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_same_secret_prepare_resumed_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        vssLowDegreeEvidenceHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statementSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_public_key_share_prepare_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statementSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_public_key_share_prepare_resumed_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statementSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_share_prepare_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_reference_prepare_generation?: (
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessObjectHandlesPointer: number,
+        orderedPublicRandomnessObjectHandlesByteLength: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_setup_key_relation_generation_statement_discard?: (
+        statementSourceHandle: number,
+    ) => number;
+    sealed_lattice_same_secret_generation_contribute_package?: (
+        builderHandle: number,
+        statementSourceHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_public_key_share_generation_contribute_package?: (
+        builderHandle: number,
+        statementSourceHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_same_secret_generation_cancel?: (
+        statementSourceHandle: number,
+        generatedCommonProofHandle: number,
+    ) => number;
+    sealed_lattice_same_secret_generation_supply_authenticated_transcript_prefix?: (
+        statementSourceHandle: number,
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_public_key_share_generation_cancel?: (
+        statementSourceHandle: number,
+        generatedCommonProofHandle: number,
     ) => number;
     sealed_lattice_canonical_stream_absorb_chunk?: (
         handle: number,
@@ -529,6 +1495,178 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         tagLength: number,
     ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_compact_public_key_transport_bindings_byte_length?: () => number;
+    sealed_lattice_compact_public_key_generation_external_memory_usage_word_count?: () => number;
+    sealed_lattice_compact_public_key_generation_diagnostic_record_byte_length?: () => number;
+    sealed_lattice_compact_public_key_generation_diagnostic_observation_count?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_diagnostic_observations?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_poll?: (
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+        stageOutputPointer: number,
+        firstOrdinalOutputPointer: number,
+        completedWorkUnitCountOutputPointer: number,
+        checkpointReadyOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_pending_storage_request_byte_length?: (
+        operationHandle: number,
+        storageOwnerOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_storage_request?: (
+        operationHandle: number,
+        storageOwnerCode: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_supply_storage_response?: (
+        operationHandle: number,
+        storageOwnerCode: number,
+        responsePointer: number,
+        responseByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_public_input_byte_length?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_proof_byte_length?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_public_input?: (
+        operationHandle: number,
+        sourceOffset: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_proof?: (
+        operationHandle: number,
+        sourceOffset: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_transport_bindings?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_copy_external_memory_usage?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputWordCount: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_release_completed?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_compact_public_key_generation_cancel?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_compact_public_key_validate_transport?: (
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_begin_algebraic_verification_input?: (
+        bindingsPointer: number,
+        bindingsByteLength: number,
+        proofByteLength: number,
+        publicInputByteLength: number,
+        checkpointPointer: number,
+        checkpointByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_supply_algebraic_verification_input_chunk?: (
+        inputHandle: number,
+        inputKind: number,
+        byteOffset: number,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_compact_public_key_finish_algebraic_verification_input?: (
+        inputHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_cancel_algebraic_verification_input?: (
+        inputHandle: number,
+    ) => number;
+    sealed_lattice_compact_public_key_algebraic_verification_poll?: (
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+        pollKindPointer: number,
+        completedWorkUnitCountPointer: number,
+        checkpointSafeBoundaryOrdinalPointer: number,
+    ) => number;
+    sealed_lattice_compact_public_key_cancel_algebraic_verification?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_compact_public_key_algebraic_verification_checkpoint_byte_length?: () => number;
+    sealed_lattice_compact_public_key_algebraic_verification_safe_boundary_count?: () => number;
+    sealed_lattice_compact_public_key_copy_algebraic_verification_checkpoint?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_begin_verification?: (
+        preparedHandle: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_resume_verification?: (
+        preparedHandle: number,
+        proofPointer: number,
+        proofByteLength: number,
+        publicInputPointer: number,
+        publicInputByteLength: number,
+        checkpointPointer: number,
+        checkpointByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_verification_checkpoint_byte_length?: () => number;
+    sealed_lattice_accepted_setup_compact_public_key_verification_safe_boundary_count?: () => number;
+    sealed_lattice_accepted_setup_compact_public_key_verification_poll?: (
+        operationHandle: number,
+        maximumWorkUnitCount: number,
+        pollKindPointer: number,
+        completedWorkUnitCountPointer: number,
+        checkpointSafeBoundaryOrdinalPointer: number,
+        verifiedCapabilityHandlePointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_copy_verification_checkpoint?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_copy_checkpoint_source_digests?: (
+        preparedHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_cancel_verification?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_finish_verification?: (
+        verifiedCapabilityHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_discard_prepared_verification?: (
+        preparedHandle: number,
+    ) => number;
+    sealed_lattice_accepted_setup_compact_public_key_discard_capability?: (
+        verifiedCapabilityHandle: number,
+    ) => number;
     sealed_lattice_common_proof_begin_generation?: (
         preparedGenerationHandle: number,
         statusPointer: number,
@@ -538,6 +1676,8 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         runtimeBindingHashOutputPointer: number,
         verificationBindingHashOutputPointer: number,
         proofAttemptLineageIdentifierOutputPointer: number,
+        checkpointLineageIdentifierOutputPointer: number,
+        applicationStatementSchemaIdentifierOutputPointer: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_common_proof_describe_verification_family_adapter?: (
@@ -549,6 +1689,8 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         adapterHandle: number,
         authenticatedCheckpointStatePointer: number,
         authenticatedCheckpointStateByteLength: number,
+        authenticatedGenerationCursorManifestPointer: number,
+        authenticatedGenerationCursorManifestByteLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_common_proof_prepare_verification_family_adapter?: (
@@ -571,28 +1713,224 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         preparedGenerationHandle: number,
         authenticatedCheckpointStatePointer: number,
         authenticatedCheckpointStateByteLength: number,
+        authenticatedGenerationCursorManifestPointer: number,
+        authenticatedGenerationCursorManifestByteLength: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_ballot_validity_prepare_generation?: (
+        selectedSuiteHandle: number,
+        actionRandomnessHandle: number,
+        acceptedSetupAuthorityHandle: number,
+        producerSequence: bigint,
+        scoresPointer: number,
+        scoresByteLength: number,
+        encryptionAttemptIdentifierPointer: number,
+        proofAttemptNoncePointer: number,
+        checkpointLineageIdentifierPointer: number,
+        ciphertextReadbackHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_prepare_resumed_generation?: (
+        selectedSuiteHandle: number,
+        actionRandomnessHandle: number,
+        acceptedSetupAuthorityHandle: number,
+        producerSequence: bigint,
+        scoresPointer: number,
+        scoresByteLength: number,
+        encryptionAttemptIdentifierPointer: number,
+        proofAttemptNoncePointer: number,
+        checkpointLineageIdentifierPointer: number,
+        ciphertextReadbackHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_ciphertext_descriptor_byte_length?: (
+        ciphertextReadbackHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_copy_ciphertext_descriptor?: (
+        ciphertextReadbackHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_read_ciphertext_chunk?: (
+        ciphertextReadbackHandle: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_finish_ciphertext_readback?: (
+        ciphertextReadbackHandle: number,
+    ) => number;
+    sealed_lattice_ballot_validity_prepare_ballot_package_carrier?: (
+        ciphertextReadbackHandle: number,
+        proofDescriptorPointer: number,
+        proofDescriptorByteLength: number,
+        canonicalRosterPointer: number,
+        canonicalRosterByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_finish_ballot_package_carrier?: (
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_validity_cancel_ballot_package_carrier?: (
+        preparedCarrierHandle: number,
+    ) => number;
+    sealed_lattice_ballot_validity_bind_generated_proof_to_board?: (
+        generatedCommonProofHandle: number,
+        ciphertextReadbackHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        ballotPackageObjectHandle: number,
+    ) => number;
+    sealed_lattice_ballot_validity_discard_ciphertext_readback?: (
+        ciphertextReadbackHandle: number,
+    ) => number;
+    sealed_lattice_ballot_validity_begin_verification?: (
+        selectedSuiteHandle: number,
+        acceptedSetupAuthorityHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        ballotPackageObjectHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_absorb_ciphertext_chunk?: (
+        preparationHandle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_validity_finish_verification_preparation?: (
+        preparationHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_discard_verification_preparation?: (
+        preparationHandle: number,
+    ) => number;
+    sealed_lattice_ballot_validity_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_validity_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_ballot_validity_discard_verified_output?: (
+        outputHandle: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_begin?: (
+        acceptedSetupAuthorityHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_absorb?: (
+        aggregationHandle: number,
+        verifiedBallotOutputHandle: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_poll?: (
+        aggregationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_absorb_store_chunk?: (
+        aggregationHandle: number,
+        storeByteOffset: bigint,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_prepare?: (
+        aggregationHandle: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_aggregate_carrier_byte_length?: (
+        aggregationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_copy_aggregate_carrier?: (
+        aggregationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_bind_aggregate_object?: (
+        aggregationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        verifiedAggregateObjectHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_cancel?: (
+        aggregationHandle: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_discard_verified_aggregate?: (
+        verifiedAggregateAuthorityHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_begin?: (
+        verifiedAggregateAuthorityHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_poll?: (
+        executionHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_absorb_store_chunk?: (
+        executionHandle: number,
+        storeByteOffset: bigint,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_finish?: (
+        executionHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_replay_carrier_byte_length?: (
+        executionHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_copy_replay_carrier?: (
+        executionHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_bind_replay_object?: (
+        executionHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        verifiedReplayObjectHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_evaluator_execution_cancel?: (
+        executionHandle: number,
+    ) => number;
+    sealed_lattice_evaluator_replay_release?: (
+        verifiedReplayHandle: number,
+    ) => number;
     sealed_lattice_common_proof_generation_checkpoint_state_byte_length?: () => number;
+    sealed_lattice_common_proof_generation_external_memory_accounting_byte_length?: () => number;
+    sealed_lattice_common_proof_generation_authenticated_source_request_byte_length?: () => number;
     sealed_lattice_common_proof_generation_describe_checkpoint?: (
         operationHandle: number,
         safeBoundaryOrdinalPointer: number,
         stateByteLengthPointer: number,
-        cursorCountPointer: number,
+        cursorManifestByteLengthPointer: number,
     ) => number;
     sealed_lattice_common_proof_generation_copy_checkpoint_state?: (
         operationHandle: number,
         outputPointer: number,
         outputByteLength: number,
     ) => number;
-    sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length?: (
+    sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest?: (
         operationHandle: number,
-        cursorIndex: number,
-        statusPointer: number,
-    ) => number;
-    sealed_lattice_common_proof_generation_copy_checkpoint_cursor?: (
-        operationHandle: number,
-        cursorIndex: number,
         outputPointer: number,
         outputByteLength: number,
     ) => number;
@@ -628,6 +1966,16 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         outputPointer: number,
         outputLength: number,
     ) => number;
+    sealed_lattice_common_proof_generation_copy_authenticated_source_request?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_external_memory_accounting?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
     sealed_lattice_common_proof_generation_finish?: (
         operationHandle: number,
         statusPointer: number,
@@ -651,6 +1999,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         operationHandle: number,
         responsePointer: number,
         responseLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_supply_authenticated_source_range?: (
+        operationHandle: number,
+        sourcePointer: number,
+        sourceLength: number,
     ) => number;
     sealed_lattice_common_proof_release_generated_proof?: (
         handle: number,
@@ -686,10 +2039,276 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         statusPointer: number,
     ) => number;
     sealed_lattice_common_proof_release_suite?: (handle: number) => number;
+    sealed_lattice_common_proof_copy_selected_suite_record?: (
+        handle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_selected_suite_record_byte_length?: (
+        handle: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_common_proof_select_suite?: (
         canonicalSuiteRecordPointer: number,
         canonicalSuiteRecordLength: number,
         statusPointer: number,
+    ) => number;
+    sealed_lattice_foundation_roster_encode?: (
+        inputPointer: number,
+        inputByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_foundation_roster_encoded_byte_length?: (
+        inputPointer: number,
+        inputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_board_object_handle_catalog_byte_length?: () => number;
+    sealed_lattice_vss_share_linkage_prepare_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        boardBindingSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_prepare_resumed_generation?: (
+        selectedSuiteHandle: number,
+        setupGenerationAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        setupIntentObjectHandle: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        boardBindingSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_bind_generated_proof_to_board?: (
+        generatedCommonProofHandle: number,
+        boardBindingSourceHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedObjectHandleBytesPointer: number,
+        orderedObjectHandleBytesByteLength: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_discard_generation_board_binding_source?: (
+        boardBindingSourceHandle: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_prepare_verification?: (
+        selectedSuiteHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedObjectHandleBytesPointer: number,
+        orderedObjectHandleBytesByteLength: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_finish_low_degree_evidence?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_discard_verified_terminal?: (
+        terminalHandle: number,
+    ) => number;
+    sealed_lattice_vss_share_linkage_discard_low_degree_evidence?: (
+        evidenceHandle: number,
+    ) => number;
+    sealed_lattice_target_release_prepare_generation?: (
+        selectedSuiteHandle: number,
+        acceptedSetupAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        finalityVerifierSessionHandle: number,
+        finalityVerifierSessionCapabilityPointer: number,
+        finalityVerifierSessionCapabilityByteLength: number,
+        verifiedFinalityHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        reservationIntentObjectHandle: number,
+        targetIdentifierPointer: number,
+        targetIdentifierByteLength: number,
+        targetOrderPointer: number,
+        targetOrderByteLength: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        generationSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_prepare_resumed_generation?: (
+        selectedSuiteHandle: number,
+        acceptedSetupAuthorityHandle: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        finalityVerifierSessionHandle: number,
+        finalityVerifierSessionCapabilityPointer: number,
+        finalityVerifierSessionCapabilityByteLength: number,
+        verifiedFinalityHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        reservationIntentObjectHandle: number,
+        targetIdentifierPointer: number,
+        targetIdentifierByteLength: number,
+        targetOrderPointer: number,
+        targetOrderByteLength: number,
+        checkpointLineageIdentifierPointer: number,
+        checkpointLineageIdentifierByteLength: number,
+        generationSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_partial_descriptor_byte_length?: (
+        generationSourceHandle: number,
+        roleOrdinal: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_copy_partial_descriptor?: (
+        generationSourceHandle: number,
+        roleOrdinal: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_partial_total_byte_length?: (
+        generationSourceHandle: number,
+        roleOrdinal: number,
+        statusPointer: number,
+    ) => bigint;
+    sealed_lattice_target_release_read_partial_chunk?: (
+        generationSourceHandle: number,
+        roleOrdinal: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_prepare_output_carrier?: (
+        generationSourceHandle: number,
+        proofDescriptorPointer: number,
+        proofDescriptorByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_finish_output_carrier?: (
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_target_release_cancel_output_carrier?: (
+        preparedCarrierHandle: number,
+    ) => number;
+    sealed_lattice_target_release_bind_generated_proof?: (
+        generatedCommonProofHandle: number,
+        generationSourceHandle: number,
+        verifiedOutputHandle: number,
+        targetShareObjectHandle: number,
+    ) => number;
+    sealed_lattice_target_release_discard_generation_source?: (
+        generationSourceHandle: number,
+    ) => number;
+    sealed_lattice_target_release_prepare_verification?: (
+        selectedSuiteHandle: number,
+        acceptedSetupAuthorityHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        verifiedOutputHandle: number,
+        finalityVerifierSessionHandle: number,
+        finalityVerifierSessionCapabilityPointer: number,
+        finalityVerifierSessionCapabilityByteLength: number,
+        verifiedFinalityHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        targetShareObjectHandle: number,
+        targetIdentifierPointer: number,
+        targetIdentifierByteLength: number,
+        targetOrderPointer: number,
+        targetOrderByteLength: number,
+        targetIdentifierPartialPointer: number,
+        targetIdentifierPartialByteLength: number,
+        targetOrderPartialPointer: number,
+        targetOrderPartialByteLength: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_finish_verification?: (
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_discard_verification_terminal_source?: (
+        terminalSourceHandle: number,
+    ) => number;
+    sealed_lattice_target_release_discard_verified_share?: (
+        verifiedShareHandle: number,
+    ) => number;
+    sealed_lattice_target_release_reconstruct_verified_shares?: (
+        finalityVerifierSessionHandle: number,
+        finalityVerifierSessionCapabilityPointer: number,
+        finalityVerifierSessionCapabilityByteLength: number,
+        verifiedFinalityHandle: number,
+        targetIdentifierPointer: number,
+        targetIdentifierByteLength: number,
+        targetOrderPointer: number,
+        targetOrderByteLength: number,
+        verifiedShareHandlesPointer: number,
+        verifiedShareHandlesByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_reconstructed_selected_option_count?: (
+        reconstructedTargetResultHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_copy_reconstructed_option_identifiers?: (
+        reconstructedTargetResultHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_target_release_finish_reconstruction?: (
+        reconstructedTargetResultHandle: number,
+    ) => number;
+    sealed_lattice_target_release_discard_reconstruction?: (
+        reconstructedTargetResultHandle: number,
     ) => number;
     sealed_lattice_common_proof_begin_verification?: (
         preparedVerificationHandle: number,
@@ -706,6 +2325,12 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     ) => number;
     sealed_lattice_common_proof_verification_cancel?: (
         operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_readback_accounting_byte_length?: () => number;
+    sealed_lattice_common_proof_verification_copy_readback_accounting?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputLength: number,
     ) => number;
     sealed_lattice_common_proof_verification_finish?: (
         operationHandle: number,
@@ -764,6 +2389,33 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         capabilityLength: number,
         verifiedObjectHandle: number,
         statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_prepare_ballot_candidate_list?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityByteLength: number,
+        framedBallotPackageHandlesPointer: number,
+        framedBallotPackageHandlesByteLength: number,
+        canonicalCarrierByteLengthOutputPointer: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_finish_ballot_candidate_list?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityByteLength: number,
+        preparedCarrierHandle: number,
+        signaturePointer: number,
+        signatureByteLength: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_cancel_ballot_candidate_list?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityByteLength: number,
+        preparedCarrierHandle: number,
     ) => number;
     sealed_lattice_board_verifier_cancel?: (
         sessionHandle: number,

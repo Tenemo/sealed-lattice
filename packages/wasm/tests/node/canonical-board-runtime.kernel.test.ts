@@ -83,7 +83,6 @@ describe('Canonical board real-WASM runtime in Node', () => {
                     .map((canonicalCarrier) => ({ canonicalCarrier })),
                 {
                     canonicalCarrier: vector.reservation.canonicalIntentCarrier,
-                    relayArrivalIndex: Number.MAX_SAFE_INTEGER,
                 },
             ];
             const verified = session.verifyUnorderedCarriers(carriers);

@@ -7,6 +7,7 @@ const bytesPerGigabyte = 1024 ** 3;
 const defaultHardMemoryLimitGigabytes = 32;
 const maximumHostMemoryFraction = 0.7;
 const reservedHostMemoryGigabytes = 2;
+const minimumResourceSampleIntervalMilliseconds = 100;
 
 export type ProcessMemoryGuard = Readonly<{
     buildVerificationCommand: () => CommandInvocation;
@@ -15,6 +16,7 @@ export type ProcessMemoryGuard = Readonly<{
         options?: Readonly<{
             diagnosticsPath?: string;
             memoryLimitBytes?: number;
+            resourceSampleIntervalMilliseconds?: number;
         }>,
     ) => CommandInvocation;
     memoryLimitBytes: number;
@@ -116,7 +118,6 @@ export const resolveProcessMemoryLimitGigabytes = (input: {
 export const createProcessMemoryGuard = (input: {
     readonly insufficientFreeMemoryRunDescription: string;
     readonly memoryLimitEnvironmentVariable?: string;
-    readonly virtualAddressSpaceAllowanceBytes?: number;
 }): ProcessMemoryGuard => {
     const automaticMemoryLimitGigabytes = deriveProcessMemoryLimitGigabytes({
         freeMemoryGigabytes: os.freemem() / bytesPerGigabyte,
@@ -129,16 +130,6 @@ export const createProcessMemoryGuard = (input: {
         memoryLimitEnvironmentVariable: input.memoryLimitEnvironmentVariable,
     });
     const memoryLimitBytes = memoryLimitGigabytes * bytesPerGigabyte;
-    const virtualAddressSpaceAllowanceBytes =
-        input.virtualAddressSpaceAllowanceBytes ?? 0;
-    if (
-        !Number.isSafeInteger(virtualAddressSpaceAllowanceBytes) ||
-        virtualAddressSpaceAllowanceBytes < 0
-    ) {
-        throw new Error(
-            'Virtual address-space allowance must be a non-negative safe integer.',
-        );
-    }
     const processMemoryGuardTargetDirectory = path.resolve(
         process.cwd(),
         'target',
@@ -163,21 +154,35 @@ export const createProcessMemoryGuard = (input: {
                     'Process-memory guard diagnostics path must be absolute.',
                 );
             }
+            if (
+                options.resourceSampleIntervalMilliseconds !== undefined &&
+                (!Number.isSafeInteger(
+                    options.resourceSampleIntervalMilliseconds,
+                ) ||
+                    options.resourceSampleIntervalMilliseconds <
+                        minimumResourceSampleIntervalMilliseconds)
+            ) {
+                throw new Error(
+                    `Process-memory guard resource sample interval must be an integer of at least ${minimumResourceSampleIntervalMilliseconds} milliseconds.`,
+                );
+            }
 
             return {
                 ...command,
                 args: [
                     '--memory-limit-bytes',
                     String(options.memoryLimitBytes ?? memoryLimitBytes),
-                    ...(virtualAddressSpaceAllowanceBytes === 0
-                        ? []
-                        : [
-                              '--virtual-address-space-allowance-bytes',
-                              String(virtualAddressSpaceAllowanceBytes),
-                          ]),
                     ...(options.diagnosticsPath === undefined
                         ? []
                         : ['--diagnostics-path', options.diagnosticsPath]),
+                    ...(options.resourceSampleIntervalMilliseconds === undefined
+                        ? []
+                        : [
+                              '--resource-sample-interval-milliseconds',
+                              String(
+                                  options.resourceSampleIntervalMilliseconds,
+                              ),
+                          ]),
                     '--',
                     command.command,
                     ...command.args,

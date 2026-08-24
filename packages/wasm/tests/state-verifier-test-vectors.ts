@@ -31,7 +31,18 @@ import {
 const stateReservationObjectType = 0x0051;
 const stateOutputIntentObjectType = 0x0052;
 const stateWitnessVoteObjectType = 0x0053;
+const targetDecryptionShareObjectType = 0x0060;
 const targetReleaseCapabilityKind = 3;
+const targetDecryptionSharePayloadSchemaIdentifier = 0x1620;
+const targetReleaseOutputBundleSchemaIdentifier = 0x1622;
+const targetIdentifierPartialDecryptionStreamDomain = 19;
+const targetOrderPartialDecryptionStreamDomain = 20;
+const maliciousTargetShareProofStreamDomain = 21;
+
+type TargetReleaseChildStreamDomain =
+    | typeof targetIdentifierPartialDecryptionStreamDomain
+    | typeof targetOrderPartialDecryptionStreamDomain
+    | typeof maliciousTargetShareProofStreamDomain;
 
 type SignedCarrierVector = Readonly<{
     canonicalCarrierBytes: Uint8Array;
@@ -125,12 +136,217 @@ const stateExactOutputHash = (
         variableBytesItem(exactOutputBytes),
     );
 
+const unsigned32Item = (value: number): Uint8Array =>
+    canonicalItem(0x04, unsigned32LittleEndian(value));
+
+const canonicalHashListItem = (hashes: readonly Uint8Array[]): Uint8Array =>
+    canonicalItem(
+        0x0e,
+        concatenateBytes(
+            unsigned16LittleEndian(0x06),
+            unsigned32LittleEndian(hashes.length),
+            ...hashes,
+        ),
+    );
+
+const canonicalStreamDomainName = (
+    streamDomain: TargetReleaseChildStreamDomain,
+): string => {
+    switch (streamDomain) {
+        case targetIdentifierPartialDecryptionStreamDomain:
+            return 'sealed-lattice/stream/target-release/target-id-partial-decryption/v1';
+        case targetOrderPartialDecryptionStreamDomain:
+            return 'sealed-lattice/stream/target-release/target-order-partial-decryption/v1';
+        case maliciousTargetShareProofStreamDomain:
+            return 'sealed-lattice/stream/target-release/malicious-share-proof/v1';
+    }
+};
+
+const deriveCanonicalStreamDescriptorFixture = (
+    streamDomain: TargetReleaseChildStreamDomain,
+    streamBytes: Uint8Array,
+): Uint8Array => {
+    const streamDomainName = canonicalStreamDomainName(streamDomain);
+    const chunkDigests: Uint8Array[] = [];
+    for (
+        let byteOffset = 0, chunkIndex = 0;
+        byteOffset < streamBytes.byteLength;
+        byteOffset += foundationProfile.streamChunkByteLength, chunkIndex += 1
+    ) {
+        const chunkBytes = streamBytes.slice(
+            byteOffset,
+            byteOffset + foundationProfile.streamChunkByteLength,
+        );
+        chunkDigests.push(
+            foundationHash512(
+                'sealed-lattice/transport/chunk/v1',
+                asciiItem(streamDomainName),
+                unsigned32Item(chunkIndex),
+                unsigned32Item(chunkBytes.byteLength),
+                variableBytesItem(chunkBytes),
+            ),
+        );
+    }
+
+    return canonicalTuple(
+        0x1800,
+        unsigned64Item(BigInt(streamBytes.byteLength)),
+        canonicalHashListItem(chunkDigests),
+        hashItem(
+            foundationHash512(
+                'sealed-lattice/transport/full-object/v1',
+                asciiItem(streamDomainName),
+                unsigned64Item(BigInt(streamBytes.byteLength)),
+                variableBytesItem(streamBytes),
+            ),
+        ),
+    );
+};
+
+const deterministicTargetReleaseBytes = (
+    byteLength: number,
+    outputSeedByte: number,
+    streamDiscriminator: number,
+): Uint8Array =>
+    Uint8Array.from(
+        { length: byteLength },
+        (_unused, byteIndex) =>
+            (outputSeedByte + streamDiscriminator + byteIndex * 197) & 0xff,
+    );
+
+const createCanonicalTargetReleaseExactOutputFixture = (input: {
+    createCanonicalSignedTargetDecryptionShareCarrier: (
+        payloadBytes: Uint8Array,
+    ) => Uint8Array;
+    deriveCanonicalStreamDescriptor: (
+        streamDomain: TargetReleaseChildStreamDomain,
+        streamBytes: Uint8Array,
+    ) => Uint8Array;
+    finalityHash: Uint8Array;
+    outputSeedByte?: number;
+    reservationIntentObjectHash: Uint8Array;
+    targetExactOutputByteLength: number;
+}): Uint8Array => {
+    if (
+        input.finalityHash.byteLength !== 64 ||
+        input.reservationIntentObjectHash.byteLength !== 64
+    ) {
+        throw new TypeError(
+            'The target-release fixture hashes must each contain exactly 64 bytes.',
+        );
+    }
+    if (
+        !Number.isSafeInteger(input.targetExactOutputByteLength) ||
+        input.targetExactOutputByteLength <= 0
+    ) {
+        throw new TypeError(
+            'The target-release fixture byte length must be a positive safe integer.',
+        );
+    }
+    const outputSeedByte = input.outputSeedByte ?? 0x59;
+    if (
+        !Number.isSafeInteger(outputSeedByte) ||
+        outputSeedByte < 0 ||
+        outputSeedByte > 0xff
+    ) {
+        throw new TypeError(
+            'The target-release fixture seed must be one unsigned byte.',
+        );
+    }
+
+    const targetIdentifierBytes = deterministicTargetReleaseBytes(
+        37,
+        outputSeedByte,
+        0x13,
+    );
+    const targetOrderBytes = deterministicTargetReleaseBytes(
+        53,
+        outputSeedByte,
+        0x2f,
+    );
+    const createCarrierForProofBytes = (
+        maliciousShareProofBytes: Uint8Array,
+    ): Uint8Array =>
+        input.createCanonicalSignedTargetDecryptionShareCarrier(
+            canonicalTuple(
+                targetDecryptionSharePayloadSchemaIdentifier,
+                hashItem(input.finalityHash),
+                hashItem(input.reservationIntentObjectHash),
+                canonicalItem(
+                    0x09,
+                    input.deriveCanonicalStreamDescriptor(
+                        targetIdentifierPartialDecryptionStreamDomain,
+                        targetIdentifierBytes,
+                    ),
+                ),
+                canonicalItem(
+                    0x09,
+                    input.deriveCanonicalStreamDescriptor(
+                        targetOrderPartialDecryptionStreamDomain,
+                        targetOrderBytes,
+                    ),
+                ),
+                canonicalItem(
+                    0x09,
+                    input.deriveCanonicalStreamDescriptor(
+                        maliciousTargetShareProofStreamDomain,
+                        maliciousShareProofBytes,
+                    ),
+                ),
+            ),
+        );
+    const provisionalCarrier = createCarrierForProofBytes(Uint8Array.of(0));
+    const maliciousShareProofByteLength =
+        input.targetExactOutputByteLength -
+        4 -
+        provisionalCarrier.byteLength -
+        targetIdentifierBytes.byteLength -
+        targetOrderBytes.byteLength;
+    if (
+        maliciousShareProofByteLength <= 0 ||
+        maliciousShareProofByteLength > foundationProfile.streamChunkByteLength
+    ) {
+        throw new TypeError(
+            'The target-release fixture length must leave one non-empty canonical proof chunk.',
+        );
+    }
+    const maliciousShareProofBytes = deterministicTargetReleaseBytes(
+        maliciousShareProofByteLength,
+        outputSeedByte,
+        0x71,
+    );
+    const canonicalSignedCarrier = createCarrierForProofBytes(
+        maliciousShareProofBytes,
+    );
+    if (canonicalSignedCarrier.byteLength !== provisionalCarrier.byteLength) {
+        throw new Error(
+            'The target-release fixture carrier length changed with fixed-size descriptors.',
+        );
+    }
+    const exactOutputBytes = concatenateBytes(
+        unsigned16LittleEndian(targetReleaseOutputBundleSchemaIdentifier),
+        unsigned16LittleEndian(1),
+        canonicalSignedCarrier,
+        targetIdentifierBytes,
+        targetOrderBytes,
+        maliciousShareProofBytes,
+    );
+    if (exactOutputBytes.byteLength !== input.targetExactOutputByteLength) {
+        throw new Error(
+            'The target-release fixture did not meet its exact byte-length boundary.',
+        );
+    }
+    return exactOutputBytes;
+};
+
 export const createStateVerifierTestVector = (
     input: {
         actionContextHash?: Uint8Array;
         ceremonyContextHash?: Uint8Array;
         setupActionRandomnessAuthorizationHash?: Uint8Array;
+        subjectRosterPosition?: number;
         suiteIdentifier?: Uint8Array;
+        targetReleaseOutputSeedByte?: number;
     } = {},
 ): StateVerifierTestVector => {
     for (const [fieldName, value] of [
@@ -147,6 +363,16 @@ export const createStateVerifierTestVector = (
                 `The ${fieldName} value must contain exactly 64 bytes.`,
             );
         }
+    }
+    const subjectRosterPosition = input.subjectRosterPosition ?? 0;
+    if (
+        !Number.isSafeInteger(subjectRosterPosition) ||
+        subjectRosterPosition < 0 ||
+        subjectRosterPosition >= foundationProfile.participantCount
+    ) {
+        throw new TypeError(
+            'The subjectRosterPosition value must name one participant in the fixed roster.',
+        );
     }
     const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
         foundationProfile.participantCount,
@@ -178,6 +404,24 @@ export const createStateVerifierTestVector = (
                 canonicalItem(0x01, publicKey),
             ),
         );
+        const stateWitnessRosterPositions = Array.from(
+            { length: foundationProfile.participantCount },
+            (_unused, rosterPosition) => rosterPosition,
+        )
+            .filter(
+                (rosterPosition) => rosterPosition !== subjectRosterPosition,
+            )
+            .slice(0, foundationProfile.stateWitnessQuorum);
+        const witnessRosterPosition = stateWitnessRosterPositions[0];
+        if (
+            stateWitnessRosterPositions.length !==
+                foundationProfile.stateWitnessQuorum ||
+            witnessRosterPosition === undefined
+        ) {
+            throw new Error(
+                'The deterministic state vector could not select its fixed-roster witnesses.',
+            );
+        }
 
         const signedCarrier = (carrierInput: {
             objectType: number;
@@ -262,7 +506,7 @@ export const createStateVerifierTestVector = (
                 unsigned16Item(targetReleaseCapabilityKind),
                 hashItem(authorizationHash),
             ),
-            producerRosterPosition: 0,
+            producerRosterPosition: subjectRosterPosition,
             producerSequence: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
@@ -271,11 +515,11 @@ export const createStateVerifierTestVector = (
             canonicalStateCertificate: certificateFor(
                 reservationCarrier.objectHash,
                 1n,
-                [1, 2, 3, 4, 5, 6, 7],
+                stateWitnessRosterPositions,
             ),
             objectHash: reservationCarrier.objectHash,
         };
-        const reservationVoteCarriers = [1, 2, 3, 4, 5, 6, 7].map(
+        const reservationVoteCarriers = stateWitnessRosterPositions.map(
             (producerRosterPosition) =>
                 signedCarrier({
                     objectType: stateWitnessVoteObjectType,
@@ -297,7 +541,7 @@ export const createStateVerifierTestVector = (
                 unsigned16Item(targetReleaseCapabilityKind),
                 hashItem(conflictingAuthorizationHash),
             ),
-            producerRosterPosition: 0,
+            producerRosterPosition: subjectRosterPosition,
             producerSequence: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
@@ -307,7 +551,7 @@ export const createStateVerifierTestVector = (
             canonicalStateCertificate: certificateFor(
                 conflictingReservationCarrier.objectHash,
                 1n,
-                [1, 2, 3, 4, 5, 6, 7],
+                stateWitnessRosterPositions,
             ),
             objectHash: conflictingReservationCarrier.objectHash,
         };
@@ -328,7 +572,7 @@ export const createStateVerifierTestVector = (
                     unsigned16Item(capabilityKind),
                     hashItem(reservationAuthorizationHash),
                 ),
-                producerRosterPosition: 0,
+                producerRosterPosition: subjectRosterPosition,
                 producerSequence: 0n,
                 signaturePurpose: 'state-reservation-intent',
             });
@@ -339,23 +583,34 @@ export const createStateVerifierTestVector = (
                     canonicalStateCertificate: certificateFor(
                         carrier.objectHash,
                         1n,
-                        [1, 2, 3, 4, 5, 6, 7],
+                        stateWitnessRosterPositions,
                     ),
                     objectHash: carrier.objectHash,
                 },
             };
         });
 
-        const exactOutputBytes = new Uint8Array(
-            foundationProfile.streamChunkByteLength + 17,
+        const exactOutputBytes = createCanonicalTargetReleaseExactOutputFixture(
+            {
+                createCanonicalSignedTargetDecryptionShareCarrier: (
+                    payloadBytes,
+                ) =>
+                    signedCarrier({
+                        objectType: targetDecryptionShareObjectType,
+                        payloadBytes,
+                        producerRosterPosition: subjectRosterPosition,
+                        producerSequence: 0n,
+                        signaturePurpose: 'target-release-output',
+                    }).canonicalCarrierBytes,
+                deriveCanonicalStreamDescriptor:
+                    deriveCanonicalStreamDescriptorFixture,
+                finalityHash: new Uint8Array(64).fill(0xb7),
+                outputSeedByte: input.targetReleaseOutputSeedByte,
+                reservationIntentObjectHash: reservationCarrier.objectHash,
+                targetExactOutputByteLength:
+                    foundationProfile.streamChunkByteLength + 17,
+            },
         );
-        for (
-            let byteIndex = 0;
-            byteIndex < exactOutputBytes.byteLength;
-            byteIndex += 1
-        ) {
-            exactOutputBytes[byteIndex] = (byteIndex * 197 + 29) & 0xff;
-        }
         const outputCarrier = signedCarrier({
             objectType: stateOutputIntentObjectType,
             payloadBytes: canonicalTuple(
@@ -368,7 +623,7 @@ export const createStateVerifierTestVector = (
                     ),
                 ),
             ),
-            producerRosterPosition: 0,
+            producerRosterPosition: subjectRosterPosition,
             producerSequence: 0n,
             signaturePurpose: 'state-output-intent',
         });
@@ -377,14 +632,24 @@ export const createStateVerifierTestVector = (
             canonicalStateCertificate: certificateFor(
                 outputCarrier.objectHash,
                 2n,
-                [1, 2, 3, 4, 5, 6, 7],
+                stateWitnessRosterPositions,
             ),
             objectHash: outputCarrier.objectHash,
         };
         const invalidExtraOutputCertificate = certificateFor(
             outputCarrier.objectHash,
             2n,
-            [1, 2, 3, 4, 5, 6, 7, 8],
+            [
+                ...stateWitnessRosterPositions,
+                ...Array.from(
+                    { length: foundationProfile.participantCount },
+                    (_unused, rosterPosition) => rosterPosition,
+                ).filter(
+                    (rosterPosition) =>
+                        rosterPosition !== subjectRosterPosition &&
+                        !stateWitnessRosterPositions.includes(rosterPosition),
+                ),
+            ].slice(0, foundationProfile.stateWitnessQuorum + 1),
             true,
         );
 
@@ -401,9 +666,11 @@ export const createStateVerifierTestVector = (
             reservationVoteCarriers,
             reservationOnly,
             rosterHash,
-            subjectParticipantIdentity: participantIdentities[0],
+            subjectParticipantIdentity:
+                participantIdentities[subjectRosterPosition],
             suiteIdentifier,
-            witnessParticipantIdentity: participantIdentities[1],
+            witnessParticipantIdentity:
+                participantIdentities[witnessRosterPosition],
         };
     } finally {
         for (const { secretKey } of signingKeyPairs) {

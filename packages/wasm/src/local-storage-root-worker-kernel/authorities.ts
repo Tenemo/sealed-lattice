@@ -16,17 +16,27 @@ import {
 } from '@sealed-lattice/types';
 
 import type {
+    AggregateThresholdShareRecipientAuthority,
+    ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+} from '../aggregate-threshold-share-authenticated-recipient.js';
+import type { VerifiedTranscriptObject } from '../canonical-board-runtime.js';
+import type {
     CommonProofApplicationFreshnessCoordinate,
     VerifiedCommonProofCapability,
 } from '../common-proof-worker-runtime.js';
+import type { BrowserOwnedSetupGenerationAuthority } from '../setup-generation-recipient-payload.js';
 import type {
     StateVerifierSession,
     VerifiedStateDurableBinding,
     VerifiedStateReservation,
     VerifiedStateReservationIntent,
 } from '../state-verifier-runtime.js';
-import type { BgvSetupCommitmentOpeningComputation } from '../structured-commitment-worker-response.js';
-import type { SetupMailboxSlot } from '../transcript-core-bridge/kernel-types.js';
+import type { ActionRandomnessKernelContext } from '../transcript-core-bridge/action-randomness-kernel-context.js';
+import type {
+    SetupMailboxSlot,
+    TranscriptCoreKernel,
+} from '../transcript-core-bridge/kernel-types.js';
+
 export type RootLease = {
     binding: BrowserActionStorageRootBinding;
     capability: Uint8Array<ArrayBuffer>;
@@ -77,6 +87,155 @@ export type WorkerActionRandomnessSessionRecord = Readonly<{
     handle: number;
 }>;
 
+export type ClosedWorkerProductionOperationIdentifiers = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    stateReservationIdentifier: string;
+    stateVerifierSessionIdentifier: string;
+}>;
+
+type ClosedWorkerProductionOperationKernelAuthorization = Readonly<{
+    readonly actionRandomnessContext: ActionRandomnessKernelContext;
+    readonly actionRandomnessHandle: number;
+    readonly kernel: TranscriptCoreKernel;
+    readonly stateReservationCapabilityMemory: WebAssembly.Memory;
+    readonly stateReservationCapabilityPointer: number;
+    readonly stateReservationHandle: number;
+    readonly stateVerifierSessionHandle: number;
+}>;
+
+export type ClosedWorkerProductionOperationAuthority = Readonly<{
+    withExactKernelAuthorization(
+        operation: (
+            authorization: ClosedWorkerProductionOperationKernelAuthorization,
+        ) => Promise<void> | void,
+    ): Promise<void> | void;
+}>;
+
+type ClosedWorkerProductionOperationAuthorityRecord = {
+    authorization:
+        | ClosedWorkerProductionOperationKernelAuthorization
+        | undefined;
+    state: 'active' | 'revoked';
+};
+
+const closedWorkerProductionOperationAuthorityRecords = new WeakMap<
+    ClosedWorkerProductionOperationAuthority,
+    ClosedWorkerProductionOperationAuthorityRecord
+>();
+
+const requireLiveClosedWorkerProductionOperationAuthorityRecord = (
+    authority: ClosedWorkerProductionOperationAuthority,
+): ClosedWorkerProductionOperationKernelAuthorization => {
+    const record =
+        closedWorkerProductionOperationAuthorityRecords.get(authority);
+    if (
+        record === undefined ||
+        record.state !== 'active' ||
+        record.authorization === undefined
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidState',
+            'The closed worker production-operation authority is no longer active.',
+        );
+    }
+    return record.authorization;
+};
+
+const defineBorrowedAuthorizationProperty = <
+    PropertyName extends
+        keyof ClosedWorkerProductionOperationKernelAuthorization,
+>(
+    target: object,
+    authority: ClosedWorkerProductionOperationAuthority,
+    propertyName: PropertyName,
+): void => {
+    Object.defineProperty(target, propertyName, {
+        configurable: false,
+        enumerable: false,
+        get: () =>
+            requireLiveClosedWorkerProductionOperationAuthorityRecord(
+                authority,
+            )[propertyName],
+    });
+};
+
+export const createClosedWorkerProductionOperationAuthority = (input: {
+    authorization: ClosedWorkerProductionOperationKernelAuthorization;
+}): Readonly<{
+    authority: ClosedWorkerProductionOperationAuthority;
+    revoke(): void;
+}> => {
+    const authorityTarget = Object.create(null) as object;
+    const authority =
+        authorityTarget as ClosedWorkerProductionOperationAuthority;
+    Object.defineProperty(authorityTarget, 'withExactKernelAuthorization', {
+        configurable: false,
+        enumerable: false,
+        value: (
+            operation: (
+                authorization: ClosedWorkerProductionOperationKernelAuthorization,
+            ) => Promise<void> | void,
+        ): Promise<void> | void => {
+            if (typeof operation !== 'function') {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The exact-kernel production operation must be a function.',
+                );
+            }
+            requireLiveClosedWorkerProductionOperationAuthorityRecord(
+                authority,
+            );
+            const borrowedAuthorizationTarget = Object.create(null) as object;
+            for (const propertyName of [
+                'actionRandomnessContext',
+                'actionRandomnessHandle',
+                'kernel',
+                'stateReservationCapabilityMemory',
+                'stateReservationCapabilityPointer',
+                'stateReservationHandle',
+                'stateVerifierSessionHandle',
+            ] as const) {
+                defineBorrowedAuthorizationProperty(
+                    borrowedAuthorizationTarget,
+                    authority,
+                    propertyName,
+                );
+            }
+            const operationOutput = operation(
+                Object.freeze(
+                    borrowedAuthorizationTarget,
+                ) as ClosedWorkerProductionOperationKernelAuthorization,
+            );
+            if (operationOutput === undefined) {
+                return;
+            }
+            return Promise.resolve(operationOutput).then((resolvedOutput) => {
+                if (resolvedOutput !== undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'An exact-kernel production operation must not return authority material.',
+                    );
+                }
+            });
+        },
+        writable: false,
+    });
+    Object.freeze(authorityTarget);
+    const record: ClosedWorkerProductionOperationAuthorityRecord = {
+        authorization: input.authorization,
+        state: 'active',
+    };
+    closedWorkerProductionOperationAuthorityRecords.set(authority, record);
+
+    return Object.freeze({
+        authority,
+        revoke: (): void => {
+            record.state = 'revoked';
+            record.authorization = undefined;
+        },
+    });
+};
+
 export type WorkerAuthenticatedRepairProtectionRecord = Readonly<{
     namespaceBytes: Uint8Array<ArrayBuffer>;
     runtimeBuildManifestHash: Uint8Array<ArrayBuffer>;
@@ -108,32 +267,19 @@ export type ClosedWorkerSetupMailboxRandomnessOperations = Readonly<{
     signSetupObject(input: {
         readonly signatureMessageHash: ProtocolHash;
     }): Uint8Array<ArrayBuffer>;
-    revoke(): void;
-}>;
-
-export const structuredCommitmentOpeningCapabilityBrand: unique symbol = Symbol(
-    'sealed-lattice/structured-commitment-opening-capability',
-);
-
-export type ClosedWorkerStructuredCommitmentOpeningCapability = Readonly<{
-    readonly [structuredCommitmentOpeningCapabilityBrand]: true;
-}>;
-
-export type ClosedWorkerStructuredCommitmentOpeningOperations = Readonly<{
-    create(input: {
-        readonly sourceSetupIntentObjectHash: ProtocolHash;
-        readonly sourceRosterPosition: number;
-        readonly sourceRnsLimbIndex: number;
-        readonly shamirCoefficientIndex: number;
-    }): ClosedWorkerStructuredCommitmentOpeningCapability;
-    computeCommitment(input: {
-        readonly capability: ClosedWorkerStructuredCommitmentOpeningCapability;
-        readonly messageCoefficients: readonly number[];
-        readonly publicMatrixSeedHash: ProtocolHash;
-    }): BgvSetupCommitmentOpeningComputation;
-    release(
-        capability: ClosedWorkerStructuredCommitmentOpeningCapability,
-    ): void;
+    produceSetupIntentCarrier(): Uint8Array<ArrayBuffer>;
+    producePublicRandomnessCommitmentCarrier(input: {
+        readonly orderedSetupIntentObjects: readonly VerifiedTranscriptObject[];
+    }): Uint8Array<ArrayBuffer>;
+    producePublicRandomnessRevealCarrier(input: {
+        readonly publicRandomnessCommitmentObject: VerifiedTranscriptObject;
+        readonly setupIntentObject: VerifiedTranscriptObject;
+    }): Uint8Array<ArrayBuffer>;
+    produceDealerPublicRecordCarrier(input: {
+        readonly orderedRecipientEnvelopeHashes: readonly ProtocolHash[];
+        readonly proofDescriptorBytes: Uint8Array;
+        readonly setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
+    }): Uint8Array<ArrayBuffer>;
     revoke(): void;
 }>;
 
@@ -163,12 +309,6 @@ export type WorkerSetupMailboxRandomnessInput = Readonly<{
     readonly stateReservationIdentifier: string;
 }>;
 
-export type WorkerStructuredCommitmentOpeningInput = Readonly<{
-    readonly actionRandomnessSessionIdentifier: string;
-    readonly rosterHash: ProtocolHash;
-    readonly stateReservationIdentifier: string;
-}>;
-
 export type WorkerActionRandomnessKernelRunner = Readonly<{
     close(sessionIdentifier: string): Promise<void>;
     createAndSeal(
@@ -184,9 +324,9 @@ export type WorkerActionRandomnessKernelRunner = Readonly<{
     openSetupMailboxRandomness(
         input: WorkerSetupMailboxRandomnessInput,
     ): Promise<ClosedWorkerSetupMailboxRandomnessOperations>;
-    openStructuredCommitmentOpenings(
-        input: WorkerStructuredCommitmentOpeningInput,
-    ): Promise<ClosedWorkerStructuredCommitmentOpeningOperations>;
+    openAggregateThresholdShareRecipientAuthority(
+        input: ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+    ): Promise<AggregateThresholdShareRecipientAuthority>;
     durableBindingForStateObject(
         stateObjectIdentifier: string,
     ): Promise<VerificationResult<VerifiedStateDurableBinding>>;
@@ -250,6 +390,20 @@ type WorkerCommonProofApplicationRunner = Readonly<{
 export const workerCommonProofApplicationRunners = new WeakMap<
     BrowserActionStorageWorkerKernel,
     WorkerCommonProofApplicationRunner
+>();
+
+type WorkerProductionOperationAuthorityRunner = Readonly<{
+    withAuthority(
+        identifiers: ClosedWorkerProductionOperationIdentifiers,
+        operation: (
+            authority: ClosedWorkerProductionOperationAuthority,
+        ) => Promise<void> | void,
+    ): Promise<void>;
+}>;
+
+export const workerProductionOperationAuthorityRunners = new WeakMap<
+    BrowserActionStorageWorkerKernel,
+    WorkerProductionOperationAuthorityRunner
 >();
 
 export const closedWorkerCommonProofScratchStorage = new WeakMap<

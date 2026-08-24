@@ -73,8 +73,9 @@ export type UntrustedStorageAtomicMutation = Readonly<{
  * adapter must implement applyAtomicMutation with one strict-durability browser
  * transaction and must grant this store exclusive repair authority for its
  * namespace. A rejected applyAtomicMutation promise must guarantee that its
- * mutation did not commit. Reads and writes may return attacker-controlled
- * bytes.
+ * mutation did not commit. Each read result must be a fresh full ArrayBuffer
+ * view whose ownership transfers to this store; the store may zero and detach
+ * it. Reads and writes may return attacker-controlled bytes.
  */
 export type UntrustedStorageAdapter = Readonly<{
     read(key: string): Promise<Uint8Array | undefined>;
@@ -153,7 +154,6 @@ export type UntrustedStorageTransaction = Readonly<{
 }>;
 
 export type UntrustedStorageRepairReport = Readonly<{
-    removedCorruptIndexCount: number;
     removedUnreferencedObjectCount: number;
     retainedObjectCount: number;
     storedValueByteLength: number;
@@ -170,7 +170,33 @@ export type UntrustedStorageAuthenticatedHeadSnapshot = Readonly<{
     storageInstanceIdentity: Uint8Array;
 }>;
 
+/**
+ * Exact value-byte and adapter-operation accounting owned by one exclusive
+ * production storage reservation. The snapshot is diagnostic evidence only;
+ * no cryptographic acceptance path consumes it.
+ */
+export type UntrustedStoragePhysicalAccountingSnapshot = Readonly<{
+    deletedByteLength: number;
+    deletionCount: number;
+    deletionDurationMilliseconds: number;
+    physicalReadByteLength: number;
+    physicalReadCallCount: number;
+    repairHashCallCount: number;
+    repairHashedByteLength: number;
+    storageRequestCount: number;
+    storageTransactionCount: number;
+    physicalWriteByteLength: number;
+    physicalWriteCallCount: number;
+    physicalQuotaByteLength: number;
+    physicalQuotaHeadroomByteLength: number;
+    physicalQuotaReservedByteLength: number;
+    physicalStoredEndByteLength: number;
+    physicalStoredPeakByteLength: number;
+    physicalStoredStartByteLength: number;
+}>;
+
 export type UntrustedStorageExclusiveCapacityReservation = Readonly<{
+    copyPhysicalStorageAccounting(): UntrustedStoragePhysicalAccountingSnapshot;
     copyAuthenticatedLogicalRecordKeys(
         prefix: string,
     ): Promise<readonly string[]>;
@@ -291,9 +317,33 @@ export type TransactionRecord = {
 };
 
 export type ExclusiveCapacityReservationRecord = {
+    readonly accounting: {
+        deletedByteLength: number;
+        deletionCount: number;
+        deletionDurationMilliseconds: number;
+        physicalReadByteLengthAtEnd: number | undefined;
+        readonly physicalReadByteLengthAtStart: number;
+        physicalReadCallCountAtEnd: number | undefined;
+        readonly physicalReadCallCountAtStart: number;
+        physicalStoredByteLength: number;
+        physicalStoredPeakByteLength: number;
+        readonly physicalValueByteLengths: Map<string, number | undefined>;
+        physicalWriteByteLengthAtEnd: number | undefined;
+        readonly physicalWriteByteLengthAtStart: number;
+        physicalWriteCallCountAtEnd: number | undefined;
+        readonly physicalWriteCallCountAtStart: number;
+        repairHashCallCount: number;
+        repairHashedByteLength: number;
+        storageRequestCountAtEnd: number | undefined;
+        readonly storageRequestCountAtStart: number;
+        storageTransactionCountAtEnd: number | undefined;
+        readonly storageTransactionCountAtStart: number;
+    };
     readonly identifier: symbol;
     readonly logicalRecordKeyPrefixes: Set<string>;
     readonly maximumDeletionBatchRecordCount: number;
+    readonly physicalQuotaReservedByteLength: number;
+    readonly physicalStoredStartByteLength: number;
     released: boolean;
 };
 

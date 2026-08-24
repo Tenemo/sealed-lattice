@@ -5,7 +5,7 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
-use super::canonical_stream::VerifiedCanonicalStreamSummary;
+use super::canonical_stream::{VerifiedCanonicalStreamSummary, VerifiedTargetReleaseOutputBundle};
 use super::{
     ActionRandomnessDerivationInput, CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION,
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
@@ -624,6 +624,29 @@ pub struct StateDurableBinding {
 }
 
 impl StateDurableBinding {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) const fn for_exact_same_secret_evidence(
+        suite_id: Hash512,
+        ceremony_context_hash: Hash512,
+        action_context_hash: Hash512,
+        subject_participant_id: ParticipantIdentity,
+    ) -> Self {
+        Self {
+            vote_kind: StateWitnessVoteKind::Reservation,
+            capability_kind: StateCapabilityKind::SetupActionRandomnessRoot,
+            suite_id,
+            ceremony_context_hash,
+            action_context_hash,
+            subject_participant_id,
+            state_key: Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
+            intent_object_hash: Hash512::from_bytes([0x52; Hash512::BYTE_LENGTH]),
+            reservation_intent_object_hash: Some(Hash512::from_bytes([0x52; Hash512::BYTE_LENGTH])),
+            output_intent_object_hash: None,
+            exact_output_hash: None,
+            exact_output_byte_length: None,
+        }
+    }
+
     pub const fn vote_kind(self) -> StateWitnessVoteKind {
         self.vote_kind
     }
@@ -760,6 +783,7 @@ impl VerifiedStateReservation {
 
 pub struct VerifiedStateOutputIntent {
     binding: StateOutputBinding,
+    target_release_output_bundle: Option<VerifiedTargetReleaseOutputBundle>,
 }
 
 impl VerifiedStateOutputIntent {
@@ -770,6 +794,7 @@ impl VerifiedStateOutputIntent {
 
 pub struct VerifiedStateOutput {
     binding: StateOutputBinding,
+    target_release_output_bundle: Option<VerifiedTargetReleaseOutputBundle>,
 }
 
 impl VerifiedStateOutput {
@@ -819,6 +844,12 @@ impl VerifiedStateOutput {
 
     pub const fn durable_binding(&self) -> StateDurableBinding {
         durable_output_binding(self.binding)
+    }
+
+    pub(crate) const fn target_release_output_bundle(
+        &self,
+    ) -> Option<&VerifiedTargetReleaseOutputBundle> {
+        self.target_release_output_bundle.as_ref()
     }
 }
 
@@ -888,8 +919,8 @@ impl StateVerifier {
         roster: &Roster,
         canonical_decode_limits: CanonicalDecodeLimits,
     ) -> StateResult<Self> {
-        let canonical_roster =
-            Roster::new(roster.entries.clone()).map_err(StateError::from_schema)?;
+        roster.validate().map_err(StateError::from_schema)?;
+        let canonical_roster = roster.clone();
         canonical_roster
             .require_selected_profile_size()
             .map_err(StateError::from_schema)?;
@@ -904,6 +935,10 @@ impl StateVerifier {
 
     pub(crate) fn roster_hash(&self) -> StateResult<Hash512> {
         self.roster.roster_hash().map_err(StateError::from_schema)
+    }
+
+    pub(crate) const fn roster(&self) -> &Roster {
+        &self.roster
     }
 
     pub(crate) fn prepare_setup_action_randomness_reservation_intent(
@@ -1290,11 +1325,19 @@ impl StateVerifier {
         let Some(exact_output_hash) = verified_stream.state_exact_output_hash() else {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         };
+        let exact_output_byte_length = verified_stream.total_byte_length();
+        let target_release_output_bundle = verified_stream.into_target_release_output_bundle();
+        if (binding.capability_kind == StateCapabilityKind::TargetRelease)
+            != target_release_output_bundle.is_some()
+        {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
         let verified_intent = match self.verify_output_intent_binding(
             verified_reservation,
             canonical_output_intent_carrier,
             exact_output_hash,
-            verified_stream.total_byte_length(),
+            exact_output_byte_length,
+            target_release_output_bundle,
         ) {
             Ok(value) => value,
             Err(error) => return VerificationResult::refused(error.refusal_reason),
@@ -1325,11 +1368,19 @@ impl StateVerifier {
         let Some(exact_output_hash) = verified_stream.state_exact_output_hash() else {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         };
+        let exact_output_byte_length = verified_stream.total_byte_length();
+        let target_release_output_bundle = verified_stream.into_target_release_output_bundle();
+        if (binding.capability_kind == StateCapabilityKind::TargetRelease)
+            != target_release_output_bundle.is_some()
+        {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
         match self.verify_output_intent_binding(
             verified_reservation,
             canonical_output_intent_carrier,
             exact_output_hash,
-            verified_stream.total_byte_length(),
+            exact_output_byte_length,
+            target_release_output_bundle,
         ) {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
@@ -1342,6 +1393,7 @@ impl StateVerifier {
         canonical_output_intent_carrier: &[u8],
         exact_output_hash: Hash512,
         exact_output_byte_length: u64,
+        target_release_output_bundle: Option<VerifiedTargetReleaseOutputBundle>,
     ) -> StateResult<VerifiedStateOutputIntent> {
         self.require_reservation_context(verified_reservation)?;
         let binding = verified_reservation.binding;
@@ -1361,6 +1413,20 @@ impl StateVerifier {
                 "output intent does not reference its verified reservation",
             ));
         }
+        if let Some(bundle) = target_release_output_bundle.as_ref() {
+            if bundle.reservation_intent_object_hash() != binding.intent_object_hash {
+                return Err(StateError::new(
+                    RefusalReason::WrongContext,
+                    "target-release output does not reference its verified reservation",
+                ));
+            }
+            self.decode_and_verify_subject_carrier(
+                bundle.canonical_signed_carrier(),
+                FoundationObjectType::TargetDecryptionShare,
+                binding.subject_participant_id,
+                0,
+            )?;
+        }
         if payload.exact_output_hash != exact_output_hash {
             return Err(StateError::new(
                 RefusalReason::WrongHashOrRoot,
@@ -1378,6 +1444,7 @@ impl StateVerifier {
                 exact_output_hash,
                 exact_output_byte_length,
             },
+            target_release_output_bundle,
         })
     }
 
@@ -1410,7 +1477,10 @@ impl StateVerifier {
                     },
                 )
             })
-            .map(|()| VerifiedStateOutput { binding });
+            .map(|()| VerifiedStateOutput {
+                binding,
+                target_release_output_bundle: verified_intent.target_release_output_bundle.clone(),
+            });
         match result {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
@@ -1432,7 +1502,10 @@ impl StateVerifier {
                 vote_kind: StateWitnessVoteKind::Output,
             },
         )?;
-        Ok(VerifiedStateOutput { binding })
+        Ok(VerifiedStateOutput {
+            binding,
+            target_release_output_bundle: verified_intent.target_release_output_bundle.clone(),
+        })
     }
 
     fn require_reservation_context(
@@ -1629,8 +1702,10 @@ impl StateVerifier {
         canonical_vote_carriers: &[Vec<u8>],
         expected_intent: &ResolvedStateIntent,
     ) -> StateResult<()> {
-        self.canonicalize_unordered_vote_carriers(canonical_vote_carriers, expected_intent)
-            .map(|_| ())
+        let ordered_vote_carriers =
+            self.canonicalize_unordered_vote_carriers(canonical_vote_carriers, expected_intent)?;
+        let canonical_certificate = StateCertificate::new(ordered_vote_carriers)?.encode()?;
+        self.verify_certificate(&canonical_certificate, expected_intent)
     }
 
     fn canonicalize_unordered_vote_carriers(

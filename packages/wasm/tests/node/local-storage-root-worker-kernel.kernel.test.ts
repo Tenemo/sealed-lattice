@@ -5,6 +5,11 @@ import {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import { createBrowserLocalSigningOperations } from '#packages/crypto/tests/support/browser-local-key-operations';
+import {
+    createCanonicalCarrierMailboxKeyPairFixtures,
+    createCanonicalCarrierSigningKeyPairFixtures,
+} from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
@@ -12,7 +17,9 @@ import {
 import {
     closeWorkerActionRandomness,
     createAndSealWorkerActionRandomness,
+    openClosedWorkerSetupMailboxRandomness,
     openSealedWorkerActionRandomness,
+    withClosedWorkerProductionOperationAuthority,
 } from '#packages/wasm/src/local-storage-root-worker-kernel';
 import {
     createStateVerifierTestVector,
@@ -39,6 +46,80 @@ const expectCustodyErrorCode = async (
     await expect(operation).rejects.toMatchObject({
         code,
         name: 'BrowserActionStorageCustodyError',
+    });
+};
+
+const openProductionOperationAuthorityFixture = async () => {
+    const baseStateVector = createStateVerifierTestVector();
+    const kernel = await loadFreshTranscriptCoreKernel();
+    const workerKernel = createWasmBrowserActionStorageWorkerKernel({ kernel });
+    await workerKernel.createAndStageDeviceWrappingState({
+        binding: {
+            actionContextHash: baseStateVector.actionContextHash,
+            ceremonyContextHash: baseStateVector.ceremonyContextHash,
+            participantId: baseStateVector.subjectParticipantIdentity,
+            suiteId: baseStateVector.suiteIdentifier,
+        },
+    });
+    await workerKernel.commitStagedActionStorageRoot();
+    const actionRandomness = await createAndSealWorkerActionRandomness(
+        workerKernel,
+        { recordVersion: 0n },
+    );
+    const stateVector = createStateVerifierTestVector({
+        setupActionRandomnessAuthorizationHash:
+            deriveSetupActionRandomnessAuthorization(
+                baseStateVector,
+                actionRandomness.actionRandomnessCommitment,
+            ),
+    });
+    const stateVerifierSession =
+        await workerKernel.openActionStateVerifierSession({
+            canonicalRosterBytes: stateVector.canonicalRosterBytes,
+        });
+    if (!stateVerifierSession.isValid) {
+        throw new Error('State-verifier session did not open.');
+    }
+    const reservationVector = stateVector.reservationOnly.find(
+        ({ capabilityKind }) =>
+            capabilityKind === stateCapabilityKinds.setupActionRandomnessRoot,
+    );
+    if (reservationVector === undefined) {
+        throw new Error('Missing action-randomness reservation vector.');
+    }
+    const stateReservation =
+        await workerKernel.verifyActionRandomnessReservation({
+            actionRandomnessSessionIdentifier:
+                actionRandomness.actionRandomnessSessionIdentifier,
+            canonicalReservationIntentCarrier:
+                reservationVector.certifiedIntent.canonicalIntentCarrier,
+            canonicalStateCertificate:
+                reservationVector.certifiedIntent.canonicalStateCertificate,
+            stateVerifierSessionIdentifier: stateVerifierSession.value,
+        });
+    if (!stateReservation.isValid) {
+        throw new Error('Action-randomness reservation did not verify.');
+    }
+
+    return Object.freeze({
+        close: async (): Promise<void> => {
+            await workerKernel.closeActionStateVerifierSession(
+                stateVerifierSession.value,
+            );
+            await closeWorkerActionRandomness(
+                workerKernel,
+                actionRandomness.actionRandomnessSessionIdentifier,
+            );
+            await workerKernel.destroyActiveActionStorageRoot();
+        },
+        identifiers: Object.freeze({
+            actionRandomnessSessionIdentifier:
+                actionRandomness.actionRandomnessSessionIdentifier,
+            stateReservationIdentifier: stateReservation.value,
+            stateVerifierSessionIdentifier: stateVerifierSession.value,
+        }),
+        kernel,
+        workerKernel,
     });
 };
 
@@ -102,6 +183,212 @@ describe('Local storage-root real-WASM worker kernel', () => {
             prepared.actionRandomness.actionRandomnessSessionIdentifier,
         );
         await workerKernel.destroyActiveActionStorageRoot();
+    });
+
+    it('keeps exact production-operation authorities opaque, pinned, and callback-scoped', async () => {
+        const fixture = await openProductionOperationAuthorityFixture();
+        let useAuthorityAfterCompletion: (() => unknown) | undefined;
+        let readKernelAfterCompletion: (() => unknown) | undefined;
+        try {
+            await withClosedWorkerProductionOperationAuthority(
+                fixture.workerKernel,
+                fixture.identifiers,
+                async (authority) => {
+                    expect(Object.keys(authority)).toEqual([]);
+                    expect(JSON.stringify(authority)).toBe('{}');
+                    useAuthorityAfterCompletion = () =>
+                        authority.withExactKernelAuthorization(() => undefined);
+                    await authority.withExactKernelAuthorization(
+                        async (authorization) => {
+                            expect(Object.keys(authorization)).toEqual([]);
+                            expect(JSON.stringify(authorization)).toBe('{}');
+                            expect(authorization.kernel).toBe(fixture.kernel);
+                            expect(
+                                authorization.actionRandomnessContext.memory,
+                            ).toBe(
+                                authorization.stateReservationCapabilityMemory,
+                            );
+                            readKernelAfterCompletion = () =>
+                                authorization.kernel;
+                            await Promise.resolve();
+                            expect(authorization.kernel).toBe(fixture.kernel);
+                        },
+                    );
+                },
+            );
+
+            expect(useAuthorityAfterCompletion).toBeDefined();
+            expect(readKernelAfterCompletion).toBeDefined();
+            expect(() => useAuthorityAfterCompletion?.()).toThrow(
+                BrowserActionStorageCustodyError,
+            );
+            expect(() => readKernelAfterCompletion?.()).toThrow(
+                BrowserActionStorageCustodyError,
+            );
+
+            let useAuthorityAfterFailure: (() => unknown) | undefined;
+            await expect(
+                withClosedWorkerProductionOperationAuthority(
+                    fixture.workerKernel,
+                    fixture.identifiers,
+                    (authority) => {
+                        useAuthorityAfterFailure = () =>
+                            authority.withExactKernelAuthorization(
+                                () => undefined,
+                            );
+                        throw new Error(
+                            'Synthetic production-operation failure.',
+                        );
+                    },
+                ),
+            ).rejects.toThrow('Synthetic production-operation failure.');
+            expect(useAuthorityAfterFailure).toBeDefined();
+            expect(() => useAuthorityAfterFailure?.()).toThrow(
+                BrowserActionStorageCustodyError,
+            );
+
+            const returningExactKernelOperation: () => void = () => 41;
+            await expectCustodyErrorCode(
+                withClosedWorkerProductionOperationAuthority(
+                    fixture.workerKernel,
+                    fixture.identifiers,
+                    async (authority) => {
+                        await authority.withExactKernelAuthorization(
+                            returningExactKernelOperation,
+                        );
+                    },
+                ),
+                'InvalidInput',
+            );
+            const returningProductionOperation: () => void = () => 47;
+            await expectCustodyErrorCode(
+                withClosedWorkerProductionOperationAuthority(
+                    fixture.workerKernel,
+                    fixture.identifiers,
+                    returningProductionOperation,
+                ),
+                'InvalidInput',
+            );
+
+            let subsequentCallbackEntered = false;
+            await withClosedWorkerProductionOperationAuthority(
+                fixture.workerKernel,
+                fixture.identifiers,
+                async (authority) => {
+                    await authority.withExactKernelAuthorization(() => {
+                        subsequentCallbackEntered = true;
+                    });
+                },
+            );
+            expect(subsequentCallbackEntered).toBe(true);
+        } finally {
+            await fixture.close();
+        }
+    });
+
+    it('produces a signed setup intent from worker-owned randomness and state authority', async () => {
+        const fixture = await openProductionOperationAuthorityFixture();
+        const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
+            foundationProfile.participantCount,
+        );
+        const mailboxKeyPairs = createCanonicalCarrierMailboxKeyPairFixtures(
+            foundationProfile.participantCount,
+        );
+        const sourceSigningKeyPair = signingKeyPairs[0];
+        const sourceMailboxKeyPair = mailboxKeyPairs[0];
+        if (
+            sourceSigningKeyPair === undefined ||
+            sourceMailboxKeyPair === undefined
+        ) {
+            throw new Error('The deterministic source key pairs are missing.');
+        }
+        const signingOperations =
+            createBrowserLocalSigningOperations(sourceSigningKeyPair);
+        let setupRandomness:
+            | Awaited<ReturnType<typeof openClosedWorkerSetupMailboxRandomness>>
+            | undefined;
+        try {
+            setupRandomness = await openClosedWorkerSetupMailboxRandomness(
+                fixture.workerKernel,
+                {
+                    actionRandomnessSessionIdentifier:
+                        fixture.identifiers.actionRandomnessSessionIdentifier,
+                    signing: signingOperations,
+                    sourceMailboxEncapsulationKey:
+                        sourceMailboxKeyPair.publicKey,
+                    stateReservationIdentifier:
+                        fixture.identifiers.stateReservationIdentifier,
+                },
+            );
+
+            const canonicalSetupIntentCarrier =
+                setupRandomness.produceSetupIntentCarrier();
+            expect(canonicalSetupIntentCarrier.byteLength).toBeGreaterThan(
+                3_309,
+            );
+
+            setupRandomness.revoke();
+            expect(() => setupRandomness?.produceSetupIntentCarrier()).toThrow(
+                BrowserActionStorageCustodyError,
+            );
+        } finally {
+            setupRandomness?.revoke();
+            signingOperations.revoke();
+            for (const signingKeyPair of signingKeyPairs) {
+                signingKeyPair.secretKey.fill(0);
+            }
+            for (const mailboxKeyPair of mailboxKeyPairs) {
+                mailboxKeyPair.secretKey.fill(0);
+            }
+            await fixture.close();
+        }
+    });
+
+    it('refuses cross-kernel production-operation identifiers before callback entry', async () => {
+        const sourceFixture = await openProductionOperationAuthorityFixture();
+        const otherFixture = await openProductionOperationAuthorityFixture();
+        try {
+            let crossKernelCallbackEntryCount = 0;
+            await expectCustodyErrorCode(
+                withClosedWorkerProductionOperationAuthority(
+                    sourceFixture.workerKernel,
+                    {
+                        actionRandomnessSessionIdentifier:
+                            sourceFixture.identifiers
+                                .actionRandomnessSessionIdentifier,
+                        stateReservationIdentifier:
+                            otherFixture.identifiers.stateReservationIdentifier,
+                        stateVerifierSessionIdentifier:
+                            otherFixture.identifiers
+                                .stateVerifierSessionIdentifier,
+                    },
+                    () => {
+                        crossKernelCallbackEntryCount += 1;
+                    },
+                ),
+                'InvalidState',
+            );
+            await expectCustodyErrorCode(
+                withClosedWorkerProductionOperationAuthority(
+                    sourceFixture.workerKernel,
+                    {
+                        ...sourceFixture.identifiers,
+                        actionRandomnessSessionIdentifier:
+                            otherFixture.identifiers
+                                .actionRandomnessSessionIdentifier,
+                    },
+                    () => {
+                        crossKernelCallbackEntryCount += 1;
+                    },
+                ),
+                'InvalidState',
+            );
+
+            expect(crossKernelCallbackEntryCount).toBe(0);
+        } finally {
+            await sourceFixture.close();
+            await otherFixture.close();
+        }
     });
 
     it('seals and recovers action randomness without exposing its root plaintext', async () => {

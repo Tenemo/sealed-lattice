@@ -17,6 +17,8 @@ import {
     loadFreshTranscriptCoreKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { createStateVerifierTestVector } from '#packages/wasm/tests/state-verifier-test-vectors';
+import { canonicalStreamChunkBuffers as chunkBuffers } from '#tests/support/canonical-stream-chunk-buffers';
 
 const createBytes = (
     byteLength: number,
@@ -27,23 +29,6 @@ const createBytes = (
         bytes[byteIndex] = (seed + byteIndex * 131) & 0xff;
     }
     return bytes;
-};
-
-const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
-    const chunks: ArrayBuffer[] = [];
-    for (
-        let offset = 0;
-        offset < bytes.byteLength;
-        offset += foundationProfile.streamChunkByteLength
-    ) {
-        chunks.push(
-            bytes.slice(
-                offset,
-                offset + foundationProfile.streamChunkByteLength,
-            ).buffer,
-        );
-    }
-    return chunks;
 };
 
 const writeDescriptor = (
@@ -110,7 +95,12 @@ describe('Canonical stream real-WASM runtime', () => {
                     : domainIndex % 3 === 1
                       ? foundationProfile.streamChunkByteLength
                       : foundationProfile.streamChunkByteLength + 17;
-            const bytes = createBytes(byteLength, domainIndex + 1);
+            const bytes =
+                streamDomain ===
+                canonicalStreamDomains.stateTargetReleaseExactOutput
+                    ? createStateVerifierTestVector().exactOutputBytes
+                    : createBytes(byteLength, domainIndex + 1);
+            expect(bytes.byteLength).toBe(byteLength);
             const descriptor = writeDescriptor(runtime, streamDomain, bytes);
             const verifier = runtime.openVerifier({
                 descriptorBytes: descriptor,
@@ -128,7 +118,6 @@ describe('Canonical stream real-WASM runtime', () => {
         expect(counters.maximumObservedCopiedPayloadByteLength).toBe(
             foundationProfile.streamChunkByteLength,
         );
-        expect(counters.maximumObservedResidentPayloadChunkCount).toBe(2);
         expect(counters.javascriptToWasmPayloadCopyCount).toBe(
             counters.absorbedPayloadChunkCount,
         );

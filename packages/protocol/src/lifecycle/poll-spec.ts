@@ -1,4 +1,5 @@
 import {
+    configurableOptionCountRange,
     foundationProfile,
     type PollSpec,
     type PollSpecValidation,
@@ -89,28 +90,21 @@ const isWellFormedString = (value: string): boolean => {
 };
 
 const textEncoder = new TextEncoder();
-const canonicalOptionCount = 20;
-// This is the fixed canonical framing for the manifest tuple and its
-// deterministic option-0 through option-19 definitions. Rust remains the
-// canonical encoder and rechecks the complete serialized byte length.
-const canonicalManifestNonDisplayByteLength = 920;
+
+// The Rust tuple codec remains authoritative. This mirrors only its fixed
+// framing and the deterministic option identifiers so ingress can enforce the
+// same copied-buffer budget before crossing the WASM boundary.
+const canonicalManifestNonDisplayByteLength = (optionCount: number): number =>
+    30 +
+    36 * optionCount +
+    Array.from({ length: optionCount }, (_, optionIndex) =>
+        textEncoder.encode(`option-${String(optionIndex)}`),
+    ).reduce((byteLength, identifier) => byteLength + identifier.byteLength, 0);
 
 export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const errors: PollSpecValidationError[] = [];
     const optionLabels = new Set<string>();
     const inputRecordDescriptors = ordinaryRecordDescriptors(input);
-    let remainingDisplayTextByteLength =
-        foundationProfile.maximumCopiedBufferByteLength -
-        canonicalManifestNonDisplayByteLength;
-    const consumeDisplayTextByteLength = (value: string): boolean => {
-        const byteLength = textEncoder.encode(value).byteLength;
-        if (byteLength > remainingDisplayTextByteLength) {
-            return false;
-        }
-        remainingDisplayTextByteLength -= byteLength;
-
-        return true;
-    };
     const pollId = dataPropertyValue(inputRecordDescriptors, 'pollId');
     const question = dataPropertyValue(inputRecordDescriptors, 'question');
     const rawOptions = dataPropertyValue(inputRecordDescriptors, 'options');
@@ -143,6 +137,25 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             optionDescriptors = undefined;
         }
     }
+
+    const structurallyBoundedOptionCount =
+        optionCount >= configurableOptionCountRange.minimum &&
+        optionCount <= configurableOptionCountRange.maximum;
+    const framingOptionCount = structurallyBoundedOptionCount
+        ? optionCount
+        : configurableOptionCountRange.maximum;
+    let remainingDisplayTextByteLength =
+        foundationProfile.maximumCopiedBufferByteLength -
+        canonicalManifestNonDisplayByteLength(framingOptionCount);
+    const consumeDisplayTextByteLength = (value: string): boolean => {
+        const byteLength = textEncoder.encode(value).byteLength;
+        if (byteLength > remainingDisplayTextByteLength) {
+            return false;
+        }
+        remainingDisplayTextByteLength -= byteLength;
+
+        return true;
+    };
 
     if (typeof pollId !== 'string' || pollId.length === 0) {
         errors.push({
@@ -178,21 +191,18 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
                 'question must be well-formed Unicode and fit the bounded poll display-text budget.',
         });
     }
-    if (
-        optionDescriptors === undefined ||
-        optionCount !== canonicalOptionCount
-    ) {
+    if (optionDescriptors === undefined || !structurallyBoundedOptionCount) {
         errors.push({
             code: 'InvalidOptionCount',
             field: 'options',
-            message: 'options must contain exactly 20 labels.',
+            message: 'options must contain between 2 and 20 labels.',
         });
     }
 
     for (
         let optionIndex = 0;
         optionDescriptors !== undefined &&
-        optionCount === canonicalOptionCount &&
+        structurallyBoundedOptionCount &&
         optionIndex < optionCount;
         optionIndex += 1
     ) {
@@ -272,7 +282,7 @@ export const prepareFoundationManifestIngress = (
     const validation = validatePollSpec(pollSpec);
     if (!validation.isValid) {
         throw new TypeError(
-            'The poll input cannot produce the fixed twenty-option manifest.',
+            'The poll input cannot produce a bounded canonical manifest.',
         );
     }
 

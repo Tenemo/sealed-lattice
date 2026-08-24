@@ -7,6 +7,9 @@ use aes_gcm_siv::{
 use tiny_keccak::{Hasher, Kmac};
 use zeroize::Zeroizing;
 
+use super::canonical_tuple::{
+    CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH, CanonicalDecodeBudget, validate_item_bytes,
+};
 use super::schemas::{
     SchemaResult, read_fixed_bytes, read_hash, read_item, read_u16, read_u64, read_variable_item,
     require_header,
@@ -48,9 +51,10 @@ const DEVICE_WRAPPING_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH: usize = 380;
 const DEVICE_WRAPPED_STORAGE_ROOT_MAXIMUM_BYTE_LENGTH: usize = 492;
 const LOCAL_RECORD_KEY_INPUT_MAXIMUM_BYTE_LENGTH: usize = 700;
 const LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH: usize = 900;
-const LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH: usize = MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH
-    + LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH
-    + 68;
+pub(super) const LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH: usize =
+    MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH
+        + LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH
+        + 68;
 
 const ACTION_STORAGE_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/local-storage/key-hierarchy/v1";
@@ -206,6 +210,15 @@ pub(crate) struct LocalRecordSealWithIdentifierInput<'input> {
     pub predecessor_record_hash: Option<Hash512>,
     pub nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
     pub plaintext: &'input [u8],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LocalRecordOpenWithIdentifierInput {
+    pub action_randomness_commitment: Hash512,
+    pub record_type: LocalRecordType,
+    pub expected_identifier: Hash512,
+    pub record_version: u64,
+    pub predecessor_record_hash: Option<Hash512>,
 }
 
 impl LocalRecordIdentifierInput<'_> {
@@ -701,6 +714,130 @@ impl ActionStorageRoot {
         &self,
         input: LocalRecordSealWithIdentifierInput<'_>,
     ) -> SchemaResult<LocalRecordEnvelope> {
+        let (associated_data, canonical_associated_data, cipher) =
+            self.prepare_local_record_seal(input)?;
+        let mut ciphertext = Zeroizing::new(input.plaintext.to_vec());
+        let tag = encrypt_local_record_bytes(
+            &cipher,
+            &input.nonce,
+            &canonical_associated_data,
+            ciphertext.as_mut_slice(),
+        )?;
+        LocalRecordEnvelope::new(
+            associated_data,
+            input.nonce,
+            core::mem::take(&mut *ciphertext),
+            tag,
+        )
+    }
+
+    /// Seals directly into the final canonical envelope allocation. This is
+    /// the browser command path: the caller's input remains borrowed while the
+    /// sole payload-sized Rust allocation becomes the returned ciphertext.
+    pub(crate) fn seal_local_record_with_identifier_canonical(
+        &self,
+        input: LocalRecordSealWithIdentifierInput<'_>,
+    ) -> SchemaResult<Vec<u8>> {
+        let (_associated_data, canonical_associated_data, cipher) =
+            self.prepare_local_record_seal(input)?;
+        let associated_data_item_byte_length = canonical_associated_data
+            .len()
+            .checked_add(core::mem::size_of::<u32>())
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the canonical associated-data item length overflows",
+                )
+            })?;
+        let ciphertext_item_byte_length = input
+            .plaintext
+            .len()
+            .checked_add(core::mem::size_of::<u32>())
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the canonical ciphertext item length overflows",
+                )
+            })?;
+        let encoded_byte_length = 8_usize
+            .checked_add(6 * 4)
+            .and_then(|byte_length| byte_length.checked_add(associated_data_item_byte_length))
+            .and_then(|byte_length| byte_length.checked_add(LOCAL_RECORD_NONCE_BYTE_LENGTH))
+            .and_then(|byte_length| byte_length.checked_add(ciphertext_item_byte_length))
+            .and_then(|byte_length| byte_length.checked_add(LOCAL_RECORD_TAG_BYTE_LENGTH))
+            .filter(|byte_length| *byte_length <= LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH)
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the canonical local-record envelope length exceeds the profile",
+                )
+            })?;
+        let mut encoded = Zeroizing::new(Vec::new());
+        encoded
+            .try_reserve_exact(encoded_byte_length)
+            .map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the canonical local-record envelope allocation failed",
+                )
+            })?;
+        encoded.extend_from_slice(&LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER.to_le_bytes());
+        encoded.extend_from_slice(&FOUNDATION_PROTOCOL_VERSION.to_le_bytes());
+        encoded.extend_from_slice(&4_u32.to_le_bytes());
+        append_canonical_item_header(
+            &mut encoded,
+            CanonicalItemType::RawBytes,
+            associated_data_item_byte_length,
+        )?;
+        append_canonical_variable_value(&mut encoded, &canonical_associated_data)?;
+        append_canonical_item_header(
+            &mut encoded,
+            CanonicalItemType::RawBytes,
+            LOCAL_RECORD_NONCE_BYTE_LENGTH,
+        )?;
+        encoded.extend_from_slice(&input.nonce);
+        append_canonical_item_header(
+            &mut encoded,
+            CanonicalItemType::RawBytes,
+            ciphertext_item_byte_length,
+        )?;
+        encoded.extend_from_slice(
+            &u32::try_from(input.plaintext.len())
+                .map_err(|_| {
+                    schema_error(
+                        RefusalReason::OutsideSupportedProfile,
+                        "the local-record plaintext length does not fit u32",
+                    )
+                })?
+                .to_le_bytes(),
+        );
+        let ciphertext_start = encoded.len();
+        encoded.extend_from_slice(input.plaintext);
+        let tag = encrypt_local_record_bytes(
+            &cipher,
+            &input.nonce,
+            &canonical_associated_data,
+            &mut encoded[ciphertext_start..],
+        )?;
+        append_canonical_item_header(
+            &mut encoded,
+            CanonicalItemType::RawBytes,
+            LOCAL_RECORD_TAG_BYTE_LENGTH,
+        )?;
+        encoded.extend_from_slice(&tag);
+        if encoded.len() != encoded_byte_length {
+            return Err(schema_error(
+                RefusalReason::MalformedEncoding,
+                "the canonical local-record envelope length is inconsistent",
+            ));
+        }
+        Ok(core::mem::take(&mut *encoded))
+    }
+
+    fn prepare_local_record_seal(
+        &self,
+        input: LocalRecordSealWithIdentifierInput<'_>,
+    ) -> SchemaResult<(LocalRecordAssociatedData, Vec<u8>, Aes256GcmSiv)> {
         validate_local_record_plaintext_length(input.plaintext.len())?;
         let associated_data = LocalRecordAssociatedData::new(
             self.binding,
@@ -724,22 +861,7 @@ impl ActionStorageRoot {
                 "AES-256-GCM-SIV rejected the fixed local-record key length",
             )
         })?;
-        let mut ciphertext = Zeroizing::new(input.plaintext.to_vec());
-        let tag = cipher
-            .encrypt_in_place_detached(
-                Nonce::from_slice(&input.nonce),
-                &canonical_associated_data,
-                ciphertext.as_mut(),
-            )
-            .map_err(|_| {
-                schema_error(
-                    RefusalReason::OutsideSupportedProfile,
-                    "AES-256-GCM-SIV refused the bounded local-record plaintext",
-                )
-            })?;
-        let mut tag_bytes = [0u8; LOCAL_RECORD_TAG_BYTE_LENGTH];
-        tag_bytes.copy_from_slice(tag.as_slice());
-        LocalRecordEnvelope::new(associated_data, input.nonce, ciphertext.to_vec(), tag_bytes)
+        Ok((associated_data, canonical_associated_data, cipher))
     }
 
     pub fn open_local_record(
@@ -775,26 +897,63 @@ impl ActionStorageRoot {
         predecessor_record_hash: Option<Hash512>,
         envelope: &LocalRecordEnvelope,
     ) -> VerificationResult<Zeroizing<Vec<u8>>> {
+        self.open_local_record_parts_with_identifier(
+            LocalRecordOpenWithIdentifierInput {
+                action_randomness_commitment,
+                record_type,
+                expected_identifier,
+                record_version,
+                predecessor_record_hash,
+            },
+            &envelope.associated_data,
+            &envelope.nonce,
+            &envelope.ciphertext,
+            &envelope.tag,
+        )
+    }
+
+    pub(crate) fn open_borrowed_local_record_with_identifier(
+        &self,
+        input: LocalRecordOpenWithIdentifierInput,
+        envelope: &BorrowedLocalRecordEnvelope<'_>,
+    ) -> VerificationResult<Zeroizing<Vec<u8>>> {
+        self.open_local_record_parts_with_identifier(
+            input,
+            &envelope.associated_data,
+            &envelope.nonce,
+            envelope.ciphertext,
+            &envelope.tag,
+        )
+    }
+
+    fn open_local_record_parts_with_identifier(
+        &self,
+        input: LocalRecordOpenWithIdentifierInput,
+        associated_data: &LocalRecordAssociatedData,
+        nonce: &[u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+        ciphertext: &[u8],
+        tag: &[u8; LOCAL_RECORD_TAG_BYTE_LENGTH],
+    ) -> VerificationResult<Zeroizing<Vec<u8>>> {
         let expected_associated_data = match LocalRecordAssociatedData::new(
             self.binding,
-            action_randomness_commitment,
-            record_type,
-            expected_identifier,
-            record_version,
-            predecessor_record_hash,
-            envelope.associated_data.plaintext_byte_length,
+            input.action_randomness_commitment,
+            input.record_type,
+            input.expected_identifier,
+            input.record_version,
+            input.predecessor_record_hash,
+            associated_data.plaintext_byte_length,
         ) {
             Ok(associated_data) => associated_data,
             Err(error) => return VerificationResult::refused(error.refusal_reason),
         };
-        if envelope.associated_data != expected_associated_data {
+        if *associated_data != expected_associated_data {
             return VerificationResult::refused(RefusalReason::WrongContext);
         }
-        let canonical_associated_data = match envelope.associated_data.encode() {
+        let canonical_associated_data = match associated_data.encode() {
             Ok(bytes) => bytes,
             Err(error) => return VerificationResult::refused(error.refusal_reason),
         };
-        let record_key = match self.derive_record_key(&envelope.associated_data) {
+        let record_key = match self.derive_record_key(associated_data) {
             Ok(key) => key,
             Err(error) => return VerificationResult::refused(error.refusal_reason),
         };
@@ -804,13 +963,13 @@ impl ActionStorageRoot {
                 return VerificationResult::refused(RefusalReason::UnsupportedVersionOrSuite);
             }
         };
-        let mut plaintext = Zeroizing::new(envelope.ciphertext.clone());
+        let mut plaintext = Zeroizing::new(ciphertext.to_vec());
         if cipher
             .decrypt_in_place_detached(
-                Nonce::from_slice(&envelope.nonce),
+                Nonce::from_slice(nonce),
                 &canonical_associated_data,
                 plaintext.as_mut(),
-                Tag::from_slice(&envelope.tag),
+                Tag::from_slice(tag),
             )
             .is_err()
         {
@@ -830,6 +989,59 @@ impl ActionStorageRoot {
             LOCAL_RECORD_KEY_CUSTOMIZATION,
         )))
     }
+}
+
+fn encrypt_local_record_bytes(
+    cipher: &Aes256GcmSiv,
+    nonce: &[u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    canonical_associated_data: &[u8],
+    bytes: &mut [u8],
+) -> SchemaResult<[u8; LOCAL_RECORD_TAG_BYTE_LENGTH]> {
+    let tag = cipher
+        .encrypt_in_place_detached(Nonce::from_slice(nonce), canonical_associated_data, bytes)
+        .map_err(|_| {
+            schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "AES-256-GCM-SIV refused the bounded local-record plaintext",
+            )
+        })?;
+    let mut tag_bytes = [0_u8; LOCAL_RECORD_TAG_BYTE_LENGTH];
+    tag_bytes.copy_from_slice(tag.as_slice());
+    Ok(tag_bytes)
+}
+
+fn append_canonical_item_header(
+    output: &mut Vec<u8>,
+    item_type: CanonicalItemType,
+    byte_length: usize,
+) -> SchemaResult<()> {
+    output.extend_from_slice(&item_type.canonical_code().to_le_bytes());
+    output.extend_from_slice(
+        &u32::try_from(byte_length)
+            .map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the canonical item length does not fit u32",
+                )
+            })?
+            .to_le_bytes(),
+    );
+    Ok(())
+}
+
+fn append_canonical_variable_value(output: &mut Vec<u8>, value: &[u8]) -> SchemaResult<()> {
+    output.extend_from_slice(
+        &u32::try_from(value.len())
+            .map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the canonical variable value length does not fit u32",
+                )
+            })?
+            .to_le_bytes(),
+    );
+    output.extend_from_slice(value);
+    Ok(())
 }
 
 impl fmt::Debug for ActionStorageRoot {
@@ -1065,6 +1277,278 @@ impl LocalRecordAssociatedData {
     }
 }
 
+pub(crate) struct BorrowedLocalRecordEnvelope<'encoded> {
+    associated_data: LocalRecordAssociatedData,
+    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    ciphertext: &'encoded [u8],
+    tag: [u8; LOCAL_RECORD_TAG_BYTE_LENGTH],
+}
+
+#[derive(Clone, Copy)]
+struct BorrowedCanonicalItem<'encoded> {
+    item_type: CanonicalItemType,
+    canonical_bytes: &'encoded [u8],
+}
+
+impl<'encoded> BorrowedLocalRecordEnvelope<'encoded> {
+    pub(crate) fn decode(
+        encoded: &'encoded [u8],
+        limits: &CanonicalDecodeLimits,
+    ) -> SchemaResult<Self> {
+        let bounded_limits =
+            bounded_canonical_decode_limits(limits, LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH, 4);
+        if encoded.len() > bounded_limits.maximum_tuple_byte_length {
+            return Err(schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "the canonical local-record envelope exceeds the decode limits",
+            ));
+        }
+        let header = encoded.get(..8).ok_or_else(|| {
+            schema_error(
+                RefusalReason::MalformedEncoding,
+                "the canonical local-record envelope header is truncated",
+            )
+        })?;
+        let schema_identifier = u16::from_le_bytes([header[0], header[1]]);
+        let schema_version = u16::from_le_bytes([header[2], header[3]]);
+        let item_count = usize::try_from(u32::from_le_bytes([
+            header[4], header[5], header[6], header[7],
+        ]))
+        .map_err(|_| {
+            schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "the canonical local-record item count does not fit usize",
+            )
+        })?;
+        if item_count > bounded_limits.maximum_item_count {
+            return Err(schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "the canonical local-record item count exceeds the decode limit",
+            ));
+        }
+        let minimum_encoded_byte_length = item_count
+            .checked_mul(6)
+            .and_then(|item_header_byte_length| item_header_byte_length.checked_add(8))
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::MalformedEncoding,
+                    "the canonical local-record item headers overflow",
+                )
+            })?;
+        if minimum_encoded_byte_length > encoded.len() {
+            return Err(schema_error(
+                RefusalReason::MalformedEncoding,
+                "the canonical local-record envelope cannot contain its declared item headers",
+            ));
+        }
+        if minimum_encoded_byte_length > bounded_limits.maximum_cumulative_work_byte_length {
+            return Err(schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "the canonical local-record envelope exceeds the work budget",
+            ));
+        }
+        let mut decode_budget = CanonicalDecodeBudget::new(&bounded_limits);
+        decode_budget
+            .charge_work(minimum_encoded_byte_length, 0)
+            .map_err(FoundationSchemaError::from)?;
+        let item_allocation_byte_length = item_count
+            .checked_mul(CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH)
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::MalformedEncoding,
+                    "the canonical local-record item allocation accounting overflows",
+                )
+            })?;
+        decode_budget
+            .charge_allocation(item_allocation_byte_length, 4)
+            .map_err(FoundationSchemaError::from)?;
+        let mut items = [None; 4];
+        let mut offset = 8_usize;
+        for item in items.iter_mut().take(item_count) {
+            *item = Some(read_borrowed_canonical_item(
+                encoded,
+                &mut offset,
+                &mut decode_budget,
+                &bounded_limits,
+            )?);
+        }
+        if offset != encoded.len() {
+            return Err(schema_error(
+                RefusalReason::MalformedEncoding,
+                "the canonical local-record envelope has trailing bytes",
+            ));
+        }
+        if schema_identifier != LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER {
+            return Err(schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "the canonical local-record envelope has the wrong schema",
+            ));
+        }
+        if schema_version != FOUNDATION_PROTOCOL_VERSION {
+            return Err(schema_error(
+                RefusalReason::UnsupportedVersionOrSuite,
+                "the canonical local-record envelope version is unsupported",
+            ));
+        }
+        let [
+            Some(associated_data_item),
+            Some(nonce_item),
+            Some(ciphertext_item),
+            Some(tag_item),
+        ] = items
+        else {
+            return Err(schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "the canonical local-record envelope has the wrong item count",
+            ));
+        };
+        let associated_data_item = require_borrowed_canonical_item_type(
+            associated_data_item,
+            CanonicalItemType::RawBytes,
+        )?;
+        let associated_data_bytes = borrowed_canonical_variable_value(associated_data_item)?;
+        let associated_data = LocalRecordAssociatedData::decode(associated_data_bytes, limits)?;
+        let nonce = require_borrowed_canonical_item_type(nonce_item, CanonicalItemType::RawBytes)?;
+        let nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH] = nonce.try_into().map_err(|_| {
+            schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "the local-record nonce has the wrong length",
+            )
+        })?;
+        let ciphertext_item =
+            require_borrowed_canonical_item_type(ciphertext_item, CanonicalItemType::RawBytes)?;
+        let ciphertext = borrowed_canonical_variable_value(ciphertext_item)?;
+        let tag = require_borrowed_canonical_item_type(tag_item, CanonicalItemType::RawBytes)?;
+        let tag: [u8; LOCAL_RECORD_TAG_BYTE_LENGTH] = tag.try_into().map_err(|_| {
+            schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "the local-record authentication tag has the wrong length",
+            )
+        })?;
+        validate_local_record_plaintext_length(ciphertext.len())?;
+        if u64::try_from(ciphertext.len()).ok() != Some(associated_data.plaintext_byte_length) {
+            return Err(schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "the local-record ciphertext length does not match its associated data",
+            ));
+        }
+        Ok(Self {
+            associated_data,
+            nonce,
+            ciphertext,
+            tag,
+        })
+    }
+}
+
+fn read_borrowed_canonical_item<'encoded>(
+    encoded: &'encoded [u8],
+    offset: &mut usize,
+    decode_budget: &mut CanonicalDecodeBudget,
+    limits: &CanonicalDecodeLimits,
+) -> SchemaResult<BorrowedCanonicalItem<'encoded>> {
+    let header_end = offset.checked_add(6).ok_or_else(|| {
+        schema_error(
+            RefusalReason::MalformedEncoding,
+            "the canonical local-record item header overflows",
+        )
+    })?;
+    let header = encoded.get(*offset..header_end).ok_or_else(|| {
+        schema_error(
+            RefusalReason::MalformedEncoding,
+            "the canonical local-record item header is truncated",
+        )
+    })?;
+    let item_type_code = u16::from_le_bytes([header[0], header[1]]);
+    let item_type = CanonicalItemType::from_canonical_code(item_type_code).ok_or_else(|| {
+        schema_error(
+            RefusalReason::MalformedEncoding,
+            "the canonical local-record item type is unassigned",
+        )
+    })?;
+    let byte_length = usize::try_from(u32::from_le_bytes([
+        header[2], header[3], header[4], header[5],
+    ]))
+    .map_err(|_| {
+        schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "the canonical local-record item length does not fit usize",
+        )
+    })?;
+    if byte_length > limits.maximum_item_byte_length {
+        return Err(schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "the canonical local-record item exceeds the decode limit",
+        ));
+    }
+    let item_end = header_end.checked_add(byte_length).ok_or_else(|| {
+        schema_error(
+            RefusalReason::MalformedEncoding,
+            "the canonical local-record item end overflows",
+        )
+    })?;
+    let item = encoded.get(header_end..item_end).ok_or_else(|| {
+        schema_error(
+            RefusalReason::MalformedEncoding,
+            "the canonical local-record item is truncated",
+        )
+    })?;
+    validate_item_bytes(item_type, item, limits, decode_budget, 0, header_end)
+        .map_err(FoundationSchemaError::from)?;
+    decode_budget
+        .charge_allocation(item.len(), header_end)
+        .map_err(FoundationSchemaError::from)?;
+    *offset = item_end;
+    Ok(BorrowedCanonicalItem {
+        item_type,
+        canonical_bytes: item,
+    })
+}
+
+fn require_borrowed_canonical_item_type<'encoded>(
+    item: BorrowedCanonicalItem<'encoded>,
+    expected_item_type: CanonicalItemType,
+) -> SchemaResult<&'encoded [u8]> {
+    if item.item_type != expected_item_type {
+        return Err(schema_error(
+            RefusalReason::WrongTypeOrLength,
+            "the canonical local-record item has the wrong semantic type",
+        ));
+    }
+    Ok(item.canonical_bytes)
+}
+
+fn borrowed_canonical_variable_value(bytes: &[u8]) -> SchemaResult<&[u8]> {
+    let length_bytes: [u8; 4] = bytes
+        .get(..4)
+        .and_then(|length| length.try_into().ok())
+        .ok_or_else(|| {
+            schema_error(
+                RefusalReason::MalformedEncoding,
+                "the canonical variable value length is truncated",
+            )
+        })?;
+    let declared_byte_length = usize::try_from(u32::from_le_bytes(length_bytes)).map_err(|_| {
+        schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "the canonical variable value length does not fit usize",
+        )
+    })?;
+    let value = bytes.get(4..).ok_or_else(|| {
+        schema_error(
+            RefusalReason::MalformedEncoding,
+            "the canonical variable value is truncated",
+        )
+    })?;
+    if value.len() != declared_byte_length {
+        return Err(schema_error(
+            RefusalReason::MalformedEncoding,
+            "the canonical variable value length is inconsistent",
+        ));
+    }
+    Ok(value)
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct LocalRecordEnvelope {
     associated_data: LocalRecordAssociatedData,
@@ -1157,6 +1641,151 @@ impl fmt::Debug for LocalRecordEnvelope {
             .field("tag", &self.tag)
             .finish()
     }
+}
+
+/// Runs the exact canonical secret-record codec used by browser-owned common-
+/// proof scratch storage over deterministic, non-authoritative measurement
+/// bytes. This helper exists only in the opt-in primitive-measurement artifact.
+#[cfg(feature = "primitive-measurement-evidence")]
+pub(crate) fn measure_common_proof_scratch_record_codec(
+    plaintext: &[u8],
+    iteration_count: usize,
+) -> SchemaResult<(u64, usize, usize)> {
+    if plaintext.is_empty() || iteration_count == 0 {
+        return Err(schema_error(
+            RefusalReason::WrongTypeOrLength,
+            "the common-proof scratch-record measurement requires nonempty input and iterations",
+        ));
+    }
+    let binding = LocalStorageBinding::new(
+        Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x42; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x53; Hash512::BYTE_LENGTH]),
+        ParticipantIdentity::from_bytes([0x64; ParticipantIdentity::BYTE_LENGTH]),
+    );
+    let root = ActionStorageRoot::from_verified_root(
+        binding,
+        Zeroizing::new([0x75; ACTION_STORAGE_ROOT_BYTE_LENGTH]),
+    )?;
+    let action_randomness_commitment = Hash512::from_bytes([0x86; Hash512::BYTE_LENGTH]);
+    let common_proof_runtime_binding_hash = Hash512::from_bytes([0x97; Hash512::BYTE_LENGTH]);
+    let common_proof_environment_identifier = [0xa8; 32];
+    let proof_attempt_lineage_identifier = [0xb9; 32];
+    let decode_limits = CanonicalDecodeLimits::default();
+    let mut checksum = 0_u64;
+    let mut canonical_envelope_byte_length = 0_usize;
+
+    for iteration_ordinal in 0..iteration_count {
+        let chunk_ordinal = u32::try_from(iteration_ordinal)
+            .ok()
+            .and_then(|ordinal| ordinal.checked_add(1))
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the common-proof scratch-record measurement iteration exceeds u32",
+                )
+            })?;
+        let byte_offset = u64::try_from(iteration_ordinal)
+            .ok()
+            .and_then(|ordinal| {
+                u64::try_from(plaintext.len())
+                    .ok()
+                    .and_then(|byte_length| ordinal.checked_mul(byte_length))
+            })
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the common-proof scratch-record measurement offset overflows",
+                )
+            })?;
+        let identifier_input = LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier,
+            common_proof_runtime_binding_hash,
+            proof_attempt_lineage_identifier,
+            record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+            object_ordinal: 1,
+            chunk_ordinal,
+            byte_offset,
+        };
+        let record_identifier = derive_local_record_identifier(binding, identifier_input)?;
+        let mut nonce = [0xca; LOCAL_RECORD_NONCE_BYTE_LENGTH];
+        nonce[..8].copy_from_slice(
+            &u64::try_from(iteration_ordinal)
+                .map_err(|_| {
+                    schema_error(
+                        RefusalReason::OutsideSupportedProfile,
+                        "the common-proof scratch-record measurement nonce ordinal exceeds u64",
+                    )
+                })?
+                .to_le_bytes(),
+        );
+        let mut canonical_envelope =
+            root.seal_local_record_with_identifier_canonical(LocalRecordSealWithIdentifierInput {
+                action_randomness_commitment,
+                record_type: LocalRecordType::CommonProofExternalMemory,
+                record_identifier,
+                record_version: 0,
+                predecessor_record_hash: None,
+                nonce,
+                plaintext,
+            })?;
+        canonical_envelope_byte_length = canonical_envelope.len();
+        let borrowed_envelope =
+            BorrowedLocalRecordEnvelope::decode(&canonical_envelope, &decode_limits)?;
+        let opened = match root.open_borrowed_local_record_with_identifier(
+            LocalRecordOpenWithIdentifierInput {
+                action_randomness_commitment,
+                record_type: LocalRecordType::CommonProofExternalMemory,
+                expected_identifier: record_identifier,
+                record_version: 0,
+                predecessor_record_hash: None,
+            },
+            &borrowed_envelope,
+        ) {
+            VerificationResult::Valid { value } => value,
+            VerificationResult::Refused { refusal_reason } => {
+                canonical_envelope.fill(0);
+                return Err(schema_error(
+                    refusal_reason,
+                    "the exact common-proof scratch-record measurement refused its own canonical envelope",
+                ));
+            }
+        };
+        if opened.as_slice() != plaintext {
+            canonical_envelope.fill(0);
+            return Err(schema_error(
+                RefusalReason::WrongHashOrRoot,
+                "the exact common-proof scratch-record measurement opened different plaintext",
+            ));
+        }
+        checksum ^= opened
+            .iter()
+            .fold(u64::from(chunk_ordinal), |accumulated, byte| {
+                accumulated.rotate_left(1) ^ u64::from(*byte)
+            });
+        checksum ^= canonical_envelope.iter().fold(
+            u64::try_from(canonical_envelope_byte_length).unwrap_or(u64::MAX),
+            |accumulated, byte| accumulated.rotate_left(1) ^ u64::from(*byte),
+        );
+        canonical_envelope.fill(0);
+    }
+
+    let maximum_live_byte_length = plaintext
+        .len()
+        .checked_mul(2)
+        .and_then(|byte_length| byte_length.checked_add(canonical_envelope_byte_length))
+        .and_then(|byte_length| byte_length.checked_add(size_of::<ActionStorageRoot>()))
+        .ok_or_else(|| {
+            schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "the common-proof scratch-record measurement live set overflows",
+            )
+        })?;
+    Ok((
+        checksum,
+        canonical_envelope_byte_length,
+        maximum_live_byte_length,
+    ))
 }
 
 pub fn derive_local_record_envelope_hash(

@@ -5,6 +5,7 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
     foundationProfile,
+    refusalReasonCodes,
     type MailboxAssociatedData,
     type MailboxCiphertextDescriptor,
     type MailboxKeyScheduleInput,
@@ -50,22 +51,6 @@ const mlKem768CiphertextByteLength = ml_kem768.lengths.cipherText!;
 const mlDsa65VerificationKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
-const refusalReasons = new Set<RefusalReason>([
-    'malformedEncoding',
-    'unsupportedVersionOrSuite',
-    'outsideSupportedProfile',
-    'wrongContext',
-    'wrongTypeOrLength',
-    'wrongHashOrRoot',
-    'invalidSignature',
-    'duplicateIdentity',
-    'equivocation',
-    'missingPrerequisite',
-    'invalidProof',
-    'invalidArithmeticRelation',
-    'consumedState',
-]);
-
 export type AuthenticatedMailboxKernel = Readonly<{
     encodeMailboxKeyScheduleInput(input: {
         readonly kemCiphertextHex: string;
@@ -111,8 +96,17 @@ type MailboxGcmVerifierLease = Readonly<{
     cancel(): void;
     decryptChunk(bytes: ArrayBuffer): void;
     finishAuthentication(tag: Uint8Array): void;
-    finishDecryption(): void;
+    finishDecryption(): AuthenticatedMailboxPlaintextCapability;
     state(): MailboxLeaseState;
+}>;
+
+/**
+ * One-shot worker-local authority over plaintext authenticated and digested by
+ * the mailbox GCM kernel. It exposes only explicit retirement; an exact-family
+ * WASM consumer owns the numeric handle and verifies the bound bytes.
+ */
+export type AuthenticatedMailboxPlaintextCapability = Readonly<{
+    release(): void;
 }>;
 
 export type AuthenticatedMailboxGcmRuntime = Readonly<{
@@ -184,6 +178,8 @@ export type AuthenticatedMailboxPlaintextSinkLease = Readonly<{
      * means every exact plaintext chunk is durably staged but unpublished.
      */
     readonly disposition: 'committed' | 'fresh' | 'prepared';
+    /** Whether this lease needs a fresh full ciphertext authentication pass. */
+    readonly authenticationRequirement: 'authenticate' | 'none';
     /** Removes only an unpublished fresh transaction and its staged bytes. */
     cancel(): Promise<void>;
     /**
@@ -196,8 +192,13 @@ export type AuthenticatedMailboxPlaintextSinkLease = Readonly<{
      * It is a no-op for an already committed delivery.
      */
     release(): Promise<void>;
-    /** Makes every exact staged chunk durable without publishing plaintext. */
-    seal(): Promise<void>;
+    /**
+     * Transfers the one-shot kernel authority after every exact plaintext
+     * chunk is staged. The lease must retire it on cancellation or failure.
+     */
+    seal(
+        authenticatedPlaintextCapability: AuthenticatedMailboxPlaintextCapability,
+    ): Promise<void>;
     stageChunk(input: {
         readonly bytes: ArrayBuffer;
         readonly chunkIndex: number;
@@ -211,6 +212,7 @@ export type AuthenticatedMailboxPlaintextSinkBoundary = Readonly<{
      * state must survive restarts so a retry cannot duplicate or lose delivery.
      */
     reserve(input: {
+        readonly canonicalEnvelopeBytes: Uint8Array;
         readonly envelopeHash: ProtocolHash;
         readonly plaintextByteLength: number;
         readonly producerSlot: AuthenticatedMailboxProducerSlot;
@@ -294,7 +296,7 @@ export type AuthenticatedMailboxStagingBoundary = Readonly<{
     }): Promise<AuthenticatedMailboxStagingLease>;
 }>;
 
-type AuthenticatedMailboxSealCommonInput = Readonly<{
+export type AuthenticatedMailboxSealInput = Readonly<{
     readonly abortSignal?: AbortSignal;
     readonly associatedData: SetupMailboxSlot;
     readonly emitCiphertextChunk: MailboxChunkSink;
@@ -308,8 +310,6 @@ type AuthenticatedMailboxSealCommonInput = Readonly<{
     readonly sourceVerificationKey: Uint8Array;
     readonly streamBoundary: AuthenticatedMailboxStreamBoundary;
 }>;
-
-export type AuthenticatedMailboxSealInput = AuthenticatedMailboxSealCommonInput;
 
 export type AuthenticatedMailboxOpenInput = Readonly<{
     readonly abortSignal?: AbortSignal;
@@ -521,7 +521,7 @@ const canonicalAssociatedDataMatches = (
 
 const producerSlot = (
     associatedData:
-        | AuthenticatedMailboxSealCommonInput['associatedData']
+        | AuthenticatedMailboxSealInput['associatedData']
         | MailboxAssociatedData,
 ): AuthenticatedMailboxProducerSlot => ({
     suiteId: associatedData.suiteId,
@@ -727,7 +727,7 @@ const refusalReasonFromBoundaryError = (
     const refusalReason = error.refusalReason;
 
     return typeof refusalReason === 'string' &&
-        refusalReasons.has(refusalReason as RefusalReason)
+        Object.prototype.hasOwnProperty.call(refusalReasonCodes, refusalReason)
         ? (refusalReason as RefusalReason)
         : undefined;
 };
@@ -770,7 +770,7 @@ const cancelSynchronousLease = (
 };
 
 const emitCachedCiphertext = async (
-    input: AuthenticatedMailboxSealCommonInput,
+    input: AuthenticatedMailboxSealInput,
     lease: AuthenticatedMailboxOutboundCacheLease,
     plaintextByteLength: number,
 ): Promise<void> => {
@@ -807,8 +807,8 @@ const emitCachedCiphertext = async (
     );
 };
 
-const sealMailbox = async (
-    input: AuthenticatedMailboxSealCommonInput,
+export const sealAuthenticatedMailbox = async (
+    input: AuthenticatedMailboxSealInput,
 ): Promise<AuthenticatedMailboxCarrier> => {
     const plaintextByteLength = parseMailboxByteLength(
         String(input.plaintextByteLength),
@@ -1060,13 +1060,12 @@ const sealMailbox = async (
     return result;
 };
 
-export const sealAuthenticatedMailbox = async (
-    input: AuthenticatedMailboxSealInput,
-): Promise<AuthenticatedMailboxCarrier> => sealMailbox(input);
-
 export const openAuthenticatedMailbox = async (
     input: AuthenticatedMailboxOpenInput,
 ): Promise<VerificationResult<OpenedAuthenticatedMailbox>> => {
+    let authenticatedPlaintextCapability:
+        | AuthenticatedMailboxPlaintextCapability
+        | undefined;
     let canonicalEnvelopeBytes: Uint8Array | undefined;
     let gcmVerifier: MailboxGcmVerifierLease | undefined;
     let inboundSlotLease: AuthenticatedMailboxInboundSlotLease | undefined;
@@ -1131,12 +1130,22 @@ export const openAuthenticatedMailbox = async (
             inboundSlotLease = slotReservation.value;
             const inboundDisposition = inboundSlotLease.disposition;
             plaintextSinkLease = await input.plaintextSinkBoundary.reserve({
+                canonicalEnvelopeBytes: canonicalEnvelopeBytes.slice(),
                 envelopeHash,
                 plaintextByteLength,
                 producerSlot: producerSlot(envelope.associatedData),
             });
             plaintextSinkCommitted =
-                plaintextSinkLease.disposition === 'committed';
+                plaintextSinkLease.disposition === 'committed' &&
+                plaintextSinkLease.authenticationRequirement === 'none';
+            if (
+                plaintextSinkLease.authenticationRequirement === 'none' &&
+                plaintextSinkLease.disposition !== 'committed'
+            ) {
+                throw new Error(
+                    'A plaintext sink may skip authentication only for a delivery committed by the same live sink authority.',
+                );
+            }
             if (
                 inboundDisposition === 'fresh' &&
                 plaintextSinkLease.disposition === 'committed'
@@ -1145,7 +1154,9 @@ export const openAuthenticatedMailbox = async (
                     'A committed plaintext delivery is missing its authenticated inbound mailbox slot.',
                 );
             }
-            if (plaintextSinkLease.disposition === 'fresh') {
+            if (
+                plaintextSinkLease.authenticationRequirement === 'authenticate'
+            ) {
                 streamVerifier = input.streamBoundary.openVerifier({
                     descriptor: envelope.ciphertextDescriptor,
                 });
@@ -1299,13 +1310,15 @@ export const openAuthenticatedMailbox = async (
                     stagedStreamVerifier.chunkCount,
                 );
                 stagedStreamVerifier.finish();
-                gcmVerifier.finishDecryption();
-                await plaintextSinkLease.seal();
+                authenticatedPlaintextCapability =
+                    gcmVerifier.finishDecryption();
+                await plaintextSinkLease.seal(authenticatedPlaintextCapability);
+                authenticatedPlaintextCapability = undefined;
                 retainPlaintextSinkForRetry = true;
                 await stagingLease.dispose();
                 stagingDisposed = true;
             }
-            if (plaintextSinkLease.disposition !== 'committed') {
+            if (!plaintextSinkCommitted) {
                 retainPlaintextSinkForRetry = true;
                 if (inboundDisposition === 'fresh') {
                     await inboundSlotLease.commit();
@@ -1339,6 +1352,13 @@ export const openAuthenticatedMailbox = async (
     cancelSynchronousLease(gcmVerifier, cleanupFailures);
     cancelSynchronousLease(stagedStreamVerifier, cleanupFailures);
     cancelSynchronousLease(streamVerifier, cleanupFailures);
+    if (authenticatedPlaintextCapability !== undefined) {
+        try {
+            authenticatedPlaintextCapability.release();
+        } catch (error) {
+            cleanupFailures.push(error);
+        }
+    }
     if (stagingLease !== undefined && !stagingDisposed) {
         try {
             await stagingLease.dispose();

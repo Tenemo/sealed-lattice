@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    mem::size_of,
     sync::{Mutex, OnceLock},
 };
 
@@ -12,6 +13,43 @@ use crate::bgv::setup::sampling::sample_public_setup_residues;
 
 static SETUP_COMMITMENT_MATRIX_NTT_CACHE: OnceLock<Mutex<SetupCommitmentMatrixNttCache>> =
     OnceLock::new();
+
+/// Coefficient payload retained when every sampled matrix coordinate for the
+/// selected commitment primes is resident in the process cache. Structural
+/// zero and identity coordinates never enter the cache and are excluded by
+/// the same predicate used by commitment computation.
+pub(in crate::bgv) fn setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length(
+    ring_degree: usize,
+) -> CanonicalResult<u64> {
+    validate_ring_degree(ring_degree)?;
+    let sampled_coordinate_count_per_modulus = (0..SETUP_COMMITMENT_ROW_COUNT)
+        .flat_map(|matrix_row_index| {
+            (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                .map(move |randomness_column_index| (matrix_row_index, randomness_column_index))
+        })
+        .filter(|(matrix_row_index, randomness_column_index)| {
+            structural_matrix_polynomial_kind(*matrix_row_index, *randomness_column_index).is_none()
+        })
+        .count();
+    u64::try_from(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
+        .ok()
+        .and_then(|modulus_count| {
+            u64::try_from(sampled_coordinate_count_per_modulus)
+                .ok()
+                .and_then(|coordinate_count| modulus_count.checked_mul(coordinate_count))
+        })
+        .and_then(|coordinate_count| {
+            u64::try_from(ring_degree)
+                .ok()
+                .and_then(|degree| coordinate_count.checked_mul(degree))
+        })
+        .and_then(|coefficient_count| {
+            u64::try_from(size_of::<u64>())
+                .ok()
+                .and_then(|byte_length| coefficient_count.checked_mul(byte_length))
+        })
+        .ok_or_else(|| invalid_commitment_input("setup commitment matrix cache size overflowed"))
+}
 
 // Version three binds the prime-local rank-one layout. Purpose eleven supplies
 // two ternary columns and purpose twelve supplies one independently sampled
@@ -41,7 +79,7 @@ struct SetupCommitmentMatrixNttKey {
     modulus: u64,
 }
 
-pub(in super::super) fn setup_commitment_matrix_polynomial(
+pub(in crate::bgv) fn setup_commitment_matrix_polynomial(
     public_matrix_seed_hash: &str,
     commitment_modulus_index: usize,
     matrix_row_index: usize,
@@ -54,7 +92,6 @@ pub(in super::super) fn setup_commitment_matrix_polynomial(
         commitment_modulus_index,
         matrix_row_index,
         randomness_column_index,
-        0,
     )?;
     if modulus != DATA_PRIMES[commitment_modulus_index] {
         return Err(invalid_commitment_input(
@@ -136,28 +173,6 @@ pub(super) fn setup_commitment_matrix_ntt(
     }
 
     Ok(matrix_ntt)
-}
-
-// Coefficient-form matrix polynomial through the process-wide NTT cache: the
-// expensive hash sampling happens once per coordinate set and seed.
-pub(in super::super) fn setup_commitment_matrix_coefficients_cached(
-    public_matrix_seed_hash: &str,
-    commitment_modulus_index: usize,
-    matrix_row_index: usize,
-    randomness_column_index: usize,
-    ring_degree: usize,
-    modulus: u64,
-) -> CanonicalResult<Vec<u64>> {
-    let matrix_ntt = setup_commitment_matrix_ntt(
-        public_matrix_seed_hash,
-        commitment_modulus_index,
-        matrix_row_index,
-        randomness_column_index,
-        ring_degree,
-        modulus,
-    )?;
-
-    inverse_negacyclic_ntt(&matrix_ntt, modulus)
 }
 
 fn setup_commitment_matrix_sampler_customization(
@@ -256,6 +271,16 @@ mod tests {
     use crate::transcript_core::encode_hex;
 
     #[test]
+    fn selected_matrix_cache_accounting_matches_the_live_sampled_coordinates() -> CanonicalResult<()>
+    {
+        assert_eq!(
+            setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length(POLYNOMIAL_DEGREE,)?,
+            2_359_296
+        );
+        Ok(())
+    }
+
+    #[test]
     fn matrix_sampler_customization_has_the_exact_version_three_encoding() -> CanonicalResult<()> {
         let customization = setup_commitment_matrix_sampler_customization(0, 0, 0)?;
 
@@ -288,27 +313,27 @@ mod tests {
         assert_eq!(
             a1,
             vec![
-                74_233_248_433_461,
-                93_662_928_840_886,
-                69_113_591_029_174,
-                95_983_993_961_951,
-                47_260_697_516_106,
-                74_728_968_932_805,
-                23_165_785_688_220,
-                43_774_976_744_748,
+                1_180_583_222,
+                683_066_235,
+                1_429_182_874,
+                1_318_510_005,
+                1_038_040_795,
+                1_464_599_517,
+                1_218_598_985,
+                1_498_491_642,
             ]
         );
         assert_eq!(
             a2,
             vec![
-                23_215_683_972_662,
-                76_502_121_174_878,
-                79_984_457_241_307,
-                64_002_282_650_182,
-                92_286_285_641_774,
-                60_829_121_885_974,
-                105_821_010_475_260,
-                79_724_811_664_109,
+                1_578_872_374,
+                1_659_540_755,
+                1_167_329_729,
+                1_428_181_724,
+                97_765_557,
+                1_169_764_680,
+                323_352_622,
+                1_118_000_110,
             ]
         );
         assert_ne!(a1, a2);

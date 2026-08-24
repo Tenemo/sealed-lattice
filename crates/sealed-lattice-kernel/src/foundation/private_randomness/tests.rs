@@ -1,7 +1,7 @@
 use super::super::schemas::SchemaResult;
 use super::super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalTuple, FOUNDATION_PROFILE, Hash512,
-    ParticipantIdentity, RefusalReason, hash_foundation_tuple_512 as hash512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalTuple, DistributionPurpose, FOUNDATION_PROFILE,
+    Hash512, ParticipantIdentity, RefusalReason, hash_foundation_tuple_512 as hash512,
 };
 use super::stream::sample_modulo_from_byte_source;
 use super::*;
@@ -40,6 +40,23 @@ fn action_randomness() -> ActionPrivateRandomness {
     ))
     .derive(derivation_input())
     .expect("fixed action randomness derives")
+}
+
+fn witness_bound_persistent_attempt_identifier(
+    action_randomness: &ActionPrivateRandomness,
+    input: &PersistentProofCoinInput,
+    canonical_witness: &[u8],
+) -> PrivateRandomnessAttemptIdentifier {
+    let mut binding = action_randomness
+        .begin_persistent_proof_witness_coin_binding(input)
+        .expect("persistent witness binding starts");
+    binding
+        .absorb_canonical_bytes(b"sealed-lattice/test/canonical-semantic-witness/v1")
+        .expect("test witness domain is absorbed");
+    binding
+        .absorb_canonical_bytes(canonical_witness)
+        .expect("test witness is absorbed");
+    binding.finish().expect("persistent attempt derives")
 }
 
 fn persistent_slot() -> ProofApplicationSlot {
@@ -144,7 +161,7 @@ fn canonical_private_randomness_inputs_round_trip() {
 #[test]
 fn structured_commitment_opening_context_is_canonical_and_binds_every_coordinate() {
     let limits = CanonicalDecodeLimits::default();
-    let baseline = SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 1, 11, 1)
+    let baseline = SetupStructuredCommitmentOpeningContext::new(hash(0x91), 1, 11, 1)
         .expect("assigned structured-commitment opening context");
     let encoded = baseline.encode().expect("opening context encodes");
     assert_eq!(
@@ -153,20 +170,16 @@ fn structured_commitment_opening_context_is_canonical_and_binds_every_coordinate
         baseline,
     );
     assert_eq!(baseline.source_setup_intent_object_hash(), hash(0x91));
-    assert_eq!(baseline.source_rns_limb_index(), 2);
-    assert_eq!(baseline.shamir_coefficient_index(), 3);
     assert_eq!(baseline.commitment_data_prime_index(), 1);
     assert_eq!(baseline.distribution_purpose(), 11);
     assert_eq!(baseline.component_ordinal(), 1);
 
     let baseline_hash = baseline.hash().expect("opening context hashes");
     for changed in [
-        SetupStructuredCommitmentOpeningContext::new(hash(0x92), 2, 3, 1, 11, 1),
-        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 1, 3, 1, 11, 1),
-        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 2, 1, 11, 1),
-        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 2, 11, 1),
-        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 1, 12, 0),
-        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 1, 11, 0),
+        SetupStructuredCommitmentOpeningContext::new(hash(0x92), 1, 11, 1),
+        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 11, 1),
+        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 1, 12, 0),
+        SetupStructuredCommitmentOpeningContext::new(hash(0x91), 1, 11, 0),
     ] {
         assert_ne!(
             changed
@@ -181,8 +194,6 @@ fn structured_commitment_opening_context_is_canonical_and_binds_every_coordinate
         assert_eq!(
             SetupStructuredCommitmentOpeningContext::new(
                 hash(0x91),
-                2,
-                3,
                 1,
                 purpose,
                 component_ordinal,
@@ -192,27 +203,6 @@ fn structured_commitment_opening_context_is_canonical_and_binds_every_coordinate
             RefusalReason::WrongTypeOrLength,
         );
     }
-
-    let version_one = CanonicalTuple::new(
-        SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
-        1,
-        vec![
-            CanonicalItem::hash512(hash(0x91).into_bytes()),
-            CanonicalItem::unsigned16(2),
-            CanonicalItem::unsigned16(3),
-            CanonicalItem::unsigned16(1),
-            CanonicalItem::unsigned16(11),
-            CanonicalItem::unsigned16(1),
-        ],
-    )
-    .encode()
-    .expect("version-one tuple encodes");
-    assert_eq!(
-        SetupStructuredCommitmentOpeningContext::decode(&version_one, &limits)
-            .expect_err("incompatible version-one context refuses")
-            .refusal_reason,
-        RefusalReason::UnsupportedVersionOrSuite,
-    );
 }
 
 #[test]
@@ -366,19 +356,35 @@ fn key_hierarchy_and_first_stream_block_match_independent_kmac_vector() {
 }
 
 #[test]
-fn attempt_identifiers_bind_attempt_kind_statement_and_nonce() {
+fn attempt_identifiers_bind_attempt_kind_statement_witness_and_nonce() {
     let action_randomness = action_randomness();
     let persistent =
         PersistentProofCoinInput::new(persistent_slot(), hash(0x66)).expect("persistent input");
     let changed_statement = PersistentProofCoinInput::new(persistent_slot(), hash(0x67))
         .expect("changed persistent input");
     assert_ne!(
-        action_randomness
-            .persistent_proof_attempt_identifier(&persistent)
-            .expect("persistent attempt"),
-        action_randomness
-            .persistent_proof_attempt_identifier(&changed_statement)
-            .expect("changed persistent attempt"),
+        witness_bound_persistent_attempt_identifier(
+            &action_randomness,
+            &persistent,
+            b"first canonical witness",
+        ),
+        witness_bound_persistent_attempt_identifier(
+            &action_randomness,
+            &changed_statement,
+            b"first canonical witness",
+        ),
+    );
+    assert_ne!(
+        witness_bound_persistent_attempt_identifier(
+            &action_randomness,
+            &persistent,
+            b"first canonical witness",
+        ),
+        witness_bound_persistent_attempt_identifier(
+            &action_randomness,
+            &persistent,
+            b"second canonical witness",
+        ),
     );
 
     let ordinary = OrdinaryProofCoinInput::new(ordinary_slot(), hash(0x66), [0x70; 32])
@@ -433,9 +439,11 @@ fn attempt_identifiers_bind_attempt_kind_statement_and_nonce() {
             .is_ok()
     );
 
-    let persistent_attempt = action_randomness
-        .persistent_proof_attempt_identifier(&persistent)
-        .expect("persistent attempt");
+    let persistent_attempt = witness_bound_persistent_attempt_identifier(
+        &action_randomness,
+        &persistent,
+        b"first canonical witness",
+    );
     let mismatch = action_randomness
         .begin_stream(
             PrivateRandomnessDomain::setup_source(1).expect("setup domain"),
@@ -678,6 +686,7 @@ fn proof_application_slots_enforce_closed_coordinate_shapes() {
         (0x1214, Some(9), Some(0), None),
         (0x1213, None, None, None),
         (0x1215, None, Some(u32::MAX), None),
+        (0x1218, None, None, None),
         (ORDINARY_BALLOT_PROOF_FAMILY, Some(1), None, Some(0)),
     ] {
         assert!(
@@ -699,6 +708,7 @@ fn proof_application_slots_enforce_closed_coordinate_shapes() {
         (0x1214, Some(0), None, None),
         (0x1213, Some(0), None, None),
         (0x1215, None, None, None),
+        (0x1218, Some(0), None, None),
         (ORDINARY_BALLOT_PROOF_FAMILY, Some(0), None, None),
         (0xffff, None, None, None),
     ] {
@@ -730,15 +740,76 @@ fn proof_application_slots_enforce_closed_coordinate_shapes() {
 }
 
 #[test]
-fn public_only_and_unassigned_randomness_domains_refuse() {
-    for public_family in PUBLIC_ONLY_PROOF_FAMILIES {
-        assert!(PrivateRandomnessDomain::reset_safe_proof(public_family, 1).is_err());
+fn every_public_witness_family_has_only_private_construction_hiding_coins() {
+    let action_randomness = action_randomness();
+    let mut construction_attempt_identifiers = std::collections::BTreeSet::new();
+    for (public_family, schedule_position) in [
+        (
+            ProofFamilyIdentifiers::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+        ),
+        (
+            ProofFamilyIdentifiers::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+        ),
+        (
+            ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+        ),
+    ] {
+        let application_slot = ProofApplicationSlot::new(
+            hash(0x11),
+            hash(0x22),
+            hash(0x33),
+            public_family,
+            None,
+            schedule_position,
+            None,
+        )
+        .expect("the public-only family has one canonical slot shape");
+
+        assert!(PrivateRandomnessDomain::reset_safe_proof(public_family, 4).is_ok());
+        for forbidden_purpose in [1, 2, 3, PRIVATE_PROOF_SALT_PURPOSE] {
+            assert!(
+                PrivateRandomnessDomain::reset_safe_proof(public_family, forbidden_purpose)
+                    .is_err()
+            );
+        }
+        let input = PersistentProofCoinInput::new(application_slot, hash(4))
+            .expect("the public-witness construction-hiding input is canonical");
+        let construction_attempt_identifier = action_randomness
+            .persistent_proof_preparation_identifier(&input)
+            .expect("the private construction-hiding attempt derives");
+        assert!(
+            construction_attempt_identifiers.insert(*construction_attempt_identifier.as_bytes()),
+            "each public-witness family must have a distinct construction-hiding attempt",
+        );
+        assert!(
+            action_randomness
+                .begin_persistent_proof_witness_coin_binding(&input)
+                .is_err(),
+            "a public relation must not acquire a private-witness binding",
+        );
+        let changed_statement_input = PersistentProofCoinInput::new(application_slot, hash(5))
+            .expect("a changed public statement remains canonical");
+        assert_ne!(
+            construction_attempt_identifier,
+            action_randomness
+                .persistent_proof_preparation_identifier(&changed_statement_input)
+                .expect("the changed construction-hiding attempt derives"),
+        );
+        assert_eq!(
+            proof_attempt_identifier_derivation_count(public_family),
+            Some(1)
+        );
     }
+    assert_eq!(
+        PUBLIC_ONLY_PROOF_FAMILIES,
+        ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS,
+    );
+
     for invalid_purpose in [0, 8, 9, 10, 13, u16::MAX] {
         assert!(PrivateRandomnessDomain::setup_suite_distribution(invalid_purpose).is_err());
-    }
-    for invalid_purpose in [0, 1, 7, 11, u16::MAX] {
-        assert!(PrivateRandomnessDomain::ballot_encryption_distribution(invalid_purpose).is_err());
     }
     assert!(PrivateRandomnessDomain::setup_mailbox(4).is_err());
     assert!(PrivateRandomnessDomain::setup_source(3).is_err());
@@ -746,4 +817,20 @@ fn public_only_and_unassigned_randomness_domains_refuse() {
     assert!(PrivateRandomnessDomain::target_flooding(3).is_err());
     assert!(PrivateRandomnessDomain::reset_safe_proof(0x1211, 0x4000).is_err());
     assert!(PrivateRandomnessDomain::ordinary_proof(0x4000).is_err());
+}
+
+#[test]
+fn ballot_encryption_distribution_accepts_exactly_purposes_eight_through_ten() {
+    let assigned_purposes = [
+        DistributionPurpose::BallotEncryptionEphemeralSecret.canonical_code(),
+        DistributionPurpose::BallotEncryptionErrorZero.canonical_code(),
+        DistributionPurpose::BallotEncryptionErrorOne.canonical_code(),
+    ];
+    for purpose in u16::MIN..=u16::MAX {
+        assert_eq!(
+            PrivateRandomnessDomain::ballot_encryption_distribution(purpose).is_ok(),
+            assigned_purposes.contains(&purpose),
+            "unexpected ballot-encryption purpose assignment for {purpose}",
+        );
+    }
 }

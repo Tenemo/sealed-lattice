@@ -1,5 +1,6 @@
 pub const PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER: u16 = 0x0109;
 pub const PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0400;
+pub const PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION: u16 = 1;
 pub const PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0401;
 pub const ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0402;
 pub const ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0403;
@@ -11,12 +12,12 @@ pub const PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 pub const PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH: usize = 64;
 pub const PRIVATE_PROOF_SALT_PURPOSE: u16 = 0xfffe;
 
-const FOUNDATION_SCHEMA_VERSION: u16 = 1;
-const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION: u16 = 2;
-const ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH: usize = 192;
+const FOUNDATION_SCHEMA_VERSION: u16 = PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_VERSION;
+const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION: u16 = 3;
+pub(crate) const ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH: usize = 192;
 const ACTION_RANDOMNESS_COMMITMENT_PREIMAGE_BYTE_LENGTH: usize = 64;
-const PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH: usize = 64;
-const PROOF_COIN_KEY_BYTE_LENGTH: usize = 64;
+pub(crate) const PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH: usize = 64;
+pub(crate) const PROOF_COIN_KEY_BYTE_LENGTH: usize = 64;
 const PRIVATE_RANDOMNESS_BLOCK_BIT_LENGTH: u16 = 512;
 
 const SUITE_DISTRIBUTION_FAMILY: u16 = 0x0116;
@@ -29,20 +30,26 @@ const ORDINARY_BALLOT_PROOF_FAMILY: u16 =
 const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: u16 =
     ProofFamilyIdentifiers::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER;
 
-const ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
+pub(crate) const ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/private-randomness/action-key-hierarchy/v1";
 const ACTION_RANDOMNESS_COMMITMENT_DOMAIN: &str =
     "sealed-lattice/private-randomness/action-root-commitment/v1";
 const SETUP_ACTION_RANDOMNESS_AUTHORIZATION_DOMAIN: &str =
     "sealed-lattice/setup/state/action-randomness/v1";
-const PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION: &[u8] = b"sealed-lattice/private-randomness/v1";
-const SETUP_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/setup/reset-safe-attempt/v1";
-const PERSISTENT_PROOF_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/proof/persistent-attempt/v1";
-const ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/proof/ordinary-attempt/v1";
-const TARGET_RELEASE_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/target-release/attempt/v1";
+pub(crate) const PRIVATE_RANDOMNESS_BLOCK_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/private-randomness/v1";
+pub(crate) const SETUP_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/setup/reset-safe-attempt/v1";
+pub(crate) const PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/proof/persistent-preparation/v1";
+pub(crate) const PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/proof/persistent-canonical-witness-attempt/v1";
+pub(crate) const ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/proof/ordinary-attempt/v1";
+pub(crate) const TARGET_RELEASE_ATTEMPT_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/target-release/attempt/v1";
 const APPLICATION_SLOT_HASH_DOMAIN: &str = "sealed-lattice/proof/application-slot/v1";
 const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/structured-commitment-opening-context/v2";
+    "sealed-lattice/setup/structured-commitment-opening-context/v3";
 
 const RESET_SAFE_PROOF_FAMILIES: [u16; 8] = [
     ProofFamilyIdentifiers::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
@@ -54,19 +61,19 @@ const RESET_SAFE_PROOF_FAMILIES: [u16; 8] = [
     ProofFamilyIdentifiers::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
     TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
 ];
-const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] = [
-    ProofFamilyIdentifiers::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-    ProofFamilyIdentifiers::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-    ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-];
+const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] =
+    ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS;
 
 mod domain;
+#[cfg(test)]
+pub(super) mod generator_hybrid;
 mod material;
 mod proof_coins;
 mod stream;
 mod validation;
 
 pub use domain::PrivateRandomnessDomain;
+pub(crate) use material::PersistentProofWitnessCoinBinding;
 pub use material::{
     ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,
     SetupStructuredCommitmentOpeningContext,
@@ -76,6 +83,26 @@ pub use proof_coins::{
     ProofApplicationSlot,
 };
 pub use stream::{PrivateRandomBlockInput, PrivateRandomCursor, PrivateRandomnessStream};
+
+/// Distinct proof-attempt identifier derivations for one application slot.
+/// Public-witness families derive only the independently keyed construction-
+/// hiding attempt. Secret-bearing reset-safe families additionally bind the
+/// canonical witness. The target proof's separately keyed release attempt
+/// belongs to target flooding.
+#[cfg(test)]
+pub(crate) fn proof_attempt_identifier_derivation_count(
+    application_statement_schema_identifier: u16,
+) -> Option<u64> {
+    if RESET_SAFE_PROOF_FAMILIES.contains(&application_statement_schema_identifier) {
+        Some(2)
+    } else if application_statement_schema_identifier == ORDINARY_BALLOT_PROOF_FAMILY
+        || PUBLIC_ONLY_PROOF_FAMILIES.contains(&application_statement_schema_identifier)
+    {
+        Some(1)
+    } else {
+        None
+    }
+}
 
 fn schema_error(
     refusal_reason: super::RefusalReason,

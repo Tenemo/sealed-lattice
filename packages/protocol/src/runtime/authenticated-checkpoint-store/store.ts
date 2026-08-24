@@ -21,7 +21,11 @@ import {
     ExclusiveResourceLifecycle,
     type ExclusiveResourceOwnerToken,
 } from '../exclusive-resource-lifecycle.js';
-import type { UntrustedStorageTransactionStore } from '../untrusted-storage-transaction-store.js';
+import type { UntrustedStorageExclusiveCapacityReservationInput } from '../untrusted-storage-transaction-store/records.js';
+import type {
+    UntrustedStorageExclusiveCapacityReservation,
+    UntrustedStorageTransactionStore,
+} from '../untrusted-storage-transaction-store.js';
 
 import {
     identifierByteLength,
@@ -30,6 +34,8 @@ import {
     checkpointJournalOperationDomain,
     checkpointChunkOperationDomain,
     checkpointOperationIdentityBrand,
+    checkpointLineageReservationBrand,
+    authenticatedCheckpointPhysicalAccountingScopeBrand,
     copyAndValidateBoundary,
     encodeCheckpointManifest,
     parseStreamDescriptor,
@@ -50,35 +56,144 @@ import {
     asAsyncIterable,
     runCheckpointLineageExclusive,
     validateAuthenticatedCheckpointStoreLimits,
-    type CheckpointRandomCursorKernel,
     type CheckpointBoundaryPolicy,
     type CheckpointOperationIdentity,
+    type CheckpointLineageReservation,
     type CheckpointBoundary,
     type ExpectedCheckpointBoundary,
     type AuthenticatedCheckpointStoreLimits,
     type AuthenticatedCheckpointStore,
+    type AuthenticatedCheckpointPhysicalAccountingScope,
+    type AuthenticatedCheckpointPhysicalAccountingSnapshot,
     type TransferableAuthenticatedCheckpointStore,
     type StoredCheckpointJournal,
     type CheckpointOperationIdentityRecord,
+    type CheckpointLineageReservationRecord,
 } from './records.js';
 
 export { describeAuthenticatedCheckpointStateStream } from './records.js';
 export type {
     AuthenticatedCheckpointStore,
     AuthenticatedCheckpointStoreLimits,
+    AuthenticatedCheckpointPhysicalAccountingScope,
     CheckpointBoundary,
     CheckpointBoundaryPolicy,
+    CheckpointLineageReservation,
     CheckpointOperationIdentity,
-    CheckpointRandomCursor,
-    CheckpointRandomCursorKernel,
     ExpectedCheckpointBoundary,
     ResumedCheckpoint,
     TransferableAuthenticatedCheckpointStore,
 } from './records.js';
 
+const runtimeRecordEnvelopeOverheadByteLength = 34n;
+const checkpointStorageIndexValueByteLength = 256n;
+const authenticatedRepairRecordFixedByteLength = 68n;
+const checkpointStorageObjectKeyByteLength = 256n;
+const checkpointStorageProfileTextEncoder = new TextEncoder();
+
+const checkedCheckpointStorageNumber = (
+    value: bigint,
+    label: string,
+): number => {
+    if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidConfiguration',
+            `${label} exceeds the exact JavaScript integer range.`,
+        );
+    }
+    return Number(value);
+};
+
+const checkpointPhysicalAccountingCapacity = (
+    limits: AuthenticatedCheckpointStoreLimits,
+): Omit<
+    UntrustedStorageExclusiveCapacityReservationInput,
+    'initialLogicalRecordKeyPrefixes'
+> => {
+    const maximumChunkCount = BigInt(
+        Math.ceil(
+            limits.maximumCheckpointStateByteLength /
+                foundationProfile.streamChunkByteLength,
+        ),
+    );
+    const maximumChunkRecordKeyByteLength = BigInt(
+        checkpointStorageProfileTextEncoder.encode(
+            `checkpoint/chunk/${'0'.repeat(64)}/${'0'.repeat(64)}/${'0'.repeat(8)}-${'0'.repeat(128)}`,
+        ).byteLength,
+    );
+    const maximumManifestRecordKeyByteLength = BigInt(
+        checkpointStorageProfileTextEncoder.encode(
+            `checkpoint/manifest/${'0'.repeat(64)}`,
+        ).byteLength,
+    );
+    const maximumJournalRecordKeyByteLength = BigInt(
+        checkpointStorageProfileTextEncoder.encode(
+            `checkpoint/journal/${'0'.repeat(64)}`,
+        ).byteLength,
+    );
+    const maximumLogicalRecordKeyByteLength = [
+        maximumChunkRecordKeyByteLength,
+        maximumManifestRecordKeyByteLength,
+        maximumJournalRecordKeyByteLength,
+    ].reduce((maximum, value) => (maximum > value ? maximum : value));
+    const simultaneousLogicalRecordCount = maximumChunkCount * 2n + 2n;
+    const checkpointChunkStoredValueByteLength =
+        BigInt(limits.maximumCheckpointStateByteLength) * 2n +
+        maximumChunkCount * runtimeRecordEnvelopeOverheadByteLength * 2n;
+    const manifestPlaintextByteLength =
+        BigInt(limits.maximumManifestByteLength) + 38n;
+    const manifestStoredValueByteLength =
+        (manifestPlaintextByteLength +
+            runtimeRecordEnvelopeOverheadByteLength) *
+        2n;
+    const journalPlaintextByteLength =
+        1_024n +
+        maximumChunkCount * 2n * (maximumChunkRecordKeyByteLength + 4n);
+    const journalStoredValueByteLength =
+        (journalPlaintextByteLength + runtimeRecordEnvelopeOverheadByteLength) *
+        2n;
+    const indexStoredValueByteLength =
+        simultaneousLogicalRecordCount * checkpointStorageIndexValueByteLength;
+    const authenticatedRepairHeadPlaintextByteLength =
+        simultaneousLogicalRecordCount *
+        (authenticatedRepairRecordFixedByteLength +
+            maximumLogicalRecordKeyByteLength +
+            checkpointStorageObjectKeyByteLength);
+    return Object.freeze({
+        maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength:
+            checkedCheckpointStorageNumber(
+                authenticatedRepairHeadPlaintextByteLength,
+                'Checkpoint repair-head capacity',
+            ),
+        maximumAdditionalOwnedRecordCount: checkedCheckpointStorageNumber(
+            simultaneousLogicalRecordCount * 2n + 2n,
+            'Checkpoint owned-record capacity',
+        ),
+        maximumAdditionalStoredValueByteLength: checkedCheckpointStorageNumber(
+            checkpointChunkStoredValueByteLength +
+                manifestStoredValueByteLength +
+                journalStoredValueByteLength +
+                indexStoredValueByteLength,
+            'Checkpoint stored-value capacity',
+        ),
+        maximumDeletionBatchRecordCount: 1,
+    });
+};
+
+type CheckpointPhysicalAccountingScopeRecord = {
+    readonly checkpointLineageIdentifier: Uint8Array;
+    openCallCount: number;
+    openCiphertextByteLength: number;
+    openPlaintextByteLength: number;
+    readonly reservation: UntrustedStorageExclusiveCapacityReservation;
+    released: boolean;
+    sealCallCount: number;
+    sealCiphertextByteLength: number;
+    sealPlaintextByteLength: number;
+};
+
 export const openAuthenticatedCheckpointStoreWithProtection = (input: {
     boundaryPolicy: CheckpointBoundaryPolicy;
-    cursorKernel: CheckpointRandomCursorKernel;
     limits: AuthenticatedCheckpointStoreLimits;
     protection: RuntimeRecordProtection;
     store: UntrustedStorageTransactionStore;
@@ -94,10 +209,127 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         CheckpointOperationIdentity,
         CheckpointOperationIdentityRecord
     >();
+    let checkpointLineageReservations = new WeakMap<
+        CheckpointLineageReservation,
+        CheckpointLineageReservationRecord
+    >();
     let releasedOperationIdentities =
         new WeakSet<CheckpointOperationIdentity>();
+    let releasedCheckpointLineageReservations =
+        new WeakSet<CheckpointLineageReservation>();
     const issuedOperationIdentityRecords =
         new Set<CheckpointOperationIdentityRecord>();
+    const issuedCheckpointLineageReservationRecords =
+        new Set<CheckpointLineageReservationRecord>();
+    let physicalAccountingScopes = new WeakMap<
+        AuthenticatedCheckpointPhysicalAccountingScope,
+        CheckpointPhysicalAccountingScopeRecord
+    >();
+    let activePhysicalAccountingScopeRecord:
+        | CheckpointPhysicalAccountingScopeRecord
+        | undefined;
+    const issuedPhysicalAccountingScopeRecords =
+        new Set<CheckpointPhysicalAccountingScopeRecord>();
+
+    const checkedAccountingAdd = (
+        currentValue: number,
+        increment: number,
+        label: string,
+    ): number => {
+        const value = currentValue + increment;
+        if (!Number.isSafeInteger(value) || value < 0) {
+            throw new AuthenticatedRuntimeRecordError(
+                'ResourceLimit',
+                `${label} exceeds the exact JavaScript integer range.`,
+            );
+        }
+        return value;
+    };
+
+    const requirePhysicalAccountingLineage = (
+        checkpointLineageIdentifier: Uint8Array,
+    ): void => {
+        if (
+            activePhysicalAccountingScopeRecord !== undefined &&
+            !bytesEqual(
+                activePhysicalAccountingScopeRecord.checkpointLineageIdentifier,
+                checkpointLineageIdentifier,
+            )
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidInput',
+                'Checkpoint physical accounting is reserved for a different lineage.',
+            );
+        }
+    };
+
+    const observeOpenedRecord = (opened: {
+        plaintext: Uint8Array;
+        sealedBytes: Uint8Array;
+    }): void => {
+        const accounting = activePhysicalAccountingScopeRecord;
+        if (accounting === undefined) {
+            return;
+        }
+        accounting.openCallCount = checkedAccountingAdd(
+            accounting.openCallCount,
+            1,
+            'Checkpoint open call accounting',
+        );
+        accounting.openCiphertextByteLength = checkedAccountingAdd(
+            accounting.openCiphertextByteLength,
+            opened.sealedBytes.byteLength,
+            'Checkpoint open ciphertext accounting',
+        );
+        accounting.openPlaintextByteLength = checkedAccountingAdd(
+            accounting.openPlaintextByteLength,
+            opened.plaintext.byteLength,
+            'Checkpoint open plaintext accounting',
+        );
+    };
+
+    const readCheckpointRuntimeRecord = async (
+        readInput: Parameters<typeof readRuntimeRecord>[0],
+        checkpointLineageIdentifier: Uint8Array,
+    ) => {
+        requirePhysicalAccountingLineage(checkpointLineageIdentifier);
+        const opened = await readRuntimeRecord(readInput);
+        if (opened !== undefined) {
+            observeOpenedRecord(opened);
+        }
+        return opened;
+    };
+
+    const stageCheckpointRuntimeRecordWrite = async (
+        writeInput: Parameters<typeof stageRuntimeRecordWrite>[0],
+        checkpointLineageIdentifier: Uint8Array,
+    ): Promise<void> => {
+        requirePhysicalAccountingLineage(checkpointLineageIdentifier);
+        const sealedBytes = await stageRuntimeRecordWrite(writeInput);
+        const accounting = activePhysicalAccountingScopeRecord;
+        try {
+            if (accounting === undefined) {
+                return;
+            }
+            accounting.sealCallCount = checkedAccountingAdd(
+                accounting.sealCallCount,
+                1,
+                'Checkpoint seal call accounting',
+            );
+            accounting.sealCiphertextByteLength = checkedAccountingAdd(
+                accounting.sealCiphertextByteLength,
+                sealedBytes.byteLength,
+                'Checkpoint seal ciphertext accounting',
+            );
+            accounting.sealPlaintextByteLength = checkedAccountingAdd(
+                accounting.sealPlaintextByteLength,
+                writeInput.plaintext.byteLength,
+                'Checkpoint seal plaintext accounting',
+            );
+        } finally {
+            sealedBytes.fill(0);
+        }
+    };
 
     const retainIdentifierKey = (identifierKey: string): void => {
         identifierReferenceCounts.set(
@@ -147,6 +379,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
     const reserveOperationIdentitySlot = (): (() => void) => {
         if (
             issuedOperationIdentityRecords.size +
+                issuedCheckpointLineageReservationRecords.size +
                 pendingOperationIdentityCount >=
             limits.maximumActiveOperationIdentityCount
         ) {
@@ -176,10 +409,8 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             sourceDigest.fill(0);
         }
         boundary.stateStreamDescriptorBytes.fill(0);
-        for (const randomCursor of boundary.orderedRandomCursors) {
-            randomCursor.derivationContextHash.fill(0);
-            randomCursor.streamAttemptIdentifier.fill(0);
-        }
+        boundary.privateRandomCursorManifestBytes.fill(0);
+        boundary.privateRandomnessStreamAttemptIdentifier?.fill(0);
     };
 
     const destroyOperationIdentityRecord = (
@@ -241,9 +472,33 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         identityRecord.operationKind = undefined;
         identityRecord.orderedSourceDigestHex = undefined;
         identityRecord.stateStreamDomain = undefined;
-        for (const attemptIdentifier of identityRecord.streamAttemptIdentifiers) {
-            attemptIdentifier.fill(0);
-        }
+        identityRecord.privateRandomnessStreamAttemptIdentifier?.fill(0);
+        identityRecord.privateRandomnessStreamAttemptIdentifier = undefined;
+    };
+
+    const consumeCheckpointLineageReservationRecord = (
+        reservation: CheckpointLineageReservation,
+        reservationRecord: CheckpointLineageReservationRecord,
+    ): void => {
+        checkpointLineageReservations.delete(reservation);
+        releasedCheckpointLineageReservations.add(reservation);
+        issuedCheckpointLineageReservationRecords.delete(reservationRecord);
+        reservationRecord.checkpointLineageIdentifier.fill(0);
+    };
+
+    const destroyCheckpointLineageReservationRecord = (
+        reservation: CheckpointLineageReservation,
+        reservationRecord: CheckpointLineageReservationRecord,
+    ): void => {
+        const lineageIdentifierKey = bytesToHex(
+            reservationRecord.checkpointLineageIdentifier,
+        );
+        releaseIdentifierKey(lineageIdentifierKey);
+        rememberReleasedLineageIdentifierKey(lineageIdentifierKey);
+        consumeCheckpointLineageReservationRecord(
+            reservation,
+            reservationRecord,
+        );
     };
 
     const synchronizePublicationIdentifier = (
@@ -288,7 +543,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
 
     const createOperationIdentity = (
         checkpointLineageIdentifier: Uint8Array,
-        streamAttemptIdentifiers: readonly Uint8Array[],
+        privateRandomnessStreamAttemptIdentifier: Uint8Array | undefined,
         lineageIdentifierAlreadyRetained: boolean,
         resumedPublication?: Readonly<{
             boundary: CheckpointBoundary;
@@ -297,18 +552,17 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }>,
     ): CheckpointOperationIdentity => {
         const lineageIdentifier = checkpointLineageIdentifier.slice();
-        const attemptIdentifiers = streamAttemptIdentifiers.map((identifier) =>
-            identifier.slice(),
-        );
+        const attemptIdentifier =
+            privateRandomnessStreamAttemptIdentifier?.slice();
         const identity = Object.freeze({
             [checkpointOperationIdentityBrand]: true as const,
             get checkpointLineageIdentifier(): Uint8Array {
                 return lineageIdentifier.slice();
             },
-            get streamAttemptIdentifiers(): readonly Uint8Array[] {
-                return Object.freeze(
-                    attemptIdentifiers.map((identifier) => identifier.slice()),
-                );
+            get privateRandomnessStreamAttemptIdentifier():
+                | Uint8Array
+                | undefined {
+                return attemptIdentifier?.slice();
             },
         });
         const identityRecord: CheckpointOperationIdentityRecord = {
@@ -332,7 +586,12 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                       stateStreamDomain:
                           resumedPublication.boundary.stateStreamDomain,
                   }),
-            streamAttemptIdentifiers: Object.freeze(attemptIdentifiers),
+            ...(attemptIdentifier === undefined
+                ? {}
+                : {
+                      privateRandomnessStreamAttemptIdentifier:
+                          attemptIdentifier,
+                  }),
         };
         const lineageIdentifierKey = bytesToHex(lineageIdentifier);
         if (!lineageIdentifierAlreadyRetained) {
@@ -344,6 +603,24 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         operationIdentities.set(identity, identityRecord);
         issuedOperationIdentityRecords.add(identityRecord);
         return identity;
+    };
+
+    const createCheckpointLineageReservation = (
+        checkpointLineageIdentifier: Uint8Array,
+    ): CheckpointLineageReservation => {
+        const lineageIdentifier = checkpointLineageIdentifier.slice();
+        const reservation = Object.freeze({
+            [checkpointLineageReservationBrand]: true as const,
+            get checkpointLineageIdentifier(): Uint8Array {
+                return lineageIdentifier.slice();
+            },
+        });
+        const reservationRecord = {
+            checkpointLineageIdentifier: lineageIdentifier,
+        };
+        checkpointLineageReservations.set(reservation, reservationRecord);
+        issuedCheckpointLineageReservationRecords.add(reservationRecord);
+        return reservation;
     };
 
     const runBoundaryPolicy = async (
@@ -399,9 +676,23 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             identityRecord.operationKind = boundary.operationKind;
             identityRecord.orderedSourceDigestHex = sourceDigestHex;
             identityRecord.stateStreamDomain = boundary.stateStreamDomain;
+            identityRecord.privateRandomnessStreamAttemptIdentifier =
+                boundary.privateRandomnessStreamAttemptIdentifier?.slice();
         } else if (
             identityRecord.operationKind !== boundary.operationKind ||
             identityRecord.stateStreamDomain !== boundary.stateStreamDomain ||
+            (identityRecord.privateRandomnessStreamAttemptIdentifier ===
+                undefined) !==
+                (boundary.privateRandomnessStreamAttemptIdentifier ===
+                    undefined) ||
+            (identityRecord.privateRandomnessStreamAttemptIdentifier !==
+                undefined &&
+                boundary.privateRandomnessStreamAttemptIdentifier !==
+                    undefined &&
+                !bytesEqual(
+                    identityRecord.privateRandomnessStreamAttemptIdentifier,
+                    boundary.privateRandomnessStreamAttemptIdentifier,
+                )) ||
             identityRecord.orderedSourceDigestHex?.length !==
                 sourceDigestHex.length ||
             identityRecord.orderedSourceDigestHex.some(
@@ -444,59 +735,23 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             }
             return;
         }
-        const previousCursorsByKey = new Map(
-            previousBoundary.orderedRandomCursors.map((cursor) => [
-                [
-                    cursor.family,
-                    cursor.purpose,
-                    bytesToHex(cursor.derivationContextHash),
-                    bytesToHex(cursor.streamAttemptIdentifier),
-                ].join('/'),
-                cursor,
-            ]),
-        );
-        for (const cursor of boundary.orderedRandomCursors) {
-            const previousCursor = previousCursorsByKey.get(
-                [
-                    cursor.family,
-                    cursor.purpose,
-                    bytesToHex(cursor.derivationContextHash),
-                    bytesToHex(cursor.streamAttemptIdentifier),
-                ].join('/'),
-            );
-            if (previousCursor === undefined) {
-                continue;
-            }
-            const counterRewound =
-                cursor.nextCounter < previousCursor.nextCounter;
-            const positionRewoundAtSameCounter =
-                cursor.nextCounter === previousCursor.nextCounter &&
-                ((previousCursor.nextUnreadBitOffsetInBufferedBlock ===
-                    undefined &&
-                    cursor.nextUnreadBitOffsetInBufferedBlock !== undefined) ||
-                    (previousCursor.nextUnreadBitOffsetInBufferedBlock !==
-                        undefined &&
-                        cursor.nextUnreadBitOffsetInBufferedBlock !==
-                            undefined &&
-                        cursor.nextUnreadBitOffsetInBufferedBlock <
-                            previousCursor.nextUnreadBitOffsetInBufferedBlock));
-            if (counterRewound || positionRewoundAtSameCounter) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'Conflict',
-                    'Checkpoint replacement cannot rewind a private-randomness cursor.',
-                );
-            }
-        }
+        // The canonical private-randomness manifest is opaque to JavaScript.
+        // Rust creates it from the exact coordinate plan and authenticates it
+        // again during deterministic-prefix replay. The store binds its exact
+        // bytes at every boundary and never expands it into an ordinal map.
     };
 
     const readManifest = async (lineageIdentifier: Uint8Array) => {
         const logicalRecordKey = manifestRecordKey(lineageIdentifier);
-        const opened = await readRuntimeRecord({
-            logicalRecordKey,
-            operationDomain: checkpointManifestOperationDomain,
-            protection,
-            store: input.store,
-        });
+        const opened = await readCheckpointRuntimeRecord(
+            {
+                logicalRecordKey,
+                operationDomain: checkpointManifestOperationDomain,
+                protection,
+                store: input.store,
+            },
+            lineageIdentifier,
+        );
         if (opened === undefined) {
             return undefined;
         }
@@ -517,12 +772,15 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
 
     const readJournal = async (lineageIdentifier: Uint8Array) => {
         const logicalRecordKey = journalRecordKey(lineageIdentifier);
-        const opened = await readRuntimeRecord({
-            logicalRecordKey,
-            operationDomain: checkpointJournalOperationDomain,
-            protection,
-            store: input.store,
-        });
+        const opened = await readCheckpointRuntimeRecord(
+            {
+                logicalRecordKey,
+                operationDomain: checkpointJournalOperationDomain,
+                protection,
+                store: input.store,
+            },
+            lineageIdentifier,
+        );
         if (opened === undefined) {
             return undefined;
         }
@@ -567,6 +825,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }
         await deleteAuthenticatedRecord({
             logicalRecordKey: journalRecordKey(lineageIdentifier),
+            observeOpenedRecord,
             operationDomain: checkpointJournalOperationDomain,
             protection,
             store: input.store,
@@ -590,107 +849,224 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         );
     };
 
+    const sampleFreshCheckpointLineage = async (): Promise<
+        Readonly<{
+            checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
+            lineageIdentifierKey: string;
+        }>
+    > => {
+        const checkpointLineageIdentifier = Uint8Array.from(
+            sampleRuntimeIdentifier(
+                protection,
+                unavailableIdentifierKeys(),
+                'checkpoint lineage identifier',
+            ),
+        );
+        const lineageIdentifierKey = bytesToHex(checkpointLineageIdentifier);
+        retainIdentifierKey(lineageIdentifierKey);
+        try {
+            await runCheckpointLineageExclusive(
+                input.store,
+                checkpointLineageIdentifier,
+                async () => {
+                    const collidingManifest = await readManifest(
+                        checkpointLineageIdentifier,
+                    );
+                    const collidingJournal = await readJournal(
+                        checkpointLineageIdentifier,
+                    );
+                    collidingManifest?.opened.plaintext.fill(0);
+                    collidingJournal?.opened.plaintext.fill(0);
+                    if (
+                        collidingManifest !== undefined ||
+                        collidingJournal !== undefined
+                    ) {
+                        throw new AuthenticatedRuntimeRecordError(
+                            'EntropyFailure',
+                            'Checkpoint lineage identifier collides with retained storage.',
+                        );
+                    }
+                },
+            );
+            return Object.freeze({
+                checkpointLineageIdentifier,
+                lineageIdentifierKey,
+            });
+        } catch (error) {
+            releaseIdentifierKey(lineageIdentifierKey);
+            rememberReleasedLineageIdentifierKey(lineageIdentifierKey);
+            checkpointLineageIdentifier.fill(0);
+            throw error;
+        }
+    };
+
     const beginOperation: AuthenticatedCheckpointStore['beginOperation'] =
-        async (untrustedStreamAttemptIdentifiers) => {
-            if (!Array.isArray(untrustedStreamAttemptIdentifiers)) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'InvalidInput',
-                    'Checkpoint stream-attempt identifiers must be an array.',
-                );
-            }
-            if (
-                untrustedStreamAttemptIdentifiers.length >
-                limits.maximumStreamAttemptCount
-            ) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'ResourceLimit',
-                    'Checkpoint stream-attempt count exceeds the configured profile.',
-                );
-            }
-            const streamAttemptIdentifiers: Uint8Array[] = [];
+        async (untrustedPrivateRandomnessStreamAttemptIdentifier) => {
+            let privateRandomnessStreamAttemptIdentifier:
+                | Uint8Array
+                | undefined;
             let releaseOperationIdentitySlot: (() => void) | undefined;
-            let checkpointLineageIdentifier: Uint8Array | undefined;
-            let sampledLineageIdentifierKey: string | undefined;
-            let sampledLineageIdentifierTransferred = false;
+            let sampledLineage:
+                | Awaited<ReturnType<typeof sampleFreshCheckpointLineage>>
+                | undefined;
+            let sampledLineageTransferred = false;
             try {
-                for (
-                    let identifierIndex = 0;
-                    identifierIndex < untrustedStreamAttemptIdentifiers.length;
-                    identifierIndex += 1
-                ) {
-                    streamAttemptIdentifiers.push(
-                        copyExactBytes(
-                            untrustedStreamAttemptIdentifiers[identifierIndex],
-                            identifierByteLength,
-                            `streamAttemptIdentifiers[${String(identifierIndex)}]`,
-                        ),
-                    );
-                }
-                if (
-                    new Set(streamAttemptIdentifiers.map(bytesToHex)).size !==
-                    streamAttemptIdentifiers.length
-                ) {
-                    throw new AuthenticatedRuntimeRecordError(
-                        'InvalidInput',
-                        'Checkpoint stream-attempt identifiers must be distinct.',
-                    );
-                }
+                privateRandomnessStreamAttemptIdentifier =
+                    untrustedPrivateRandomnessStreamAttemptIdentifier ===
+                    undefined
+                        ? undefined
+                        : copyExactBytes(
+                              untrustedPrivateRandomnessStreamAttemptIdentifier,
+                              identifierByteLength,
+                              'privateRandomnessStreamAttemptIdentifier',
+                          );
                 releaseOperationIdentitySlot = reserveOperationIdentitySlot();
-                checkpointLineageIdentifier = sampleRuntimeIdentifier(
-                    protection,
-                    unavailableIdentifierKeys(),
-                    'checkpoint lineage identifier',
-                );
-                const retainedLineageIdentifier = checkpointLineageIdentifier;
-                sampledLineageIdentifierKey = bytesToHex(
-                    retainedLineageIdentifier,
-                );
-                retainIdentifierKey(sampledLineageIdentifierKey);
-                await runCheckpointLineageExclusive(
-                    input.store,
-                    retainedLineageIdentifier,
-                    async () => {
-                        const collidingManifest = await readManifest(
-                            retainedLineageIdentifier,
-                        );
-                        const collidingJournal = await readJournal(
-                            retainedLineageIdentifier,
-                        );
-                        collidingManifest?.opened.plaintext.fill(0);
-                        collidingJournal?.opened.plaintext.fill(0);
-                        if (
-                            collidingManifest !== undefined ||
-                            collidingJournal !== undefined
-                        ) {
-                            throw new AuthenticatedRuntimeRecordError(
-                                'EntropyFailure',
-                                'Checkpoint lineage identifier collides with retained storage.',
-                            );
-                        }
-                    },
-                );
+                sampledLineage = await sampleFreshCheckpointLineage();
                 const identity = createOperationIdentity(
-                    retainedLineageIdentifier,
-                    streamAttemptIdentifiers,
+                    sampledLineage.checkpointLineageIdentifier,
+                    privateRandomnessStreamAttemptIdentifier,
                     true,
                 );
-                sampledLineageIdentifierTransferred = true;
+                sampledLineageTransferred = true;
                 return identity;
             } finally {
                 releaseOperationIdentitySlot?.();
-                for (const identifier of streamAttemptIdentifiers) {
-                    identifier.fill(0);
-                }
-                checkpointLineageIdentifier?.fill(0);
+                privateRandomnessStreamAttemptIdentifier?.fill(0);
+                sampledLineage?.checkpointLineageIdentifier.fill(0);
                 if (
-                    sampledLineageIdentifierKey !== undefined &&
-                    !sampledLineageIdentifierTransferred
+                    sampledLineage !== undefined &&
+                    !sampledLineageTransferred
                 ) {
-                    releaseIdentifierKey(sampledLineageIdentifierKey);
+                    releaseIdentifierKey(sampledLineage.lineageIdentifierKey);
                     rememberReleasedLineageIdentifierKey(
-                        sampledLineageIdentifierKey,
+                        sampledLineage.lineageIdentifierKey,
                     );
                 }
+            }
+        };
+
+    const reserveCheckpointLineage: AuthenticatedCheckpointStore['reserveCheckpointLineage'] =
+        async () => {
+            const releaseOperationIdentitySlot = reserveOperationIdentitySlot();
+            let sampledLineage:
+                | Awaited<ReturnType<typeof sampleFreshCheckpointLineage>>
+                | undefined;
+            let sampledLineageTransferred = false;
+            try {
+                sampledLineage = await sampleFreshCheckpointLineage();
+                const reservation = createCheckpointLineageReservation(
+                    sampledLineage.checkpointLineageIdentifier,
+                );
+                sampledLineageTransferred = true;
+                return reservation;
+            } finally {
+                releaseOperationIdentitySlot();
+                sampledLineage?.checkpointLineageIdentifier.fill(0);
+                if (
+                    sampledLineage !== undefined &&
+                    !sampledLineageTransferred
+                ) {
+                    releaseIdentifierKey(sampledLineage.lineageIdentifierKey);
+                    rememberReleasedLineageIdentifierKey(
+                        sampledLineage.lineageIdentifierKey,
+                    );
+                }
+            }
+        };
+
+    const bindCheckpointLineageToProofAttempt: AuthenticatedCheckpointStore['bindCheckpointLineageToProofAttempt'] =
+        async (reservation, untrustedProofAttemptLineageIdentifier) => {
+            const proofAttemptLineageIdentifier = copyExactBytes(
+                untrustedProofAttemptLineageIdentifier,
+                identifierByteLength,
+                'proofAttemptLineageIdentifier',
+            );
+            const reservationRecord =
+                checkpointLineageReservations.get(reservation);
+            if (reservationRecord === undefined) {
+                proofAttemptLineageIdentifier.fill(0);
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidInput',
+                    'Checkpoint-lineage binding requires an active reservation issued by this authenticated store.',
+                );
+            }
+            const checkpointLineageIdentifier =
+                reservationRecord.checkpointLineageIdentifier.slice();
+            try {
+                return await runCheckpointLineageExclusive(
+                    input.store,
+                    checkpointLineageIdentifier,
+                    () => {
+                        const currentReservationRecord =
+                            checkpointLineageReservations.get(reservation);
+                        if (currentReservationRecord !== reservationRecord) {
+                            throw new AuthenticatedRuntimeRecordError(
+                                'InvalidInput',
+                                'Checkpoint-lineage reservation was already consumed or released.',
+                            );
+                        }
+                        const identity = createOperationIdentity(
+                            currentReservationRecord.checkpointLineageIdentifier,
+                            proofAttemptLineageIdentifier,
+                            true,
+                        );
+                        consumeCheckpointLineageReservationRecord(
+                            reservation,
+                            currentReservationRecord,
+                        );
+                        return Promise.resolve(identity);
+                    },
+                );
+            } finally {
+                checkpointLineageIdentifier.fill(0);
+                proofAttemptLineageIdentifier.fill(0);
+            }
+        };
+
+    const releaseCheckpointLineageReservation: AuthenticatedCheckpointStore['releaseCheckpointLineageReservation'] =
+        async (reservation) => {
+            if (releasedCheckpointLineageReservations.has(reservation)) {
+                return;
+            }
+            const reservationRecord =
+                checkpointLineageReservations.get(reservation);
+            if (reservationRecord === undefined) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidInput',
+                    'Checkpoint-lineage release requires a reservation issued by this authenticated store.',
+                );
+            }
+            const checkpointLineageIdentifier =
+                reservationRecord.checkpointLineageIdentifier.slice();
+            try {
+                await runCheckpointLineageExclusive(
+                    input.store,
+                    checkpointLineageIdentifier,
+                    () => {
+                        const currentReservationRecord =
+                            checkpointLineageReservations.get(reservation);
+                        if (currentReservationRecord === undefined) {
+                            if (
+                                releasedCheckpointLineageReservations.has(
+                                    reservation,
+                                )
+                            ) {
+                                return Promise.resolve();
+                            }
+                            throw new AuthenticatedRuntimeRecordError(
+                                'InvalidInput',
+                                'Checkpoint-lineage release requires a current reservation.',
+                            );
+                        }
+                        destroyCheckpointLineageReservationRecord(
+                            reservation,
+                            currentReservationRecord,
+                        );
+                        return Promise.resolve();
+                    },
+                );
+            } finally {
+                checkpointLineageIdentifier.fill(0);
             }
         };
 
@@ -710,56 +1086,22 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         const lineageIdentifier =
             issuedIdentity.checkpointLineageIdentifier.slice();
         if (
-            issuedIdentity.streamAttemptIdentifiers.length >
-            limits.maximumStreamAttemptCount
+            (issuedIdentity.privateRandomnessStreamAttemptIdentifier ===
+                undefined) !==
+                (boundary.privateRandomnessStreamAttemptIdentifier ===
+                    undefined) ||
+            (issuedIdentity.privateRandomnessStreamAttemptIdentifier !==
+                undefined &&
+                boundary.privateRandomnessStreamAttemptIdentifier !==
+                    undefined &&
+                !bytesEqual(
+                    issuedIdentity.privateRandomnessStreamAttemptIdentifier,
+                    boundary.privateRandomnessStreamAttemptIdentifier,
+                ))
         ) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidInput',
-                'Checkpoint operation identity has an invalid stream-attempt count.',
-            );
-        }
-        const expectedAttemptIdentifiers =
-            issuedIdentity.streamAttemptIdentifiers.map(
-                (identifier, identifierIndex) =>
-                    copyExactBytes(
-                        identifier,
-                        identifierByteLength,
-                        `streamAttemptIdentifiers[${identifierIndex}]`,
-                    ),
-            );
-        const expectedAttemptIdentifierKeys = new Set(
-            expectedAttemptIdentifiers.map(bytesToHex),
-        );
-        if (
-            expectedAttemptIdentifierKeys.size !==
-            expectedAttemptIdentifiers.length
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'InvalidInput',
-                'Checkpoint operation identity contains a reused stream-attempt identifier.',
-            );
-        }
-        const observedAttemptIdentifiersByKey = new Map<string, Uint8Array>();
-        for (const cursor of boundary.orderedRandomCursors) {
-            observedAttemptIdentifiersByKey.set(
-                bytesToHex(cursor.streamAttemptIdentifier),
-                cursor.streamAttemptIdentifier,
-            );
-        }
-        const observedAttemptIdentifiers = [
-            ...observedAttemptIdentifiersByKey.values(),
-        ];
-        if (
-            observedAttemptIdentifiers.length !==
-                expectedAttemptIdentifiers.length ||
-            observedAttemptIdentifiers.some(
-                (identifier) =>
-                    !expectedAttemptIdentifierKeys.has(bytesToHex(identifier)),
-            )
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'InvalidInput',
-                'Checkpoint cursor attempts were not issued for this operation.',
+                'Checkpoint private-randomness attempt was not issued for this operation.',
             );
         }
         await repairInterruptedPublicationUnlocked(lineageIdentifier);
@@ -796,7 +1138,6 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             authorityContext,
             boundary,
             checkpointLineageIdentifier: lineageIdentifier,
-            cursorKernel: input.cursorKernel,
             stateStreamDescriptorBytes: boundary.stateStreamDescriptorBytes,
         });
         if (
@@ -849,14 +1190,17 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
         });
         try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes: null,
-                logicalRecordKey: journalRecordKey(lineageIdentifier),
-                operationDomain: checkpointJournalOperationDomain,
-                plaintext: journalPlaintext,
-                protection,
-                transaction: journalTransaction,
-            });
+            await stageCheckpointRuntimeRecordWrite(
+                {
+                    expectedCurrentSealedBytes: null,
+                    logicalRecordKey: journalRecordKey(lineageIdentifier),
+                    operationDomain: checkpointJournalOperationDomain,
+                    plaintext: journalPlaintext,
+                    protection,
+                    transaction: journalTransaction,
+                },
+                lineageIdentifier,
+            );
             await journalTransaction.commit();
         } catch (error) {
             throw await closeTransactionAfterFailure(journalTransaction, error);
@@ -912,15 +1256,18 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                         limits.transactionLifetimeMilliseconds,
                 });
                 try {
-                    await stageRuntimeRecordWrite({
-                        expectedCurrentSealedBytes: null,
-                        logicalRecordKey:
-                            newChunkRecordKeys[observedChunkCount],
-                        operationDomain: checkpointChunkOperationDomain,
-                        plaintext: chunkBytes,
-                        protection,
-                        transaction: chunkTransaction,
-                    });
+                    await stageCheckpointRuntimeRecordWrite(
+                        {
+                            expectedCurrentSealedBytes: null,
+                            logicalRecordKey:
+                                newChunkRecordKeys[observedChunkCount],
+                            operationDomain: checkpointChunkOperationDomain,
+                            plaintext: chunkBytes,
+                            protection,
+                            transaction: chunkTransaction,
+                        },
+                        lineageIdentifier,
+                    );
                     await chunkTransaction.commit();
                 } catch (error) {
                     throw await closeTransactionAfterFailure(
@@ -955,15 +1302,18 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
         });
         try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes:
-                    previousManifest?.opened.sealedBytes ?? null,
-                logicalRecordKey: manifestRecordKey(lineageIdentifier),
-                operationDomain: checkpointManifestOperationDomain,
-                plaintext: manifestPlaintext,
-                protection,
-                transaction: manifestTransaction,
-            });
+            await stageCheckpointRuntimeRecordWrite(
+                {
+                    expectedCurrentSealedBytes:
+                        previousManifest?.opened.sealedBytes ?? null,
+                    logicalRecordKey: manifestRecordKey(lineageIdentifier),
+                    operationDomain: checkpointManifestOperationDomain,
+                    plaintext: manifestPlaintext,
+                    protection,
+                    transaction: manifestTransaction,
+                },
+                lineageIdentifier,
+            );
             await manifestTransaction.commit();
             issuedIdentity.lastCanonicalManifestBytes =
                 canonicalManifestBytes.slice();
@@ -1059,7 +1409,6 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             authorityContext,
             boundary: expectedBoundary,
             checkpointLineageIdentifier: lineageIdentifier,
-            cursorKernel: input.cursorKernel,
             stateStreamDescriptorBytes: descriptorBytes,
         });
         const storedCanonicalManifest =
@@ -1073,21 +1422,11 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }
         const manifestSealedBytes = manifest.opened.sealedBytes.slice();
         const chunkRecordKeys = [...manifest.record.chunkRecordKeys];
-        const resumedAttemptIdentifiersByHex = new Map<string, Uint8Array>();
-        for (const cursor of expectedBoundary.orderedRandomCursors) {
-            resumedAttemptIdentifiersByHex.set(
-                bytesToHex(cursor.streamAttemptIdentifier),
-                cursor.streamAttemptIdentifier,
-            );
-        }
-        const resumedAttemptIdentifiers = [
-            ...resumedAttemptIdentifiersByHex.values(),
-        ];
         return Object.freeze({
             canonicalManifestBytes: storedCanonicalManifest.slice(),
             operationIdentity: createOperationIdentity(
                 lineageIdentifier,
-                resumedAttemptIdentifiers,
+                expectedBoundary.privateRandomnessStreamAttemptIdentifier,
                 false,
                 {
                     boundary: {
@@ -1136,14 +1475,18 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                                 chunkIndex < chunkRecordKeys.length;
                                 chunkIndex += 1
                             ) {
-                                const openedChunk = await readRuntimeRecord({
-                                    logicalRecordKey:
-                                        chunkRecordKeys[chunkIndex],
-                                    operationDomain:
-                                        checkpointChunkOperationDomain,
-                                    protection,
-                                    store: input.store,
-                                });
+                                const openedChunk =
+                                    await readCheckpointRuntimeRecord(
+                                        {
+                                            logicalRecordKey:
+                                                chunkRecordKeys[chunkIndex],
+                                            operationDomain:
+                                                checkpointChunkOperationDomain,
+                                            protection,
+                                            store: input.store,
+                                        },
+                                        lineageIdentifier,
+                                    );
                                 if (openedChunk === undefined) {
                                     throw new AuthenticatedRuntimeRecordError(
                                         'MissingRecord',
@@ -1294,14 +1637,17 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
         });
         try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes: null,
-                logicalRecordKey: journalRecordKey(lineageIdentifier),
-                operationDomain: checkpointJournalOperationDomain,
-                plaintext: journalPlaintext,
-                protection,
-                transaction: journalTransaction,
-            });
+            await stageCheckpointRuntimeRecordWrite(
+                {
+                    expectedCurrentSealedBytes: null,
+                    logicalRecordKey: journalRecordKey(lineageIdentifier),
+                    operationDomain: checkpointJournalOperationDomain,
+                    plaintext: journalPlaintext,
+                    protection,
+                    transaction: journalTransaction,
+                },
+                lineageIdentifier,
+            );
             await journalTransaction.commit();
         } catch (error) {
             throw await closeTransactionAfterFailure(journalTransaction, error);
@@ -1310,6 +1656,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }
         await deleteAuthenticatedRecord({
             logicalRecordKey: manifestRecordKey(lineageIdentifier),
+            observeOpenedRecord,
             operationDomain: checkpointManifestOperationDomain,
             protection,
             store: input.store,
@@ -1334,20 +1681,138 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         );
     };
 
+    const requirePhysicalAccountingScopeRecord = (
+        scope: AuthenticatedCheckpointPhysicalAccountingScope,
+    ): CheckpointPhysicalAccountingScopeRecord => {
+        const record = physicalAccountingScopes.get(scope);
+        if (record === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidInput',
+                'Checkpoint physical accounting requires a scope issued by this store.',
+            );
+        }
+        return record;
+    };
+
+    const openPhysicalAccountingScope: AuthenticatedCheckpointStore['openPhysicalAccountingScope'] =
+        async (checkpointLineageIdentifier) => {
+            if (activePhysicalAccountingScopeRecord !== undefined) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'Conflict',
+                    'Checkpoint physical accounting already owns this store.',
+                );
+            }
+            const lineageIdentifier = copyExactBytes(
+                checkpointLineageIdentifier,
+                identifierByteLength,
+                'checkpointLineageIdentifier',
+            );
+            const lineageHex = bytesToHex(lineageIdentifier);
+            const capacity = checkpointPhysicalAccountingCapacity(limits);
+            let reservation:
+                | UntrustedStorageExclusiveCapacityReservation
+                | undefined;
+            try {
+                reservation = await input.store.reserveExclusiveCapacity({
+                    ...capacity,
+                    initialLogicalRecordKeyPrefixes: [
+                        `checkpoint/manifest/${lineageHex}`,
+                        `checkpoint/journal/${lineageHex}`,
+                        `checkpoint/chunk/${lineageHex}/`,
+                    ],
+                });
+                const scope = Object.freeze({
+                    [authenticatedCheckpointPhysicalAccountingScopeBrand]:
+                        true as const,
+                });
+                const record: CheckpointPhysicalAccountingScopeRecord = {
+                    checkpointLineageIdentifier: lineageIdentifier,
+                    openCallCount: 0,
+                    openCiphertextByteLength: 0,
+                    openPlaintextByteLength: 0,
+                    reservation,
+                    released: false,
+                    sealCallCount: 0,
+                    sealCiphertextByteLength: 0,
+                    sealPlaintextByteLength: 0,
+                };
+                physicalAccountingScopes.set(scope, record);
+                issuedPhysicalAccountingScopeRecords.add(record);
+                activePhysicalAccountingScopeRecord = record;
+                return scope;
+            } catch (error) {
+                if (reservation !== undefined) {
+                    await reservation.release();
+                }
+                lineageIdentifier.fill(0);
+                throw error;
+            }
+        };
+
+    const copyPhysicalAccounting: AuthenticatedCheckpointStore['copyPhysicalAccounting'] =
+        (scope): AuthenticatedCheckpointPhysicalAccountingSnapshot => {
+            const record = requirePhysicalAccountingScopeRecord(scope);
+            return Object.freeze({
+                ...record.reservation.copyPhysicalStorageAccounting(),
+                openCallCount: record.openCallCount,
+                openCiphertextByteLength: record.openCiphertextByteLength,
+                openPlaintextByteLength: record.openPlaintextByteLength,
+                sealCallCount: record.sealCallCount,
+                sealCiphertextByteLength: record.sealCiphertextByteLength,
+                sealPlaintextByteLength: record.sealPlaintextByteLength,
+            });
+        };
+
+    const releasePhysicalAccountingScope: AuthenticatedCheckpointStore['releasePhysicalAccountingScope'] =
+        async (scope) => {
+            const record = requirePhysicalAccountingScopeRecord(scope);
+            if (record.released) {
+                return;
+            }
+            if (activePhysicalAccountingScopeRecord !== record) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidState',
+                    'Checkpoint physical accounting scope is not the active store owner.',
+                );
+            }
+            await record.reservation.release();
+            record.released = true;
+            activePhysicalAccountingScopeRecord = undefined;
+        };
+
     const lifecycle = new ExclusiveResourceLifecycle({
         cleanup: async () => {
+            if (
+                activePhysicalAccountingScopeRecord !== undefined &&
+                !activePhysicalAccountingScopeRecord.released
+            ) {
+                await activePhysicalAccountingScopeRecord.reservation.release();
+                activePhysicalAccountingScopeRecord.released = true;
+                activePhysicalAccountingScopeRecord = undefined;
+            }
             await releaseRuntimeRecordProtection(protection);
             operationIdentities = new WeakMap();
             releasedOperationIdentities = new WeakSet();
+            checkpointLineageReservations = new WeakMap();
+            releasedCheckpointLineageReservations = new WeakSet();
+            physicalAccountingScopes = new WeakMap();
             for (const identityRecord of issuedOperationIdentityRecords) {
                 identityRecord.checkpointLineageIdentifier.fill(0);
                 identityRecord.lastCanonicalManifestBytes?.fill(0);
                 destroyBoundary(identityRecord.lastPublishedBoundary);
-                for (const attemptIdentifier of identityRecord.streamAttemptIdentifiers) {
-                    attemptIdentifier.fill(0);
-                }
+                identityRecord.privateRandomnessStreamAttemptIdentifier?.fill(
+                    0,
+                );
             }
             issuedOperationIdentityRecords.clear();
+            for (const reservationRecord of issuedCheckpointLineageReservationRecords) {
+                reservationRecord.checkpointLineageIdentifier.fill(0);
+            }
+            issuedCheckpointLineageReservationRecords.clear();
+            for (const accountingRecord of issuedPhysicalAccountingScopeRecords) {
+                accountingRecord.checkpointLineageIdentifier.fill(0);
+            }
+            issuedPhysicalAccountingScopeRecords.clear();
             identifierReferenceCounts.clear();
             recentlyReleasedLineageIdentifierKeys.length = 0;
             pendingOperationIdentityCount = 0;
@@ -1365,9 +1830,19 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         owner: ExclusiveResourceOwnerToken,
     ): AuthenticatedCheckpointStore =>
         Object.freeze({
-            beginOperation: (streamAttemptIdentifiers) =>
+            bindCheckpointLineageToProofAttempt: (
+                reservation,
+                proofAttemptLineageIdentifier,
+            ) =>
                 lifecycle.run(owner, () =>
-                    beginOperation(streamAttemptIdentifiers),
+                    bindCheckpointLineageToProofAttempt(
+                        reservation,
+                        proofAttemptLineageIdentifier,
+                    ),
+                ),
+            beginOperation: (privateRandomnessStreamAttemptIdentifier) =>
+                lifecycle.run(owner, () =>
+                    beginOperation(privateRandomnessStreamAttemptIdentifier),
                 ),
             close: () => lifecycle.close(owner),
             copyAuthorityContext: () => {
@@ -1378,14 +1853,32 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                 lifecycle.assertOpen(owner);
                 return input.store.copyStorageInstanceIdentity();
             },
+            copyPhysicalAccounting: (scope) => {
+                lifecycle.assertOpen(owner);
+                return copyPhysicalAccounting(scope);
+            },
             evict: (checkpointLineageIdentifier) =>
                 lifecycle.run(owner, () => evict(checkpointLineageIdentifier)),
+            openPhysicalAccountingScope: (checkpointLineageIdentifier) =>
+                lifecycle.run(owner, () =>
+                    openPhysicalAccountingScope(checkpointLineageIdentifier),
+                ),
             publish: (publication) =>
                 lifecycle.run(owner, () => publish(publication)),
             releaseOperationIdentity: (identity) =>
                 lifecycle.run(owner, () => releaseOperationIdentity(identity)),
+            releasePhysicalAccountingScope: (scope) =>
+                lifecycle.run(owner, () =>
+                    releasePhysicalAccountingScope(scope),
+                ),
+            releaseCheckpointLineageReservation: (reservation) =>
+                lifecycle.run(owner, () =>
+                    releaseCheckpointLineageReservation(reservation),
+                ),
             repair: (checkpointLineageIdentifier) =>
                 lifecycle.run(owner, () => repair(checkpointLineageIdentifier)),
+            reserveCheckpointLineage: () =>
+                lifecycle.run(owner, reserveCheckpointLineage),
             resume: (resumeInput) =>
                 lifecycle.run(owner, () => resume(resumeInput)),
         });
@@ -1402,7 +1895,6 @@ export const openAuthenticatedCheckpointStore = (input: {
     authorityContext: RuntimeStorageAuthorityContext;
     boundaryPolicy: CheckpointBoundaryPolicy;
     cryptoProvider?: Crypto;
-    cursorKernel: CheckpointRandomCursorKernel;
     encryptionKey: CryptoKey;
     limits: AuthenticatedCheckpointStoreLimits;
     store: UntrustedStorageTransactionStore;
@@ -1410,7 +1902,6 @@ export const openAuthenticatedCheckpointStore = (input: {
     const limits = validateAuthenticatedCheckpointStoreLimits(input.limits);
     return openAuthenticatedCheckpointStoreWithProtection({
         boundaryPolicy: input.boundaryPolicy,
-        cursorKernel: input.cursorKernel,
         limits,
         protection: createRuntimeRecordProtection({
             authorityContext: input.authorityContext,

@@ -1,4 +1,5 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
+import { foundationProfile } from '@sealed-lattice/types';
 
 import {
     openFoundationCeremonyRuntime,
@@ -20,7 +21,7 @@ export const createCanonicalBoardContextTestInput = (
     const manifest = ceremonyRuntime.encodeManifest({
         displayTitle: 'Test selection',
         optionDefinitions: Array.from(
-            { length: 20 },
+            { length: foundationProfile.optionCount },
             (_value, optionIndex) => ({
                 displayLabel: `Option ${String(optionIndex)}`,
                 optionIdentifier: `option-${String(optionIndex)}`,

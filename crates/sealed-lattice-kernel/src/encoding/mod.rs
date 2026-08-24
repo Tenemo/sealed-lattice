@@ -20,8 +20,6 @@ use command::run_transcript_core_command_inner;
 #[serde(rename_all = "PascalCase")]
 pub enum CanonicalErrorCode {
     DuplicateField,
-    FixtureMismatch,
-    InvalidChunkSize,
     InvalidEnum,
     InvalidProtocolObject,
     InvalidHex,
@@ -32,7 +30,6 @@ pub enum CanonicalErrorCode {
     NonCanonicalVarUint,
     ComponentMismatch,
     TrailingBytes,
-    UnsupportedObjectType,
     UnsupportedObjectVersion,
 }
 
@@ -40,8 +37,6 @@ impl CanonicalErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::DuplicateField => "DuplicateField",
-            Self::FixtureMismatch => "FixtureMismatch",
-            Self::InvalidChunkSize => "InvalidChunkSize",
             Self::InvalidEnum => "InvalidEnum",
             Self::InvalidProtocolObject => "InvalidProtocolObject",
             Self::InvalidHex => "InvalidHex",
@@ -52,7 +47,6 @@ impl CanonicalErrorCode {
             Self::NonCanonicalVarUint => "NonCanonicalVarUint",
             Self::ComponentMismatch => "ComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
-            Self::UnsupportedObjectType => "UnsupportedObjectType",
             Self::UnsupportedObjectVersion => "UnsupportedObjectVersion",
         }
     }
@@ -113,13 +107,11 @@ pub fn append_string(output: &mut Vec<u8>, value: &str) {
     append_bytes(output, value.as_bytes());
 }
 
-#[cfg(test)]
 pub struct CanonicalReader<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
-#[cfg(test)]
 impl<'a> CanonicalReader<'a> {
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
@@ -320,13 +312,6 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
-pub(crate) fn run_accepted_setup_command(input: &[u8], session_handle: u32) -> Vec<u8> {
-    match command::run_accepted_setup_command_inner(input, session_handle) {
-        Ok(value) => encode_success(value),
-        Err(error) => encode_error(error),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -446,25 +431,6 @@ mod tests {
                 .as_bytes(),
             )
             .is_err()
-        );
-    }
-
-    #[test]
-    fn generic_command_refuses_setup_verification_without_an_opaque_session() {
-        let error = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "VerifyCollectiveBgvSetup",
-                "setupPackage": {},
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect_err("the generic command cannot own accepted-setup material roots");
-
-        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-        assert_eq!(
-            error.message,
-            "accepted setup verification requires an opaque material-ownership session"
         );
     }
 }

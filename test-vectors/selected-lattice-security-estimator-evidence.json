@@ -1,0 +1,1085 @@
+{
+  "recordKind": "selected-lattice-security-estimator-evidence",
+  "recordVersion": 1,
+  "inputPayloadSha256": "dee1001ef13b72473fc0fd46931c9fbacd15e38ba84756ff443ee2aec984a751",
+  "input": {
+    "sourceAuthority": [
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/parameters.rs",
+        "sha256": "01455f0840f8526a5f896a443d23580618f48ba25e938f52239af2f1239dde0e"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/parameters/root_parameters.rs",
+        "sha256": "7e992c98f4d5333b60294dbc106dd172dfbea8d1240a57a55acae15b233476c7"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/key_switch_topology.rs",
+        "sha256": "bdd5c577a658c4820bfea7a52aab8d8ae78d9423b597cf23e940cca13c988e10"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/evaluator/candidate_evidence.rs",
+        "sha256": "9667cd0371a8ab20ca12e3559e1b0f2b5d6a025dc9a0bee58c77f8804dac005f"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/evaluator/top_k/mod.rs",
+        "sha256": "91befe04a95ffe6f3487d3aecd070cef9797e8752733d2611a3f88e3b8efd43f"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/evaluator/top_k/rotations.rs",
+        "sha256": "271299e239180607c2ea1967c7c0aaef8107cb87c176f9125b11906ad02c1e4f"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_population.rs",
+        "sha256": "0d011c696e4e31e97fca2219717c06d9e07167d5946b5a09d2fef00da95f9c4e"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/setup/accepted_setup/generation_relinearization.rs",
+        "sha256": "cf36fa4463445672897a554b1022318ca70fbf1de355a4746d229a118cb5fbeb"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/bgv/proof_suite/relation_plan/ballot_validity_adapter.rs",
+        "sha256": "9240c829d2e9222300fa7df00591962a35f839b3458b4fa9889c02205173597f"
+      },
+      {
+        "path": "crates/sealed-lattice-kernel/src/foundation/schemas.rs",
+        "sha256": "f6decb7b659661c0f7d5489852487880d653089abda69a7ce7a652593da84c2e"
+      }
+    ],
+    "estimator": {
+      "repository": "https://github.com/malb/lattice-estimator",
+      "revision": "3e48ef421ec256afddb3e7d2249a77eab6e9ba12",
+      "sourceTreeSha256": "c8489bdbf73ab6b0ccd7dd23fe007d8c83bf38adc4359d9709d896dc994c6b09",
+      "containerImageReference": "docker.io/sagemath/sagemath@sha256:ec32d9752b3a11c628103ca6802db890b63cbe9bb480cfea02de09656ecc84a2",
+      "sageVersion": "9.5",
+      "estimatorProgramPath": "tools/ci/selected-lattice-security-estimator.py",
+      "estimatorProgramSha256": "2517e30367257670db8cc50ae561950356c82d5612e37924de6da63e3053a4bb",
+      "classicalReductionCostModel": "MATZOV classical",
+      "quantumReductionCostModel": "MATZOV list_decoding-naive_quantum",
+      "attacks": [
+        "primalUsvp",
+        "primalBdd",
+        "dual",
+        "dualHybrid"
+      ]
+    },
+    "activeAssuranceTarget": {
+      "bits": 80,
+      "materialSuccessThreshold": "at least one half",
+      "role": "Evidence-review policy only; not a suite field or runtime-verifier input."
+    },
+    "topology": {
+      "polynomialDegree": 32768,
+      "plaintextModulus": 257,
+      "orderedDataPrimes": [
+        1953759233,
+        2256928769,
+        2408513537,
+        2610626561,
+        2661154817,
+        3014852609,
+        3031695361,
+        3368550401,
+        84213761,
+        235798529,
+        336855041,
+        1010565121,
+        690552833,
+        1313734657,
+        1397948417,
+        437911553,
+        404226049,
+        606339073,
+        1061093377,
+        1819017217,
+        555810817,
+        1869545473,
+        1903230977
+      ],
+      "orderedSpecialPrimes": [
+        275513737217,
+        275530579969,
+        275968491521
+      ],
+      "dataPrimesPerDecompositionBlock": 3,
+      "evaluatorWorkingLevel": 22,
+      "relinearizationLevels": [
+        22
+      ],
+      "galoisKeySchedule": [
+        {
+          "catalogLevel": 14,
+          "galoisElement": 15
+        },
+        {
+          "catalogLevel": 14,
+          "galoisElement": 19
+        },
+        {
+          "catalogLevel": 14,
+          "galoisElement": 219
+        },
+        {
+          "catalogLevel": 18,
+          "galoisElement": 257
+        },
+        {
+          "catalogLevel": 18,
+          "galoisElement": 1025
+        },
+        {
+          "catalogLevel": 18,
+          "galoisElement": 8193
+        }
+      ],
+      "targetCiphertextLevel": 7,
+      "participantCount": 10,
+      "optionCount": 10
+    },
+    "distributions": {
+      "trusteeSecretContribution": {
+        "exactCoefficientLaw": "uniform centered ternary",
+        "support": [
+          -1,
+          1
+        ],
+        "variance": "2/3",
+        "independence": "Independent across honest trustees and coefficients under the action-root sampler assumption."
+      },
+      "relinearizationEphemeralSecret": {
+        "exactCoefficientLaw": "uniform centered ternary",
+        "support": [
+          -1,
+          1
+        ],
+        "variance": "2/3",
+        "independence": "Fresh per honest trustee and setup attempt; shared only across that trustee's two relinearization rounds."
+      },
+      "setupErrors": {
+        "exactCoefficientLaw": "centered binomial two",
+        "support": [
+          -2,
+          2
+        ],
+        "variance": 1,
+        "families": [
+          "collective public key",
+          "relinearization round one left",
+          "relinearization round one right",
+          "relinearization round two",
+          "Galois key"
+        ]
+      },
+      "ballotEncryption": {
+        "randomizerExactCoefficientLaw": "uniform centered ternary",
+        "errorExactCoefficientLaw": "centered binomial two",
+        "errorPolynomialCountPerCiphertext": 2
+      },
+      "corruptionCases": [
+        {
+          "corruptionCount": 0,
+          "honestContributionCount": 10,
+          "collectiveSecretCoefficientDistribution": {
+            "exactLaw": "convolution of 10 independent uniform centered-ternary variables plus a known proof-bounded shift",
+            "mean": 0,
+            "variance": "20/3",
+            "supportBeforeKnownShift": [
+              -10,
+              10
+            ]
+          },
+          "honestAggregateErrorCoefficientDistribution": {
+            "exactLaw": "centered binomial 20",
+            "mean": 0,
+            "variance": 10,
+            "support": [
+              -20,
+              20
+            ]
+          },
+          "maliciousContributionTreatment": "Proof-bounded coordinated values are treated as known shifts, not honest noise."
+        },
+        {
+          "corruptionCount": 1,
+          "honestContributionCount": 9,
+          "collectiveSecretCoefficientDistribution": {
+            "exactLaw": "convolution of 9 independent uniform centered-ternary variables plus a known proof-bounded shift",
+            "mean": 0,
+            "variance": "18/3",
+            "supportBeforeKnownShift": [
+              -9,
+              9
+            ]
+          },
+          "honestAggregateErrorCoefficientDistribution": {
+            "exactLaw": "centered binomial 18",
+            "mean": 0,
+            "variance": 9,
+            "support": [
+              -18,
+              18
+            ]
+          },
+          "maliciousContributionTreatment": "Proof-bounded coordinated values are treated as known shifts, not honest noise."
+        },
+        {
+          "corruptionCount": 2,
+          "honestContributionCount": 8,
+          "collectiveSecretCoefficientDistribution": {
+            "exactLaw": "convolution of 8 independent uniform centered-ternary variables plus a known proof-bounded shift",
+            "mean": 0,
+            "variance": "16/3",
+            "supportBeforeKnownShift": [
+              -8,
+              8
+            ]
+          },
+          "honestAggregateErrorCoefficientDistribution": {
+            "exactLaw": "centered binomial 16",
+            "mean": 0,
+            "variance": 8,
+            "support": [
+              -16,
+              16
+            ]
+          },
+          "maliciousContributionTreatment": "Proof-bounded coordinated values are treated as known shifts, not honest noise."
+        },
+        {
+          "corruptionCount": 3,
+          "honestContributionCount": 7,
+          "collectiveSecretCoefficientDistribution": {
+            "exactLaw": "convolution of 7 independent uniform centered-ternary variables plus a known proof-bounded shift",
+            "mean": 0,
+            "variance": "14/3",
+            "supportBeforeKnownShift": [
+              -7,
+              7
+            ]
+          },
+          "honestAggregateErrorCoefficientDistribution": {
+            "exactLaw": "centered binomial 14",
+            "mean": 0,
+            "variance": 7,
+            "support": [
+              -14,
+              14
+            ]
+          },
+          "maliciousContributionTreatment": "Proof-bounded coordinated values are treated as known shifts, not honest noise."
+        }
+      ]
+    },
+    "sampleCensus": {
+      "countingRule": "One setup relation is one ring equation for one B-like polynomial and its derived or reused A-like polynomial. Deterministic aggregates remain visible but are not fresh independent samples.",
+      "setupRows": [
+        {
+          "family": "collectivePublicKey",
+          "catalogLevel": 22,
+          "basis": "orderedDataPrimePrefix",
+          "sourceRelationCount": 10,
+          "deterministicDerivedRelationCount": 1,
+          "publicRelationCount": 11,
+          "commonUniformPolynomialCount": 1,
+          "generatedComponentViewCount": 12,
+          "distinctPublicPolynomialCount": 12,
+          "ordinaryMarginalRelationCountPerParticipant": 1,
+          "relationClass": "ordinary marginal plus deterministic aggregate"
+        },
+        {
+          "family": "relinearization",
+          "catalogLevel": 22,
+          "keyCount": 1,
+          "decompositionBlockCount": 8,
+          "roundOneLeftSourceRelationCount": 80,
+          "roundOneRightSourceRelationCount": 80,
+          "roundTwoSourceRelationCount": 80,
+          "roundOneAggregateRelationCount": 16,
+          "runtimeKeyRelationCount": 8,
+          "sourceRelationCount": 240,
+          "deterministicDerivedRelationCount": 24,
+          "publicRelationCount": 264,
+          "commonUniformPolynomialCount": 8,
+          "runtimeKeyHalfComponentViewCount": 16,
+          "duplicateRuntimeAViewCount": 8,
+          "generatedComponentViewCount": 280,
+          "distinctPublicPolynomialCount": 272,
+          "ordinarySecretMarginalRelationCountPerParticipant": 8,
+          "ordinaryEphemeralMarginalRelationCountPerParticipant": 8,
+          "relationClass": "ordinary marginals embedded in a joint secret-square circular or KDM exposure"
+        },
+        {
+          "family": "galois",
+          "catalogLevel": 18,
+          "keyCount": 3,
+          "decompositionBlockCount": 7,
+          "sourceRelationCount": 210,
+          "deterministicDerivedRelationCount": 21,
+          "publicRelationCount": 231,
+          "commonUniformPolynomialCount": 21,
+          "generatedComponentViewCount": 252,
+          "distinctPublicPolynomialCount": 252,
+          "relationClass": "transformed-secret circular or KDM exposure"
+        },
+        {
+          "family": "galois",
+          "catalogLevel": 14,
+          "keyCount": 3,
+          "decompositionBlockCount": 5,
+          "sourceRelationCount": 150,
+          "deterministicDerivedRelationCount": 15,
+          "publicRelationCount": 165,
+          "commonUniformPolynomialCount": 15,
+          "generatedComponentViewCount": 180,
+          "distinctPublicPolynomialCount": 180,
+          "relationClass": "transformed-secret circular or KDM exposure"
+        }
+      ],
+      "setupSummary": {
+        "sourceRelationCountPerParticipant": 61,
+        "sourceRelationCountForRoster": 610,
+        "deterministicDerivedRelationCount": 61,
+        "completePublicRelationCount": 671,
+        "finalRuntimeKeyRelationCount": 45,
+        "commonUniformPolynomialCount": 45,
+        "generatedComponentViewCount": 724,
+        "distinctPublicPolynomialCount": 716,
+        "duplicateComponentViewCount": 8
+      },
+      "ballotExposure": {
+        "maximumAcceptedBallotCount": 10,
+        "ciphertextsPerBallot": 2,
+        "maximumFreshBallotCiphertextCount": 20,
+        "freshRandomizerDistribution": "independent centered ternary",
+        "freshErrorDistributionPerComponent": "independent centered binomial two",
+        "relationClass": "ciphertext exposure under the collective key; not an additional independent setup sample"
+      },
+      "deterministicCiphertextViews": {
+        "publishedAggregateCiphertextCount": 2,
+        "publishedTargetCiphertextCount": 2,
+        "independentSampleCount": 0,
+        "relationClass": "deterministic homomorphic functions of accepted ballot ciphertexts and verified evaluator keys"
+      }
+    },
+    "diagnosticCases": [
+      {
+        "identifier": "oneIndividualPublicKeyShare",
+        "purpose": "One exact ordinary public-key-share marginal before ring structure is relaxed.",
+        "catalogLevel": 22,
+        "basis": "Q",
+        "orderedModuli": [
+          1953759233,
+          2256928769,
+          2408513537,
+          2610626561,
+          2661154817,
+          3014852609,
+          3031695361,
+          3368550401,
+          84213761,
+          235798529,
+          336855041,
+          1010565121,
+          690552833,
+          1313734657,
+          1397948417,
+          437911553,
+          404226049,
+          606339073,
+          1061093377,
+          1819017217,
+          555810817,
+          1869545473,
+          1903230977
+        ],
+        "modulus": "7978954605930979513730214529474237813373504940697089779907870264277977576622679123892578171429133318778801148506955122897693232706381979888517154589475600372783949052653637852139464819411852663128194361065473",
+        "modulusLog2": 690.6353153801573,
+        "ringRelationCount": 1,
+        "scalarSampleCount": 32768
+      },
+      {
+        "identifier": "completePublicKeyCensus",
+        "purpose": "All public-key contribution and aggregate rows pooled as a scalar-LWE stress view.",
+        "catalogLevel": 22,
+        "basis": "Q",
+        "orderedModuli": [
+          1953759233,
+          2256928769,
+          2408513537,
+          2610626561,
+          2661154817,
+          3014852609,
+          3031695361,
+          3368550401,
+          84213761,
+          235798529,
+          336855041,
+          1010565121,
+          690552833,
+          1313734657,
+          1397948417,
+          437911553,
+          404226049,
+          606339073,
+          1061093377,
+          1819017217,
+          555810817,
+          1869545473,
+          1903230977
+        ],
+        "modulus": "7978954605930979513730214529474237813373504940697089779907870264277977576622679123892578171429133318778801148506955122897693232706381979888517154589475600372783949052653637852139464819411852663128194361065473",
+        "modulusLog2": 690.6353153801573,
+        "ringRelationCount": 11,
+        "scalarSampleCount": 360448
+      },
+      {
+        "identifier": "ordinaryRelinearizationRightMarginal",
+        "purpose": "The eight ordinary round-one-right marginals for one trustee secret.",
+        "catalogLevel": 22,
+        "basis": "QTimesKeySwitchP",
+        "orderedModuli": [
+          1953759233,
+          2256928769,
+          2408513537,
+          2610626561,
+          2661154817,
+          3014852609,
+          3031695361,
+          3368550401,
+          84213761,
+          235798529,
+          336855041,
+          1010565121,
+          690552833,
+          1313734657,
+          1397948417,
+          437911553,
+          404226049,
+          606339073,
+          1061093377,
+          1819017217,
+          555810817,
+          1869545473,
+          1903230977,
+          275513737217,
+          275530579969,
+          275968491521
+        ],
+        "modulus": "167154686791828813475473077598897959751678833358131317534090944977688534047554986783712873759456310255945385158229827070495404581369657664971520534279237591932377232038379325138314175046612597230332623449365381402409673265956138740374731358209",
+        "modulusLog2": 804.6477827694861,
+        "ringRelationCount": 8,
+        "scalarSampleCount": 262144
+      },
+      {
+        "identifier": "completeRelinearizationCensus",
+        "purpose": "All relinearization rows pooled as a scalar-LWE stress view; circular rows are not reduced by this diagnostic.",
+        "catalogLevel": 22,
+        "basis": "QTimesKeySwitchP",
+        "orderedModuli": [
+          1953759233,
+          2256928769,
+          2408513537,
+          2610626561,
+          2661154817,
+          3014852609,
+          3031695361,
+          3368550401,
+          84213761,
+          235798529,
+          336855041,
+          1010565121,
+          690552833,
+          1313734657,
+          1397948417,
+          437911553,
+          404226049,
+          606339073,
+          1061093377,
+          1819017217,
+          555810817,
+          1869545473,
+          1903230977,
+          275513737217,
+          275530579969,
+          275968491521
+        ],
+        "modulus": "167154686791828813475473077598897959751678833358131317534090944977688534047554986783712873759456310255945385158229827070495404581369657664971520534279237591932377232038379325138314175046612597230332623449365381402409673265956138740374731358209",
+        "modulusLog2": 804.6477827694861,
+        "ringRelationCount": 264,
+        "scalarSampleCount": 8650752
+      },
+      {
+        "identifier": "completeLevel18GaloisCensus",
+        "purpose": "All level-18 Galois rows pooled as a scalar-LWE stress view; transformed-secret KDM structure remains an assumption.",
+        "catalogLevel": 18,
+        "basis": "QTimesKeySwitchP",
+        "orderedModuli": [
+          1953759233,
+          2256928769,
+          2408513537,
+          2610626561,
+          2661154817,
+          3014852609,
+          3031695361,
+          3368550401,
+          84213761,
+          235798529,
+          336855041,
+          1010565121,
+          690552833,
+          1313734657,
+          1397948417,
+          437911553,
+          404226049,
+          606339073,
+          1061093377,
+          275513737217,
+          275530579969,
+          275968491521
+        ],
+        "modulus": "46465137129753539719542812736821590834237347532421979628555678382785444164804428530003176746883618726019879769218433652211727991778235349155763687217504246140304855184578120257121233539705371263055297576961",
+        "modulusLog2": 683.2114081175048,
+        "ringRelationCount": 231,
+        "scalarSampleCount": 7569408
+      },
+      {
+        "identifier": "completeLevel14GaloisCensus",
+        "purpose": "All level-14 Galois rows pooled as a scalar-LWE stress view; transformed-secret KDM structure remains an assumption.",
+        "catalogLevel": 14,
+        "basis": "QTimesKeySwitchP",
+        "orderedModuli": [
+          1953759233,
+          2256928769,
+          2408513537,
+          2610626561,
+          2661154817,
+          3014852609,
+          3031695361,
+          3368550401,
+          84213761,
+          235798529,
+          336855041,
+          1010565121,
+          690552833,
+          1313734657,
+          1397948417,
+          275513737217,
+          275530579969,
+          275968491521
+        ],
+        "modulus": "407987976274867460579684505439142207635316900175803127029810458695491298345358542702157216220549471071141907184419758266186784109811540988840435666459801782004687433367553",
+        "modulusLog2": 566.7563027663223,
+        "ringRelationCount": 165,
+        "scalarSampleCount": 5406720
+      },
+      {
+        "identifier": "completeBallotCiphertextCensus",
+        "purpose": "All fresh ballot ciphertexts pooled as a scalar-LWE stress view; public-key encryption composition remains separate.",
+        "catalogLevel": 22,
+        "basis": "Q",
+        "orderedModuli": [
+          1953759233,
+          2256928769,
+          2408513537,
+          2610626561,
+          2661154817,
+          3014852609,
+          3031695361,
+          3368550401,
+          84213761,
+          235798529,
+          336855041,
+          1010565121,
+          690552833,
+          1313734657,
+          1397948417,
+          437911553,
+          404226049,
+          606339073,
+          1061093377,
+          1819017217,
+          555810817,
+          1869545473,
+          1903230977
+        ],
+        "modulus": "7978954605930979513730214529474237813373504940697089779907870264277977576622679123892578171429133318778801148506955122897693232706381979888517154589475600372783949052653637852139464819411852663128194361065473",
+        "modulusLog2": 690.6353153801573,
+        "ringRelationCount": 20,
+        "scalarSampleCount": 655360
+      }
+    ],
+    "estimatorConfiguration": {
+      "dimension": 32768,
+      "secretDistributionProxy": "uniform ternary",
+      "errorDistributionProxy": "centered binomial two after plaintext-unit normalization",
+      "normalization": "Every selected data and special prime is one modulo 257. Multiplication by the inverse of 257 preserves uniform A and maps a public 257-times-CB2 error to CB2.",
+      "sampleCountRule": "ring relation count times polynomial degree",
+      "successMetric": "base-two logarithm of estimator rop, conservatively truncated to twelve decimal places",
+      "attackCoverage": [
+        "primalUsvp",
+        "primalBdd",
+        "dual",
+        "dualHybrid"
+      ]
+    },
+    "assumptions": {
+      "structuredSecret": "The exact collective secret is the corruption-case convolution in this record. The estimator proxy is not a reduction from that structured law.",
+      "multiSample": "The exact finite census is recorded, but pooling correlated ring rows as independent scalar samples is only a stress diagnostic.",
+      "circularAndKdm": "Joint security of secret-square, transformed-secret, evaluator-key, proof, VSS, and commitment auxiliary inputs requires the named joint circular or KDM assumption and a separate composition reduction.",
+      "maliciousContributions": "At least seven honest contributions are independently sampled; up to three proof-bounded adversarial contributions are coordinated known shifts.",
+      "ballotEncryption": "Fresh ballot randomizers and errors use the exact laws recorded here. Security of their joint public-key-encryption exposure requires the underlying RLWE encryption reduction.",
+      "targetRelease": "One-shot target authorization narrows exposure but does not prove CPAD security; the threshold-release argument and flooding assumptions remain separate."
+    },
+    "limitations": [
+      "The calculation is a generic scalar-LWE known-attack diagnostic, not an RLWE reduction or proof. It does not close algebraic, subfield, ideal, module, or distribution-specific attacks.",
+      "Scalarization exposes every declared row count but does not make the cyclic scalar equations independent. Reused public polynomials, different secrets, deterministic aggregates, bases, and correlated messages remain explicit in the census.",
+      "The estimator uses one uniform ternary secret and centered-binomial-two error as a named small-secret proxy. It does not implement the exact seven-through-ten-fold collective-secret convolutions or prove monotonicity across the four corruption cases.",
+      "Relinearization and Galois rows contain secret-square, ephemeral-secret, and transformed-secret messages. Their marginal estimates do not establish joint circular or KDM security, malicious collective-setup composition, or auxiliary-input security for correlated proof, VSS, and commitment views.",
+      "The ballot diagnostic is a pooled public-key-encryption stress view. Deterministic aggregate, evaluator, and target ciphertexts are not counted as fresh independent samples, and one-shot target release still requires its separate CPAD and threshold assumptions.",
+      "The quantum figures use the named heuristic nearest-neighbor model for the listed lattice-reduction attacks. They are neither a proof against every quantum algorithm nor a common-proof QROM result.",
+      "The active 80-bit target is review policy. Meeting it does not establish a 128-bit hardened profile, a NIST category, production readiness, or supported-phone qualification."
+    ]
+  },
+  "estimates": [
+    {
+      "identifier": "oneIndividualPublicKeyShare",
+      "catalogLevel": 22,
+      "basis": "Q",
+      "modulusLog2LowerBound": 690.635315380157,
+      "ringRelationCount": 1,
+      "scalarSampleCount": 32768,
+      "models": {
+        "classical": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 163.021777587464,
+              "blockSize": 451,
+              "latticeDimension": 63930
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 163.015698112489,
+              "blockSize": 451,
+              "latticeDimension": 63442
+            },
+            "dual": {
+              "securityBitsLowerBound": 164.122833914302,
+              "blockSize": 451,
+              "latticeDimension": 65496,
+              "usedScalarSamples": 32728
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 163.834951354447,
+              "blockSize": 450,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 163.015698112489
+        },
+        "quantum": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 145.101917178125,
+              "blockSize": 451,
+              "latticeDimension": 63930
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 145.093561215254,
+              "blockSize": 451,
+              "latticeDimension": 63442
+            },
+            "dual": {
+              "securityBitsLowerBound": 146.147981228916,
+              "blockSize": 451,
+              "latticeDimension": 65496,
+              "usedScalarSamples": 32728
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 145.892419514582,
+              "blockSize": 450,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 145.093561215254
+        }
+      }
+    },
+    {
+      "identifier": "completePublicKeyCensus",
+      "catalogLevel": 22,
+      "basis": "Q",
+      "modulusLog2LowerBound": 690.635315380157,
+      "ringRelationCount": 11,
+      "scalarSampleCount": 360448,
+      "models": {
+        "classical": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 163.021777587464,
+              "blockSize": 451,
+              "latticeDimension": 63930
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 163.015698112489,
+              "blockSize": 451,
+              "latticeDimension": 63442
+            },
+            "dual": {
+              "securityBitsLowerBound": 164.122833914302,
+              "blockSize": 451,
+              "latticeDimension": 65496,
+              "usedScalarSamples": 32728
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 163.834951354447,
+              "blockSize": 450,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 163.015698112489
+        },
+        "quantum": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 145.101917178125,
+              "blockSize": 451,
+              "latticeDimension": 63930
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 145.093561215254,
+              "blockSize": 451,
+              "latticeDimension": 63442
+            },
+            "dual": {
+              "securityBitsLowerBound": 146.147981228916,
+              "blockSize": 451,
+              "latticeDimension": 65496,
+              "usedScalarSamples": 32728
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 145.892419514582,
+              "blockSize": 450,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 145.093561215254
+        }
+      }
+    },
+    {
+      "identifier": "ordinaryRelinearizationRightMarginal",
+      "catalogLevel": 22,
+      "basis": "QTimesKeySwitchP",
+      "modulusLog2LowerBound": 804.647782769486,
+      "ringRelationCount": 8,
+      "scalarSampleCount": 262144,
+      "models": {
+        "classical": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 138.308922768794,
+              "blockSize": 362,
+              "latticeDimension": 64068
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 138.310765988363,
+              "blockSize": 362,
+              "latticeDimension": 63457
+            },
+            "dual": {
+              "securityBitsLowerBound": 139.326000952313,
+              "blockSize": 362,
+              "latticeDimension": 65515,
+              "usedScalarSamples": 32747
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 139.325340605119,
+              "blockSize": 362,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 138.308922768794
+        },
+        "quantum": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 123.133452865166,
+              "blockSize": 362,
+              "latticeDimension": 64068
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 123.127188561514,
+              "blockSize": 362,
+              "latticeDimension": 63457
+            },
+            "dual": {
+              "securityBitsLowerBound": 124.106847790869,
+              "blockSize": 362,
+              "latticeDimension": 65515,
+              "usedScalarSamples": 32747
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 124.106286574049,
+              "blockSize": 362,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 123.127188561514
+        }
+      }
+    },
+    {
+      "identifier": "completeRelinearizationCensus",
+      "catalogLevel": 22,
+      "basis": "QTimesKeySwitchP",
+      "modulusLog2LowerBound": 804.647782769486,
+      "ringRelationCount": 264,
+      "scalarSampleCount": 8650752,
+      "models": {
+        "classical": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 138.308922768794,
+              "blockSize": 362,
+              "latticeDimension": 64068
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 138.310765988363,
+              "blockSize": 362,
+              "latticeDimension": 63457
+            },
+            "dual": {
+              "securityBitsLowerBound": 139.326000952313,
+              "blockSize": 362,
+              "latticeDimension": 65515,
+              "usedScalarSamples": 32747
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 139.325340605119,
+              "blockSize": 362,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 138.308922768794
+        },
+        "quantum": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 123.133452865166,
+              "blockSize": 362,
+              "latticeDimension": 64068
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 123.127188561514,
+              "blockSize": 362,
+              "latticeDimension": 63457
+            },
+            "dual": {
+              "securityBitsLowerBound": 124.106847790869,
+              "blockSize": 362,
+              "latticeDimension": 65515,
+              "usedScalarSamples": 32747
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 124.106286574049,
+              "blockSize": 362,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 123.127188561514
+        }
+      }
+    },
+    {
+      "identifier": "completeLevel18GaloisCensus",
+      "catalogLevel": 18,
+      "basis": "QTimesKeySwitchP",
+      "modulusLog2LowerBound": 683.211408117504,
+      "ringRelationCount": 231,
+      "scalarSampleCount": 7569408,
+      "models": {
+        "classical": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 164.966207509449,
+              "blockSize": 458,
+              "latticeDimension": 63842
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 164.959187873378,
+              "blockSize": 458,
+              "latticeDimension": 63450
+            },
+            "dual": {
+              "securityBitsLowerBound": 165.983171948148,
+              "blockSize": 458,
+              "latticeDimension": 65497,
+              "usedScalarSamples": 32729
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 165.848446264816,
+              "blockSize": 457,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 164.959187873378
+        },
+        "quantum": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 146.830221046435,
+              "blockSize": 458,
+              "latticeDimension": 63842
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 146.822247087649,
+              "blockSize": 458,
+              "latticeDimension": 63420
+            },
+            "dual": {
+              "securityBitsLowerBound": 147.804316121711,
+              "blockSize": 458,
+              "latticeDimension": 65497,
+              "usedScalarSamples": 32729
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 147.680154922906,
+              "blockSize": 457,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 146.822247087649
+        }
+      }
+    },
+    {
+      "identifier": "completeLevel14GaloisCensus",
+      "catalogLevel": 14,
+      "basis": "QTimesKeySwitchP",
+      "modulusLog2LowerBound": 566.756302766322,
+      "ringRelationCount": 165,
+      "scalarSampleCount": 5406720,
+      "models": {
+        "classical": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 202.849272432837,
+              "blockSize": 594,
+              "latticeDimension": 64163
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 202.840339314438,
+              "blockSize": 594,
+              "latticeDimension": 63667
+            },
+            "dual": {
+              "securityBitsLowerBound": 204.161074147745,
+              "blockSize": 595,
+              "latticeDimension": 65495,
+              "usedScalarSamples": 32727
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 203.585472226784,
+              "blockSize": 593,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 202.840339314438
+        },
+        "quantum": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 180.507672054934,
+              "blockSize": 594,
+              "latticeDimension": 64163
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 180.50806541324,
+              "blockSize": 593,
+              "latticeDimension": 65336
+            },
+            "dual": {
+              "securityBitsLowerBound": 181.74257141952,
+              "blockSize": 595,
+              "latticeDimension": 65495,
+              "usedScalarSamples": 32727
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 181.231388884604,
+              "blockSize": 593,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 180.507672054934
+        }
+      }
+    },
+    {
+      "identifier": "completeBallotCiphertextCensus",
+      "catalogLevel": 22,
+      "basis": "Q",
+      "modulusLog2LowerBound": 690.635315380157,
+      "ringRelationCount": 20,
+      "scalarSampleCount": 655360,
+      "models": {
+        "classical": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 163.021777587464,
+              "blockSize": 451,
+              "latticeDimension": 63930
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 163.015698112489,
+              "blockSize": 451,
+              "latticeDimension": 63442
+            },
+            "dual": {
+              "securityBitsLowerBound": 164.122833914302,
+              "blockSize": 451,
+              "latticeDimension": 65496,
+              "usedScalarSamples": 32728
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 163.834951354447,
+              "blockSize": 450,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 163.015698112489
+        },
+        "quantum": {
+          "attacks": {
+            "primalUsvp": {
+              "securityBitsLowerBound": 145.101917178125,
+              "blockSize": 451,
+              "latticeDimension": 63930
+            },
+            "primalBdd": {
+              "securityBitsLowerBound": 145.093561215254,
+              "blockSize": 451,
+              "latticeDimension": 63442
+            },
+            "dual": {
+              "securityBitsLowerBound": 146.147981228916,
+              "blockSize": 451,
+              "latticeDimension": 65496,
+              "usedScalarSamples": 32728
+            },
+            "dualHybrid": {
+              "securityBitsLowerBound": 145.892419514582,
+              "blockSize": 450,
+              "usedScalarSamples": 32768
+            }
+          },
+          "minimumSecurityBitsLowerBound": 145.093561215254
+        }
+      }
+    }
+  ],
+  "summary": {
+    "minimumClassicalSecurityBitsLowerBound": 138.308922768794,
+    "minimumQuantumSecurityBitsLowerBound": 123.127188561514,
+    "materialSuccessThreshold": "at least one half",
+    "scope": "Known-attack scalar-LWE diagnostics under the explicitly named proxy model; reductions and joint structured or circular security remain separate assumptions."
+  },
+  "outputPayloadSha256": "6bb3bae8de52695e0bdbf6bf20a598f84d90bf378e16b59fc8c4b986d5e04485"
+}

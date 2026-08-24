@@ -7,7 +7,7 @@ const DEFAULT_MAXIMUM_CUMULATIVE_WORK_BYTE_LENGTH: usize = 64 * 1024 * 1024;
 const DEFAULT_MAXIMUM_CUMULATIVE_ALLOCATION_BYTE_LENGTH: usize = 64 * 1024 * 1024;
 // Keep allocation accounting independent of native pointer width so the same
 // configured limit accepts and refuses the same canonical bytes under WASM.
-const CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH: usize = 32;
+pub(in crate::foundation) const CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanonicalCodecErrorKind {
@@ -69,20 +69,20 @@ impl Default for CanonicalDecodeLimits {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CanonicalDecodeBudget {
+pub(in crate::foundation) struct CanonicalDecodeBudget {
     remaining_work_byte_length: usize,
     remaining_allocation_byte_length: usize,
 }
 
 impl CanonicalDecodeBudget {
-    pub(super) const fn new(limits: &CanonicalDecodeLimits) -> Self {
+    pub(in crate::foundation) const fn new(limits: &CanonicalDecodeLimits) -> Self {
         Self {
             remaining_work_byte_length: limits.maximum_cumulative_work_byte_length,
             remaining_allocation_byte_length: limits.maximum_cumulative_allocation_byte_length,
         }
     }
 
-    fn charge_work(
+    pub(in crate::foundation) fn charge_work(
         &mut self,
         byte_length: usize,
         byte_offset: usize,
@@ -98,7 +98,7 @@ impl CanonicalDecodeBudget {
         Ok(())
     }
 
-    fn charge_allocation(
+    pub(in crate::foundation) fn charge_allocation(
         &mut self,
         byte_length: usize,
         byte_offset: usize,
@@ -119,6 +119,7 @@ mod decoding;
 mod value;
 
 pub use decoding::IncrementalCanonicalTupleDecoder;
+pub(in crate::foundation) use decoding::validate_item_bytes;
 pub use value::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 #[cfg(test)]

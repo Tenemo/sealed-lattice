@@ -4,6 +4,9 @@
         ".": {
             "entry": [
                 "tests/**/*.test.ts",
+                "tools/ci/desktop-browser-compact-cfw-storage-diagnostic-host.ts",
+                "tools/ci/desktop-browser-compact-cfw-storage-diagnostic-worker.ts",
+                "tools/ci/desktop-browser-primitive-measurement-page.ts",
                 "tools/ci/packed-package-smoke.mjs",
                 "tools/ci/sdk-package-tsdown.config.ts",
             ],
@@ -13,10 +16,13 @@
                 "sealed-lattice",
                 // The Wasm kernel build resolves binaryen's wasm-opt script by path.
                 "binaryen",
+                // The root browser harness resolves these deep-import optimizer entries from string-valued Vitest configuration.
+                "@noble/hashes",
+                "@noble/post-quantum",
             ],
         },
         "packages/sdk": {
-            "entry": ["tests/**/*.test.ts"],
+            "entry": ["src/index.ts", "tests/**/*.test.ts"],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
             "ignoreDependencies": [
                 // The public package intentionally declares the crypto backends used by the vendored runtime surface.

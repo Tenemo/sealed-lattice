@@ -1,6 +1,7 @@
 import { shake256 } from '@noble/hashes/sha3.js';
 import {
     BrowserActionStorageCustodyError,
+    foundationProfile,
     type BrowserActionStorageWorkerKernel,
 } from '@sealed-lattice/types';
 import type {
@@ -14,26 +15,28 @@ import type {
 } from '@sealed-lattice/wasm';
 
 import type {
+    AuthenticatedCheckpointPhysicalAccountingScope,
     AuthenticatedCheckpointStore,
-    CheckpointRandomCursor,
-    CheckpointRandomCursorKernel,
+    CheckpointOperationIdentity,
 } from '../authenticated-checkpoint-store.js';
 import type {
     UntrustedStorageExclusiveCapacityReservation,
+    UntrustedStoragePhysicalAccountingSnapshot,
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
 } from '../untrusted-storage-transaction-store.js';
 
 export const foundationHashByteLength = 64;
 export const identifierByteLength = 32;
-export const maximumCanonicalDataChunkByteLength = 49_152;
+export const maximumCanonicalDataChunkByteLength =
+    foundationProfile.streamChunkByteLength;
 export const maximumDeletionBatchRecordCount = 64;
 export const canonicalCommonProofOutputChunkByteLength = 1_048_576;
 export const maximumCommonProofOutputChunkCount = 256;
 export const maximumCommonProofOutputByteLength = 268_435_456;
-const maximumCheckpointCursorCount = 4_096;
-const maximumCheckpointCursorAggregateByteLength = 1_048_576;
+export const maximumCheckpointCursorManifestByteLength = 1_048_576;
 const maximumUnsigned32 = 0xffff_ffff;
+const maximumUnsigned16 = 0xffff;
 const publicRecordMagic = Uint8Array.of(0x53, 0x4c, 0x43, 0x50);
 const publicRecordVersion = 1;
 const publicRecordHeaderByteLength =
@@ -48,7 +51,6 @@ export const checkpointStateStreamDomain =
     'sealed-lattice/common-proof/generation-checkpoint-state/v1';
 const commonProofAttemptStoragePrefixDomain =
     'sealed-lattice/common-proof/attempt-storage-prefix/v1';
-export const commonProofGenerationCheckpointOperationKind = 1;
 export const textEncoder = new TextEncoder();
 
 export type CommonProofExternalMemoryIdentifierInput =
@@ -69,19 +71,242 @@ type ExternalMemoryDataChunk = Readonly<{
 export type ExternalMemoryObjectState = {
     appendedByteLength: bigint;
     chunks: ExternalMemoryDataChunk[];
+    contentDigest: Uint8Array<ArrayBuffer>;
     exactByteLength: bigint;
     header: ExternalMemoryRecordDescriptor;
+    maximumAppendByteLength: number;
     nextChunkOrdinal: number;
     protection: 'public-integrity' | 'secret-authenticated-encryption';
+    sealedContentDigest?: Uint8Array<ArrayBuffer>;
     sealMarker?: ExternalMemoryRecordDescriptor;
+};
+
+export type ExternalMemoryDeletionState = {
+    deletedObjectCount: number;
+    deletionStateDigest: Uint8Array<ArrayBuffer>;
 };
 
 type StagedExternalMemoryRecordWrite = {
     descriptor: ExternalMemoryRecordDescriptor;
     encodedRecord?: Uint8Array<ArrayBuffer>;
     expectedCurrentValue: Uint8Array<ArrayBuffer> | null;
-    payload: Uint8Array<ArrayBuffer>;
+    payloadByteLength: number;
+    payloadOwnership?: CommonProofPayloadBufferOwnership;
 };
+
+export type CommonProofPayloadBufferOwnership = Readonly<{
+    buffer: ArrayBuffer;
+    byteLength: number;
+    identifier: number;
+    ledger: CommonProofPayloadBufferOwnershipLedger;
+}>;
+
+export type CommonProofPayloadBufferAccounting = Readonly<{
+    claimedBufferCount: bigint;
+    claimedByteLength: bigint;
+    maximumLiveBufferByteLength: bigint;
+    maximumLiveBufferCount: number;
+    releasedBufferCount: bigint;
+    releasedByteLength: bigint;
+    secretRecordOpenByteLength: bigint;
+    secretRecordOpenCount: bigint;
+    secretRecordSealByteLength: bigint;
+    secretRecordSealCount: bigint;
+    transferredBufferCount: bigint;
+    transferredByteLength: bigint;
+}>;
+
+export class CommonProofPayloadBufferOwnershipLedger {
+    readonly #liveOwners = new Map<
+        ArrayBuffer,
+        Readonly<{ byteLength: number; identifier: number; owner: string }>
+    >();
+    #claimedBufferCount = 0n;
+    #claimedByteLength = 0n;
+    #liveBufferByteLength = 0n;
+    #maximumLiveBufferByteLength = 0n;
+    #maximumLiveOwnerCount = 0;
+    #nextIdentifier = 1;
+    #releasedBufferCount = 0n;
+    #releasedByteLength = 0n;
+    #transferredBufferCount = 0n;
+    #transferredByteLength = 0n;
+    readonly #transitions: string[] = [];
+
+    public observe(
+        bytes: Uint8Array,
+        owner: string,
+    ): CommonProofPayloadBufferOwnership | undefined {
+        if (!(bytes.buffer instanceof ArrayBuffer)) {
+            return undefined;
+        }
+        const existing = this.#liveOwners.get(bytes.buffer);
+        if (existing !== undefined) {
+            this.#liveOwners.set(bytes.buffer, {
+                byteLength: existing.byteLength,
+                identifier: existing.identifier,
+                owner,
+            });
+            this.#transferredBufferCount += 1n;
+            this.#transferredByteLength += BigInt(existing.byteLength);
+            this.#transitions.push(
+                `transfer:${String(existing.identifier)}:${owner}`,
+            );
+            return Object.freeze({
+                buffer: bytes.buffer,
+                byteLength: existing.byteLength,
+                identifier: existing.identifier,
+                ledger: this,
+            });
+        }
+        if (this.#liveOwners.size >= 2) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `Common-proof payload custody cannot add ${owner} while ${[
+                    ...this.#liveOwners.values(),
+                ]
+                    .map(
+                        (liveOwner) =>
+                            `${String(liveOwner.identifier)}:${liveOwner.owner}`,
+                    )
+                    .join(' and ')} are live.`,
+            );
+        }
+        const identifier = this.#nextIdentifier;
+        this.#nextIdentifier += 1;
+        const byteLength = bytes.byteLength;
+        this.#liveOwners.set(bytes.buffer, { byteLength, identifier, owner });
+        this.#claimedBufferCount += 1n;
+        this.#claimedByteLength += BigInt(byteLength);
+        this.#liveBufferByteLength += BigInt(byteLength);
+        this.#maximumLiveBufferByteLength =
+            this.#maximumLiveBufferByteLength > this.#liveBufferByteLength
+                ? this.#maximumLiveBufferByteLength
+                : this.#liveBufferByteLength;
+        this.#maximumLiveOwnerCount = Math.max(
+            this.#maximumLiveOwnerCount,
+            this.#liveOwners.size,
+        );
+        this.#transitions.push(`claim:${String(identifier)}:${owner}`);
+        return Object.freeze({
+            buffer: bytes.buffer,
+            byteLength,
+            identifier,
+            ledger: this,
+        });
+    }
+
+    public transfer(
+        ownership: CommonProofPayloadBufferOwnership,
+        owner: string,
+    ): void {
+        this.#requireOwnership(ownership);
+        this.#liveOwners.set(ownership.buffer, {
+            byteLength: ownership.byteLength,
+            identifier: ownership.identifier,
+            owner,
+        });
+        this.#transferredBufferCount += 1n;
+        this.#transferredByteLength += BigInt(ownership.byteLength);
+        this.#transitions.push(
+            `transfer:${String(ownership.identifier)}:${owner}`,
+        );
+    }
+
+    public replace(
+        ownership: CommonProofPayloadBufferOwnership | undefined,
+        bytes: Uint8Array,
+        owner: string,
+    ): CommonProofPayloadBufferOwnership | undefined {
+        const replacement = this.observe(bytes, owner);
+        if (
+            ownership !== undefined &&
+            replacement?.buffer !== ownership.buffer
+        ) {
+            this.release(ownership);
+        }
+        return replacement;
+    }
+
+    public release(ownership: CommonProofPayloadBufferOwnership): void {
+        this.#requireOwnership(ownership);
+        const owner = this.#liveOwners.get(ownership.buffer);
+        this.#liveOwners.delete(ownership.buffer);
+        this.#liveBufferByteLength -= BigInt(ownership.byteLength);
+        this.#releasedBufferCount += 1n;
+        this.#releasedByteLength += BigInt(ownership.byteLength);
+        this.#transitions.push(
+            `release:${String(ownership.identifier)}:${owner?.owner}`,
+        );
+    }
+
+    public releaseIfLive(
+        ownership: CommonProofPayloadBufferOwnership | undefined,
+    ): void {
+        if (
+            ownership !== undefined &&
+            ownership.ledger === this &&
+            this.#liveOwners.get(ownership.buffer)?.identifier ===
+                ownership.identifier
+        ) {
+            this.release(ownership);
+        }
+    }
+
+    public assertReleased(): void {
+        if (this.#liveOwners.size !== 0) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `Common-proof payload custody retained ${[
+                    ...this.#liveOwners.values(),
+                ]
+                    .map(
+                        (owner) => `${String(owner.identifier)}:${owner.owner}`,
+                    )
+                    .join(' and ')} after the transaction.`,
+            );
+        }
+    }
+
+    public snapshot(): Readonly<{
+        accounting: CommonProofPayloadBufferAccounting;
+        maximumLiveOwnerCount: number;
+        transitions: readonly string[];
+    }> {
+        return Object.freeze({
+            accounting: Object.freeze({
+                claimedBufferCount: this.#claimedBufferCount,
+                claimedByteLength: this.#claimedByteLength,
+                maximumLiveBufferByteLength: this.#maximumLiveBufferByteLength,
+                maximumLiveBufferCount: this.#maximumLiveOwnerCount,
+                releasedBufferCount: this.#releasedBufferCount,
+                releasedByteLength: this.#releasedByteLength,
+                secretRecordOpenByteLength: 0n,
+                secretRecordOpenCount: 0n,
+                secretRecordSealByteLength: 0n,
+                secretRecordSealCount: 0n,
+                transferredBufferCount: this.#transferredBufferCount,
+                transferredByteLength: this.#transferredByteLength,
+            }),
+            maximumLiveOwnerCount: this.#maximumLiveOwnerCount,
+            transitions: Object.freeze([...this.#transitions]),
+        });
+    }
+
+    #requireOwnership(ownership: CommonProofPayloadBufferOwnership): void {
+        if (
+            ownership.ledger !== this ||
+            !this.#liveOwners.has(ownership.buffer) ||
+            this.#liveOwners.get(ownership.buffer)?.identifier !==
+                ownership.identifier
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Common-proof payload custody received a stale or foreign ownership claim.',
+            );
+        }
+    }
+}
 
 type StagedExternalMemoryRecordDeletion = {
     descriptor: ExternalMemoryRecordDescriptor;
@@ -98,10 +323,11 @@ export type StagedExternalMemoryRecordChange =
       }>;
 
 export type ExternalMemoryShadowState = {
-    byteLength: bigint;
     readonly changes: Map<string, StagedExternalMemoryRecordChange>;
     readonly createdDescriptors: Set<ExternalMemoryRecordDescriptor>;
+    readonly deletionState: ExternalMemoryDeletionState;
     readonly objects: Map<number, ExternalMemoryObjectState>;
+    payloadByteLength: bigint;
     recordCount: number;
     readonly replay: boolean;
 };
@@ -120,15 +346,22 @@ export type CommonProofBrowserCustodyLimits = Readonly<{
 
 export type CommonProofBrowserCustodyInput = Readonly<{
     actionRandomnessCommitment: Uint8Array;
+    applicationStatementSchemaIdentifier: number;
     capacityReservation: UntrustedStorageExclusiveCapacityReservation;
     commonProofEnvironmentIdentifier: Uint8Array;
     commonProofRuntimeBindingHash: Uint8Array;
     limits: CommonProofBrowserCustodyLimits;
-    checkpoint?: Readonly<{
-        cursorKernel: CheckpointRandomCursorKernel;
-        resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
-        store: AuthenticatedCheckpointStore;
-    }>;
+    checkpoint?:
+        | Readonly<{
+              operationIdentity: CheckpointOperationIdentity;
+              physicalAccountingScope: AuthenticatedCheckpointPhysicalAccountingScope;
+              store: AuthenticatedCheckpointStore;
+          }>
+        | Readonly<{
+              resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+              physicalAccountingScope: AuthenticatedCheckpointPhysicalAccountingScope;
+              store: AuthenticatedCheckpointStore;
+          }>;
     proofAttemptLineageIdentifier: Uint8Array;
     store: UntrustedStorageTransactionStore;
     workerKernel: BrowserActionStorageWorkerKernel;
@@ -137,7 +370,9 @@ export type CommonProofBrowserCustodyInput = Readonly<{
 export type CommonProofCheckpointResumeDescriptor = Readonly<{
     checkpointLineageIdentifier: Uint8Array;
     commonProofEnvironmentIdentifier: Uint8Array;
-    orderedPrivateRandomCursorBytes: readonly Uint8Array[];
+    externalMemoryStateDigest: Uint8Array;
+    generationCursorManifestBytes: Uint8Array;
+    privateRandomnessStreamAttemptIdentifier?: Uint8Array;
     safeBoundaryOrdinal: number;
     stableAttemptBindingHash: Uint8Array;
 }>;
@@ -151,8 +386,38 @@ export type CommonProofCheckpointCustody = Readonly<{
     publishAuthenticatedCheckpoint(
         checkpoint: CommonProofGenerationCheckpoint,
     ): Promise<void>;
-    restoreAuthenticatedCheckpointState(): Promise<Uint8Array>;
+    restoreAuthenticatedCheckpoint(): Promise<
+        Readonly<{
+            canonicalStateBytes: Uint8Array;
+            generationCursorManifestBytes: Uint8Array;
+        }>
+    >;
 }>;
+
+export type CommonProofBrowserCustodyPhysicalAccountingSnapshot =
+    UntrustedStoragePhysicalAccountingSnapshot &
+        Readonly<{
+            cleanupCompleted: boolean;
+            cleanupDurationMilliseconds: number;
+            commitReadbackByteLength: number;
+            commitReadbackCallCount: number;
+            ciphertextReadByteLength: number;
+            ciphertextReadCallCount: number;
+            ciphertextWriteByteLength: number;
+            ciphertextWriteCallCount: number;
+            deterministicRegeneratedByteLength: number;
+            deterministicRegenerationCallCount: number;
+            openCallCount: number;
+            openCiphertextByteLength: number;
+            openPlaintextByteLength: number;
+            plaintextReadByteLength: number;
+            plaintextReadCallCount: number;
+            plaintextWriteByteLength: number;
+            plaintextWriteCallCount: number;
+            sealCallCount: number;
+            sealCiphertextByteLength: number;
+            sealPlaintextByteLength: number;
+        }>;
 
 /**
  * Internal worker-owned storage composition. The installed custody host wraps
@@ -163,11 +428,13 @@ export type CommonProofBrowserCustody = Readonly<{
     armApplicationHandoff(): Promise<CommonProofApplicationHandoff>;
     checkpointCustody?: CommonProofCheckpointCustody;
     completeVerifiedOutput(): Promise<void>;
+    copyPhysicalStorageAccounting(): CommonProofBrowserCustodyPhysicalAccountingSnapshot;
     copyCheckpointResumeDescriptor():
         | CommonProofCheckpointResumeDescriptor
         | undefined;
     externalMemory: CommonProofExternalMemoryTransactionExecutor;
     prefixReplayExternalMemory: Readonly<{
+        confirmAuthenticatedCheckpointExternalMemoryState(): void;
         executeDeterministicPrefixReplayTransaction(
             request: CommonProofExternalMemoryRequest,
         ): Promise<readonly CommonProofExternalMemoryReadResult[]>;
@@ -183,13 +450,8 @@ export type CommonProofBrowserCustody = Readonly<{
 export const isSafeUnsigned32 = (value: number): boolean =>
     Number.isSafeInteger(value) && value >= 0 && value <= maximumUnsigned32;
 
-export const isNonEmptyByteArrayList = (
-    value: unknown,
-): value is readonly Uint8Array<ArrayBuffer>[] =>
-    Array.isArray(value) &&
-    value.every(
-        (entry: unknown) => entry instanceof Uint8Array && entry.byteLength > 0,
-    );
+export const isNonzeroUnsigned16 = (value: number): boolean =>
+    Number.isSafeInteger(value) && value > 0 && value <= maximumUnsigned16;
 
 export const copyExactBytes = (
     value: Uint8Array,
@@ -306,7 +568,10 @@ export const copyCheckpointResumeDescriptor = (
     if (
         typeof value !== 'object' ||
         value === null ||
-        !isNonEmptyByteArrayList(value.orderedPrivateRandomCursorBytes) ||
+        !(value.generationCursorManifestBytes instanceof Uint8Array) ||
+        value.generationCursorManifestBytes.byteLength === 0 ||
+        value.generationCursorManifestBytes.byteLength >
+            maximumCheckpointCursorManifestByteLength ||
         !isSafeUnsigned32(value.safeBoundaryOrdinal)
     ) {
         throw new BrowserActionStorageCustodyError(
@@ -314,32 +579,13 @@ export const copyCheckpointResumeDescriptor = (
             'The common-proof checkpoint resume descriptor is malformed.',
         );
     }
-    if (
-        value.orderedPrivateRandomCursorBytes.length >
-        maximumCheckpointCursorCount
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            `The common-proof checkpoint resume descriptor exceeds the ${String(maximumCheckpointCursorCount)}-cursor limit.`,
-        );
-    }
-    let cursorAggregateByteLength = 0;
-    for (const cursorBytes of value.orderedPrivateRandomCursorBytes) {
-        if (
-            cursorBytes.byteLength >
-            maximumCheckpointCursorAggregateByteLength -
-                cursorAggregateByteLength
-        ) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                `The common-proof checkpoint resume descriptor exceeds the ${String(maximumCheckpointCursorAggregateByteLength)}-byte cursor budget.`,
-            );
-        }
-        cursorAggregateByteLength += cursorBytes.byteLength;
-    }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
-    const orderedPrivateRandomCursorBytes: Uint8Array<ArrayBuffer>[] = [];
+    let externalMemoryStateDigest = new Uint8Array(0);
+    let generationCursorManifestBytes = new Uint8Array(0);
+    let privateRandomnessStreamAttemptIdentifier:
+        | Uint8Array<ArrayBuffer>
+        | undefined;
     let stableAttemptBindingHash = new Uint8Array(0);
     try {
         checkpointLineageIdentifier = copyExactBytes(
@@ -352,9 +598,22 @@ export const copyCheckpointResumeDescriptor = (
             identifierByteLength,
             'Checkpoint common-proof environment identifier',
         );
-        for (const cursorBytes of value.orderedPrivateRandomCursorBytes) {
-            orderedPrivateRandomCursorBytes.push(Uint8Array.from(cursorBytes));
-        }
+        externalMemoryStateDigest = copyExactBytes(
+            value.externalMemoryStateDigest,
+            foundationHashByteLength,
+            'Checkpoint external-memory state digest',
+        );
+        generationCursorManifestBytes = Uint8Array.from(
+            value.generationCursorManifestBytes,
+        );
+        privateRandomnessStreamAttemptIdentifier =
+            value.privateRandomnessStreamAttemptIdentifier === undefined
+                ? undefined
+                : copyExactBytes(
+                      value.privateRandomnessStreamAttemptIdentifier,
+                      identifierByteLength,
+                      'Private-randomness stream-attempt identifier',
+                  );
         stableAttemptBindingHash = copyExactBytes(
             value.stableAttemptBindingHash,
             foundationHashByteLength,
@@ -363,18 +622,20 @@ export const copyCheckpointResumeDescriptor = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
-            orderedPrivateRandomCursorBytes: Object.freeze(
-                orderedPrivateRandomCursorBytes,
-            ),
+            externalMemoryStateDigest,
+            generationCursorManifestBytes,
+            ...(privateRandomnessStreamAttemptIdentifier === undefined
+                ? {}
+                : { privateRandomnessStreamAttemptIdentifier }),
             safeBoundaryOrdinal: value.safeBoundaryOrdinal,
             stableAttemptBindingHash,
         });
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
-        for (const cursorBytes of orderedPrivateRandomCursorBytes) {
-            cursorBytes.fill(0);
-        }
+        externalMemoryStateDigest.fill(0);
+        generationCursorManifestBytes.fill(0);
+        privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);
         throw error;
     }
@@ -385,10 +646,10 @@ export const destroyCheckpointResumeDescriptor = (
 ): void => {
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
+    descriptor.externalMemoryStateDigest.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
-    for (const cursorBytes of descriptor.orderedPrivateRandomCursorBytes) {
-        cursorBytes.fill(0);
-    }
+    descriptor.generationCursorManifestBytes.fill(0);
+    descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
 };
 
 export const destroyIdentifierInput = (
@@ -410,49 +671,11 @@ export const allObjectDescriptors = (
 export const destroyExternalMemoryObjectInMemory = (
     object: ExternalMemoryObjectState,
 ): void => {
+    object.contentDigest.fill(0);
+    object.sealedContentDigest?.fill(0);
     for (const descriptor of allObjectDescriptors(object)) {
         destroyIdentifierInput(descriptor.identifierInput);
     }
-};
-
-export const decodeCheckpointCursor = (
-    cursorKernel: CheckpointRandomCursorKernel,
-    canonicalBytes: Uint8Array,
-): CheckpointRandomCursor => {
-    const decoded = cursorKernel.decodePrivateRandomCursor({
-        canonicalBytesHex: bytesToHex(canonicalBytes),
-    }).value;
-    let nextCounter: bigint;
-    try {
-        nextCounter = BigInt(decoded.nextCounter);
-    } catch (error) {
-        throw new BrowserActionStorageCustodyError(
-            'RecordAuthenticationFailed',
-            'A common-proof checkpoint cursor has a malformed counter.',
-            error,
-        );
-    }
-    return Object.freeze({
-        derivationContextHash: hexToExactBytes(
-            decoded.derivationContextHash,
-            foundationHashByteLength,
-            'Checkpoint cursor derivation-context hash',
-        ),
-        family: decoded.family,
-        nextCounter,
-        ...(decoded.nextUnreadBitOffsetInBufferedBlock === undefined
-            ? {}
-            : {
-                  nextUnreadBitOffsetInBufferedBlock:
-                      decoded.nextUnreadBitOffsetInBufferedBlock,
-              }),
-        purpose: decoded.purpose,
-        streamAttemptIdentifier: hexToExactBytes(
-            decoded.streamAttemptIdentifierHex,
-            identifierByteLength,
-            'Checkpoint cursor stream-attempt identifier',
-        ),
-    });
 };
 
 export const checkpointEnvironmentBindingHash = (input: {

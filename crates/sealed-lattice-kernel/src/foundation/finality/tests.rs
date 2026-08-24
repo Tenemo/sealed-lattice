@@ -9,9 +9,10 @@ use fips204::{
 };
 
 use crate::foundation::{
-    CanonicalBoardLimits, CanonicalBoardVerifier, RosterEntry, StateOutputIntentPayload,
-    StateReservationIntentPayload, StateWitnessVoteKind, StateWitnessVotePayload,
-    derive_state_exact_output_hash, derive_state_witness_vote_sequence, signature_message,
+    AggregatePayload, CanonicalBoardLimits, CanonicalBoardVerifier, RosterEntry,
+    StateOutputIntentPayload, StateReservationIntentPayload, StateWitnessVoteKind,
+    StateWitnessVotePayload, derive_state_exact_output_hash, derive_state_witness_vote_sequence,
+    signature_message,
 };
 
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
@@ -111,6 +112,7 @@ impl FinalityTestFixture {
             &self.roster,
             CanonicalBoardLimits {
                 maximum_ballot_attempts_per_participant: 4,
+                maximum_candidate_packages_per_action: 20,
                 maximum_retained_canonical_carrier_byte_length: 8 * 1024 * 1024,
                 maximum_unordered_carriers_per_batch: 128,
                 maximum_retained_transcript_objects: 512,
@@ -259,21 +261,15 @@ impl FinalityTestFixture {
             .iter()
             .map(|carrier| canonical_signed_carrier_object_hash(carrier))
             .collect::<Vec<_>>();
-        let selected_ballot_items = ballot_hashes
-            .iter()
-            .map(|object_hash| CanonicalItem::hash512(object_hash.into_bytes()))
-            .collect::<Vec<_>>();
-        let aggregate_payload = CanonicalTuple::new(
-            0x1404,
-            1,
-            vec![
-                CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
-                CanonicalItem::hash512(hash(0x52).into_bytes()),
-                CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballot_items)
-                    .expect("selected ballot list"),
-                self.stream_descriptor_item(CanonicalStreamDomain::AggregateCiphertext, 0xc3),
+        let aggregate_payload = AggregatePayload::new(
+            verified_setup_source_hash,
+            ballot_hashes.clone(),
+            [
+                self.stream_descriptor(CanonicalStreamDomain::AggregateCiphertext, 0xc3),
+                self.stream_descriptor(CanonicalStreamDomain::AggregateCiphertext, 0xc4),
             ],
         )
+        .expect("aggregate payload")
         .encode()
         .expect("aggregate payload");
         let aggregate_envelope = self.envelope(
@@ -316,13 +312,18 @@ impl FinalityTestFixture {
             .expect("replay capability");
         VerifiedEvaluatorReplay::from_verified_relation(
             replay_object,
-            self.roster_hash,
-            4,
-            self.verified_stream(
-                CanonicalStreamDomain::ReplayTargetIdentifierCiphertext,
-                0xc4,
-            ),
-            self.verified_stream(CanonicalStreamDomain::ReplayTargetOrderCiphertext, 0xc5),
+            VerifiedEvaluatorReplayRelationOutput {
+                roster_hash: self.roster_hash,
+                top_count: 4,
+                target_level: 1,
+                decrypt_scaling: 1,
+                target_identifier_stream: self.verified_stream(
+                    CanonicalStreamDomain::ReplayTargetIdentifierCiphertext,
+                    0xc4,
+                ),
+                target_order_stream: self
+                    .verified_stream(CanonicalStreamDomain::ReplayTargetOrderCiphertext, 0xc5),
+            },
             &CanonicalDecodeLimits::default(),
         )
         .expect("verified replay relation fixture")

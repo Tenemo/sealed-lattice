@@ -3,12 +3,16 @@ import { webcrypto } from 'node:crypto';
 import {
     BrowserActionStorageCustodyError,
     type BrowserActionStorageWorkerKernel,
+    type BrowserLocalRecordIdentifierInput,
+    type BrowserLocalRecordOpenableIdentifierInput,
 } from '@sealed-lattice/types';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
     openAuthenticatedCheckpointStore,
     type CheckpointBoundaryPolicy,
+    type CheckpointOperationIdentity,
+    type AuthenticatedCheckpointPhysicalAccountingScope,
     type TransferableAuthenticatedCheckpointStore,
 } from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
 import {
@@ -16,14 +20,24 @@ import {
     openCommonProofBrowserCustody,
     type CommonProofBrowserCustody,
 } from '#packages/protocol/src/runtime/common-proof-browser-custody';
+import {
+    destroyCheckpointResumeDescriptor,
+    maximumCanonicalDataChunkByteLength,
+} from '#packages/protocol/src/runtime/common-proof-browser-custody/records';
 import type {
     UntrustedStorageExclusiveCapacityReservation,
     UntrustedStorageTransactionStore,
 } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
+    commonProofSecretRecordOverheadByteLength,
     commonProofStorageCapacityProfile,
     requireCommonProofStorageCapacity,
 } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
+import { commonProofScratchByteLength } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store/records';
+import {
+    TestActionStorageWorkerKernel,
+    testActionStorageRootByteLength,
+} from '#packages/protocol/tests/support/action-storage-custody-test-support';
 import {
     generateRuntimeStorageEncryptionKey,
     InMemoryRuntimeStorageAdapter,
@@ -33,20 +47,20 @@ import {
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
+    type ClosedWorkerCommonProofScratchRecordIdentifierInput,
     type CommonProofExternalMemoryOperation,
     type CommonProofExternalMemoryRequest,
-    type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { closedWorkerCommonProofScratchStorage } from '#packages/wasm/src/local-storage-root-worker-kernel/authorities';
 
 const cryptoProvider = webcrypto as unknown as Crypto;
 const checkpointLimits = {
     maximumActiveOperationIdentityCount: 64,
     maximumCheckpointStateByteLength: 1_048_576,
     maximumManifestByteLength: 16_384,
-    maximumRandomCursorCount: 8,
+    maximumRandomCursorManifestByteLength: 4_096,
     maximumRecordSealingCount: 256,
     maximumSourceDigestCount: 8,
-    maximumStreamAttemptCount: 4,
     transactionLifetimeMilliseconds: 5_000,
 } as const;
 const boundaryPolicy: CheckpointBoundaryPolicy = {
@@ -62,25 +76,108 @@ const binding = Object.freeze({
 const actionRandomnessCommitment = new Uint8Array(64).fill(0x55);
 const runtimeBindingHash = new Uint8Array(64).fill(0x66);
 const proofAttemptLineageIdentifier = new Uint8Array(32).fill(0x77);
+const applicationStatementSchemaIdentifier = 0x1217;
 
-const bytesFromHex = (encoded: string): Uint8Array<ArrayBuffer> => {
-    const bytes = new Uint8Array(encoded.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            encoded.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
+const asBrowserLocalRecordIdentifier = (
+    identifierInput: ClosedWorkerCommonProofScratchRecordIdentifierInput,
+): BrowserLocalRecordOpenableIdentifierInput =>
+    identifierInput as unknown as BrowserLocalRecordOpenableIdentifierInput;
+
+const createInitializedTestWorkerKernel =
+    async (): Promise<BrowserActionStorageWorkerKernel> => {
+        const workerKernel = new TestActionStorageWorkerKernel({
+            actionStorageRoot: new Uint8Array(
+                testActionStorageRootByteLength,
+            ).fill(0x5a),
+            cryptoProvider,
+        });
+        await workerKernel.createAndStageDeviceWrappingState({ binding });
+        await workerKernel.commitStagedActionStorageRoot();
+        closedWorkerCommonProofScratchStorage.set(
+            workerKernel,
+            Object.freeze({
+                deriveRecordIdentifier: (identifierInput) =>
+                    workerKernel.deriveActiveLocalRecordIdentifier(
+                        identifierInput as unknown as BrowserLocalRecordIdentifierInput,
+                    ),
+                openRecord: async (input) => {
+                    const encodedPlaintext =
+                        await workerKernel.openActiveLocalRecord({
+                            actionRandomnessCommitment:
+                                input.actionRandomnessCommitment,
+                            envelope: input.envelope,
+                            identifierInput: asBrowserLocalRecordIdentifier(
+                                input.identifierInput,
+                            ),
+                            recordVersion: 1n,
+                        });
+                    try {
+                        if (encodedPlaintext[0] !== 0xa5) {
+                            throw new Error(
+                                'The test common-proof record has an invalid framing byte.',
+                            );
+                        }
+                        return encodedPlaintext.slice(1);
+                    } finally {
+                        encodedPlaintext.fill(0);
+                    }
+                },
+                sealRecord: async (input) => {
+                    const encodedPlaintext = new Uint8Array(
+                        input.plaintext.byteLength + 1,
+                    );
+                    encodedPlaintext[0] = 0xa5;
+                    encodedPlaintext.set(input.plaintext, 1);
+                    try {
+                        return await workerKernel.sealActiveLocalRecord({
+                            actionRandomnessCommitment:
+                                input.actionRandomnessCommitment,
+                            identifierInput: asBrowserLocalRecordIdentifier(
+                                input.identifierInput,
+                            ),
+                            plaintext: encodedPlaintext,
+                            recordVersion: 1n,
+                        });
+                    } finally {
+                        encodedPlaintext.fill(0);
+                    }
+                },
+            }),
         );
-    }
-    return bytes;
-};
+        return workerKernel;
+    };
+
+const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
+    Uint8Array.of(
+        0x53,
+        0x4c,
+        0x43,
+        0x50,
+        0x43,
+        0x4d,
+        0x30,
+        0x33,
+        0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    );
 
 const request = (
     operations: readonly CommonProofExternalMemoryOperation[],
     requestSequence = 1n,
+    maximumPayloadByteLength = 1_048_576n,
 ): CommonProofExternalMemoryRequest =>
     Object.freeze({
         maximumOperationCount: 4_096,
-        maximumPayloadByteLength: 1_048_576n,
+        maximumPayloadByteLength,
         operations: Object.freeze(operations),
         requestDigest: new Uint8Array(64).fill(0x88),
         requestSequence,
@@ -120,11 +217,15 @@ const canonicalAppendRequests = (
     objectOrdinal: number,
     bytes: Uint8Array,
     firstRequestSequence = 1n,
+    maximumPayloadByteLength: number = maximumCanonicalDataChunkByteLength,
 ): readonly CommonProofExternalMemoryRequest[] => {
     const requests: CommonProofExternalMemoryRequest[] = [];
     let byteOffset = 0;
     while (byteOffset < bytes.byteLength) {
-        const chunkByteLength = Math.min(49_152, bytes.byteLength - byteOffset);
+        const chunkByteLength = Math.min(
+            maximumPayloadByteLength,
+            bytes.byteLength - byteOffset,
+        );
         requests.push(
             request(
                 [
@@ -135,6 +236,7 @@ const canonicalAppendRequests = (
                     ),
                 ],
                 firstRequestSequence + BigInt(requests.length),
+                BigInt(maximumPayloadByteLength),
             ),
         );
         byteOffset += chunkByteLength;
@@ -239,14 +341,9 @@ const ensureAuthenticatedRepairHead = async (
 };
 
 describe('Common-proof browser custody', () => {
-    let transcriptCoreKernel: TranscriptCoreKernel;
     const openedCustodies: CommonProofBrowserCustody[] = [];
     const openedCheckpointStores: TransferableAuthenticatedCheckpointStore[] =
         [];
-
-    beforeAll(async () => {
-        transcriptCoreKernel = await loadFreshTranscriptCoreKernel();
-    });
 
     afterEach(async () => {
         await Promise.allSettled(
@@ -259,11 +356,13 @@ describe('Common-proof browser custody', () => {
 
     const openFixture = async (input?: {
         adapter?: InMemoryRuntimeStorageAdapter;
+        applicationStatementSchemaIdentifier?: number;
         decorateCapacityReservation?: (
             reservation: UntrustedStorageExclusiveCapacityReservation,
         ) => UntrustedStorageExclusiveCapacityReservation;
         checkpointStore?: TransferableAuthenticatedCheckpointStore;
         commonProofEnvironmentIdentifier?: Uint8Array;
+        maximumExternalMemoryByteLength?: bigint;
         resumeDescriptor?: ReturnType<
             CommonProofBrowserCustody['copyCheckpointResumeDescriptor']
         >;
@@ -308,29 +407,90 @@ describe('Common-proof browser custody', () => {
         const ownedCapacityReservation =
             input?.decorateCapacityReservation?.(capacityReservation) ??
             capacityReservation;
+        let freshCheckpointOperationIdentity:
+            | CheckpointOperationIdentity
+            | undefined;
+        if (
+            input?.checkpointStore !== undefined &&
+            input.resumeDescriptor === undefined
+        ) {
+            const checkpointLineageReservation =
+                await input.checkpointStore.reserveCheckpointLineage();
+            try {
+                freshCheckpointOperationIdentity =
+                    await input.checkpointStore.bindCheckpointLineageToProofAttempt(
+                        checkpointLineageReservation,
+                        proofAttemptLineageIdentifier,
+                    );
+            } catch (error) {
+                await input.checkpointStore.releaseCheckpointLineageReservation(
+                    checkpointLineageReservation,
+                );
+                await ownedCapacityReservation.release();
+                throw error;
+            }
+        }
+        let checkpointPhysicalAccountingScope:
+            | AuthenticatedCheckpointPhysicalAccountingScope
+            | undefined;
+        if (input?.checkpointStore !== undefined) {
+            const checkpointLineageIdentifier =
+                input.resumeDescriptor?.checkpointLineageIdentifier.slice() ??
+                freshCheckpointOperationIdentity?.checkpointLineageIdentifier;
+            if (checkpointLineageIdentifier === undefined) {
+                await ownedCapacityReservation.release();
+                throw new Error(
+                    'The checkpoint fixture did not produce a lineage identifier.',
+                );
+            }
+            try {
+                checkpointPhysicalAccountingScope =
+                    await input.checkpointStore.openPhysicalAccountingScope(
+                        checkpointLineageIdentifier,
+                    );
+            } catch (error) {
+                if (freshCheckpointOperationIdentity !== undefined) {
+                    await input.checkpointStore.releaseOperationIdentity(
+                        freshCheckpointOperationIdentity,
+                    );
+                }
+                await ownedCapacityReservation.release();
+                throw error;
+            } finally {
+                checkpointLineageIdentifier.fill(0);
+            }
+        }
         let custody: CommonProofBrowserCustody;
         try {
             custody = openCommonProofBrowserCustody({
                 actionRandomnessCommitment,
+                applicationStatementSchemaIdentifier:
+                    input?.applicationStatementSchemaIdentifier ??
+                    applicationStatementSchemaIdentifier,
                 capacityReservation: ownedCapacityReservation,
                 ...(input?.checkpointStore === undefined
                     ? {}
                     : {
                           checkpoint: {
-                              cursorKernel: transcriptCoreKernel,
                               ...(input.resumeDescriptor === undefined
-                                  ? {}
+                                  ? {
+                                        operationIdentity:
+                                            freshCheckpointOperationIdentity!,
+                                    }
                                   : {
                                         resumeDescriptor:
                                             input.resumeDescriptor,
                                     }),
                               store: input.checkpointStore,
+                              physicalAccountingScope:
+                                  checkpointPhysicalAccountingScope!,
                           },
                       }),
                 commonProofEnvironmentIdentifier,
                 commonProofRuntimeBindingHash: runtimeBindingHash,
                 limits: {
-                    maximumExternalMemoryByteLength: 5_242_880n,
+                    maximumExternalMemoryByteLength:
+                        input?.maximumExternalMemoryByteLength ?? 5_242_880n,
                     maximumExternalMemoryObjectCount: 32,
                     maximumExternalMemoryRecordCount: 512,
                     transactionLifetimeMilliseconds: 5_000,
@@ -340,6 +500,22 @@ describe('Common-proof browser custody', () => {
                 workerKernel,
             });
         } catch (error) {
+            if (
+                freshCheckpointOperationIdentity !== undefined &&
+                input?.checkpointStore !== undefined
+            ) {
+                await input.checkpointStore.releaseOperationIdentity(
+                    freshCheckpointOperationIdentity,
+                );
+            }
+            if (
+                checkpointPhysicalAccountingScope !== undefined &&
+                input?.checkpointStore !== undefined
+            ) {
+                await input.checkpointStore.releasePhysicalAccountingScope(
+                    checkpointPhysicalAccountingScope,
+                );
+            }
             await ownedCapacityReservation.release();
             throw error;
         }
@@ -347,7 +523,7 @@ describe('Common-proof browser custody', () => {
         return { adapter, custody, store, workerKernel };
     };
 
-    it('rejects hostile checkpoint cursor counts and aggregate bytes before custody opens', async () => {
+    it('rejects hostile checkpoint manifest and attempt-identifier lengths before custody opens', async () => {
         const checkpointStorage = await openRuntimeTestStore({
             namespace: 'common-proof-hostile-checkpoint-descriptor-test',
         });
@@ -355,22 +531,18 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
         });
         openedCheckpointStores.push(checkpointStore);
-        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
-            kernel: await loadFreshTranscriptCoreKernel(),
-        });
-        await workerKernel.createAndStageDeviceWrappingState({ binding });
-        await workerKernel.commitStagedActionStorageRoot();
+        const workerKernel = await createInitializedTestWorkerKernel();
         const descriptorBase = {
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x12),
             commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0x99),
+            externalMemoryStateDigest: new Uint8Array(64).fill(0x44),
             safeBoundaryOrdinal: 1,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x34),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         } as const;
 
         await expect(
@@ -378,32 +550,51 @@ describe('Common-proof browser custody', () => {
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    orderedPrivateRandomCursorBytes: Array.from(
-                        { length: 4_097 },
-                        () => Uint8Array.of(1),
-                    ),
+                    generationCursorManifestBytes: new Uint8Array(1_048_577),
                 },
                 workerKernel,
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
 
-        const firstOversizedCursor = new Uint8Array(524_289).fill(0x56);
-        const secondOversizedCursor = new Uint8Array(524_288).fill(0x78);
         await expect(
             openFixture({
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    orderedPrivateRandomCursorBytes: [
-                        firstOversizedCursor,
-                        secondOversizedCursor,
-                    ],
+                    generationCursorManifestBytes: new Uint8Array(),
                 },
                 workerKernel,
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
-        expect(firstOversizedCursor[0]).toBe(0x56);
-        expect(secondOversizedCursor[0]).toBe(0x78);
+
+        await expect(
+            openFixture({
+                checkpointStore,
+                resumeDescriptor: {
+                    ...descriptorBase,
+                    externalMemoryStateDigest: new Uint8Array(63),
+                    generationCursorManifestBytes:
+                        emptyPrivateRandomCursorManifest(),
+                },
+                workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        const malformedAttemptIdentifier = new Uint8Array(31).fill(0x56);
+        await expect(
+            openFixture({
+                checkpointStore,
+                resumeDescriptor: {
+                    ...descriptorBase,
+                    generationCursorManifestBytes:
+                        emptyPrivateRandomCursorManifest(),
+                    privateRandomnessStreamAttemptIdentifier:
+                        malformedAttemptIdentifier,
+                },
+                workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        expect(malformedAttemptIdentifier[0]).toBe(0x56);
     });
 
     it('persists encrypted and public objects through create, append, seal, ordered read, and delete', async () => {
@@ -482,6 +673,191 @@ describe('Common-proof browser custody', () => {
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
     });
 
+    it('uses the executor-bound payload ceiling as the canonical append chunk size', async () => {
+        const { custody } = await openFixture({
+            maximumExternalMemoryByteLength: 5_242_880n,
+        });
+        const compactCfwChunkByteLength = 655_360;
+        const objectBytes = Uint8Array.from(
+            { length: compactCfwChunkByteLength * 2 + 40 },
+            (_unused, byteOrdinal) => (byteOrdinal * 43 + 29) & 0xff,
+        );
+        const maximumPayloadByteLength = BigInt(compactCfwChunkByteLength);
+        await custody.externalMemory.executeTransaction(
+            request(
+                [createOperation(24, BigInt(objectBytes.byteLength))],
+                1n,
+                maximumPayloadByteLength,
+            ),
+        );
+
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request(
+                    [
+                        appendOperation(
+                            24,
+                            objectBytes.slice(0, compactCfwChunkByteLength - 1),
+                        ),
+                    ],
+                    2n,
+                    BigInt(compactCfwChunkByteLength - 1),
+                ),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+
+        for (const appendRequest of canonicalAppendRequests(
+            24,
+            objectBytes,
+            3n,
+            compactCfwChunkByteLength,
+        )) {
+            await custody.externalMemory.executeTransaction(appendRequest);
+        }
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(24)], 6n, maximumPayloadByteLength),
+        );
+        const reads = await custody.externalMemory.executeTransaction(
+            request(
+                [
+                    readOperation(
+                        24,
+                        BigInt(compactCfwChunkByteLength - 13),
+                        compactCfwChunkByteLength,
+                    ),
+                ],
+                7n,
+                maximumPayloadByteLength,
+            ),
+        );
+        expect(reads).toHaveLength(1);
+        expect(reads[0]?.bytes).toEqual(
+            objectBytes.slice(
+                compactCfwChunkByteLength - 13,
+                compactCfwChunkByteLength * 2 - 13,
+            ),
+        );
+        const accounting =
+            custody.externalMemory.copyBrowserStorageAccounting?.();
+        expect(accounting).toMatchObject({
+            secretRecordSealByteLength: BigInt(objectBytes.byteLength + 9),
+            secretRecordSealCount: 5n,
+        });
+        await custody.externalMemory.executeTransaction(
+            request([deleteOperation(24)], 8n, maximumPayloadByteLength),
+        );
+    });
+
+    it('reports authenticated physical storage, buffer custody, and terminal cleanup from production owners', async () => {
+        const { custody, store } = await openFixture();
+        const secretBytes = Uint8Array.from(
+            { length: 8_193 },
+            (_unused, byteIndex) => (byteIndex * 31 + 19) & 0xff,
+        );
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(17, BigInt(secretBytes.byteLength))]),
+        );
+        for (const appendRequest of canonicalAppendRequests(17, secretBytes)) {
+            await custody.externalMemory.executeTransaction(appendRequest);
+        }
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(17)]),
+        );
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request([readOperation(17, 101n, 4_097)]),
+            ),
+        ).resolves.toEqual([
+            expect.objectContaining({
+                bytes: secretBytes.slice(101, 4_198),
+                objectOrdinal: 17,
+                offset: 101n,
+            }),
+        ]);
+        await custody.externalMemory.executeTransaction(
+            request([deleteOperation(17)]),
+        );
+        await custody.outputStore.commitChunk(
+            0,
+            new Uint8Array(1_033).fill(0x5c),
+        );
+        custody.sealCanonicalOutput();
+
+        const browserStorageAccounting =
+            custody.externalMemory.copyBrowserStorageAccounting?.();
+        if (browserStorageAccounting === undefined) {
+            throw new Error(
+                'Production common-proof custody omitted browser-storage accounting.',
+            );
+        }
+        const beforeCleanup = custody.copyPhysicalStorageAccounting();
+        expect(beforeCleanup.cleanupCompleted).toBe(false);
+        expect(beforeCleanup.physicalStoredEndByteLength).toBeGreaterThan(
+            beforeCleanup.physicalStoredStartByteLength,
+        );
+
+        await custody.completeVerifiedOutput();
+        openedCustodies.splice(openedCustodies.indexOf(custody), 1);
+        const terminal = custody.copyPhysicalStorageAccounting();
+
+        expect(terminal).toMatchObject({
+            cleanupCompleted: true,
+            openCallCount: Number(
+                browserStorageAccounting.secretRecordOpenCount,
+            ),
+            openCiphertextByteLength: Number(
+                browserStorageAccounting.secretRecordOpenByteLength,
+            ),
+            sealCallCount: Number(
+                browserStorageAccounting.secretRecordSealCount,
+            ),
+            sealPlaintextByteLength: Number(
+                browserStorageAccounting.secretRecordSealByteLength,
+            ),
+        });
+        expect(terminal.commitReadbackCallCount).toBeGreaterThan(0);
+        expect(terminal.commitReadbackByteLength).toBeGreaterThan(1_033);
+        expect(terminal.ciphertextReadByteLength).toBeGreaterThan(4_097);
+        expect(terminal.ciphertextWriteByteLength).toBeGreaterThan(
+            secretBytes.byteLength,
+        );
+        expect(terminal.plaintextReadByteLength).toBeGreaterThanOrEqual(4_097);
+        expect(terminal.plaintextWriteByteLength).toBeGreaterThan(
+            secretBytes.byteLength,
+        );
+        expect(terminal.deletionCount).toBeGreaterThan(0);
+        expect(terminal.deletedByteLength).toBeGreaterThan(secretBytes.length);
+        expect(terminal.storageRequestCount).toBeGreaterThanOrEqual(
+            terminal.storageTransactionCount,
+        );
+        expect(terminal.storageTransactionCount).toBeGreaterThan(0);
+        expect(terminal.physicalStoredPeakByteLength).toBeGreaterThanOrEqual(
+            terminal.physicalStoredStartByteLength,
+        );
+        expect(terminal.physicalStoredPeakByteLength).toBeGreaterThanOrEqual(
+            terminal.physicalStoredEndByteLength,
+        );
+        expect(terminal.physicalStoredPeakByteLength).toBeLessThanOrEqual(
+            terminal.physicalQuotaReservedByteLength,
+        );
+        expect(
+            terminal.physicalQuotaReservedByteLength +
+                terminal.physicalQuotaHeadroomByteLength,
+        ).toBe(terminal.physicalQuotaByteLength);
+
+        const unrelatedTransaction = await store.beginTransaction({
+            lifetimeMilliseconds: 5_000,
+        });
+        const unrelatedLease = await unrelatedTransaction.issueWriteLease({
+            declaredByteLength: 3,
+            logicalRecordKey: 'foundation/post-proof-accounting-write',
+        });
+        await unrelatedLease.write(Uint8Array.of(1, 2, 3));
+        await unrelatedLease.seal(() => undefined);
+        await unrelatedTransaction.commit();
+        expect(custody.copyPhysicalStorageAccounting()).toEqual(terminal);
+    });
+
     it('rejects append-after-seal, cross-object aliases, and mutated committed records', async () => {
         const { adapter, custody } = await openFixture();
         const bytes = new Uint8Array(80_000).fill(0xa5);
@@ -555,6 +931,7 @@ describe('Common-proof browser custody', () => {
         const { adapter, custody } = await openFixture();
         const bytes = new Uint8Array(257).fill(0x3d);
         const recordsBefore = ownedStorageRecordKeys(adapter);
+        const accountingBefore = custody.copyPhysicalStorageAccounting();
 
         await expect(
             custody.externalMemory.executeTransaction(
@@ -565,6 +942,15 @@ describe('Common-proof browser custody', () => {
             ),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
         expect(ownedStorageRecordKeys(adapter)).toEqual(recordsBefore);
+        expect(custody.copyPhysicalStorageAccounting()).toMatchObject({
+            deletionCount: accountingBefore.deletionCount,
+            physicalStoredEndByteLength:
+                accountingBefore.physicalStoredEndByteLength,
+            physicalStoredPeakByteLength:
+                accountingBefore.physicalStoredPeakByteLength,
+            storageRequestCount: accountingBefore.storageRequestCount,
+            storageTransactionCount: accountingBefore.storageTransactionCount,
+        });
 
         await custody.externalMemory.executeTransaction(
             request([createOperation(21, BigInt(bytes.byteLength))]),
@@ -591,6 +977,7 @@ describe('Common-proof browser custody', () => {
     it('enforces custody quotas and removes partial writes after storage failure and retirement', async () => {
         const adapter = new InMemoryRuntimeStorageAdapter();
         const { custody } = await openFixture({ adapter });
+        const accountingBeforeFailure = custody.copyPhysicalStorageAccounting();
         adapter.failAtomicMutationAfter(1);
         await expect(
             custody.externalMemory.executeTransaction(
@@ -600,15 +987,38 @@ describe('Common-proof browser custody', () => {
         await custody.retire();
         openedCustodies.splice(openedCustodies.indexOf(custody), 1);
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
+        const accountingAfterRetirement =
+            custody.copyPhysicalStorageAccounting();
+        expect(accountingAfterRetirement.cleanupCompleted).toBe(true);
+        expect(
+            accountingAfterRetirement.physicalStoredEndByteLength,
+        ).toBeLessThanOrEqual(
+            accountingBeforeFailure.physicalStoredStartByteLength,
+        );
 
         const quotaFixture = await openFixture({
             commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0xaa),
         });
+        const accountingBeforeQuotaRefusal =
+            quotaFixture.custody.copyPhysicalStorageAccounting();
         await expect(
             quotaFixture.custody.externalMemory.executeTransaction(
                 request([createOperation(2, 5_242_881n)]),
             ),
         ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(
+            quotaFixture.custody.copyPhysicalStorageAccounting(),
+        ).toMatchObject({
+            deletionCount: accountingBeforeQuotaRefusal.deletionCount,
+            physicalStoredEndByteLength:
+                accountingBeforeQuotaRefusal.physicalStoredEndByteLength,
+            physicalStoredPeakByteLength:
+                accountingBeforeQuotaRefusal.physicalStoredPeakByteLength,
+            storageRequestCount:
+                accountingBeforeQuotaRefusal.storageRequestCount,
+            storageTransactionCount:
+                accountingBeforeQuotaRefusal.storageTransactionCount,
+        });
     });
 
     it('holds exclusive live capacity until terminal retirement', async () => {
@@ -688,7 +1098,9 @@ describe('Common-proof browser custody', () => {
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
     });
 
-    it('publishes and restores authenticated checkpoints before byte-identical copy-on-write replay', async () => {
+    it('refuses mismatched bindings and restores authenticated checkpoints before byte-identical copy-on-write replay', async () => {
+        const publishedOperationKinds: number[] = [];
+        const resumedOperationKinds: number[] = [];
         const adapter = new InMemoryRuntimeStorageAdapter();
         const openedStore = await openRuntimeTestStore({
             adapter,
@@ -700,9 +1112,15 @@ describe('Common-proof browser custody', () => {
         const encryptionKey = await generateRuntimeStorageEncryptionKey();
         const checkpointStore = openAuthenticatedCheckpointStore({
             authorityContext: runtimeAuthorityContext(),
-            boundaryPolicy,
+            boundaryPolicy: {
+                validatePublication: ({ boundary }) => {
+                    publishedOperationKinds.push(boundary.operationKind);
+                },
+                validateResume: ({ expectedBoundary }) => {
+                    resumedOperationKinds.push(expectedBoundary.operationKind);
+                },
+            },
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey,
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -712,50 +1130,223 @@ describe('Common-proof browser custody', () => {
             adapter,
             checkpointStore,
             store: openedStore.store,
+            workerKernel: await createInitializedTestWorkerKernel(),
         });
         const replayBytes = Uint8Array.from(
             { length: 100_003 },
             (_unused, index) => (index * 13 + 17) & 0xff,
         );
-        const replayRequests = [
-            request([createOperation(8, BigInt(replayBytes.byteLength))], 1n),
-            ...canonicalAppendRequests(8, replayBytes, 2n),
-            request([sealOperation(8)], 5n),
-        ] as const;
-        for (const replayRequest of replayRequests) {
+        const firstDeletedObjectBytes = Uint8Array.from(
+            { length: 257 },
+            (_unused, index) => (index * 19 + 23) & 0xff,
+        );
+        const secondDeletedObjectBytes = Uint8Array.from(
+            { length: 389 },
+            (_unused, index) => (index * 31 + 29) & 0xff,
+        );
+        const createObjectLifecycleReplayRequests = (input: {
+            bytes: Uint8Array;
+            deleteObjectAfterReplay: boolean;
+            firstRequestSequence: bigint;
+            objectOrdinal: number;
+            sealObjectBeforeReplayEnds: boolean;
+        }): readonly CommonProofExternalMemoryRequest[] => {
+            let nextRequestSequence = input.firstRequestSequence;
+            const lifecycleRequests = [
+                request(
+                    [
+                        createOperation(
+                            input.objectOrdinal,
+                            BigInt(input.bytes.byteLength),
+                        ),
+                    ],
+                    nextRequestSequence,
+                ),
+            ];
+            nextRequestSequence += 1n;
+            const replayAppendRequests = canonicalAppendRequests(
+                input.objectOrdinal,
+                input.bytes,
+                nextRequestSequence,
+            );
+            lifecycleRequests.push(...replayAppendRequests);
+            nextRequestSequence += BigInt(replayAppendRequests.length);
+            if (input.sealObjectBeforeReplayEnds) {
+                lifecycleRequests.push(
+                    request(
+                        [sealOperation(input.objectOrdinal)],
+                        nextRequestSequence,
+                    ),
+                );
+                nextRequestSequence += 1n;
+            }
+            if (input.deleteObjectAfterReplay) {
+                lifecycleRequests.push(
+                    request(
+                        [deleteOperation(input.objectOrdinal)],
+                        nextRequestSequence,
+                    ),
+                );
+            }
+            return Object.freeze(lifecycleRequests);
+        };
+        const createSealedRetainedObjectReplayRequests = () =>
+            createObjectLifecycleReplayRequests({
+                bytes: replayBytes,
+                deleteObjectAfterReplay: false,
+                firstRequestSequence: 1n,
+                objectOrdinal: 8,
+                sealObjectBeforeReplayEnds: true,
+            });
+        const createIncompleteRetainedObjectReplayRequests = () =>
+            Object.freeze([request([createOperation(11, 4_097n)], 300n)]);
+        const createReplacementRetainedObjectReplayRequests = () =>
+            Object.freeze([request([createOperation(12, 8_191n)], 400n)]);
+        const createRetainedStateReplayRequests = () =>
+            Object.freeze([
+                ...createSealedRetainedObjectReplayRequests(),
+                ...createIncompleteRetainedObjectReplayRequests(),
+                ...createReplacementRetainedObjectReplayRequests(),
+            ]);
+        const createFirstDeletedObjectReplayRequests = () =>
+            createObjectLifecycleReplayRequests({
+                bytes: firstDeletedObjectBytes,
+                deleteObjectAfterReplay: true,
+                firstRequestSequence: 100n,
+                objectOrdinal: 9,
+                sealObjectBeforeReplayEnds: false,
+            });
+        const createSecondDeletedObjectReplayRequests = () =>
+            createObjectLifecycleReplayRequests({
+                bytes: secondDeletedObjectBytes,
+                deleteObjectAfterReplay: true,
+                firstRequestSequence: 200n,
+                objectOrdinal: 10,
+                sealObjectBeforeReplayEnds: true,
+            });
+        const createInitialCheckpointReplayRequests = () =>
+            Object.freeze([
+                ...createSealedRetainedObjectReplayRequests(),
+                ...createIncompleteRetainedObjectReplayRequests(),
+                ...createFirstDeletedObjectReplayRequests(),
+                ...createSecondDeletedObjectReplayRequests(),
+            ]);
+        const createLatestCheckpointReplayRequests = () =>
+            Object.freeze([
+                ...createInitialCheckpointReplayRequests(),
+                ...createReplacementRetainedObjectReplayRequests(),
+            ]);
+        const replayRequests = createLatestCheckpointReplayRequests();
+        const initialReplayRequests = createInitialCheckpointReplayRequests();
+        for (const replayRequest of initialReplayRequests) {
             await first.custody.externalMemory.executeTransaction(
                 replayRequest,
+            );
+        }
+        const cursorBytes = emptyPrivateRandomCursorManifest();
+        const checkpointState = Uint8Array.from(
+            { length: 733 },
+            (_unused, index) => (index * 41 + 9) & 0xff,
+        );
+        const mismatchedRuntimeBindingHash = runtimeBindingHash.slice();
+        mismatchedRuntimeBindingHash[0] ^= 0xff;
+        await expect(
+            first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+                canonicalStateBytes: checkpointState,
+                generationCursorManifestBytes: cursorBytes,
+                privateRandomnessStreamAttemptIdentifier:
+                    proofAttemptLineageIdentifier.slice(),
+                safeBoundaryOrdinal: 6,
+                stableAttemptBindingHash: mismatchedRuntimeBindingHash,
+            }),
+        ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        expect(publishedOperationKinds).toEqual([]);
+        expect(first.custody.copyCheckpointResumeDescriptor()).toBeUndefined();
+        await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+            canonicalStateBytes: checkpointState,
+            generationCursorManifestBytes: cursorBytes,
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
+            safeBoundaryOrdinal: 6,
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
+        });
+        expect(publishedOperationKinds).toEqual([
+            applicationStatementSchemaIdentifier,
+        ]);
+        const firstResumeDescriptor =
+            first.custody.copyCheckpointResumeDescriptor();
+        if (firstResumeDescriptor === undefined) {
+            throw new Error(
+                'Expected the first authenticated checkpoint descriptor.',
+            );
+        }
+        for (const replacementStateRequest of createReplacementRetainedObjectReplayRequests()) {
+            await first.custody.externalMemory.executeTransaction(
+                replacementStateRequest,
             );
         }
         const committedPrefixRecordBytes = ownedStorageRecordKeys(adapter)
             .filter((key) => key.includes('/objects/'))
             .map((key) => adapter.rawRead(key))
             .filter((value): value is Uint8Array => value !== undefined);
-        const cursorBytes = bytesFromHex(
-            transcriptCoreKernel.encodePrivateRandomCursor({
-                derivationContextHash: 'ab'.repeat(64),
-                family: 0x0200,
-                nextCounter: '37',
-                purpose: 2,
-                streamAttemptIdentifierHex: 'cd'.repeat(32),
-            }).canonicalBytesHex,
-        );
-        const checkpointState = Uint8Array.from(
-            { length: 733 },
-            (_unused, index) => (index * 41 + 9) & 0xff,
-        );
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: checkpointState,
-            orderedPrivateRandomCursorBytes: [cursorBytes],
-            safeBoundaryOrdinal: 6,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x31),
+            generationCursorManifestBytes: cursorBytes,
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
+            safeBoundaryOrdinal: 7,
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
+        expect(publishedOperationKinds).toEqual([
+            applicationStatementSchemaIdentifier,
+            applicationStatementSchemaIdentifier,
+        ]);
+        const checkpointWriteAccounting =
+            first.custody.copyPhysicalStorageAccounting();
+        expect(checkpointWriteAccounting.sealCallCount).toBeGreaterThan(0);
+        expect(
+            checkpointWriteAccounting.sealCiphertextByteLength,
+        ).toBeGreaterThan(checkpointState.byteLength);
+        expect(
+            checkpointWriteAccounting.physicalWriteByteLength,
+        ).toBeGreaterThan(checkpointState.byteLength);
+        expect(
+            checkpointWriteAccounting.physicalWriteCallCount,
+        ).toBeGreaterThan(checkpointWriteAccounting.sealCallCount);
         const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
         expect(resumeDescriptor).toBeDefined();
         if (resumeDescriptor === undefined) {
             throw new Error('Expected an authenticated checkpoint descriptor.');
         }
+        expect(resumeDescriptor.externalMemoryStateDigest).toHaveLength(64);
+        expect(resumeDescriptor.externalMemoryStateDigest).not.toEqual(
+            firstResumeDescriptor.externalMemoryStateDigest,
+        );
+        destroyCheckpointResumeDescriptor(firstResumeDescriptor);
         await first.custody.suspendForAuthenticatedResume();
+        const suspendedPhysicalAccounting =
+            first.custody.copyPhysicalStorageAccounting();
+        expect(suspendedPhysicalAccounting.cleanupCompleted).toBe(true);
+        expect(
+            suspendedPhysicalAccounting.physicalStoredEndByteLength,
+        ).toBeGreaterThan(0);
+
+        const mismatchedResumeBindingHash =
+            resumeDescriptor.stableAttemptBindingHash.slice();
+        mismatchedResumeBindingHash[0] ^= 0xff;
+        await expect(
+            openFixture({
+                adapter,
+                checkpointStore,
+                resumeDescriptor: {
+                    ...resumeDescriptor,
+                    stableAttemptBindingHash: mismatchedResumeBindingHash,
+                },
+                store: openedStore.store,
+                workerKernel: first.workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        expect(resumedOperationKinds).toEqual([]);
 
         await expect(
             openFixture({
@@ -767,6 +1358,9 @@ describe('Common-proof browser custody', () => {
                 workerKernel: first.workerKernel,
             }),
         ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        expect(first.custody.copyPhysicalStorageAccounting()).toEqual(
+            suspendedPhysicalAccounting,
+        );
 
         const resumed = await openFixture({
             adapter,
@@ -776,8 +1370,29 @@ describe('Common-proof browser custody', () => {
             workerKernel: first.workerKernel,
         });
         await expect(
-            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpointState(),
-        ).resolves.toEqual(checkpointState);
+            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
+        ).resolves.toEqual({
+            canonicalStateBytes: checkpointState,
+            generationCursorManifestBytes: cursorBytes,
+        });
+        expect(resumedOperationKinds).toEqual([
+            applicationStatementSchemaIdentifier,
+        ]);
+        await expect(
+            resumed.custody.externalMemory.executeTransaction(
+                request([readOperation(8, 0n, 1)]),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(
+            resumed.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+                canonicalStateBytes: checkpointState,
+                generationCursorManifestBytes: cursorBytes,
+                privateRandomnessStreamAttemptIdentifier:
+                    proofAttemptLineageIdentifier.slice(),
+                safeBoundaryOrdinal: 7,
+                stableAttemptBindingHash: runtimeBindingHash.slice(),
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
 
         for (const replayRequest of replayRequests) {
             await resumed.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
@@ -789,6 +1404,17 @@ describe('Common-proof browser custody', () => {
                 request([readOperation(8, 27_000n, 61_111)]),
             );
         expect(replayRead[0]?.bytes).toEqual(replayBytes.slice(27_000, 88_111));
+        resumed.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState();
+        expect(() =>
+            resumed.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
+        ).toThrow(expect.objectContaining({ code: 'InvalidState' }));
+        const postConfirmationRead =
+            await resumed.custody.externalMemory.executeTransaction(
+                request([readOperation(8, 19n, 37)]),
+            );
+        expect(postConfirmationRead[0]?.bytes).toEqual(
+            replayBytes.slice(19, 56),
+        );
         const recordsAfterReplay = ownedStorageRecordKeys(adapter)
             .filter((key) => key.includes('/objects/'))
             .map((key) => adapter.rawRead(key))
@@ -805,7 +1431,78 @@ describe('Common-proof browser custody', () => {
                 ),
             ).toBe(true);
         }
+        const resumedAccounting =
+            resumed.custody.copyPhysicalStorageAccounting();
+        expect(
+            resumedAccounting.deterministicRegenerationCallCount,
+        ).toBeGreaterThan(0);
+        expect(
+            resumedAccounting.deterministicRegeneratedByteLength,
+        ).toBeGreaterThanOrEqual(replayBytes.byteLength);
+        expect(
+            resumedAccounting.plaintextReadByteLength,
+        ).toBeGreaterThanOrEqual(replayRead[0]?.bytes.byteLength ?? 0);
+        expect(resumedAccounting.physicalReadByteLength).toBe(
+            resumedAccounting.ciphertextReadByteLength,
+        );
+        expect(resumedAccounting.physicalReadCallCount).toBe(
+            resumedAccounting.ciphertextReadCallCount,
+        );
+        expect(resumedAccounting.openCallCount).toBeGreaterThan(
+            Number(
+                resumed.custody.externalMemory.copyBrowserStorageAccounting?.()
+                    .secretRecordOpenCount ?? 0n,
+            ),
+        );
         await resumed.custody.suspendForAuthenticatedResume();
+
+        const omittedDeletionReplay = await openFixture({
+            adapter,
+            checkpointStore,
+            resumeDescriptor,
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await omittedDeletionReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
+        for (const retainedObjectRequest of createRetainedStateReplayRequests()) {
+            await omittedDeletionReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
+                retainedObjectRequest,
+            );
+        }
+        expect(() =>
+            omittedDeletionReplay.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
+        ).toThrow(
+            expect.objectContaining({ code: 'RecordAuthenticationFailed' }),
+        );
+        await omittedDeletionReplay.custody.suspendForAuthenticatedResume();
+
+        const reorderedDeletionReplay = await openFixture({
+            adapter,
+            checkpointStore,
+            resumeDescriptor,
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await reorderedDeletionReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
+        for (const retainedObjectRequest of createRetainedStateReplayRequests()) {
+            await reorderedDeletionReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
+                retainedObjectRequest,
+            );
+        }
+        for (const deletedObjectRequest of [
+            ...createSecondDeletedObjectReplayRequests(),
+            ...createFirstDeletedObjectReplayRequests(),
+        ]) {
+            await reorderedDeletionReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
+                deletedObjectRequest,
+            );
+        }
+        expect(() =>
+            reorderedDeletionReplay.custody.prefixReplayExternalMemory.confirmAuthenticatedCheckpointExternalMemoryState(),
+        ).toThrow(
+            expect.objectContaining({ code: 'RecordAuthenticationFailed' }),
+        );
+        await reorderedDeletionReplay.custody.suspendForAuthenticatedResume();
 
         const changedReplay = await openFixture({
             adapter,
@@ -814,9 +1511,9 @@ describe('Common-proof browser custody', () => {
             store: openedStore.store,
             workerKernel: first.workerKernel,
         });
-        await changedReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpointState();
+        await changedReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         await changedReplay.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
-            replayRequests[0],
+            request([createOperation(8, BigInt(replayBytes.byteLength))], 1n),
         );
         const changedBytes = replayBytes.slice();
         changedBytes[changedBytes.byteLength - 1] ^= 1;
@@ -840,6 +1537,75 @@ describe('Common-proof browser custody', () => {
                 changedFinalAppendRequest,
             ),
         ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        await changedReplay.custody.suspendForAuthenticatedResume();
+
+        const mismatchedExternalMemoryStateDigest =
+            resumeDescriptor.externalMemoryStateDigest.slice();
+        mismatchedExternalMemoryStateDigest[0] ^= 0xff;
+        const substitutedStateDescriptorReplay = await openFixture({
+            adapter,
+            checkpointStore,
+            resumeDescriptor: {
+                ...resumeDescriptor,
+                externalMemoryStateDigest: mismatchedExternalMemoryStateDigest,
+            },
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await expect(
+            substitutedStateDescriptorReplay.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
+        ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+    });
+
+    it('refuses to resume an authenticated checkpoint under a different application schema', async () => {
+        const adapter = new InMemoryRuntimeStorageAdapter();
+        const openedStore = await openRuntimeTestStore({
+            adapter,
+            namespace: 'common-proof-schema-mismatch-custody-test',
+        });
+        const checkpointStorage = await openRuntimeTestStore({
+            namespace: 'common-proof-schema-mismatch-checkpoint-test',
+        });
+        const checkpointStore = openAuthenticatedCheckpointStore({
+            authorityContext: runtimeAuthorityContext(),
+            boundaryPolicy,
+            cryptoProvider,
+            encryptionKey: await generateRuntimeStorageEncryptionKey(),
+            limits: checkpointLimits,
+            store: checkpointStorage.store,
+        });
+        openedCheckpointStores.push(checkpointStore);
+        const first = await openFixture({
+            adapter,
+            checkpointStore,
+            store: openedStore.store,
+        });
+        await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+            canonicalStateBytes: new Uint8Array(97).fill(0x3a),
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
+            safeBoundaryOrdinal: 2,
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
+        });
+        const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
+        if (resumeDescriptor === undefined) {
+            throw new Error('Expected an authenticated checkpoint descriptor.');
+        }
+        await first.custody.suspendForAuthenticatedResume();
+
+        const mismatched = await openFixture({
+            adapter,
+            applicationStatementSchemaIdentifier:
+                applicationStatementSchemaIdentifier + 1,
+            checkpointStore,
+            resumeDescriptor,
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await expect(
+            mismatched.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
     });
 
     it('retires cleanly when authenticated checkpoint custody is missing or corrupt', async () => {
@@ -857,7 +1623,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -870,9 +1635,11 @@ describe('Common-proof browser custody', () => {
         });
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(64).fill(0x17),
-            orderedPrivateRandomCursorBytes: [],
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 2,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x29),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
         const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
         if (resumeDescriptor === undefined) {
@@ -912,7 +1679,7 @@ describe('Common-proof browser custody', () => {
             workerKernel: first.workerKernel,
         });
         await expect(
-            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpointState(),
+            resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpoint(),
         ).rejects.toMatchObject({ code: 'StorageFailure' });
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
         await expect(
@@ -935,7 +1702,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -948,9 +1714,11 @@ describe('Common-proof browser custody', () => {
         });
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(128).fill(0x41),
-            orderedPrivateRandomCursorBytes: [],
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 3,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x52),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
         const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
         if (resumeDescriptor === undefined) {
@@ -967,7 +1735,7 @@ describe('Common-proof browser custody', () => {
             store: openedStore.store,
             workerKernel: first.workerKernel,
         });
-        await resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpointState();
+        await resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         await resumed.custody.outputStore.commitChunk(0, committedChunk);
         resumed.custody.sealCanonicalOutput();
         await expect(
@@ -984,7 +1752,7 @@ describe('Common-proof browser custody', () => {
             store: openedStore.store,
             workerKernel: first.workerKernel,
         });
-        await changedResume.custody.checkpointCustody?.restoreAuthenticatedCheckpointState();
+        await changedResume.custody.checkpointCustody?.restoreAuthenticatedCheckpoint();
         const changedChunk = committedChunk.slice();
         changedChunk[0] ^= 1;
         await expect(
@@ -1051,6 +1819,8 @@ describe('Common-proof browser custody', () => {
         const { adapter, custody, store } = await openFixture({
             decorateCapacityReservation: (reservation) =>
                 Object.freeze({
+                    copyPhysicalStorageAccounting: () =>
+                        reservation.copyPhysicalStorageAccounting(),
                     copyAuthenticatedLogicalRecordKeys: (prefix) =>
                         reservation.copyAuthenticatedLogicalRecordKeys(prefix),
                     deleteAuthenticatedLogicalRecords: async (prefix) => {
@@ -1122,7 +1892,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -1158,6 +1927,8 @@ describe('Common-proof browser custody', () => {
             checkpointStore: retryingCheckpointStore,
             decorateCapacityReservation: (reservation) =>
                 Object.freeze({
+                    copyPhysicalStorageAccounting: () =>
+                        reservation.copyPhysicalStorageAccounting(),
                     copyAuthenticatedLogicalRecordKeys: (prefix) =>
                         reservation.copyAuthenticatedLogicalRecordKeys(prefix),
                     deleteAuthenticatedLogicalRecords: async (prefix) => {
@@ -1174,9 +1945,11 @@ describe('Common-proof browser custody', () => {
         });
         await custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(97).fill(0x61),
-            orderedPrivateRandomCursorBytes: [],
+            generationCursorManifestBytes: emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 4,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x72),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
         await custody.outputStore.commitChunk(
             0,
@@ -1240,8 +2013,11 @@ describe('Common-proof browser custody', () => {
 
     it('uses typed custody failures for malformed environment inputs', async () => {
         const openedStore = await openRuntimeTestStore();
-        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
-            kernel: transcriptCoreKernel,
+        const workerKernel = new TestActionStorageWorkerKernel({
+            actionStorageRoot: new Uint8Array(
+                testActionStorageRootByteLength,
+            ).fill(0x5a),
+            cryptoProvider,
         });
         await ensureAuthenticatedRepairHead(openedStore.store);
         const capacityReservation =
@@ -1255,6 +2031,7 @@ describe('Common-proof browser custody', () => {
         expect(() =>
             openCommonProofBrowserCustody({
                 actionRandomnessCommitment: new Uint8Array(63),
+                applicationStatementSchemaIdentifier,
                 capacityReservation,
                 commonProofEnvironmentIdentifier: new Uint8Array(32),
                 commonProofRuntimeBindingHash: runtimeBindingHash,
@@ -1269,10 +2046,45 @@ describe('Common-proof browser custody', () => {
                 workerKernel,
             }),
         ).toThrow(BrowserActionStorageCustodyError);
+        for (const malformedApplicationStatementSchemaIdentifier of [
+            0, 0x1_0000,
+        ]) {
+            expect(() =>
+                openCommonProofBrowserCustody({
+                    actionRandomnessCommitment,
+                    applicationStatementSchemaIdentifier:
+                        malformedApplicationStatementSchemaIdentifier,
+                    capacityReservation,
+                    commonProofEnvironmentIdentifier: new Uint8Array(32),
+                    commonProofRuntimeBindingHash: runtimeBindingHash,
+                    limits: {
+                        maximumExternalMemoryByteLength: 1n,
+                        maximumExternalMemoryObjectCount: 1,
+                        maximumExternalMemoryRecordCount: 1,
+                        transactionLifetimeMilliseconds: 1,
+                    },
+                    proofAttemptLineageIdentifier,
+                    store: openedStore.store,
+                    workerKernel,
+                }),
+            ).toThrowError(
+                expect.objectContaining({
+                    code: 'InvalidInput',
+                    message:
+                        'The common-proof application-statement schema identifier is not a nonzero unsigned 16-bit value.',
+                }),
+            );
+        }
         await capacityReservation.release();
     });
 
     it('requires the exact installed scratch-record capacity at every store boundary', () => {
+        expect(
+            commonProofStorageCapacityProfile.maximumLeaseByteLength,
+        ).toBeGreaterThan(maximumCanonicalDataChunkByteLength);
+        expect(
+            commonProofStorageCapacityProfile.maximumTransactionByteLength,
+        ).toBe(commonProofStorageCapacityProfile.maximumLeaseByteLength);
         const boundaryLimits = {
             maximumActiveTransactionCount: 1,
             maximumLeaseByteLength:
@@ -1308,5 +2120,198 @@ describe('Common-proof browser custody', () => {
                 }),
             ).toThrowError(expect.objectContaining({ code: 'OpenFailed' }));
         }
+    });
+
+    it('matches the Rust payload-only scratch boundary while charging physical record overhead separately', async () => {
+        const { custody } = await openFixture({
+            maximumExternalMemoryByteLength: commonProofScratchByteLength,
+        });
+
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(71, commonProofScratchByteLength)]),
+        );
+        const afterExactBoundaryCreate =
+            custody.copyPhysicalStorageAccounting();
+        expect(
+            afterExactBoundaryCreate.physicalStoredEndByteLength -
+                afterExactBoundaryCreate.physicalStoredStartByteLength,
+        ).toBeGreaterThan(9);
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request([createOperation(72, 1n)]),
+            ),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+
+        await custody.externalMemory.executeTransaction(
+            request([deleteOperation(71)]),
+        );
+        await expect(
+            custody.externalMemory.executeTransaction(
+                request([
+                    createOperation(73, commonProofScratchByteLength + 1n),
+                ]),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+    });
+
+    it('opens one partial terminal secret chunk once and accounts every ownership transition', async () => {
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: await loadFreshTranscriptCoreKernel(),
+        });
+        await workerKernel.createAndStageDeviceWrappingState({
+            binding,
+        });
+        await workerKernel.commitStagedActionStorageRoot();
+        const { custody } = await openFixture({ workerKernel });
+        const terminalChunkByteLength = 113;
+        const objectByteLength =
+            maximumCanonicalDataChunkByteLength + terminalChunkByteLength;
+        const sourceBytes = Uint8Array.from(
+            { length: objectByteLength },
+            (_unused, byteIndex) => (byteIndex * 29 + 7) & 0xff,
+        );
+        const expectedReadBytes = sourceBytes.slice(
+            maximumCanonicalDataChunkByteLength + 19,
+            maximumCanonicalDataChunkByteLength + 76,
+        );
+        const copyAccounting = () => {
+            const accounting =
+                custody.externalMemory.copyBrowserStorageAccounting?.();
+            if (accounting === undefined) {
+                throw new Error(
+                    'Expected production browser-storage accounting.',
+                );
+            }
+            return accounting;
+        };
+
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(41, BigInt(objectByteLength))]),
+        );
+        await custody.externalMemory.executeTransaction(
+            request([
+                appendOperation(
+                    41,
+                    sourceBytes.slice(0, maximumCanonicalDataChunkByteLength),
+                ),
+            ]),
+        );
+        const beforeTerminalAppend = copyAccounting();
+        await custody.externalMemory.executeTransaction(
+            request([
+                appendOperation(
+                    41,
+                    sourceBytes.slice(maximumCanonicalDataChunkByteLength),
+                    BigInt(maximumCanonicalDataChunkByteLength),
+                ),
+            ]),
+        );
+        const afterTerminalAppend = copyAccounting();
+        expect(
+            afterTerminalAppend.claimedBufferCount -
+                beforeTerminalAppend.claimedBufferCount,
+        ).toBe(2n);
+        expect(
+            afterTerminalAppend.releasedBufferCount -
+                beforeTerminalAppend.releasedBufferCount,
+        ).toBe(2n);
+        expect(
+            afterTerminalAppend.claimedByteLength -
+                beforeTerminalAppend.claimedByteLength,
+        ).toBeGreaterThan(BigInt(terminalChunkByteLength));
+
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(41)]),
+        );
+        const beforeRead = copyAccounting();
+        const readResults = await custody.externalMemory.executeTransaction(
+            request([
+                readOperation(
+                    41,
+                    BigInt(maximumCanonicalDataChunkByteLength + 19),
+                    expectedReadBytes.byteLength,
+                ),
+            ]),
+        );
+        const afterRead = copyAccounting();
+
+        expect(readResults[0]?.bytes).toEqual(expectedReadBytes);
+        expect(
+            afterRead.secretRecordOpenCount - beforeRead.secretRecordOpenCount,
+        ).toBe(1n);
+        expect(
+            afterRead.claimedBufferCount - beforeRead.claimedBufferCount,
+        ).toBe(2n);
+        expect(afterRead.claimedByteLength - beforeRead.claimedByteLength).toBe(
+            BigInt(terminalChunkByteLength + expectedReadBytes.byteLength),
+        );
+        expect(
+            afterRead.transferredBufferCount -
+                beforeRead.transferredBufferCount,
+        ).toBe(1n);
+        expect(
+            afterRead.transferredByteLength - beforeRead.transferredByteLength,
+        ).toBe(BigInt(expectedReadBytes.byteLength));
+        expect(
+            afterRead.releasedBufferCount - beforeRead.releasedBufferCount,
+        ).toBe(2n);
+        expect(afterRead.maximumLiveBufferCount).toBeLessThanOrEqual(2);
+    });
+
+    it('stores one canonical authenticated scratch chunk under the exact lease ceiling', async () => {
+        const adapter = new InMemoryRuntimeStorageAdapter();
+        const openedStore = await openRuntimeTestStore({
+            adapter,
+            limits: {
+                maximumLeaseByteLength:
+                    commonProofStorageCapacityProfile.maximumLeaseByteLength,
+                maximumTransactionByteLength:
+                    commonProofStorageCapacityProfile.maximumTransactionByteLength,
+            },
+            namespace: 'common-proof-exact-secret-chunk-test',
+        });
+        const { custody } = await openFixture({
+            adapter,
+            store: openedStore.store,
+        });
+        const chunkBytes = Uint8Array.from(
+            { length: maximumCanonicalDataChunkByteLength },
+            (_unused, byteIndex) => (byteIndex * 37 + 11) & 0xff,
+        );
+        const expectedTerminalBytes = chunkBytes.slice(-97);
+        const chunkByteLength = chunkBytes.byteLength;
+
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(31, BigInt(chunkByteLength))]),
+        );
+        await custody.externalMemory.executeTransaction(
+            request([appendOperation(31, chunkBytes)]),
+        );
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(31)]),
+        );
+        const readResults = await custody.externalMemory.executeTransaction(
+            request([readOperation(31, BigInt(chunkByteLength - 97), 97)]),
+        );
+
+        expect(readResults[0]?.bytes).toEqual(expectedTerminalBytes);
+        const storedObjectByteLengths = ownedStorageRecordKeys(adapter)
+            .filter((key) => key.includes('/objects/'))
+            .map((key) => adapter.rawRead(key)?.byteLength)
+            .filter(
+                (byteLength): byteLength is number => byteLength !== undefined,
+            );
+        const maximumStoredObjectByteLength = Math.max(
+            ...storedObjectByteLengths,
+        );
+        const exactSecretRecordCeiling =
+            chunkByteLength + Number(commonProofSecretRecordOverheadByteLength);
+        expect(maximumStoredObjectByteLength).toBeGreaterThan(chunkByteLength);
+        expect(maximumStoredObjectByteLength).toBeLessThanOrEqual(
+            exactSecretRecordCeiling,
+        );
+        expect(commonProofStorageCapacityProfile.maximumLeaseByteLength).toBe(
+            exactSecretRecordCeiling,
+        );
     });
 });

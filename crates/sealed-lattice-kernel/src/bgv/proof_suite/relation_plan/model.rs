@@ -6,27 +6,30 @@ use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 use super::{
     compiled_plan::RelationPlanCheckContext,
     expressions::{
-        canonical_nested_list, canonical_u32_list, canonical_u64_list, encode_generated_tuple,
+        canonical_nested_list, canonical_u32_list, canonical_u64_list,
+        checked_resident_payload_add, resident_string_payload_byte_length,
+        resident_vec_storage_byte_length,
     },
     layout::RelationPlanVariant,
     schema::{
-        APPLICATION_SLOT_SOURCE_SCHEMA_IDENTIFIER, APPLICATION_STATEMENT_SOURCE_SCHEMA_IDENTIFIER,
-        BOUND_PUBLIC_TREE_SCHEMA_IDENTIFIER, BOUND_TREE_COLUMN_ORIGIN_SCHEMA_IDENTIFIER,
+        APPLICATION_STATEMENT_SOURCE_SCHEMA_IDENTIFIER, BOUND_PUBLIC_TREE_SCHEMA_IDENTIFIER,
+        BOUND_TREE_COLUMN_ORIGIN_SCHEMA_IDENTIFIER,
+        DIRECT_BALLOT_PAIR_CHARACTER_ENCODER_PROFILE_SOURCE_SCHEMA_IDENTIFIER,
         NEGACYCLIC_AUTOMORPHISM_MAPPING_SOURCE_SCHEMA_IDENTIFIER,
         PROOF_CREATED_TREE_SCHEMA_IDENTIFIER, PROTOCOL_SOURCE_SCHEMA_IDENTIFIER,
         PROVER_COLUMN_ORIGIN_SCHEMA_IDENTIFIER, PUBLIC_ONLY_FAMILIES,
-        RADIX_COLUMN_DIGITS_SCHEMA_IDENTIFIER, RADIX_CONSTANT_DIGITS_SCHEMA_IDENTIFIER,
-        RADIX_CONVOLUTION_SCHEMA_IDENTIFIER, RADIX_DECOMPOSED_VERIFIER_SOURCE_SCHEMA_IDENTIFIER,
-        RADIX_NON_NATIVE_MODULUS_DIGITS_SCHEMA_IDENTIFIER, RADIX_PRODUCT_TERM_SCHEMA_IDENTIFIER,
-        RADIX_SCALAR_COLUMN_SCHEMA_IDENTIFIER, RADIX_TRANSCRIPT_CHALLENGE_DIGITS_SCHEMA_IDENTIFIER,
-        RELATION_CHALLENGE_DESCRIPTOR_SCHEMA_IDENTIFIER,
-        RELATION_CHALLENGE_EPOCH_CATALOG_SCHEMA_IDENTIFIER,
-        RELATION_CHALLENGE_MODULUS_SELECTOR_SCHEMA_IDENTIFIER, RELATION_COLUMN_SCHEMA_IDENTIFIER,
-        RELATION_PUBLIC_SAMPLER_SCHEMA_IDENTIFIER, SAMPLER_OUTPUT_SOURCE_SCHEMA_IDENTIFIER,
-        SCHEMA_VERSION, SECRET_BEARING_FAMILIES, SELECTOR_PATH_STEP_SCHEMA_IDENTIFIER,
-        SUITE_MODULUS_REFERENCE_SCHEMA_IDENTIFIER, SUITE_SOURCE_SCHEMA_IDENTIFIER,
+        RADIX_DECOMPOSED_VERIFIER_SOURCE_SCHEMA_IDENTIFIER, RELATION_COLUMN_SCHEMA_IDENTIFIER,
+        RELATION_PUBLIC_SAMPLER_SCHEMA_IDENTIFIER, SCHEMA_VERSION, SECRET_BEARING_FAMILIES,
+        SELECTOR_PATH_STEP_SCHEMA_IDENTIFIER, SUITE_MODULUS_REFERENCE_SCHEMA_IDENTIFIER,
         VALUE_LAYOUT_SCHEMA_IDENTIFIER, VERIFIER_SEQUENCE_COLUMN_ORIGIN_SCHEMA_IDENTIFIER,
     },
+};
+
+#[cfg(test)]
+use super::schema::{
+    RADIX_COLUMN_DIGITS_SCHEMA_IDENTIFIER, RADIX_CONSTANT_DIGITS_SCHEMA_IDENTIFIER,
+    RADIX_CONVOLUTION_SCHEMA_IDENTIFIER, RADIX_PRODUCT_TERM_SCHEMA_IDENTIFIER,
+    RADIX_SCALAR_COLUMN_SCHEMA_IDENTIFIER,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +45,6 @@ pub(crate) enum RelationPlanError {
     NonCanonicalOrder,
     DuplicateItem,
     InvalidSource,
-    SourceCycle,
     UnusedSource,
     InvalidSampler,
     InvalidSemanticCell,
@@ -60,9 +62,6 @@ pub(crate) enum RelationPlanError {
     InvalidOpening,
     InvalidChallengeCatalog,
     InvalidMaskGrammar,
-    MaskPurposeExhausted,
-    InvalidApplicationSlot,
-    MissingExactNegacyclicLowering,
     CountOverflow,
 }
 
@@ -70,7 +69,9 @@ pub(super) fn canonical_encoding_error<T>(_: T) -> RelationPlanError {
     RelationPlanError::CanonicalEncoding
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u16)]
 pub(crate) enum ModulusCatalog {
     Data = 1,
@@ -80,7 +81,10 @@ pub(crate) enum ModulusCatalog {
     Target = 5,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SuiteModulusReference {
     pub(super) catalog: ModulusCatalog,
     pub(super) modulus_index: u16,
@@ -151,7 +155,6 @@ impl ProofPrivacyMode {
 pub(crate) enum RelationElementKind {
     Hash512 = 1,
     BaseField = 2,
-    ChallengeExtension = 3,
     Residue = 4,
 }
 
@@ -161,7 +164,6 @@ pub(crate) enum RelationEmbeddingKind {
     None = 0,
     Identity = 1,
     LeastNonnegative = 2,
-    Centered = 3,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -173,6 +175,10 @@ pub(crate) struct RelationValueLayout {
 }
 
 impl RelationValueLayout {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        resident_vec_storage_byte_length(&self.shape)
+    }
+
     pub(super) fn scalar_hash() -> Self {
         Self {
             element_kind: RelationElementKind::Hash512,
@@ -230,18 +236,10 @@ impl RelationValueLayout {
             self.shape.is_empty(),
         ) {
             (RelationElementKind::Hash512, None, RelationEmbeddingKind::None, true)
-            | (
-                RelationElementKind::BaseField | RelationElementKind::ChallengeExtension,
-                None,
-                RelationEmbeddingKind::Identity,
-                _,
-            )
-            | (
-                RelationElementKind::Residue,
-                Some(_),
-                RelationEmbeddingKind::LeastNonnegative | RelationEmbeddingKind::Centered,
-                _,
-            ) => Ok(()),
+            | (RelationElementKind::BaseField, None, RelationEmbeddingKind::Identity, _)
+            | (RelationElementKind::Residue, Some(_), RelationEmbeddingKind::LeastNonnegative, _) => {
+                Ok(())
+            }
             _ => Err(RelationPlanError::InvalidSource),
         }
     }
@@ -252,12 +250,6 @@ impl RelationValueLayout {
 pub(crate) enum SelectorPathStepKind {
     TupleField = 1,
     LiteralListIndex = 2,
-    VariantSchedulePosition = 3,
-    RosterPosition = 4,
-    ApplicationSchedulePosition = 5,
-    ProducerSequence = 6,
-    StreamElement = 7,
-    SuiteArtifact = 8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -292,20 +284,6 @@ impl RelationSelectorPathStep {
             ],
         )
     }
-
-    pub(super) fn validate(self) -> Result<(), RelationPlanError> {
-        if matches!(
-            self.step_kind,
-            SelectorPathStepKind::VariantSchedulePosition
-                | SelectorPathStepKind::RosterPosition
-                | SelectorPathStepKind::ApplicationSchedulePosition
-                | SelectorPathStepKind::ProducerSequence
-        ) && self.argument != 0
-        {
-            return Err(RelationPlanError::InvalidSource);
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -320,20 +298,20 @@ pub(crate) enum RelationVerifierSource {
         statement_binding_path: Vec<RelationSelectorPathStep>,
         value_layout: RelationValueLayout,
     },
-    Suite {
-        value_path: Vec<RelationSelectorPathStep>,
-        value_layout: RelationValueLayout,
-    },
-    ApplicationSlot {
-        value_path: Vec<RelationSelectorPathStep>,
-        value_layout: RelationValueLayout,
-    },
-    SamplerOutput {
-        public_sampler_ordinal: u32,
-    },
     NegacyclicAutomorphismMapping {
         ring_degree: u64,
         galois_element: u64,
+    },
+    /// One verifier-derived sparse coefficient profile in the suite-fixed
+    /// pair-character encoder. Its ten fixed rotations linearly map one
+    /// option's shared score indicators into one ciphertext's U/V auxiliary.
+    DirectBallotPairCharacterEncoderProfile {
+        ring_degree: u64,
+        plaintext_modulus: u64,
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+        option_count: u16,
+        option_ordinal: u16,
     },
     /// A plan-owned, deterministic view of a canonical residue source.  It
     /// emits one fixed radix digit of `scale * residue` for every source
@@ -350,6 +328,37 @@ pub(crate) enum RelationVerifierSource {
 }
 
 impl RelationVerifierSource {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        match self {
+            Self::ApplicationStatement {
+                value_path,
+                value_layout,
+            } => checked_resident_payload_add(
+                resident_vec_storage_byte_length(value_path)?,
+                value_layout.resident_owned_payload_byte_length()?,
+            ),
+            Self::Protocol {
+                source_coordinates,
+                statement_binding_path,
+                value_layout,
+                ..
+            } => [
+                resident_vec_storage_byte_length(source_coordinates)?,
+                resident_vec_storage_byte_length(statement_binding_path)?,
+                value_layout.resident_owned_payload_byte_length()?,
+            ]
+            .into_iter()
+            .try_fold(0_u64, checked_resident_payload_add),
+            Self::RadixDecomposition { source, .. } => checked_resident_payload_add(
+                u64::try_from(std::mem::size_of::<RelationVerifierSource>())
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                source.resident_owned_payload_byte_length()?,
+            ),
+            Self::NegacyclicAutomorphismMapping { .. }
+            | Self::DirectBallotPairCharacterEncoderProfile { .. } => Ok(0),
+        }
+    }
+
     pub(crate) fn application_statement_scalar_hash_path(
         &self,
     ) -> Option<&[RelationSelectorPathStep]> {
@@ -368,38 +377,10 @@ impl RelationVerifierSource {
         }
     }
 
-    pub(super) fn value_layout<'source>(
-        &'source self,
-        samplers: &'source [RelationPublicSamplerDescriptor],
-        sources: &'source [Self],
-    ) -> Result<RelationValueLayout, RelationPlanError> {
+    pub(super) fn value_layout(&self) -> Result<RelationValueLayout, RelationPlanError> {
         match self {
             Self::ApplicationStatement { value_layout, .. }
-            | Self::Protocol { value_layout, .. }
-            | Self::Suite { value_layout, .. }
-            | Self::ApplicationSlot { value_layout, .. } => Ok(value_layout.clone()),
-            Self::SamplerOutput {
-                public_sampler_ordinal,
-            } => {
-                let sampler = samplers
-                    .get(*public_sampler_ordinal as usize)
-                    .ok_or(RelationPlanError::InvalidSource)?;
-                let output_source = sources
-                    .get(sampler.output_verifier_source_ordinal as usize)
-                    .ok_or(RelationPlanError::InvalidSampler)?;
-                if !matches!(
-                    output_source,
-                    Self::SamplerOutput {
-                        public_sampler_ordinal: ordinal
-                    } if ordinal == public_sampler_ordinal
-                ) {
-                    return Err(RelationPlanError::InvalidSampler);
-                }
-                Ok(RelationValueLayout::residue_vector(
-                    sampler.output_modulus,
-                    sampler.output_count,
-                ))
-            }
+            | Self::Protocol { value_layout, .. } => Ok(value_layout.clone()),
             Self::NegacyclicAutomorphismMapping { ring_degree, .. } => Ok(RelationValueLayout {
                 element_kind: RelationElementKind::BaseField,
                 residue_modulus: None,
@@ -410,8 +391,14 @@ impl RelationVerifierSource {
                 ],
                 embedding_kind: RelationEmbeddingKind::Identity,
             }),
+            Self::DirectBallotPairCharacterEncoderProfile { ring_degree, .. } => {
+                Ok(RelationValueLayout::residue_vector(
+                    SuiteModulusReference::plaintext(),
+                    *ring_degree,
+                ))
+            }
             Self::RadixDecomposition { source, .. } => {
-                let source_layout = source.value_layout(samplers, sources)?;
+                let source_layout = source.value_layout()?;
                 Ok(RelationValueLayout {
                     element_kind: RelationElementKind::BaseField,
                     residue_modulus: None,
@@ -454,34 +441,6 @@ impl RelationVerifierSource {
                         .map_err(canonical_encoding_error)?,
                 ],
             ),
-            Self::Suite {
-                value_path,
-                value_layout,
-            } => (
-                SUITE_SOURCE_SCHEMA_IDENTIFIER,
-                vec![
-                    canonical_nested_list(value_path.iter().map(|step| step.canonical_tuple()))?,
-                    CanonicalItem::nested_tuple(&value_layout.canonical_tuple()?)
-                        .map_err(canonical_encoding_error)?,
-                ],
-            ),
-            Self::ApplicationSlot {
-                value_path,
-                value_layout,
-            } => (
-                APPLICATION_SLOT_SOURCE_SCHEMA_IDENTIFIER,
-                vec![
-                    canonical_nested_list(value_path.iter().map(|step| step.canonical_tuple()))?,
-                    CanonicalItem::nested_tuple(&value_layout.canonical_tuple()?)
-                        .map_err(canonical_encoding_error)?,
-                ],
-            ),
-            Self::SamplerOutput {
-                public_sampler_ordinal,
-            } => (
-                SAMPLER_OUTPUT_SOURCE_SCHEMA_IDENTIFIER,
-                vec![CanonicalItem::unsigned32(*public_sampler_ordinal)],
-            ),
             Self::NegacyclicAutomorphismMapping {
                 ring_degree,
                 galois_element,
@@ -490,6 +449,24 @@ impl RelationVerifierSource {
                 vec![
                     CanonicalItem::unsigned64(*ring_degree),
                     CanonicalItem::unsigned64(*galois_element),
+                ],
+            ),
+            Self::DirectBallotPairCharacterEncoderProfile {
+                ring_degree,
+                plaintext_modulus,
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+                option_count,
+                option_ordinal,
+            } => (
+                DIRECT_BALLOT_PAIR_CHARACTER_ENCODER_PROFILE_SOURCE_SCHEMA_IDENTIFIER,
+                vec![
+                    CanonicalItem::unsigned64(*ring_degree),
+                    CanonicalItem::unsigned64(*plaintext_modulus),
+                    CanonicalItem::unsigned16(*ciphertext_ordinal),
+                    CanonicalItem::unsigned16(*auxiliary_ordinal),
+                    CanonicalItem::unsigned16(*option_count),
+                    CanonicalItem::unsigned16(*option_ordinal),
                 ],
             ),
             Self::RadixDecomposition {
@@ -532,23 +509,12 @@ impl RelationVerifierSource {
         if path.is_empty() {
             return Err(RelationPlanError::InvalidSource);
         }
-        for step in path {
-            step.validate()?;
-        }
         Ok(())
     }
 
     pub(super) fn validate_shape(&self) -> Result<(), RelationPlanError> {
         match self {
             Self::ApplicationStatement {
-                value_path,
-                value_layout,
-            }
-            | Self::Suite {
-                value_path,
-                value_layout,
-            }
-            | Self::ApplicationSlot {
                 value_path,
                 value_layout,
             } => {
@@ -580,11 +546,37 @@ impl RelationVerifierSource {
                 }
                 value_layout.validate()
             }
-            Self::SamplerOutput { .. } => Ok(()),
             Self::NegacyclicAutomorphismMapping {
                 ring_degree,
                 galois_element,
             } => validate_negacyclic_automorphism(*ring_degree, *galois_element),
+            Self::DirectBallotPairCharacterEncoderProfile {
+                ring_degree,
+                plaintext_modulus,
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+                option_count,
+                option_ordinal,
+            } => {
+                let option_count = u64::from(*option_count);
+                let pair_count = option_count
+                    .checked_mul(option_count.saturating_sub(1))
+                    .ok_or(RelationPlanError::CountOverflow)?
+                    / 2;
+                if *ring_degree < 2
+                    || !ring_degree.is_power_of_two()
+                    || option_count < 2
+                    || pair_count > 256
+                    || u64::from(*option_ordinal) >= option_count
+                    || *ring_degree != 32_768
+                    || *plaintext_modulus != 257
+                    || *ciphertext_ordinal >= 2
+                    || *auxiliary_ordinal >= 2
+                {
+                    return Err(RelationPlanError::InvalidSource);
+                }
+                Ok(())
+            }
             Self::RadixDecomposition {
                 source,
                 modulus_reference,
@@ -594,7 +586,7 @@ impl RelationVerifierSource {
                 digit_count,
             } => {
                 source.validate_shape()?;
-                let layout = source.value_layout(&[], &[])?;
+                let layout = source.value_layout()?;
                 if *scale == 0
                     || *radix < 2
                     || *digit_count == 0
@@ -764,6 +756,7 @@ pub(crate) fn apply_negacyclic_automorphism(
     Ok(output)
 }
 
+#[cfg(test)]
 pub(crate) fn negacyclic_automorphism_semantics_match(
     source_coefficients: &[i64],
     target_coefficients: &[i64],
@@ -787,6 +780,13 @@ pub(crate) struct RelationPublicSamplerDescriptor {
 }
 
 impl RelationPublicSamplerDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_resident_payload_add(
+            resident_string_payload_byte_length(&self.role_domain)?,
+            resident_vec_storage_byte_length(&self.canonical_role_coordinate_bytes)?,
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             RELATION_PUBLIC_SAMPLER_SCHEMA_IDENTIFIER,
@@ -803,20 +803,17 @@ impl RelationPublicSamplerDescriptor {
             ],
         ))
     }
-
-    pub(super) fn canonical_order_key(&self) -> (&str, &[u8]) {
-        (&self.role_domain, &self.canonical_role_coordinate_bytes)
-    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u16)]
 pub(crate) enum RelationColumnValueType {
     BaseField = 1,
     ChallengeExtension = 2,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) enum RelationColumnOrigin {
     VerifierSequence {
         verifier_source_ordinal: u32,
@@ -861,7 +858,8 @@ impl RelationColumnOrigin {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RelationColumnDescriptor {
     pub(super) origin: RelationColumnOrigin,
     pub(super) value_type: RelationColumnValueType,
@@ -933,6 +931,19 @@ pub(crate) enum RelationTreeDescriptor {
 }
 
 impl RelationTreeDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        match self {
+            Self::ProofCreated {
+                ordered_column_ordinals,
+                ..
+            }
+            | Self::BoundPublic {
+                ordered_column_ordinals,
+                ..
+            } => resident_vec_storage_byte_length(ordered_column_ordinals),
+        }
+    }
+
     pub(crate) fn ordered_column_ordinals(&self) -> &[u32] {
         match self {
             Self::ProofCreated {
@@ -984,36 +995,17 @@ pub(crate) enum RelationChallengeRole {
     NonNativeTheta = 1,
     NonNativeAlpha = 2,
     ConstraintComposition = 3,
-    DeepPoint = 4,
+    OutOfDomainPoint = 4,
     OpeningBatch = 5,
-    FriFold = 6,
-    QueryPosition = 7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RelationChallengeModulusSelector {
     BaseField,
     NonNativeModulusOrdinal(u16),
-    QueryOrbitCount,
 }
 
 impl RelationChallengeModulusSelector {
-    pub(super) fn canonical_tuple(self) -> CanonicalTuple {
-        let (selector_kind, selector_ordinal) = match self {
-            Self::BaseField => (1, 0),
-            Self::NonNativeModulusOrdinal(modulus_ordinal) => (2, modulus_ordinal),
-            Self::QueryOrbitCount => (3, 0),
-        };
-        CanonicalTuple::new(
-            RELATION_CHALLENGE_MODULUS_SELECTOR_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(selector_kind),
-                CanonicalItem::unsigned16(selector_ordinal),
-            ],
-        )
-    }
-
     pub(super) fn resolve(
         self,
         variant: &RelationPlanVariant,
@@ -1027,11 +1019,6 @@ impl RelationChallengeModulusSelector {
                 .copied()
                 .ok_or(RelationPlanError::InvalidChallengeCatalog)
                 .and_then(|reference| context.resolved_modulus(reference)),
-            Self::QueryOrbitCount => variant
-                .evaluation_domain_size
-                .checked_div(2)
-                .filter(|count| *count > 0)
-                .ok_or(RelationPlanError::InvalidChallengeCatalog),
         }
     }
 }
@@ -1058,10 +1045,6 @@ pub(crate) enum RelationChallengeSampling {
         coordinate_count: u16,
         maximum_candidate_draws_per_output: u32,
     },
-    DistinctPositions {
-        position_count_selector: RelationChallengeModulusSelector,
-        maximum_candidate_draws_per_output: u32,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1084,30 +1067,6 @@ pub(crate) struct RelationChallengeDescriptor {
 }
 
 impl RelationChallengeDescriptor {
-    pub(crate) fn canonical_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
-        self.canonical_tuple()?
-            .encode()
-            .map_err(canonical_encoding_error)
-    }
-
-    pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
-        Ok(CanonicalTuple::new(
-            RELATION_CHALLENGE_DESCRIPTOR_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.epoch),
-                CanonicalItem::unsigned16(self.role as u16),
-                canonical_u64_list(&self.role_coordinates)?,
-                CanonicalItem::unsigned32(self.value_count),
-                CanonicalItem::unsigned16(self.sampling_kind()),
-                CanonicalItem::nested_tuple(&self.modulus_selector().canonical_tuple())
-                    .map_err(canonical_encoding_error)?,
-                CanonicalItem::unsigned16(self.coordinate_count()),
-                CanonicalItem::unsigned32(self.maximum_candidate_draws_per_output()),
-            ],
-        ))
-    }
-
     pub(crate) fn resolved_sampling(
         &self,
         variant: &RelationPlanVariant,
@@ -1123,21 +1082,8 @@ impl RelationChallengeDescriptor {
                 self.sampling,
                 RelationChallengeSampling::NonzeroExtensionVectors { .. }
             ),
-            require_distinct_outputs: matches!(
-                self.sampling,
-                RelationChallengeSampling::DistinctPositions { .. }
-            ),
+            require_distinct_outputs: false,
         })
-    }
-
-    pub(super) fn sampling_kind(&self) -> u16 {
-        match self.sampling {
-            RelationChallengeSampling::IndependentResidues { .. } => 1,
-            RelationChallengeSampling::NonzeroExtensionVectors { .. } => 2,
-            RelationChallengeSampling::DistinctPositions { .. } => 3,
-            RelationChallengeSampling::ProductResidueVectorCoordinate { .. } => 4,
-            RelationChallengeSampling::PowerOfProductResidueVectorCoordinate { .. } => 5,
-        }
     }
 
     pub(super) fn modulus_selector(&self) -> RelationChallengeModulusSelector {
@@ -1156,10 +1102,6 @@ impl RelationChallengeDescriptor {
                 base_modulus_selector,
                 ..
             } => base_modulus_selector,
-            RelationChallengeSampling::DistinctPositions {
-                position_count_selector,
-                ..
-            } => position_count_selector,
         }
     }
 
@@ -1178,7 +1120,6 @@ impl RelationChallengeDescriptor {
             | RelationChallengeSampling::NonzeroExtensionVectors {
                 coordinate_count, ..
             } => coordinate_count,
-            RelationChallengeSampling::DistinctPositions { .. } => 1,
         }
     }
 
@@ -1199,10 +1140,6 @@ impl RelationChallengeDescriptor {
             | RelationChallengeSampling::NonzeroExtensionVectors {
                 maximum_candidate_draws_per_output,
                 ..
-            }
-            | RelationChallengeSampling::DistinctPositions {
-                maximum_candidate_draws_per_output,
-                ..
             } => maximum_candidate_draws_per_output,
         }
     }
@@ -1216,10 +1153,8 @@ impl RelationChallengeDescriptor {
             RelationChallengeRole::NonNativeTheta => 2,
             RelationChallengeRole::NonNativeAlpha => 3,
             RelationChallengeRole::ConstraintComposition
-            | RelationChallengeRole::DeepPoint
-            | RelationChallengeRole::OpeningBatch
-            | RelationChallengeRole::FriFold
-            | RelationChallengeRole::QueryPosition => 1,
+            | RelationChallengeRole::OutOfDomainPoint
+            | RelationChallengeRole::OpeningBatch => 1,
         };
         if self.value_count == 0
             || self.role_coordinates.len() != expected_coordinate_count
@@ -1230,47 +1165,34 @@ impl RelationChallengeDescriptor {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
         let resolved_modulus = self.modulus_selector().resolve(variant, context)?;
+        let non_native_repetition_count = match self.role {
+            RelationChallengeRole::NonNativeTheta => {
+                Some(context.non_native_theta_repetition_count)
+            }
+            RelationChallengeRole::NonNativeAlpha => {
+                Some(context.non_native_alpha_repetition_count)
+            }
+            _ => None,
+        };
         if resolved_modulus < 2
-            || matches!(
-                self.role,
-                RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha
-            ) && BigUint::from(resolved_modulus).pow(u32::from(
-                context.non_native_modular_identity_challenge_count,
-            )) >= (BigUint::one() << 512_usize)
+            || non_native_repetition_count.is_some_and(|repetition_count| {
+                BigUint::from(resolved_modulus).pow(u32::from(repetition_count))
+                    >= (BigUint::one() << 512_usize)
+            })
         {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
         let expected_epoch = match self.role {
             RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha => 1,
             RelationChallengeRole::ConstraintComposition => 2,
-            RelationChallengeRole::DeepPoint => 3,
+            RelationChallengeRole::OutOfDomainPoint => 3,
             RelationChallengeRole::OpeningBatch => 4,
-            RelationChallengeRole::FriFold => 4_u16
-                .checked_add(
-                    self.role_coordinates
-                        .first()
-                        .copied()
-                        .and_then(|ordinal| u16::try_from(ordinal).ok())
-                        .ok_or(RelationPlanError::InvalidChallengeCatalog)?,
-                )
-                .ok_or(RelationPlanError::CountOverflow)?,
-            RelationChallengeRole::QueryPosition => 4_u16
-                .checked_add(context.fri_fold_count)
-                .ok_or(RelationPlanError::CountOverflow)?,
         };
         let expected_sampling = match self.role {
             RelationChallengeRole::NonNativeTheta => {
-                let modulus_ordinal = self
-                    .role_coordinates
-                    .first()
-                    .copied()
-                    .and_then(|ordinal| u16::try_from(ordinal).ok())
-                    .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
                 RelationChallengeSampling::ProductResidueVectorCoordinate {
-                    modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(
-                        modulus_ordinal,
-                    ),
-                    coordinate_count: context.non_native_modular_identity_challenge_count,
+                    modulus_selector: RelationChallengeModulusSelector::BaseField,
+                    coordinate_count: context.non_native_theta_repetition_count,
                     maximum_candidate_draws_per_output: context
                         .maximum_fiat_shamir_candidate_draws_per_output,
                 }
@@ -1286,20 +1208,20 @@ impl RelationChallengeDescriptor {
                     modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(
                         modulus_ordinal,
                     ),
-                    coordinate_count: context.non_native_modular_identity_challenge_count,
+                    coordinate_count: context.non_native_alpha_repetition_count,
                     maximum_candidate_draws_per_output: context
                         .maximum_fiat_shamir_candidate_draws_per_output,
                 }
             }
-            RelationChallengeRole::ConstraintComposition
-            | RelationChallengeRole::OpeningBatch
-            | RelationChallengeRole::FriFold => RelationChallengeSampling::IndependentResidues {
-                modulus_selector: RelationChallengeModulusSelector::BaseField,
-                coordinate_count: context.challenge_extension_degree,
-                maximum_candidate_draws_per_output: context
-                    .maximum_fiat_shamir_candidate_draws_per_output,
-            },
-            RelationChallengeRole::DeepPoint => {
+            RelationChallengeRole::ConstraintComposition | RelationChallengeRole::OpeningBatch => {
+                RelationChallengeSampling::IndependentResidues {
+                    modulus_selector: RelationChallengeModulusSelector::BaseField,
+                    coordinate_count: context.challenge_extension_degree,
+                    maximum_candidate_draws_per_output: context
+                        .maximum_fiat_shamir_candidate_draws_per_output,
+                }
+            }
+            RelationChallengeRole::OutOfDomainPoint => {
                 RelationChallengeSampling::NonzeroExtensionVectors {
                     base_modulus_selector: RelationChallengeModulusSelector::BaseField,
                     coordinate_count: context.challenge_extension_degree,
@@ -1307,48 +1229,42 @@ impl RelationChallengeDescriptor {
                         .maximum_fiat_shamir_candidate_draws_per_output,
                 }
             }
-            RelationChallengeRole::QueryPosition => RelationChallengeSampling::DistinctPositions {
-                position_count_selector: RelationChallengeModulusSelector::QueryOrbitCount,
-                maximum_candidate_draws_per_output: context
-                    .maximum_fiat_shamir_candidate_draws_per_output,
-            },
+        };
+        let arithmetic_modulus_ordinal_is_valid = match self.role {
+            RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha => self
+                .role_coordinates
+                .first()
+                .copied()
+                .and_then(|ordinal| usize::try_from(ordinal).ok())
+                .is_some_and(|ordinal| ordinal < variant.ordered_non_native_moduli.len()),
+            _ => true,
         };
         let coordinates_and_count_are_valid = match self.role {
             RelationChallengeRole::NonNativeTheta => {
-                self.role_coordinates[1]
-                    < u64::from(context.non_native_modular_identity_challenge_count)
+                self.role_coordinates[1] < u64::from(context.non_native_theta_repetition_count)
                     && self.value_count == 1
             }
             RelationChallengeRole::NonNativeAlpha => {
-                self.role_coordinates[1]
-                    < u64::from(context.non_native_modular_identity_challenge_count)
+                self.role_coordinates[1] < u64::from(context.non_native_alpha_repetition_count)
                     && self.value_count == 1
             }
             RelationChallengeRole::ConstraintComposition => {
                 self.role_coordinates[0] < variant.ordered_constraints.len() as u64
                     && self.value_count == 1
             }
-            RelationChallengeRole::DeepPoint => {
-                self.role_coordinates[0] < u64::from(context.deep_point_count)
+            RelationChallengeRole::OutOfDomainPoint => {
+                self.role_coordinates[0] < u64::from(context.out_of_domain_point_count)
                     && self.value_count == 1
             }
             RelationChallengeRole::OpeningBatch => {
                 self.role_coordinates[0] == 0
                     && self.value_count as usize == variant.ordered_opening_claims.len()
             }
-            RelationChallengeRole::FriFold => {
-                self.role_coordinates[0] < u64::from(context.fri_fold_count)
-                    && self.value_count == 1
-            }
-            RelationChallengeRole::QueryPosition => {
-                self.role_coordinates[0] == 0 && self.value_count == context.unique_query_count
-            }
         };
         if self.epoch != expected_epoch
             || self.sampling != expected_sampling
+            || !arithmetic_modulus_ordinal_is_valid
             || !coordinates_and_count_are_valid
-            || matches!(self.role, RelationChallengeRole::QueryPosition)
-                && u64::from(self.value_count) > resolved_modulus
         {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
@@ -1356,50 +1272,8 @@ impl RelationChallengeDescriptor {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RelationChallengeEpochPrecedingMessage {
-    BaseRoots,
-    AuxiliaryRoots,
-    QuotientRoots,
-    DeepValuesAndOpeningBatchMask,
-    FriLayerRoot(u16),
-    FriTerminal,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RelationChallengeEpochCatalog {
-    pub(crate) epoch: u16,
-    pub(crate) preceding_message: RelationChallengeEpochPrecedingMessage,
-    pub(crate) ordered_descriptors: Vec<RelationChallengeDescriptor>,
-}
-
-impl RelationChallengeEpochCatalog {
-    pub(crate) fn canonical_descriptor_bytes(&self) -> Result<Vec<Vec<u8>>, RelationPlanError> {
-        self.ordered_descriptors
-            .iter()
-            .map(RelationChallengeDescriptor::canonical_bytes)
-            .collect()
-    }
-
-    pub(crate) fn canonical_catalog_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
-        let tuple = CanonicalTuple::new(
-            RELATION_CHALLENGE_EPOCH_CATALOG_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.epoch),
-                canonical_nested_list(
-                    self.ordered_descriptors
-                        .iter()
-                        .map(RelationChallengeDescriptor::canonical_tuple)
-                        .collect::<Result<Vec<_>, _>>()?,
-                )?,
-            ],
-        );
-        encode_generated_tuple(&tuple)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) enum RelationRadixFactorDescriptor {
     ColumnDigits {
         ordered_column_ordinals: Vec<u32>,
@@ -1409,23 +1283,27 @@ pub(crate) enum RelationRadixFactorDescriptor {
     ConstantDigits {
         ordered_digits: Vec<u64>,
     },
-    TranscriptChallengeDigits {
-        challenge_role: RelationChallengeRole,
-        role_coordinates: Vec<u64>,
-        digit_count: u16,
-    },
-    NonNativeModulusDigits {
-        modulus_reference: SuiteModulusReference,
-        multiplier: u16,
-        digit_count: u16,
-    },
     ScalarColumn {
         column_ordinal: u32,
         complement_binary_value: bool,
     },
 }
 
+#[cfg(test)]
 impl RelationRadixFactorDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        match self {
+            Self::ColumnDigits {
+                ordered_column_ordinals,
+                ..
+            } => resident_vec_storage_byte_length(ordered_column_ordinals),
+            Self::ConstantDigits { ordered_digits } => {
+                resident_vec_storage_byte_length(ordered_digits)
+            }
+            Self::ScalarColumn { .. } => Ok(0),
+        }
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(match self {
             Self::ColumnDigits {
@@ -1445,33 +1323,6 @@ impl RelationRadixFactorDescriptor {
                 RADIX_CONSTANT_DIGITS_SCHEMA_IDENTIFIER,
                 SCHEMA_VERSION,
                 vec![canonical_u64_list(ordered_digits)?],
-            ),
-            Self::TranscriptChallengeDigits {
-                challenge_role,
-                role_coordinates,
-                digit_count,
-            } => CanonicalTuple::new(
-                RADIX_TRANSCRIPT_CHALLENGE_DIGITS_SCHEMA_IDENTIFIER,
-                SCHEMA_VERSION,
-                vec![
-                    CanonicalItem::unsigned16(*challenge_role as u16),
-                    canonical_u64_list(role_coordinates)?,
-                    CanonicalItem::unsigned16(*digit_count),
-                ],
-            ),
-            Self::NonNativeModulusDigits {
-                modulus_reference,
-                multiplier,
-                digit_count,
-            } => CanonicalTuple::new(
-                RADIX_NON_NATIVE_MODULUS_DIGITS_SCHEMA_IDENTIFIER,
-                SCHEMA_VERSION,
-                vec![
-                    CanonicalItem::nested_tuple(&modulus_reference.canonical_tuple())
-                        .map_err(canonical_encoding_error)?,
-                    CanonicalItem::unsigned16(*multiplier),
-                    CanonicalItem::unsigned16(*digit_count),
-                ],
             ),
             Self::ScalarColumn {
                 column_ordinal,
@@ -1495,12 +1346,23 @@ impl RelationRadixFactorDescriptor {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct RelationRadixProductTermDescriptor {
     pub(super) negative: bool,
     pub(super) ordered_factors: Vec<RelationRadixFactorDescriptor>,
 }
 
+#[cfg(test)]
 impl RelationRadixProductTermDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.ordered_factors.iter().try_fold(
+            resident_vec_storage_byte_length(&self.ordered_factors)?,
+            |total, factor| {
+                checked_resident_payload_add(total, factor.resident_owned_payload_byte_length()?)
+            },
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             RADIX_PRODUCT_TERM_SCHEMA_IDENTIFIER,
@@ -1526,11 +1388,34 @@ impl RelationRadixProductTermDescriptor {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RelationRadixConvolutionDescriptor {
+    #[cfg(test)]
     pub(super) radix: u64,
+    #[cfg(test)]
     pub(super) ordered_terms: Vec<RelationRadixProductTermDescriptor>,
 }
 
 impl RelationRadixConvolutionDescriptor {
+    #[cfg(not(test))]
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        Err(RelationPlanError::InvalidConstraint)
+    }
+
+    #[cfg(test)]
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.ordered_terms.iter().try_fold(
+            resident_vec_storage_byte_length(&self.ordered_terms)?,
+            |total, term| {
+                checked_resident_payload_add(total, term.resident_owned_payload_byte_length()?)
+            },
+        )
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
+        Err(RelationPlanError::InvalidConstraint)
+    }
+
+    #[cfg(test)]
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             RADIX_CONVOLUTION_SCHEMA_IDENTIFIER,

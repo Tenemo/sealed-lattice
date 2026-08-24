@@ -1,7 +1,9 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) use crate::bgv::setup_helpers::validate_hash_string;
 
+#[cfg(test)]
 pub(super) fn centered_integer_to_residue(value: i128, modulus: u64) -> CanonicalResult<u64> {
     let modulus_wide = i128::from(modulus);
     let residue = value.rem_euclid(modulus_wide);
@@ -10,17 +12,6 @@ pub(super) fn centered_integer_to_residue(value: i128, modulus: u64) -> Canonica
 }
 
 #[cfg(test)]
-pub(super) fn centered_big_integer_to_residue(
-    value: &BigInt,
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    let modulus_big = BigInt::from(modulus);
-    let residue = ((value % &modulus_big) + &modulus_big) % &modulus_big;
-    residue
-        .to_u64()
-        .ok_or_else(|| invalid_commitment_input("centered residue does not fit u64"))
-}
-
 pub(super) fn validate_message_coefficients(
     message_coefficients: &[u128],
     exclusive_bound: Option<u128>,
@@ -64,29 +55,6 @@ pub(super) fn validate_signed_message_coefficients(
     if !message_coefficients.iter().all(|coefficient| {
         setup_signed_coefficient_fits_centered_commitment_modulus_product(*coefficient)
     }) {
-        return Err(invalid_commitment_input(
-            "signed commitment message coefficient would wrap in the centered CRT commitment modulus",
-        ));
-    }
-
-    Ok(())
-}
-
-#[cfg(test)]
-pub(super) fn validate_big_signed_message_coefficients(
-    message_coefficients: &[BigInt],
-    ring_degree: usize,
-) -> CanonicalResult<()> {
-    if message_coefficients.len() != ring_degree {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "signed commitment message coefficient count must match the ring degree",
-        ));
-    }
-    if !message_coefficients
-        .iter()
-        .all(setup_big_signed_coefficient_fits_centered_commitment_modulus_product)
-    {
         return Err(invalid_commitment_input(
             "signed commitment message coefficient would wrap in the centered CRT commitment modulus",
         ));
@@ -146,6 +114,7 @@ pub(super) fn validate_randomness_by_commitment_limb(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn validate_fresh_randomness_by_commitment_limb(
     randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     ring_degree: usize,
@@ -179,6 +148,7 @@ pub(super) fn validate_fresh_randomness_by_commitment_limb(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn validate_randomness_shape(
     randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     ring_degree: usize,
@@ -209,10 +179,11 @@ pub(super) fn validate_randomness_shape(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn validate_source_rns_limb(source_rns_limb_index: usize) -> CanonicalResult<()> {
     if DATA_PRIMES.get(source_rns_limb_index).is_none() {
         return Err(invalid_commitment_input(
-            "commitment source RNS limb is outside the selected Q_share prime list",
+            "commitment source RNS limb is outside the full data-prime list",
         ));
     }
 
@@ -238,7 +209,6 @@ pub(super) fn validate_matrix_coordinate(
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
-    ring_coefficient_position: usize,
 ) -> CanonicalResult<()> {
     if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_modulus_index) {
         return Err(invalid_commitment_input(
@@ -255,11 +225,5 @@ pub(super) fn validate_matrix_coordinate(
             "commitment matrix column is outside the selected BDLOP shape",
         ));
     }
-    if ring_coefficient_position >= POLYNOMIAL_DEGREE {
-        return Err(invalid_commitment_input(
-            "commitment matrix ring coefficient is outside the selected ring degree",
-        ));
-    }
-
     Ok(())
 }

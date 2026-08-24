@@ -38,7 +38,7 @@ pub(crate) fn describe_collective_bgv_setup_parameters_from_request(
 mod tests {
     use crate::bgv::{
         base_conversion::convert_plaintext_lifted_basis,
-        encoding::encode_batch_plaintext_slots,
+        encoding::encode_batch_plaintext_lanes,
         parameters::BgvBasisKind,
         serialization::{BgvObjectKind, ciphertext_root, plaintext_root, serialize_bgv_object},
     };
@@ -46,15 +46,15 @@ mod tests {
     #[test]
     fn canonical_bgv_serialization_produces_stable_roots() {
         let encoded =
-            encode_batch_plaintext_slots(&[0, 1, 65_536, 17, 99], 0).expect("encoded plaintext");
+            encode_batch_plaintext_lanes(&[0, 1, 256, 17, 99], 0).expect("encoded plaintext");
         let encoded_bytes = serialize_bgv_object(
             BgvObjectKind::Plaintext,
             std::slice::from_ref(&encoded.polynomial),
         )
         .expect("encoded plaintext canonical bytes");
 
-        let left = encode_batch_plaintext_slots(&[1, 2, 3], 0).expect("left component");
-        let right = encode_batch_plaintext_slots(&[4, 5, 6], 0).expect("right component");
+        let left = encode_batch_plaintext_lanes(&[1, 2, 3], 0).expect("left component");
+        let right = encode_batch_plaintext_lanes(&[4, 5, 6], 0).expect("right component");
         let ciphertext_bytes = serialize_bgv_object(
             BgvObjectKind::Ciphertext,
             &[left.polynomial, right.polynomial],
@@ -62,7 +62,7 @@ mod tests {
         .expect("canonical ciphertext bytes");
         let encoded_ciphertext_root = ciphertext_root(&ciphertext_bytes);
 
-        let source = encode_batch_plaintext_slots(&[7, 8, 9, 65_536], 0).expect("source plaintext");
+        let source = encode_batch_plaintext_lanes(&[7, 8, 9, 256], 0).expect("source plaintext");
         let converted =
             convert_plaintext_lifted_basis(&source.polynomial, BgvBasisKind::Extended, 1)
                 .expect("base conversion");
@@ -84,10 +84,10 @@ mod tests {
                 converted_plaintext_root.clone(),
             ],
             vec![
-                "83babe666cc9e134ee31f1b3e64edf063302ff16b5c599292ba71d2d7270e8fc91067456eb09ffb69e63ff4064321099cdc09adbdaed57ac75102a7bcaa7c18d",
-                "87b57a9fbed546496f5bef0adbb919b560249c84fe33c2ace3e71aa380faed69a9b14904f16be2216cb334a86990bcdf6674711fc5c52996d0cba85596123f27",
-                "07ae82a666292ddd08bea917e2a05374938ef8b2d2b4c0410f5d534f42d4516bf9f200bb9b20f62d5b77bac7512a7f271f26312289d2ca402ca55533b15a241e",
-                "0679d66690be7acd670b06bbf57b13c3cc342add3f147f2450ac8804f92623327b63e72ee3e993f8cb9a17950d3a9bc3cb655c740fc67b8c4d46efec3888d66f",
+                "f8a4bf5292d85ac5c6394de9dbce3998df15e626c8304e96051fc1d12de6b1ca595a96bbdcd59aecc59c77eeafab74939a7740957d393c81207a93d1b5a259a8",
+                "0e01e54f578973532d67d2650f2953626ac96cc1c6a7171946298dd891c211e46d4c214ec0aa79176ccfe5dd9896e5ddbfad51acab77b43594842dab887ff3a7",
+                "ab02ce34aceaddc4bf4e106456f10bc98164b50d245d84126d8504e2db2ca2955b03621343624323311aba2066cd940d2d3c8a9efcefc665899cf88898791ca6",
+                "8c82cfbc84b373ad537e40b59e19686d2afeafb3e5984634af4c32da66495774d1f7c6ea196446b87d3464dc939c3f3ba768c1b3a5fbbb16f48a08406a4bed37",
             ]
         );
         assert_eq!(converted.residues_by_modulus.len(), 2);

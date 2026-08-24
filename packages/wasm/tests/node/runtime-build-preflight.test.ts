@@ -23,7 +23,9 @@ import {
     createSuiteIdentifierAccumulator,
     decodeRuntimeBuildManifest,
     decodeSuiteArtifactReferences,
-    proofRandomnessPurposeRanges,
+    hidingArgumentRandomnessPurpose,
+    proofMaskRandomnessPurposeClasses,
+    proofRandomnessFamilyAssignments,
     runtimeBuildBytesToHex,
     runtimeBuildCanonicalLimits,
     type RuntimeAssetRole,
@@ -31,6 +33,7 @@ import {
 import {
     compileRuntimeBuildBootstrap,
     copyRuntimeBuildAuthorityBindingDescription,
+    createRuntimeBuildKernelWorkerPreflight,
     RuntimeBuildPreflightError,
     type RuntimeBuildAuthorityBinding,
     type RuntimeBuildByteSource,
@@ -39,6 +42,9 @@ import {
     type RuntimeBuildFetcher,
     type RuntimeBuildWorkerPreflight,
 } from '#packages/wasm/src/runtime-build-preflight';
+import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
+import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
+import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
 
 const origin = 'https://runtime.example';
 const manifestPath = '/runtime-manifest.canonical';
@@ -48,29 +54,34 @@ const artifactPaths = Object.freeze(
 );
 const textEncoder = new TextEncoder();
 
-type PrivateRandomnessPurposeRangeVector = Readonly<{
+type PrivateRandomnessFamilyAssignmentVector = Readonly<{
     familyName: string;
     familySchemaIdentifier: number;
-    firstPurpose: number;
-    lastPurpose: number;
+    relationWitnessIsPrivate: boolean;
 }>;
 
-type PrivateRandomnessPurposeRangesVector = Readonly<{
+type PrivateRandomnessProofCoordinatesVector = Readonly<{
     privateProofSaltPurpose: number;
-    ranges: readonly PrivateRandomnessPurposeRangeVector[];
+    hidingArgumentPurpose: number;
+    maskPurposeClasses: Readonly<{
+        trace: number;
+        telescoping: number;
+        opening: number;
+    }>;
+    families: readonly PrivateRandomnessFamilyAssignmentVector[];
 }>;
 
-const readPrivateRandomnessPurposeRangesVector =
-    async (): Promise<PrivateRandomnessPurposeRangesVector> =>
+const readPrivateRandomnessProofCoordinatesVector =
+    async (): Promise<PrivateRandomnessProofCoordinatesVector> =>
         JSON.parse(
             await readFile(
                 path.resolve(
                     'test-vectors',
-                    'private-randomness-purpose-ranges.json',
+                    'private-randomness-proof-coordinates.json',
                 ),
                 'utf8',
             ),
-        ) as PrivateRandomnessPurposeRangesVector;
+        ) as PrivateRandomnessProofCoordinatesVector;
 
 const byteSource = (
     bytes: Uint8Array,
@@ -211,6 +222,19 @@ const operationProfileForRandomUse = (
     );
 };
 
+const ballotAggregationCheckpointOperationProfile = (): Uint8Array => {
+    const checkpointBoundary = canonicalTuple(
+        0x1807,
+        unsigned16Item(0x180a),
+        nestedTupleListItem([]),
+    );
+    return canonicalTuple(
+        0x1808,
+        unsigned16Item(0x1404),
+        nestedTupleListItem([checkpointBoundary]),
+    );
+};
+
 const createFixture = (overrides: FixtureOverrides = {}) => {
     const assets: readonly AssetFixture[] = Object.freeze([
         {
@@ -251,8 +275,8 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
     );
     const suiteRecordBytes = canonicalTuple(
         0x0118,
-        unsigned16Item(2),
-        ...Array.from({ length: 20 }, () => unsigned16Item(1)),
+        unsigned16Item(3),
+        ...Array.from({ length: 21 }, () => unsigned16Item(1)),
         nestedTupleListItem(artifactReferences),
     );
     const suiteIdentifier = deriveHash(
@@ -457,6 +481,139 @@ const createWorkerHarness = (consumeWasm = true) => {
     return { launch, observations };
 };
 
+const createSemanticWorker = (input: {
+    artifactStatus?: (artifactKind: number, bytes: Uint8Array) => number;
+    suiteIdentifier: Uint8Array;
+}) => {
+    const observedArtifactKinds: number[] = [];
+    let finished = 0;
+    let terminated = 0;
+    const worker = createRuntimeBuildKernelWorkerPreflight({
+        instantiateVerifiedWasm: ({ canonicalBytes }) => {
+            expect(canonicalBytes).toEqual(
+                Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0),
+            );
+            const memory = new WebAssembly.Memory({ initial: 1 });
+            let nextPointer = 8;
+            const allocate = (byteLength: number): number => {
+                const pointer = nextPointer;
+                nextPointer += byteLength;
+                if (nextPointer > memory.buffer.byteLength) {
+                    memory.grow(
+                        Math.ceil(
+                            (nextPointer - memory.buffer.byteLength) /
+                                (64 * 1024),
+                        ),
+                    );
+                }
+                return pointer;
+            };
+            const deallocate = (): void => undefined;
+            const kernel = {
+                verifyFoundationSuiteRecord: () => ({
+                    isValid: true as const,
+                    value: {
+                        suiteId: runtimeBuildBytesToHex(input.suiteIdentifier),
+                    },
+                }),
+            } as unknown as TranscriptCoreKernel;
+            const context = {
+                allocate,
+                deallocate,
+                executeCommand: <Result>(): Result => {
+                    throw new Error(
+                        'The semantic preflight test uses no command.',
+                    );
+                },
+                memory,
+                runExclusive: <Result>(
+                    _operationName: string,
+                    operation: () => Result,
+                ): Result => operation(),
+                wasmExports: {
+                    memory,
+                    sealed_lattice_foundation_verify_suite_artifact: (
+                        _suitePointer: number,
+                        _suiteByteLength: number,
+                        artifactKind: number,
+                        artifactPointer: number,
+                        artifactByteLength: number,
+                    ): number => {
+                        observedArtifactKinds.push(artifactKind);
+                        return (
+                            input.artifactStatus?.(
+                                artifactKind,
+                                new Uint8Array(
+                                    memory.buffer,
+                                    artifactPointer,
+                                    artifactByteLength,
+                                ).slice(),
+                            ) ?? 0
+                        );
+                    },
+                },
+            } as unknown as TranscriptCoreKernelCommandRuntime;
+            registerCommonProofKernelContext(kernel, context);
+            return Promise.resolve({
+                finish: (): Promise<Readonly<{ ready: true }>> => {
+                    finished += 1;
+                    return Promise.resolve(Object.freeze({ ready: true }));
+                },
+                kernel,
+                terminate: (): void => {
+                    terminated += 1;
+                },
+            });
+        },
+    });
+    return {
+        observations: {
+            get finished(): number {
+                return finished;
+            },
+            observedArtifactKinds,
+            get terminated(): number {
+                return terminated;
+            },
+        },
+        worker,
+    };
+};
+
+const prepareSemanticWorker = async (input: {
+    artifactStatus?: (artifactKind: number, bytes: Uint8Array) => number;
+    fixture: ReturnType<typeof createFixture>;
+}) => {
+    const harness = createSemanticWorker({
+        artifactStatus: input.artifactStatus,
+        suiteIdentifier: input.fixture.suiteIdentifier,
+    });
+    const manifest = decodeRuntimeBuildManifest(input.fixture.manifestBytes);
+    const wasmReference = manifest.orderedAssets.find(
+        (reference) => reference.assetRole === 3,
+    );
+    const wasmBytes = input.fixture.routes.get('/kernel.wasm');
+    const suiteRecordBytes = input.fixture.routes.get(suiteRecordPath);
+    if (
+        wasmReference === undefined ||
+        wasmBytes === undefined ||
+        suiteRecordBytes === undefined
+    ) {
+        throw new Error('The semantic preflight fixture is incomplete.');
+    }
+    await harness.worker.verifyWasm({
+        assetReference: wasmReference,
+        source: byteSource(wasmBytes),
+    });
+    const artifactReferences = decodeSuiteArtifactReferences(suiteRecordBytes);
+    await harness.worker.verifySuiteRecord({
+        artifactReferences,
+        canonicalBytes: suiteRecordBytes,
+        suiteIdentifier: input.fixture.suiteIdentifier,
+    });
+    return { artifactReferences, harness };
+};
+
 const runFixture = async (input: {
     cache?: MemoryRuntimeBuildCache;
     fetcher?: ReturnType<typeof createFetcher>;
@@ -493,39 +650,129 @@ const runFixture = async (input: {
 };
 
 describe('runtime build preflight', () => {
-    it('matches the shared proof-family randomness purpose ranges', async () => {
-        const vector = await readPrivateRandomnessPurposeRangesVector();
-        expect(vector.ranges.map((range) => range.familyName)).toEqual([
+    it('semantically preflights all six suite artifacts before worker finish', async () => {
+        const fixture = createFixture();
+        const { artifactReferences, harness } = await prepareSemanticWorker({
+            fixture,
+        });
+        for (const [index, artifactReference] of artifactReferences.entries()) {
+            const canonicalPath = artifactPaths[index];
+            const artifactBytes =
+                canonicalPath === undefined
+                    ? undefined
+                    : fixture.routes.get(canonicalPath);
+            if (canonicalPath === undefined || artifactBytes === undefined) {
+                throw new Error('The suite-artifact fixture is incomplete.');
+            }
+            await harness.worker.verifySuiteArtifact({
+                artifactReference,
+                canonicalPath,
+                source: byteSource(artifactBytes),
+            });
+        }
+
+        await expect(harness.worker.finish()).resolves.toEqual({ ready: true });
+        expect(harness.observations.observedArtifactKinds).toEqual([
+            1, 2, 3, 4, 5, 6,
+        ]);
+        expect(harness.observations.finished).toBe(1);
+        expect(harness.observations.terminated).toBe(0);
+    });
+
+    it('propagates semantic mutation refusal and keeps finish unavailable', async () => {
+        const fixture = createFixture();
+        const firstArtifactBytes = fixture.routes.get(artifactPaths[0] ?? '');
+        if (firstArtifactBytes === undefined) {
+            throw new Error('The first suite artifact is unavailable.');
+        }
+        const { artifactReferences, harness } = await prepareSemanticWorker({
+            artifactStatus: (artifactKind, bytes) =>
+                artifactKind === 1 && bytes[0] !== firstArtifactBytes[0]
+                    ? 0x0006
+                    : 0,
+            fixture,
+        });
+        const mutated = firstArtifactBytes.slice();
+        mutated[0] = (mutated[0] ?? 0) ^ 0xff;
+        const firstReference = artifactReferences[0];
+        if (firstReference === undefined) {
+            throw new Error(
+                'The first suite-artifact reference is unavailable.',
+            );
+        }
+        await expect(
+            harness.worker.verifySuiteArtifact({
+                artifactReference: firstReference,
+                canonicalPath: artifactPaths[0] ?? '',
+                source: byteSource(mutated),
+            }),
+        ).rejects.toThrow('wrongHashOrRoot');
+        await expect(harness.worker.finish()).rejects.toThrow(
+            'before every suite artifact passes',
+        );
+        await harness.worker.terminate();
+        expect(harness.observations.terminated).toBe(1);
+    });
+
+    it('parses the exact ballot aggregation checkpoint operation profile', () => {
+        const fixture = createFixture({
+            operationProfiles: [ballotAggregationCheckpointOperationProfile()],
+        });
+        const manifest = decodeRuntimeBuildManifest(fixture.manifestBytes);
+
+        expect(manifest.operationProfiles).toHaveLength(1);
+        const operationProfile = manifest.operationProfiles[0];
+        expect(operationProfile?.operationKind).toBe(0x1404);
+        expect(operationProfile?.safeBoundaries).toHaveLength(1);
+        expect(operationProfile?.safeBoundaries[0]).toEqual({
+            orderedRandomUses: [],
+            stateSchemaIdentifier: 0x180a,
+        });
+    });
+
+    it('matches the shared proof-family randomness coordinates', async () => {
+        const vector = await readPrivateRandomnessProofCoordinatesVector();
+        expect(vector.families.map((family) => family.familyName)).toEqual([
             'sameSecret',
             'publicKeyShare',
+            'collectivePublicKeyAggregate',
             'relinearizationRoundOne',
+            'relinearizationRoundOneAggregate',
             'relinearizationRoundTwo',
             'galoisKeyShare',
+            'evaluatorKeyAggregate',
             'ballotValidity',
             'targetShareProof',
             'vssShareLinkage',
             'aggregateThresholdShare',
         ]);
-        expect(proofRandomnessPurposeRanges).toEqual(
-            vector.ranges.map(
-                ({ familySchemaIdentifier, firstPurpose, lastPurpose }) => ({
+        expect(proofRandomnessFamilyAssignments).toEqual(
+            vector.families.map(
+                ({ familySchemaIdentifier, relationWitnessIsPrivate }) => ({
                     familySchemaIdentifier,
-                    firstPurpose,
-                    lastPurpose,
+                    relationWitnessIsPrivate,
                 }),
             ),
         );
+        expect(proofMaskRandomnessPurposeClasses).toEqual(
+            vector.maskPurposeClasses,
+        );
+        expect(hidingArgumentRandomnessPurpose).toBe(
+            vector.hidingArgumentPurpose,
+        );
 
-        for (const range of vector.ranges) {
-            for (const purpose of [
-                range.firstPurpose,
-                range.lastPurpose,
-                vector.privateProofSaltPurpose,
-            ]) {
+        const privateWitnessPurposes = [
+            vector.maskPurposeClasses.trace,
+            vector.maskPurposeClasses.telescoping,
+            vector.maskPurposeClasses.opening,
+            vector.privateProofSaltPurpose,
+        ];
+        for (const family of vector.families) {
+            for (const purpose of [vector.hidingArgumentPurpose]) {
                 const fixture = createFixture({
                     operationProfiles: [
                         operationProfileForRandomUse(
-                            range.familySchemaIdentifier,
+                            family.familySchemaIdentifier,
                             purpose,
                         ),
                     ],
@@ -535,14 +782,11 @@ describe('runtime build preflight', () => {
                 ).not.toThrow();
             }
 
-            for (const purpose of [
-                range.firstPurpose - 1,
-                range.lastPurpose + 1,
-            ]) {
+            for (const purpose of [0, 5, 0xffff]) {
                 const fixture = createFixture({
                     operationProfiles: [
                         operationProfileForRandomUse(
-                            range.familySchemaIdentifier,
+                            family.familySchemaIdentifier,
                             purpose,
                         ),
                     ],
@@ -553,10 +797,43 @@ describe('runtime build preflight', () => {
             }
         }
 
-        for (const [family, purpose] of [
-            [0x1213, 0xfffe],
-            [0xffff, 1],
-        ] as const) {
+        for (const family of vector.families.filter(
+            (assignment) => assignment.relationWitnessIsPrivate,
+        )) {
+            for (const purpose of privateWitnessPurposes) {
+                const fixture = createFixture({
+                    operationProfiles: [
+                        operationProfileForRandomUse(
+                            family.familySchemaIdentifier,
+                            purpose,
+                        ),
+                    ],
+                });
+                expect(() =>
+                    decodeRuntimeBuildManifest(fixture.manifestBytes),
+                ).not.toThrow();
+            }
+        }
+
+        for (const family of vector.families.filter(
+            (assignment) => !assignment.relationWitnessIsPrivate,
+        )) {
+            for (const purpose of privateWitnessPurposes) {
+                const fixture = createFixture({
+                    operationProfiles: [
+                        operationProfileForRandomUse(
+                            family.familySchemaIdentifier,
+                            purpose,
+                        ),
+                    ],
+                });
+                expect(() =>
+                    decodeRuntimeBuildManifest(fixture.manifestBytes),
+                ).toThrow('A checkpoint random-use profile is unassigned.');
+            }
+        }
+
+        for (const [family, purpose] of [[0xffff, 1]] as const) {
             const fixture = createFixture({
                 operationProfiles: [
                     operationProfileForRandomUse(family, purpose),

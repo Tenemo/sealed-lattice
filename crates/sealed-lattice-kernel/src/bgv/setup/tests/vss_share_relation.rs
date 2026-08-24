@@ -192,7 +192,7 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
                 .iter()
                 .map(|value| u128::from(*value))
                 .collect::<Vec<_>>();
-            compute_setup_commitment_for_tests(
+            compute_setup_commitment_for_degree(
                 &public_matrix_seed_hash,
                 0,
                 coefficient_index as u64,

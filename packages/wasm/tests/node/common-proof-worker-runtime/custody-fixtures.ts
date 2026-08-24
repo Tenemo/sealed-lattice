@@ -1,10 +1,19 @@
-import { foundationProfile, stateCapabilityKinds } from '@sealed-lattice/types';
+import {
+    BrowserActionStorageCustodyError,
+    foundationProfile,
+    stateCapabilityKinds,
+} from '@sealed-lattice/types';
 import { expect } from 'vitest';
 
-import { openClosedWorkerCommonProofGenerationFamilyAdapter } from '../../../src/common-proof-worker-runtime.js';
+import {
+    openClosedWorkerCommonProofGenerationFamilyAdapter,
+    releaseClosedWorkerCommonProofGenerationFamilyAdapter,
+    type ClosedWorkerCommonProofGenerationFamilyAdapter,
+} from '../../../src/common-proof-worker-runtime.js';
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
+    type RuntimeBuildManifest,
 } from '../../../src/index.js';
 import {
     openStateVerifierSession,
@@ -17,6 +26,7 @@ import type { TranscriptCoreKernel } from '../../../src/transcript-core-bridge/k
 
 import {
     createMockKernelRuntime,
+    createResetSafeCommonProofCursorManifest,
     createVerifiedApplicationFixture,
     memoryBytes,
     noSecondPollValue,
@@ -24,7 +34,6 @@ import {
     writeUnsigned32,
 } from './kernel-fixtures.js';
 import {
-    bytesFromHex,
     cryptoProvider,
     encodeRequest,
     hashByteLength,
@@ -37,7 +46,10 @@ import {
     createCanonicalCarrierSigningKeyPairFixtures,
     signCanonicalCarrierFixtureMessage,
 } from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
-import { openAuthenticatedCheckpointStore } from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
+import {
+    openAuthenticatedCheckpointStore,
+    type AuthenticatedCheckpointPhysicalAccountingScope,
+} from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
 import type {
     BrowserActionStorageCustody,
     BrowserActionStorageRootBinding,
@@ -45,12 +57,16 @@ import type {
 } from '#packages/protocol/src/runtime/browser-action-storage-custody';
 import {
     closeCommonProofExecutionEnvironmentInInstalledCustodyWorker,
+    copyReservedCommonProofCheckpointLineageIdentifier,
     installBrowserActionStorageCustodyWorkerHost,
     openCommonProofExecutionEnvironmentInInstalledCustodyWorker,
     prepareCommonProofGenerationInInstalledCustodyWorker,
+    releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker,
+    reserveCommonProofCheckpointLineageInInstalledCustodyWorker,
     runCommonProofGenerationInInstalledCustodyWorker,
     suspendCommonProofExecutionEnvironmentForAuthenticatedResumeInInstalledCustodyWorker,
     type BrowserActionStorageCustodyWorkerConfiguration,
+    type InstalledCommonProofCheckpointLineageReservation,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody-worker-channel';
 import type { BrowserFoundationInitializationInput } from '#packages/protocol/src/runtime/browser-foundation-operation-owner';
 import {
@@ -59,10 +75,12 @@ import {
     openCommonProofBrowserCustody,
     type CommonProofBrowserCustody,
 } from '#packages/protocol/src/runtime/common-proof-browser-custody';
+import { checkpointStateStreamDomain } from '#packages/protocol/src/runtime/common-proof-browser-custody/records';
 import {
     openDurableStateWitnessService,
     type DurableStateWitnessServiceLimits,
 } from '#packages/protocol/src/runtime/durable-state-witness-service';
+import { createRuntimeBuildCheckpointBoundaryPolicy } from '#packages/protocol/src/runtime/runtime-build-checkpoint-boundary-policy';
 import type {
     WebLockCommittedBrowserFoundationInitialization,
     WebLockFoundationWitnessRecord,
@@ -88,6 +106,24 @@ import {
     variableBytesItem,
 } from '#packages/wasm/tests/canonical-tuple-test-helpers';
 import { createStateVerifierTestVector } from '#packages/wasm/tests/state-verifier-test-vectors';
+
+type InstalledCustodyCommonProofExecutionEnvironment = Awaited<
+    ReturnType<
+        typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
+    >
+>;
+
+const installedCommonProofGenerationBindingHash = runtimeBinding(0x5b);
+
+export const createCommonProofGenerationCursorFixtureBytes = (
+    _kernel?: TranscriptCoreKernel,
+): Uint8Array<ArrayBuffer> =>
+    createResetSafeCommonProofCursorManifest(
+        installedProofAttemptLineageIdentifier,
+        installedCommonProofGenerationBindingHash,
+    );
+
+export const commonProofApplicationStatementSchemaIdentifier = 0x1217;
 
 const foundationWitnessServiceLimits: DurableStateWitnessServiceLimits =
     Object.freeze({
@@ -119,23 +155,55 @@ const commonProofCheckpointLimits = Object.freeze({
     maximumActiveOperationIdentityCount: 64,
     maximumCheckpointStateByteLength: 1_048_576,
     maximumManifestByteLength: 16_384,
-    maximumRandomCursorCount: 8,
+    maximumRandomCursorManifestByteLength: 4_096,
     maximumRecordSealingCount: 256,
     maximumSourceDigestCount: 8,
-    maximumStreamAttemptCount: 4,
     transactionLifetimeMilliseconds: 10_000,
 });
 
-const commonProofCheckpointBoundaryPolicy = Object.freeze({
-    validatePublication: () => undefined,
-    validateResume: () => undefined,
-});
-
-const workerCheckpointStateStreamDomain = 'worker-checkpoint-test';
+const commonProofCheckpointStateSchemaIdentifier = 0x010c;
+const commonProofRuntimeBuildManifest = Object.freeze({
+    operationProfiles: Object.freeze([
+        Object.freeze({
+            operationKind: commonProofApplicationStatementSchemaIdentifier,
+            safeBoundaries: Object.freeze([
+                Object.freeze({
+                    orderedRandomUses: Object.freeze([
+                        Object.freeze({
+                            family: commonProofApplicationStatementSchemaIdentifier,
+                            purpose: 1,
+                        }),
+                    ]),
+                    stateSchemaIdentifier:
+                        commonProofCheckpointStateSchemaIdentifier,
+                }),
+            ]),
+        }),
+    ]),
+    orderedAssets: Object.freeze([]),
+    orderedSuiteArtifactPaths: Object.freeze([]),
+    protocolVersion: 1,
+    releaseIdentifier: 'common-proof-checkpoint-custody-test',
+    suiteIdentifier: new Uint8Array(64),
+    suiteRecordPath: '/suite.canonical',
+}) satisfies RuntimeBuildManifest;
+const commonProofCheckpointBoundaryPolicy =
+    createRuntimeBuildCheckpointBoundaryPolicy({
+        operationKind: commonProofApplicationStatementSchemaIdentifier,
+        orderedBoundaryBindings: Object.freeze([
+            Object.freeze({
+                safeBoundaryOrdinal: 0,
+                stateSchemaIdentifier:
+                    commonProofCheckpointStateSchemaIdentifier,
+                stateStreamDomain: checkpointStateStreamDomain,
+            }),
+        ]),
+        runtimeBuildManifest: commonProofRuntimeBuildManifest,
+    });
 export const workerCheckpointStateBytes = Uint8Array.of(0x41);
 const workerCheckpointChunkDigest = foundationHash512(
     'sealed-lattice/transport/chunk/v1',
-    asciiItem(workerCheckpointStateStreamDomain),
+    asciiItem(checkpointStateStreamDomain),
     canonicalItem(0x04, unsigned32LittleEndian(0)),
     canonicalItem(
         0x04,
@@ -157,7 +225,7 @@ const workerCheckpointStreamDescriptor = canonicalTuple(
     hashItem(
         foundationHash512(
             'sealed-lattice/transport/full-object/v1',
-            asciiItem(workerCheckpointStateStreamDomain),
+            asciiItem(checkpointStateStreamDomain),
             unsigned64Item(BigInt(workerCheckpointStateBytes.byteLength)),
             variableBytesItem(workerCheckpointStateBytes),
         ),
@@ -166,21 +234,35 @@ const workerCheckpointStreamDescriptor = canonicalTuple(
 
 export const createWorkerCheckpointBoundary = () =>
     Object.freeze({
-        operationKind: 1,
-        orderedRandomCursors: Object.freeze([]),
-        orderedSourceDigests: Object.freeze([]),
-        safeBoundaryOrdinal: 1,
+        operationKind: commonProofApplicationStatementSchemaIdentifier,
+        orderedSourceDigests: Object.freeze([
+            installedCommonProofGenerationBindingHash.slice(),
+            installedCommonProofGenerationBindingHash.slice(),
+            installedCommonProofVerificationBindingHash.slice(),
+        ]),
+        privateRandomCursorManifestBytes:
+            createCommonProofGenerationCursorFixtureBytes(),
+        privateRandomnessStreamAttemptIdentifier:
+            installedProofAttemptLineageIdentifier.slice(),
+        safeBoundaryOrdinal: 0,
         stateStreamDescriptorBytes: workerCheckpointStreamDescriptor.slice(),
-        stateStreamDomain: workerCheckpointStateStreamDomain,
+        stateStreamDomain: checkpointStateStreamDomain,
     });
 
 export const createExpectedWorkerCheckpointBoundary = () =>
     Object.freeze({
-        operationKind: 1,
-        orderedRandomCursors: Object.freeze([]),
-        orderedSourceDigests: Object.freeze([]),
-        safeBoundaryOrdinal: 1,
-        stateStreamDomain: workerCheckpointStateStreamDomain,
+        operationKind: commonProofApplicationStatementSchemaIdentifier,
+        orderedSourceDigests: Object.freeze([
+            installedCommonProofGenerationBindingHash.slice(),
+            installedCommonProofGenerationBindingHash.slice(),
+            installedCommonProofVerificationBindingHash.slice(),
+        ]),
+        privateRandomCursorManifestBytes:
+            createCommonProofGenerationCursorFixtureBytes(),
+        privateRandomnessStreamAttemptIdentifier:
+            installedProofAttemptLineageIdentifier.slice(),
+        safeBoundaryOrdinal: 0,
+        stateStreamDomain: checkpointStateStreamDomain,
     });
 
 type SameRealmCustodyWorkerResponse = Readonly<{
@@ -706,7 +788,7 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
             return createCommittedInitialization();
         },
         custody: custodyFacade,
-        openCheckpointStore: () => {
+        openCheckpointStore: (checkpointInput) => {
             transferableCheckpointStore ??= openAuthenticatedCheckpointStore({
                 authorityContext: runtimeAuthorityContext({
                     actionContextHash: binding.actionContextHash,
@@ -714,11 +796,10 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
                     ownerParticipantIdentity: binding.participantId,
                     suiteIdentifier: binding.suiteId,
                 }),
-                boundaryPolicy: commonProofCheckpointBoundaryPolicy,
+                boundaryPolicy: checkpointInput.boundaryPolicy,
                 cryptoProvider,
-                cursorKernel: kernel,
                 encryptionKey,
-                limits: commonProofCheckpointLimits,
+                limits: checkpointInput.limits,
                 store: checkpointStorage.store,
             });
             return Promise.resolve(transferableCheckpointStore);
@@ -741,10 +822,42 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
                     maximumDeletionBatchRecordCount:
                         commonProofStorageCapacityProfile.maximumLeaseCountPerTransaction,
                 });
+            let checkpointPhysicalAccountingScope:
+                | AuthenticatedCheckpointPhysicalAccountingScope
+                | undefined;
             try {
+                if (commonProofInput.checkpoint !== undefined) {
+                    const checkpointLineageIdentifier =
+                        'operationIdentity' in commonProofInput.checkpoint
+                            ? commonProofInput.checkpoint.operationIdentity
+                                  .checkpointLineageIdentifier
+                            : commonProofInput.checkpoint.resumeDescriptor.checkpointLineageIdentifier.slice();
+                    try {
+                        checkpointPhysicalAccountingScope =
+                            await commonProofInput.checkpoint.store.openPhysicalAccountingScope(
+                                checkpointLineageIdentifier,
+                            );
+                    } finally {
+                        checkpointLineageIdentifier.fill(0);
+                    }
+                }
+                const {
+                    checkpoint: configuredCheckpoint,
+                    ...commonProofInputWithoutCheckpoint
+                } = commonProofInput;
                 const commonProofCustody = openCommonProofBrowserCustody({
-                    ...commonProofInput,
+                    ...commonProofInputWithoutCheckpoint,
                     capacityReservation,
+                    ...(configuredCheckpoint === undefined ||
+                    checkpointPhysicalAccountingScope === undefined
+                        ? {}
+                        : {
+                              checkpoint: {
+                                  ...configuredCheckpoint,
+                                  physicalAccountingScope:
+                                      checkpointPhysicalAccountingScope,
+                              },
+                          }),
                     limits: {
                         maximumExternalMemoryByteLength: 1_073_741_824n,
                         maximumExternalMemoryObjectCount: 4_096,
@@ -759,6 +872,14 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
                     commonProofCustody
                 );
             } catch (error) {
+                if (
+                    commonProofInput.checkpoint !== undefined &&
+                    checkpointPhysicalAccountingScope !== undefined
+                ) {
+                    await commonProofInput.checkpoint.store.releasePhysicalAccountingScope(
+                        checkpointPhysicalAccountingScope,
+                    );
+                }
                 await capacityReservation.release();
                 throw error;
             }
@@ -870,7 +991,6 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
         },
         checkpointStore: {
             boundaryPolicy: commonProofCheckpointBoundaryPolicy,
-            cursorKernel: kernel,
             limits: commonProofCheckpointLimits,
         },
         cryptoProvider,
@@ -1034,9 +1154,11 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
 export const createInstalledCommonProofGenerationFixture = (
     checkpointCursorBytes: Uint8Array<ArrayBuffer>,
     options: Readonly<{
+        checkpointLineageIdentifier: Uint8Array<ArrayBufferLike>;
         failFirstGenerationFamilyAdapterDiscard?: boolean;
+        resumeApplicationStatementSchemaIdentifier?: number;
         resumeCheckpointStateByteLength?: number;
-    }> = {},
+    }>,
 ): Readonly<{
     binding: Uint8Array<ArrayBuffer>;
     checkpointStateBytes: Uint8Array<ArrayBuffer>;
@@ -1055,10 +1177,16 @@ export const createInstalledCommonProofGenerationFixture = (
     resumeRuntime: TranscriptCoreKernelCommandRuntime;
     verificationBinding: Uint8Array<ArrayBuffer>;
 }> => {
-    const binding = runtimeBinding(0x5b);
+    expect(options.checkpointLineageIdentifier.byteLength).toBe(32);
+    const checkpointLineageIdentifier =
+        options.checkpointLineageIdentifier.slice();
+    const binding = installedCommonProofGenerationBindingHash.slice();
     const objectBytes = Uint8Array.from([4, 2, 1, 7, 9, 3, 8, 5]);
+    const maximumStorageTransactionPayloadByteLength = BigInt(
+        objectBytes.byteLength,
+    );
     const createStorageRequest = encodeRequest({
-        maximumPayloadByteLength: 1n,
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 1,
@@ -1072,7 +1200,7 @@ export const createInstalledCommonProofGenerationFixture = (
         runtimeBindingHash: binding,
     });
     const appendStorageRequest = encodeRequest({
-        maximumPayloadByteLength: BigInt(objectBytes.byteLength),
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 2,
@@ -1087,7 +1215,7 @@ export const createInstalledCommonProofGenerationFixture = (
         runtimeBindingHash: binding,
     });
     const sealStorageRequest = encodeRequest({
-        maximumPayloadByteLength: 1n,
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 3,
@@ -1101,7 +1229,7 @@ export const createInstalledCommonProofGenerationFixture = (
         runtimeBindingHash: binding,
     });
     const readStorageRequest = encodeRequest({
-        maximumPayloadByteLength: BigInt(objectBytes.byteLength),
+        maximumPayloadByteLength: maximumStorageTransactionPayloadByteLength,
         operations: [
             {
                 kind: 4,
@@ -1121,7 +1249,7 @@ export const createInstalledCommonProofGenerationFixture = (
         readStorageRequest,
     ]);
     const checkpointStateBytes = new Uint8Array(37).fill(0x91);
-    const stableAttemptBindingHash = new Uint8Array(hashByteLength).fill(0x62);
+    const stableAttemptBindingHash = binding.slice();
     const outputBytes = Uint8Array.from([8, 6, 7, 5, 3, 0, 9]);
     const observations = {
         acknowledgedCheckpointCount: 0,
@@ -1157,6 +1285,8 @@ export const createInstalledCommonProofGenerationFixture = (
             runtimeBindingHashOutputPointer,
             verificationBindingHashOutputPointer,
             proofAttemptLineageIdentifierOutputPointer,
+            checkpointLineageIdentifierOutputPointer,
+            applicationStatementSchemaIdentifierOutputPointer,
             statusPointer,
         ) => {
             expect([101, 103]).toContain(adapterHandle);
@@ -1175,6 +1305,16 @@ export const createInstalledCommonProofGenerationFixture = (
                 proofAttemptLineageIdentifierOutputPointer,
                 installedProofAttemptLineageIdentifier.byteLength,
             ).set(installedProofAttemptLineageIdentifier);
+            memoryBytes(
+                memory,
+                checkpointLineageIdentifierOutputPointer,
+                checkpointLineageIdentifier.byteLength,
+            ).set(checkpointLineageIdentifier);
+            writeUnsigned32(
+                memory,
+                applicationStatementSchemaIdentifierOutputPointer,
+                commonProofApplicationStatementSchemaIdentifier,
+            );
             writeUnsigned32(memory, statusPointer, 0);
             return 0;
         },
@@ -1182,11 +1322,15 @@ export const createInstalledCommonProofGenerationFixture = (
             adapterHandle,
             checkpointPointer,
             checkpointByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
             statusPointer,
         ) => {
             expect([101, 103]).toContain(adapterHandle);
             expect(checkpointPointer).toBe(0);
             expect(checkpointByteLength).toBe(0);
+            expect(generationCursorManifestPointer).toBe(0);
+            expect(generationCursorManifestByteLength).toBe(0);
             writeUnsigned32(memory, statusPointer, 0);
             return adapterHandle === 101 ? 201 : 203;
         },
@@ -1304,17 +1448,21 @@ export const createInstalledCommonProofGenerationFixture = (
             operationHandle,
             safeBoundaryOrdinalPointer,
             stateByteLengthPointer,
-            cursorCountPointer,
+            cursorManifestByteLengthPointer,
         ) => {
             expect(operationHandle).toBe(301);
             expect(freshPhase).toBe('checkpoint');
-            writeUnsigned32(memory, safeBoundaryOrdinalPointer, 6);
+            writeUnsigned32(memory, safeBoundaryOrdinalPointer, 0);
             writeUnsigned32(
                 memory,
                 stateByteLengthPointer,
                 checkpointStateBytes.byteLength,
             );
-            writeUnsigned32(memory, cursorCountPointer, 1);
+            writeUnsigned32(
+                memory,
+                cursorManifestByteLengthPointer,
+                checkpointCursorBytes.byteLength,
+            );
             return 0;
         },
         sealed_lattice_common_proof_generation_copy_checkpoint_state: (
@@ -1329,30 +1477,15 @@ export const createInstalledCommonProofGenerationFixture = (
             );
             return 0;
         },
-        sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length: (
-            operationHandle,
-            cursorIndex,
-            statusPointer,
-        ) => {
-            expect(operationHandle).toBe(301);
-            expect(cursorIndex).toBe(0);
-            writeUnsigned32(memory, statusPointer, 0);
-            return checkpointCursorBytes.byteLength;
-        },
-        sealed_lattice_common_proof_generation_copy_checkpoint_cursor: (
-            operationHandle,
-            cursorIndex,
-            outputPointer,
-            outputByteLength,
-        ) => {
-            expect(operationHandle).toBe(301);
-            expect(cursorIndex).toBe(0);
-            expect(outputByteLength).toBe(checkpointCursorBytes.byteLength);
-            memoryBytes(memory, outputPointer, outputByteLength).set(
-                checkpointCursorBytes,
-            );
-            return 0;
-        },
+        sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest:
+            (operationHandle, outputPointer, outputByteLength) => {
+                expect(operationHandle).toBe(301);
+                expect(outputByteLength).toBe(checkpointCursorBytes.byteLength);
+                memoryBytes(memory, outputPointer, outputByteLength).set(
+                    checkpointCursorBytes,
+                );
+                return 0;
+            },
         sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash:
             (operationHandle, outputPointer, outputByteLength) => {
                 expect(operationHandle).toBe(301);
@@ -1410,6 +1543,8 @@ export const createInstalledCommonProofGenerationFixture = (
             runtimeBindingHashOutputPointer,
             verificationBindingHashOutputPointer,
             proofAttemptLineageIdentifierOutputPointer,
+            checkpointLineageIdentifierOutputPointer,
+            applicationStatementSchemaIdentifierOutputPointer,
             statusPointer,
         ) => {
             expect(adapterHandle).toBe(102);
@@ -1428,6 +1563,17 @@ export const createInstalledCommonProofGenerationFixture = (
                 proofAttemptLineageIdentifierOutputPointer,
                 installedProofAttemptLineageIdentifier.byteLength,
             ).set(installedProofAttemptLineageIdentifier);
+            memoryBytes(
+                memory,
+                checkpointLineageIdentifierOutputPointer,
+                checkpointLineageIdentifier.byteLength,
+            ).set(checkpointLineageIdentifier);
+            writeUnsigned32(
+                memory,
+                applicationStatementSchemaIdentifierOutputPointer,
+                options.resumeApplicationStatementSchemaIdentifier ??
+                    commonProofApplicationStatementSchemaIdentifier,
+            );
             writeUnsigned32(memory, statusPointer, 0);
             return 0;
         },
@@ -1435,6 +1581,8 @@ export const createInstalledCommonProofGenerationFixture = (
             adapterHandle,
             checkpointPointer,
             checkpointByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
             statusPointer,
         ) => {
             expect(adapterHandle).toBe(102);
@@ -1442,6 +1590,13 @@ export const createInstalledCommonProofGenerationFixture = (
             expect([
                 ...memoryBytes(memory, checkpointPointer, checkpointByteLength),
             ]).toEqual([...checkpointStateBytes]);
+            expect([
+                ...memoryBytes(
+                    memory,
+                    generationCursorManifestPointer,
+                    generationCursorManifestByteLength,
+                ),
+            ]).toEqual([...checkpointCursorBytes]);
             writeUnsigned32(memory, statusPointer, 0);
             return 202;
         },
@@ -1459,12 +1614,21 @@ export const createInstalledCommonProofGenerationFixture = (
             preparedGenerationHandle,
             checkpointPointer,
             checkpointByteLength,
+            generationCursorManifestPointer,
+            generationCursorManifestByteLength,
             statusPointer,
         ) => {
             expect(preparedGenerationHandle).toBe(202);
             expect([
                 ...memoryBytes(memory, checkpointPointer, checkpointByteLength),
             ]).toEqual([...checkpointStateBytes]);
+            expect([
+                ...memoryBytes(
+                    memory,
+                    generationCursorManifestPointer,
+                    generationCursorManifestByteLength,
+                ),
+            ]).toEqual([...checkpointCursorBytes]);
             writeUnsigned32(memory, statusPointer, 0);
             return 302;
         },
@@ -1649,14 +1813,94 @@ export const createInstalledCommonProofGenerationFixture = (
     });
 };
 
+export const openReservedInstalledCommonProofGenerationFixture = async (
+    host: Pick<
+        Awaited<ReturnType<typeof openSameRealmCommonProofApplicationHost>>,
+        'installedHost'
+    >,
+    checkpointCursorBytes: Uint8Array<ArrayBuffer>,
+    options: Readonly<{
+        failFirstGenerationFamilyAdapterDiscard?: boolean;
+        generationFamilyAdapterHandle?: 101 | 103;
+        resumeApplicationStatementSchemaIdentifier?: number;
+        resumeCheckpointStateByteLength?: number;
+    }> = {},
+): Promise<
+    Readonly<{
+        checkpointLineageReservation: InstalledCommonProofCheckpointLineageReservation;
+        generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
+        generationFixture: ReturnType<
+            typeof createInstalledCommonProofGenerationFixture
+        >;
+    }>
+> => {
+    const { generationFamilyAdapterHandle = 101, ...generationFixtureOptions } =
+        options;
+    const checkpointLineageReservation =
+        await reserveCommonProofCheckpointLineageInInstalledCustodyWorker(
+            host.installedHost,
+        );
+    const checkpointLineageIdentifier =
+        copyReservedCommonProofCheckpointLineageIdentifier(
+            checkpointLineageReservation,
+        );
+    let generationFamilyAdapter:
+        | ReturnType<typeof openClosedWorkerCommonProofGenerationFamilyAdapter>
+        | undefined;
+    try {
+        const generationFixture = createInstalledCommonProofGenerationFixture(
+            checkpointCursorBytes,
+            {
+                ...generationFixtureOptions,
+                checkpointLineageIdentifier,
+            },
+        );
+        generationFamilyAdapter =
+            openClosedWorkerCommonProofGenerationFamilyAdapter(
+                generationFixture.freshRuntime,
+                generationFamilyAdapterHandle,
+            );
+        return Object.freeze({
+            checkpointLineageReservation,
+            generationFamilyAdapter,
+            generationFixture,
+        });
+    } catch (error) {
+        const cleanupFailures: unknown[] = [];
+        if (generationFamilyAdapter !== undefined) {
+            try {
+                releaseClosedWorkerCommonProofGenerationFamilyAdapter(
+                    generationFamilyAdapter,
+                );
+            } catch (cleanupError) {
+                cleanupFailures.push(cleanupError);
+            }
+        }
+        try {
+            await releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker(
+                host.installedHost,
+                checkpointLineageReservation,
+            );
+        } catch (cleanupError) {
+            cleanupFailures.push(cleanupError);
+        }
+        if (cleanupFailures.length !== 0) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Opening the reserved installed common-proof fixture failed and cleanup did not complete.',
+                Object.freeze([error, ...cleanupFailures]),
+            );
+        }
+        throw error;
+    } finally {
+        checkpointLineageIdentifier.fill(0);
+    }
+};
+
 export const openReadyCommonProofApplication = async (): Promise<
     Readonly<{
         durableBindingIdentifier: string;
-        environment: Awaited<
-            ReturnType<
-                typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-            >
-        >;
+        environment: InstalledCustodyCommonProofExecutionEnvironment;
         generationFixture: ReturnType<
             typeof createInstalledCommonProofGenerationFixture
         >;
@@ -1668,37 +1912,32 @@ export const openReadyCommonProofApplication = async (): Promise<
     const proofBytes = Uint8Array.from([8, 6, 7, 5, 3, 0, 9]);
     const host = await openSameRealmCommonProofApplicationHost({ proofBytes });
     try {
-        const cursorBytes = bytesFromHex(
-            host.kernel.encodePrivateRandomCursor({
-                derivationContextHash: 'ab'.repeat(64),
-                family: 0x0200,
-                nextCounter: '37',
-                purpose: 2,
-                streamAttemptIdentifierHex: 'cd'.repeat(32),
-            }).canonicalBytesHex,
+        const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+            host.kernel,
         );
-        const generationFixture =
-            createInstalledCommonProofGenerationFixture(cursorBytes);
-        const generationFamilyAdapter =
-            openClosedWorkerCommonProofGenerationFamilyAdapter(
-                generationFixture.freshRuntime,
-                101,
+        const reservedGeneration =
+            await openReservedInstalledCommonProofGenerationFixture(
+                host,
+                cursorBytes,
             );
+        const generationFixture = reservedGeneration.generationFixture;
         const preparedOperation =
-            prepareCommonProofGenerationInInstalledCustodyWorker(
+            await prepareCommonProofGenerationInInstalledCustodyWorker(
                 host.installedHost,
                 {
+                    checkpoint: {
+                        generationMode: 'fresh',
+                        reservation:
+                            reservedGeneration.checkpointLineageReservation,
+                    },
                     foundationActionRandomnessHandleIdentifier:
                         host.actionRandomnessHandleIdentifier,
-                    generationFamilyAdapter,
+                    generationFamilyAdapter:
+                        reservedGeneration.generationFamilyAdapter,
                 },
             );
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined =
             await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                 host.installedHost,
@@ -1727,30 +1966,34 @@ export const openReadyCommonProofApplication = async (): Promise<
                     generationFixture.resumeRuntime,
                     102,
                 );
-            const resumedPreparedOperation =
-                prepareCommonProofGenerationInInstalledCustodyWorker(
-                    host.installedHost,
-                    {
-                        foundationActionRandomnessHandleIdentifier:
-                            host.actionRandomnessHandleIdentifier,
-                        generationFamilyAdapter: resumedGenerationFamilyAdapter,
-                    },
-                );
             try {
+                const resumedPreparedOperation =
+                    await prepareCommonProofGenerationInInstalledCustodyWorker(
+                        host.installedHost,
+                        {
+                            checkpoint: {
+                                generationMode: 'resumed',
+                                resumeDescriptor,
+                            },
+                            foundationActionRandomnessHandleIdentifier:
+                                host.actionRandomnessHandleIdentifier,
+                            generationFamilyAdapter:
+                                resumedGenerationFamilyAdapter,
+                        },
+                    );
                 environment =
                     await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                         host.installedHost,
-                        {
-                            preparedOperation: resumedPreparedOperation,
-                            resumeDescriptor,
-                        },
+                        { preparedOperation: resumedPreparedOperation },
                     );
             } finally {
                 resumeDescriptor.checkpointLineageIdentifier.fill(0);
                 resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-                for (const resumeCursorBytes of resumeDescriptor.orderedPrivateRandomCursorBytes) {
-                    resumeCursorBytes.fill(0);
-                }
+                resumeDescriptor.externalMemoryStateDigest.fill(0);
+                resumeDescriptor.generationCursorManifestBytes.fill(0);
+                resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
+                    0,
+                );
                 resumeDescriptor.stableAttemptBindingHash.fill(0);
             }
             await runCommonProofGenerationInInstalledCustodyWorker(

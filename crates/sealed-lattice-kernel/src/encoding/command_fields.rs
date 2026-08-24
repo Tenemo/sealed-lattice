@@ -40,6 +40,13 @@ pub(super) fn required_array<'a>(
         .ok_or_else(|| invalid_value(format!("{field_name} must be an array")))
 }
 
+pub(super) fn required_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<u16> {
+    let value = required_value(object, field_name)?
+        .as_u64()
+        .ok_or_else(|| invalid_value(format!("{field_name} must be an unsigned integer")))?;
+    u16::try_from(value).map_err(|_| invalid_value(format!("{field_name} does not fit u16")))
+}
+
 pub(super) fn required_canonical_u64_decimal(
     object: &Map<String, Value>,
     field_name: &str,
@@ -56,24 +63,6 @@ pub(super) fn required_canonical_u64_decimal(
     value
         .parse()
         .map_err(|_| invalid_value(format!("{field_name} does not fit u64")))
-}
-
-/// Preserves the foundation command's existing `u64::from_str` syntax.
-///
-/// Unlike [`required_canonical_u64_decimal`], this accepts representations such
-/// as a leading-zero decimal. The two policies are named separately so command
-/// parsers cannot drift through copied implementations.
-pub(super) fn required_rust_parseable_u64_decimal(
-    object: &Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<u64> {
-    required_string(object, field_name)?
-        .parse::<u64>()
-        .map_err(|_| {
-            invalid_value(format!(
-                "{field_name} must be a canonical u64 decimal string"
-            ))
-        })
 }
 
 pub(super) fn required_lowercase_hex_bytes(
@@ -113,11 +102,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unsigned_decimal_policies_keep_their_distinct_command_syntax() {
+    fn unsigned_decimal_requires_canonical_syntax() {
         let value = json!({ "number": "00" });
         let object = value.as_object().expect("test input is an object");
 
-        assert_eq!(required_rust_parseable_u64_decimal(object, "number"), Ok(0));
         let error = required_canonical_u64_decimal(object, "number")
             .expect_err("canonical decimal syntax must reject a leading zero");
         assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);

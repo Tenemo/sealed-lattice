@@ -16,9 +16,11 @@ use diagnostics::{
 
 const MEMORY_LIMIT_ARGUMENT: &str = "--memory-limit-bytes";
 const DIAGNOSTICS_PATH_ARGUMENT: &str = "--diagnostics-path";
+const RESOURCE_SAMPLE_INTERVAL_ARGUMENT: &str = "--resource-sample-interval-milliseconds";
 const VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT: &str = "--virtual-address-space-allowance-bytes";
 const COMMAND_SEPARATOR: &str = "--";
-const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+const DEFAULT_RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+const MINIMUM_RESOURCE_SAMPLE_INTERVAL_MILLISECONDS: u64 = 100;
 const CHILD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Eq, PartialEq)]
@@ -26,6 +28,7 @@ struct GuardedCommand {
     memory_limit_bytes: u64,
     virtual_address_space_allowance_bytes: u64,
     diagnostics_path: Option<PathBuf>,
+    resource_sample_interval: Duration,
     program: OsString,
     arguments: Vec<OsString>,
 }
@@ -57,6 +60,8 @@ fn parse_arguments(
     }
 
     let mut diagnostics_path = None;
+    let mut resource_sample_interval = DEFAULT_RESOURCE_SAMPLE_INTERVAL;
+    let mut resource_sample_interval_was_set = false;
     let mut virtual_address_space_allowance_bytes = 0;
     let mut virtual_address_space_allowance_was_set = false;
     loop {
@@ -77,6 +82,33 @@ fn parse_arguments(
                 return Err(usage("diagnostics path must not be empty"));
             }
             diagnostics_path = Some(PathBuf::from(path));
+            continue;
+        }
+        if option == RESOURCE_SAMPLE_INTERVAL_ARGUMENT {
+            if resource_sample_interval_was_set {
+                return Err(usage(
+                    "resource sample interval was supplied more than once",
+                ));
+            }
+            let value = arguments
+                .next()
+                .ok_or_else(|| usage("missing resource sample interval value"))?;
+            let milliseconds = value
+                .to_str()
+                .ok_or_else(|| usage("resource sample interval must be UTF-8"))?
+                .parse::<u64>()
+                .map_err(|_| {
+                    usage(
+                        "resource sample interval must be an integer of at least 100 milliseconds",
+                    )
+                })?;
+            if milliseconds < MINIMUM_RESOURCE_SAMPLE_INTERVAL_MILLISECONDS {
+                return Err(usage(
+                    "resource sample interval must be an integer of at least 100 milliseconds",
+                ));
+            }
+            resource_sample_interval = Duration::from_millis(milliseconds);
+            resource_sample_interval_was_set = true;
             continue;
         }
         if option == VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT {
@@ -112,6 +144,7 @@ fn parse_arguments(
         memory_limit_bytes,
         virtual_address_space_allowance_bytes,
         diagnostics_path,
+        resource_sample_interval,
         program,
         arguments: arguments.collect(),
     })
@@ -119,7 +152,7 @@ fn parse_arguments(
 
 fn usage(reason: &str) -> String {
     format!(
-        "{reason}. Usage: sealed-lattice-process-memory-guard {MEMORY_LIMIT_ARGUMENT} <bytes> [{VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT} <bytes>] [{DIAGNOSTICS_PATH_ARGUMENT} <path>] {COMMAND_SEPARATOR} <command> [arguments...]"
+        "{reason}. Usage: sealed-lattice-process-memory-guard {MEMORY_LIMIT_ARGUMENT} <bytes> [{VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT} <bytes>] [{DIAGNOSTICS_PATH_ARGUMENT} <path>] [{RESOURCE_SAMPLE_INTERVAL_ARGUMENT} <milliseconds>] {COMMAND_SEPARATOR} <command> [arguments...]"
     )
 }
 
@@ -145,7 +178,7 @@ fn run_guarded_command(command: GuardedCommand) -> Result<GuardRunResult, String
             containment_scope: platform::CONTAINMENT_SCOPE,
             expected_diagnostic,
             memory_limit_bytes: command.memory_limit_bytes,
-            sample_interval: RESOURCE_SAMPLE_INTERVAL,
+            sample_interval: command.resource_sample_interval,
             virtual_address_space_allowance_bytes: command.virtual_address_space_allowance_bytes,
         })?;
     }
@@ -188,7 +221,7 @@ fn run_guarded_command(command: GuardedCommand) -> Result<GuardRunResult, String
     let mut confirmed_limit_violation = false;
     let mut diagnostics_error = None;
     let exit_status = if diagnostics.is_some() {
-        let mut next_sample_at = Instant::now();
+        let mut next_sample_at = Some(Instant::now());
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
@@ -203,7 +236,7 @@ fn run_guarded_command(command: GuardedCommand) -> Result<GuardRunResult, String
             }
 
             let now = Instant::now();
-            if now >= next_sample_at {
+            if next_sample_at.is_some_and(|sample_at| now >= sample_at) {
                 let snapshot = containment.sample(std::process::id());
                 peaks.observe(&snapshot);
                 confirmed_limit_violation |= snapshot.confirmed_memory_limit_violation;
@@ -214,9 +247,18 @@ fn run_guarded_command(command: GuardedCommand) -> Result<GuardRunResult, String
                     diagnostics_error = Some(error);
                     diagnostics = None;
                 }
-                next_sample_at = now + RESOURCE_SAMPLE_INTERVAL;
+                next_sample_at = now.checked_add(command.resource_sample_interval);
             }
-            thread::sleep(CHILD_STATUS_POLL_INTERVAL);
+            let sleep_duration = next_sample_at.map_or(CHILD_STATUS_POLL_INTERVAL, |sample_at| {
+                sample_at
+                    .saturating_duration_since(Instant::now())
+                    .min(CHILD_STATUS_POLL_INTERVAL)
+            });
+            if sleep_duration.is_zero() {
+                thread::yield_now();
+            } else {
+                thread::sleep(sleep_duration);
+            }
         }
     } else {
         child
@@ -324,6 +366,7 @@ mod tests {
                 memory_limit_bytes: 34_359_738_368,
                 virtual_address_space_allowance_bytes: 0,
                 diagnostics_path: None,
+                resource_sample_interval: DEFAULT_RESOURCE_SAMPLE_INTERVAL,
                 program: OsString::from("cargo"),
                 arguments: owned_arguments(&["test", COMMAND_SEPARATOR, "--test-threads", "1"]),
             }
@@ -349,6 +392,7 @@ mod tests {
                 memory_limit_bytes: 4096,
                 virtual_address_space_allowance_bytes: 0,
                 diagnostics_path: Some(PathBuf::from("logs/run/resources/guard.jsonl")),
+                resource_sample_interval: DEFAULT_RESOURCE_SAMPLE_INTERVAL,
                 program: OsString::from("node"),
                 arguments: owned_arguments(&["test.js"]),
             }
@@ -379,7 +423,29 @@ mod tests {
             assert_eq!(parsed.memory_limit_bytes, 1_073_741_824);
             assert_eq!(parsed.virtual_address_space_allowance_bytes, 8_589_934_592);
             assert_eq!(parsed.diagnostics_path, Some(PathBuf::from("guard.jsonl")));
+            assert_eq!(
+                parsed.resource_sample_interval,
+                DEFAULT_RESOURCE_SAMPLE_INTERVAL
+            );
         }
+    }
+
+    #[test]
+    fn parses_the_minimum_resource_sample_interval() {
+        let parsed = parse_arguments(owned_arguments(&[
+            MEMORY_LIMIT_ARGUMENT,
+            "1073741824",
+            RESOURCE_SAMPLE_INTERVAL_ARGUMENT,
+            "100",
+            COMMAND_SEPARATOR,
+            "cargo",
+        ]))
+        .expect("guarded command with resource sample interval");
+
+        assert_eq!(
+            parsed.resource_sample_interval,
+            Duration::from_millis(MINIMUM_RESOURCE_SAMPLE_INTERVAL_MILLISECONDS)
+        );
     }
 
     #[test]
@@ -417,6 +483,44 @@ mod tests {
                 MEMORY_LIMIT_ARGUMENT,
                 "1024",
                 DIAGNOSTICS_PATH_ARGUMENT,
+            ]))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn refuses_invalid_or_duplicate_resource_sample_intervals() {
+        for value in ["0", "99", "100.5", "-100", "not-a-number"] {
+            assert!(
+                parse_arguments(owned_arguments(&[
+                    MEMORY_LIMIT_ARGUMENT,
+                    "1024",
+                    RESOURCE_SAMPLE_INTERVAL_ARGUMENT,
+                    value,
+                    COMMAND_SEPARATOR,
+                    "cargo",
+                ]))
+                .is_err()
+            );
+        }
+        assert!(
+            parse_arguments(owned_arguments(&[
+                MEMORY_LIMIT_ARGUMENT,
+                "1024",
+                RESOURCE_SAMPLE_INTERVAL_ARGUMENT,
+                "100",
+                RESOURCE_SAMPLE_INTERVAL_ARGUMENT,
+                "200",
+                COMMAND_SEPARATOR,
+                "cargo",
+            ]))
+            .is_err()
+        );
+        assert!(
+            parse_arguments(owned_arguments(&[
+                MEMORY_LIMIT_ARGUMENT,
+                "1024",
+                RESOURCE_SAMPLE_INTERVAL_ARGUMENT,
             ]))
             .is_err()
         );

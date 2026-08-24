@@ -1,10 +1,12 @@
 use std::sync::{Mutex, OnceLock};
 
+use super::runtime_input::refusal_status;
 use super::{
     MAILBOX_GCM_TAG_BYTE_LENGTH, RefusalReason,
     mailbox_gcm::{
-        MAILBOX_GCM_KEY_BYTE_LENGTH, MAILBOX_GCM_NONCE_BYTE_LENGTH, MailboxGcmDecryptor,
-        MailboxGcmEncryptor, MailboxGcmVerifier,
+        AuthenticatedMailboxPlaintextCapability, MAILBOX_GCM_KEY_BYTE_LENGTH,
+        MAILBOX_GCM_NONCE_BYTE_LENGTH, MailboxGcmDecryptor, MailboxGcmEncryptor,
+        MailboxGcmVerifier,
     },
 };
 
@@ -23,7 +25,13 @@ struct MailboxGcmRuntimeSession {
     kind: MailboxGcmRuntimeSessionKind,
 }
 
+struct AuthenticatedMailboxPlaintextCapabilitySession {
+    capability: AuthenticatedMailboxPlaintextCapability,
+    handle: u32,
+}
+
 struct MailboxGcmRuntimeRegistry {
+    authenticated_plaintext_capability: Option<AuthenticatedMailboxPlaintextCapabilitySession>,
     active_session: Option<MailboxGcmRuntimeSession>,
     next_handle: u32,
 }
@@ -31,6 +39,7 @@ struct MailboxGcmRuntimeRegistry {
 impl Default for MailboxGcmRuntimeRegistry {
     fn default() -> Self {
         Self {
+            authenticated_plaintext_capability: None,
             active_session: None,
             next_handle: 1,
         }
@@ -157,24 +166,59 @@ impl MailboxGcmRuntimeRegistry {
         let MailboxGcmRuntimeSessionKind::Decryptor(decryptor) = session.kind else {
             return Err(MAILBOX_GCM_RUNTIME_INVALID_SESSION);
         };
-        decryptor
+        let capability = decryptor
             .finish()
+            .map_err(|error| refusal_status(error.refusal_reason))?;
+        if self.authenticated_plaintext_capability.is_some() {
+            return Err(MAILBOX_GCM_RUNTIME_INTERNAL_FAILURE);
+        }
+        self.authenticated_plaintext_capability =
+            Some(AuthenticatedMailboxPlaintextCapabilitySession { capability, handle });
+        Ok(())
+    }
+
+    fn consume_authenticated_plaintext_capability(
+        &mut self,
+        handle: u32,
+        expected_associated_data: &[u8],
+        canonical_plaintext: &[u8],
+    ) -> Result<(), u32> {
+        let capability_session = self
+            .authenticated_plaintext_capability
+            .as_ref()
+            .ok_or(MAILBOX_GCM_RUNTIME_INVALID_SESSION)?;
+        if capability_session.handle != handle {
+            return Err(MAILBOX_GCM_RUNTIME_INVALID_SESSION);
+        }
+        let capability_session = self
+            .authenticated_plaintext_capability
+            .take()
+            .ok_or(MAILBOX_GCM_RUNTIME_INTERNAL_FAILURE)?;
+        capability_session
+            .capability
+            .consume(expected_associated_data, canonical_plaintext)
             .map_err(|error| refusal_status(error.refusal_reason))
     }
 
     fn cancel(&mut self, handle: u32) -> Result<(), u32> {
-        let Some(session) = self.active_session.as_ref() else {
+        if let Some(session) = self.active_session.as_ref() {
+            if session.handle != handle {
+                return Err(MAILBOX_GCM_RUNTIME_INVALID_SESSION);
+            }
+            self.active_session = None;
             return Ok(());
-        };
-        if session.handle != handle {
-            return Err(MAILBOX_GCM_RUNTIME_INVALID_SESSION);
         }
-        self.active_session = None;
+        if let Some(capability_session) = self.authenticated_plaintext_capability.as_ref() {
+            if capability_session.handle != handle {
+                return Err(MAILBOX_GCM_RUNTIME_INVALID_SESSION);
+            }
+            self.authenticated_plaintext_capability = None;
+        }
         Ok(())
     }
 
     fn refuse_overlapping_begin(&self) -> Result<(), u32> {
-        if self.active_session.is_some() {
+        if self.active_session.is_some() || self.authenticated_plaintext_capability.is_some() {
             Err(refusal_status(RefusalReason::OutsideSupportedProfile))
         } else {
             Ok(())
@@ -216,7 +260,9 @@ fn with_runtime_registry<ResultValue>(
     let mut registry = match runtime_registry().lock() {
         Ok(registry) => registry,
         Err(poisoned) => {
-            poisoned.into_inner().active_session = None;
+            let mut poisoned_registry = poisoned.into_inner();
+            poisoned_registry.active_session = None;
+            poisoned_registry.authenticated_plaintext_capability = None;
             return Err(MAILBOX_GCM_RUNTIME_INTERNAL_FAILURE);
         }
     };
@@ -274,6 +320,20 @@ pub(crate) fn finish_mailbox_gcm_decryptor(handle: u32) -> Result<(), u32> {
     with_runtime_registry(|registry| registry.finish_decryptor(handle))
 }
 
+pub(crate) fn consume_authenticated_mailbox_plaintext_capability(
+    handle: u32,
+    expected_associated_data: &[u8],
+    canonical_plaintext: &[u8],
+) -> Result<(), u32> {
+    with_runtime_registry(|registry| {
+        registry.consume_authenticated_plaintext_capability(
+            handle,
+            expected_associated_data,
+            canonical_plaintext,
+        )
+    })
+}
+
 pub(crate) fn cancel_mailbox_gcm(handle: u32) -> Result<(), u32> {
     with_runtime_registry(|registry| registry.cancel(handle))
 }
@@ -289,10 +349,6 @@ fn require_associated_data_length(associated_data: &[u8]) -> Result<(), u32> {
         }));
     }
     Ok(())
-}
-
-fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    u32::from(refusal_reason.canonical_code())
 }
 
 #[cfg(test)]
@@ -364,6 +420,10 @@ mod tests {
             .finish_decryptor(verifier)
             .expect("decryptor finishes");
         assert_eq!(ciphertext, plaintext);
+        registry
+            .consume_authenticated_plaintext_capability(verifier, associated_data, &ciphertext)
+            .expect("authenticated plaintext capability matches");
+        assert!(registry.authenticated_plaintext_capability.is_none());
     }
 
     #[test]
@@ -380,5 +440,71 @@ mod tests {
             Err(refusal_status(RefusalReason::InvalidArithmeticRelation))
         );
         assert!(registry.active_session.is_none());
+    }
+
+    #[test]
+    fn wrong_plaintext_is_terminal_for_the_authenticated_capability() {
+        let key = [0x11_u8; MAILBOX_GCM_KEY_BYTE_LENGTH];
+        let nonce = [0x22_u8; MAILBOX_GCM_NONCE_BYTE_LENGTH];
+        let associated_data = b"exact mailbox associated data";
+        let plaintext = b"recipient private payload";
+        let mut registry = MailboxGcmRuntimeRegistry::default();
+
+        let encryptor = registry
+            .begin_encryptor(
+                key,
+                nonce,
+                associated_data,
+                u32::try_from(plaintext.len()).expect("test length"),
+            )
+            .expect("encryptor begins");
+        let mut ciphertext = plaintext.to_vec();
+        registry
+            .encrypt_chunk(encryptor, &mut ciphertext)
+            .expect("plaintext encrypts");
+        let tag = registry
+            .finish_encryptor(encryptor)
+            .expect("encryptor finishes");
+
+        let verifier = registry
+            .begin_verifier(
+                key,
+                nonce,
+                associated_data,
+                u32::try_from(ciphertext.len()).expect("test length"),
+            )
+            .expect("verifier begins");
+        registry
+            .authenticate_chunk(verifier, &ciphertext)
+            .expect("ciphertext authenticates");
+        registry
+            .finish_authentication(verifier, &tag)
+            .expect("tag authenticates");
+        registry
+            .decrypt_chunk(verifier, &mut ciphertext)
+            .expect("ciphertext decrypts");
+        registry
+            .finish_decryptor(verifier)
+            .expect("decryptor finishes");
+
+        let mut wrong_plaintext = plaintext.to_vec();
+        wrong_plaintext[3] ^= 1;
+        assert_eq!(
+            registry.consume_authenticated_plaintext_capability(
+                verifier,
+                associated_data,
+                &wrong_plaintext,
+            ),
+            Err(refusal_status(RefusalReason::InvalidArithmeticRelation))
+        );
+        assert!(registry.authenticated_plaintext_capability.is_none());
+        assert_eq!(
+            registry.consume_authenticated_plaintext_capability(
+                verifier,
+                associated_data,
+                plaintext,
+            ),
+            Err(MAILBOX_GCM_RUNTIME_INVALID_SESSION)
+        );
     }
 }

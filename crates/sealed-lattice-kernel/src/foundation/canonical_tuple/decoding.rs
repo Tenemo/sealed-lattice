@@ -541,7 +541,7 @@ pub(super) fn decode_tuple_at(
     ))
 }
 
-pub(super) fn validate_item_bytes(
+pub(in crate::foundation) fn validate_item_bytes(
     item_type: CanonicalItemType,
     bytes: &[u8],
     limits: &CanonicalDecodeLimits,

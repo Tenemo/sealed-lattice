@@ -38,22 +38,21 @@ export const registerPrivateKernelContexts = (
     const { wasmExports } = runtime;
     registerCanonicalStreamKernelContext(kernel, {
         ...canonicalStreamContext,
-        bgvMaterialReaderBegin: resolveOptionalNumberExport(
-            wasmExports,
-            'sealed_lattice_bgv_canonical_material_reader_begin',
-        ),
-        bgvMaterialReaderCancel: resolveOptionalNumberExport(
-            wasmExports,
-            'sealed_lattice_bgv_canonical_material_reader_cancel',
-        ),
-        bgvMaterialReaderFinish: resolveOptionalNumberExport(
-            wasmExports,
-            'sealed_lattice_bgv_canonical_material_reader_finish',
-        ),
-        bgvMaterialReaderReadChunk: resolveOptionalNumberExport(
-            wasmExports,
-            'sealed_lattice_bgv_canonical_material_reader_read_chunk',
-        ),
+        aggregateThresholdShareBeginRecipientAuthority:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_aggregate_threshold_share_begin_recipient_authority',
+            ),
+        aggregateThresholdShareAbsorbAuthenticatedRecipientPayload:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_aggregate_threshold_share_absorb_authenticated_recipient_payload',
+            ),
+        aggregateThresholdShareDiscardRecipientAuthority:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_aggregate_threshold_share_discard_recipient_authority',
+            ),
         mailboxGcmAuthenticateChunk: resolveOptionalNumberExport(
             wasmExports,
             'sealed_lattice_mailbox_gcm_authenticate_chunk',
@@ -90,5 +89,62 @@ export const registerPrivateKernelContexts = (
             wasmExports,
             'sealed_lattice_mailbox_gcm_finish_encryptor',
         ),
+        setupGenerationAuthorityBegin: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_authority_begin',
+        ),
+        setupGenerationAuthorityRelease: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_authority_release',
+        ),
+        setupGenerationPublicKeyShareBodyByteLength:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_public_key_share_body_byte_length',
+            ),
+        setupGenerationPublicKeyShareBodyCancel: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_public_key_share_body_cancel',
+        ),
+        setupGenerationPublicKeyShareBodyOpen: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_public_key_share_body_open',
+        ),
+        setupGenerationPublicKeyShareBodyRead: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_public_key_share_body_read',
+        ),
+        setupGenerationPublicKeyShareSourceByteLength:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_public_key_share_source_byte_length',
+            ),
+        setupGenerationRecipientVssPayloadByteLength:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_recipient_vss_payload_byte_length',
+            ),
+        setupGenerationRecipientVssPayloadCancel: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_recipient_vss_payload_cancel',
+        ),
+        setupGenerationRecipientVssPayloadOpen: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_recipient_vss_payload_open',
+        ),
+        setupGenerationRecipientVssPayloadRead: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_recipient_vss_payload_read',
+        ),
+        setupGenerationRecipientVssPayloadSourceByteLength:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_recipient_vss_payload_source_byte_length',
+            ),
+        setupGenerationRecipientVssPayloadSourceRecipientRosterPosition:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_recipient_vss_payload_source_recipient_roster_position',
+            ),
     });
 };

@@ -101,7 +101,10 @@ impl PrivateRandomnessDomain {
             VSS_EXPANSION_FAMILY => Self::vss_expansion(purpose),
             TARGET_FLOODING_FAMILY => Self::target_flooding(purpose),
             ORDINARY_BALLOT_PROOF_FAMILY => Self::ordinary_proof(purpose),
-            family if RESET_SAFE_PROOF_FAMILIES.contains(&family) => {
+            family
+                if RESET_SAFE_PROOF_FAMILIES.contains(&family)
+                    || PUBLIC_ONLY_PROOF_FAMILIES.contains(&family) =>
+            {
                 Self::reset_safe_proof(family, purpose)
             }
             _ => Err(unassigned_randomness_domain()),
@@ -151,15 +154,10 @@ fn proof_domain(
     if purpose == 0 || purpose == u16::MAX {
         return Err(unassigned_randomness_domain());
     }
-    if PUBLIC_ONLY_PROOF_FAMILIES.contains(&statement_schema_identifier) {
-        return Err(schema_error(
-            RefusalReason::WrongTypeOrLength,
-            "public-only proof families cannot allocate private randomness",
-        ));
-    }
     let family_matches_attempt = match attempt_class {
         AttemptClass::ResetSafeProof => {
             RESET_SAFE_PROOF_FAMILIES.contains(&statement_schema_identifier)
+                || PUBLIC_ONLY_PROOF_FAMILIES.contains(&statement_schema_identifier)
         }
         AttemptClass::OrdinaryProof => statement_schema_identifier == ORDINARY_BALLOT_PROOF_FAMILY,
         AttemptClass::ResetSafeSetup

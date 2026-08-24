@@ -9,7 +9,7 @@ const SETUP_COMMITMENT_WORKER_RESPONSE_VERSION: u32 = 1;
 const SETUP_COMMITMENT_WORKER_RESPONSE_HEADER_BYTE_LENGTH: usize = 32;
 const SETUP_COMMITMENT_WORKER_RESPONSE_LIMB_HEADER_BYTE_LENGTH: usize = 4;
 
-pub(crate) fn setup_commitment_worker_response_bytes(
+fn setup_commitment_worker_response_bytes(
     commitment: &SetupCommitmentValue,
 ) -> CanonicalResult<Vec<u8>> {
     validate_setup_commitment_worker_response_value(commitment)?;

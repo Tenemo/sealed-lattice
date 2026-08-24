@@ -20,6 +20,7 @@ import {
     type AuthenticatedMailboxInboundSlotAuthority,
     type AuthenticatedMailboxKernel,
     type AuthenticatedMailboxOutboundCache,
+    type AuthenticatedMailboxPlaintextCapability,
     type AuthenticatedMailboxPlaintextSinkBoundary,
     type AuthenticatedMailboxProducerSlot,
     type AuthenticatedMailboxStagingBoundary,
@@ -408,6 +409,17 @@ const makeGcmRuntime = (
                     state = 'completed';
                     key.fill(0);
                     nonce.fill(0);
+                    let capabilityActive = true;
+                    return Object.freeze({
+                        release: () => {
+                            if (!capabilityActive) {
+                                throw new Error(
+                                    'authenticated plaintext capability is inactive',
+                                );
+                            }
+                            capabilityActive = false;
+                        },
+                    });
                 },
                 state: () => state,
             };
@@ -718,7 +730,11 @@ const makePlaintextSinkBoundary = (input?: {
     return {
         boundary: {
             reserve: (reservation) => {
-                const declaration = canonicalJson(reservation);
+                const declaration = canonicalJson({
+                    envelopeHash: reservation.envelopeHash,
+                    plaintextByteLength: reservation.plaintextByteLength,
+                    producerSlot: reservation.producerSlot,
+                });
                 let record = records.get(reservation.envelopeHash);
                 if (
                     record !== undefined &&
@@ -739,6 +755,7 @@ const makePlaintextSinkBoundary = (input?: {
                 }
                 if (record?.state === 'committed') {
                     return Promise.resolve({
+                        authenticationRequirement: 'none' as const,
                         disposition: 'committed' as const,
                         cancel: () => Promise.resolve(),
                         commit: () => Promise.resolve(),
@@ -762,6 +779,10 @@ const makePlaintextSinkBoundary = (input?: {
                 const stagedChunks = record?.chunks ?? [];
                 let leaseState: 'fresh' | 'prepared' =
                     record === undefined ? 'fresh' : 'prepared';
+                let authenticatedPlaintextCapability:
+                    | AuthenticatedMailboxPlaintextCapability
+                    | undefined;
+                let replayedChunkCount = 0;
                 let reservationActive = true;
                 const releaseReservation = (): void => {
                     if (reservationActive) {
@@ -771,6 +792,7 @@ const makePlaintextSinkBoundary = (input?: {
                 };
 
                 return Promise.resolve({
+                    authenticationRequirement: 'authenticate' as const,
                     disposition: leaseState,
                     cancel: () => {
                         if (leaseState !== 'fresh') {
@@ -784,6 +806,8 @@ const makePlaintextSinkBoundary = (input?: {
                         for (const chunk of stagedChunks) {
                             chunk.fill(0);
                         }
+                        authenticatedPlaintextCapability?.release();
+                        authenticatedPlaintextCapability = undefined;
                         releaseReservation();
                         return Promise.resolve();
                     },
@@ -806,6 +830,7 @@ const makePlaintextSinkBoundary = (input?: {
                             );
                         }
                         record!.state = 'committed';
+                        authenticatedPlaintextCapability = undefined;
                         observation.publicationCount += 1;
                         observation.publishedChunks = stagedChunks.map(
                             (chunk) => chunk.slice(),
@@ -822,17 +847,22 @@ const makePlaintextSinkBoundary = (input?: {
                         return Promise.resolve();
                     },
                     release: () => {
+                        authenticatedPlaintextCapability?.release();
+                        authenticatedPlaintextCapability = undefined;
                         releaseReservation();
                         return Promise.resolve();
                     },
-                    seal: () => {
+                    seal: (capability) => {
                         if (
-                            leaseState !== 'fresh' ||
-                            stagedChunks.length !==
-                                Math.ceil(
-                                    reservation.plaintextByteLength /
-                                        foundationProfile.streamChunkByteLength,
-                                )
+                            (leaseState === 'fresh' &&
+                                stagedChunks.length !==
+                                    Math.ceil(
+                                        reservation.plaintextByteLength /
+                                            foundationProfile.streamChunkByteLength,
+                                    )) ||
+                            (leaseState === 'prepared' &&
+                                replayedChunkCount !== stagedChunks.length) ||
+                            authenticatedPlaintextCapability !== undefined
                         ) {
                             return Promise.reject(
                                 new Error(
@@ -840,16 +870,36 @@ const makePlaintextSinkBoundary = (input?: {
                                 ),
                             );
                         }
-                        leaseState = 'prepared';
-                        record = {
-                            chunks: stagedChunks,
-                            declaration,
-                            state: 'prepared',
-                        };
-                        records.set(reservation.envelopeHash, record);
+                        authenticatedPlaintextCapability = capability;
+                        if (leaseState === 'fresh') {
+                            leaseState = 'prepared';
+                            record = {
+                                chunks: stagedChunks,
+                                declaration,
+                                state: 'prepared',
+                            };
+                            records.set(reservation.envelopeHash, record);
+                        }
                         return Promise.resolve();
                     },
                     stageChunk: async ({ bytes, chunkIndex }) => {
+                        if (leaseState === 'prepared') {
+                            const expectedChunk = stagedChunks[chunkIndex];
+                            if (
+                                chunkIndex !== replayedChunkCount ||
+                                expectedChunk === undefined ||
+                                !bytesEqual(
+                                    new Uint8Array(bytes),
+                                    expectedChunk,
+                                )
+                            ) {
+                                throw new Error(
+                                    'Reauthenticated plaintext differs from the prepared delivery.',
+                                );
+                            }
+                            replayedChunkCount += 1;
+                            return;
+                        }
                         if (
                             leaseState !== 'fresh' ||
                             chunkIndex !== stagedChunks.length
@@ -1415,7 +1465,7 @@ describe('authenticated mailbox', () => {
             inboundFailure: 'after publication' as const,
         },
     ])(
-        'finishes a prepared delivery after inbound commit fails $inboundFailure without decrypting twice',
+        'reauthenticates a prepared delivery after inbound commit fails $inboundFailure',
         async ({ expectedRetryDisposition, inboundFailure }) => {
             const sourceKeys = keyPair(authenticatedMailboxSourceSeed);
             const recipientKeys = keyPair(
@@ -1469,11 +1519,9 @@ describe('authenticated mailbox', () => {
                 inboundSlotAuthority,
                 kernel,
                 plaintextSinkBoundary: plaintextSink.boundary,
-                pullCiphertextChunk: () => {
+                pullCiphertextChunk: (input) => {
                     retryCiphertextPullCount += 1;
-                    return Promise.reject(
-                        new Error('Prepared delivery must not decrypt again.'),
-                    );
+                    return sourceFromChunks(ciphertextChunks)(input);
                 },
                 recipientMailboxCapability: recipientProvider.mailboxCapability,
                 sourceRoster,
@@ -1484,7 +1532,7 @@ describe('authenticated mailbox', () => {
                 isValid: true,
                 value: { disposition: expectedRetryDisposition },
             });
-            expect(retryCiphertextPullCount).toBe(0);
+            expect(retryCiphertextPullCount).toBe(ciphertextChunks.length + 1);
             expect(plaintextSink.observation.publicationCount).toBe(1);
             expect(plaintextSink.observation.publishedChunks).toEqual([
                 plaintext,
@@ -1563,13 +1611,9 @@ describe('authenticated mailbox', () => {
                     inboundSlotAuthority,
                     kernel,
                     plaintextSinkBoundary: plaintextSink.boundary,
-                    pullCiphertextChunk: () => {
+                    pullCiphertextChunk: (input) => {
                         retryCiphertextPullCount += 1;
-                        return Promise.reject(
-                            new Error(
-                                'A retained delivery must not decrypt again.',
-                            ),
-                        );
+                        return sourceFromChunks(ciphertextChunks)(input);
                     },
                     recipientMailboxCapability:
                         recipientProvider.mailboxCapability,
@@ -1581,7 +1625,11 @@ describe('authenticated mailbox', () => {
                 isValid: true,
                 value: { disposition: 'byteIdenticalRetransmission' },
             });
-            expect(retryCiphertextPullCount).toBe(0);
+            expect(retryCiphertextPullCount).toBe(
+                sinkFailure === 'before publication'
+                    ? ciphertextChunks.length + 1
+                    : 0,
+            );
             expect(plaintextSink.observation.commitAttemptCount).toBe(
                 expectedCommitAttemptCount,
             );
@@ -1695,7 +1743,10 @@ describe('authenticated mailbox', () => {
             ...createBrowserLocalKeyOperations(wrongRecipientKeys),
         });
         const plaintext = textEncoder.encode(
-            canonicalJson({ objectType: 'PrivateVssShareEnvelope', value: 3 }),
+            canonicalJson({
+                objectType: 'RecipientPrivateVssPayload',
+                value: 3,
+            }),
         );
         const fixture = createAuthenticatedMailboxFixture({
             plaintext,

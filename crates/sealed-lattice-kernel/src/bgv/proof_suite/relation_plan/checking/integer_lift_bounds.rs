@@ -14,7 +14,7 @@ use super::super::{
         ordered_injective_integer_factor_product_expression, radix_recomposition_expression,
         resolved_modulus_multiple, strictly_sorted_unique, trinary_constraint_expression,
     },
-    integer_lift::RelationIntegerLiftCoefficient,
+    integer_lift::{RelationIntegerLiftCoefficient, resolved_modulus_radix_digit},
     layout::RelationPlanVariant,
     model::{
         BoundTreeConstructionKind, RelationColumnOrigin, RelationElementKind,
@@ -55,17 +55,11 @@ pub(super) fn integer_lift_require_pre_challenge_column(
         .ordered_columns
         .get(column_ordinal as usize)
         .ok_or(RelationPlanError::InvalidColumn)?;
-    let role = tree_roles_by_column
-        .get(&column_ordinal)
-        .copied()
-        .ok_or(RelationPlanError::MissingRoot)?;
+    let role = tree_roles_by_column.get(&column_ordinal).copied();
     match column.origin {
-        RelationColumnOrigin::Prover | RelationColumnOrigin::VerifierSequence { .. }
-            if role == Some(1) =>
-        {
-            Ok(())
-        }
-        RelationColumnOrigin::BoundTree { .. } if role.is_none() => Ok(()),
+        RelationColumnOrigin::Prover if role == Some(Some(1)) => Ok(()),
+        RelationColumnOrigin::VerifierSequence { .. } if role.is_none() => Ok(()),
+        RelationColumnOrigin::BoundTree { .. } if role == Some(None) => Ok(()),
         _ => Err(RelationPlanError::InvalidConstraint),
     }
 }
@@ -154,10 +148,7 @@ pub(super) fn integer_lift_column_interval(
             let modulus_reference = column
                 .canonical_residue_modulus
                 .ok_or(RelationPlanError::InvalidSemanticCell)?;
-            let layout = source.value_layout(
-                &variant.ordered_public_samplers,
-                &variant.ordered_verifier_sources,
-            )?;
+            let layout = source.value_layout()?;
             if layout.element_kind != RelationElementKind::Residue
                 || layout.residue_modulus != Some(modulus_reference)
             {
@@ -167,13 +158,6 @@ pub(super) fn integer_lift_column_interval(
             match layout.embedding_kind {
                 RelationEmbeddingKind::LeastNonnegative => {
                     SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(modulus - 1))
-                }
-                RelationEmbeddingKind::Centered => {
-                    let absolute_bound = (modulus - 1) / 2;
-                    SignedIntegerInterval::from_bigints(
-                        -BigInt::from(absolute_bound),
-                        BigInt::from(absolute_bound),
-                    )
                 }
                 _ => Err(RelationPlanError::InvalidSemanticCell),
             }
@@ -235,6 +219,24 @@ pub(super) fn integer_lift_coefficient_value(
             modulus_reference,
             multiplier,
         } => resolved_modulus_multiple(modulus_reference, multiplier, context),
+        RelationIntegerLiftCoefficient::ModulusRadixDigit {
+            modulus_reference,
+            multiplier,
+            radix,
+            digit_ordinal,
+        } => {
+            let value = resolved_modulus_radix_digit(
+                modulus_reference,
+                multiplier,
+                radix,
+                digit_ordinal,
+                context,
+            )?;
+            if value == 0 {
+                return Err(RelationPlanError::NoWrapBoundViolated);
+            }
+            Ok(value)
+        }
     }
 }
 

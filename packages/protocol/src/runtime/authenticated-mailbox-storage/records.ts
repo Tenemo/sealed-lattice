@@ -98,7 +98,7 @@ export type BrowserLocalAuthenticatedMailboxStorageConfiguration = Readonly<{
     store: UntrustedStorageTransactionStore;
 }>;
 
-type StoredProducerSlot = Readonly<{
+export type StoredProducerSlot = Readonly<{
     actionContextHash: ProtocolHash;
     ceremonyContextHash: ProtocolHash;
     payloadType: MailboxPayloadType;

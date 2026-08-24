@@ -1,112 +1,62 @@
-//! Exact allowlist checks for the selected fixed suite.
+//! Rust-owned authority boundary for the exact selected suite.
+
+use std::collections::BTreeMap;
 
 use crate::bgv::{
-    key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KEY_SWITCH_SPECIAL_PRIMES},
+    key_switch_topology::{
+        KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KEY_SWITCH_SPECIAL_PRIMES, KeySwitchDecompositionTopology,
+    },
     parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    proof_suite::{
+        MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, SelectedEvaluatorEntryKind,
+        selected_evaluator_galois_entry_positions,
+        selected_evaluator_relinearization_entry_positions,
+    },
 };
 
 #[cfg(test)]
 use crate::bgv::{
-    evaluator::program::selected_evaluator_program_set,
-    key_switch_topology::KeySwitchDecompositionTopology,
-    proof_suite::{SelectedEvaluatorEntryKind, selected_evaluator_entry_positions},
-};
-
-use super::schemas::SchemaResult;
-use super::{
-    ArtifactKind, ArtifactReference, FOUNDATION_PROFILE, FoundationSchemaError, Hash512,
-    RefusalReason, SuiteCountLimits, SuiteRecord,
+    evaluator::{
+        candidate_evidence::EvaluatorCandidateInput,
+        noise_recurrence::direct_ballot_target_noise_bounds,
+        program::selected_evaluator_program_set,
+    },
+    parameters::validate_supported_algebraic_parameters,
+    proof_suite::{
+        ValidatedRelationPlanArtifact, selected_complete_proof_resource_accounting,
+        selected_evaluator_aggregate_relation_plan, selected_evaluator_entry_positions,
+        selected_galois_key_share_batch_schedule,
+        selected_recipient_private_vss_payload_byte_length, selected_relation_plans,
+        selected_target_decryption_flooding_bound,
+    },
 };
 
 #[cfg(test)]
-use super::{
-    CanonicalDecodeLimits, selected_encoder_and_ballot_layout_artifact_bytes,
-    selected_evaluator_program_artifact_bytes, selected_lattice_commitment_profile_artifact_bytes,
-    selected_proof_profile_artifact_bytes, selected_target_decryption_profile_artifact_bytes,
+use super::schemas::PROTOTYPE_PARTICIPANT_COUNT;
+use super::schemas::SchemaResult;
+#[cfg(test)]
+use super::suite_artifacts::{
+    selected_encoder_and_ballot_layout_artifact_bytes, selected_evaluator_program_artifact_bytes,
+    selected_lattice_commitment_profile_artifact_bytes, selected_proof_profile_artifact_bytes,
+    selected_proof_profile_artifact_bytes_from_relation_plans,
+    selected_target_decryption_profile_artifact_bytes,
     selected_verifiable_secret_sharing_profile_artifact_bytes,
 };
+use super::{FOUNDATION_PROFILE, FoundationSchemaError, Hash512, RefusalReason, SuiteRecord};
+
+#[cfg(test)]
+use super::{
+    ArtifactKind, ArtifactReference, CanonicalDecodeLimits, CanonicalItem, CanonicalTuple,
+    MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, ProofApplicationSlotCeilings, SuiteCountLimits,
+    derive_foundation_roster_parameters,
+};
+#[cfg(test)]
+use crate::bgv::proof_suite::SelectedEvaluatorEntryPosition;
 
 pub(crate) const SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT: u16 = 3;
 pub(crate) const SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 pub(crate) const SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
 pub(crate) const SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION: u32 = 20;
-pub(crate) const SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION: u32 = 269;
-
-const SELECTED_CANDIDATE_SUITE_IDENTIFIER: Hash512 = Hash512::from_bytes([
-    0xaf, 0xda, 0x52, 0x0b, 0xe6, 0xd3, 0x0c, 0x78, 0x60, 0x7a, 0xc5, 0x6a, 0x5e, 0xf5, 0x10, 0x15,
-    0x0f, 0x89, 0x5a, 0x97, 0x34, 0x25, 0xa5, 0x10, 0x8e, 0xd1, 0xee, 0x10, 0x80, 0x00, 0xd2, 0x3c,
-    0x78, 0xbf, 0xe8, 0xbb, 0x65, 0xb6, 0x3f, 0xe7, 0x69, 0x61, 0x9a, 0x43, 0xf2, 0x60, 0x9f, 0x1c,
-    0x2a, 0xf9, 0xf6, 0x5f, 0x22, 0x5f, 0x99, 0x5e, 0x5b, 0x8e, 0x31, 0x1b, 0x7e, 0xaf, 0xbb, 0xaf,
-]);
-
-const SELECTED_ARTIFACT_REFERENCE_INPUTS: [(ArtifactKind, u64, [u8; 64]); 6] = [
-    (
-        ArtifactKind::EncoderAndBallotLayout,
-        38,
-        [
-            0x23, 0x43, 0xbe, 0xdf, 0x62, 0x8e, 0x86, 0x60, 0xa8, 0x77, 0xb4, 0xd5, 0x41, 0xbf,
-            0x1d, 0x79, 0x61, 0x71, 0x36, 0xdc, 0x27, 0x97, 0xd0, 0xd4, 0xf7, 0x9b, 0xad, 0x1b,
-            0x06, 0xa8, 0x5a, 0x11, 0x01, 0x92, 0x29, 0xde, 0xac, 0x22, 0xa0, 0xda, 0xf9, 0x5b,
-            0xed, 0x71, 0x88, 0xc4, 0x0b, 0xc5, 0x7b, 0xa9, 0xbd, 0x47, 0x58, 0x8e, 0x97, 0x8c,
-            0x45, 0x78, 0x95, 0xff, 0x3d, 0x55, 0x6b, 0x73,
-        ],
-    ),
-    (
-        ArtifactKind::VerifiableSecretSharingProfile,
-        74,
-        [
-            0x49, 0xd3, 0x33, 0x6d, 0x22, 0x7e, 0x29, 0x7d, 0x65, 0xe3, 0xde, 0x75, 0x8e, 0x1e,
-            0xdd, 0xd1, 0x95, 0x6d, 0x18, 0xaa, 0xbc, 0xd0, 0x0e, 0x7e, 0x4f, 0x7d, 0x4f, 0x73,
-            0x99, 0x42, 0x72, 0x7e, 0x93, 0x85, 0xb5, 0xba, 0x50, 0x5b, 0xbd, 0xfa, 0x1e, 0x41,
-            0x35, 0xf8, 0x48, 0x01, 0x1d, 0x28, 0x03, 0x47, 0x03, 0x1f, 0xe9, 0xc6, 0x25, 0x45,
-            0xde, 0x84, 0x22, 0xe6, 0x40, 0x6c, 0x3c, 0xea,
-        ],
-    ),
-    (
-        ArtifactKind::LatticeCommitmentProfile,
-        34,
-        [
-            0xfe, 0x40, 0xcd, 0x4a, 0x47, 0x87, 0x7c, 0xcd, 0x0c, 0x93, 0x3a, 0x1e, 0x05, 0x12,
-            0x8a, 0x8a, 0x07, 0x40, 0xab, 0x36, 0x87, 0xb7, 0xb9, 0xa6, 0x0f, 0x77, 0xce, 0x46,
-            0x3a, 0xc4, 0xb7, 0x11, 0x2e, 0xd7, 0x1a, 0xec, 0xd5, 0x82, 0x5b, 0xcb, 0xae, 0x5f,
-            0x46, 0x92, 0x5a, 0xd8, 0xb6, 0xa4, 0x55, 0x86, 0x53, 0xa0, 0x1e, 0xdc, 0x9a, 0x31,
-            0xa8, 0xbb, 0x2d, 0x9e, 0x36, 0x2e, 0x44, 0x7a,
-        ],
-    ),
-    (
-        ArtifactKind::ProofProfileSet,
-        957_460,
-        [
-            0xb6, 0xbe, 0xd3, 0x13, 0x39, 0xf9, 0xbb, 0x45, 0xa1, 0xd7, 0x96, 0x19, 0x82, 0xb0,
-            0x7a, 0x46, 0x92, 0x84, 0x3e, 0x0c, 0x3d, 0x7c, 0x18, 0xe3, 0x89, 0x1b, 0xa5, 0xbc,
-            0x23, 0xd9, 0x48, 0xc2, 0x7f, 0xa2, 0x3b, 0x3b, 0x6f, 0x9a, 0x12, 0x6c, 0xe9, 0x9f,
-            0x72, 0xd8, 0xde, 0xd9, 0x1f, 0xdb, 0xa4, 0x1c, 0x38, 0x50, 0x20, 0x9f, 0x0e, 0xbf,
-            0x8d, 0xa1, 0x0b, 0xae, 0x83, 0xca, 0x63, 0x76,
-        ],
-    ),
-    (
-        ArtifactKind::EvaluatorProgramSet,
-        20_270_968,
-        [
-            0xfd, 0x9c, 0x95, 0x8a, 0x65, 0xdc, 0xf9, 0x36, 0x40, 0xa1, 0x8e, 0x7b, 0xcc, 0x1c,
-            0x5a, 0x9a, 0x79, 0x2e, 0xd6, 0xce, 0x8d, 0x36, 0x23, 0xa7, 0xb7, 0x07, 0xc4, 0x61,
-            0x62, 0x15, 0x17, 0xd1, 0x84, 0xda, 0x4b, 0x5a, 0x75, 0x08, 0x49, 0x93, 0x6a, 0xe0,
-            0xd3, 0xba, 0x25, 0x5b, 0xea, 0x4d, 0x0b, 0x8a, 0x6b, 0xff, 0xa5, 0x1a, 0x96, 0x3f,
-            0xa6, 0xbf, 0x41, 0x65, 0x5d, 0xd9, 0x9b, 0xb0,
-        ],
-    ),
-    (
-        ArtifactKind::TargetDecryptionProfile,
-        36,
-        [
-            0xf3, 0xc8, 0x19, 0x92, 0x71, 0xb3, 0x78, 0xa0, 0xfd, 0xeb, 0x07, 0xf8, 0x2c, 0x69,
-            0xf5, 0xe2, 0xff, 0x15, 0x1f, 0x31, 0x5a, 0x24, 0x72, 0x17, 0x4e, 0x55, 0x75, 0xe9,
-            0x6e, 0xb7, 0xf0, 0xa7, 0x6d, 0x27, 0xeb, 0xa8, 0x04, 0xbf, 0x89, 0x7d, 0xb9, 0xfe,
-            0xad, 0x9e, 0x33, 0x3a, 0x8c, 0x6c, 0xc6, 0xa6, 0x2d, 0x7d, 0x90, 0xb8, 0x5f, 0x7c,
-            0x14, 0xe3, 0x7a, 0x7f, 0x98, 0x48, 0x90, 0xe0,
-        ],
-    ),
-];
 
 /// Non-serializable authority for the exact selected cryptographic suite.
 /// Callers cannot supply an identifier, feasibility measurement, or artifact
@@ -139,6 +89,50 @@ impl SelectedSuiteCapability {
     pub(crate) const fn polynomial_degree(&self) -> u32 {
         POLYNOMIAL_DEGREE as u32
     }
+
+    pub(crate) const fn maximum_private_sampler_candidate_draws_per_output(&self) -> u32 {
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn selected_suite_capability_for_tests() -> SelectedSuiteCapability {
+    let structural_record = SuiteRecord::new(
+        selected_count_limits().expect("structural test count limits derive"),
+        structural_artifact_references_for_tests(),
+    )
+    .expect("structural test suite is canonical");
+    SelectedSuiteCapability {
+        suite_identifier: structural_record
+            .suite_id()
+            .expect("structural test suite identifier derives")
+            .into_bytes(),
+    }
+}
+
+#[cfg(test)]
+fn structural_artifact_reference_for_tests(artifact_kind: ArtifactKind) -> ArtifactReference {
+    let bytes = CanonicalTuple::new(
+        artifact_kind.artifact_schema_identifier(),
+        artifact_kind.artifact_schema_version(),
+        vec![CanonicalItem::unsigned16(artifact_kind.canonical_code())],
+    )
+    .encode()
+    .expect("structural test artifact encodes");
+    ArtifactReference::from_canonical_artifact_bytes(
+        artifact_kind,
+        &bytes,
+        &CanonicalDecodeLimits::default(),
+    )
+    .expect("structural test artifact reference derives")
+}
+
+#[cfg(test)]
+fn structural_artifact_references_for_tests() -> Vec<ArtifactReference> {
+    ArtifactKind::ALL
+        .into_iter()
+        .map(structural_artifact_reference_for_tests)
+        .collect()
 }
 
 pub(crate) fn select_suite_record(record: &SuiteRecord) -> SchemaResult<SelectedSuiteCapability> {
@@ -148,168 +142,437 @@ pub(crate) fn select_suite_record(record: &SuiteRecord) -> SchemaResult<Selected
     })
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SelectedEvaluatorResourceAccounting {
-    component_material_wire_byte_length: u64,
-    component_material_resident_byte_length: u64,
+pub(crate) struct SelectedEvaluatorLevelResourceAccounting {
+    catalog_level: usize,
+    component_wire_byte_length: u64,
+    component_resident_byte_length: u64,
     source_component_count_per_participant: u64,
-    aggregate_component_count: u64,
-    final_evaluator_key_store_wire_byte_length: u64,
-    final_evaluator_key_store_byte_length: u64,
-    setup_upload_lower_bound_per_participant: u64,
-    ceremony_setup_upload_lower_bound: u64,
-    complete_runtime_material_per_participant: u64,
-    complete_runtime_material_for_ceremony: u64,
+    final_component_count: u64,
+    source_wire_byte_length_per_participant: u64,
+    source_resident_byte_length_per_participant: u64,
+    final_wire_byte_length: u64,
+    final_resident_byte_length: u64,
 }
 
-#[cfg(test)]
-impl SelectedEvaluatorResourceAccounting {
-    pub(crate) const fn component_material_wire_byte_length(self) -> u64 {
-        self.component_material_wire_byte_length
+impl SelectedEvaluatorLevelResourceAccounting {
+    pub(crate) const fn catalog_level(self) -> usize {
+        self.catalog_level
     }
 
-    pub(crate) const fn component_material_resident_byte_length(self) -> u64 {
-        self.component_material_resident_byte_length
+    pub(crate) const fn component_wire_byte_length(self) -> u64 {
+        self.component_wire_byte_length
+    }
+
+    pub(crate) const fn component_resident_byte_length(self) -> u64 {
+        self.component_resident_byte_length
     }
 
     pub(crate) const fn source_component_count_per_participant(self) -> u64 {
         self.source_component_count_per_participant
     }
 
-    pub(crate) const fn aggregate_component_count(self) -> u64 {
-        self.aggregate_component_count
+    pub(crate) const fn final_component_count(self) -> u64 {
+        self.final_component_count
     }
 
-    pub(crate) const fn final_evaluator_key_store_wire_byte_length(self) -> u64 {
+    pub(crate) const fn source_wire_byte_length_per_participant(self) -> u64 {
+        self.source_wire_byte_length_per_participant
+    }
+
+    pub(crate) const fn source_resident_byte_length_per_participant(self) -> u64 {
+        self.source_resident_byte_length_per_participant
+    }
+
+    pub(crate) const fn final_wire_byte_length(self) -> u64 {
+        self.final_wire_byte_length
+    }
+
+    pub(crate) const fn final_resident_byte_length(self) -> u64 {
+        self.final_resident_byte_length
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedEvaluatorResourceAccounting {
+    levels: Vec<SelectedEvaluatorLevelResourceAccounting>,
+    relinearization_position_count: u32,
+    galois_position_count: u32,
+    source_component_count_per_participant: u64,
+    source_public_polynomial_context_hash_count_per_participant: u64,
+    source_public_polynomial_context_hash_resident_byte_length_per_participant: u64,
+    final_component_count: u64,
+    source_wire_byte_length_per_participant: u64,
+    source_resident_byte_length_per_participant: u64,
+    final_evaluator_key_store_wire_byte_length: u64,
+    final_evaluator_key_store_resident_byte_length: u64,
+    ceremony_setup_wire_byte_length: u64,
+    ceremony_source_and_final_resident_volume_byte_length: u64,
+}
+
+impl SelectedEvaluatorResourceAccounting {
+    pub(crate) fn levels(&self) -> &[SelectedEvaluatorLevelResourceAccounting] {
+        &self.levels
+    }
+
+    pub(crate) const fn source_component_count_per_participant(&self) -> u64 {
+        self.source_component_count_per_participant
+    }
+
+    pub(crate) const fn relinearization_position_count(&self) -> u32 {
+        self.relinearization_position_count
+    }
+
+    pub(crate) const fn galois_position_count(&self) -> u32 {
+        self.galois_position_count
+    }
+
+    pub(crate) const fn source_public_polynomial_context_hash_count_per_participant(&self) -> u64 {
+        self.source_public_polynomial_context_hash_count_per_participant
+    }
+
+    pub(crate) const fn source_public_polynomial_context_hash_resident_byte_length_per_participant(
+        &self,
+    ) -> u64 {
+        self.source_public_polynomial_context_hash_resident_byte_length_per_participant
+    }
+
+    pub(crate) const fn final_component_count(&self) -> u64 {
+        self.final_component_count
+    }
+
+    pub(crate) const fn source_wire_byte_length_per_participant(&self) -> u64 {
+        self.source_wire_byte_length_per_participant
+    }
+
+    pub(crate) const fn source_resident_byte_length_per_participant(&self) -> u64 {
+        self.source_resident_byte_length_per_participant
+    }
+
+    pub(crate) const fn final_evaluator_key_store_wire_byte_length(&self) -> u64 {
         self.final_evaluator_key_store_wire_byte_length
     }
 
-    pub(crate) const fn final_evaluator_key_store_byte_length(self) -> u64 {
-        self.final_evaluator_key_store_byte_length
+    pub(crate) const fn final_evaluator_key_store_resident_byte_length(&self) -> u64 {
+        self.final_evaluator_key_store_resident_byte_length
     }
 
-    pub(crate) const fn setup_upload_lower_bound_per_participant(self) -> u64 {
-        self.setup_upload_lower_bound_per_participant
+    pub(crate) const fn ceremony_setup_wire_byte_length(&self) -> u64 {
+        self.ceremony_setup_wire_byte_length
     }
 
-    pub(crate) const fn ceremony_setup_upload_lower_bound(self) -> u64 {
-        self.ceremony_setup_upload_lower_bound
-    }
-
-    pub(crate) const fn complete_runtime_material_per_participant(self) -> u64 {
-        self.complete_runtime_material_per_participant
-    }
-
-    pub(crate) const fn complete_runtime_material_for_ceremony(self) -> u64 {
-        self.complete_runtime_material_for_ceremony
+    pub(crate) const fn ceremony_source_and_final_resident_volume_byte_length(&self) -> u64 {
+        self.ceremony_source_and_final_resident_volume_byte_length
     }
 }
 
-#[cfg(test)]
 pub(crate) fn selected_evaluator_resource_accounting()
 -> SchemaResult<SelectedEvaluatorResourceAccounting> {
-    let positions = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-        .map_err(|_| invalid_selected_suite("selected evaluator key positions are invalid"))?;
-    let decomposition_topology = KeySwitchDecompositionTopology::for_level(
-        DATA_PRIMES
-            .len()
-            .checked_sub(1)
-            .ok_or_else(resource_count_overflow)?,
-    )
-    .map_err(|_| invalid_selected_suite("selected key-switch topology is invalid"))?;
-    let component_material_wire_byte_length = decomposition_topology
-        .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)
-        .map_err(|_| invalid_selected_suite("selected component wire length is invalid"))?;
-    let component_material_resident_byte_length = decomposition_topology
-        .resident_component_byte_length(POLYNOMIAL_DEGREE)
-        .map_err(|_| invalid_selected_suite("selected component resident length is invalid"))?;
-    let mut source_component_count_per_participant = 0_u64;
-    let mut aggregate_component_count = 0_u64;
-
-    for position in positions {
-        let catalog_level = match position.key_kind() {
-            SelectedEvaluatorEntryKind::Relinearization { catalog_level }
-            | SelectedEvaluatorEntryKind::Galois { catalog_level, .. } => catalog_level,
+    let relinearization_positions =
+        selected_evaluator_relinearization_entry_positions().map_err(|_| {
+            invalid_selected_suite("selected relinearization key positions are invalid")
+        })?;
+    let galois_positions = selected_evaluator_galois_entry_positions()
+        .map_err(|_| invalid_selected_suite("selected Galois key positions are invalid"))?;
+    if relinearization_positions.is_empty() || galois_positions.is_empty() {
+        return Err(invalid_selected_suite(
+            "selected evaluator key position catalog is empty",
+        ));
+    }
+    let mut component_counts_by_level = BTreeMap::<usize, (u64, u64)>::new();
+    let mut relinearization_position_count = 0_u32;
+    let mut galois_position_count = 0_u32;
+    for position in relinearization_positions {
+        let SelectedEvaluatorEntryKind::Relinearization { catalog_level } = position.key_kind()
+        else {
+            return Err(invalid_selected_suite(
+                "selected relinearization position has the wrong key kind",
+            ));
         };
-        let decomposition_digit_count = catalog_level
+        relinearization_position_count = relinearization_position_count
             .checked_add(1)
             .ok_or_else(resource_count_overflow)?;
-        if decomposition_digit_count != DATA_PRIMES.len() {
+        let counts = component_counts_by_level
+            .entry(catalog_level)
+            .or_insert((0, 0));
+        counts.0 = counts
+            .0
+            .checked_add(3)
+            .ok_or_else(resource_count_overflow)?;
+        counts.1 = counts
+            .1
+            .checked_add(2)
+            .ok_or_else(resource_count_overflow)?;
+    }
+    for position in galois_positions {
+        let SelectedEvaluatorEntryKind::Galois { catalog_level, .. } = position.key_kind() else {
             return Err(invalid_selected_suite(
-                "selected evaluator entry does not use the complete data-prime basis",
+                "selected Galois position has the wrong key kind",
             ));
-        }
-        match position.key_kind() {
-            SelectedEvaluatorEntryKind::Relinearization { .. } => {
-                // Two round-one source components and one round-two source
-                // component produce the two final relinearization components.
-                source_component_count_per_participant = source_component_count_per_participant
-                    .checked_add(3)
-                    .ok_or_else(resource_count_overflow)?;
-                aggregate_component_count = aggregate_component_count
-                    .checked_add(2)
-                    .ok_or_else(resource_count_overflow)?;
-            }
-            SelectedEvaluatorEntryKind::Galois { .. } => {
-                source_component_count_per_participant = source_component_count_per_participant
-                    .checked_add(1)
-                    .ok_or_else(resource_count_overflow)?;
-                aggregate_component_count = aggregate_component_count
-                    .checked_add(1)
-                    .ok_or_else(resource_count_overflow)?;
-            }
-        }
+        };
+        galois_position_count = galois_position_count
+            .checked_add(1)
+            .ok_or_else(resource_count_overflow)?;
+        let counts = component_counts_by_level
+            .entry(catalog_level)
+            .or_insert((0, 0));
+        counts.0 = counts
+            .0
+            .checked_add(1)
+            .ok_or_else(resource_count_overflow)?;
+        counts.1 = counts
+            .1
+            .checked_add(1)
+            .ok_or_else(resource_count_overflow)?;
     }
 
-    let final_evaluator_key_store_wire_byte_length = component_material_wire_byte_length
-        .checked_mul(aggregate_component_count)
-        .ok_or_else(resource_count_overflow)?;
-    let final_evaluator_key_store_byte_length = component_material_resident_byte_length
-        .checked_mul(aggregate_component_count)
-        .ok_or_else(resource_count_overflow)?;
-    let setup_upload_lower_bound_per_participant = component_material_wire_byte_length
-        .checked_mul(source_component_count_per_participant)
-        .ok_or_else(resource_count_overflow)?;
-    let source_upload_for_ceremony = setup_upload_lower_bound_per_participant
+    let mut levels = Vec::new();
+    levels
+        .try_reserve_exact(component_counts_by_level.len())
+        .map_err(|_| resource_count_overflow())?;
+    for (catalog_level, (source_component_count, final_component_count)) in
+        component_counts_by_level
+    {
+        let decomposition_topology = KeySwitchDecompositionTopology::for_level(catalog_level)
+            .map_err(|_| invalid_selected_suite("selected key-switch topology is invalid"))?;
+        let component_wire_byte_length = decomposition_topology
+            .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)
+            .map_err(|_| invalid_selected_suite("selected component wire length is invalid"))?;
+        let component_resident_byte_length = decomposition_topology
+            .resident_component_byte_length(POLYNOMIAL_DEGREE)
+            .map_err(|_| invalid_selected_suite("selected component resident length is invalid"))?;
+        levels.push(SelectedEvaluatorLevelResourceAccounting {
+            catalog_level,
+            component_wire_byte_length,
+            component_resident_byte_length,
+            source_component_count_per_participant: source_component_count,
+            final_component_count,
+            source_wire_byte_length_per_participant: component_wire_byte_length
+                .checked_mul(source_component_count)
+                .ok_or_else(resource_count_overflow)?,
+            source_resident_byte_length_per_participant: component_resident_byte_length
+                .checked_mul(source_component_count)
+                .ok_or_else(resource_count_overflow)?,
+            final_wire_byte_length: component_wire_byte_length
+                .checked_mul(final_component_count)
+                .ok_or_else(resource_count_overflow)?,
+            final_resident_byte_length: component_resident_byte_length
+                .checked_mul(final_component_count)
+                .ok_or_else(resource_count_overflow)?,
+        });
+    }
+
+    let source_component_count_per_participant =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.source_component_count_per_participant())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let final_component_count = levels.iter().try_fold(0_u64, |total, level| {
+        total
+            .checked_add(level.final_component_count())
+            .ok_or_else(resource_count_overflow)
+    })?;
+    let source_wire_byte_length_per_participant =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.source_wire_byte_length_per_participant())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let source_component_resident_byte_length_per_participant =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.source_resident_byte_length_per_participant())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let source_public_polynomial_context_hash_count_per_participant =
+        u64::from(relinearization_position_count)
+            .checked_add(u64::from(galois_position_count))
+            .ok_or_else(resource_count_overflow)?;
+    let source_public_polynomial_context_hash_resident_byte_length_per_participant =
+        source_public_polynomial_context_hash_count_per_participant
+            .checked_mul(
+                u64::try_from(Hash512::BYTE_LENGTH).map_err(|_| resource_count_overflow())?,
+            )
+            .ok_or_else(resource_count_overflow)?;
+    let source_resident_byte_length_per_participant =
+        source_component_resident_byte_length_per_participant
+            .checked_add(source_public_polynomial_context_hash_resident_byte_length_per_participant)
+            .ok_or_else(resource_count_overflow)?;
+    let final_evaluator_key_store_wire_byte_length =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.final_wire_byte_length())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let final_evaluator_key_store_resident_byte_length =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.final_resident_byte_length())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let source_wire_byte_length_for_ceremony = source_wire_byte_length_per_participant
         .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
         .ok_or_else(resource_count_overflow)?;
-    let ceremony_setup_upload_lower_bound = source_upload_for_ceremony
+    let ceremony_setup_wire_byte_length = source_wire_byte_length_for_ceremony
         .checked_add(final_evaluator_key_store_wire_byte_length)
         .ok_or_else(resource_count_overflow)?;
-    let complete_runtime_material_per_participant = component_material_resident_byte_length
-        .checked_mul(source_component_count_per_participant)
-        .ok_or_else(resource_count_overflow)?;
-    let source_runtime_material_for_ceremony = complete_runtime_material_per_participant
+    let ceremony_source_resident_volume_byte_length = source_resident_byte_length_per_participant
         .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
         .ok_or_else(resource_count_overflow)?;
-    let complete_runtime_material_for_ceremony = source_runtime_material_for_ceremony
-        .checked_add(final_evaluator_key_store_byte_length)
-        .ok_or_else(resource_count_overflow)?;
-    Ok(SelectedEvaluatorResourceAccounting {
-        component_material_wire_byte_length,
-        component_material_resident_byte_length,
+    let ceremony_source_and_final_resident_volume_byte_length =
+        ceremony_source_resident_volume_byte_length
+            .checked_add(final_evaluator_key_store_resident_byte_length)
+            .ok_or_else(resource_count_overflow)?;
+    let accounting = SelectedEvaluatorResourceAccounting {
+        levels,
+        relinearization_position_count,
+        galois_position_count,
         source_component_count_per_participant,
-        aggregate_component_count,
+        source_public_polynomial_context_hash_count_per_participant,
+        source_public_polynomial_context_hash_resident_byte_length_per_participant,
+        final_component_count,
+        source_wire_byte_length_per_participant,
+        source_resident_byte_length_per_participant,
         final_evaluator_key_store_wire_byte_length,
-        final_evaluator_key_store_byte_length,
-        setup_upload_lower_bound_per_participant,
-        ceremony_setup_upload_lower_bound,
-        complete_runtime_material_per_participant,
-        complete_runtime_material_for_ceremony,
-    })
+        final_evaluator_key_store_resident_byte_length,
+        ceremony_setup_wire_byte_length,
+        ceremony_source_and_final_resident_volume_byte_length,
+    };
+    require_selected_evaluator_resource_accounting(&accounting)?;
+    Ok(accounting)
+}
+
+fn require_selected_evaluator_resource_accounting(
+    accounting: &SelectedEvaluatorResourceAccounting,
+) -> SchemaResult<()> {
+    let mut source_component_count_per_participant = 0_u64;
+    let mut final_component_count = 0_u64;
+    let mut source_wire_byte_length_per_participant = 0_u64;
+    let mut source_component_resident_byte_length_per_participant = 0_u64;
+    let mut final_evaluator_key_store_wire_byte_length = 0_u64;
+    let mut final_evaluator_key_store_resident_byte_length = 0_u64;
+    let mut previous_catalog_level = None;
+    for level in accounting.levels() {
+        if previous_catalog_level
+            .is_some_and(|previous_catalog_level| level.catalog_level() <= previous_catalog_level)
+            || level.component_wire_byte_length() == 0
+            || level.component_resident_byte_length() == 0
+            || level.source_component_count_per_participant() == 0
+            || level.final_component_count() == 0
+            || level.source_wire_byte_length_per_participant()
+                != level
+                    .component_wire_byte_length()
+                    .checked_mul(level.source_component_count_per_participant())
+                    .ok_or_else(resource_count_overflow)?
+            || level.source_resident_byte_length_per_participant()
+                != level
+                    .component_resident_byte_length()
+                    .checked_mul(level.source_component_count_per_participant())
+                    .ok_or_else(resource_count_overflow)?
+            || level.final_wire_byte_length()
+                != level
+                    .component_wire_byte_length()
+                    .checked_mul(level.final_component_count())
+                    .ok_or_else(resource_count_overflow)?
+            || level.final_resident_byte_length()
+                != level
+                    .component_resident_byte_length()
+                    .checked_mul(level.final_component_count())
+                    .ok_or_else(resource_count_overflow)?
+        {
+            return Err(invalid_selected_suite(
+                "selected evaluator level accounting is inconsistent",
+            ));
+        }
+        previous_catalog_level = Some(level.catalog_level());
+        source_component_count_per_participant = source_component_count_per_participant
+            .checked_add(level.source_component_count_per_participant())
+            .ok_or_else(resource_count_overflow)?;
+        final_component_count = final_component_count
+            .checked_add(level.final_component_count())
+            .ok_or_else(resource_count_overflow)?;
+        source_wire_byte_length_per_participant = source_wire_byte_length_per_participant
+            .checked_add(level.source_wire_byte_length_per_participant())
+            .ok_or_else(resource_count_overflow)?;
+        source_component_resident_byte_length_per_participant =
+            source_component_resident_byte_length_per_participant
+                .checked_add(level.source_resident_byte_length_per_participant())
+                .ok_or_else(resource_count_overflow)?;
+        final_evaluator_key_store_wire_byte_length = final_evaluator_key_store_wire_byte_length
+            .checked_add(level.final_wire_byte_length())
+            .ok_or_else(resource_count_overflow)?;
+        final_evaluator_key_store_resident_byte_length =
+            final_evaluator_key_store_resident_byte_length
+                .checked_add(level.final_resident_byte_length())
+                .ok_or_else(resource_count_overflow)?;
+    }
+    let source_public_polynomial_context_hash_count_per_participant =
+        u64::from(accounting.relinearization_position_count())
+            .checked_add(u64::from(accounting.galois_position_count()))
+            .ok_or_else(resource_count_overflow)?;
+    let source_public_polynomial_context_hash_resident_byte_length_per_participant =
+        source_public_polynomial_context_hash_count_per_participant
+            .checked_mul(
+                u64::try_from(Hash512::BYTE_LENGTH).map_err(|_| resource_count_overflow())?,
+            )
+            .ok_or_else(resource_count_overflow)?;
+    let source_resident_byte_length_per_participant =
+        source_component_resident_byte_length_per_participant
+            .checked_add(source_public_polynomial_context_hash_resident_byte_length_per_participant)
+            .ok_or_else(resource_count_overflow)?;
+    let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
+    let ceremony_setup_wire_byte_length = source_wire_byte_length_per_participant
+        .checked_mul(participant_count)
+        .and_then(|source_byte_length| {
+            source_byte_length.checked_add(final_evaluator_key_store_wire_byte_length)
+        })
+        .ok_or_else(resource_count_overflow)?;
+    let ceremony_source_and_final_resident_volume_byte_length =
+        source_resident_byte_length_per_participant
+            .checked_mul(participant_count)
+            .and_then(|source_byte_length| {
+                source_byte_length.checked_add(final_evaluator_key_store_resident_byte_length)
+            })
+            .ok_or_else(resource_count_overflow)?;
+    if accounting.levels().is_empty()
+        || accounting.relinearization_position_count() == 0
+        || accounting.galois_position_count() == 0
+        || accounting.source_component_count_per_participant()
+            != source_component_count_per_participant
+        || accounting.source_public_polynomial_context_hash_count_per_participant()
+            != source_public_polynomial_context_hash_count_per_participant
+        || accounting.source_public_polynomial_context_hash_resident_byte_length_per_participant()
+            != source_public_polynomial_context_hash_resident_byte_length_per_participant
+        || accounting.final_component_count() != final_component_count
+        || accounting.source_wire_byte_length_per_participant()
+            != source_wire_byte_length_per_participant
+        || accounting.source_resident_byte_length_per_participant()
+            != source_resident_byte_length_per_participant
+        || accounting.final_evaluator_key_store_wire_byte_length()
+            != final_evaluator_key_store_wire_byte_length
+        || accounting.final_evaluator_key_store_resident_byte_length()
+            != final_evaluator_key_store_resident_byte_length
+        || accounting.ceremony_setup_wire_byte_length() != ceremony_setup_wire_byte_length
+        || accounting.ceremony_source_and_final_resident_volume_byte_length()
+            != ceremony_source_and_final_resident_volume_byte_length
+        || accounting.ceremony_setup_wire_byte_length()
+            > crate::foundation::MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+        || accounting.source_resident_byte_length_per_participant()
+            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        || accounting.final_evaluator_key_store_resident_byte_length()
+            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+    {
+        return Err(invalid_selected_suite(
+            "selected evaluator resource accounting exceeds an absolute bound or is inconsistent",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn require_selected_suite_record(record: &SuiteRecord) -> SchemaResult<()> {
-    let expected_count_limits = selected_count_limits()?;
-    if record.roster_size() != FOUNDATION_PROFILE.participant_count
-        || record.byzantine_bound() != FOUNDATION_PROFILE.active_fault_bound
-        || record.reconstruction_threshold() != FOUNDATION_PROFILE.reconstruction_threshold
-        || record.finality_quorum() != FOUNDATION_PROFILE.finality_quorum
-        || record.count_limits() != expected_count_limits
-        || record.artifacts() != selected_artifact_references()?.as_slice()
-        || record.suite_id()? != SELECTED_CANDIDATE_SUITE_IDENTIFIER
-    {
+    let expected_record = selected_suite_record()?;
+    if record != &expected_record {
         return Err(invalid_selected_suite(
             "suite record is not the exact selected roster, count, and artifact profile",
         ));
@@ -317,19 +580,434 @@ pub(crate) fn require_selected_suite_record(record: &SuiteRecord) -> SchemaResul
     Ok(())
 }
 
-pub(crate) fn selected_artifact_references() -> SchemaResult<Vec<ArtifactReference>> {
-    SELECTED_ARTIFACT_REFERENCE_INPUTS
+fn selected_suite_record() -> SchemaResult<SuiteRecord> {
+    // No runtime record is frozen while the evaluator topology, proof
+    // representation, and release bounds remain unsettled. In particular, do
+    // not run the research recurrence or relation compilers on a participant's
+    // browser path merely to discover that the candidate is unavailable.
+    Err(invalid_selected_suite(
+        "no canonical selected suite record has been frozen",
+    ))
+}
+
+#[cfg(test)]
+fn derive_selected_fixed_algebra_candidate_record() -> SchemaResult<SuiteRecord> {
+    require_selected_foundation_geometry()?;
+    SuiteRecord::new(
+        selected_count_limits()?,
+        derive_selected_fixed_algebra_artifact_references()?,
+    )
+}
+
+#[cfg(test)]
+pub(super) fn derive_selected_suite_candidate_record() -> SchemaResult<SuiteRecord> {
+    let candidate = derive_unactivated_selected_suite_candidate_record()?;
+    require_selected_absolute_resource_bounds()?;
+    Ok(candidate)
+}
+
+/// Derives the exact canonical suite inputs without claiming that the
+/// activation-only proof, resource, WebAssembly, or browser gates have closed.
+/// This test-only record is evidence input; `select_suite_record` continues to
+/// fail closed because `selected_suite_record` has no allowlisted value.
+#[cfg(test)]
+pub(crate) fn derive_unactivated_selected_suite_candidate_record() -> SchemaResult<SuiteRecord> {
+    let relation_plans = selected_relation_plans()
+        .map_err(|_| invalid_selected_suite("selected relation geometry is invalid"))?;
+    derive_unactivated_selected_suite_candidate_record_from_relation_plans(relation_plans)
+}
+
+#[cfg(test)]
+pub(crate) fn derive_unactivated_selected_suite_candidate_record_from_relation_plans(
+    relation_plans: Vec<ValidatedRelationPlanArtifact>,
+) -> SchemaResult<SuiteRecord> {
+    require_selected_foundation_geometry()?;
+    require_selected_evaluator_catalog()?;
+    require_selected_release_margins()?;
+
+    // `selected_relation_plans` performs the final relation-plan check. In
+    // particular, the committed-material checker owns the VSS numerator,
+    // quotient, opening-degree, and evaluation-domain inequalities. An
+    // unchecked compiler result can never reach suite identity derivation.
+    require_selected_complete_list_relation(&relation_plans)?;
+
+    let count_limits = selected_count_limits()?;
+    let proof_profile_bytes = selected_proof_profile_artifact_bytes_from_relation_plans(
+        relation_plans,
+        SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+    )?;
+    let artifact_references =
+        derive_selected_artifact_references_with_proof_profile_bytes(proof_profile_bytes)?;
+    SuiteRecord::new(count_limits, artifact_references)
+}
+
+#[cfg(test)]
+fn require_selected_foundation_geometry() -> SchemaResult<()> {
+    let roster_parameters = derive_foundation_roster_parameters(PROTOTYPE_PARTICIPANT_COUNT)
+        .ok_or_else(|| invalid_selected_suite("selected roster geometry is invalid"))?;
+    if FOUNDATION_PROFILE.participant_count != PROTOTYPE_PARTICIPANT_COUNT
+        || FOUNDATION_PROFILE.participant_count != roster_parameters.participant_count
+        || FOUNDATION_PROFILE.active_fault_bound != roster_parameters.active_fault_bound
+        || FOUNDATION_PROFILE.reconstruction_threshold != roster_parameters.reconstruction_threshold
+        || FOUNDATION_PROFILE.finality_quorum != roster_parameters.finality_quorum
+        || FOUNDATION_PROFILE.state_witness_quorum != roster_parameters.state_witness_quorum
+        || FOUNDATION_PROFILE.option_count < 2
+        || FOUNDATION_PROFILE.minimum_score > FOUNDATION_PROFILE.maximum_score
+    {
+        return Err(invalid_selected_suite(
+            "selected roster or ballot geometry is inconsistent",
+        ));
+    }
+    validate_supported_algebraic_parameters()
+        .map_err(|_| invalid_selected_suite("selected ring or modulus catalog is invalid"))?;
+    // This also checks the exact canonical pair ordering against the live
+    // ballot-slot codec, rather than trusting a copied layout constant.
+    selected_encoder_and_ballot_layout_artifact_bytes()?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn require_selected_evaluator_catalog() -> SchemaResult<()> {
+    let candidate = EvaluatorCandidateInput::implemented()
+        .map_err(|_| invalid_selected_suite("selected evaluator candidate is invalid"))?;
+    if candidate.data_primes.as_slice() != DATA_PRIMES
+        || candidate.special_primes.as_slice() != KEY_SWITCH_SPECIAL_PRIMES
+        || candidate.galois_key_schedule.is_empty()
+        || candidate.relinearization_levels.is_empty()
+    {
+        return Err(invalid_selected_suite(
+            "selected evaluator candidate disagrees with the suite algebra",
+        ));
+    }
+
+    let program_key_positions = selected_evaluator_program_set()
+        .and_then(|program| program.key_positions())
+        .map_err(|_| invalid_selected_suite("selected evaluator program is invalid"))?;
+    if program_key_positions.streams().len() != usize::from(FOUNDATION_PROFILE.option_count)
+        || program_key_positions.relinearization_catalog_levels()
+            != candidate.relinearization_levels
+        || program_key_positions.galois_catalog_positions().len()
+            != candidate.galois_key_schedule.len()
+        || program_key_positions
+            .galois_catalog_positions()
+            .iter()
+            .zip(&candidate.galois_key_schedule)
+            .any(|(position, expected)| {
+                (position.galois_element(), position.catalog_level()) != *expected
+            })
+    {
+        return Err(invalid_selected_suite(
+            "selected evaluator program and ordered key catalog disagree",
+        ));
+    }
+
+    let relinearization_positions = selected_evaluator_relinearization_entry_positions()
+        .map_err(|_| invalid_selected_suite("selected relinearization catalog is invalid"))?;
+    let galois_positions = selected_evaluator_galois_entry_positions()
+        .map_err(|_| invalid_selected_suite("selected Galois catalog is invalid"))?;
+    if relinearization_positions.len() != candidate.relinearization_levels.len()
+        || galois_positions.len() != candidate.galois_key_schedule.len()
+        || relinearization_positions
+            .iter()
+            .enumerate()
+            .any(|(schedule_position, position)| {
+                position.schedule_position() != u32::try_from(schedule_position).unwrap_or(u32::MAX)
+                    || !matches!(
+                        position.key_kind(),
+                        SelectedEvaluatorEntryKind::Relinearization { catalog_level }
+                            if Some(&catalog_level)
+                                == candidate.relinearization_levels.get(schedule_position)
+                    )
+            })
+        || galois_positions
+            .iter()
+            .enumerate()
+            .any(|(schedule_position, position)| {
+                position.schedule_position() != u32::try_from(schedule_position).unwrap_or(u32::MAX)
+                    || !matches!(
+                        position.key_kind(),
+                        SelectedEvaluatorEntryKind::Galois {
+                            galois_element,
+                            catalog_level,
+                        } if Some(&(galois_element, catalog_level))
+                            == candidate.galois_key_schedule.get(schedule_position)
+                    )
+            })
+    {
+        return Err(invalid_selected_suite(
+            "selected evaluator setup positions and ordered catalog disagree",
+        ));
+    }
+
+    let selected_relinearization_position_count =
+        u32::try_from(relinearization_positions.len()).map_err(|_| resource_count_overflow())?;
+    let mut expected_complete_list = relinearization_positions;
+    expected_complete_list.extend(galois_positions);
+    let ordered_variant_catalogs = (1..=FOUNDATION_PROFILE.option_count)
+        .map(|top_count| {
+            selected_evaluator_entry_positions(top_count)
+                .map(|positions| (top_count, positions))
+                .map_err(|_| invalid_selected_suite("selected complete evaluator list is invalid"))
+        })
+        .collect::<SchemaResult<Vec<_>>>()?;
+    require_complete_evaluator_variant_catalogs(
+        &expected_complete_list,
+        &ordered_variant_catalogs,
+    )?;
+
+    let selected_galois_batch_count =
+        u32::try_from(selected_galois_key_share_batch_schedule().len())
+            .map_err(|_| resource_count_overflow())?;
+    let application_slot_ceilings = ProofApplicationSlotCeilings::derive(
+        FOUNDATION_PROFILE.participant_count,
+        selected_relinearization_position_count,
+        selected_galois_batch_count,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    )?;
+    if application_slot_ceilings.family_ceiling(
+        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ) != Some(1)
+    {
+        return Err(invalid_selected_suite(
+            "selected complete evaluator list does not own exactly one application slot",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn require_complete_evaluator_variant_catalogs(
+    expected_complete_list: &[SelectedEvaluatorEntryPosition],
+    ordered_variant_catalogs: &[(u16, Vec<SelectedEvaluatorEntryPosition>)],
+) -> SchemaResult<()> {
+    if expected_complete_list.is_empty()
+        || ordered_variant_catalogs.len() != usize::from(FOUNDATION_PROFILE.option_count)
+        || ordered_variant_catalogs.iter().enumerate().any(
+            |(variant_index, (top_count, positions))| {
+                u16::try_from(variant_index)
+                    .ok()
+                    .and_then(|index| index.checked_add(1))
+                    != Some(*top_count)
+                    || positions.as_slice() != expected_complete_list
+            },
+        )
+    {
+        return Err(invalid_selected_suite(
+            "selected complete evaluator list omits, reorders, or substitutes a catalog entry",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn require_selected_release_margins() -> SchemaResult<()> {
+    let option_count = usize::from(FOUNDATION_PROFILE.option_count);
+    let target_bounds = direct_ballot_target_noise_bounds(
+        u64::from(FOUNDATION_PROFILE.participant_count),
+        usize::from(FOUNDATION_PROFILE.participant_count),
+        option_count,
+        u64::from(FOUNDATION_PROFILE.minimum_score),
+        u64::from(FOUNDATION_PROFILE.maximum_score),
+    )
+    .map_err(|_| invalid_selected_suite("selected evaluator recurrence is invalid"))?;
+    if target_bounds.len() != option_count
+        || target_bounds
+            .iter()
+            .enumerate()
+            .any(|(top_count_index, bound)| {
+                bound.top_count != top_count_index + 1
+                    || !bound.every_decryption_margin_is_positive()
+            })
+    {
+        return Err(invalid_selected_suite(
+            "selected evaluator recurrence has a non-positive decryption margin",
+        ));
+    }
+    if selected_target_decryption_flooding_bound()
+        .map_err(|_| invalid_selected_suite("selected factor-four release is invalid"))?
+        .bits()
+        == 0
+    {
+        return Err(invalid_selected_suite(
+            "selected factor-four flooding bound is empty",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn require_selected_complete_list_relation(
+    relation_plans: &[crate::bgv::proof_suite::ValidatedRelationPlanArtifact],
+) -> SchemaResult<()> {
+    let complete_list_schema_identifier =
+        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+    let mut matching_plans = relation_plans.iter().filter(|plan| {
+        plan.application_statement_schema_identifier() == complete_list_schema_identifier
+    });
+    let selected_plan = matching_plans
+        .next()
+        .ok_or_else(|| invalid_selected_suite("selected complete-list relation is missing"))?;
+    if matching_plans.next().is_some() {
+        return Err(invalid_selected_suite(
+            "selected complete-list relation is not unique",
+        ));
+    }
+    let independently_derived_plan = selected_evaluator_aggregate_relation_plan()
+        .map_err(|_| invalid_selected_suite("selected complete-list relation is invalid"))?;
+    if selected_plan.compiled_plan() != &independently_derived_plan
+        || independently_derived_plan.variants().len()
+            != usize::from(FOUNDATION_PROFILE.option_count)
+        || independently_derived_plan
+            .variants()
+            .iter()
+            .enumerate()
+            .any(|(variant_index, variant)| {
+                variant.schedule_position().is_some()
+                    || variant.top_count()
+                        != u16::try_from(variant_index)
+                            .ok()
+                            .and_then(|index| index.checked_add(1))
+            })
+    {
+        return Err(invalid_selected_suite(
+            "selected complete-list counts or root topology disagree",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn require_selected_absolute_resource_bounds() -> SchemaResult<()> {
+    selected_evaluator_resource_accounting()?;
+    let vss_payload_byte_length = selected_recipient_private_vss_payload_byte_length()
+        .map_err(|_| invalid_selected_suite("selected VSS payload accounting is invalid"))?;
+    if vss_payload_byte_length == 0
+        || vss_payload_byte_length > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+    {
+        return Err(invalid_selected_suite(
+            "selected VSS payload exceeds the absolute stream bound",
+        ));
+    }
+
+    let proof_resources = selected_complete_proof_resource_accounting()
+        .map_err(|_| invalid_selected_suite("selected proof resource accounting is invalid"))?;
+    if proof_resources.ordered_families().is_empty()
+        || proof_resources.ordered_families().iter().any(|family| {
+            family.maximum_proof_byte_length() == 0
+                || family.maximum_proof_byte_length() > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+        })
+        || proof_resources.maximum_one_browser_wasm_resident_byte_length()
+            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+    {
+        return Err(invalid_selected_suite(
+            "selected proof resource accounting exceeds an absolute bound or is incomplete",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn derive_selected_fixed_algebra_artifact_references() -> SchemaResult<Vec<ArtifactReference>> {
+    // This fixed-algebra fixture derives real canonical references only for
+    // artifacts whose construction is independent of relation and evaluator
+    // compilers. The all-real builder below retains those later gates.
+    Ok(vec![
+        derive_selected_artifact_reference(
+            ArtifactKind::EncoderAndBallotLayout,
+            selected_encoder_and_ballot_layout_artifact_bytes()?,
+        )?,
+        derive_selected_artifact_reference(
+            ArtifactKind::VerifiableSecretSharingProfile,
+            selected_verifiable_secret_sharing_profile_artifact_bytes()?,
+        )?,
+        derive_selected_artifact_reference(
+            ArtifactKind::LatticeCommitmentProfile,
+            selected_lattice_commitment_profile_artifact_bytes()?,
+        )?,
+        structural_artifact_reference_for_tests(ArtifactKind::ProofProfileSet),
+        structural_artifact_reference_for_tests(ArtifactKind::EvaluatorProgramSet),
+        derive_selected_artifact_reference(
+            ArtifactKind::TargetDecryptionProfile,
+            selected_target_decryption_profile_artifact_bytes()?,
+        )?,
+    ])
+}
+
+#[cfg(test)]
+fn derive_selected_artifact_references() -> SchemaResult<Vec<ArtifactReference>> {
+    derive_selected_artifact_references_with_proof_profile_bytes(
+        selected_proof_profile_artifact_bytes(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT)?,
+    )
+}
+
+#[cfg(test)]
+fn derive_selected_artifact_references_with_proof_profile_bytes(
+    proof_profile_bytes: Vec<u8>,
+) -> SchemaResult<Vec<ArtifactReference>> {
+    let artifacts = [
+        (
+            ArtifactKind::EncoderAndBallotLayout,
+            selected_encoder_and_ballot_layout_artifact_bytes()?,
+        ),
+        (
+            ArtifactKind::VerifiableSecretSharingProfile,
+            selected_verifiable_secret_sharing_profile_artifact_bytes()?,
+        ),
+        (
+            ArtifactKind::LatticeCommitmentProfile,
+            selected_lattice_commitment_profile_artifact_bytes()?,
+        ),
+        (ArtifactKind::ProofProfileSet, proof_profile_bytes),
+        (
+            ArtifactKind::EvaluatorProgramSet,
+            selected_evaluator_program_artifact_bytes()?,
+        ),
+        (
+            ArtifactKind::TargetDecryptionProfile,
+            selected_target_decryption_profile_artifact_bytes()?,
+        ),
+    ];
+    artifacts
         .into_iter()
-        .map(|(artifact_kind, byte_length, artifact_hash)| {
-            ArtifactReference::new(
-                artifact_kind,
-                byte_length,
-                Hash512::from_bytes(artifact_hash),
-            )
+        .map(|(artifact_kind, canonical_bytes)| {
+            derive_selected_artifact_reference(artifact_kind, canonical_bytes)
         })
         .collect()
 }
 
+#[cfg(test)]
+fn derive_selected_artifact_reference(
+    artifact_kind: ArtifactKind,
+    canonical_bytes: Vec<u8>,
+) -> SchemaResult<ArtifactReference> {
+    let byte_length = canonical_bytes.len();
+    if byte_length == 0
+        || u64::try_from(byte_length).map_err(|_| resource_count_overflow())?
+            > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+    {
+        return Err(invalid_selected_suite(
+            "selected artifact exceeds the absolute stream bound",
+        ));
+    }
+    let cumulative_work_byte_length = byte_length
+        .checked_mul(64)
+        .ok_or_else(resource_count_overflow)?;
+    let decode_limits = CanonicalDecodeLimits {
+        maximum_tuple_byte_length: byte_length,
+        maximum_item_count: 100_000,
+        maximum_item_byte_length: byte_length,
+        maximum_nesting_depth: 32,
+        maximum_cumulative_work_byte_length: cumulative_work_byte_length,
+        maximum_cumulative_allocation_byte_length: cumulative_work_byte_length,
+    };
+    ArtifactReference::from_canonical_artifact_bytes(
+        artifact_kind,
+        &canonical_bytes,
+        &decode_limits,
+    )
+}
+
+#[cfg(test)]
 fn selected_count_limits() -> SchemaResult<SuiteCountLimits> {
     SuiteCountLimits::new(
         SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
@@ -337,62 +1015,39 @@ fn selected_count_limits() -> SchemaResult<SuiteCountLimits> {
         SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
-        SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION,
+        selected_maximum_proof_objects_per_action()?,
     )
 }
 
 #[cfg(test)]
-fn selected_maximum_proof_objects_per_action() -> SchemaResult<u32> {
-    let program = selected_evaluator_program_set()
-        .map_err(|_| invalid_selected_suite("selected evaluator program is invalid"))?;
-    let key_positions = program
-        .key_positions()
-        .map_err(|_| invalid_selected_suite("selected evaluator key positions are invalid"))?;
-    let participant_count = u32::from(FOUNDATION_PROFILE.participant_count);
-    key_positions
-        .streams()
-        .iter()
-        .map(|stream| {
-            let relinearization_count =
-                u32::try_from(stream.relinearization_catalog_levels().len())
-                    .map_err(|_| resource_count_overflow())?;
-            let galois_count = u32::try_from(stream.galois_catalog_positions().len())
-                .map_err(|_| resource_count_overflow())?;
-            participant_count
-                .checked_mul(4)
-                .and_then(|count| {
-                    relinearization_count
-                        .checked_add(galois_count)
-                        .and_then(|evaluator_entry_count| evaluator_entry_count.checked_add(1))
-                        .and_then(|aggregate_count| count.checked_add(aggregate_count))
-                })
-                .and_then(|count| {
-                    participant_count
-                        .checked_mul(2)
-                        .and_then(|trustee_count| trustee_count.checked_add(1))
-                        .and_then(|per_position| per_position.checked_mul(relinearization_count))
-                        .and_then(|position_count| count.checked_add(position_count))
-                })
-                .and_then(|count| {
-                    participant_count
-                        .checked_mul(galois_count)
-                        .and_then(|galois_proofs| count.checked_add(galois_proofs))
-                })
-                .and_then(|count| count.checked_add(SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION))
-                .and_then(|count| count.checked_add(participant_count))
-                .ok_or_else(resource_count_overflow)
-        })
-        .collect::<SchemaResult<Vec<_>>>()?
-        .into_iter()
-        .max()
-        .ok_or_else(|| invalid_selected_suite("selected evaluator program has no streams"))
+pub(crate) fn selected_maximum_proof_objects_per_action() -> SchemaResult<u32> {
+    let selected_relinearization_positions =
+        selected_evaluator_relinearization_entry_positions()
+            .map_err(|_| invalid_selected_suite("selected relinearization catalog is invalid"))?;
+    let selected_galois_batch_schedule = selected_galois_key_share_batch_schedule();
+    if selected_relinearization_positions.is_empty() || selected_galois_batch_schedule.is_empty() {
+        return Err(invalid_selected_suite(
+            "selected evaluator proof-application catalog is empty",
+        ));
+    }
+    let selected_relinearization_position_count =
+        u32::try_from(selected_relinearization_positions.len())
+            .map_err(|_| resource_count_overflow())?;
+    let selected_galois_batch_count = u32::try_from(selected_galois_batch_schedule.len())
+        .map_err(|_| resource_count_overflow())?;
+    Ok(ProofApplicationSlotCeilings::derive(
+        FOUNDATION_PROFILE.participant_count,
+        selected_relinearization_position_count,
+        selected_galois_batch_count,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    )?
+    .total_application_slot_ceiling())
 }
 
 fn invalid_selected_suite(message: &'static str) -> FoundationSchemaError {
     FoundationSchemaError::new(RefusalReason::UnsupportedVersionOrSuite, message)
 }
 
-#[cfg(test)]
 fn resource_count_overflow() -> FoundationSchemaError {
     FoundationSchemaError::new(
         RefusalReason::OutsideSupportedProfile,
@@ -403,286 +1058,387 @@ fn resource_count_overflow() -> FoundationSchemaError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::foundation::{CanonicalItem, CanonicalTuple};
 
-    fn selected_candidate_suite_record() -> SuiteRecord {
-        SuiteRecord::new(
-            selected_count_limits().expect("selected count limits derive"),
-            selected_artifact_references().expect("selected artifact references derive"),
-        )
-        .expect("selected structural candidate is canonical")
-    }
-
-    fn structural_artifact_references() -> Vec<ArtifactReference> {
-        ArtifactKind::ALL
-            .into_iter()
-            .map(|artifact_kind| {
-                let bytes = CanonicalTuple::new(
-                    artifact_kind.artifact_schema_identifier(),
-                    artifact_kind.artifact_schema_version(),
-                    vec![CanonicalItem::unsigned16(artifact_kind.canonical_code())],
+    fn selected_complete_evaluator_catalog_fixture() -> (
+        Vec<SelectedEvaluatorEntryPosition>,
+        Vec<(u16, Vec<SelectedEvaluatorEntryPosition>)>,
+    ) {
+        let mut expected_complete_list = selected_evaluator_relinearization_entry_positions()
+            .expect("selected relinearization catalog derives");
+        expected_complete_list.extend(
+            selected_evaluator_galois_entry_positions().expect("selected Galois catalog derives"),
+        );
+        let ordered_variant_catalogs = (1..=FOUNDATION_PROFILE.option_count)
+            .map(|top_count| {
+                (
+                    top_count,
+                    selected_evaluator_entry_positions(top_count)
+                        .expect("selected action catalog derives"),
                 )
-                .encode()
-                .expect("test artifact encodes");
-                ArtifactReference::from_canonical_artifact_bytes(
-                    artifact_kind,
-                    &bytes,
-                    &CanonicalDecodeLimits::default(),
-                )
-                .expect("test artifact reference derives")
             })
-            .collect()
+            .collect();
+        (expected_complete_list, ordered_variant_catalogs)
     }
 
     #[test]
-    fn selected_evaluator_accounting_reports_exact_wire_and_resident_measurements() {
-        let accounting = selected_evaluator_resource_accounting().expect("resource accounting");
-        assert_eq!(accounting.component_material_wire_byte_length(), 6_684_672);
+    fn every_action_variant_uses_the_exact_seven_entry_evaluator_catalog() {
+        let (expected_complete_list, ordered_variant_catalogs) =
+            selected_complete_evaluator_catalog_fixture();
         assert_eq!(
-            accounting.component_material_resident_byte_length(),
-            8_912_896
-        );
-        assert_eq!(accounting.source_component_count_per_participant(), 19);
-        assert_eq!(accounting.aggregate_component_count(), 18);
-        assert_eq!(
-            accounting.final_evaluator_key_store_wire_byte_length(),
-            120_324_096
+            selected_evaluator_relinearization_entry_positions()
+                .expect("selected relinearization catalog derives")
+                .len(),
+            1
         );
         assert_eq!(
-            accounting.final_evaluator_key_store_byte_length(),
-            160_432_128
+            selected_evaluator_galois_entry_positions()
+                .expect("selected Galois catalog derives")
+                .len(),
+            6
         );
+        assert_eq!(expected_complete_list.len(), 7);
         assert_eq!(
-            accounting.setup_upload_lower_bound_per_participant(),
-            127_008_768
+            ordered_variant_catalogs.len(),
+            usize::from(FOUNDATION_PROFILE.option_count)
         );
-        assert_eq!(
-            accounting.ceremony_setup_upload_lower_bound(),
-            1_390_411_776
-        );
-        assert_eq!(
-            accounting.complete_runtime_material_per_participant(),
-            169_345_024
-        );
-        assert_eq!(
-            accounting.complete_runtime_material_for_ceremony(),
-            1_853_882_368
-        );
-    }
-
-    #[test]
-    fn selected_artifact_reference_generator_matches_the_fixed_catalog_and_suite_identifier() {
-        let generated_artifact_bytes = vec![
-            (
-                ArtifactKind::EncoderAndBallotLayout,
-                selected_encoder_and_ballot_layout_artifact_bytes()
-                    .expect("encoder and ballot artifact derives"),
-            ),
-            (
-                ArtifactKind::VerifiableSecretSharingProfile,
-                selected_verifiable_secret_sharing_profile_artifact_bytes()
-                    .expect("VSS artifact derives"),
-            ),
-            (
-                ArtifactKind::LatticeCommitmentProfile,
-                selected_lattice_commitment_profile_artifact_bytes()
-                    .expect("commitment artifact derives"),
-            ),
-            (
-                ArtifactKind::ProofProfileSet,
-                selected_proof_profile_artifact_bytes(
-                    SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
-                )
-                .expect("proof-profile artifact derives"),
-            ),
-            (
-                ArtifactKind::EvaluatorProgramSet,
-                selected_evaluator_program_artifact_bytes()
-                    .expect("evaluator-program artifact derives"),
-            ),
-            (
-                ArtifactKind::TargetDecryptionProfile,
-                selected_target_decryption_profile_artifact_bytes()
-                    .expect("target-decryption artifact derives"),
-            ),
-        ];
-        let artifacts = generated_artifact_bytes
-            .into_iter()
-            .map(|(artifact_kind, bytes)| {
-                let generated_artifact_work_limit = bytes
-                    .len()
-                    .checked_mul(64)
-                    .expect("generated artifact work limit fits usize");
-                let decode_limits = CanonicalDecodeLimits {
-                    maximum_tuple_byte_length: bytes.len(),
-                    maximum_item_count: 100_000,
-                    maximum_item_byte_length: bytes.len(),
-                    maximum_nesting_depth: 32,
-                    maximum_cumulative_work_byte_length: generated_artifact_work_limit,
-                    maximum_cumulative_allocation_byte_length: generated_artifact_work_limit,
-                };
-                ArtifactReference::from_canonical_artifact_bytes(
-                    artifact_kind,
-                    &bytes,
-                    &decode_limits,
-                )
-                .expect("generated artifact reference derives")
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            artifacts,
-            selected_artifact_references().expect("fixed artifact references derive")
-        );
-        assert_eq!(
-            selected_maximum_proof_objects_per_action()
-                .expect("selected proof-object count derives"),
-            SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION
-        );
-        let candidate = SuiteRecord::new(
-            selected_count_limits().expect("selected count limits derive"),
-            artifacts,
+        require_complete_evaluator_variant_catalogs(
+            &expected_complete_list,
+            &ordered_variant_catalogs,
         )
-        .expect("candidate suite record");
+        .expect("every action variant uses the complete catalog");
+
+        let selected_relinearization_position_count = u32::try_from(
+            selected_evaluator_relinearization_entry_positions()
+                .expect("selected relinearization catalog derives")
+                .len(),
+        )
+        .expect("selected relinearization count fits u32");
+        let selected_galois_batch_count =
+            u32::try_from(selected_galois_key_share_batch_schedule().len())
+                .expect("selected Galois batch count fits u32");
+        let application_slot_ceilings = ProofApplicationSlotCeilings::derive(
+            FOUNDATION_PROFILE.participant_count,
+            selected_relinearization_position_count,
+            selected_galois_batch_count,
+            SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+        )
+        .expect("selected application slots derive");
         assert_eq!(
-            candidate.suite_id().expect("suite identifier derives"),
-            SELECTED_CANDIDATE_SUITE_IDENTIFIER
-        );
-        assert_eq!(
-            candidate.encode().expect("candidate suite encodes").len(),
-            1_590
+            application_slot_ceilings.family_ceiling(
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            ),
+            Some(1)
         );
     }
 
     #[test]
-    fn exact_selected_suite_mints_authority_independently_of_phone_measurements() {
-        let candidate = selected_candidate_suite_record();
-        require_selected_suite_record(&candidate).expect("selected suite is admitted");
-        let capability = select_suite_record(&candidate).expect("selected suite mints authority");
+    fn complete_evaluator_variant_catalog_refuses_an_omitted_entry() {
+        let (expected_complete_list, mut ordered_variant_catalogs) =
+            selected_complete_evaluator_catalog_fixture();
+        ordered_variant_catalogs[0]
+            .1
+            .pop()
+            .expect("complete catalog has an entry to omit");
         assert_eq!(
-            capability.suite_identifier(),
-            candidate
-                .suite_id()
-                .expect("selected suite identifier derives")
-                .into_bytes()
-        );
-    }
-
-    #[test]
-    fn nonselected_roster_candidate_cannot_cross_the_authority_boundary() {
-        let mut tuple = CanonicalTuple::decode(
-            &selected_candidate_suite_record()
-                .encode()
-                .expect("selected candidate encodes"),
-            &CanonicalDecodeLimits::default(),
-        )
-        .expect("selected candidate tuple decodes");
-        let roster_parameters = crate::foundation::derive_foundation_roster_parameters(3)
-            .expect("three participants are configurable");
-        tuple.items[1] = CanonicalItem::unsigned16(roster_parameters.participant_count);
-        tuple.items[2] = CanonicalItem::unsigned16(roster_parameters.active_fault_bound);
-        tuple.items[3] = CanonicalItem::unsigned16(roster_parameters.reconstruction_threshold);
-        tuple.items[4] = CanonicalItem::unsigned16(roster_parameters.finality_quorum);
-        tuple.items[15] = CanonicalItem::unsigned16(roster_parameters.participant_count);
-        tuple.items[18] = CanonicalItem::unsigned32(6);
-        let candidate = SuiteRecord::decode(
-            &tuple.encode().expect("candidate suite encodes"),
-            &CanonicalDecodeLimits::default(),
-        )
-        .expect("nonselected candidate remains structural");
-
-        assert_eq!(
-            require_selected_suite_record(&candidate)
-                .expect_err("nonselected roster cannot mint selected-suite authority")
-                .refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite
-        );
-        let selection_error = match select_suite_record(&candidate) {
-            Ok(_) => panic!("nonselected roster cannot be selected"),
-            Err(error) => error,
-        };
-        assert_eq!(
-            selection_error.refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite
-        );
-    }
-
-    #[test]
-    fn proof_profile_reference_length_hash_and_order_are_exact() {
-        let fixed_artifacts = selected_artifact_references().expect("fixed references derive");
-        let proof_profile_index = ArtifactKind::ALL
-            .iter()
-            .position(|kind| *kind == ArtifactKind::ProofProfileSet)
-            .expect("proof profile is in the complete artifact inventory");
-        let proof_profile = fixed_artifacts[proof_profile_index];
-
-        let mut wrong_length_artifacts = fixed_artifacts.clone();
-        wrong_length_artifacts[proof_profile_index] = ArtifactReference::new(
-            ArtifactKind::ProofProfileSet,
-            proof_profile.byte_length() + 1,
-            proof_profile.artifact_hash(),
-        )
-        .expect("positive mutated length is structural");
-        let wrong_length = SuiteRecord::new(
-            selected_count_limits().expect("selected count limits derive"),
-            wrong_length_artifacts,
-        )
-        .expect("mutated reference remains a structural suite");
-        assert_eq!(
-            require_selected_suite_record(&wrong_length)
-                .expect_err("proof-profile length drift must refuse")
-                .refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite
-        );
-
-        let mut wrong_hash_bytes = proof_profile.artifact_hash().into_bytes();
-        wrong_hash_bytes[0] ^= 1;
-        let mut wrong_hash_artifacts = fixed_artifacts.clone();
-        wrong_hash_artifacts[proof_profile_index] = ArtifactReference::new(
-            ArtifactKind::ProofProfileSet,
-            proof_profile.byte_length(),
-            Hash512::from_bytes(wrong_hash_bytes),
-        )
-        .expect("mutated hash reference is structural");
-        let wrong_hash = SuiteRecord::new(
-            selected_count_limits().expect("selected count limits derive"),
-            wrong_hash_artifacts,
-        )
-        .expect("mutated reference remains a structural suite");
-        assert_eq!(
-            require_selected_suite_record(&wrong_hash)
-                .expect_err("proof-profile hash drift must refuse")
-                .refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite
-        );
-
-        let mut reordered_artifacts = fixed_artifacts;
-        reordered_artifacts.swap(proof_profile_index - 1, proof_profile_index);
-        assert_eq!(
-            SuiteRecord::new(
-                selected_count_limits().expect("selected count limits derive"),
-                reordered_artifacts,
+            require_complete_evaluator_variant_catalogs(
+                &expected_complete_list,
+                &ordered_variant_catalogs,
             )
-            .expect_err("artifact order drift must refuse")
+            .expect_err("an omitted evaluator entry must refuse")
             .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
         );
     }
 
     #[test]
-    fn invalid_selected_profile_prevents_authority_minting() {
-        let counts = selected_count_limits().expect("selected counts");
-        let suite =
-            SuiteRecord::new(counts, structural_artifact_references()).expect("structural suite");
+    fn complete_evaluator_variant_catalog_refuses_reordered_entries() {
+        let (expected_complete_list, mut ordered_variant_catalogs) =
+            selected_complete_evaluator_catalog_fixture();
+        ordered_variant_catalogs[1].1.swap(0, 1);
         assert_eq!(
-            require_selected_suite_record(&suite)
-                .expect_err("an invalid proof profile cannot cross the operative boundary")
+            require_complete_evaluator_variant_catalogs(
+                &expected_complete_list,
+                &ordered_variant_catalogs,
+            )
+            .expect_err("reordered evaluator entries must refuse")
+            .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+    }
+
+    #[test]
+    fn complete_evaluator_variant_catalog_refuses_a_substituted_entry() {
+        let (expected_complete_list, mut ordered_variant_catalogs) =
+            selected_complete_evaluator_catalog_fixture();
+        let replacement = ordered_variant_catalogs[2].1[0];
+        let final_entry_index = ordered_variant_catalogs[2].1.len() - 1;
+        ordered_variant_catalogs[2].1[final_entry_index] = replacement;
+        assert_eq!(
+            require_complete_evaluator_variant_catalogs(
+                &expected_complete_list,
+                &ordered_variant_catalogs,
+            )
+            .expect_err("a substituted evaluator entry must refuse")
+            .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+    }
+
+    #[test]
+    fn selected_evaluator_accounting_reports_exact_wire_and_resident_measurements() {
+        let accounting = selected_evaluator_resource_accounting().expect("resource accounting");
+        let candidate = EvaluatorCandidateInput::implemented().expect("candidate derives");
+        let expected_source_component_count = u64::try_from(
+            candidate
+                .relinearization_levels
+                .len()
+                .checked_mul(3)
+                .and_then(|count| count.checked_add(candidate.galois_key_schedule.len()))
+                .expect("selected component count fits usize"),
+        )
+        .expect("selected component count fits u64");
+        let expected_final_component_count = u64::try_from(
+            candidate
+                .relinearization_levels
+                .len()
+                .checked_mul(2)
+                .and_then(|count| count.checked_add(candidate.galois_key_schedule.len()))
+                .expect("selected component count fits usize"),
+        )
+        .expect("selected component count fits u64");
+        assert_eq!(
+            accounting.relinearization_position_count(),
+            u32::try_from(candidate.relinearization_levels.len())
+                .expect("selected relinearization count fits u32")
+        );
+        assert_eq!(
+            accounting.galois_position_count(),
+            u32::try_from(candidate.galois_key_schedule.len())
+                .expect("selected Galois count fits u32")
+        );
+        let accounting_derived_maximum_proof_objects = ProofApplicationSlotCeilings::derive(
+            FOUNDATION_PROFILE.participant_count,
+            accounting.relinearization_position_count(),
+            u32::try_from(selected_galois_key_share_batch_schedule().len())
+                .expect("selected Galois batch count fits u32"),
+            SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+        )
+        .expect("accounting-derived proof-application slots derive")
+        .total_application_slot_ceiling();
+        assert_eq!(
+            selected_maximum_proof_objects_per_action()
+                .expect("catalog-derived proof-object ceiling derives"),
+            accounting_derived_maximum_proof_objects
+        );
+        assert_eq!(
+            accounting.source_component_count_per_participant(),
+            expected_source_component_count
+        );
+        assert_eq!(
+            accounting.final_component_count(),
+            expected_final_component_count
+        );
+        assert_eq!(
+            accounting.source_public_polynomial_context_hash_count_per_participant(),
+            u64::from(accounting.relinearization_position_count())
+                + u64::from(accounting.galois_position_count())
+        );
+        assert_eq!(
+            accounting.source_public_polynomial_context_hash_resident_byte_length_per_participant(),
+            accounting.source_public_polynomial_context_hash_count_per_participant()
+                * u64::try_from(Hash512::BYTE_LENGTH).expect("hash width fits u64")
+        );
+        assert!(accounting.levels().iter().all(|level| {
+            level.component_wire_byte_length() < level.component_resident_byte_length()
+                && level.source_wire_byte_length_per_participant()
+                    == level.component_wire_byte_length()
+                        * level.source_component_count_per_participant()
+                && level.source_resident_byte_length_per_participant()
+                    == level.component_resident_byte_length()
+                        * level.source_component_count_per_participant()
+                && level.final_wire_byte_length()
+                    == level.component_wire_byte_length() * level.final_component_count()
+                && level.final_resident_byte_length()
+                    == level.component_resident_byte_length() * level.final_component_count()
+        }));
+        assert_eq!(
+            accounting.source_wire_byte_length_per_participant(),
+            accounting
+                .levels()
+                .iter()
+                .map(|level| level.source_wire_byte_length_per_participant())
+                .sum::<u64>()
+        );
+        assert_eq!(
+            accounting.source_resident_byte_length_per_participant(),
+            accounting
+                .levels()
+                .iter()
+                .map(|level| level.source_resident_byte_length_per_participant())
+                .sum::<u64>()
+                + accounting
+                    .source_public_polynomial_context_hash_resident_byte_length_per_participant()
+        );
+        assert_eq!(
+            accounting.final_evaluator_key_store_wire_byte_length(),
+            accounting
+                .levels()
+                .iter()
+                .map(|level| level.final_wire_byte_length())
+                .sum::<u64>()
+        );
+        assert_eq!(
+            accounting.ceremony_setup_wire_byte_length(),
+            accounting.source_wire_byte_length_per_participant()
+                * u64::from(FOUNDATION_PROFILE.participant_count)
+                + accounting.final_evaluator_key_store_wire_byte_length()
+        );
+        assert_eq!(
+            accounting.ceremony_source_and_final_resident_volume_byte_length(),
+            accounting.source_resident_byte_length_per_participant()
+                * u64::from(FOUNDATION_PROFILE.participant_count)
+                + accounting.final_evaluator_key_store_resident_byte_length()
+        );
+        assert!(
+            accounting.ceremony_setup_wire_byte_length()
+                <= crate::foundation::MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+        );
+    }
+
+    #[test]
+    fn suite_selection_refuses_before_a_canonical_record_is_frozen() {
+        let structural_candidate = SuiteRecord::new(
+            selected_count_limits().expect("selected count limits derive"),
+            structural_artifact_references_for_tests(),
+        )
+        .expect("structural candidate is canonical");
+        assert_eq!(
+            require_selected_suite_record(&structural_candidate)
+                .expect_err("an unavailable suite cannot mint authority")
                 .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
         );
         assert_eq!(
-            select_suite_record(&suite)
+            select_suite_record(&structural_candidate)
                 .err()
-                .expect("an invalid proof profile cannot mint authority")
+                .expect("an unavailable suite cannot mint authority")
+                .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+    }
+
+    #[test]
+    fn fixed_algebra_candidate_round_trips_with_owned_artifacts_and_later_placeholders() {
+        let candidate = derive_selected_fixed_algebra_candidate_record()
+            .expect("the fixed-algebra candidate and its owned artifacts must derive");
+        let encoded = candidate.encode().expect("fixed-algebra candidate encodes");
+        let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("fixed-algebra candidate decodes");
+        assert_eq!(decoded, candidate);
+        assert_eq!(
+            decoded.encode().expect("decoded candidate re-encodes"),
+            encoded
+        );
+        assert_eq!(
+            decoded
+                .suite_id()
+                .expect("decoded candidate identifier derives"),
+            candidate.suite_id().expect("candidate identifier derives")
+        );
+        assert_eq!(
+            decoded
+                .artifacts()
+                .iter()
+                .map(|reference| reference.artifact_kind())
+                .collect::<Vec<_>>(),
+            ArtifactKind::ALL
+        );
+
+        let encoder_bytes = selected_encoder_and_ballot_layout_artifact_bytes()
+            .expect("selected encoder artifact derives");
+        let encoder_tuple =
+            CanonicalTuple::decode(&encoder_bytes, &CanonicalDecodeLimits::default())
+                .expect("selected encoder artifact decodes");
+        assert_eq!(
+            encoder_tuple.schema_identifier,
+            ArtifactKind::EncoderAndBallotLayout.artifact_schema_identifier()
+        );
+        assert_eq!(
+            encoder_tuple.schema_version,
+            ArtifactKind::EncoderAndBallotLayout.artifact_schema_version()
+        );
+        assert_eq!(encoder_tuple.schema_version, 4);
+
+        for (artifact_kind, canonical_bytes) in [
+            (ArtifactKind::EncoderAndBallotLayout, encoder_bytes),
+            (
+                ArtifactKind::VerifiableSecretSharingProfile,
+                selected_verifiable_secret_sharing_profile_artifact_bytes()
+                    .expect("selected VSS artifact derives"),
+            ),
+            (
+                ArtifactKind::LatticeCommitmentProfile,
+                selected_lattice_commitment_profile_artifact_bytes()
+                    .expect("selected lattice-commitment artifact derives"),
+            ),
+            (
+                ArtifactKind::TargetDecryptionProfile,
+                selected_target_decryption_profile_artifact_bytes()
+                    .expect("selected target-decryption artifact derives"),
+            ),
+        ] {
+            let real_reference = derive_selected_artifact_reference(artifact_kind, canonical_bytes)
+                .expect("owned real artifact reference derives");
+            assert_eq!(candidate.artifact(artifact_kind), &real_reference);
+            assert_ne!(
+                candidate.artifact(artifact_kind),
+                &structural_artifact_reference_for_tests(artifact_kind)
+            );
+        }
+        for later_owned_kind in [
+            ArtifactKind::ProofProfileSet,
+            ArtifactKind::EvaluatorProgramSet,
+        ] {
+            assert_eq!(
+                candidate.artifact(later_owned_kind),
+                &structural_artifact_reference_for_tests(later_owned_kind)
+            );
+        }
+        assert_eq!(
+            select_suite_record(&candidate)
+                .err()
+                .expect("fixed algebra does not enable runtime suite selection")
+                .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+    }
+
+    #[test]
+    #[ignore = "full candidate selection gate; run only after the evaluator and proof representation settle"]
+    fn candidate_suite_gate_derives_one_complete_canonical_record() {
+        let candidate = derive_selected_suite_candidate_record()
+            .expect("the candidate must satisfy every static selection gate");
+        let canonical_bytes = candidate
+            .encode()
+            .expect("the complete candidate record encodes canonically");
+        eprintln!(
+            "selected suite candidate canonical bytes: {}",
+            canonical_bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        assert_eq!(
+            candidate.artifacts(),
+            derive_selected_artifact_references()
+                .expect("candidate artifacts derive")
+                .as_slice()
+        );
+        assert!(candidate.suite_id().is_ok());
+        assert_eq!(
+            select_suite_record(&candidate)
+                .err()
+                .expect("a candidate cannot become runtime authority before it is frozen")
                 .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
         );

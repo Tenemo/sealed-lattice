@@ -92,7 +92,7 @@ describe('release policy', () => {
                 packageVersion: '0.2.1',
                 registryLookup: failedProbe(1, 'npm error code E404'),
             }),
-        ).toEqual({ action: 'publish' });
+        ).toBe('publish');
         expect(
             resolveNpmPublication({
                 latestTagLookup: successfulProbe('"0.2.1"'),
@@ -100,7 +100,7 @@ describe('release policy', () => {
                 packageVersion: '0.2.1',
                 registryLookup: successfulProbe('"sha512-local"'),
             }),
-        ).toEqual({ action: 'already-identical' });
+        ).toBe('already-identical');
         expect(() =>
             resolveNpmPublication({
                 localIntegrity: 'sha512-local',
@@ -121,7 +121,7 @@ describe('release policy', () => {
                 releaseLookup: failedProbe(1, 'gh: Not Found (HTTP 404)'),
                 tag: 'v0.2.1',
             }),
-        ).toEqual({ action: 'create' });
+        ).toBe('create');
         expect(
             resolveGitHubRelease({
                 releaseLookup: successfulProbe(
@@ -133,7 +133,7 @@ describe('release policy', () => {
                 ),
                 tag: 'v0.2.1',
             }),
-        ).toEqual({ action: 'already-exists' });
+        ).toBe('already-exists');
         expect(() =>
             resolveGitHubRelease({
                 releaseLookup: successfulProbe(

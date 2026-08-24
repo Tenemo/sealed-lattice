@@ -159,15 +159,6 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
     Ok(normalized as u64)
 }
 
-pub(crate) fn integer_square_root_ceil(value: usize) -> usize {
-    let mut root = 1_usize;
-    while root.saturating_mul(root) < value {
-        root += 1;
-    }
-
-    root
-}
-
 fn validate_modulus(modulus: u64) -> CanonicalResult<()> {
     if modulus <= 1 {
         return Err(CanonicalError::new(

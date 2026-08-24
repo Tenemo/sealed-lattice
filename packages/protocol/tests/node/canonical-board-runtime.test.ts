@@ -79,6 +79,10 @@ const createFakeSession = (
         close,
         copyCachedCarrier,
         describe: describeObject,
+        produceBallotCandidateListCarrier: vi.fn(() => ({
+            isValid: false as const,
+            refusalReason: 'wrongContext' as const,
+        })),
         release: vi.fn(),
         state: () => state,
         verifyUnorderedCarriers,
@@ -161,7 +165,6 @@ describe('canonical board runtime', () => {
         const carriers = [
             {
                 canonicalCarrier: Uint8Array.of(9, 8, 7),
-                relayArrivalIndex: 999,
             },
         ];
 

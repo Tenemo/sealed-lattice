@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
     CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
+    CanonicalStreamResourceError,
 } from '#packages/wasm/src/canonical-stream-runtime';
 import {
     loadFreshTranscriptCoreKernel,
@@ -127,9 +128,22 @@ describe('Mailbox AES-GCM real-WASM runtime', () => {
             for (const fragment of decryptedFragments) {
                 verifier.decryptChunk(fragment);
             }
-            verifier.finishDecryption();
+            const authenticatedPlaintextCapability =
+                verifier.finishDecryption();
             expect(concatenate(decryptedFragments)).toEqual(plaintext);
             expect(verifier.state()).toBe('completed');
+            expect(() =>
+                runtime.openEncryptor({
+                    associatedData,
+                    key,
+                    nonce,
+                    totalByteLength: plaintext.byteLength,
+                }),
+            ).toThrow(CanonicalStreamResourceError);
+            authenticatedPlaintextCapability.release();
+            expect(() => authenticatedPlaintextCapability.release()).toThrow(
+                CanonicalStreamInternalError,
+            );
         }
     });
 
@@ -171,6 +185,45 @@ describe('Mailbox AES-GCM real-WASM runtime', () => {
         expect(() => verifier.decryptChunk(ciphertext.slice().buffer)).toThrow(
             CanonicalStreamInternalError,
         );
+    });
+
+    it('refuses same-length ciphertext substituted between authentication and decryption', () => {
+        const key = deterministicBytes(32, 41);
+        const nonce = deterministicBytes(12, 43);
+        const associatedData = deterministicBytes(37, 47);
+        const plaintext = deterministicBytes(4097, 53);
+        const runtime = openMailboxGcmRuntime({ kernel });
+        const encryptor = runtime.openEncryptor({
+            associatedData,
+            key,
+            nonce,
+            totalByteLength: plaintext.byteLength,
+        });
+        const ciphertextBuffer = plaintext.slice().buffer;
+        encryptor.encryptChunk(ciphertextBuffer);
+        const ciphertext = new Uint8Array(ciphertextBuffer.slice(0));
+        const tag = encryptor.finish();
+
+        const verifier = runtime.openVerifier({
+            associatedData,
+            key,
+            nonce,
+            totalByteLength: ciphertext.byteLength,
+        });
+        for (const fragment of fragments(ciphertext, 29)) {
+            verifier.authenticateChunk(fragment);
+        }
+        verifier.finishAuthentication(tag);
+
+        const substitutedCiphertext = ciphertext.slice();
+        substitutedCiphertext[2053] ^= 0x20;
+        for (const fragment of fragments(substitutedCiphertext, 17)) {
+            verifier.decryptChunk(fragment);
+        }
+        expect(() => verifier.finishDecryption()).toThrow(
+            CanonicalStreamRefusalError,
+        );
+        expect(verifier.state()).toBe('failed');
     });
 
     it('refuses truncated, overlong, and cancelled lifecycles without retaining a session', () => {

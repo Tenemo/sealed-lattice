@@ -50,6 +50,28 @@ const testBinding: BrowserActionStorageRootBinding = Object.freeze({
 const runtimeBuildManifestHash = createTestBytes(64, 83);
 const checkpointStateStreamDomain =
     'sealed-lattice/test/browser-checkpoint-state/v1';
+const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
+    Uint8Array.of(
+        0x53,
+        0x4c,
+        0x43,
+        0x50,
+        0x43,
+        0x4d,
+        0x30,
+        0x33,
+        0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    );
 
 const checkpointStateDescriptor = (stateBytes: Uint8Array): Uint8Array => {
     const chunkDigest = foundationHash512(
@@ -580,7 +602,7 @@ describe('Browser action-storage custody worker channel', () => {
             foundationHeadBeforeCheckpoint,
         );
 
-        const checkpoint = await custody.beginCheckpoint([]);
+        const checkpoint = await custody.beginCheckpoint();
         await expect(
             custody.copyCheckpointDescription(
                 Object.freeze({}) as BrowserFoundationCheckpointHandle,
@@ -588,7 +610,8 @@ describe('Browser action-storage custody worker channel', () => {
         ).rejects.toMatchObject({ code: 'InvalidInput' });
         const boundary = {
             operationKind: 1,
-            orderedRandomCursors: [],
+            privateRandomCursorManifestBytes:
+                emptyPrivateRandomCursorManifest(),
             orderedSourceDigests: [],
             safeBoundaryOrdinal: 0,
             stateStreamDescriptorBytes: checkpointStateDescriptor(
@@ -611,7 +634,8 @@ describe('Browser action-storage custody worker channel', () => {
                 description.checkpointLineageIdentifier,
             expectedBoundary: {
                 operationKind: boundary.operationKind,
-                orderedRandomCursors: boundary.orderedRandomCursors,
+                privateRandomCursorManifestBytes:
+                    boundary.privateRandomCursorManifestBytes,
                 orderedSourceDigests: boundary.orderedSourceDigests,
                 safeBoundaryOrdinal: boundary.safeBoundaryOrdinal,
                 stateStreamDomain: boundary.stateStreamDomain,

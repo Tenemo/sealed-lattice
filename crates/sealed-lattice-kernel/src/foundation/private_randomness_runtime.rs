@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use fips203::{
     ml_kem_768,
@@ -6,31 +6,32 @@ use fips203::{
 };
 use zeroize::Zeroizing;
 
-use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
-use crate::bgv::setup::{
-    SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, compute_setup_commitment_from_typed_opening,
-    setup_commitment_worker_response_bytes,
-};
-
 use super::board_ingestion_runtime::VerifiedBoardApplicationSource;
 use super::local_storage_runtime::{
     LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH, open_action_randomness_root,
     seal_action_randomness_root,
 };
 use super::runtime_input::RuntimeInputReader as InputReader;
+use super::setup_transcript_runtime::{
+    COMMAND_CANCEL_SETUP_TRANSCRIPT_CARRIER, COMMAND_FINISH_SETUP_TRANSCRIPT_CARRIER,
+    COMMAND_PREPARE_DEALER_PUBLIC_RECORD_CARRIER,
+    COMMAND_PREPARE_PUBLIC_RANDOMNESS_COMMITMENT_CARRIER,
+    COMMAND_PREPARE_PUBLIC_RANDOMNESS_REVEAL_CARRIER, COMMAND_PREPARE_SETUP_INTENT_CARRIER,
+    run_setup_transcript_command,
+};
 use super::state_runtime::{
     STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VerifiedStateReservationRuntimeBinding,
     verified_state_reservation_binding,
 };
 use super::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionPrivateRandomness, ActionRandomnessDerivationInput,
-    ActionRandomnessRoot, CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
-    LOCAL_RECORD_NONCE_BYTE_LENGTH, LocalStorageBinding, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
+    ActionRandomnessRoot, CanonicalDecodeLimits, Hash512, LOCAL_RECORD_NONCE_BYTE_LENGTH,
+    LocalStorageBinding, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
     ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH, OrdinaryProofCoinInput, ParticipantIdentity,
-    PersistentProofCoinInput, PrivateRandomnessDomain, ProofApplicationSlot,
+    PersistentProofCoinInput, PersistentProofWitnessCoinBinding,
+    PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain, ProofApplicationSlot,
     ProofApplicationSlotCeilings as ProofFamilyIdentifiers, RefusalReason, Roster,
-    SetupStructuredCommitmentOpeningContext, StateCapabilityKind,
+    StateCapabilityKind,
 };
 
 const COMMAND_OPEN: u32 = 1;
@@ -44,18 +45,12 @@ const COMMAND_OPEN_SEALED: u32 = 9;
 const COMMAND_SETUP_ACTION_RANDOMNESS_AUTHORIZATION: u32 = 10;
 const COMMAND_VALIDATE_SETUP_MAILBOX_SOURCE_KEYS: u32 = 11;
 const COMMAND_SETUP_MAILBOX_SIGNATURE_HEDGE: u32 = 12;
-const COMMAND_CREATE_STRUCTURED_COMMITMENT_OPENING: u32 = 13;
-const COMMAND_RELEASE_STRUCTURED_COMMITMENT_OPENING: u32 = 14;
-const COMMAND_COMPUTE_STRUCTURED_COMMITMENT: u32 = 15;
 const COMMAND_SETUP_OBJECT_SIGNATURE_HEDGE: u32 = 16;
 
 const HANDLE_BYTE_LENGTH: usize = 4;
 const HASH_BYTE_LENGTH: usize = 64;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const MAXIMUM_ACTIVE_SESSION_COUNT: usize = 256;
-const MAXIMUM_RETAINED_STRUCTURED_COMMITMENT_OPENING_COUNT: usize = 256;
-const MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
-
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE: u32 = 0x0001_0001;
 
@@ -74,6 +69,23 @@ pub(crate) struct AuthenticatedCheckpointContinuationSource {
 }
 
 impl AuthenticatedCheckpointContinuationSource {
+    /// Marks the beginning of one locally owned proof attempt before its
+    /// generation binding can derive the exact checkpoint genesis digest.
+    /// The zero cumulative digest is an internal construction marker only;
+    /// it is replaced by the binding-derived genesis before a worker starts
+    /// and is never accepted as an authenticated resumed position.
+    pub(crate) const fn for_fresh_common_proof_attempt(
+        checkpoint_lineage_identifier: [u8; 32],
+        checkpoint_schedule_digest: Hash512,
+    ) -> Self {
+        Self {
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+            next_event_index: 0,
+            cumulative_event_digest: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+        }
+    }
+
     /// Constructs the continuation authority decoded from one checkpoint that
     /// the browser-owned custody path has already authenticated. This remains
     /// crate-private so transported fields cannot construct prover authority
@@ -117,20 +129,17 @@ impl AuthenticatedCheckpointContinuationSource {
 /// caller accounting cannot construct it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PreparedActionProofAttemptSource {
-    attempt_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    attempt_identifier: PrivateRandomnessAttemptIdentifier,
     application_slot: ProofApplicationSlot,
     application_slot_hash: Hash512,
     application_statement_schema_identifier: u16,
     application_statement_hash: Hash512,
-    board_object_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 }
 
 impl PreparedActionProofAttemptSource {
     pub(crate) const fn attempt_identifier(&self) -> [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
-        self.attempt_identifier
+        *self.attempt_identifier.as_bytes()
     }
 
     pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
@@ -149,16 +158,157 @@ impl PreparedActionProofAttemptSource {
         self.application_statement_hash
     }
 
-    pub(crate) const fn board_object_hash(&self) -> Hash512 {
-        self.board_object_hash
+    pub(crate) const fn checkpoint_continuation(
+        &self,
+    ) -> &AuthenticatedCheckpointContinuationSource {
+        &self.checkpoint_continuation
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn prepare_exact_same_secret_evidence_attempt(
+    action_private_randomness: &ActionPrivateRandomness,
+    application_slot: ProofApplicationSlot,
+    application_statement_hash: Hash512,
+    checkpoint_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    checkpoint_schedule_digest: Hash512,
+) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    prepare_exact_same_secret_evidence_attempt_with_continuation(
+        action_private_randomness,
+        application_slot,
+        application_statement_hash,
+        AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+        ),
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+    action_private_randomness: &ActionPrivateRandomness,
+    application_slot: ProofApplicationSlot,
+    application_statement_hash: Hash512,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    if checkpoint_continuation.next_event_index() == 0
+        || checkpoint_continuation
+            .cumulative_event_digest()
+            .into_bytes()
+            == [0_u8; HASH_BYTE_LENGTH]
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "the exact same-secret evidence checkpoint is not a resumed boundary",
+        ));
+    }
+    prepare_exact_same_secret_evidence_attempt_with_continuation(
+        action_private_randomness,
+        application_slot,
+        application_statement_hash,
+        checkpoint_continuation,
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn prepare_exact_same_secret_evidence_attempt_with_continuation(
+    action_private_randomness: &ActionPrivateRandomness,
+    application_slot: ProofApplicationSlot,
+    application_statement_hash: Hash512,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    if application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
+        || checkpoint_continuation.checkpoint_lineage_identifier()
+            == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]
+        || checkpoint_continuation
+            .checkpoint_schedule_digest()
+            .into_bytes()
+            == [0_u8; HASH_BYTE_LENGTH]
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "the exact same-secret evidence attempt has invalid limits",
+        ));
+    }
+    let derivation = action_private_randomness.derivation_input();
+    if application_slot.suite_identifier() != derivation.suite_identifier()
+        || application_slot.ceremony_context_hash() != derivation.ceremony_context_hash()
+        || application_slot.action_context_hash() != derivation.action_context_hash()
+        || application_slot.roster_position().is_none()
+        || application_slot.schedule_position().is_some()
+        || application_slot.producer_sequence().is_some()
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::WrongContext,
+            "the exact same-secret evidence slot and action randomness differ",
+        ));
+    }
+    let proof_coin_input =
+        PersistentProofCoinInput::new(application_slot, application_statement_hash)?;
+    let attempt_identifier =
+        action_private_randomness.persistent_proof_preparation_identifier(&proof_coin_input)?;
+    Ok(PreparedActionProofAttemptSource {
+        attempt_identifier,
+        application_slot,
+        application_slot_hash: application_slot.hash()?,
+        application_statement_schema_identifier: application_slot
+            .application_statement_schema_identifier(),
+        application_statement_hash,
+        checkpoint_continuation,
+    })
+}
+
+/// A reset-safe prepared attempt after the family owner has streamed the
+/// exact canonical semantic witness into the browser-owned proof-coin KMAC.
+/// Only this type can authorize persistent common-proof generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WitnessBoundPreparedActionProofAttemptSource {
+    prepared_source: PreparedActionProofAttemptSource,
+    attempt_identifier: PrivateRandomnessAttemptIdentifier,
+}
+
+/// Opaque local generation authority for one proof whose relation witness is
+/// public. It is bound to the browser-owned action key, setup reservation,
+/// application slot, canonical statement, selected proof limits, and
+/// checkpoint continuation. Its private-randomness attempt identifier
+/// authorizes only construction-level hiding coins; it does not create a
+/// private relation witness or a relation-mask domain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PreparedPublicOnlyProofAttemptSource {
+    attempt_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    private_randomness_attempt_identifier: PrivateRandomnessAttemptIdentifier,
+    application_slot: ProofApplicationSlot,
+    application_slot_hash: Hash512,
+    application_statement_schema_identifier: u16,
+    application_statement_hash: Hash512,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+}
+
+impl PreparedPublicOnlyProofAttemptSource {
+    pub(crate) const fn attempt_lineage_identifier(&self) -> [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
+        self.attempt_lineage_identifier
     }
 
-    pub(crate) const fn expected_proof_byte_length(&self) -> u64 {
-        self.expected_proof_byte_length
+    pub(crate) const fn private_randomness_attempt_identifier(
+        &self,
+    ) -> PrivateRandomnessAttemptIdentifier {
+        self.private_randomness_attempt_identifier
     }
 
-    pub(crate) const fn expected_query_count(&self) -> u32 {
-        self.expected_query_count
+    pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
+        self.application_slot
+    }
+
+    pub(crate) const fn application_slot_hash(&self) -> Hash512 {
+        self.application_slot_hash
+    }
+
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub(crate) const fn application_statement_hash(&self) -> Hash512 {
+        self.application_statement_hash
     }
 
     pub(crate) const fn checkpoint_continuation(
@@ -166,6 +316,61 @@ impl PreparedActionProofAttemptSource {
     ) -> &AuthenticatedCheckpointContinuationSource {
         &self.checkpoint_continuation
     }
+}
+
+impl WitnessBoundPreparedActionProofAttemptSource {
+    pub(crate) const fn attempt_identifier(&self) -> [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
+        *self.attempt_identifier.as_bytes()
+    }
+
+    pub(crate) const fn private_randomness_attempt_identifier(
+        &self,
+    ) -> PrivateRandomnessAttemptIdentifier {
+        self.attempt_identifier
+    }
+
+    pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
+        self.prepared_source.application_slot()
+    }
+
+    pub(crate) const fn application_slot_hash(&self) -> Hash512 {
+        self.prepared_source.application_slot_hash()
+    }
+
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.prepared_source
+            .application_statement_schema_identifier()
+    }
+
+    pub(crate) const fn application_statement_hash(&self) -> Hash512 {
+        self.prepared_source.application_statement_hash()
+    }
+
+    pub(crate) const fn checkpoint_continuation(
+        &self,
+    ) -> &AuthenticatedCheckpointContinuationSource {
+        self.prepared_source.checkpoint_continuation()
+    }
+}
+
+pub(crate) fn bind_prepared_action_proof_attempt_to_canonical_witness(
+    prepared_source: PreparedActionProofAttemptSource,
+    binding: PersistentProofWitnessCoinBinding,
+) -> Result<WitnessBoundPreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    let input = binding.input();
+    if input.application_slot() != prepared_source.application_slot()
+        || input.application_statement_hash() != prepared_source.application_statement_hash()
+        || binding.preparation_identifier() != prepared_source.attempt_identifier
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::WrongContext,
+            "canonical proof witness binding does not match the prepared attempt",
+        ));
+    }
+    Ok(WitnessBoundPreparedActionProofAttemptSource {
+        prepared_source,
+        attempt_identifier: binding.finish()?,
+    })
 }
 
 /// Resolves one live reset-safe or target-release proof attempt from retained
@@ -180,13 +385,8 @@ pub(crate) fn resolve_prepared_action_proof_attempt_source(
     board_source: &VerifiedBoardApplicationSource,
     application_slot: ProofApplicationSlot,
     application_statement_hash: Hash512,
-    expected_proof_byte_length: u64,
-    expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
 ) -> RuntimeResult<PreparedActionProofAttemptSource> {
-    if expected_proof_byte_length == 0 || expected_query_count == 0 {
-        return Err(RefusalReason::OutsideSupportedProfile.canonical_code() as u32);
-    }
     ACTION_RANDOMNESS_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let randomness = registry.get(action_randomness_handle)?;
@@ -212,78 +412,138 @@ pub(crate) fn resolve_prepared_action_proof_attempt_source(
             verified_reservation_binding,
             persistent_proof_reservation_kind(statement_schema_identifier)?,
         )?;
-        let attempt_identifier = if statement_schema_identifier
-            == ProofFamilyIdentifiers::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
-        {
-            randomness
-                .target_release_attempt_identifier(application_slot)
-                .map_err(schema_status)?
-        } else {
-            let input = PersistentProofCoinInput::new(application_slot, application_statement_hash)
-                .map_err(schema_status)?;
-            randomness
-                .persistent_proof_attempt_identifier(&input)
-                .map_err(schema_status)?
-        };
+        let input = PersistentProofCoinInput::new(application_slot, application_statement_hash)
+            .map_err(schema_status)?;
+        let attempt_identifier = randomness
+            .persistent_proof_preparation_identifier(&input)
+            .map_err(schema_status)?;
         Ok(PreparedActionProofAttemptSource {
-            attempt_identifier: *attempt_identifier.as_bytes(),
+            attempt_identifier,
             application_slot,
             application_slot_hash: application_slot.hash().map_err(schema_status)?,
             application_statement_schema_identifier: statement_schema_identifier,
             application_statement_hash,
-            board_object_hash: board_source.object_hash(),
-            expected_proof_byte_length,
-            expected_query_count,
             checkpoint_continuation,
         })
     })
 }
 
-struct ValidatedSetupRoster {
-    mailbox_encapsulation_keys: Vec<(
-        ParticipantIdentity,
-        [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
-    )>,
-    participant_identities: Vec<ParticipantIdentity>,
+/// Resolves one locally owned setup proof attempt whose relation witness is
+/// public. The exact family slot and canonical statement are joined to the
+/// participant's live setup reservation to authorize generation, checkpoint
+/// custody, and an independent private construction-hiding stream. No private
+/// relation witness, relation mask, or leaf-salt domain exists for this path.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
+    action_randomness_handle: u32,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     roster_hash: Hash512,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct StructuredCommitmentOpeningSlot {
-    source_setup_intent_object_hash: Hash512,
-    source_rns_limb_index: u16,
-    shamir_coefficient_index: u16,
-    commitment_data_prime_index: u16,
-}
-
-struct RetainedStructuredCommitmentOpening {
-    hiding_secret_polynomials: Vec<Zeroizing<Vec<i8>>>,
-    hiding_error_polynomials: Vec<Zeroizing<Vec<i8>>>,
-    opening_handle: u32,
-}
-
-impl RetainedStructuredCommitmentOpening {
-    fn has_expected_shape(&self) -> bool {
-        self.hiding_secret_polynomials.len() == SETUP_COMMITMENT_HIDING_SECRET_WIDTH
-            && self.hiding_error_polynomials.len() == SETUP_COMMITMENT_HIDING_ERROR_WIDTH
-            && self
-                .hiding_secret_polynomials
-                .iter()
-                .chain(&self.hiding_error_polynomials)
-                .all(|polynomial| polynomial.len() == POLYNOMIAL_DEGREE)
+    application_slot: ProofApplicationSlot,
+    application_statement_hash: Hash512,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+) -> RuntimeResult<PreparedPublicOnlyProofAttemptSource> {
+    let statement_schema_identifier = application_slot.application_statement_schema_identifier();
+    if !ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+        .contains(&statement_schema_identifier)
+        || application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
+    {
+        return Err(RefusalReason::OutsideSupportedProfile.canonical_code() as u32);
     }
+
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let randomness = registry.get(action_randomness_handle)?;
+        let derivation = randomness.derivation_input();
+        if application_slot.suite_identifier() != derivation.suite_identifier()
+            || application_slot.ceremony_context_hash() != derivation.ceremony_context_hash()
+            || application_slot.action_context_hash() != derivation.action_context_hash()
+        {
+            return Err(RefusalReason::WrongContext.canonical_code() as u32);
+        }
+        require_matching_setup_action_randomness_reservation(
+            randomness,
+            verified_reservation_binding,
+            roster_hash,
+        )?;
+
+        let application_slot_hash = application_slot.hash().map_err(schema_status)?;
+        let proof_coin_input =
+            PersistentProofCoinInput::new(application_slot, application_statement_hash)
+                .map_err(schema_status)?;
+        let private_randomness_attempt_identifier = randomness
+            .persistent_proof_preparation_identifier(&proof_coin_input)
+            .map_err(schema_status)?;
+        let attempt_lineage_identifier = *private_randomness_attempt_identifier.as_bytes();
+
+        Ok(PreparedPublicOnlyProofAttemptSource {
+            attempt_lineage_identifier,
+            private_randomness_attempt_identifier,
+            application_slot,
+            application_slot_hash,
+            application_statement_schema_identifier: statement_schema_identifier,
+            application_statement_hash,
+            checkpoint_continuation,
+        })
+    })
+}
+
+/// Resolves one ordinary ballot proof attempt from live browser-owned
+/// randomness and the exact typed coin input already joined by the ballot
+/// family. Unlike reset-safe setup and target-release families, an ordinary
+/// ballot proof does not consume a state reservation or depend on a final
+/// board object that would contain its own proof descriptor.
+pub(crate) fn resolve_prepared_ordinary_proof_attempt_source(
+    action_private_randomness: &ActionPrivateRandomness,
+    proof_coin_input: OrdinaryProofCoinInput,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    let application_slot = proof_coin_input.application_slot();
+    let application_statement_hash = proof_coin_input.application_statement_hash();
+    if application_slot.application_statement_schema_identifier()
+        != ProofFamilyIdentifiers::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+        || application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "ordinary proof attempt is outside the selected ballot profile",
+        ));
+    }
+    let derivation = action_private_randomness.derivation_input();
+    if application_slot.suite_identifier() != derivation.suite_identifier()
+        || application_slot.ceremony_context_hash() != derivation.ceremony_context_hash()
+        || application_slot.action_context_hash() != derivation.action_context_hash()
+        || application_slot.roster_position().is_none()
+        || application_slot.schedule_position().is_some()
+        || application_slot.producer_sequence().is_none()
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::WrongContext,
+            "ordinary proof attempt and action randomness contexts differ",
+        ));
+    }
+    let attempt_identifier =
+        action_private_randomness.ordinary_proof_attempt_identifier(&proof_coin_input)?;
+    Ok(PreparedActionProofAttemptSource {
+        attempt_identifier,
+        application_slot,
+        application_slot_hash: application_slot.hash()?,
+        application_statement_schema_identifier:
+            ProofFamilyIdentifiers::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+        application_statement_hash,
+        checkpoint_continuation,
+    })
+}
+
+struct ValidatedSetupRoster {
+    roster: Roster,
+    roster_hash: Hash512,
 }
 
 #[derive(Default)]
 struct ActionRandomnessRegistry {
     next_handle: u32,
-    next_structured_commitment_opening_handle: u32,
-    sessions: HashMap<u32, ActionPrivateRandomness>,
+    sessions: HashMap<u32, Rc<ActionPrivateRandomness>>,
     setup_rosters: HashMap<u32, ValidatedSetupRoster>,
-    structured_commitment_opening_locations: HashMap<u32, (u32, StructuredCommitmentOpeningSlot)>,
-    structured_commitment_openings:
-        HashMap<u32, HashMap<StructuredCommitmentOpeningSlot, RetainedStructuredCommitmentOpening>>,
-    structured_commitment_setup_intent_hashes: HashMap<u32, Hash512>,
 }
 
 impl ActionRandomnessRegistry {
@@ -295,13 +555,14 @@ impl ActionRandomnessRegistry {
             .next_handle
             .checked_add(1)
             .ok_or(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT)?;
-        self.sessions.insert(self.next_handle, randomness);
+        self.sessions.insert(self.next_handle, Rc::new(randomness));
         Ok(self.next_handle)
     }
 
     fn get(&self, handle: u32) -> RuntimeResult<&ActionPrivateRandomness> {
         self.sessions
             .get(&handle)
+            .map(Rc::as_ref)
             .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)
     }
 
@@ -313,14 +574,6 @@ impl ActionRandomnessRegistry {
             .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
         if closed.is_ok() {
             self.setup_rosters.remove(&handle);
-            self.structured_commitment_setup_intent_hashes
-                .remove(&handle);
-            if let Some(openings) = self.structured_commitment_openings.remove(&handle) {
-                for opening in openings.values() {
-                    self.structured_commitment_opening_locations
-                        .remove(&opening.opening_handle);
-                }
-            }
         }
         closed
     }
@@ -351,177 +604,17 @@ impl ActionRandomnessRegistry {
             return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
         }
         roster
-            .mailbox_encapsulation_keys
+            .roster
+            .entries
             .iter()
-            .find_map(|(participant_identity, key)| {
-                (*participant_identity == recipient_participant_identity).then_some(*key)
+            .find_map(|entry| {
+                entry
+                    .participant_identity()
+                    .ok()
+                    .filter(|identity| *identity == recipient_participant_identity)
+                    .map(|_| entry.mailbox_encapsulation_key)
             })
             .ok_or(RefusalReason::WrongContext.canonical_code() as u32)
-    }
-
-    fn setup_source_matches_roster_position(
-        &self,
-        handle: u32,
-        roster_hash: Hash512,
-        source_roster_position: u16,
-        expected_source_identity: ParticipantIdentity,
-    ) -> RuntimeResult<()> {
-        let roster = self
-            .setup_rosters
-            .get(&handle)
-            .ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
-        if roster.roster_hash != roster_hash {
-            return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
-        }
-        if roster
-            .participant_identities
-            .get(usize::from(source_roster_position))
-            != Some(&expected_source_identity)
-        {
-            return Err(RefusalReason::WrongContext.canonical_code() as u32);
-        }
-        Ok(())
-    }
-
-    fn retain_structured_commitment_opening(
-        &mut self,
-        action_randomness_handle: u32,
-        slot: StructuredCommitmentOpeningSlot,
-        mut opening: RetainedStructuredCommitmentOpening,
-    ) -> RuntimeResult<u32> {
-        if !self.sessions.contains_key(&action_randomness_handle) {
-            return Err(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
-        }
-        if let Some(pinned_hash) = self
-            .structured_commitment_setup_intent_hashes
-            .get(&action_randomness_handle)
-        {
-            if *pinned_hash != slot.source_setup_intent_object_hash {
-                return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
-            }
-        } else {
-            self.structured_commitment_setup_intent_hashes.insert(
-                action_randomness_handle,
-                slot.source_setup_intent_object_hash,
-            );
-        }
-        if let Some(retained) = self
-            .structured_commitment_openings
-            .get(&action_randomness_handle)
-            .and_then(|openings| openings.get(&slot))
-        {
-            if !retained.has_expected_shape() {
-                return Err(RefusalReason::ConsumedState.canonical_code() as u32);
-            }
-            return Ok(retained.opening_handle);
-        }
-        if self.structured_commitment_opening_locations.len()
-            >= MAXIMUM_RETAINED_STRUCTURED_COMMITMENT_OPENING_COUNT
-        {
-            return Err(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT);
-        }
-        self.next_structured_commitment_opening_handle = self
-            .next_structured_commitment_opening_handle
-            .checked_add(1)
-            .ok_or(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT)?;
-        opening.opening_handle = self.next_structured_commitment_opening_handle;
-        self.structured_commitment_opening_locations
-            .insert(opening.opening_handle, (action_randomness_handle, slot));
-        self.structured_commitment_openings
-            .entry(action_randomness_handle)
-            .or_default()
-            .insert(slot, opening);
-        Ok(self.next_structured_commitment_opening_handle)
-    }
-
-    fn existing_structured_commitment_opening_handles(
-        &self,
-        action_randomness_handle: u32,
-        slots: &[StructuredCommitmentOpeningSlot],
-    ) -> RuntimeResult<Vec<Option<u32>>> {
-        if !self.sessions.contains_key(&action_randomness_handle) {
-            return Err(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
-        }
-        let Some(first_slot) = slots.first() else {
-            return Err(RefusalReason::MissingPrerequisite.canonical_code() as u32);
-        };
-        if slots.iter().any(|slot| {
-            slot.source_setup_intent_object_hash != first_slot.source_setup_intent_object_hash
-        }) || self
-            .structured_commitment_setup_intent_hashes
-            .get(&action_randomness_handle)
-            .is_some_and(|pinned_hash| *pinned_hash != first_slot.source_setup_intent_object_hash)
-        {
-            return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
-        }
-        let mut handles = Vec::with_capacity(slots.len());
-        let mut fresh_opening_count = 0usize;
-        for slot in slots {
-            if let Some(retained) = self
-                .structured_commitment_openings
-                .get(&action_randomness_handle)
-                .and_then(|openings| openings.get(slot))
-            {
-                if !retained.has_expected_shape() {
-                    return Err(RefusalReason::ConsumedState.canonical_code() as u32);
-                }
-                handles.push(Some(retained.opening_handle));
-            } else {
-                fresh_opening_count = fresh_opening_count
-                    .checked_add(1)
-                    .ok_or(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT)?;
-                handles.push(None);
-            }
-        }
-        if self
-            .structured_commitment_opening_locations
-            .len()
-            .checked_add(fresh_opening_count)
-            .is_none_or(|opening_count| {
-                opening_count > MAXIMUM_RETAINED_STRUCTURED_COMMITMENT_OPENING_COUNT
-            })
-            || self
-                .next_structured_commitment_opening_handle
-                .checked_add(
-                    u32::try_from(fresh_opening_count)
-                        .map_err(|_| ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT)?,
-                )
-                .is_none()
-        {
-            return Err(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT);
-        }
-        Ok(handles)
-    }
-
-    fn release_structured_commitment_opening(
-        &mut self,
-        action_randomness_handle: u32,
-        opening_handle: u32,
-    ) -> RuntimeResult<()> {
-        let Some((owner_handle, slot)) = self
-            .structured_commitment_opening_locations
-            .get(&opening_handle)
-            .copied()
-        else {
-            return Err(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
-        };
-        if owner_handle != action_randomness_handle {
-            return Err(RefusalReason::WrongContext.canonical_code() as u32);
-        }
-        self.structured_commitment_opening_locations
-            .remove(&opening_handle);
-        let openings = self
-            .structured_commitment_openings
-            .get_mut(&action_randomness_handle)
-            .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
-        openings
-            .remove(&slot)
-            .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
-        if openings.is_empty() {
-            self.structured_commitment_openings
-                .remove(&action_randomness_handle);
-        }
-        Ok(())
     }
 }
 
@@ -562,17 +655,71 @@ pub(crate) fn resolve_setup_action_randomness_reservation_source(
     })
 }
 
+/// Retains one live browser-owned action-randomness source for a deferred
+/// exact-family operation. The returned process-local source shares custody
+/// with the action session and exposes no root, stream key, or serialized
+/// secret material.
+pub(crate) fn retain_action_private_randomness_for_exact_family(
+    action_randomness_handle: u32,
+) -> RuntimeResult<Rc<ActionPrivateRandomness>> {
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .sessions
+            .get(&action_randomness_handle)
+            .cloned()
+            .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)
+    })
+}
+
+/// Borrows the one action-randomness source whose selected roster and genuine
+/// setup reservation were already authenticated by the closed worker. The
+/// operation receives no serializable secret material and cannot outlive the
+/// action-randomness registry borrow.
+pub(crate) fn with_authenticated_setup_object_source<Value>(
+    action_randomness_handle: u32,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+    operation: impl FnOnce(&ActionPrivateRandomness, &Roster, Hash512, u16) -> RuntimeResult<Value>,
+) -> RuntimeResult<Value> {
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let randomness = registry.get(action_randomness_handle)?;
+        let retained_roster = registry
+            .setup_rosters
+            .get(&action_randomness_handle)
+            .ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
+        require_matching_setup_action_randomness_reservation(
+            randomness,
+            verified_reservation_binding,
+            retained_roster.roster_hash,
+        )?;
+        let participant_identity = randomness.derivation_input().participant_identity();
+        let source_roster_position = retained_roster
+            .roster
+            .entries
+            .iter()
+            .position(|entry| {
+                entry
+                    .participant_identity()
+                    .is_ok_and(|identity| identity == participant_identity)
+            })
+            .and_then(|position| u16::try_from(position).ok())
+            .ok_or(RefusalReason::WrongContext.canonical_code() as u32)?;
+        operation(
+            randomness,
+            &retained_roster.roster,
+            retained_roster.roster_hash,
+            source_roster_position,
+        )
+    })
+}
+
 pub(crate) fn run_action_randomness_command(command: u32, input: &[u8]) -> RuntimeResult<Vec<u8>> {
     match command {
         COMMAND_OPEN => open(input),
         COMMAND_CLOSE => close(input),
         COMMAND_SETUP_MAILBOX_ENCAPSULATE => setup_mailbox_encapsulate(input),
         COMMAND_SETUP_MAILBOX_SIGNATURE_HEDGE => setup_mailbox_signature_hedge(input),
-        COMMAND_CREATE_STRUCTURED_COMMITMENT_OPENING => create_structured_commitment_opening(input),
-        COMMAND_RELEASE_STRUCTURED_COMMITMENT_OPENING => {
-            release_structured_commitment_opening(input)
-        }
-        COMMAND_COMPUTE_STRUCTURED_COMMITMENT => compute_structured_commitment(input),
         COMMAND_SETUP_OBJECT_SIGNATURE_HEDGE => setup_object_signature_hedge(input),
         COMMAND_ORDINARY_PROOF_ATTEMPT => ordinary_proof_attempt(input),
         COMMAND_TARGET_RELEASE_ATTEMPT => target_release_attempt(input),
@@ -583,6 +730,12 @@ pub(crate) fn run_action_randomness_command(command: u32, input: &[u8]) -> Runti
             setup_action_randomness_authorization(input)
         }
         COMMAND_VALIDATE_SETUP_MAILBOX_SOURCE_KEYS => validate_setup_mailbox_source_keys(input),
+        COMMAND_PREPARE_SETUP_INTENT_CARRIER
+        | COMMAND_PREPARE_DEALER_PUBLIC_RECORD_CARRIER
+        | COMMAND_PREPARE_PUBLIC_RANDOMNESS_COMMITMENT_CARRIER
+        | COMMAND_PREPARE_PUBLIC_RANDOMNESS_REVEAL_CARRIER
+        | COMMAND_FINISH_SETUP_TRANSCRIPT_CARRIER
+        | COMMAND_CANCEL_SETUP_TRANSCRIPT_CARRIER => run_setup_transcript_command(command, input),
         _ => Err(malformed_status()),
     }
 }
@@ -715,13 +868,8 @@ fn validate_setup_mailbox_source_keys(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         )?;
         let expected_participant_identity = randomness.derivation_input().participant_identity();
         let mut source_keys_match = false;
-        let mut mailbox_encapsulation_keys = Vec::with_capacity(roster.entries.len());
-        let mut participant_identities = Vec::with_capacity(roster.entries.len());
         for entry in &roster.entries {
             let participant_identity = entry.participant_identity().map_err(schema_status)?;
-            participant_identities.push(participant_identity);
-            mailbox_encapsulation_keys
-                .push((participant_identity, entry.mailbox_encapsulation_key));
             if participant_identity == expected_participant_identity {
                 source_keys_match = entry.signing_verification_key
                     == supplied_signing_verification_key
@@ -734,8 +882,7 @@ fn validate_setup_mailbox_source_keys(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         registry.retain_setup_roster(
             handle,
             ValidatedSetupRoster {
-                mailbox_encapsulation_keys,
-                participant_identities,
+                roster,
                 roster_hash,
             },
         )?;
@@ -923,281 +1070,6 @@ fn setup_object_signature_hedge(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     })
 }
 
-fn create_structured_commitment_opening(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let action_randomness_handle = reader.read_u32()?;
-    let reservation_binding = read_verified_reservation_binding(&mut reader)?;
-    let roster_hash = Hash512::from_bytes(reader.read_array()?);
-    let source_roster_position = reader.read_u16()?;
-    let source_setup_intent_object_hash = Hash512::from_bytes(reader.read_array()?);
-    let source_rns_limb_index = reader.read_u16()?;
-    let shamir_coefficient_index = reader.read_u16()?;
-    reader.finish()?;
-
-    let source_rns_limb_position = usize::from(source_rns_limb_index);
-    if source_rns_limb_position >= DATA_PRIMES.len()
-        || shamir_coefficient_index >= FOUNDATION_PROFILE.reconstruction_threshold
-    {
-        return Err(RefusalReason::WrongTypeOrLength.canonical_code() as u32);
-    }
-    let slots = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .copied()
-        .map(|commitment_data_prime_index| {
-            Ok(StructuredCommitmentOpeningSlot {
-                source_setup_intent_object_hash,
-                source_rns_limb_index,
-                shamir_coefficient_index,
-                commitment_data_prime_index: u16::try_from(commitment_data_prime_index)
-                    .map_err(|_| RefusalReason::OutsideSupportedProfile.canonical_code() as u32)?,
-            })
-        })
-        .collect::<RuntimeResult<Vec<_>>>()?;
-
-    let existing_handles = ACTION_RANDOMNESS_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let randomness = registry.get(action_randomness_handle)?;
-        require_matching_setup_action_randomness_reservation(
-            randomness,
-            reservation_binding,
-            roster_hash,
-        )?;
-        registry.setup_source_matches_roster_position(
-            action_randomness_handle,
-            roster_hash,
-            source_roster_position,
-            randomness.derivation_input().participant_identity(),
-        )?;
-        registry.existing_structured_commitment_opening_handles(action_randomness_handle, &slots)
-    })?;
-    if existing_handles.iter().all(Option::is_some) {
-        let mut output = Vec::with_capacity(HANDLE_BYTE_LENGTH * existing_handles.len());
-        for existing_handle in existing_handles {
-            let handle =
-                existing_handle.ok_or(RefusalReason::ConsumedState.canonical_code() as u32)?;
-            output.extend_from_slice(&handle.to_le_bytes());
-        }
-        return Ok(output);
-    }
-
-    let fresh_openings = ACTION_RANDOMNESS_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let randomness = registry.get(action_randomness_handle)?;
-        slots
-            .iter()
-            .copied()
-            .zip(existing_handles.iter())
-            .filter_map(|(slot, existing_handle)| existing_handle.is_none().then_some(slot))
-            .map(|slot| {
-                Ok((
-                    slot,
-                    derive_structured_commitment_opening(randomness, slot)?,
-                ))
-            })
-            .collect::<RuntimeResult<Vec<_>>>()
-    })?;
-    let fresh_handles = ACTION_RANDOMNESS_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        fresh_openings
-            .into_iter()
-            .map(|(slot, opening)| {
-                registry.retain_structured_commitment_opening(
-                    action_randomness_handle,
-                    slot,
-                    opening,
-                )
-            })
-            .collect::<RuntimeResult<Vec<_>>>()
-    })?;
-    let mut fresh_handle_iterator = fresh_handles.into_iter();
-    let mut output = Vec::with_capacity(HANDLE_BYTE_LENGTH * existing_handles.len());
-    for existing_handle in existing_handles {
-        let handle = match existing_handle {
-            Some(handle) => handle,
-            None => fresh_handle_iterator
-                .next()
-                .ok_or(RefusalReason::ConsumedState.canonical_code() as u32)?,
-        };
-        output.extend_from_slice(&handle.to_le_bytes());
-    }
-    if fresh_handle_iterator.next().is_some() {
-        return Err(RefusalReason::ConsumedState.canonical_code() as u32);
-    }
-    Ok(output)
-}
-
-fn release_structured_commitment_opening(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let action_randomness_handle = reader.read_u32()?;
-    let opening_handle = reader.read_u32()?;
-    reader.finish()?;
-    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .release_structured_commitment_opening(action_randomness_handle, opening_handle)
-    })?;
-    Ok(Vec::new())
-}
-
-fn derive_structured_commitment_opening(
-    randomness: &ActionPrivateRandomness,
-    slot: StructuredCommitmentOpeningSlot,
-) -> RuntimeResult<RetainedStructuredCommitmentOpening> {
-    let attempt_identifier = randomness.setup_attempt_identifier();
-    let mut hiding_secret_polynomials = Vec::with_capacity(SETUP_COMMITMENT_HIDING_SECRET_WIDTH);
-    for component_ordinal in 0..SETUP_COMMITMENT_HIDING_SECRET_WIDTH {
-        let context = SetupStructuredCommitmentOpeningContext::new(
-            slot.source_setup_intent_object_hash,
-            slot.source_rns_limb_index,
-            slot.shamir_coefficient_index,
-            slot.commitment_data_prime_index,
-            11,
-            u16::try_from(component_ordinal).map_err(|_| malformed_status())?,
-        )
-        .map_err(schema_status)?;
-        let mut stream = randomness
-            .begin_stream(
-                PrivateRandomnessDomain::setup_suite_distribution(11).map_err(schema_status)?,
-                context.hash().map_err(schema_status)?,
-                attempt_identifier,
-            )
-            .map_err(schema_status)?;
-        let mut polynomial = Zeroizing::new(Vec::with_capacity(POLYNOMIAL_DEGREE));
-        for _ in 0..POLYNOMIAL_DEGREE {
-            polynomial.push(
-                stream
-                    .sample_centered_ternary(MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT)
-                    .map_err(schema_status)?,
-            );
-        }
-        hiding_secret_polynomials.push(polynomial);
-    }
-
-    let mut hiding_error_polynomials = Vec::with_capacity(SETUP_COMMITMENT_HIDING_ERROR_WIDTH);
-    for component_ordinal in 0..SETUP_COMMITMENT_HIDING_ERROR_WIDTH {
-        let context = SetupStructuredCommitmentOpeningContext::new(
-            slot.source_setup_intent_object_hash,
-            slot.source_rns_limb_index,
-            slot.shamir_coefficient_index,
-            slot.commitment_data_prime_index,
-            12,
-            u16::try_from(component_ordinal).map_err(|_| malformed_status())?,
-        )
-        .map_err(schema_status)?;
-        let mut stream = randomness
-            .begin_stream(
-                PrivateRandomnessDomain::setup_suite_distribution(12).map_err(schema_status)?,
-                context.hash().map_err(schema_status)?,
-                attempt_identifier,
-            )
-            .map_err(schema_status)?;
-        let mut polynomial = Zeroizing::new(Vec::with_capacity(POLYNOMIAL_DEGREE));
-        for _ in 0..POLYNOMIAL_DEGREE {
-            let coefficient = stream.sample_centered_binomial(2).map_err(schema_status)?;
-            polynomial.push(
-                i8::try_from(coefficient).map_err(|_| {
-                    RefusalReason::InvalidArithmeticRelation.canonical_code() as u32
-                })?,
-            );
-        }
-        hiding_error_polynomials.push(polynomial);
-    }
-
-    Ok(RetainedStructuredCommitmentOpening {
-        hiding_secret_polynomials,
-        hiding_error_polynomials,
-        opening_handle: 0,
-    })
-}
-
-fn compute_structured_commitment(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let action_randomness_handle = reader.read_u32()?;
-    let public_matrix_seed_hash = Hash512::from_bytes(reader.read_array()?);
-    let mut opening_handles = [0_u32; SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()];
-    for opening_handle in &mut opening_handles {
-        *opening_handle = reader.read_u32()?;
-    }
-    let message_coefficient_count =
-        usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
-    if message_coefficient_count != POLYNOMIAL_DEGREE {
-        return Err(RefusalReason::WrongTypeOrLength.canonical_code() as u32);
-    }
-    let mut message_coefficients = Vec::with_capacity(message_coefficient_count);
-    for _ in 0..message_coefficient_count {
-        message_coefficients.push(u128::from(reader.read_u64()?));
-    }
-    reader.finish()?;
-
-    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        registry.get(action_randomness_handle)?;
-        let mut common_slot = None;
-        let mut randomness_by_commitment_limb =
-            Vec::with_capacity(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
-        for (commitment_limb_position, opening_handle) in
-            opening_handles.iter().copied().enumerate()
-        {
-            let (owner_handle, slot) = registry
-                .structured_commitment_opening_locations
-                .get(&opening_handle)
-                .copied()
-                .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
-            if owner_handle != action_randomness_handle
-                || usize::from(slot.commitment_data_prime_index)
-                    != SETUP_COMMITMENT_MODULUS_LIMB_INDICES[commitment_limb_position]
-            {
-                return Err(RefusalReason::WrongContext.canonical_code() as u32);
-            }
-            if let Some(expected_slot) = common_slot {
-                let expected_slot: StructuredCommitmentOpeningSlot = expected_slot;
-                if slot.source_setup_intent_object_hash
-                    != expected_slot.source_setup_intent_object_hash
-                    || slot.source_rns_limb_index != expected_slot.source_rns_limb_index
-                    || slot.shamir_coefficient_index != expected_slot.shamir_coefficient_index
-                {
-                    return Err(RefusalReason::WrongContext.canonical_code() as u32);
-                }
-            } else {
-                common_slot = Some(slot);
-            }
-            let retained = registry
-                .structured_commitment_openings
-                .get(&action_randomness_handle)
-                .and_then(|openings| openings.get(&slot))
-                .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
-            if !retained.has_expected_shape() {
-                return Err(RefusalReason::ConsumedState.canonical_code() as u32);
-            }
-            randomness_by_commitment_limb.push(
-                retained
-                    .hiding_secret_polynomials
-                    .iter()
-                    .chain(&retained.hiding_error_polynomials)
-                    .map(|polynomial| {
-                        polynomial
-                            .iter()
-                            .copied()
-                            .map(i128::from)
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>(),
-            );
-        }
-        let slot = common_slot.ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
-        let commitment = compute_setup_commitment_from_typed_opening(
-            &public_matrix_seed_hash.to_lowercase_hex(),
-            usize::from(slot.source_rns_limb_index),
-            u64::from(slot.shamir_coefficient_index),
-            &message_coefficients,
-            &randomness_by_commitment_limb,
-        )
-        .map_err(|_| RefusalReason::InvalidArithmeticRelation.canonical_code() as u32)?;
-        setup_commitment_worker_response_bytes(&commitment)
-            .map_err(|_| RefusalReason::InvalidArithmeticRelation.canonical_code() as u32)
-    })
-}
-
 fn ordinary_proof_attempt(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let handle = reader.read_u32()?;
@@ -1337,7 +1209,8 @@ fn persistent_proof_reservation_kind(
         | ProofFamilyIdentifiers::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
         | ProofFamilyIdentifiers::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
         | ProofFamilyIdentifiers::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
-        | ProofFamilyIdentifiers::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+        | ProofFamilyIdentifiers::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
             Ok(StateCapabilityKind::SetupActionRandomnessRoot)
         }
         ProofFamilyIdentifiers::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
@@ -1448,6 +1321,147 @@ mod tests {
     }
 
     #[test]
+    fn exact_evidence_resume_requires_a_bound_non_genesis_checkpoint() {
+        let action_randomness = fixed_action_randomness();
+        let application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; HASH_BYTE_LENGTH]),
+            0x1211,
+            Some(2),
+            None,
+            None,
+        )
+        .expect("persistent proof slot is valid");
+        let application_statement_hash = Hash512::from_bytes([0x66; HASH_BYTE_LENGTH]);
+        let checkpoint_lineage_identifier = [0x77; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+        let checkpoint_schedule_digest = Hash512::from_bytes([0x88; HASH_BYTE_LENGTH]);
+        let resumed_checkpoint =
+            AuthenticatedCheckpointContinuationSource::from_authenticated_common_proof_checkpoint(
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
+                3,
+                Hash512::from_bytes([0x99; HASH_BYTE_LENGTH]),
+            );
+
+        let resumed = prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+            &action_randomness,
+            application_slot,
+            application_statement_hash,
+            resumed_checkpoint,
+        )
+        .expect("authenticated non-genesis checkpoint prepares");
+        assert_eq!(
+            resumed
+                .checkpoint_continuation()
+                .checkpoint_lineage_identifier(),
+            checkpoint_lineage_identifier,
+        );
+        assert_eq!(
+            resumed
+                .checkpoint_continuation()
+                .checkpoint_schedule_digest(),
+            checkpoint_schedule_digest,
+        );
+        assert_eq!(resumed.checkpoint_continuation().next_event_index(), 3);
+        assert_eq!(
+            resumed.checkpoint_continuation().cumulative_event_digest(),
+            Hash512::from_bytes([0x99; HASH_BYTE_LENGTH]),
+        );
+
+        for invalid_checkpoint in [
+            AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
+            ),
+            AuthenticatedCheckpointContinuationSource::from_authenticated_common_proof_checkpoint(
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
+                3,
+                Hash512::from_bytes([0_u8; HASH_BYTE_LENGTH]),
+            ),
+        ] {
+            assert!(
+                prepare_exact_same_secret_evidence_attempt_from_authenticated_checkpoint(
+                    &action_randomness,
+                    application_slot,
+                    application_statement_hash,
+                    invalid_checkpoint,
+                )
+                .is_err(),
+                "a genesis or zero-digest checkpoint must refuse",
+            );
+        }
+    }
+
+    #[test]
+    fn witness_binding_refuses_a_different_action_randomness_key() {
+        let application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; HASH_BYTE_LENGTH]),
+            0x1211,
+            Some(2),
+            None,
+            None,
+        )
+        .expect("persistent proof slot is valid");
+        let application_statement_hash = Hash512::from_bytes([0x66; HASH_BYTE_LENGTH]);
+        let proof_coin_input =
+            PersistentProofCoinInput::new(application_slot, application_statement_hash)
+                .expect("persistent proof coin input is valid");
+        let prepared_action_randomness = fixed_action_randomness();
+        let prepared_source = PreparedActionProofAttemptSource {
+            attempt_identifier: prepared_action_randomness
+                .persistent_proof_preparation_identifier(&proof_coin_input)
+                .expect("persistent proof preparation identifier derives"),
+            application_slot,
+            application_slot_hash: application_slot
+                .hash()
+                .expect("persistent proof slot hashes"),
+            application_statement_schema_identifier: 0x1211,
+            application_statement_hash,
+            checkpoint_continuation:
+                AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                    [0x77; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+                    Hash512::from_bytes([0x88; HASH_BYTE_LENGTH]),
+                ),
+        };
+        let bind_witness = |action_randomness: &ActionPrivateRandomness| {
+            let mut binding = action_randomness
+                .begin_persistent_proof_witness_coin_binding(&proof_coin_input)
+                .expect("persistent witness binding starts");
+            binding
+                .absorb_canonical_bytes(b"sealed-lattice/test/canonical-semantic-witness/v1")
+                .expect("canonical witness is absorbed");
+            binding
+        };
+
+        bind_prepared_action_proof_attempt_to_canonical_witness(
+            prepared_source,
+            bind_witness(&prepared_action_randomness),
+        )
+        .expect("the prepared action key authorizes its witness binding");
+
+        let different_action_randomness = ActionRandomnessRoot::from_injected_bytes(
+            Zeroizing::new([0x6b; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]),
+        )
+        .derive(ActionRandomnessDerivationInput::new(
+            Hash512::from_bytes([0x11; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; HASH_BYTE_LENGTH]),
+            ParticipantIdentity::from_bytes([0x44; HASH_BYTE_LENGTH]),
+        ))
+        .expect("different action randomness derives for the same public context");
+        let error = bind_prepared_action_proof_attempt_to_canonical_witness(
+            prepared_source,
+            bind_witness(&different_action_randomness),
+        )
+        .expect_err("a different action key cannot bind the prepared attempt");
+        assert_eq!(error.refusal_reason, RefusalReason::WrongContext);
+    }
+
+    #[test]
     fn runtime_keeps_action_keys_opaque_and_returns_only_the_commitment() {
         let opened = run_action_randomness_command(COMMAND_OPEN, &open_input())
             .expect("action randomness opens");
@@ -1518,70 +1532,6 @@ mod tests {
         assert_eq!(
             run_action_randomness_command(99, &[]),
             Err(malformed_status()),
-        );
-    }
-
-    #[test]
-    fn structured_commitment_opening_derivation_is_reset_safe_and_uses_exact_supports() {
-        let randomness = fixed_action_randomness();
-        let slot = StructuredCommitmentOpeningSlot {
-            source_setup_intent_object_hash: Hash512::from_bytes([0x71; HASH_BYTE_LENGTH]),
-            source_rns_limb_index: 4,
-            shamir_coefficient_index: 2,
-            commitment_data_prime_index: 1,
-        };
-        let first = derive_structured_commitment_opening(&randomness, slot)
-            .expect("first structured opening derives");
-        let replay = derive_structured_commitment_opening(&randomness, slot)
-            .expect("same structured opening re-derives after reset");
-
-        assert!(first.has_expected_shape());
-        assert_eq!(
-            first.hiding_secret_polynomials,
-            replay.hiding_secret_polynomials
-        );
-        assert_eq!(
-            first.hiding_error_polynomials,
-            replay.hiding_error_polynomials
-        );
-        assert!(
-            first
-                .hiding_secret_polynomials
-                .iter()
-                .flat_map(|polynomial| polynomial.iter())
-                .all(|coefficient| (-1..=1).contains(coefficient))
-        );
-        assert!(
-            first
-                .hiding_error_polynomials
-                .iter()
-                .flat_map(|polynomial| polynomial.iter())
-                .all(|coefficient| (-2..=2).contains(coefficient))
-        );
-        assert!(
-            first
-                .hiding_error_polynomials
-                .iter()
-                .flat_map(|polynomial| polynomial.iter())
-                .any(|coefficient| coefficient.unsigned_abs() == 2),
-            "eta-two output must not collapse to the legacy ternary profile",
-        );
-
-        let changed_prime = derive_structured_commitment_opening(
-            &randomness,
-            StructuredCommitmentOpeningSlot {
-                commitment_data_prime_index: 2,
-                ..slot
-            },
-        )
-        .expect("changed commitment-prime opening derives");
-        assert_ne!(
-            first.hiding_secret_polynomials,
-            changed_prime.hiding_secret_polynomials
-        );
-        assert_ne!(
-            first.hiding_error_polynomials,
-            changed_prime.hiding_error_polynomials
         );
     }
 

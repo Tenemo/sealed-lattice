@@ -1,89 +1,20 @@
-#[cfg(test)]
-mod aggregation;
-#[cfg(test)]
-mod encryption;
-mod evaluator_replay;
-#[cfg(test)]
 mod request;
-#[cfg(test)]
-use aggregation::*;
-#[cfg(test)]
-use encryption::*;
-#[cfg(test)]
-pub(crate) use evaluator_replay::{
-    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_plaintext_target_slots,
-    run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
-};
-#[cfg(test)]
-use request::*;
-use serde_json::{Value, json};
-
-#[cfg(test)]
-use crate::bgv::{
-    evaluator::engine::{
-        EncryptionWitness, ciphertext_add, encode_slots_to_coefficients, negacyclic_mul,
-        signed_residue,
-    },
-    modular_arithmetic::add_mod,
-    parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+pub(crate) use request::{
+    PAIR_CHARACTER_AUXILIARY_COUNT, PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT,
+    PAIR_CHARACTER_LANE_DEGREE, PAIR_CHARACTER_PLAINTEXT_MODULUS, PAIR_CHARACTER_RING_DEGREE,
+    PairCharacterEncoderProfileTerm, SCORE_BUCKET_COUNT, pair_character_encoder_profile_sequence,
+    pair_character_encoder_profile_terms, pair_character_lane_assignments,
+    pair_character_lane_idempotent_coefficients, pair_character_lane_value,
+    pair_character_plaintexts,
 };
 
-#[cfg(test)]
-mod relation_proof;
+use crate::foundation::FOUNDATION_PROFILE;
 
-#[cfg(test)]
-use relation_proof::DirectBallotRelationProofGeneration;
-#[cfg(test)]
-use relation_proof::{generate_direct_ballot_relation_proof, verify_direct_ballot_relation_proof};
-
-use crate::{
-    bgv::evaluator::{
-        circuit::{EvaluatorContext, modulus_switch_to},
-        engine::{Ciphertext, DevelopmentBgvKey, ciphertext_object_root},
-        records::target_layout_hash,
-        top_k::{
-            EncryptedSparseTarget, SELECTED_EVALUATOR_WORKING_LEVEL,
-            evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
-            pack_direct_score_slots, project_packed_sparse_target_from_rank_evaluation,
-        },
-    },
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::hash512_hex,
-};
-
-const OPTION_COUNT: usize = 20;
+const OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
 // pub(crate): the setup-parameter identity binds the bounded-domain evaluator
 // profile (score span times roster size) from these score-domain constants.
-pub(crate) const MINIMUM_SCORE: u64 = 1;
-pub(crate) const MAXIMUM_SCORE: u64 = 10;
-const SCORE_BUCKET_COUNT: usize = (MAXIMUM_SCORE - MINIMUM_SCORE + 1) as usize;
-const DEFAULT_EVALUATOR_WORKING_LEVEL: usize = SELECTED_EVALUATOR_WORKING_LEVEL;
-const SINGLE_BALLOT_TARGET_WORKING_LEVEL: usize = 8;
-
-#[cfg(test)]
-#[derive(Clone)]
-struct DirectBallotInput {
-    voter_identity: String,
-    action_context_hash: String,
-    scores: Vec<u64>,
-    one_hot_witnesses: Option<Vec<Vec<u64>>>,
-    encryption_seed_hex: String,
-}
-
-#[cfg(test)]
-#[derive(Clone)]
-struct DirectEncryptedBallot {
-    input: DirectBallotInput,
-    plaintext_coefficients: Vec<u64>,
-    ciphertext: Ciphertext,
-    encryption_witness: EncryptionWitness,
-    ciphertext_root: String,
-}
-
-#[cfg(test)]
-struct DirectBallotAggregationResult {
-    aggregate_ciphertext: Ciphertext,
-}
+pub(crate) const MINIMUM_SCORE: u64 = FOUNDATION_PROFILE.minimum_score as u64;
+pub(crate) const MAXIMUM_SCORE: u64 = FOUNDATION_PROFILE.maximum_score as u64;
 
 #[cfg(test)]
 mod tests;

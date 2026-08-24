@@ -421,72 +421,132 @@ export const requireCanonicalRuntimePath = (path: string): string => {
 };
 
 const privateProofSaltPurpose = 0xfffe;
+export const hidingArgumentRandomnessPurpose = 4;
 const sameSecretProofFamilySchemaIdentifier = 0x1211;
-const publicKeyShareProofFamilySchemaIdentifier = 0x1212;
+export const publicKeyShareProofFamilySchemaIdentifier = 0x1212;
+const collectivePublicKeyAggregateProofFamilySchemaIdentifier = 0x1213;
 const relinearizationRoundOneProofFamilySchemaIdentifier = 0x1214;
+const relinearizationRoundOneAggregateProofFamilySchemaIdentifier = 0x1215;
 const relinearizationRoundTwoProofFamilySchemaIdentifier = 0x1216;
 const galoisKeyShareProofFamilySchemaIdentifier = 0x1217;
+const evaluatorKeyAggregateProofFamilySchemaIdentifier = 0x1218;
 const ballotValidityProofFamilySchemaIdentifier = 0x1302;
 const targetShareProofFamilySchemaIdentifier = 0x1621;
 const vssShareLinkageProofFamilySchemaIdentifier = 0x2110;
 const aggregateThresholdShareProofFamilySchemaIdentifier = 0x2111;
-export const proofRandomnessPurposeRanges = Object.freeze([
+export const proofMaskRandomnessPurposeClasses = Object.freeze({
+    trace: 1,
+    telescoping: 2,
+    opening: 3,
+});
+const proofMaskRandomnessPurposeClassSet = new Set<number>(
+    Object.values(proofMaskRandomnessPurposeClasses),
+);
+export const proofRandomnessFamilyAssignments = Object.freeze([
     Object.freeze({
         familySchemaIdentifier: sameSecretProofFamilySchemaIdentifier,
-        firstPurpose: 1,
-        lastPurpose: 2,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: publicKeyShareProofFamilySchemaIdentifier,
-        firstPurpose: 3,
-        lastPurpose: 4,
+        relationWitnessIsPrivate: true,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            collectivePublicKeyAggregateProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: false,
     }),
     Object.freeze({
         familySchemaIdentifier:
             relinearizationRoundOneProofFamilySchemaIdentifier,
-        firstPurpose: 5,
-        lastPurpose: 6,
+        relationWitnessIsPrivate: true,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            relinearizationRoundOneAggregateProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: false,
     }),
     Object.freeze({
         familySchemaIdentifier:
             relinearizationRoundTwoProofFamilySchemaIdentifier,
-        firstPurpose: 7,
-        lastPurpose: 8,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: galoisKeyShareProofFamilySchemaIdentifier,
-        firstPurpose: 9,
-        lastPurpose: 40,
+        relationWitnessIsPrivate: true,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            evaluatorKeyAggregateProofFamilySchemaIdentifier,
+        relationWitnessIsPrivate: false,
     }),
     Object.freeze({
         familySchemaIdentifier: ballotValidityProofFamilySchemaIdentifier,
-        firstPurpose: 41,
-        lastPurpose: 42,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: targetShareProofFamilySchemaIdentifier,
-        firstPurpose: 43,
-        lastPurpose: 44,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier: vssShareLinkageProofFamilySchemaIdentifier,
-        firstPurpose: 45,
-        lastPurpose: 46,
+        relationWitnessIsPrivate: true,
     }),
     Object.freeze({
         familySchemaIdentifier:
             aggregateThresholdShareProofFamilySchemaIdentifier,
-        firstPurpose: 47,
-        lastPurpose: 48,
+        relationWitnessIsPrivate: true,
     }),
 ]);
 
-const isAssignedRandomUse = (family: number, purpose: number): boolean => {
-    if (purpose === 0 || purpose === 0xffff) {
+const assignedRuntimeCheckpointRandomUseFamilySet = new Set<number>([
+    0x0116,
+    0x1201,
+    0x2120,
+    0x0200,
+    0x1630,
+    ...proofRandomnessFamilyAssignments.map(
+        (assignment) => assignment.familySchemaIdentifier,
+    ),
+]);
+
+const publicOnlyCommonProofCheckpointFamilySet = new Set<number>(
+    proofRandomnessFamilyAssignments
+        .filter((assignment) => !assignment.relationWitnessIsPrivate)
+        .map((assignment) => assignment.familySchemaIdentifier),
+);
+
+export const isPublicOnlyCommonProofCheckpointFamily = (
+    family: number,
+): boolean =>
+    Number.isInteger(family) &&
+    family > 0 &&
+    family <= 0xffff &&
+    publicOnlyCommonProofCheckpointFamilySet.has(family);
+
+export const isAssignedRuntimeCheckpointRandomUseFamily = (
+    family: number,
+): boolean =>
+    Number.isInteger(family) &&
+    family > 0 &&
+    family <= 0xffff &&
+    assignedRuntimeCheckpointRandomUseFamilySet.has(family);
+
+export const isAssignedRuntimeCheckpointRandomUse = (
+    family: number,
+    purpose: number,
+): boolean => {
+    if (
+        !isAssignedRuntimeCheckpointRandomUseFamily(family) ||
+        !Number.isInteger(purpose) ||
+        purpose <= 0 ||
+        purpose > 0xffff ||
+        purpose === 0xffff
+    ) {
         return false;
     }
     if (family === 0x0116) {
-        return purpose >= 1 && purpose <= 12 && purpose !== 0;
+        return purpose <= 12;
     }
     if (family === 0x1201) {
         return purpose === 1 || purpose === 2 || purpose === 4;
@@ -500,14 +560,19 @@ const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (family === 0x1630) {
         return purpose <= 2;
     }
-    const proofPurposeRange = proofRandomnessPurposeRanges.find(
-        (range) => range.familySchemaIdentifier === family,
+    const proofFamilyAssignment = proofRandomnessFamilyAssignments.find(
+        (assignment) => assignment.familySchemaIdentifier === family,
     );
+    if (proofFamilyAssignment === undefined) {
+        return false;
+    }
+    if (purpose === hidingArgumentRandomnessPurpose) {
+        return true;
+    }
     return (
-        proofPurposeRange !== undefined &&
+        proofFamilyAssignment.relationWitnessIsPrivate &&
         (purpose === privateProofSaltPurpose ||
-            (purpose >= proofPurposeRange.firstPurpose &&
-                purpose <= proofPurposeRange.lastPurpose))
+            proofMaskRandomnessPurposeClassSet.has(purpose))
     );
 };
 
@@ -563,7 +628,7 @@ const parseCheckpointRandomUse = (
     }
     const family = readUnsigned16Item(tuple, 0);
     const purpose = readUnsigned16Item(tuple, 1);
-    if (!isAssignedRandomUse(family, purpose)) {
+    if (!isAssignedRuntimeCheckpointRandomUse(family, purpose)) {
         return fail('A checkpoint random-use profile is unassigned.');
     }
     return Object.freeze({ family, purpose });
@@ -748,9 +813,9 @@ export const decodeSuiteArtifactReferences = (
     const tuple = parseCanonicalTuple(
         canonicalSuiteRecordBytes,
         suiteRecordSchemaIdentifier,
-        22,
+        23,
     );
-    const references = readNestedTupleList(tuple, 21).map((referenceTuple) => {
+    const references = readNestedTupleList(tuple, 22).map((referenceTuple) => {
         if (
             referenceTuple.schemaIdentifier !==
                 suiteArtifactReferenceSchemaIdentifier ||

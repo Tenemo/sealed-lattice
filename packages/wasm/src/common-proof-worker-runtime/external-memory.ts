@@ -1,13 +1,24 @@
 import { shake256 } from '@noble/hashes/sha3.js';
+import { foundationProfile } from '@sealed-lattice/types';
+
+import { byteArraysEqual } from '../byte-array.js';
 
 const hashByteLength = 64;
 export const maximumWorkerOperationCount = 4_096;
-export const maximumWorkerPayloadByteLength = 1_048_576n;
-const maximumExternalMemoryAppendByteLength = 49_152;
+export const maximumWorkerPayloadByteLength = BigInt(
+    foundationProfile.streamChunkByteLength,
+);
+const maximumExternalMemoryAppendByteLength = Number(
+    maximumWorkerPayloadByteLength,
+);
 const operationHeaderByteLength = 32;
 const readResultHeaderByteLength = 88;
 export const requestHeaderByteLength = 156;
 const responseHeaderByteLength = 80;
+export const maximumEncodedResponseByteLength =
+    responseHeaderByteLength +
+    maximumWorkerOperationCount * readResultHeaderByteLength +
+    Number(maximumWorkerPayloadByteLength);
 export const maximumEncodedRequestByteLength =
     requestHeaderByteLength +
     maximumWorkerOperationCount * operationHeaderByteLength +
@@ -92,6 +103,40 @@ export type CommonProofExternalMemoryReadResult = Readonly<{
     operationIndex: number;
 }>;
 
+const ownedRequestBytes = new WeakMap<
+    CommonProofExternalMemoryRequest,
+    Uint8Array<ArrayBuffer>
+>();
+
+const destroyOwnedArrayBuffer = (bytes: Uint8Array): void => {
+    if (!(bytes.buffer instanceof ArrayBuffer)) {
+        bytes.fill(0);
+        return;
+    }
+    const buffer = bytes.buffer;
+    if (buffer.byteLength === 0) {
+        return;
+    }
+    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+        bytes.fill(0);
+        return;
+    }
+    new Uint8Array(buffer).fill(0);
+    structuredClone(buffer, { transfer: [buffer] });
+};
+
+export const clearCommonProofExternalMemoryRequest = (
+    request: CommonProofExternalMemoryRequest,
+): void => {
+    const bytes = ownedRequestBytes.get(request);
+    if (bytes !== undefined) {
+        destroyOwnedArrayBuffer(bytes);
+        ownedRequestBytes.delete(request);
+    }
+    request.requestDigest.fill(0);
+    request.runtimeBindingHash.fill(0);
+};
+
 type CommonProofWorkerRuntimeErrorCode =
     | 'Cancelled'
     | 'KernelFailure'
@@ -172,29 +217,15 @@ const unsigned64Bytes = (value: bigint): Uint8Array<ArrayBuffer> => {
     return bytes;
 };
 
-export const byteArraysEqual = (
-    left: Uint8Array,
-    right: Uint8Array,
-): boolean => {
-    if (left.byteLength !== right.byteLength) {
-        return false;
-    }
-    let difference = 0;
-    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
-        difference |= left[byteIndex] ^ right[byteIndex];
-    }
-    return difference === 0;
-};
-
 class BoundedMessageReader {
-    readonly #bytes: Uint8Array;
+    readonly #bytes: Uint8Array<ArrayBuffer>;
     #offset = 0;
 
-    public constructor(bytes: Uint8Array) {
+    public constructor(bytes: Uint8Array<ArrayBuffer>) {
         this.#bytes = bytes;
     }
 
-    public bytes(byteLength: number): Uint8Array {
+    public bytes(byteLength: number): Uint8Array<ArrayBuffer> {
         if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
             this.#malformed();
         }
@@ -391,127 +422,147 @@ export const decodeCommonProofExternalMemoryRequest = (
             'The common-proof storage request length exceeds the absolute worker safety bound.',
         );
     }
-    const exactViewSnapshot = encodedRequest.slice();
-    const snapshotBuffer: ArrayBuffer = structuredClone(
-        exactViewSnapshot.buffer,
-        { transfer: [exactViewSnapshot.buffer] },
+    const exactOwnedView =
+        encodedRequest.buffer instanceof ArrayBuffer &&
+        encodedRequest.byteOffset === 0 &&
+        encodedRequest.byteLength === encodedRequest.buffer.byteLength
+            ? (encodedRequest as Uint8Array<ArrayBuffer>)
+            : encodedRequest.slice();
+    const exactOwnedBuffer: ArrayBuffer = structuredClone(
+        exactOwnedView.buffer,
+        { transfer: [exactOwnedView.buffer] },
     );
-    const ownedEncodedRequest = new Uint8Array(snapshotBuffer);
-    const reader = new BoundedMessageReader(ownedEncodedRequest);
-    if (
-        reader.unsigned16() !== schemaVersion ||
-        reader.unsigned16() !== requestMessageKind
-    ) {
-        throw new CommonProofWorkerRuntimeError(
-            'MalformedRequest',
-            'The common-proof storage request version or message kind is unsupported.',
-        );
-    }
-    const maximumPayloadByteLength = reader.unsigned64();
-    const maximumOperationCount = reader.unsigned32();
-    const operationCount = reader.unsigned32();
-    const requestSequence = reader.unsigned64();
-    const runtimeBindingHash = reader.bytes(hashByteLength).slice();
-    const suppliedRequestDigest = reader.bytes(hashByteLength).slice();
-    if (
-        maximumPayloadByteLength === 0n ||
-        maximumPayloadByteLength > maximumWorkerPayloadByteLength ||
-        maximumOperationCount === 0 ||
-        maximumOperationCount > maximumWorkerOperationCount ||
-        operationCount === 0 ||
-        operationCount > maximumOperationCount ||
-        requestSequence === 0n
-    ) {
-        throw new CommonProofWorkerRuntimeError(
-            'ResourceLimit',
-            'The common-proof storage request exceeds the absolute worker safety bound.',
-        );
-    }
-    const minimumOperationByteLength =
-        operationCount * operationHeaderByteLength;
-    if (
-        !Number.isSafeInteger(minimumOperationByteLength) ||
-        ownedEncodedRequest.byteLength <
-            requestHeaderByteLength + minimumOperationByteLength
-    ) {
-        throw new CommonProofWorkerRuntimeError(
-            'MalformedRequest',
-            'The common-proof storage operation list is truncated.',
-        );
-    }
-    const operations: CommonProofExternalMemoryOperation[] = [];
-    let transactionPayloadByteLength = 0n;
-    for (
-        let operationIndex = 0;
-        operationIndex < operationCount;
-        operationIndex += 1
-    ) {
-        const operation = decodeOperation(reader, operationIndex);
-        operations.push(operation);
-        if (operation.operationKind === 'append') {
-            transactionPayloadByteLength += BigInt(operation.bytes.byteLength);
-        } else if (operation.operationKind === 'read') {
-            transactionPayloadByteLength += BigInt(operation.byteLength);
-        }
-        if (transactionPayloadByteLength > maximumPayloadByteLength) {
+    const ownedEncodedRequest = new Uint8Array(exactOwnedBuffer);
+    try {
+        const reader = new BoundedMessageReader(ownedEncodedRequest);
+        if (
+            reader.unsigned16() !== schemaVersion ||
+            reader.unsigned16() !== requestMessageKind
+        ) {
             throw new CommonProofWorkerRuntimeError(
-                'ResourceLimit',
-                'The common-proof storage transaction payload exceeds its declared bound.',
+                'MalformedRequest',
+                'The common-proof storage request version or message kind is unsupported.',
             );
         }
-    }
-    const firstOperationKind = operations[0]?.operationKind;
-    if (
-        firstOperationKind === undefined ||
-        (operations.length > 1 &&
-            (firstOperationKind !== 'delete' ||
-                operations.some(
-                    (operation) => operation.operationKind !== 'delete',
-                ))) ||
-        operations.some(
-            (operation) =>
-                operation.operationKind === 'append' &&
-                operation.bytes.byteLength >
-                    maximumExternalMemoryAppendByteLength,
-        )
-    ) {
-        throw new CommonProofWorkerRuntimeError(
-            'MalformedRequest',
-            'The common-proof storage request does not use the fixed executor transaction grammar.',
+        const maximumPayloadByteLength = reader.unsigned64();
+        const maximumOperationCount = reader.unsigned32();
+        const operationCount = reader.unsigned32();
+        const requestSequence = reader.unsigned64();
+        const runtimeBindingHash = reader.bytes(hashByteLength).slice();
+        const suppliedRequestDigest = reader.bytes(hashByteLength).slice();
+        if (
+            maximumPayloadByteLength === 0n ||
+            maximumPayloadByteLength > maximumWorkerPayloadByteLength ||
+            maximumOperationCount === 0 ||
+            maximumOperationCount > maximumWorkerOperationCount ||
+            operationCount === 0 ||
+            operationCount > maximumOperationCount ||
+            requestSequence === 0n
+        ) {
+            throw new CommonProofWorkerRuntimeError(
+                'ResourceLimit',
+                'The common-proof storage request exceeds the absolute worker safety bound.',
+            );
+        }
+        const minimumOperationByteLength =
+            operationCount * operationHeaderByteLength;
+        if (
+            !Number.isSafeInteger(minimumOperationByteLength) ||
+            ownedEncodedRequest.byteLength <
+                requestHeaderByteLength + minimumOperationByteLength
+        ) {
+            throw new CommonProofWorkerRuntimeError(
+                'MalformedRequest',
+                'The common-proof storage operation list is truncated.',
+            );
+        }
+        const operations: CommonProofExternalMemoryOperation[] = [];
+        let transactionPayloadByteLength = 0n;
+        for (
+            let operationIndex = 0;
+            operationIndex < operationCount;
+            operationIndex += 1
+        ) {
+            const operation = decodeOperation(reader, operationIndex);
+            operations.push(operation);
+            if (operation.operationKind === 'append') {
+                transactionPayloadByteLength += BigInt(
+                    operation.bytes.byteLength,
+                );
+            } else if (operation.operationKind === 'read') {
+                transactionPayloadByteLength += BigInt(operation.byteLength);
+            }
+            if (transactionPayloadByteLength > maximumPayloadByteLength) {
+                throw new CommonProofWorkerRuntimeError(
+                    'ResourceLimit',
+                    'The common-proof storage transaction payload exceeds its declared bound.',
+                );
+            }
+        }
+        const firstOperationKind = operations[0]?.operationKind;
+        if (
+            firstOperationKind === undefined ||
+            (operations.length > 1 &&
+                (firstOperationKind !== 'delete' ||
+                    operations.some(
+                        (operation) => operation.operationKind !== 'delete',
+                    ))) ||
+            operations.some(
+                (operation) =>
+                    operation.operationKind === 'append' &&
+                    operation.bytes.byteLength >
+                        maximumExternalMemoryAppendByteLength,
+            )
+        ) {
+            throw new CommonProofWorkerRuntimeError(
+                'MalformedRequest',
+                'The common-proof storage request does not use the fixed executor transaction grammar.',
+            );
+        }
+        if (!reader.complete()) {
+            throw new CommonProofWorkerRuntimeError(
+                'MalformedRequest',
+                'The common-proof storage request has trailing bytes.',
+            );
+        }
+        const operationBytes = ownedEncodedRequest.subarray(
+            requestHeaderByteLength,
         );
+        const expectedRequestDigest = framedHash(requestDigestDomain, [
+            unsigned16Bytes(schemaVersion),
+            runtimeBindingHash,
+            unsigned64Bytes(requestSequence),
+            unsigned64Bytes(maximumPayloadByteLength),
+            unsigned32Bytes(maximumOperationCount),
+            unsigned32Bytes(operationCount),
+            operationBytes,
+        ]);
+        try {
+            if (
+                !byteArraysEqual(suppliedRequestDigest, expectedRequestDigest)
+            ) {
+                throw new CommonProofWorkerRuntimeError(
+                    'WrongRequestDigest',
+                    'The common-proof storage request digest does not bind its exact operation list.',
+                );
+            }
+        } finally {
+            expectedRequestDigest.fill(0);
+        }
+        const request = Object.freeze({
+            maximumOperationCount,
+            maximumPayloadByteLength,
+            operations: Object.freeze(operations),
+            requestDigest: suppliedRequestDigest,
+            requestSequence,
+            runtimeBindingHash,
+        });
+        ownedRequestBytes.set(request, ownedEncodedRequest);
+        return request;
+    } catch (error) {
+        destroyOwnedArrayBuffer(ownedEncodedRequest);
+        throw error;
     }
-    if (!reader.complete()) {
-        throw new CommonProofWorkerRuntimeError(
-            'MalformedRequest',
-            'The common-proof storage request has trailing bytes.',
-        );
-    }
-    const operationBytes = ownedEncodedRequest.subarray(
-        requestHeaderByteLength,
-    );
-    const expectedRequestDigest = framedHash(requestDigestDomain, [
-        unsigned16Bytes(schemaVersion),
-        runtimeBindingHash,
-        unsigned64Bytes(requestSequence),
-        unsigned64Bytes(maximumPayloadByteLength),
-        unsigned32Bytes(maximumOperationCount),
-        unsigned32Bytes(operationCount),
-        operationBytes,
-    ]);
-    if (!byteArraysEqual(suppliedRequestDigest, expectedRequestDigest)) {
-        throw new CommonProofWorkerRuntimeError(
-            'WrongRequestDigest',
-            'The common-proof storage request digest does not bind its exact operation list.',
-        );
-    }
-    return Object.freeze({
-        maximumOperationCount,
-        maximumPayloadByteLength,
-        operations: Object.freeze(operations),
-        requestDigest: expectedRequestDigest,
-        requestSequence,
-        runtimeBindingHash,
-    });
 };
 
 const readDigest = (
@@ -535,13 +586,14 @@ const clearReadResults = (
     readResults: readonly CommonProofExternalMemoryReadResult[],
 ): void => {
     for (const result of readResults) {
-        result.bytes.fill(0);
+        destroyOwnedArrayBuffer(result.bytes);
     }
 };
 
 const encodeStorageResponse = (
     request: CommonProofExternalMemoryRequest,
     readResults: readonly CommonProofExternalMemoryReadResult[],
+    reusableResponseBuffer?: Uint8Array<ArrayBuffer>,
 ): Uint8Array<ArrayBuffer> => {
     const readOperations = request.operations.filter(
         (
@@ -590,8 +642,25 @@ const encodeStorageResponse = (
             'The common-proof storage response exceeds its fixed bound.',
         );
     }
-    const response = new Uint8Array(responseByteLength);
-    const view = new DataView(response.buffer);
+    if (
+        reusableResponseBuffer !== undefined &&
+        reusableResponseBuffer.byteLength < responseByteLength
+    ) {
+        throw new CommonProofWorkerRuntimeError(
+            'ResourceLimit',
+            'The reusable common-proof response buffer is too small.',
+        );
+    }
+    const response =
+        reusableResponseBuffer === undefined
+            ? new Uint8Array(responseByteLength)
+            : reusableResponseBuffer.subarray(0, responseByteLength);
+    response.fill(0);
+    const view = new DataView(
+        response.buffer,
+        response.byteOffset,
+        response.byteLength,
+    );
     let offset = 0;
     view.setUint16(offset, schemaVersion, true);
     offset += 2;
@@ -615,10 +684,12 @@ const encodeStorageResponse = (
         offset += 4;
         view.setUint32(offset, 0, true);
         offset += 4;
-        response.set(
-            readDigest(request.requestDigest, operation, bytes),
-            offset,
-        );
+        const digest = readDigest(request.requestDigest, operation, bytes);
+        try {
+            response.set(digest, offset);
+        } finally {
+            digest.fill(0);
+        }
         offset += hashByteLength;
         response.set(bytes, offset);
         offset += bytes.byteLength;
@@ -646,5 +717,31 @@ export const encodeCommonProofExternalMemoryResponse = (
         return encodeStorageResponse(request, readResults);
     } finally {
         clearReadResults(readResults);
+        clearCommonProofExternalMemoryRequest(request);
+    }
+};
+
+/**
+ * Encodes one response into caller-owned bounded storage. The returned view is
+ * valid until the caller reuses that buffer; read results and request bytes
+ * are cleared with the same semantics as the allocating encoder.
+ */
+export const encodeCommonProofExternalMemoryResponseInto = (
+    request: CommonProofExternalMemoryRequest,
+    readResults: readonly CommonProofExternalMemoryReadResult[],
+    reusableResponseBuffer: Uint8Array<ArrayBuffer>,
+): Uint8Array<ArrayBuffer> => {
+    try {
+        return encodeStorageResponse(
+            request,
+            readResults,
+            reusableResponseBuffer,
+        );
+    } catch (error) {
+        reusableResponseBuffer.fill(0);
+        throw error;
+    } finally {
+        clearReadResults(readResults);
+        clearCommonProofExternalMemoryRequest(request);
     }
 };

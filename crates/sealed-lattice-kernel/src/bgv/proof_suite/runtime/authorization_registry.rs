@@ -1,33 +1,41 @@
-#[cfg(test)]
-use super::ProofExternalMemoryTransactionRequest;
+use super::super::{
+    CommonProofAuthenticatedSourceReadRequest, ExactSameSecretAuthenticatedTranscriptPrefixRequest,
+    PreparedExactSameSecretTranscriptPrefix,
+};
 use super::{
     BTreeMap, BrowserWorkerAuthenticatedStorageHeadSource,
     BrowserWorkerAuthenticatedStorageTransitionSource, CanonicalStreamDomain,
-    CommonProofGenerationWorker, CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
-    CommonProofRelationPlanCapability, CommonProofRuntimeCancellation, CommonProofRuntimeError,
-    CommonProofRuntimeLimits, CommonProofVerificationWorker, CommonProofVerificationWorkerError,
+    CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationWorker,
+    CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
+    CommonProofRelationPlanCapability, CommonProofRuntimeError, CommonProofRuntimeLimits,
+    CommonProofVerificationReadbackAccounting, CommonProofVerificationStatementSource,
+    CommonProofVerificationWorker, CommonProofVerificationWorkerError,
     CommonProofVerificationWorkerPoll, DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH,
     DURABLE_AUTHORIZATION_FRAME_MAGIC, DURABLE_AUTHORIZATION_FRAME_VERSION,
-    DURABLE_AUTHORIZATION_RECORD_HASH_DOMAIN, GeneratedCommonProof, HASH_BYTE_LENGTH, Hash512,
-    LocalStorageBinding, MAXIMUM_COMMON_PROOF_BYTE_LENGTH, PROOF_APPLICATION_BINDING_HASH_DOMAIN,
+    DURABLE_AUTHORIZATION_RECORD_HASH_DOMAIN, ExpectedCommonProofPackageBindings,
+    GeneratedCommonProof, HASH_BYTE_LENGTH, Hash512, LocalStorageBinding,
+    MAXIMUM_COMMON_PROOF_BYTE_LENGTH, PROOF_APPLICATION_BINDING_HASH_DOMAIN,
     PendingCommonProofGenerationCheckpoint, PreparedCommonProofGeneration,
     PreparedCommonProofVerification, ProofApplicationSlotCeilings,
     VERIFICATION_BINDING_HASH_DOMAIN, VerifiedCanonicalStreamSummary, VerifiedCommonProof,
-    common_proof_registry_entry_count, hash_framed_parts_512,
-    require_common_proof_registry_entry_capacity,
+    VerifiedCommonProofStatementSource, Zeroizing, common_proof_registry_entry_count,
+    hash_framed_parts_512, require_common_proof_registry_entry_capacity,
 };
+#[cfg(test)]
+use super::{CommonProofGenerationAuthorization, ProofExternalMemoryTransactionRequest};
+use crate::foundation::{StreamDescriptor, VerifiedBoardApplicationSource};
 
 /// Exact durable application reservation consumed by one proof attempt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofApplicationBinding {
     pub(super) proof_application_slot_hash: [u8; HASH_BYTE_LENGTH],
     pub(super) canonical_proof_application_binding_hash: [u8; HASH_BYTE_LENGTH],
+    pub(super) row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
     pub(super) application_statement_schema_identifier: u16,
     pub(super) proof_header_hash: [u8; HASH_BYTE_LENGTH],
     pub(super) proof_stream_domain: CanonicalStreamDomain,
     pub(super) proof_stream_full_object_digest: [u8; HASH_BYTE_LENGTH],
     pub(super) proof_byte_length: u64,
-    pub(super) proof_query_count: u32,
 }
 
 impl CommonProofApplicationBinding {
@@ -35,29 +43,28 @@ impl CommonProofApplicationBinding {
     pub(crate) fn new(
         proof_application_slot_hash: [u8; HASH_BYTE_LENGTH],
         canonical_proof_application_binding_hash: [u8; HASH_BYTE_LENGTH],
+        row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
         application_statement_schema_identifier: u16,
         proof_header_hash: [u8; HASH_BYTE_LENGTH],
         proof_stream_domain: CanonicalStreamDomain,
         proof_stream_full_object_digest: [u8; HASH_BYTE_LENGTH],
         proof_byte_length: u64,
-        proof_query_count: u32,
     ) -> Result<Self, CommonProofRuntimeError> {
         if application_statement_schema_identifier == 0
             || proof_byte_length == 0
             || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64
-            || proof_query_count == 0
         {
             return Err(CommonProofRuntimeError::InvalidLimits);
         }
         Ok(Self {
             proof_application_slot_hash,
             canonical_proof_application_binding_hash,
+            row_code_whir_construction_plan_identity_hash,
             application_statement_schema_identifier,
             proof_header_hash,
             proof_stream_domain,
             proof_stream_full_object_digest,
             proof_byte_length,
-            proof_query_count,
         })
     }
 
@@ -67,12 +74,12 @@ impl CommonProofApplicationBinding {
             &[
                 &self.proof_application_slot_hash,
                 &self.canonical_proof_application_binding_hash,
+                &self.row_code_whir_construction_plan_identity_hash,
                 &self.application_statement_schema_identifier.to_le_bytes(),
                 &self.proof_header_hash,
                 &self.proof_stream_domain.canonical_code().to_le_bytes(),
                 &self.proof_stream_full_object_digest,
                 &self.proof_byte_length.to_le_bytes(),
-                &self.proof_query_count.to_le_bytes(),
             ],
         )
     }
@@ -192,29 +199,38 @@ impl PendingCommonProofAuthorizationHandle {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CommonProofAuthenticatedLedgerHeadCapabilityHandle(u32);
-
-impl CommonProofAuthenticatedLedgerHeadCapabilityHandle {
-    pub(crate) const fn get(&self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CommonProofAuthenticatedLedgerTransitionCapabilityHandle(u32);
-
-impl CommonProofAuthenticatedLedgerTransitionCapabilityHandle {
-    pub(crate) const fn get(&self) -> u32 {
-        self.0
-    }
-}
-
 struct CommonProofOperationEntry {
     binding: CommonProofVerificationBinding,
     limits: CommonProofRuntimeLimits,
+    statement_source: Option<CommonProofVerificationStatementSource>,
     cancellation_requested: bool,
     worker: Option<CommonProofVerificationWorker>,
+}
+
+#[derive(Clone, Copy)]
+struct CommonProofRelationPlanTerminalBinding {
+    relation_plan_hash: [u8; HASH_BYTE_LENGTH],
+    row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
+    expected_verified_query_count: u32,
+    relation_plan_variant_hash: [u8; HASH_BYTE_LENGTH],
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+}
+
+impl CommonProofRelationPlanTerminalBinding {
+    fn try_from_relation_plan(
+        relation_plan: &CommonProofRelationPlanCapability,
+    ) -> Result<Self, CommonProofRuntimeError> {
+        Ok(Self {
+            relation_plan_hash: relation_plan.relation_plan_hash(),
+            row_code_whir_construction_plan_identity_hash: relation_plan
+                .row_code_whir_construction_plan_identity_hash(),
+            expected_verified_query_count: relation_plan.proof_query_count()?,
+            relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+            schedule_position: relation_plan.schedule_position,
+            top_count: relation_plan.top_count,
+        })
+    }
 }
 
 struct CommonProofGenerationOperationEntry {
@@ -227,6 +243,7 @@ struct GeneratedCommonProofCapabilityEntry {
 
 struct VerifiedCommonProofCapabilityEntry {
     binding: CommonProofVerificationBinding,
+    statement_source: Option<CommonProofVerificationStatementSource>,
     proof: VerifiedCommonProof,
     verified_stream: VerifiedCanonicalStreamSummary,
 }
@@ -242,7 +259,32 @@ pub(crate) struct ConsumedVerifiedCommonProofCapability {
     entry: VerifiedCommonProofCapabilityEntry,
 }
 
-impl ConsumedVerifiedCommonProofCapability {
+/// Callback-scoped view of one still-retained verifier capability. Exact
+/// family adapters use this view to complete every fallible terminal and
+/// destination check before the registry permanently retires the handle.
+#[derive(Clone, Copy)]
+pub(crate) struct BorrowedVerifiedCommonProofCapability<'capability> {
+    entry: &'capability VerifiedCommonProofCapabilityEntry,
+}
+
+impl BorrowedVerifiedCommonProofCapability<'_> {
+    /// Borrows the exact family-minted statement source that remained linear
+    /// throughout positive verification. A terminal can join against this
+    /// authority before the generic capability is consumed.
+    pub(crate) fn statement_source(
+        &self,
+    ) -> Result<&VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.entry
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()
+    }
+
+    pub(crate) const fn verified_proof(&self) -> &VerifiedCommonProof {
+        &self.entry.proof
+    }
+
     pub(crate) const fn protocol_version(&self) -> u16 {
         self.entry.proof.protocol_version()
     }
@@ -297,6 +339,10 @@ impl ConsumedVerifiedCommonProofCapability {
         self.entry.verified_stream.stream_domain()
     }
 
+    pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
+        self.entry.verified_stream.stream_descriptor()
+    }
+
     pub(crate) const fn proof_stream_full_object_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.entry.verified_stream.full_object_digest().into_bytes()
     }
@@ -305,12 +351,93 @@ impl ConsumedVerifiedCommonProofCapability {
         self.entry.proof.proof_byte_length()
     }
 
-    pub(crate) const fn verified_query_count(&self) -> u32 {
-        self.entry.proof.verified_query_count()
-    }
-
     pub(crate) const fn relation_plan_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.entry.binding.relation_plan_hash
+    }
+
+    pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.proof.relation_plan_variant_hash()
+    }
+
+    pub(crate) const fn schedule_position(&self) -> Option<u32> {
+        self.entry.proof.schedule_position()
+    }
+
+    pub(crate) const fn top_count(&self) -> Option<u16> {
+        self.entry.proof.top_count()
+    }
+}
+
+impl ConsumedVerifiedCommonProofCapability {
+    pub(crate) const fn borrowed(&self) -> BorrowedVerifiedCommonProofCapability<'_> {
+        BorrowedVerifiedCommonProofCapability { entry: &self.entry }
+    }
+
+    /// Borrows the exact source while this one-shot verified capability owns
+    /// it. Consuming the capability into its family terminal also consumes the
+    /// source; no binding copy can recreate it.
+    pub(crate) fn statement_source(
+        &self,
+    ) -> Result<&VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.entry
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()
+    }
+
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.entry.proof.protocol_version()
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.proof.suite_identifier()
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.action_context_hash
+    }
+
+    pub(crate) const fn board_object_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.board_object_hash
+    }
+
+    pub(crate) fn verification_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.binding_hash()
+    }
+
+    pub(crate) const fn proof_application_slot_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry
+            .binding
+            .proof_application
+            .proof_application_slot_hash
+    }
+
+    pub(crate) const fn canonical_proof_application_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry
+            .binding
+            .proof_application
+            .canonical_proof_application_binding_hash
+    }
+
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.entry.proof.application_statement_schema_identifier()
+    }
+
+    pub(crate) const fn application_statement_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.proof.application_statement_hash()
+    }
+
+    pub(crate) const fn proof_stream_domain(&self) -> CanonicalStreamDomain {
+        self.entry.verified_stream.stream_domain()
+    }
+
+    pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
+        self.entry.verified_stream.stream_descriptor()
     }
 
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
@@ -349,15 +476,6 @@ impl CommonProofAuthenticatedLedgerHead {
     }
 }
 
-struct CommonProofAuthenticatedLedgerHeadCapabilityEntry {
-    terminal_capability_handle: u32,
-    authenticated_head: CommonProofAuthenticatedLedgerHead,
-}
-
-struct CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
-    pending_authorization_handle: u32,
-}
-
 struct PendingCommonProofAuthorizationEntry {
     predecessor_authenticated_storage_head: CommonProofAuthenticatedLedgerHead,
     durable_authorization_frame_digest: [u8; HASH_BYTE_LENGTH],
@@ -374,11 +492,7 @@ struct PendingCommonProofAuthorizationEntry {
 pub(crate) struct PreparedCommonProofAuthorization {
     pending_handle: PendingCommonProofAuthorizationHandle,
     durable_authorization_frame: Box<[u8; DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH]>,
-    durable_authorization_frame_digest: [u8; HASH_BYTE_LENGTH],
     proof_application_slot_hash: [u8; HASH_BYTE_LENGTH],
-    application_statement_schema_identifier: u16,
-    proof_byte_length: u64,
-    verified_query_count: u32,
 }
 
 impl PreparedCommonProofAuthorization {
@@ -390,28 +504,8 @@ impl PreparedCommonProofAuthorization {
         self.durable_authorization_frame.as_slice()
     }
 
-    pub(crate) const fn durable_authorization_frame_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
-        self.durable_authorization_frame_digest
-    }
-
     pub(crate) const fn proof_application_slot_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.proof_application_slot_hash
-    }
-
-    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
-        self.application_statement_schema_identifier
-    }
-
-    pub(crate) const fn proof_byte_length(&self) -> u64 {
-        self.proof_byte_length
-    }
-
-    pub(crate) const fn verified_query_count(&self) -> u32 {
-        self.verified_query_count
-    }
-
-    pub(crate) fn into_pending_handle(self) -> PendingCommonProofAuthorizationHandle {
-        self.pending_handle
     }
 }
 
@@ -423,8 +517,6 @@ pub(crate) struct CommonProofRuntimeRegistry {
     next_generation_operation_handle: u32,
     next_verified_capability_handle: u32,
     next_generated_capability_handle: u32,
-    next_authenticated_ledger_head_handle: u32,
-    next_authenticated_ledger_transition_handle: u32,
     next_pending_authorization_handle: u32,
     operations: BTreeMap<CommonProofVerificationOperationHandle, CommonProofOperationEntry>,
     generation_operations:
@@ -433,14 +525,6 @@ pub(crate) struct CommonProofRuntimeRegistry {
         BTreeMap<VerifiedCommonProofCapabilityHandle, VerifiedCommonProofCapabilityEntry>,
     generated_capabilities:
         BTreeMap<GeneratedCommonProofCapabilityHandle, GeneratedCommonProofCapabilityEntry>,
-    authenticated_ledger_heads: BTreeMap<
-        CommonProofAuthenticatedLedgerHeadCapabilityHandle,
-        CommonProofAuthenticatedLedgerHeadCapabilityEntry,
-    >,
-    authenticated_ledger_transitions: BTreeMap<
-        CommonProofAuthenticatedLedgerTransitionCapabilityHandle,
-        CommonProofAuthenticatedLedgerTransitionCapabilityEntry,
-    >,
     pending_authorizations:
         BTreeMap<PendingCommonProofAuthorizationHandle, PendingCommonProofAuthorizationEntry>,
 }
@@ -452,15 +536,11 @@ impl Default for CommonProofRuntimeRegistry {
             next_generation_operation_handle: 1,
             next_verified_capability_handle: 1,
             next_generated_capability_handle: 1,
-            next_authenticated_ledger_head_handle: 1,
-            next_authenticated_ledger_transition_handle: 1,
             next_pending_authorization_handle: 1,
             operations: BTreeMap::new(),
             generation_operations: BTreeMap::new(),
             verified_capabilities: BTreeMap::new(),
             generated_capabilities: BTreeMap::new(),
-            authenticated_ledger_heads: BTreeMap::new(),
-            authenticated_ledger_transitions: BTreeMap::new(),
             pending_authorizations: BTreeMap::new(),
         }
     }
@@ -473,8 +553,6 @@ impl CommonProofRuntimeRegistry {
             self.generation_operations.len(),
             self.verified_capabilities.len(),
             self.generated_capabilities.len(),
-            self.authenticated_ledger_heads.len(),
-            self.authenticated_ledger_transitions.len(),
             self.pending_authorizations.len(),
         ])
     }
@@ -492,8 +570,6 @@ impl CommonProofRuntimeRegistry {
             self.generation_operations.len(),
             self.verified_capabilities.len(),
             self.generated_capabilities.len(),
-            self.authenticated_ledger_heads.len(),
-            self.authenticated_ledger_transitions.len(),
             self.pending_authorizations.len(),
         ])
     }
@@ -510,6 +586,7 @@ impl CommonProofRuntimeRegistry {
             CommonProofOperationEntry {
                 binding,
                 limits,
+                statement_source: None,
                 cancellation_requested: false,
                 worker: None,
             },
@@ -517,22 +594,14 @@ impl CommonProofRuntimeRegistry {
     }
 
     #[cfg(test)]
-    pub(super) fn insert_test_authenticated_ledger_transition(&mut self, identifier: u32) {
-        self.authenticated_ledger_transitions.insert(
-            CommonProofAuthenticatedLedgerTransitionCapabilityHandle(identifier),
-            CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
-                pending_authorization_handle: identifier,
-            },
-        );
+    pub(super) fn remove_test_verification_operation(&mut self, identifier: u32) {
+        self.operations
+            .remove(&CommonProofVerificationOperationHandle::from_identifier(
+                identifier,
+            ));
     }
 
     #[cfg(test)]
-    pub(super) fn remove_test_authenticated_ledger_transition(&mut self, identifier: u32) {
-        self.authenticated_ledger_transitions.remove(
-            &CommonProofAuthenticatedLedgerTransitionCapabilityHandle(identifier),
-        );
-    }
-
     pub(crate) fn begin_owned_generation(
         &mut self,
         prepared: PreparedCommonProofGeneration,
@@ -561,22 +630,18 @@ impl CommonProofRuntimeRegistry {
         Ok(handle)
     }
 
-    pub(crate) fn resume_owned_generation(
-        &mut self,
-        prepared: PreparedCommonProofGeneration,
-        authenticated_checkpoint_state: &[u8],
-    ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
-        let handle = self.preissue_generation_operation_handle()?;
-        self.resume_owned_generation_with_handle(prepared, authenticated_checkpoint_state, handle)
-    }
-
     pub(crate) fn resume_owned_generation_with_handle(
         &mut self,
         prepared: PreparedCommonProofGeneration,
         authenticated_checkpoint_state: &[u8],
+        authenticated_generation_cursor_manifest: &[u8],
         handle: CommonProofGenerationOperationHandle,
     ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
-        let worker = CommonProofGenerationWorker::resume(prepared, authenticated_checkpoint_state)?;
+        let worker = CommonProofGenerationWorker::resume(
+            prepared,
+            authenticated_checkpoint_state,
+            authenticated_generation_cursor_manifest,
+        )?;
         self.generation_operations
             .insert(handle, CommonProofGenerationOperationEntry { worker });
         Ok(handle)
@@ -593,16 +658,50 @@ impl CommonProofRuntimeRegistry {
             .poll()
     }
 
-    pub(crate) fn generation_storage_request(
+    pub(crate) fn generation_storage_request_byte_length(
         &self,
         handle: CommonProofGenerationOperationHandle,
-    ) -> Result<&[u8], CommonProofRuntimeError> {
+    ) -> Result<usize, CommonProofRuntimeError> {
         self.generation_operations
             .get(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .worker
-            .pending_storage_request()
-            .ok_or(CommonProofRuntimeError::TransactionResponseMissing)
+            .pending_storage_request_byte_length()
+    }
+
+    pub(crate) fn encode_generation_storage_request_into(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        output: &mut [u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .encode_pending_storage_request_into(output)
+    }
+
+    pub(crate) fn generation_external_memory_accounting(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<CommonProofGenerationExternalMemoryAccounting, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .external_memory_accounting()
+    }
+
+    pub(crate) fn generation_authenticated_source_read_request(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<CommonProofAuthenticatedSourceReadRequest, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .pending_authenticated_source_read()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
     pub(crate) fn generation_checkpoint_state(
@@ -618,6 +717,115 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
+    #[cfg(test)]
+    pub(crate) fn generation_initial_phase_commitment_lane_checkpoint_coordinates(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Option<(u8, u32)>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .pending_initial_phase_commitment_lane_checkpoint_coordinates()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_initial_phase_commitment_lane_checkpoint_bytes(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .initial_phase_commitment_lane_checkpoint_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_initial_phase_commitment_lane_restore_target(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Option<u8>, CommonProofRuntimeError> {
+        Ok(self
+            .generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .initial_phase_commitment_lane_restore_target())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_generation_initial_phase_commitment_lane_checkpoint(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        phase_ordinal: u8,
+        completed_lane_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .restore_initial_phase_commitment_lane_checkpoint(
+                phase_ordinal,
+                completed_lane_count,
+                canonical_checkpoint_bytes,
+            )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_quotient_constraint_checkpoint_coordinates(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Option<u32>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .pending_quotient_constraint_checkpoint_coordinates()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_quotient_constraint_checkpoint_bytes(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<Vec<u8>, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .quotient_constraint_checkpoint_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation_quotient_constraint_checkpoint_restore_target(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<bool, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .quotient_constraint_checkpoint_restore_target()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_generation_quotient_constraint_checkpoint(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        completed_constraint_count: u32,
+        canonical_checkpoint_bytes: &[u8],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .restore_quotient_constraint_checkpoint(
+                completed_constraint_count,
+                canonical_checkpoint_bytes,
+            )
+    }
+
     pub(crate) fn generation_checkpoint_safe_boundary_ordinal(
         &self,
         handle: CommonProofGenerationOperationHandle,
@@ -631,31 +839,16 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
-    pub(crate) fn generation_checkpoint_cursor_count(
+    pub(crate) fn generation_checkpoint_cursor_manifest(
         &self,
         handle: CommonProofGenerationOperationHandle,
-    ) -> Result<usize, CommonProofRuntimeError> {
-        self.generation_operations
-            .get(&handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
-            .worker
-            .pending_checkpoint()
-            .map(|checkpoint| checkpoint.ordered_cursor_bytes().len())
-            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
-    }
-
-    pub(crate) fn generation_checkpoint_cursor(
-        &self,
-        handle: CommonProofGenerationOperationHandle,
-        cursor_index: usize,
     ) -> Result<&[u8], CommonProofRuntimeError> {
         self.generation_operations
             .get(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .worker
             .pending_checkpoint()
-            .and_then(|checkpoint| checkpoint.ordered_cursor_bytes().get(cursor_index))
-            .map(Vec::as_slice)
+            .map(PendingCommonProofGenerationCheckpoint::cursor_manifest_bytes)
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
@@ -713,6 +906,47 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .worker
             .supply_storage_response(encoded_response)
+    }
+
+    pub(crate) fn supply_generation_authenticated_source_range(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        authenticated_bytes: Zeroizing<Box<[u8]>>,
+    ) -> Result<(), CommonProofGenerationWorkerError> {
+        let operation = self
+            .generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        let request = operation
+            .worker
+            .pending_authenticated_source_read()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+        operation
+            .worker
+            .supply_authenticated_source_range(request, authenticated_bytes)
+    }
+
+    pub(in crate::bgv::proof_suite) fn generation_authenticated_transcript_prefix_request(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<ExactSameSecretAuthenticatedTranscriptPrefixRequest, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .authenticated_transcript_prefix_request()
+    }
+
+    pub(in crate::bgv::proof_suite) fn supply_generation_authenticated_transcript_prefix(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        prepared: PreparedExactSameSecretTranscriptPrefix,
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .supply_authenticated_transcript_prefix(prepared)
     }
 
     pub(crate) fn generation_output_chunk(
@@ -825,12 +1059,186 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
-    pub(crate) fn begin_owned_verification(
+    #[cfg(test)]
+    pub(crate) fn insert_test_generated_proof(
         &mut self,
-        prepared: PreparedCommonProofVerification,
-    ) -> Result<CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError> {
-        let handle = self.preissue_verification_operation_handle()?;
-        self.begin_owned_verification_with_handle(prepared, handle)
+        handle_identifier: u32,
+        authorization: CommonProofGenerationAuthorization,
+    ) -> Result<GeneratedCommonProofCapabilityHandle, CommonProofRuntimeError> {
+        let handle = GeneratedCommonProofCapabilityHandle::from_identifier(handle_identifier);
+        if handle_identifier == 0 || self.generated_capabilities.contains_key(&handle) {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let proof = GeneratedCommonProof::from_genuine_test_authorization(authorization)?;
+        self.generated_capabilities
+            .insert(handle, GeneratedCommonProofCapabilityEntry { proof });
+        Ok(GeneratedCommonProofCapabilityHandle::from_identifier(
+            handle_identifier,
+        ))
+    }
+
+    /// Retires every still-live member of a family-owned pending set. Missing
+    /// or duplicated identifiers remain a loud binding error, but cannot make
+    /// another retained proof leak when the owning lifecycle is cancelled.
+    pub(crate) fn retire_generated_proofs(
+        &mut self,
+        handle_identifiers: &[u32],
+    ) -> Result<(), CommonProofRuntimeError> {
+        let mut invalid_binding = false;
+        for (handle_ordinal, handle_identifier) in handle_identifiers.iter().enumerate() {
+            if *handle_identifier == 0
+                || handle_identifiers[..handle_ordinal].contains(handle_identifier)
+            {
+                invalid_binding = true;
+                continue;
+            }
+            if self
+                .generated_capabilities
+                .remove(&GeneratedCommonProofCapabilityHandle::from_identifier(
+                    *handle_identifier,
+                ))
+                .is_none()
+            {
+                invalid_binding = true;
+            }
+        }
+        if invalid_binding {
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn preflight_generated_proof_pending_statement(
+        &self,
+        handle: &GeneratedCommonProofCapabilityHandle,
+        expected_application_statement_schema_identifier: u16,
+        expected_roster_position: Option<u16>,
+        expected_schedule_position: Option<u32>,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+        self.generated_capabilities
+            .get(handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .preflight_pending_statement(
+                expected_application_statement_schema_identifier,
+                expected_roster_position,
+                expected_schedule_position,
+                canonical_application_statement_bytes,
+            )
+    }
+
+    pub(crate) fn preflight_generated_proof_attempt_binding(
+        &self,
+        handle: &GeneratedCommonProofCapabilityHandle,
+        expected_generation_binding_hash: [u8; HASH_BYTE_LENGTH],
+        expected_attempt_identifier: [u8; 32],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.generated_capabilities
+            .get(handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .preflight_attempt_binding(
+                expected_generation_binding_hash,
+                expected_attempt_identifier,
+            )
+    }
+
+    pub(crate) fn preflight_generated_proof_pending_package(
+        &self,
+        handle: &GeneratedCommonProofCapabilityHandle,
+        expected_bindings: ExpectedCommonProofPackageBindings<'_>,
+    ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+        self.generated_capabilities
+            .get(handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .preflight_pending_package(expected_bindings)
+    }
+
+    /// Consumes a completed local prover only after a positively verified
+    /// board object carries the exact generated proof descriptor and all
+    /// canonical application coordinates match the generation authority.
+    pub(crate) fn bind_generated_proof_to_verified_board_source(
+        &mut self,
+        handle: GeneratedCommonProofCapabilityHandle,
+        board_source: &VerifiedBoardApplicationSource,
+        board_proof_descriptor: &StreamDescriptor,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<CommonProofVerificationBinding, CommonProofRuntimeError> {
+        let binding = self
+            .generated_capabilities
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .bind_verified_board_source(
+                board_source,
+                board_proof_descriptor,
+                canonical_application_statement_bytes,
+            )?;
+        self.generated_capabilities
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        Ok(binding)
+    }
+
+    /// Consumes a completed collective setup prover only after an exact
+    /// accepted-package statement source carries the generated descriptor.
+    pub(crate) fn bind_generated_proof_to_verified_statement_source(
+        &mut self,
+        handle: GeneratedCommonProofCapabilityHandle,
+        statement_source: &super::VerifiedCommonProofStatementSource,
+    ) -> Result<CommonProofVerificationBinding, CommonProofRuntimeError> {
+        let binding = self
+            .generated_capabilities
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .bind_verified_statement_source(statement_source)?;
+        self.generated_capabilities
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        Ok(binding)
+    }
+
+    /// Validates one exact accepted-package binding set before retiring any
+    /// generated proof. This keeps a malformed joint package retryable and
+    /// makes the later retirement loop infallible after every descriptor and
+    /// application coordinate has been checked.
+    pub(crate) fn bind_generated_proofs_to_verified_statement_sources(
+        &mut self,
+        bindings: &[(u32, &super::VerifiedCommonProofStatementSource)],
+    ) -> Result<(), CommonProofRuntimeError> {
+        if bindings.is_empty() {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        for (binding_ordinal, (handle_identifier, statement_source)) in bindings.iter().enumerate()
+        {
+            if *handle_identifier == 0
+                || bindings[..binding_ordinal]
+                    .iter()
+                    .any(|(earlier_identifier, _)| earlier_identifier == handle_identifier)
+            {
+                return Err(CommonProofRuntimeError::WrongVerificationBinding);
+            }
+            let handle = GeneratedCommonProofCapabilityHandle::from_identifier(*handle_identifier);
+            self.generated_capabilities
+                .get(&handle)
+                .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+                .proof
+                .bind_verified_statement_source(statement_source)?;
+        }
+        for (handle_identifier, _) in bindings {
+            let removed = self.generated_capabilities.remove(
+                &GeneratedCommonProofCapabilityHandle::from_identifier(*handle_identifier),
+            );
+            assert!(
+                removed.is_some(),
+                "joint binding preflight retained every generated proof"
+            );
+        }
+        Ok(())
     }
 
     pub(crate) fn preissue_verification_operation_handle(
@@ -847,40 +1255,15 @@ impl CommonProofRuntimeRegistry {
         prepared: PreparedCommonProofVerification,
         handle: CommonProofVerificationOperationHandle,
     ) -> Result<CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError> {
-        let worker = CommonProofVerificationWorker::new(prepared)?;
+        let (statement_source, worker) = CommonProofVerificationWorker::new(prepared);
         self.operations.insert(
             handle,
             CommonProofOperationEntry {
                 binding: worker.verification_binding,
                 limits: worker.limits,
+                statement_source: Some(statement_source),
                 cancellation_requested: false,
                 worker: Some(worker),
-            },
-        );
-        Ok(handle)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn begin_verification(
-        &mut self,
-        binding: CommonProofVerificationBinding,
-        relation_plan: &CommonProofRelationPlanCapability,
-        limits: CommonProofRuntimeLimits,
-    ) -> Result<CommonProofVerificationOperationHandle, CommonProofRuntimeError> {
-        if binding.relation_plan_hash != relation_plan.relation_plan_hash() {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.require_entry_capacity()?;
-        let handle = CommonProofVerificationOperationHandle(take_nonrepeating_handle(
-            &mut self.next_operation_handle,
-        )?);
-        self.operations.insert(
-            handle,
-            CommonProofOperationEntry {
-                binding,
-                limits,
-                cancellation_requested: false,
-                worker: None,
             },
         );
         Ok(handle)
@@ -945,6 +1328,19 @@ impl CommonProofRuntimeRegistry {
             .poll()
     }
 
+    pub(crate) fn verification_readback_accounting(
+        &self,
+        handle: CommonProofVerificationOperationHandle,
+    ) -> Result<CommonProofVerificationReadbackAccounting, CommonProofRuntimeError> {
+        self.operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+            .map(CommonProofVerificationWorker::readback_accounting)
+    }
+
     pub(crate) fn supply_verification_readback_chunk(
         &mut self,
         handle: CommonProofVerificationOperationHandle,
@@ -987,54 +1383,27 @@ impl CommonProofRuntimeRegistry {
                 .take()
                 .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
         };
-        let (_binding, relation_plan, proof, verified_stream) = match worker.finish() {
-            Ok(terminal) => terminal,
-            Err(error) => {
-                self.operations.remove(&handle);
-                return Err(error);
-            }
+        let relation_plan_binding = {
+            let operation = self
+                .operations
+                .get(&handle)
+                .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+            let relation_plan = operation
+                .statement_source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+                .relation_plan();
+            CommonProofRelationPlanTerminalBinding::try_from_relation_plan(relation_plan)?
         };
-        match self.register_verified_proof_with_identifier(
+        let (proof, verified_stream) = worker.finish()?;
+        self.register_verified_proof_with_identifier(
             handle,
-            &relation_plan,
+            relation_plan_binding,
             proof,
             verified_stream,
             capability_identifier,
-        ) {
-            Ok(capability_handle) => Ok(capability_handle),
-            Err(error) => {
-                self.operations.remove(&handle);
-                Err(CommonProofVerificationWorkerError::Runtime(error))
-            }
-        }
-    }
-
-    pub(crate) fn request_cancellation(
-        &mut self,
-        handle: CommonProofVerificationOperationHandle,
-    ) -> Result<(), CommonProofRuntimeError> {
-        let operation = self
-            .operations
-            .get_mut(&handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        operation.cancellation_requested = true;
-        if let Some(worker) = operation.worker.as_mut() {
-            worker.cancel();
-        }
-        Ok(())
-    }
-
-    pub(crate) fn cancellation(
-        &self,
-        handle: CommonProofVerificationOperationHandle,
-    ) -> Result<CommonProofRuntimeCancellation, CommonProofRuntimeError> {
-        let operation = self
-            .operations
-            .get(&handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        Ok(CommonProofRuntimeCancellation {
-            cancellation_requested: operation.cancellation_requested,
-        })
+        )
+        .map_err(CommonProofVerificationWorkerError::Runtime)
     }
 
     pub(crate) fn cancel_operation(
@@ -1051,34 +1420,59 @@ impl CommonProofRuntimeRegistry {
         Ok(())
     }
 
-    /// Converts the verifier's terminal, non-constructible token into a
-    /// process-local capability. Decoded bytes, hashes, and caller-supplied
-    /// verdicts cannot enter this registry.
-    pub(crate) fn register_verified_proof(
+    /// Borrows the exact statement source retained by an active, cancelled,
+    /// or failed verifier operation. Families use this only to reserve and
+    /// validate the original source destination before ownership moves.
+    #[cfg(test)]
+    pub(crate) fn with_verification_statement_source<Output>(
+        &self,
+        handle: CommonProofVerificationOperationHandle,
+        inspect: impl FnOnce(&VerifiedCommonProofStatementSource) -> Output,
+    ) -> Result<Output, CommonProofRuntimeError> {
+        let source = self
+            .operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()?;
+        Ok(inspect(source))
+    }
+
+    /// Cancels a verifier operation and returns its original family-minted
+    /// source by move. The caller must first reserve a destination through the
+    /// borrowed preflight above so this transition has no fallible commit.
+    #[cfg(test)]
+    pub(crate) fn cancel_operation_and_take_statement_source(
         &mut self,
         handle: CommonProofVerificationOperationHandle,
-        relation_plan: &CommonProofRelationPlanCapability,
-        proof: VerifiedCommonProof,
-        verified_stream: VerifiedCanonicalStreamSummary,
-    ) -> Result<VerifiedCommonProofCapabilityHandle, CommonProofRuntimeError> {
-        let capability_identifier = take_replacement_handle_before_consuming_source(
-            &self.operations,
-            &handle,
-            &mut self.next_verified_capability_handle,
-        )?;
-        self.register_verified_proof_with_identifier(
-            handle,
-            relation_plan,
-            proof,
-            verified_stream,
-            capability_identifier,
-        )
+    ) -> Result<VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()?;
+        let mut operation = self
+            .operations
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        if let Some(worker) = operation.worker.as_mut() {
+            worker.cancel();
+        }
+        operation
+            .statement_source
+            .take()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .into_exact_source()
     }
 
     fn register_verified_proof_with_identifier(
         &mut self,
         handle: CommonProofVerificationOperationHandle,
-        relation_plan: &CommonProofRelationPlanCapability,
+        relation_plan: CommonProofRelationPlanTerminalBinding,
         proof: VerifiedCommonProof,
         verified_stream: VerifiedCanonicalStreamSummary,
         capability_identifier: u32,
@@ -1088,7 +1482,9 @@ impl CommonProofRuntimeRegistry {
         if operation.cancellation_requested {
             return Err(CommonProofRuntimeError::CancellationRequested);
         }
-        if operation.binding.relation_plan_hash != relation_plan.relation_plan_hash()
+        if operation.binding.relation_plan_hash != relation_plan.relation_plan_hash
+            || proof_application.row_code_whir_construction_plan_identity_hash
+                != relation_plan.row_code_whir_construction_plan_identity_hash
             || operation.binding.suite_identifier != proof.suite_identifier()
             || proof_application.application_statement_schema_identifier
                 != proof.application_statement_schema_identifier()
@@ -1098,21 +1494,42 @@ impl CommonProofRuntimeRegistry {
                 != verified_stream.full_object_digest().into_bytes()
             || proof_application.proof_byte_length != verified_stream.total_byte_length()
             || proof_application.proof_byte_length != proof.proof_byte_length()
-            || usize::try_from(proof_application.proof_byte_length).ok()
-                != Some(operation.limits.proof_byte_length())
-            || proof_application.proof_query_count != proof.verified_query_count()
-            || proof.relation_plan_variant_hash() != relation_plan.relation_plan_variant_hash()
+            || usize::try_from(proof_application.proof_byte_length)
+                .ok()
+                .is_none_or(|proof_byte_length| {
+                    proof_byte_length > operation.limits.maximum_proof_byte_length()
+                })
+            || proof.verified_query_count() != relation_plan.expected_verified_query_count
+            || proof.row_code_whir_construction_plan_identity_hash()
+                != relation_plan.row_code_whir_construction_plan_identity_hash
+            || proof.relation_plan_variant_hash() != relation_plan.relation_plan_variant_hash
             || proof.schedule_position() != relation_plan.schedule_position
             || proof.top_count() != relation_plan.top_count
+            || operation.statement_source.as_ref().is_some_and(|source| {
+                source.verification_binding() != operation.binding
+                    || source.relation_plan().relation_plan_hash()
+                        != relation_plan.relation_plan_hash
+                    || source
+                        .relation_plan()
+                        .row_code_whir_construction_plan_identity_hash()
+                        != relation_plan.row_code_whir_construction_plan_identity_hash
+                    || source.relation_plan().relation_plan_variant_hash()
+                        != relation_plan.relation_plan_variant_hash
+                    || source.relation_plan().schedule_position != relation_plan.schedule_position
+                    || source.relation_plan().top_count != relation_plan.top_count
+            })
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        let binding = operation.binding;
-        self.operations.remove(&handle);
+        let operation = self
+            .operations
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
         self.verified_capabilities.insert(
             VerifiedCommonProofCapabilityHandle(capability_identifier),
             VerifiedCommonProofCapabilityEntry {
-                binding,
+                binding: operation.binding,
+                statement_source: operation.statement_source,
                 proof,
                 verified_stream,
             },
@@ -1132,46 +1549,18 @@ impl CommonProofRuntimeRegistry {
             .verified_capabilities
             .remove(handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        self.authenticated_ledger_heads
-            .retain(|_, head| head.terminal_capability_handle != handle.0);
         Ok(ConsumedVerifiedCommonProofCapability { entry })
     }
 
-    /// Retains one authenticated browser-worker ledger head for the exact
-    /// terminal verifier capability. The participant identity remains the
-    /// local browser identity; it is deliberately not compared with the proof
-    /// producer's identity.
-    pub(crate) fn retain_authenticated_ledger_head(
-        &mut self,
-        terminal_capability_handle: &VerifiedCommonProofCapabilityHandle,
-        source: &BrowserWorkerAuthenticatedStorageHeadSource,
-    ) -> Result<CommonProofAuthenticatedLedgerHeadCapabilityHandle, CommonProofRuntimeError> {
-        let verified_capability = self
-            .verified_capabilities
-            .get(terminal_capability_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let authenticated_head =
-            CommonProofAuthenticatedLedgerHead::from_browser_worker_source(source);
-        if !authenticated_head_matches_binding(authenticated_head, verified_capability.binding)
-            || self
-                .authenticated_ledger_heads
-                .values()
-                .any(|entry| entry.terminal_capability_handle == terminal_capability_handle.0)
-        {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        self.require_entry_capacity()?;
-        let handle = CommonProofAuthenticatedLedgerHeadCapabilityHandle(take_nonrepeating_handle(
-            &mut self.next_authenticated_ledger_head_handle,
-        )?);
-        self.authenticated_ledger_heads.insert(
-            CommonProofAuthenticatedLedgerHeadCapabilityHandle(handle.0),
-            CommonProofAuthenticatedLedgerHeadCapabilityEntry {
-                terminal_capability_handle: terminal_capability_handle.0,
-                authenticated_head,
-            },
-        );
-        Ok(handle)
+    pub(crate) fn with_verified_proof_for_protocol<Output>(
+        &self,
+        handle: &VerifiedCommonProofCapabilityHandle,
+        inspect: impl FnOnce(BorrowedVerifiedCommonProofCapability<'_>) -> Output,
+    ) -> Result<Output, CommonProofRuntimeError> {
+        self.verified_capabilities
+            .get(handle)
+            .map(|entry| inspect(BorrowedVerifiedCommonProofCapability { entry }))
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
     /// Joins a browser-worker authenticated head and prepares one durable
@@ -1191,11 +1580,7 @@ impl CommonProofRuntimeRegistry {
         if !authenticated_head_matches_binding(
             predecessor_authenticated_storage_head,
             verified_capability.binding,
-        ) || self
-            .authenticated_ledger_heads
-            .values()
-            .any(|entry| entry.terminal_capability_handle == terminal_capability_handle.0)
-        {
+        ) {
             return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
         let pending_identifier =
@@ -1207,43 +1592,6 @@ impl CommonProofRuntimeRegistry {
         Ok(self.retain_pending_authorization(
             pending_identifier,
             VerifiedCommonProofCapabilityHandle(terminal_capability_handle.0),
-            entry,
-            predecessor_authenticated_storage_head,
-        ))
-    }
-
-    /// Moves one terminal verifier capability and its authenticated predecessor
-    /// head into a retained pending state. The returned frame contains only
-    /// verifier-derived facts and is never decoded as proof authority.
-    pub(crate) fn prepare_verified_proof_application(
-        &mut self,
-        handle: &VerifiedCommonProofCapabilityHandle,
-        predecessor_head_handle: &CommonProofAuthenticatedLedgerHeadCapabilityHandle,
-    ) -> Result<PreparedCommonProofAuthorization, CommonProofRuntimeError> {
-        let predecessor_head = self
-            .authenticated_ledger_heads
-            .get(predecessor_head_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        if predecessor_head.terminal_capability_handle != handle.0
-            || !self.verified_capabilities.contains_key(handle)
-        {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        let pending_identifier =
-            take_nonrepeating_handle(&mut self.next_pending_authorization_handle)?;
-        let original_capability_handle = VerifiedCommonProofCapabilityHandle(handle.0);
-        let entry = self
-            .verified_capabilities
-            .remove(handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let predecessor_authenticated_storage_head = self
-            .authenticated_ledger_heads
-            .remove(predecessor_head_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
-            .authenticated_head;
-        Ok(self.retain_pending_authorization(
-            pending_identifier,
-            original_capability_handle,
             entry,
             predecessor_authenticated_storage_head,
         ))
@@ -1262,16 +1610,10 @@ impl CommonProofRuntimeRegistry {
         let prepared = PreparedCommonProofAuthorization {
             pending_handle: PendingCommonProofAuthorizationHandle(pending_identifier),
             durable_authorization_frame,
-            durable_authorization_frame_digest,
             proof_application_slot_hash: entry
                 .binding
                 .proof_application
                 .proof_application_slot_hash,
-            application_statement_schema_identifier: entry
-                .proof
-                .application_statement_schema_identifier(),
-            proof_byte_length: entry.proof.proof_byte_length(),
-            verified_query_count: entry.proof.verified_query_count(),
         };
         self.pending_authorizations.insert(
             PendingCommonProofAuthorizationHandle(pending_identifier),
@@ -1283,42 +1625,6 @@ impl CommonProofRuntimeRegistry {
             },
         );
         prepared
-    }
-
-    /// Mints one exact transition capability from a freshly authenticated
-    /// browser-worker head. A mismatch leaves the pending proof authority live.
-    pub(crate) fn retain_authenticated_ledger_transition(
-        &mut self,
-        pending_handle: &PendingCommonProofAuthorizationHandle,
-        source: &BrowserWorkerAuthenticatedStorageTransitionSource,
-    ) -> Result<CommonProofAuthenticatedLedgerTransitionCapabilityHandle, CommonProofRuntimeError>
-    {
-        let pending = self
-            .pending_authorizations
-            .get(pending_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        if !authenticated_transition_source_is_valid(
-            pending.predecessor_authenticated_storage_head,
-            pending.durable_authorization_frame_digest,
-            source,
-        ) || self
-            .authenticated_ledger_transitions
-            .values()
-            .any(|entry| entry.pending_authorization_handle == pending_handle.0)
-        {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        self.require_entry_capacity()?;
-        let handle = CommonProofAuthenticatedLedgerTransitionCapabilityHandle(
-            take_nonrepeating_handle(&mut self.next_authenticated_ledger_transition_handle)?,
-        );
-        self.authenticated_ledger_transitions.insert(
-            CommonProofAuthenticatedLedgerTransitionCapabilityHandle(handle.0),
-            CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
-                pending_authorization_handle: pending_handle.0,
-            },
-        );
-        Ok(handle)
     }
 
     /// Joins a browser-worker authenticated transition and confirms one
@@ -1337,36 +1643,9 @@ impl CommonProofRuntimeRegistry {
             pending.predecessor_authenticated_storage_head,
             pending.durable_authorization_frame_digest,
             source,
-        ) || self
-            .authenticated_ledger_transitions
-            .values()
-            .any(|entry| entry.pending_authorization_handle == pending_handle.0)
-        {
+        ) {
             return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
-        self.pending_authorizations.remove(pending_handle);
-        Ok(())
-    }
-
-    /// Consumes retained proof authority only after an exact transition
-    /// capability was minted from the browser-owned authenticated store.
-    pub(crate) fn confirm_verified_proof_application(
-        &mut self,
-        pending_handle: &PendingCommonProofAuthorizationHandle,
-        transition_handle: &CommonProofAuthenticatedLedgerTransitionCapabilityHandle,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.pending_authorizations
-            .get(pending_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let transition = self
-            .authenticated_ledger_transitions
-            .get(transition_handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        if transition.pending_authorization_handle != pending_handle.0 {
-            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
-        }
-        self.authenticated_ledger_transitions
-            .remove(transition_handle);
         self.pending_authorizations.remove(pending_handle);
         Ok(())
     }
@@ -1392,8 +1671,6 @@ impl CommonProofRuntimeRegistry {
             .pending_authorizations
             .remove(pending_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        self.authenticated_ledger_transitions
-            .retain(|_, transition| transition.pending_authorization_handle != pending_handle.0);
         let restored_identifier = pending.original_capability_handle.0;
         self.verified_capabilities.insert(
             pending.original_capability_handle,
@@ -1482,7 +1759,14 @@ fn durable_authorization_frame(
             .proof_application
             .canonical_proof_application_binding_hash,
     );
-    append_authorization_frame_bytes(&mut frame, &mut cursor, &entry.binding.relation_plan_hash);
+    append_authorization_frame_bytes(
+        &mut frame,
+        &mut cursor,
+        &entry
+            .binding
+            .proof_application
+            .row_code_whir_construction_plan_identity_hash,
+    );
     append_authorization_frame_bytes(
         &mut frame,
         &mut cursor,
@@ -1520,11 +1804,6 @@ fn durable_authorization_frame(
         &mut frame,
         &mut cursor,
         &entry.proof.proof_byte_length().to_le_bytes(),
-    );
-    append_authorization_frame_bytes(
-        &mut frame,
-        &mut cursor,
-        &entry.proof.verified_query_count().to_le_bytes(),
     );
     append_authorization_frame_bytes(
         &mut frame,
