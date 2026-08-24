@@ -19,6 +19,14 @@ pub(crate) mod hashing;
     )
 )]
 pub(crate) mod tally_circuit;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the unactivated tally preparation functionality is not connected to the protocol surface"
+    )
+)]
+pub(crate) mod tally_preparation;
 pub(crate) mod transcript_core;
 
 use core::{ptr, slice};
