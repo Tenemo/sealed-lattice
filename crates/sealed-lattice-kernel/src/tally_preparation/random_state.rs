@@ -170,17 +170,25 @@ pub(crate) fn parse_tally_preparation_random_state(
         label_keys.push(WireLabelKey(key));
     }
 
-    let participant_count = usize::from(circuit.profile().participant_count());
     let score_input_wire_count = usize_from_u64(geometry.score_input_wire_count)?;
     let mut score_input_mask_polynomials = Vec::new();
     score_input_mask_polynomials
         .try_reserve_exact(score_input_wire_count)
         .map_err(|_| TallyPreparationError::ArithmeticOverflow)?;
-    for score_input_position in 0..score_input_wire_count {
-        let wire_position = participant_count
-            .checked_add(score_input_position)
-            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
-        score_input_mask_polynomials.push(read_mask_polynomial(wire_masks[wire_position], source)?);
+    for score_input_wire in circuit.private_score_input_wires() {
+        let wire_position = usize::try_from(score_input_wire)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let mask =
+            *wire_masks
+                .get(wire_position)
+                .ok_or(TallyPreparationError::WireIndexOutOfRange {
+                    wire_index: score_input_wire,
+                    wire_count,
+                })?;
+        score_input_mask_polynomials.push(read_mask_polynomial(mask, source)?);
+    }
+    if score_input_mask_polynomials.len() != score_input_wire_count {
+        return Err(TallyPreparationError::GeometryMismatch);
     }
 
     let result_output_wire_count = usize_from_u64(geometry.result_output_wire_count)?;

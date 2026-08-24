@@ -4,12 +4,13 @@ use crate::{
 };
 
 use super::{
-    BooleanOperation, CompiledTallyCircuit, TALLY_CIRCUIT_ARTIFACT_MAGIC, TallyCircuitError,
-    TallyCircuitProfile, WireIndex,
+    BooleanOperation, CompiledTallyCircuit, TALLY_CANDIDATE_ATTEMPT_COUNT,
+    TALLY_CIRCUIT_ARTIFACT_MAGIC, TallyCircuitError, TallyCircuitProfile, WireIndex,
     compiler::{compile_tally_circuit, tally_circuit_compiler_identity},
+    direct_evaluator::tally_direct_evaluator_identity,
 };
 
-pub(crate) const TALLY_CIRCUIT_ARTIFACT_VERSION: u64 = 1;
+pub(crate) const TALLY_CIRCUIT_ARTIFACT_VERSION: u64 = 2;
 
 const CONSTANT_OPERATION_CODE: u8 = 0;
 const EXCLUSIVE_OR_OPERATION_CODE: u8 = 1;
@@ -24,9 +25,15 @@ pub(crate) fn encode_canonical_tally_circuit(
     append_bytes(&mut bytes, TALLY_CIRCUIT_ARTIFACT_MAGIC);
     append_varuint(&mut bytes, TALLY_CIRCUIT_ARTIFACT_VERSION);
     append_bytes(&mut bytes, &tally_circuit_compiler_identity()?);
+    append_bytes(&mut bytes, &tally_direct_evaluator_identity()?);
     append_varuint(&mut bytes, u64::from(circuit.profile().participant_count()));
     append_varuint(&mut bytes, u64::from(circuit.profile().option_count()));
     append_varuint(&mut bytes, u64::from(circuit.profile().top_count()));
+    append_varuint(
+        &mut bytes,
+        u64::try_from(TALLY_CANDIDATE_ATTEMPT_COUNT)
+            .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
+    );
     append_varuint(
         &mut bytes,
         u64::try_from(circuit.geometry().score_bit_width)
@@ -42,6 +49,8 @@ pub(crate) fn encode_canonical_tally_circuit(
         u64::try_from(circuit.geometry().option_position_bit_width)
             .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
     );
+    encode_input_mapping(&mut bytes, circuit)?;
+
     append_varuint(
         &mut bytes,
         u64::try_from(circuit.operations().len())
@@ -51,14 +60,8 @@ pub(crate) fn encode_canonical_tally_circuit(
         encode_operation(&mut bytes, operation);
     }
 
-    append_varuint(
-        &mut bytes,
-        u64::try_from(circuit.participant_validity_wires().len())
-            .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
-    );
-    for wire in circuit.participant_validity_wires() {
-        append_varuint(&mut bytes, u64::from(*wire));
-    }
+    append_varuint(&mut bytes, 1);
+    append_varuint(&mut bytes, u64::from(circuit.nonempty_output_wire()));
     append_varuint(
         &mut bytes,
         u64::try_from(circuit.ordered_option_position_wires().len())
@@ -94,6 +97,9 @@ pub(crate) fn decode_canonical_tally_circuit(
     if reader.read_bytes()?.as_slice() != tally_circuit_compiler_identity()? {
         return Err(TallyCircuitError::CompilerIdentityMismatch);
     }
+    if reader.read_bytes()?.as_slice() != tally_direct_evaluator_identity()? {
+        return Err(TallyCircuitError::DirectEvaluatorIdentityMismatch);
+    }
 
     let profile = TallyCircuitProfile::new(
         read_u16(&mut reader)?,
@@ -101,6 +107,9 @@ pub(crate) fn decode_canonical_tally_circuit(
         read_u16(&mut reader)?,
     )?;
     let expected_circuit = compile_tally_circuit(profile)?;
+    if read_usize(&mut reader)? != TALLY_CANDIDATE_ATTEMPT_COUNT {
+        return Err(TallyCircuitError::CircuitMismatch);
+    }
     let score_bit_width = read_usize(&mut reader)?;
     let aggregate_score_bit_width = read_usize(&mut reader)?;
     let option_position_bit_width = read_usize(&mut reader)?;
@@ -111,6 +120,8 @@ pub(crate) fn decode_canonical_tally_circuit(
         return Err(TallyCircuitError::CircuitMismatch);
     }
 
+    let (candidate_attempt_presence_wires, candidate_attempt_score_wires) =
+        decode_input_mapping(&mut reader, &expected_circuit)?;
     let operation_count = read_usize(&mut reader)?;
     if operation_count != expected_circuit.operations().len() {
         return Err(TallyCircuitError::CircuitMismatch);
@@ -123,14 +134,10 @@ pub(crate) fn decode_canonical_tally_circuit(
         operations.push(decode_operation(&mut reader)?);
     }
 
-    let participant_validity_wire_count = read_usize(&mut reader)?;
-    if participant_validity_wire_count != expected_circuit.participant_validity_wires().len() {
+    if read_usize(&mut reader)? != 1 {
         return Err(TallyCircuitError::CircuitMismatch);
     }
-    let participant_validity_wires = (0..participant_validity_wire_count)
-        .map(|_| read_wire_index(&mut reader))
-        .collect::<Result<Vec<_>, _>>()?;
-
+    let nonempty_output_wire = read_wire_index(&mut reader)?;
     let result_position_count = read_usize(&mut reader)?;
     if result_position_count != expected_circuit.ordered_option_position_wires().len() {
         return Err(TallyCircuitError::CircuitMismatch);
@@ -155,7 +162,9 @@ pub(crate) fn decode_canonical_tally_circuit(
         profile,
         geometry: expected_circuit.geometry(),
         operations,
-        participant_validity_wires,
+        candidate_attempt_presence_wires,
+        candidate_attempt_score_wires,
+        nonempty_output_wire,
         ordered_option_position_wires,
     };
     validate_circuit_structure(&decoded_circuit)?;
@@ -163,6 +172,99 @@ pub(crate) fn decode_canonical_tally_circuit(
         return Err(TallyCircuitError::CircuitMismatch);
     }
     Ok(decoded_circuit)
+}
+
+fn encode_input_mapping(
+    bytes: &mut Vec<u8>,
+    circuit: &CompiledTallyCircuit,
+) -> Result<(), TallyCircuitError> {
+    append_varuint(
+        bytes,
+        u64::try_from(circuit.candidate_attempt_presence_wires().len())
+            .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
+    );
+    for (participant_presence_wires, participant_score_wires) in circuit
+        .candidate_attempt_presence_wires()
+        .iter()
+        .zip(circuit.candidate_attempt_score_wires())
+    {
+        append_varuint(
+            bytes,
+            u64::try_from(participant_presence_wires.len())
+                .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
+        );
+        for (presence_wire, attempt_score_wires) in participant_presence_wires
+            .iter()
+            .zip(participant_score_wires)
+        {
+            append_varuint(bytes, u64::from(*presence_wire));
+            append_varuint(
+                bytes,
+                u64::try_from(attempt_score_wires.len())
+                    .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
+            );
+            for score_wires in attempt_score_wires {
+                append_varuint(
+                    bytes,
+                    u64::try_from(score_wires.len())
+                        .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
+                );
+                for wire in score_wires {
+                    append_varuint(bytes, u64::from(*wire));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+type CandidateAttemptPresenceWires = Vec<Vec<WireIndex>>;
+type CandidateAttemptScoreWires = Vec<Vec<Vec<Vec<WireIndex>>>>;
+
+fn decode_input_mapping(
+    reader: &mut CanonicalReader<'_>,
+    expected_circuit: &CompiledTallyCircuit,
+) -> Result<(CandidateAttemptPresenceWires, CandidateAttemptScoreWires), TallyCircuitError> {
+    let participant_count = read_usize(reader)?;
+    if participant_count != expected_circuit.candidate_attempt_presence_wires().len() {
+        return Err(TallyCircuitError::CircuitMismatch);
+    }
+    let option_count = usize::from(expected_circuit.profile().option_count());
+    let score_bit_width = expected_circuit.geometry().score_bit_width;
+    let mut candidate_attempt_presence_wires = Vec::with_capacity(participant_count);
+    let mut candidate_attempt_score_wires = Vec::with_capacity(participant_count);
+    for _participant_position in 0..participant_count {
+        let attempt_count = read_usize(reader)?;
+        if attempt_count != TALLY_CANDIDATE_ATTEMPT_COUNT {
+            return Err(TallyCircuitError::CircuitMismatch);
+        }
+        let mut participant_presence_wires = Vec::with_capacity(attempt_count);
+        let mut participant_score_wires = Vec::with_capacity(attempt_count);
+        for _attempt_position in 0..attempt_count {
+            participant_presence_wires.push(read_wire_index(reader)?);
+            if read_usize(reader)? != option_count {
+                return Err(TallyCircuitError::CircuitMismatch);
+            }
+            let mut attempt_score_wires = Vec::with_capacity(option_count);
+            for _option_position in 0..option_count {
+                if read_usize(reader)? != score_bit_width {
+                    return Err(TallyCircuitError::CircuitMismatch);
+                }
+                attempt_score_wires.push(
+                    (0..score_bit_width)
+                        .map(|_| read_wire_index(reader))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
+            participant_score_wires.push(attempt_score_wires);
+        }
+        candidate_attempt_presence_wires.push(participant_presence_wires);
+        candidate_attempt_score_wires.push(participant_score_wires);
+    }
+    Ok((
+        candidate_attempt_presence_wires,
+        candidate_attempt_score_wires,
+    ))
 }
 
 fn encode_operation(bytes: &mut Vec<u8>, operation: &BooleanOperation) {
@@ -221,6 +323,64 @@ fn decode_operation(
 
 fn validate_circuit_structure(circuit: &CompiledTallyCircuit) -> Result<(), TallyCircuitError> {
     let input_bit_count = circuit.geometry().input_bit_count;
+    let participant_count = usize::from(circuit.profile().participant_count());
+    let option_count = usize::from(circuit.profile().option_count());
+    let score_bit_width = circuit.geometry().score_bit_width;
+    if circuit.candidate_attempt_presence_wires().len() != participant_count
+        || circuit.candidate_attempt_score_wires().len() != participant_count
+    {
+        return Err(TallyCircuitError::CircuitMismatch);
+    }
+    for (participant_presence_wires, participant_score_wires) in circuit
+        .candidate_attempt_presence_wires()
+        .iter()
+        .zip(circuit.candidate_attempt_score_wires())
+    {
+        if participant_presence_wires.len() != TALLY_CANDIDATE_ATTEMPT_COUNT
+            || participant_score_wires.len() != TALLY_CANDIDATE_ATTEMPT_COUNT
+            || participant_score_wires.iter().any(|attempt_score_wires| {
+                attempt_score_wires.len() != option_count
+                    || attempt_score_wires
+                        .iter()
+                        .any(|score_wires| score_wires.len() != score_bit_width)
+            })
+        {
+            return Err(TallyCircuitError::CircuitMismatch);
+        }
+    }
+    let mut mapped_input_wires = vec![false; input_bit_count];
+    for input_wire in circuit
+        .candidate_attempt_presence_wires()
+        .iter()
+        .flatten()
+        .copied()
+        .chain(circuit.private_score_input_wires())
+    {
+        let input_position =
+            usize::try_from(input_wire).map_err(|_| TallyCircuitError::CircuitMismatch)?;
+        let was_mapped = mapped_input_wires
+            .get_mut(input_position)
+            .ok_or(TallyCircuitError::CircuitMismatch)?;
+        if *was_mapped {
+            return Err(TallyCircuitError::CircuitMismatch);
+        }
+        *was_mapped = true;
+    }
+    if mapped_input_wires.iter().any(|was_mapped| !was_mapped) {
+        return Err(TallyCircuitError::CircuitMismatch);
+    }
+
+    if circuit.ordered_option_position_wires().len() != usize::from(circuit.profile().top_count())
+        || circuit
+            .ordered_option_position_wires()
+            .iter()
+            .any(|position_wires| {
+                position_wires.len() != circuit.geometry().option_position_bit_width
+            })
+    {
+        return Err(TallyCircuitError::CircuitMismatch);
+    }
+
     for (operation_position, operation) in circuit.operations().iter().enumerate() {
         let available_wire_count = input_bit_count
             .checked_add(operation_position)
@@ -233,9 +393,18 @@ fn validate_circuit_structure(circuit: &CompiledTallyCircuit) -> Result<(), Tall
                 });
             }
         }
+        if matches!(
+            operation,
+            BooleanOperation::Conjunction {
+                left_wire,
+                right_wire
+            } if left_wire == right_wire
+        ) {
+            return Err(TallyCircuitError::CircuitMismatch);
+        }
     }
     let total_wire_count = circuit.geometry().total_wire_count;
-    for wire in circuit.participant_validity_wires().iter().copied().chain(
+    for wire in core::iter::once(circuit.nonempty_output_wire()).chain(
         circuit
             .ordered_option_position_wires()
             .iter()

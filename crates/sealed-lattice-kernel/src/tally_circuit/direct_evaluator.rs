@@ -1,7 +1,28 @@
+use crate::hashing::hash_framed_parts_512;
+
 use super::{
-    TallyCircuitError, TallyCircuitProfile, TallyEvaluationInput, TallyEvaluationOutcome,
-    bit_width_for_maximum_value, foundation_score_bounds,
+    TALLY_CANDIDATE_ATTEMPT_COUNT, TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN, TallyCircuitError,
+    TallyCircuitProfile, TallyEvaluationInput, TallyEvaluationOutcome, bit_width_for_maximum_value,
+    foundation_score_bounds,
 };
+
+const TALLY_DIRECT_EVALUATOR_SOURCE: &[u8] = include_bytes!("direct_evaluator.rs");
+
+pub(crate) fn tally_direct_evaluator_identity() -> Result<[u8; 64], TallyCircuitError> {
+    validate_canonical_source_bytes(TALLY_DIRECT_EVALUATOR_SOURCE)?;
+    let (minimum_score, maximum_score) = foundation_score_bounds()?;
+    Ok(hash_framed_parts_512(
+        TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN,
+        &[
+            TALLY_DIRECT_EVALUATOR_SOURCE,
+            &u64::try_from(TALLY_CANDIDATE_ATTEMPT_COUNT)
+                .map_err(|_| TallyCircuitError::ArithmeticOverflow)?
+                .to_le_bytes(),
+            &minimum_score.to_le_bytes(),
+            &maximum_score.to_le_bytes(),
+        ],
+    ))
+}
 
 /// Evaluates tally semantics without compiling or interpreting a circuit.
 pub(crate) fn evaluate_tally_directly(
@@ -12,60 +33,72 @@ pub(crate) fn evaluate_tally_directly(
     let participant_count = usize::from(profile.participant_count());
     let option_count = usize::from(profile.option_count());
     let top_count = usize::from(profile.top_count());
+    let participant_candidate_attempts = input.participant_candidate_attempts();
 
-    if input.participant_presence().len() != participant_count {
+    if participant_candidate_attempts.len() != participant_count {
         return Err(TallyCircuitError::InputParticipantCountMismatch {
             expected: participant_count,
-            actual: input.participant_presence().len(),
-        });
-    }
-    if input.participant_scores().len() != participant_count {
-        return Err(TallyCircuitError::InputParticipantCountMismatch {
-            expected: participant_count,
-            actual: input.participant_scores().len(),
+            actual: participant_candidate_attempts.len(),
         });
     }
 
     let score_bit_width = bit_width_for_maximum_value(usize::from(maximum_score));
     let maximum_score_encoding = (1_usize << score_bit_width) - 1;
-    let mut participant_validity = Vec::with_capacity(participant_count);
     let mut aggregate_scores = vec![0_u32; option_count];
+    let mut has_selected_ballot = false;
 
-    for participant_position in 0..participant_count {
-        let participant_scores = &input.participant_scores()[participant_position];
-        if participant_scores.len() != option_count {
-            return Err(TallyCircuitError::InputOptionCountMismatch {
+    for (participant_position, candidate_attempts) in
+        participant_candidate_attempts.iter().enumerate()
+    {
+        if candidate_attempts.len() != TALLY_CANDIDATE_ATTEMPT_COUNT {
+            return Err(TallyCircuitError::InputAttemptCountMismatch {
                 participant_position,
-                expected: option_count,
-                actual: participant_scores.len(),
+                expected: TALLY_CANDIDATE_ATTEMPT_COUNT,
+                actual: candidate_attempts.len(),
             });
         }
-
-        for (option_position, score_encoding) in participant_scores.iter().copied().enumerate() {
-            if usize::from(score_encoding) > maximum_score_encoding {
-                return Err(TallyCircuitError::ScoreEncodingOutOfRange {
+        for (attempt_position, candidate_attempt) in candidate_attempts.iter().enumerate() {
+            if candidate_attempt.score_encodings().len() != option_count {
+                return Err(TallyCircuitError::InputOptionCountMismatch {
                     participant_position,
-                    option_position,
-                    score_encoding,
+                    attempt_position,
+                    expected: option_count,
+                    actual: candidate_attempt.score_encodings().len(),
                 });
+            }
+            for (option_position, score_encoding) in candidate_attempt
+                .score_encodings()
+                .iter()
+                .copied()
+                .enumerate()
+            {
+                if usize::from(score_encoding) > maximum_score_encoding {
+                    return Err(TallyCircuitError::ScoreEncodingOutOfRange {
+                        participant_position,
+                        attempt_position,
+                        option_position,
+                        score_encoding,
+                    });
+                }
             }
         }
 
-        let is_present = input.participant_presence()[participant_position];
-        let is_valid = if is_present {
-            participant_scores
-                .iter()
-                .copied()
-                .all(|score| (minimum_score..=maximum_score).contains(&u16::from(score)))
-        } else {
-            participant_scores.iter().all(|score| *score == 0)
-        };
-        participant_validity.push(is_valid);
-
-        if is_present {
+        let selected_scores = candidate_attempts.iter().find_map(|candidate_attempt| {
+            (candidate_attempt.is_present()
+                && candidate_attempt
+                    .score_encodings()
+                    .iter()
+                    .copied()
+                    .all(|score_encoding| {
+                        (minimum_score..=maximum_score).contains(&u16::from(score_encoding))
+                    }))
+            .then_some(candidate_attempt.score_encodings())
+        });
+        if let Some(selected_scores) = selected_scores {
+            has_selected_ballot = true;
             for (aggregate_score, score_encoding) in aggregate_scores
                 .iter_mut()
-                .zip(participant_scores.iter().copied())
+                .zip(selected_scores.iter().copied())
             {
                 *aggregate_score = aggregate_score
                     .checked_add(u32::from(score_encoding))
@@ -89,11 +122,17 @@ pub(crate) fn evaluate_tally_directly(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(TallyEvaluationOutcome {
-        participant_validity,
         ordered_option_positions,
-        has_selected_ballot: input
-            .participant_presence()
-            .iter()
-            .any(|is_present| *is_present),
+        has_selected_ballot,
     })
+}
+
+fn validate_canonical_source_bytes(source_bytes: &[u8]) -> Result<(), TallyCircuitError> {
+    if core::str::from_utf8(source_bytes).is_err()
+        || source_bytes.contains(&b'\r')
+        || !source_bytes.ends_with(b"\n")
+    {
+        return Err(TallyCircuitError::NonCanonicalSourceEncoding);
+    }
+    Ok(())
 }

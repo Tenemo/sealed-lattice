@@ -43,8 +43,6 @@ impl TallyPreparationGeometry {
     pub(crate) fn derive(circuit: &CompiledTallyCircuit) -> Result<Self, TallyPreparationError> {
         let circuit_geometry = circuit.geometry();
         let participant_count = u64::from(circuit.profile().participant_count());
-        let option_count = u64::from(circuit.profile().option_count());
-        let score_bit_width = u64_from_usize(circuit_geometry.score_bit_width)?;
         let input_bit_count = u64_from_usize(circuit_geometry.input_bit_count)?;
         let operation_count = u64_from_usize(circuit.operations().len())?;
         let wire_count = checked_add(input_bit_count, operation_count)?;
@@ -80,11 +78,13 @@ impl TallyPreparationGeometry {
             return Err(TallyPreparationError::GeometryMismatch);
         }
 
-        let score_input_wire_count = checked_product(
-            checked_product(participant_count, option_count)?,
-            score_bit_width,
-        )?;
-        if checked_add(participant_count, score_input_wire_count)? != input_bit_count {
+        let score_input_wire_count = u64_from_usize(circuit.private_score_input_wires().count())?;
+        if score_input_wire_count != u64_from_usize(circuit_geometry.private_score_input_bit_count)?
+            || checked_add(
+                u64_from_usize(circuit_geometry.public_presence_input_bit_count)?,
+                score_input_wire_count,
+            )? != input_bit_count
+        {
             return Err(TallyPreparationError::GeometryMismatch);
         }
         let result_output_wire_count = u64_from_usize(
@@ -94,7 +94,7 @@ impl TallyPreparationGeometry {
                 .map(Vec::len)
                 .sum(),
         )?;
-        if result_output_wire_count != u64_from_usize(circuit_geometry.result_bit_count)? {
+        if result_output_wire_count != u64_from_usize(circuit_geometry.private_result_bit_count)? {
             return Err(TallyPreparationError::GeometryMismatch);
         }
 
