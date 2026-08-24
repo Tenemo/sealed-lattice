@@ -11,6 +11,14 @@ mod diagnostic_clock;
 mod encoding;
 pub mod foundation;
 pub(crate) mod hashing;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the unactivated tally circuit is consumed by the next candidate integration boundary"
+    )
+)]
+pub(crate) mod tally_circuit;
 pub(crate) mod transcript_core;
 
 use core::{ptr, slice};
