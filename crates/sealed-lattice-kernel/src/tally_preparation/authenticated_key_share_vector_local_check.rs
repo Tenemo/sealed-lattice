@@ -1,3 +1,5 @@
+use subtle::ConstantTimeEq;
+
 use crate::{foundation::Hash512, tally_circuit::CompiledTallyCircuit};
 
 use super::{
@@ -11,6 +13,10 @@ use super::{
     },
     output_sharing::DEGREE_THREE_RECONSTRUCTION_THRESHOLD,
 };
+
+pub(crate) const MAXIMUM_LOCAL_CHECK_SIMULTANEOUS_PAYLOAD_CHUNK_COUNT: u64 = 2;
+pub(crate) const MAXIMUM_LOCAL_CHECK_FIELD_ACCUMULATOR_COUNT: u64 = 2;
+pub(crate) const MAXIMUM_LOCAL_CHECK_PAYLOAD_AND_ACCUMULATOR_BUFFER_COUNT: u64 = 3;
 
 /// Streaming verifier for one participant's complete fixed-basis key-share
 /// check.
@@ -32,6 +38,10 @@ pub(crate) struct AuthenticatedKeyShareVectorLocalCheck {
     next_chunk_index: u64,
     total_field_count: u64,
     checked_field_count: u64,
+    next_basis_position: usize,
+    reconstructed_fields: Option<Vec<BinaryFieldElement256>>,
+    expected_local_fields: Option<Vec<BinaryFieldElement256>>,
+    failed: bool,
 }
 
 impl AuthenticatedKeyShareVectorLocalCheck {
@@ -90,65 +100,177 @@ impl AuthenticatedKeyShareVectorLocalCheck {
             next_chunk_index: 0,
             total_field_count: manifest.total_field_count(),
             checked_field_count: 0,
+            next_basis_position: 0,
+            reconstructed_fields: None,
+            expected_local_fields: None,
+            failed: false,
         })
     }
 
-    pub(crate) fn verify_next_payload_chunks(
+    /// Folds the next public basis chunk into the current reconstructed-key
+    /// chunk.
+    ///
+    /// Public basis positions are implicit and must be supplied in canonical
+    /// order. A basis participant supplies its retained local chunk only beside
+    /// the public chunk at the same roster position. Therefore this call
+    /// borrows at most two transport payloads at once.
+    pub(crate) fn absorb_next_published_basis_payload_chunk(
         &mut self,
-        published_basis_payload_chunks: &[&[u8]],
-        local_payload_chunk: &[u8],
-    ) -> Result<LocallyCheckedAuthenticatedKeyFieldChunk, TallyPreparationError> {
-        if published_basis_payload_chunks.len() != DEGREE_THREE_RECONSTRUCTION_THRESHOLD {
+        published_basis_payload_chunk: &[u8],
+        local_payload_chunk: Option<&[u8]>,
+    ) -> Result<Option<LocallyCheckedAuthenticatedKeyFieldChunk>, TallyPreparationError> {
+        self.require_live_incomplete_check()?;
+        if self.next_basis_position >= DEGREE_THREE_RECONSTRUCTION_THRESHOLD {
             return Err(
-                TallyPreparationError::AuthenticatedKeyReleaseBasisCountMismatch {
-                    expected: DEGREE_THREE_RECONSTRUCTION_THRESHOLD,
-                    actual: published_basis_payload_chunks.len(),
+                TallyPreparationError::AuthenticatedKeyShareVectorLocalPayloadOutOfSequence {
+                    absorbed_basis_count: self.next_basis_position,
                 },
             );
+        }
+
+        let basis_position = self.next_basis_position;
+        let local_payload_expected = usize::from(self.participant_position) == basis_position;
+        if local_payload_chunk.is_some() != local_payload_expected {
+            return Err(
+                TallyPreparationError::AuthenticatedKeyShareVectorLocalPayloadPresenceMismatch {
+                    basis_position: u16::try_from(basis_position)
+                        .map_err(|_| TallyPreparationError::IntegerConversion)?,
+                    expected: local_payload_expected,
+                    actual: local_payload_chunk.is_some(),
+                },
+            );
+        }
+
+        let published_basis_chunk = self.published_basis_descriptors[basis_position]
+            .verify_payload_chunk(self.next_chunk_index, published_basis_payload_chunk)?;
+        self.validate_current_chunk_geometry(&published_basis_chunk)?;
+        let local_chunk = local_payload_chunk
+            .map(|local_payload_chunk| {
+                self.local_descriptor
+                    .verify_payload_chunk(self.next_chunk_index, local_payload_chunk)
+            })
+            .transpose()?;
+        if let Some(local_chunk) = &local_chunk {
+            validate_matching_chunk_geometry(&published_basis_chunk, local_chunk)?;
+        }
+
+        let constant_term_coefficient =
+            self.field_checker.constant_term_coefficients()[basis_position];
+        let local_point_coefficient = self
+            .field_checker
+            .local_point_coefficients()
+            .map(|coefficients| coefficients[basis_position]);
+        if let Err(error) = accumulate_basis_contribution(
+            &mut self.reconstructed_fields,
+            &mut self.expected_local_fields,
+            &published_basis_chunk,
+            local_chunk.as_ref(),
+            constant_term_coefficient,
+            local_point_coefficient,
+            self.participant_position,
+        ) {
+            self.failed = true;
+            return Err(error);
+        }
+        self.next_basis_position = self
+            .next_basis_position
+            .checked_add(1)
+            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+
+        if self.next_basis_position == DEGREE_THREE_RECONSTRUCTION_THRESHOLD
+            && self.field_checker.local_point_coefficients().is_none()
+        {
+            return self.complete_current_chunk().map(Some);
+        }
+        Ok(None)
+    }
+
+    /// Checks a nonbasis participant's retained local chunk after all four
+    /// public basis chunks for the same chunk index have been folded.
+    pub(crate) fn verify_next_nonbasis_local_payload_chunk(
+        &mut self,
+        local_payload_chunk: &[u8],
+    ) -> Result<LocallyCheckedAuthenticatedKeyFieldChunk, TallyPreparationError> {
+        self.require_live_incomplete_check()?;
+        if self.field_checker.local_point_coefficients().is_none()
+            || self.next_basis_position != DEGREE_THREE_RECONSTRUCTION_THRESHOLD
+        {
+            return Err(
+                TallyPreparationError::AuthenticatedKeyShareVectorLocalPayloadOutOfSequence {
+                    absorbed_basis_count: self.next_basis_position,
+                },
+            );
+        }
+
+        let local_chunk = self
+            .local_descriptor
+            .verify_payload_chunk(self.next_chunk_index, local_payload_chunk)?;
+        self.validate_current_chunk_geometry(&local_chunk)?;
+        let expected_local_fields = self
+            .expected_local_fields
+            .as_ref()
+            .ok_or(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch)?;
+        if u64::try_from(expected_local_fields.len())
+            .map_err(|_| TallyPreparationError::IntegerConversion)?
+            != local_chunk.field_count()
+        {
+            return Err(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch);
+        }
+        for (position_within_chunk, expected_local_value) in
+            expected_local_fields.iter().enumerate()
+        {
+            let local_value = local_chunk.field_value(
+                u64::try_from(position_within_chunk)
+                    .map_err(|_| TallyPreparationError::IntegerConversion)?,
+            )?;
+            if expected_local_value.ct_eq(&local_value).unwrap_u8() != 1 {
+                self.failed = true;
+                return Err(TallyPreparationError::InconsistentShare {
+                    roster_position: self.participant_position,
+                });
+            }
+        }
+        self.expected_local_fields = None;
+        self.complete_current_chunk()
+    }
+
+    fn require_live_incomplete_check(&self) -> Result<(), TallyPreparationError> {
+        if self.failed {
+            return Err(TallyPreparationError::AuthenticatedKeyShareVectorLocalCheckFailed);
         }
         if self.next_chunk_index >= self.chunk_count {
             return Err(
                 TallyPreparationError::AuthenticatedKeyShareVectorLocalCheckAlreadyComplete,
             );
         }
+        Ok(())
+    }
 
-        let published_basis_chunks = [
-            self.published_basis_descriptors[0]
-                .verify_payload_chunk(self.next_chunk_index, published_basis_payload_chunks[0])?,
-            self.published_basis_descriptors[1]
-                .verify_payload_chunk(self.next_chunk_index, published_basis_payload_chunks[1])?,
-            self.published_basis_descriptors[2]
-                .verify_payload_chunk(self.next_chunk_index, published_basis_payload_chunks[2])?,
-            self.published_basis_descriptors[3]
-                .verify_payload_chunk(self.next_chunk_index, published_basis_payload_chunks[3])?,
-        ];
-        let local_chunk = self
-            .local_descriptor
-            .verify_payload_chunk(self.next_chunk_index, local_payload_chunk)?;
-        validate_matching_chunk_geometry(&published_basis_chunks, &local_chunk)?;
-        if local_chunk.first_field_index() != self.checked_field_count {
+    fn validate_current_chunk_geometry(
+        &self,
+        chunk: &AuthenticatedKeyShareVectorPayloadChunk<'_>,
+    ) -> Result<(), TallyPreparationError> {
+        if chunk.first_field_index() != self.checked_field_count {
             return Err(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch);
         }
+        Ok(())
+    }
 
-        let field_count = local_chunk.field_count();
-        let mut reconstructed_fields = Vec::with_capacity(
-            usize::try_from(field_count).map_err(|_| TallyPreparationError::IntegerConversion)?,
-        );
-        for position_within_chunk in 0..field_count {
-            let mut published_basis_values =
-                [BinaryFieldElement256::ZERO; DEGREE_THREE_RECONSTRUCTION_THRESHOLD];
-            for (basis_position, published_basis_chunk) in published_basis_chunks.iter().enumerate()
-            {
-                published_basis_values[basis_position] =
-                    published_basis_chunk.field_value(position_within_chunk)?;
-            }
-            reconstructed_fields.push(self.field_checker.reconstruct_locally_checked_field(
-                published_basis_values,
-                local_chunk.field_value(position_within_chunk)?,
-            )?);
+    fn complete_current_chunk(
+        &mut self,
+    ) -> Result<LocallyCheckedAuthenticatedKeyFieldChunk, TallyPreparationError> {
+        if self.next_basis_position != DEGREE_THREE_RECONSTRUCTION_THRESHOLD
+            || self.expected_local_fields.is_some()
+        {
+            return Err(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch);
         }
-
         let first_field_index = self.checked_field_count;
+        let reconstructed_fields = self
+            .reconstructed_fields
+            .take()
+            .ok_or(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch)?;
+        let field_count = u64::try_from(reconstructed_fields.len())
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
         self.checked_field_count = self
             .checked_field_count
             .checked_add(field_count)
@@ -157,6 +279,7 @@ impl AuthenticatedKeyShareVectorLocalCheck {
             .next_chunk_index
             .checked_add(1)
             .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+        self.next_basis_position = 0;
         Ok(LocallyCheckedAuthenticatedKeyFieldChunk {
             first_field_index,
             reconstructed_fields: reconstructed_fields.into_boxed_slice(),
@@ -168,6 +291,10 @@ impl AuthenticatedKeyShareVectorLocalCheck {
     ) -> Result<LocallyCheckedAuthenticatedKeyShareVector, TallyPreparationError> {
         if self.next_chunk_index != self.chunk_count
             || self.checked_field_count != self.total_field_count
+            || self.next_basis_position != 0
+            || self.reconstructed_fields.is_some()
+            || self.expected_local_fields.is_some()
+            || self.failed
         {
             return Err(
                 TallyPreparationError::AuthenticatedKeyShareVectorLocalCheckIncomplete {
@@ -175,6 +302,7 @@ impl AuthenticatedKeyShareVectorLocalCheck {
                     checked_chunk_count: self.next_chunk_index,
                     expected_field_count: self.total_field_count,
                     checked_field_count: self.checked_field_count,
+                    absorbed_basis_count: self.next_basis_position,
                 },
             );
         }
@@ -239,15 +367,71 @@ pub(crate) fn create_authenticated_key_share_vector_acknowledgement_body(
     )
 }
 
+fn accumulate_basis_contribution(
+    reconstructed_fields: &mut Option<Vec<BinaryFieldElement256>>,
+    expected_local_fields: &mut Option<Vec<BinaryFieldElement256>>,
+    published_basis_chunk: &AuthenticatedKeyShareVectorPayloadChunk<'_>,
+    basis_local_chunk: Option<&AuthenticatedKeyShareVectorPayloadChunk<'_>>,
+    constant_term_coefficient: BinaryFieldElement256,
+    local_point_coefficient: Option<BinaryFieldElement256>,
+    participant_position: u16,
+) -> Result<(), TallyPreparationError> {
+    let field_count = usize::try_from(published_basis_chunk.field_count())
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+    let reconstructed_fields =
+        reconstructed_fields.get_or_insert_with(|| vec![BinaryFieldElement256::ZERO; field_count]);
+    if reconstructed_fields.len() != field_count {
+        return Err(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch);
+    }
+    let mut expected_local_fields = match local_point_coefficient {
+        Some(_coefficient) => {
+            let fields = expected_local_fields
+                .get_or_insert_with(|| vec![BinaryFieldElement256::ZERO; field_count]);
+            if fields.len() != field_count {
+                return Err(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch);
+            }
+            Some(fields)
+        }
+        None => {
+            if expected_local_fields.is_some() {
+                return Err(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch);
+            }
+            None
+        }
+    };
+    for position_within_chunk in 0..field_count {
+        let canonical_position = u64::try_from(position_within_chunk)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let published_value = published_basis_chunk.field_value(canonical_position)?;
+        if let Some(basis_local_chunk) = basis_local_chunk {
+            let local_value = basis_local_chunk.field_value(canonical_position)?;
+            if published_value.ct_eq(&local_value).unwrap_u8() != 1 {
+                return Err(TallyPreparationError::InconsistentShare {
+                    roster_position: participant_position,
+                });
+            }
+        }
+        reconstructed_fields[position_within_chunk] = reconstructed_fields[position_within_chunk]
+            .add(published_value.multiply(constant_term_coefficient));
+        if let (Some(expected_local_fields), Some(local_point_coefficient)) = (
+            expected_local_fields.as_deref_mut(),
+            local_point_coefficient,
+        ) {
+            expected_local_fields[position_within_chunk] = expected_local_fields
+                [position_within_chunk]
+                .add(published_value.multiply(local_point_coefficient));
+        }
+    }
+    Ok(())
+}
+
 fn validate_matching_chunk_geometry(
-    published_basis_chunks: &[AuthenticatedKeyShareVectorPayloadChunk<'_>;
-         DEGREE_THREE_RECONSTRUCTION_THRESHOLD],
+    published_basis_chunk: &AuthenticatedKeyShareVectorPayloadChunk<'_>,
     local_chunk: &AuthenticatedKeyShareVectorPayloadChunk<'_>,
 ) -> Result<(), TallyPreparationError> {
-    if published_basis_chunks.iter().any(|published_chunk| {
-        published_chunk.first_field_index() != local_chunk.first_field_index()
-            || published_chunk.field_count() != local_chunk.field_count()
-    }) {
+    if published_basis_chunk.first_field_index() != local_chunk.first_field_index()
+        || published_basis_chunk.field_count() != local_chunk.field_count()
+    {
         return Err(TallyPreparationError::AuthenticatedKeyShareVectorGeometryMismatch);
     }
     Ok(())

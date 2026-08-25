@@ -11,6 +11,7 @@ mod authenticated_key_release;
 mod authenticated_key_release_resource_floor;
 mod authenticated_key_share_vector;
 mod authenticated_key_share_vector_local_check;
+mod authenticated_key_share_vector_local_check_resource_floor;
 mod authenticated_key_share_vector_manifest;
 mod authenticated_opening;
 mod binary_field;
@@ -53,6 +54,8 @@ mod amortized_binary_mpc_communication_floor_tests;
 mod authenticated_key_release_resource_floor_tests;
 #[cfg(test)]
 mod authenticated_key_release_tests;
+#[cfg(test)]
+mod authenticated_key_share_vector_local_check_resource_floor_tests;
 #[cfg(test)]
 mod authenticated_key_share_vector_local_check_tests;
 #[cfg(test)]
@@ -399,11 +402,21 @@ pub(crate) enum TallyPreparationError {
     },
     AuthenticatedKeyShareVectorLocalDescriptorMismatch,
     AuthenticatedKeyShareVectorLocalCheckAlreadyComplete,
+    AuthenticatedKeyShareVectorLocalPayloadPresenceMismatch {
+        basis_position: u16,
+        expected: bool,
+        actual: bool,
+    },
+    AuthenticatedKeyShareVectorLocalPayloadOutOfSequence {
+        absorbed_basis_count: usize,
+    },
+    AuthenticatedKeyShareVectorLocalCheckFailed,
     AuthenticatedKeyShareVectorLocalCheckIncomplete {
         expected_chunk_count: u64,
         checked_chunk_count: u64,
         expected_field_count: u64,
         checked_field_count: u64,
+        absorbed_basis_count: usize,
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
@@ -890,14 +903,31 @@ impl fmt::Display for TallyPreparationError {
             ),
             Self::AuthenticatedKeyShareVectorLocalCheckAlreadyComplete => formatter
                 .write_str("authenticated-key local share-vector check is already complete"),
+            Self::AuthenticatedKeyShareVectorLocalPayloadPresenceMismatch {
+                basis_position,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "authenticated-key basis position {basis_position} local-payload presence is {actual}; expected {expected}"
+            ),
+            Self::AuthenticatedKeyShareVectorLocalPayloadOutOfSequence {
+                absorbed_basis_count,
+            } => write!(
+                formatter,
+                "authenticated-key local payload is out of sequence after {absorbed_basis_count} basis chunks"
+            ),
+            Self::AuthenticatedKeyShareVectorLocalCheckFailed => formatter
+                .write_str("authenticated-key local share-vector check has already failed"),
             Self::AuthenticatedKeyShareVectorLocalCheckIncomplete {
                 expected_chunk_count,
                 checked_chunk_count,
                 expected_field_count,
                 checked_field_count,
+                absorbed_basis_count,
             } => write!(
                 formatter,
-                "authenticated-key local share-vector check covered {checked_chunk_count} of {expected_chunk_count} chunks and {checked_field_count} of {expected_field_count} fields"
+                "authenticated-key local share-vector check covered {checked_chunk_count} of {expected_chunk_count} chunks and {checked_field_count} of {expected_field_count} fields, with {absorbed_basis_count} basis chunks pending"
             ),
             Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
                 "preparation compiler source identity requires canonical UTF-8 with LF line endings",

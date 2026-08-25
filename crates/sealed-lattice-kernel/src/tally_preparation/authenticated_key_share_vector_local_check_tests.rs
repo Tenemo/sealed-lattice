@@ -93,15 +93,8 @@ fn streamed_local_check_requires_every_bound_chunk_before_acknowledgement() {
     let mut mutated_first_payload = honest_first_payload.clone();
     mutated_first_payload[0] ^= 1;
     assert!(matches!(
-        payload_mutation_check.verify_next_payload_chunks(
-            &[
-                mutated_first_payload.as_slice(),
-                honest_first_payload.as_slice(),
-                honest_first_payload.as_slice(),
-                honest_first_payload.as_slice(),
-            ],
-            &honest_first_payload,
-        ),
+        payload_mutation_check
+            .absorb_next_published_basis_payload_chunk(&mutated_first_payload, None,),
         Err(TallyPreparationError::AuthenticatedKeyShareVectorPayloadDigestMismatch)
     ));
 
@@ -129,17 +122,23 @@ fn streamed_local_check_requires_every_bound_chunk_before_acknowledgement() {
         HONEST_FIELD_MARKER,
         Some(INCONSISTENT_FIELD_MARKER),
     );
+    for _basis_position in 0..4 {
+        assert!(
+            inconsistent_local_check
+                .absorb_next_published_basis_payload_chunk(&honest_first_payload, None)
+                .unwrap()
+                .is_none()
+        );
+    }
     assert!(matches!(
-        inconsistent_local_check.verify_next_payload_chunks(
-            &[
-                honest_first_payload.as_slice(),
-                honest_first_payload.as_slice(),
-                honest_first_payload.as_slice(),
-                honest_first_payload.as_slice(),
-            ],
-            &inconsistent_local_payload,
-        ),
+        inconsistent_local_check
+            .verify_next_nonbasis_local_payload_chunk(&inconsistent_local_payload),
         Err(TallyPreparationError::InconsistentShare { roster_position: 8 })
+    ));
+    assert!(matches!(
+        inconsistent_local_check
+            .verify_next_nonbasis_local_payload_chunk(&inconsistent_local_payload),
+        Err(TallyPreparationError::AuthenticatedKeyShareVectorLocalCheckFailed)
     ));
 
     let wrong_sender_descriptor = descriptor(
@@ -163,6 +162,71 @@ fn streamed_local_check_requires_every_bound_chunk_before_acknowledgement() {
         Err(TallyPreparationError::AuthenticatedKeyShareVectorLocalDescriptorMismatch)
     ));
 
+    let basis_local_descriptor = descriptor(
+        context,
+        &circuit,
+        holder_commitment_root,
+        2,
+        HONEST_FIELD_MARKER,
+        None,
+    );
+    let mut basis_local_check = AuthenticatedKeyShareVectorLocalCheck::begin(
+        context,
+        &circuit,
+        holder_commitment_root,
+        &manifest,
+        &published_basis_descriptors,
+        &basis_local_descriptor,
+        2,
+    )
+    .unwrap();
+    for _basis_position in 0..2 {
+        assert!(
+            basis_local_check
+                .absorb_next_published_basis_payload_chunk(&honest_first_payload, None)
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(matches!(
+        basis_local_check.absorb_next_published_basis_payload_chunk(&honest_first_payload, None),
+        Err(
+            TallyPreparationError::AuthenticatedKeyShareVectorLocalPayloadPresenceMismatch {
+                basis_position: 2,
+                expected: true,
+                actual: false,
+            }
+        )
+    ));
+    assert!(
+        basis_local_check
+            .absorb_next_published_basis_payload_chunk(
+                &honest_first_payload,
+                Some(&honest_first_payload),
+            )
+            .unwrap()
+            .is_none()
+    );
+    assert!(matches!(
+        basis_local_check.absorb_next_published_basis_payload_chunk(
+            &honest_first_payload,
+            Some(&honest_first_payload),
+        ),
+        Err(
+            TallyPreparationError::AuthenticatedKeyShareVectorLocalPayloadPresenceMismatch {
+                basis_position: 3,
+                expected: false,
+                actual: true,
+            }
+        )
+    ));
+    assert!(
+        basis_local_check
+            .absorb_next_published_basis_payload_chunk(&honest_first_payload, None)
+            .unwrap()
+            .is_some()
+    );
+
     let mut local_check = AuthenticatedKeyShareVectorLocalCheck::begin(
         context,
         &circuit,
@@ -181,16 +245,16 @@ fn streamed_local_check_requires_every_bound_chunk_before_acknowledgement() {
     for chunk_index in 0..local_descriptor.chunk_count() {
         let payload =
             payload_for_descriptor(&local_descriptor, chunk_index, HONEST_FIELD_MARKER, None);
+        for _basis_position in 0..4 {
+            assert!(
+                local_check
+                    .absorb_next_published_basis_payload_chunk(&payload, None)
+                    .unwrap()
+                    .is_none()
+            );
+        }
         let checked_chunk = local_check
-            .verify_next_payload_chunks(
-                &[
-                    payload.as_slice(),
-                    payload.as_slice(),
-                    payload.as_slice(),
-                    payload.as_slice(),
-                ],
-                &payload,
-            )
+            .verify_next_nonbasis_local_payload_chunk(&payload)
             .unwrap();
         assert_eq!(
             checked_chunk.first_field_index(),
@@ -212,15 +276,7 @@ fn streamed_local_check_requires_every_bound_chunk_before_acknowledgement() {
         None,
     );
     assert!(matches!(
-        local_check.verify_next_payload_chunks(
-            &[
-                final_payload.as_slice(),
-                final_payload.as_slice(),
-                final_payload.as_slice(),
-                final_payload.as_slice(),
-            ],
-            &final_payload,
-        ),
+        local_check.absorb_next_published_basis_payload_chunk(&final_payload, None),
         Err(TallyPreparationError::AuthenticatedKeyShareVectorLocalCheckAlreadyComplete)
     ));
     let checked_share_vector = local_check.finish().unwrap();

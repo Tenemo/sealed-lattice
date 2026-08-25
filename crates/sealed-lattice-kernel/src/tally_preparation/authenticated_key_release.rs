@@ -25,6 +25,17 @@ pub(crate) struct AuthenticatedKeyFieldLocalChecker {
         Option<[BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD]>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AuthenticatedKeyFieldLocalCheckWork {
+    pub(crate) coefficient_vector_count: u64,
+    pub(crate) coefficient_precomputation_field_multiplication_count: u64,
+    pub(crate) coefficient_precomputation_field_addition_count: u64,
+    pub(crate) coefficient_precomputation_field_inversion_count: u64,
+    pub(crate) field_multiplication_count_per_checked_field: u64,
+    pub(crate) field_addition_count_per_checked_field: u64,
+    pub(crate) constant_time_comparison_count_per_checked_field: u64,
+}
+
 impl AuthenticatedKeyFieldLocalChecker {
     pub(crate) fn new(
         participant_count: u16,
@@ -103,6 +114,40 @@ impl AuthenticatedKeyFieldLocalChecker {
 
     pub(crate) const fn participant_position(self) -> u16 {
         self.participant_position
+    }
+
+    pub(crate) const fn constant_term_coefficients(
+        self,
+    ) -> [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD] {
+        self.constant_term_coefficients
+    }
+
+    pub(crate) const fn local_point_coefficients(
+        self,
+    ) -> Option<[BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD]> {
+        self.local_point_coefficients
+    }
+
+    pub(crate) const fn exact_work(self) -> AuthenticatedKeyFieldLocalCheckWork {
+        let coefficient_vector_count = if self.local_point_coefficients.is_some() {
+            2
+        } else {
+            1
+        };
+        // One coefficient vector uses twelve denominator products, twelve
+        // batch-inversion multiplications, twelve numerator products, four
+        // final coefficient multiplications, twenty-four point additions, and
+        // one field inversion. Interpolating one field uses four
+        // multiply-and-add steps per coefficient vector.
+        AuthenticatedKeyFieldLocalCheckWork {
+            coefficient_vector_count,
+            coefficient_precomputation_field_multiplication_count: 40 * coefficient_vector_count,
+            coefficient_precomputation_field_addition_count: 24 * coefficient_vector_count,
+            coefficient_precomputation_field_inversion_count: coefficient_vector_count,
+            field_multiplication_count_per_checked_field: 4 * coefficient_vector_count,
+            field_addition_count_per_checked_field: 4 * coefficient_vector_count,
+            constant_time_comparison_count_per_checked_field: 1,
+        }
     }
 }
 
