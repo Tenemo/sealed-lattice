@@ -32,14 +32,14 @@ pub(crate) fn compile_tally_circuit(
     let option_count = usize::from(profile.option_count());
     let top_count = usize::from(profile.top_count());
     let score_bit_width = bit_width_for_maximum_value(usize::from(maximum_score));
-    let public_presence_input_bit_count = participant_count
+    let candidate_attempt_presence_input_bit_count = participant_count
         .checked_mul(TALLY_CANDIDATE_ATTEMPT_COUNT)
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-    let private_score_input_bit_count = public_presence_input_bit_count
+    let private_score_input_bit_count = candidate_attempt_presence_input_bit_count
         .checked_mul(option_count)
         .and_then(|score_count| score_count.checked_mul(score_bit_width))
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-    let input_bit_count = public_presence_input_bit_count
+    let input_bit_count = candidate_attempt_presence_input_bit_count
         .checked_add(private_score_input_bit_count)
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
     let maximum_aggregate_score = participant_count
@@ -157,7 +157,7 @@ pub(crate) fn compile_tally_circuit(
         .checked_mul(option_position_bit_width)
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
     let geometry = builder.geometry(
-        public_presence_input_bit_count,
+        candidate_attempt_presence_input_bit_count,
         private_score_input_bit_count,
         score_bit_width,
         aggregate_score_bit_width,
@@ -617,7 +617,7 @@ impl BooleanCircuitBuilder {
 
     fn geometry(
         &self,
-        public_presence_input_bit_count: usize,
+        candidate_attempt_presence_input_bit_count: usize,
         private_score_input_bit_count: usize,
         score_bit_width: usize,
         aggregate_score_bit_width: usize,
@@ -626,7 +626,7 @@ impl BooleanCircuitBuilder {
     ) -> Result<TallyCircuitGeometry, TallyCircuitError> {
         Ok(TallyCircuitGeometry {
             input_bit_count: self.input_bit_count,
-            public_presence_input_bit_count,
+            candidate_attempt_presence_input_bit_count,
             private_score_input_bit_count,
             candidate_attempt_count: TALLY_CANDIDATE_ATTEMPT_COUNT,
             score_bit_width,

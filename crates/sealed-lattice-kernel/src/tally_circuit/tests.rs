@@ -80,7 +80,7 @@ fn completion_profile_full_ranking_reproduces_corrected_reference_geometry() {
     let geometry = compiled_circuit.geometry();
 
     assert_eq!(geometry.input_bit_count, 1_230);
-    assert_eq!(geometry.public_presence_input_bit_count, 30);
+    assert_eq!(geometry.candidate_attempt_presence_input_bit_count, 30);
     assert_eq!(geometry.private_score_input_bit_count, 1_200);
     assert_eq!(geometry.candidate_attempt_count, 3);
     assert_eq!(geometry.constant_operation_count, 2);

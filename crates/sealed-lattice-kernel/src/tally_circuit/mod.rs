@@ -120,7 +120,7 @@ impl BooleanOperation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TallyCircuitGeometry {
     pub(crate) input_bit_count: usize,
-    pub(crate) public_presence_input_bit_count: usize,
+    pub(crate) candidate_attempt_presence_input_bit_count: usize,
     pub(crate) private_score_input_bit_count: usize,
     pub(crate) candidate_attempt_count: usize,
     pub(crate) score_bit_width: usize,
