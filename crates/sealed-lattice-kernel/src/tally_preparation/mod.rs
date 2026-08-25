@@ -6,6 +6,7 @@
 //! suite.
 
 mod adaptive_oracle_repair;
+mod amortized_binary_mpc_communication_floor;
 mod authenticated_opening;
 mod binary_field;
 mod binary_field_multiplication_circuit;
@@ -27,6 +28,8 @@ mod tower_field_multiplication_circuit;
 
 #[cfg(test)]
 mod adaptive_oracle_repair_tests;
+#[cfg(test)]
+mod amortized_binary_mpc_communication_floor_tests;
 #[cfg(test)]
 mod authenticated_opening_tests;
 #[cfg(test)]
