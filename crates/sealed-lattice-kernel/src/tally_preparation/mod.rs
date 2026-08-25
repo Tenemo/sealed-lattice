@@ -28,6 +28,8 @@ mod random_tape;
 mod replicated_key_ceremony;
 mod replicated_key_ceremony_resource_model;
 mod replicated_random_sharing;
+mod replicated_sharing_field_stream;
+mod replicated_sharing_stream_resource_model;
 mod tower_field_multiplication_circuit;
 
 #[cfg(test)]
@@ -66,6 +68,10 @@ mod replicated_key_ceremony_resource_model_tests;
 mod replicated_key_ceremony_tests;
 #[cfg(test)]
 mod replicated_random_sharing_tests;
+#[cfg(test)]
+mod replicated_sharing_field_stream_tests;
+#[cfg(test)]
+mod replicated_sharing_stream_resource_model_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -149,6 +155,16 @@ pub(crate) enum TallyPreparationError {
     ReplicatedKeyCommitmentMismatch,
     ReplicatedKeyInventoryMismatch,
     ReplicatedKeyAcknowledgementMismatch,
+    ReplicatedSharingFieldPurposeMismatch,
+    ReplicatedSharingFieldCountZero,
+    ReplicatedSharingFieldChunkOutOfRange {
+        chunk_index: u64,
+        chunk_count: u64,
+    },
+    ReplicatedSharingFieldPositionOutOfRange {
+        position_within_chunk: u64,
+        field_count: u64,
+    },
     AffineLabelPointBitMismatch,
     AffineLabelCommitmentsEqual {
         component_position: usize,
@@ -370,6 +386,25 @@ impl fmt::Display for TallyPreparationError {
             Self::ReplicatedKeyAcknowledgementMismatch => {
                 formatter.write_str("replicated-key delivery acknowledgement does not match")
             }
+            Self::ReplicatedSharingFieldPurposeMismatch => formatter
+                .write_str("replicated-sharing field stream purpose does not match its key"),
+            Self::ReplicatedSharingFieldCountZero => {
+                formatter.write_str("replicated-sharing field stream must contain a field element")
+            }
+            Self::ReplicatedSharingFieldChunkOutOfRange {
+                chunk_index,
+                chunk_count,
+            } => write!(
+                formatter,
+                "replicated-sharing field chunk {chunk_index} is outside chunk count {chunk_count}"
+            ),
+            Self::ReplicatedSharingFieldPositionOutOfRange {
+                position_within_chunk,
+                field_count,
+            } => write!(
+                formatter,
+                "replicated-sharing field position {position_within_chunk} is outside chunk field count {field_count}"
+            ),
             Self::AffineLabelPointBitMismatch => formatter
                 .write_str("affine label alternatives must have canonical zero and one point bits"),
             Self::AffineLabelCommitmentsEqual { component_position } => write!(

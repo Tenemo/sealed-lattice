@@ -313,11 +313,18 @@ impl Drop for ReplicatedKeyComponentOpening {
 }
 
 #[derive(PartialEq, Eq)]
-pub(crate) struct ReplicatedRandomSharingKey([u8; REPLICATED_KEY_COMPONENT_BYTE_LENGTH]);
+pub(crate) struct ReplicatedRandomSharingKey {
+    coordinate: ReplicatedRandomSharingKeyCoordinate,
+    bytes: [u8; REPLICATED_KEY_COMPONENT_BYTE_LENGTH],
+}
 
 impl ReplicatedRandomSharingKey {
+    pub(crate) const fn coordinate(&self) -> ReplicatedRandomSharingKeyCoordinate {
+        self.coordinate
+    }
+
     pub(crate) const fn as_bytes(&self) -> &[u8; REPLICATED_KEY_COMPONENT_BYTE_LENGTH] {
-        &self.0
+        &self.bytes
     }
 }
 
@@ -329,7 +336,7 @@ impl fmt::Debug for ReplicatedRandomSharingKey {
 
 impl Drop for ReplicatedRandomSharingKey {
     fn drop(&mut self) {
-        self.0.zeroize();
+        self.bytes.zeroize();
     }
 }
 
@@ -553,7 +560,10 @@ pub(crate) fn combine_replicated_random_sharing_key(
             *combined_byte ^= component_byte;
         }
     }
-    Ok(ReplicatedRandomSharingKey(combined_key))
+    Ok(ReplicatedRandomSharingKey {
+        coordinate: expected_coordinate,
+        bytes: combined_key,
+    })
 }
 
 pub(crate) fn expected_replicated_key_component_slots(
