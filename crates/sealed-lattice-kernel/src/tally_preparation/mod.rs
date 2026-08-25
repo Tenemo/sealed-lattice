@@ -14,6 +14,7 @@ mod garbling;
 mod garbling_alternative_resource_model;
 mod geometry;
 mod label_encoding;
+mod malicious_mpc_communication_floor;
 mod output_sharing;
 mod preparation_arithmetic_graph;
 mod random_state;
@@ -31,6 +32,8 @@ mod garbling_alternative_resource_model_tests;
 mod garbling_tests;
 #[cfg(test)]
 mod label_encoding_tests;
+#[cfg(test)]
+mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
 mod preparation_arithmetic_graph_tests;
 #[cfg(test)]
