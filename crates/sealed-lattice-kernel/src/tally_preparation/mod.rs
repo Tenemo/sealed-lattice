@@ -24,6 +24,7 @@ mod output_sharing;
 mod preparation_arithmetic_graph;
 mod random_state;
 mod random_tape;
+mod replicated_random_sharing;
 mod tower_field_multiplication_circuit;
 
 #[cfg(test)]
@@ -54,6 +55,8 @@ mod malicious_mpc_communication_floor_tests;
 mod preparation_arithmetic_graph_tests;
 #[cfg(test)]
 mod randomness_tests;
+#[cfg(test)]
+mod replicated_random_sharing_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
