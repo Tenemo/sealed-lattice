@@ -5,9 +5,106 @@ use crate::foundation::derive_foundation_roster_parameters;
 use super::{
     BinaryFieldElement256, TallyPreparationError,
     output_sharing::{
-        DEGREE_THREE_RECONSTRUCTION_THRESHOLD, DegreeThreeMaskShare, reconstruct_degree_three_mask,
+        DEGREE_THREE_RECONSTRUCTION_THRESHOLD, DegreeThreeMaskShare, batch_invert_four,
+        canonical_evaluation_point,
     },
 };
+
+/// Precomputed fixed-basis checker for a participant's authenticated-key
+/// fields.
+///
+/// Construction derives both interpolation coefficient vectors once. Each
+/// subsequent field check performs no allocation or inversion. This object
+/// carries no transcript provenance and cannot authorize release by itself.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AuthenticatedKeyFieldLocalChecker {
+    participant_count: u16,
+    participant_position: u16,
+    constant_term_coefficients: [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD],
+    local_point_coefficients:
+        Option<[BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD]>,
+}
+
+impl AuthenticatedKeyFieldLocalChecker {
+    pub(crate) fn new(
+        participant_count: u16,
+        participant_position: u16,
+    ) -> Result<Self, TallyPreparationError> {
+        let roster_parameters = derive_foundation_roster_parameters(participant_count)
+            .ok_or(TallyPreparationError::ParticipantCountOutOfRange { participant_count })?;
+        if usize::from(roster_parameters.reconstruction_threshold)
+            != DEGREE_THREE_RECONSTRUCTION_THRESHOLD
+        {
+            return Err(
+                TallyPreparationError::AuthenticatedKeyReleaseProfileMismatch {
+                    participant_count,
+                    derived_reconstruction_threshold: roster_parameters.reconstruction_threshold,
+                    supported_reconstruction_threshold: u16::try_from(
+                        DEGREE_THREE_RECONSTRUCTION_THRESHOLD,
+                    )
+                    .map_err(|_| TallyPreparationError::IntegerConversion)?,
+                },
+            );
+        }
+        let local_evaluation_point =
+            canonical_evaluation_point(participant_count, participant_position)?;
+        Ok(Self {
+            participant_count,
+            participant_position,
+            constant_term_coefficients: fixed_basis_interpolation_coefficients(
+                participant_count,
+                BinaryFieldElement256::ZERO,
+            )?,
+            local_point_coefficients: (usize::from(participant_position)
+                >= DEGREE_THREE_RECONSTRUCTION_THRESHOLD)
+                .then(|| {
+                    fixed_basis_interpolation_coefficients(
+                        participant_count,
+                        local_evaluation_point,
+                    )
+                })
+                .transpose()?,
+        })
+    }
+
+    pub(crate) fn reconstruct_locally_checked_field(
+        self,
+        published_basis_values: [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD],
+        local_value: BinaryFieldElement256,
+    ) -> Result<BinaryFieldElement256, TallyPreparationError> {
+        let local_value_is_consistent = match self.local_point_coefficients {
+            Some(local_point_coefficients) => {
+                interpolate_fixed_basis_values(published_basis_values, local_point_coefficients)
+                    .ct_eq(&local_value)
+                    .unwrap_u8()
+                    == 1
+            }
+            None => {
+                published_basis_values[usize::from(self.participant_position)]
+                    .ct_eq(&local_value)
+                    .unwrap_u8()
+                    == 1
+            }
+        };
+        if !local_value_is_consistent {
+            return Err(TallyPreparationError::InconsistentShare {
+                roster_position: self.participant_position,
+            });
+        }
+        Ok(interpolate_fixed_basis_values(
+            published_basis_values,
+            self.constant_term_coefficients,
+        ))
+    }
+
+    pub(crate) const fn participant_count(self) -> u16 {
+        self.participant_count
+    }
+
+    pub(crate) const fn participant_position(self) -> u16 {
+        self.participant_position
+    }
+}
 
 /// Reconstructs one public authenticated-opening key field and checks it
 /// against one participant's private preparation share.
@@ -26,25 +123,10 @@ pub(crate) fn reconstruct_locally_checked_authenticated_key_field(
     published_basis_shares: &[DegreeThreeMaskShare],
     local_share: DegreeThreeMaskShare,
 ) -> Result<BinaryFieldElement256, TallyPreparationError> {
-    let roster_parameters = derive_foundation_roster_parameters(expected_participant_count).ok_or(
-        TallyPreparationError::ParticipantCountOutOfRange {
-            participant_count: expected_participant_count,
-        },
+    let checker = AuthenticatedKeyFieldLocalChecker::new(
+        expected_participant_count,
+        local_share.roster_position(),
     )?;
-    if usize::from(roster_parameters.reconstruction_threshold)
-        != DEGREE_THREE_RECONSTRUCTION_THRESHOLD
-    {
-        return Err(
-            TallyPreparationError::AuthenticatedKeyReleaseProfileMismatch {
-                participant_count: expected_participant_count,
-                derived_reconstruction_threshold: roster_parameters.reconstruction_threshold,
-                supported_reconstruction_threshold: u16::try_from(
-                    DEGREE_THREE_RECONSTRUCTION_THRESHOLD,
-                )
-                .map_err(|_| TallyPreparationError::IntegerConversion)?,
-            },
-        );
-    }
     if published_basis_shares.len() != DEGREE_THREE_RECONSTRUCTION_THRESHOLD {
         return Err(
             TallyPreparationError::AuthenticatedKeyReleaseBasisCountMismatch {
@@ -56,6 +138,8 @@ pub(crate) fn reconstruct_locally_checked_authenticated_key_field(
     if local_share.participant_count() != expected_participant_count {
         return Err(TallyPreparationError::ParticipantCountMismatch);
     }
+    let mut published_basis_values =
+        [BinaryFieldElement256::ZERO; DEGREE_THREE_RECONSTRUCTION_THRESHOLD];
     for (basis_position, share) in published_basis_shares.iter().copied().enumerate() {
         let expected_roster_position =
             u16::try_from(basis_position).map_err(|_| TallyPreparationError::IntegerConversion)?;
@@ -68,28 +152,57 @@ pub(crate) fn reconstruct_locally_checked_authenticated_key_field(
                 },
             );
         }
-    }
-
-    if usize::from(local_share.roster_position()) < DEGREE_THREE_RECONSTRUCTION_THRESHOLD {
-        let published_local_share = published_basis_shares
-            .get(usize::from(local_share.roster_position()))
-            .copied()
-            .ok_or(TallyPreparationError::GeometryMismatch)?;
-        if published_local_share
-            .value()
-            .ct_eq(&local_share.value())
-            .unwrap_u8()
-            != 1
-        {
-            return Err(TallyPreparationError::InconsistentShare {
-                roster_position: local_share.roster_position(),
-            });
+        if share.participant_count() != expected_participant_count {
+            return Err(TallyPreparationError::ParticipantCountMismatch);
         }
-        reconstruct_degree_three_mask(expected_participant_count, published_basis_shares)
-    } else {
-        let mut shares = Vec::with_capacity(DEGREE_THREE_RECONSTRUCTION_THRESHOLD + 1);
-        shares.extend_from_slice(published_basis_shares);
-        shares.push(local_share);
-        reconstruct_degree_three_mask(expected_participant_count, &shares)
+        published_basis_values[basis_position] = share.value();
     }
+    checker.reconstruct_locally_checked_field(published_basis_values, local_share.value())
+}
+
+fn fixed_basis_interpolation_coefficients(
+    participant_count: u16,
+    evaluation_point: BinaryFieldElement256,
+) -> Result<[BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD], TallyPreparationError> {
+    let mut basis_points = [BinaryFieldElement256::ZERO; DEGREE_THREE_RECONSTRUCTION_THRESHOLD];
+    for (basis_position, basis_point) in basis_points.iter_mut().enumerate() {
+        *basis_point = canonical_evaluation_point(
+            participant_count,
+            u16::try_from(basis_position).map_err(|_| TallyPreparationError::IntegerConversion)?,
+        )?;
+    }
+    let denominators = core::array::from_fn(|selected_position| {
+        basis_points
+            .iter()
+            .enumerate()
+            .filter(|(other_position, _point)| *other_position != selected_position)
+            .map(|(_other_position, point)| basis_points[selected_position].add(*point))
+            .fold(BinaryFieldElement256::ONE, |product, factor| {
+                product.multiply(factor)
+            })
+    });
+    let inverse_denominators = batch_invert_four(denominators)?;
+    Ok(core::array::from_fn(|selected_position| {
+        let numerator = basis_points
+            .iter()
+            .enumerate()
+            .filter(|(other_position, _point)| *other_position != selected_position)
+            .map(|(_other_position, point)| evaluation_point.add(*point))
+            .fold(BinaryFieldElement256::ONE, |product, factor| {
+                product.multiply(factor)
+            });
+        numerator.multiply(inverse_denominators[selected_position])
+    }))
+}
+
+fn interpolate_fixed_basis_values(
+    values: [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD],
+    coefficients: [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD],
+) -> BinaryFieldElement256 {
+    values
+        .into_iter()
+        .zip(coefficients)
+        .fold(BinaryFieldElement256::ZERO, |sum, (value, coefficient)| {
+            sum.add(value.multiply(coefficient))
+        })
 }

@@ -10,6 +10,7 @@ mod amortized_binary_mpc_communication_floor;
 mod authenticated_key_release;
 mod authenticated_key_release_resource_floor;
 mod authenticated_key_share_vector;
+mod authenticated_key_share_vector_local_check;
 mod authenticated_key_share_vector_manifest;
 mod authenticated_opening;
 mod binary_field;
@@ -52,6 +53,8 @@ mod amortized_binary_mpc_communication_floor_tests;
 mod authenticated_key_release_resource_floor_tests;
 #[cfg(test)]
 mod authenticated_key_release_tests;
+#[cfg(test)]
+mod authenticated_key_share_vector_local_check_tests;
 #[cfg(test)]
 mod authenticated_key_share_vector_manifest_tests;
 #[cfg(test)]
@@ -393,6 +396,14 @@ pub(crate) enum TallyPreparationError {
     AuthenticatedKeyShareVectorControlByteLengthOutOfRange {
         actual: usize,
         maximum: usize,
+    },
+    AuthenticatedKeyShareVectorLocalDescriptorMismatch,
+    AuthenticatedKeyShareVectorLocalCheckAlreadyComplete,
+    AuthenticatedKeyShareVectorLocalCheckIncomplete {
+        expected_chunk_count: u64,
+        checked_chunk_count: u64,
+        expected_field_count: u64,
+        checked_field_count: u64,
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
@@ -874,6 +885,20 @@ impl fmt::Display for TallyPreparationError {
                     "authenticated-key share-vector control body has {actual} bytes; maximum is {maximum}"
                 )
             }
+            Self::AuthenticatedKeyShareVectorLocalDescriptorMismatch => formatter.write_str(
+                "authenticated-key local share-vector descriptor does not match the participant",
+            ),
+            Self::AuthenticatedKeyShareVectorLocalCheckAlreadyComplete => formatter
+                .write_str("authenticated-key local share-vector check is already complete"),
+            Self::AuthenticatedKeyShareVectorLocalCheckIncomplete {
+                expected_chunk_count,
+                checked_chunk_count,
+                expected_field_count,
+                checked_field_count,
+            } => write!(
+                formatter,
+                "authenticated-key local share-vector check covered {checked_chunk_count} of {expected_chunk_count} chunks and {checked_field_count} of {expected_field_count} fields"
+            ),
             Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
                 "preparation compiler source identity requires canonical UTF-8 with LF line endings",
             ),
