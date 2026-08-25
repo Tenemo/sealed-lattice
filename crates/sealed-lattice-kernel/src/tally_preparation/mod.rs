@@ -8,6 +8,7 @@
 mod adaptive_oracle_repair;
 mod amortized_binary_mpc_communication_floor;
 mod authenticated_opening;
+mod authenticated_key_release_resource_floor;
 mod binary_field;
 mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
@@ -46,6 +47,8 @@ mod adaptive_oracle_repair_tests;
 mod amortized_binary_mpc_communication_floor_tests;
 #[cfg(test)]
 mod authenticated_opening_tests;
+#[cfg(test)]
+mod authenticated_key_release_resource_floor_tests;
 #[cfg(test)]
 mod binary_field_multiplication_circuit_tests;
 #[cfg(test)]
