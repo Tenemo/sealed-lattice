@@ -24,6 +24,7 @@ mod label_encoding;
 mod malicious_mpc_communication_floor;
 mod output_sharing;
 mod preparation_arithmetic_graph;
+mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
 mod random_state;
 mod random_tape;
@@ -69,6 +70,8 @@ mod label_encoding_tests;
 mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
 mod preparation_arithmetic_graph_tests;
+#[cfg(test)]
+mod preparation_holder_record_catalog_tests;
 #[cfg(test)]
 mod preparation_multiplication_catalog_tests;
 #[cfg(test)]
@@ -299,6 +302,10 @@ pub(crate) enum TallyPreparationError {
     PreparationMultiplicationIndexOutOfRange {
         operation_index: u64,
         operation_count: u64,
+    },
+    PreparationHolderRecordIndexOutOfRange {
+        record_index: u64,
+        record_count: u64,
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
@@ -648,6 +655,13 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "preparation multiplication index {operation_index} is outside operation count {operation_count}"
+            ),
+            Self::PreparationHolderRecordIndexOutOfRange {
+                record_index,
+                record_count,
+            } => write!(
+                formatter,
+                "preparation holder-record index {record_index} is outside record count {record_count}"
             ),
             Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
                 "preparation compiler source identity requires canonical UTF-8 with LF line endings",
