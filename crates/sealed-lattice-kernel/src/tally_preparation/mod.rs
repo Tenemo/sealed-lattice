@@ -10,6 +10,9 @@ mod amortized_binary_mpc_communication_floor;
 mod authenticated_key_release;
 mod authenticated_key_release_resource_floor;
 mod authenticated_key_share_vector;
+mod authenticated_key_share_vector_codeword_check;
+mod authenticated_key_share_vector_codeword_check_resource_floor;
+mod authenticated_key_share_vector_codeword_manifest;
 mod authenticated_key_share_vector_local_check;
 mod authenticated_key_share_vector_local_check_resource_floor;
 mod authenticated_key_share_vector_manifest;
@@ -54,6 +57,12 @@ mod amortized_binary_mpc_communication_floor_tests;
 mod authenticated_key_release_resource_floor_tests;
 #[cfg(test)]
 mod authenticated_key_release_tests;
+#[cfg(test)]
+mod authenticated_key_share_vector_codeword_check_resource_floor_tests;
+#[cfg(test)]
+mod authenticated_key_share_vector_codeword_check_tests;
+#[cfg(test)]
+mod authenticated_key_share_vector_codeword_manifest_tests;
 #[cfg(test)]
 mod authenticated_key_share_vector_local_check_resource_floor_tests;
 #[cfg(test)]
@@ -386,6 +395,16 @@ pub(crate) enum TallyPreparationError {
         actual: usize,
     },
     AuthenticatedKeyShareVectorManifestMismatch,
+    AuthenticatedKeyShareVectorCodewordManifestMagicMismatch,
+    UnsupportedAuthenticatedKeyShareVectorCodewordManifestVersion {
+        version: u64,
+    },
+    TrailingAuthenticatedKeyShareVectorCodewordManifestBytes,
+    AuthenticatedKeyShareVectorCodewordManifestDescriptorCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedKeyShareVectorCodewordManifestMismatch,
     AuthenticatedKeyShareVectorAcknowledgementMagicMismatch,
     UnsupportedAuthenticatedKeyShareVectorAcknowledgementVersion {
         version: u64,
@@ -417,6 +436,20 @@ pub(crate) enum TallyPreparationError {
         expected_field_count: u64,
         checked_field_count: u64,
         absorbed_basis_count: usize,
+    },
+    AuthenticatedKeyShareVectorCodewordCheckAlreadyComplete,
+    AuthenticatedKeyShareVectorCodewordChunkAwaitingFinalization,
+    AuthenticatedKeyShareVectorCodewordChunkIncomplete {
+        expected_sender_count: u16,
+        absorbed_sender_count: u16,
+    },
+    AuthenticatedKeyShareVectorCodewordCheckFailed,
+    AuthenticatedKeyShareVectorCodewordCheckIncomplete {
+        expected_chunk_count: u64,
+        checked_chunk_count: u64,
+        expected_field_count: u64,
+        checked_field_count: u64,
+        absorbed_sender_count: u16,
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
@@ -874,6 +907,25 @@ impl fmt::Display for TallyPreparationError {
             ),
             Self::AuthenticatedKeyShareVectorManifestMismatch => formatter
                 .write_str("authenticated-key share-vector manifest does not match"),
+            Self::AuthenticatedKeyShareVectorCodewordManifestMagicMismatch => formatter
+                .write_str("authenticated-key share-vector codeword manifest magic does not match"),
+            Self::UnsupportedAuthenticatedKeyShareVectorCodewordManifestVersion { version } => {
+                write!(
+                    formatter,
+                    "unsupported authenticated-key share-vector codeword manifest version {version}"
+                )
+            }
+            Self::TrailingAuthenticatedKeyShareVectorCodewordManifestBytes => formatter
+                .write_str("authenticated-key share-vector codeword manifest has trailing bytes"),
+            Self::AuthenticatedKeyShareVectorCodewordManifestDescriptorCountMismatch {
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector codeword manifest has {actual} descriptors; expected {expected}"
+            ),
+            Self::AuthenticatedKeyShareVectorCodewordManifestMismatch => formatter
+                .write_str("authenticated-key share-vector codeword manifest does not match"),
             Self::AuthenticatedKeyShareVectorAcknowledgementMagicMismatch => formatter
                 .write_str("authenticated-key share-vector acknowledgement magic does not match"),
             Self::UnsupportedAuthenticatedKeyShareVectorAcknowledgementVersion { version } => {
@@ -928,6 +980,29 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "authenticated-key local share-vector check covered {checked_chunk_count} of {expected_chunk_count} chunks and {checked_field_count} of {expected_field_count} fields, with {absorbed_basis_count} basis chunks pending"
+            ),
+            Self::AuthenticatedKeyShareVectorCodewordCheckAlreadyComplete => formatter
+                .write_str("authenticated-key share-vector codeword check is already complete"),
+            Self::AuthenticatedKeyShareVectorCodewordChunkAwaitingFinalization => formatter
+                .write_str("authenticated-key share-vector codeword chunk is awaiting finalization"),
+            Self::AuthenticatedKeyShareVectorCodewordChunkIncomplete {
+                expected_sender_count,
+                absorbed_sender_count,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector codeword chunk has {absorbed_sender_count} senders; expected {expected_sender_count}"
+            ),
+            Self::AuthenticatedKeyShareVectorCodewordCheckFailed => formatter
+                .write_str("authenticated-key share-vector codeword check has already failed"),
+            Self::AuthenticatedKeyShareVectorCodewordCheckIncomplete {
+                expected_chunk_count,
+                checked_chunk_count,
+                expected_field_count,
+                checked_field_count,
+                absorbed_sender_count,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector codeword check covered {checked_chunk_count} of {expected_chunk_count} chunks and {checked_field_count} of {expected_field_count} fields, with {absorbed_sender_count} sender payloads pending"
             ),
             Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
                 "preparation compiler source identity requires canonical UTF-8 with LF line endings",

@@ -9,6 +9,7 @@ use super::{
         authenticated_key_share_vector_descriptor_canonical_byte_length,
         authenticated_key_share_vector_payload_chunk_preimage_byte_length,
     },
+    authenticated_key_share_vector_codeword_manifest::authenticated_key_share_vector_codeword_manifest_canonical_byte_length,
     authenticated_key_share_vector_manifest::{
         authenticated_key_share_vector_acknowledgement_canonical_byte_length,
         authenticated_key_share_vector_manifest_canonical_byte_length,
@@ -37,9 +38,11 @@ const SHAKE256_RATE_BYTE_LENGTH: u64 = 136;
 /// still excludes detached signatures, signature-key binding, state
 /// certificates, transition indexes, the derived acknowledgement root,
 /// retransmission, checkpoints, and physical storage amplification. The
-/// conservative all-roster route includes only its payloads and descriptors;
-/// its distinct control graph remains unmodeled. This model is an admission
-/// floor, not a complete protocol ledger.
+/// conservative all-roster route includes its payloads, descriptors, and one
+/// source-bound codeword manifest. It still excludes signatures, source
+/// certification, state transitions, retransmission, checkpoints, and
+/// physical storage amplification. This model is an admission floor, not a
+/// complete protocol ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AuthenticatedKeyReleaseResourceFloor {
     pub(crate) participant_count: u64,
@@ -70,6 +73,9 @@ pub(crate) struct AuthenticatedKeyReleaseResourceFloor {
     pub(crate) all_roster_share_payload_byte_length: u64,
     pub(crate) all_roster_share_descriptor_byte_length: u64,
     pub(crate) all_roster_share_payload_and_descriptor_byte_length: u64,
+    pub(crate) all_roster_share_manifest_byte_length: u64,
+    pub(crate) all_roster_share_control_byte_length: u64,
+    pub(crate) all_roster_share_payload_and_control_byte_length: u64,
     pub(crate) all_roster_additional_byte_length: u64,
 }
 
@@ -197,6 +203,19 @@ impl AuthenticatedKeyReleaseResourceFloor {
             all_roster_share_payload_byte_length,
             all_roster_share_descriptor_byte_length,
         )?;
+        let all_roster_share_manifest_byte_length =
+            authenticated_key_share_vector_codeword_manifest_canonical_byte_length(
+                circuit.profile().participant_count(),
+                verification_key_field_element_count,
+            )?;
+        let all_roster_share_control_byte_length = checked_add(
+            all_roster_share_descriptor_byte_length,
+            all_roster_share_manifest_byte_length,
+        )?;
+        let all_roster_share_payload_and_control_byte_length = checked_add(
+            all_roster_share_payload_byte_length,
+            all_roster_share_control_byte_length,
+        )?;
 
         Ok(Self {
             participant_count,
@@ -233,8 +252,11 @@ impl AuthenticatedKeyReleaseResourceFloor {
             all_roster_share_payload_byte_length,
             all_roster_share_descriptor_byte_length,
             all_roster_share_payload_and_descriptor_byte_length,
+            all_roster_share_manifest_byte_length,
+            all_roster_share_control_byte_length,
+            all_roster_share_payload_and_control_byte_length,
             all_roster_additional_byte_length: checked_subtract(
-                all_roster_share_payload_and_descriptor_byte_length,
+                all_roster_share_payload_and_control_byte_length,
                 reconstructed_key_byte_length,
             )?,
         })

@@ -52,7 +52,10 @@ fn completion_key_release_floor_corrects_the_reconstructed_key_undercount() {
             all_roster_share_payload_byte_length: 461_817_600,
             all_roster_share_descriptor_byte_length: 32_610,
             all_roster_share_payload_and_descriptor_byte_length: 461_850_210,
-            all_roster_additional_byte_length: 415_668_450,
+            all_roster_share_manifest_byte_length: 1_056,
+            all_roster_share_control_byte_length: 33_666,
+            all_roster_share_payload_and_control_byte_length: 461_851_266,
+            all_roster_additional_byte_length: 415_669_506,
         }
     );
 }
@@ -200,6 +203,39 @@ fn independent_completion_derivation_matches_the_production_floor() {
         model.all_roster_share_payload_and_descriptor_byte_length,
         model.all_roster_share_payload_byte_length + model.all_roster_share_descriptor_byte_length
     );
+    let codeword_manifest_magic_byte_length =
+        b"sealed-lattice/authenticated-key-share-vector-codeword-manifest".len() as u64;
+    let independent_codeword_manifest_byte_length =
+        varuint_byte_length(codeword_manifest_magic_byte_length)
+            + codeword_manifest_magic_byte_length
+            + varuint_byte_length(1)
+            + 5 * framed_hash_byte_length
+            + varuint_byte_length(model.participant_count)
+            + varuint_byte_length(model.reconstruction_threshold)
+            + varuint_byte_length(model.verification_key_field_element_count)
+            + varuint_byte_length(model.participant_count)
+            + (0..model.participant_count)
+                .map(|sender_position| {
+                    varuint_byte_length(sender_position) + framed_hash_byte_length
+                })
+                .sum::<u64>();
+    assert_eq!(
+        model.all_roster_share_manifest_byte_length,
+        independent_codeword_manifest_byte_length
+    );
+    assert_eq!(
+        model.all_roster_share_control_byte_length,
+        model.all_roster_share_descriptor_byte_length + model.all_roster_share_manifest_byte_length
+    );
+    assert_eq!(
+        model.all_roster_share_payload_and_control_byte_length,
+        model.all_roster_share_payload_byte_length + model.all_roster_share_control_byte_length
+    );
+    assert_eq!(
+        model.all_roster_additional_byte_length,
+        model.all_roster_share_payload_and_control_byte_length
+            - model.reconstructed_key_byte_length
+    );
 }
 
 #[test]
@@ -259,6 +295,21 @@ fn every_admitted_shape_derives_thresholds_and_key_widths_from_canonical_owners(
                         * model.acknowledgement_body_byte_length_per_participant
                 );
                 assert_eq!(model.all_roster_share_sender_count, model.participant_count);
+                assert_eq!(
+                    model.all_roster_share_control_byte_length,
+                    model.all_roster_share_descriptor_byte_length
+                        + model.all_roster_share_manifest_byte_length
+                );
+                assert_eq!(
+                    model.all_roster_share_payload_and_control_byte_length,
+                    model.all_roster_share_payload_byte_length
+                        + model.all_roster_share_control_byte_length
+                );
+                assert_eq!(
+                    model.all_roster_additional_byte_length,
+                    model.all_roster_share_payload_and_control_byte_length
+                        - model.reconstructed_key_byte_length
+                );
                 assert!(
                     model.share_vector_descriptor_byte_length_per_sender
                         <= u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length).unwrap()

@@ -36,6 +36,119 @@ pub(crate) struct AuthenticatedKeyFieldLocalCheckWork {
     pub(crate) constant_time_comparison_count_per_checked_field: u64,
 }
 
+/// Precomputed fixed-basis checker for every public point in one
+/// degree-three codeword.
+///
+/// The checker retains only interpolation coefficients. It authenticates no
+/// preparation source and cannot authorize release by itself.
+#[derive(Debug, Clone)]
+pub(crate) struct AuthenticatedKeyFieldCodewordChecker {
+    participant_count: u16,
+    constant_term_coefficients: [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD],
+    nonbasis_point_coefficients:
+        Box<[[BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD]]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AuthenticatedKeyFieldCodewordCheckWork {
+    pub(crate) coefficient_vector_count: u64,
+    pub(crate) coefficient_precomputation_field_multiplication_count: u64,
+    pub(crate) coefficient_precomputation_field_addition_count: u64,
+    pub(crate) coefficient_precomputation_field_inversion_count: u64,
+    pub(crate) field_multiplication_count_per_checked_field: u64,
+    pub(crate) field_addition_count_per_checked_field: u64,
+    pub(crate) constant_time_comparison_count_per_checked_field: u64,
+}
+
+impl AuthenticatedKeyFieldCodewordChecker {
+    pub(crate) fn new(participant_count: u16) -> Result<Self, TallyPreparationError> {
+        let roster_parameters = derive_foundation_roster_parameters(participant_count)
+            .ok_or(TallyPreparationError::ParticipantCountOutOfRange { participant_count })?;
+        if usize::from(roster_parameters.reconstruction_threshold)
+            != DEGREE_THREE_RECONSTRUCTION_THRESHOLD
+        {
+            return Err(
+                TallyPreparationError::AuthenticatedKeyReleaseProfileMismatch {
+                    participant_count,
+                    derived_reconstruction_threshold: roster_parameters.reconstruction_threshold,
+                    supported_reconstruction_threshold: u16::try_from(
+                        DEGREE_THREE_RECONSTRUCTION_THRESHOLD,
+                    )
+                    .map_err(|_| TallyPreparationError::IntegerConversion)?,
+                },
+            );
+        }
+        let first_nonbasis_position = u16::try_from(DEGREE_THREE_RECONSTRUCTION_THRESHOLD)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let mut nonbasis_point_coefficients = Vec::with_capacity(
+            usize::from(participant_count)
+                .checked_sub(DEGREE_THREE_RECONSTRUCTION_THRESHOLD)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+        );
+        for participant_position in first_nonbasis_position..participant_count {
+            nonbasis_point_coefficients.push(fixed_basis_interpolation_coefficients(
+                participant_count,
+                canonical_evaluation_point(participant_count, participant_position)?,
+            )?);
+        }
+        Ok(Self {
+            participant_count,
+            constant_term_coefficients: fixed_basis_interpolation_coefficients(
+                participant_count,
+                BinaryFieldElement256::ZERO,
+            )?,
+            nonbasis_point_coefficients: nonbasis_point_coefficients.into_boxed_slice(),
+        })
+    }
+
+    pub(crate) const fn participant_count(&self) -> u16 {
+        self.participant_count
+    }
+
+    pub(crate) const fn constant_term_coefficients(
+        &self,
+    ) -> [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD] {
+        self.constant_term_coefficients
+    }
+
+    pub(crate) fn nonbasis_point_coefficients(
+        &self,
+        participant_position: u16,
+    ) -> Result<[BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD], TallyPreparationError>
+    {
+        let first_nonbasis_position = u16::try_from(DEGREE_THREE_RECONSTRUCTION_THRESHOLD)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let coefficient_position = participant_position
+            .checked_sub(first_nonbasis_position)
+            .ok_or(TallyPreparationError::RosterPositionOutOfRange {
+                roster_position: participant_position,
+                participant_count: self.participant_count,
+            })?;
+        self.nonbasis_point_coefficients
+            .get(usize::from(coefficient_position))
+            .copied()
+            .ok_or(TallyPreparationError::RosterPositionOutOfRange {
+                roster_position: participant_position,
+                participant_count: self.participant_count,
+            })
+    }
+
+    pub(crate) fn exact_work(&self) -> AuthenticatedKeyFieldCodewordCheckWork {
+        let coefficient_vector_count = 1_u64
+            + u64::try_from(self.nonbasis_point_coefficients.len())
+                .expect("the participant count is representable");
+        AuthenticatedKeyFieldCodewordCheckWork {
+            coefficient_vector_count,
+            coefficient_precomputation_field_multiplication_count: 40 * coefficient_vector_count,
+            coefficient_precomputation_field_addition_count: 24 * coefficient_vector_count,
+            coefficient_precomputation_field_inversion_count: coefficient_vector_count,
+            field_multiplication_count_per_checked_field: 4 * coefficient_vector_count,
+            field_addition_count_per_checked_field: 4 * coefficient_vector_count,
+            constant_time_comparison_count_per_checked_field: coefficient_vector_count - 1,
+        }
+    }
+}
+
 impl AuthenticatedKeyFieldLocalChecker {
     pub(crate) fn new(
         participant_count: u16,
