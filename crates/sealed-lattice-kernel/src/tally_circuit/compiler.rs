@@ -1,7 +1,7 @@
 use crate::hashing::hash_framed_parts_512;
 
 use super::{
-    BooleanOperation, CompiledTallyCircuit, TALLY_CANDIDATE_ATTEMPT_COUNT,
+    BooleanOperation, CompiledTallyCircuit, TALLY_BALLOT_ATTEMPT_COUNT,
     TALLY_CIRCUIT_COMPILER_IDENTITY_DOMAIN, TallyCircuitError, TallyCircuitGeometry,
     TallyCircuitProfile, WireIndex, bit_width_for_maximum_value, foundation_score_bounds,
 };
@@ -15,7 +15,7 @@ pub(crate) fn tally_circuit_compiler_identity() -> Result<[u8; 64], TallyCircuit
         TALLY_CIRCUIT_COMPILER_IDENTITY_DOMAIN,
         &[
             TALLY_CIRCUIT_COMPILER_SOURCE,
-            &u64::try_from(TALLY_CANDIDATE_ATTEMPT_COUNT)
+            &u64::try_from(TALLY_BALLOT_ATTEMPT_COUNT)
                 .map_err(|_| TallyCircuitError::ArithmeticOverflow)?
                 .to_le_bytes(),
             &minimum_score.to_le_bytes(),
@@ -27,19 +27,27 @@ pub(crate) fn tally_circuit_compiler_identity() -> Result<[u8; 64], TallyCircuit
 pub(crate) fn compile_tally_circuit(
     profile: TallyCircuitProfile,
 ) -> Result<CompiledTallyCircuit, TallyCircuitError> {
+    let (circuit, _accepted_ballot_authorship_source_wires) =
+        compile_tally_circuit_with_authorship_sources(profile)?;
+    Ok(circuit)
+}
+
+pub(super) fn compile_tally_circuit_with_authorship_sources(
+    profile: TallyCircuitProfile,
+) -> Result<(CompiledTallyCircuit, Vec<WireIndex>), TallyCircuitError> {
     let (_, maximum_score) = foundation_score_bounds()?;
     let participant_count = usize::from(profile.participant_count());
     let option_count = usize::from(profile.option_count());
     let top_count = usize::from(profile.top_count());
     let score_bit_width = bit_width_for_maximum_value(usize::from(maximum_score));
-    let candidate_attempt_presence_input_bit_count = participant_count
-        .checked_mul(TALLY_CANDIDATE_ATTEMPT_COUNT)
+    let ballot_attempt_presence_input_bit_count = participant_count
+        .checked_mul(TALLY_BALLOT_ATTEMPT_COUNT)
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-    let private_score_input_bit_count = candidate_attempt_presence_input_bit_count
+    let private_score_input_bit_count = ballot_attempt_presence_input_bit_count
         .checked_mul(option_count)
         .and_then(|score_count| score_count.checked_mul(score_bit_width))
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-    let input_bit_count = candidate_attempt_presence_input_bit_count
+    let input_bit_count = ballot_attempt_presence_input_bit_count
         .checked_add(private_score_input_bit_count)
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
     let maximum_aggregate_score = participant_count
@@ -48,7 +56,7 @@ pub(crate) fn compile_tally_circuit(
     let aggregate_score_bit_width = bit_width_for_maximum_value(maximum_aggregate_score);
     let option_position_bit_width = bit_width_for_maximum_value(option_count - 1).max(1);
 
-    let (candidate_attempt_presence_wires, candidate_attempt_score_wires) =
+    let (ballot_attempt_presence_wires, ballot_attempt_score_wires) =
         derive_input_wire_mapping(participant_count, option_count, score_bit_width)?;
     let mut builder = BooleanCircuitBuilder::new(input_bit_count)?;
     let false_constant_wire = builder.append_constant(false);
@@ -59,10 +67,10 @@ pub(crate) fn compile_tally_circuit(
     for participant_position in 0..participant_count {
         let mut prior_valid_attempt_wire = false_constant_wire;
         let mut selected_any_attempt_wire = false_constant_wire;
-        for attempt_position in 0..TALLY_CANDIDATE_ATTEMPT_COUNT {
+        for attempt_position in 0..TALLY_BALLOT_ATTEMPT_COUNT {
             let mut attempt_scores_valid_wire = builder.append_constant(true);
             for option_position in 0..option_count {
-                let score_wires = &candidate_attempt_score_wires[participant_position]
+                let score_wires = &ballot_attempt_score_wires[participant_position]
                     [attempt_position][option_position];
                 let valid_score_wire = score_is_valid(&mut builder, score_wires)?;
                 attempt_scores_valid_wire =
@@ -70,7 +78,7 @@ pub(crate) fn compile_tally_circuit(
             }
 
             let present_valid_attempt_wire = builder.append_conjunction(
-                candidate_attempt_presence_wires[participant_position][attempt_position],
+                ballot_attempt_presence_wires[participant_position][attempt_position],
                 attempt_scores_valid_wire,
             )?;
             let no_prior_valid_attempt_wire = builder.append_negation(prior_valid_attempt_wire)?;
@@ -85,7 +93,7 @@ pub(crate) fn compile_tally_circuit(
                 for bit_position in 0..score_bit_width {
                     let selected_score_bit_wire = builder.append_conjunction(
                         select_attempt_wire,
-                        candidate_attempt_score_wires[participant_position][attempt_position]
+                        ballot_attempt_score_wires[participant_position][attempt_position]
                             [option_position][bit_position],
                     )?;
                     effective_score_wires[participant_position][option_position][bit_position] =
@@ -101,7 +109,7 @@ pub(crate) fn compile_tally_circuit(
     }
 
     let mut nonempty_output_wire = false_constant_wire;
-    for participant_selected_wire in participant_selected_wires {
+    for participant_selected_wire in participant_selected_wires.iter().copied() {
         nonempty_output_wire =
             builder.append_disjunction(nonempty_output_wire, participant_selected_wire)?;
     }
@@ -157,7 +165,7 @@ pub(crate) fn compile_tally_circuit(
         .checked_mul(option_position_bit_width)
         .ok_or(TallyCircuitError::ArithmeticOverflow)?;
     let geometry = builder.geometry(
-        candidate_attempt_presence_input_bit_count,
+        ballot_attempt_presence_input_bit_count,
         private_score_input_bit_count,
         score_bit_width,
         aggregate_score_bit_width,
@@ -165,32 +173,35 @@ pub(crate) fn compile_tally_circuit(
         private_result_bit_count,
     )?;
 
-    Ok(CompiledTallyCircuit {
-        profile,
-        geometry,
-        operations: builder.operations,
-        candidate_attempt_presence_wires,
-        candidate_attempt_score_wires,
-        nonempty_output_wire,
-        ordered_option_position_wires,
-    })
+    Ok((
+        CompiledTallyCircuit {
+            profile,
+            geometry,
+            operations: builder.operations,
+            ballot_attempt_presence_wires,
+            ballot_attempt_score_wires,
+            nonempty_output_wire,
+            ordered_option_position_wires,
+        },
+        participant_selected_wires,
+    ))
 }
 
-type CandidateAttemptPresenceWires = Vec<Vec<WireIndex>>;
-type CandidateAttemptScoreWires = Vec<Vec<Vec<Vec<WireIndex>>>>;
+type BallotAttemptPresenceWires = Vec<Vec<WireIndex>>;
+type BallotAttemptScoreWires = Vec<Vec<Vec<Vec<WireIndex>>>>;
 
 fn derive_input_wire_mapping(
     participant_count: usize,
     option_count: usize,
     score_bit_width: usize,
-) -> Result<(CandidateAttemptPresenceWires, CandidateAttemptScoreWires), TallyCircuitError> {
+) -> Result<(BallotAttemptPresenceWires, BallotAttemptScoreWires), TallyCircuitError> {
     let mut next_wire = 0_usize;
-    let mut candidate_attempt_presence_wires = Vec::with_capacity(participant_count);
-    let mut candidate_attempt_score_wires = Vec::with_capacity(participant_count);
+    let mut ballot_attempt_presence_wires = Vec::with_capacity(participant_count);
+    let mut ballot_attempt_score_wires = Vec::with_capacity(participant_count);
     for _participant_position in 0..participant_count {
-        let mut participant_presence_wires = Vec::with_capacity(TALLY_CANDIDATE_ATTEMPT_COUNT);
-        let mut participant_score_wires = Vec::with_capacity(TALLY_CANDIDATE_ATTEMPT_COUNT);
-        for _attempt_position in 0..TALLY_CANDIDATE_ATTEMPT_COUNT {
+        let mut participant_presence_wires = Vec::with_capacity(TALLY_BALLOT_ATTEMPT_COUNT);
+        let mut participant_score_wires = Vec::with_capacity(TALLY_BALLOT_ATTEMPT_COUNT);
+        for _attempt_position in 0..TALLY_BALLOT_ATTEMPT_COUNT {
             participant_presence_wires.push(wire_index_from_usize(next_wire)?);
             next_wire = next_wire
                 .checked_add(1)
@@ -209,13 +220,10 @@ fn derive_input_wire_mapping(
             }
             participant_score_wires.push(attempt_score_wires);
         }
-        candidate_attempt_presence_wires.push(participant_presence_wires);
-        candidate_attempt_score_wires.push(participant_score_wires);
+        ballot_attempt_presence_wires.push(participant_presence_wires);
+        ballot_attempt_score_wires.push(participant_score_wires);
     }
-    Ok((
-        candidate_attempt_presence_wires,
-        candidate_attempt_score_wires,
-    ))
+    Ok((ballot_attempt_presence_wires, ballot_attempt_score_wires))
 }
 
 fn score_is_valid(
@@ -617,7 +625,7 @@ impl BooleanCircuitBuilder {
 
     fn geometry(
         &self,
-        candidate_attempt_presence_input_bit_count: usize,
+        ballot_attempt_presence_input_bit_count: usize,
         private_score_input_bit_count: usize,
         score_bit_width: usize,
         aggregate_score_bit_width: usize,
@@ -626,9 +634,9 @@ impl BooleanCircuitBuilder {
     ) -> Result<TallyCircuitGeometry, TallyCircuitError> {
         Ok(TallyCircuitGeometry {
             input_bit_count: self.input_bit_count,
-            candidate_attempt_presence_input_bit_count,
+            ballot_attempt_presence_input_bit_count,
             private_score_input_bit_count,
-            candidate_attempt_count: TALLY_CANDIDATE_ATTEMPT_COUNT,
+            ballot_attempt_count: TALLY_BALLOT_ATTEMPT_COUNT,
             score_bit_width,
             aggregate_score_bit_width,
             option_position_bit_width,

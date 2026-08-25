@@ -18,6 +18,7 @@ mod authenticated_key_share_vector_local_check_resource_floor;
 mod authenticated_key_share_vector_manifest;
 mod authenticated_opening;
 mod binary_field;
+mod binary_field_320;
 mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
 mod binary_ring_packed_mpc_evaluation_floor;
@@ -33,6 +34,7 @@ mod label_encoding;
 mod malicious_mpc_communication_floor;
 mod output_sharing;
 mod preparation_arithmetic_graph;
+mod preparation_attempt_resource_model;
 mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
 mod random_state;
@@ -77,6 +79,8 @@ mod authenticated_key_share_vector_tests;
 #[cfg(test)]
 mod authenticated_opening_tests;
 #[cfg(test)]
+mod binary_field_320_tests;
+#[cfg(test)]
 mod binary_field_multiplication_circuit_tests;
 #[cfg(test)]
 mod binary_linear_circuit_tests;
@@ -100,6 +104,8 @@ mod label_encoding_tests;
 mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
 mod preparation_arithmetic_graph_tests;
+#[cfg(test)]
+mod preparation_attempt_resource_model_tests;
 #[cfg(test)]
 mod preparation_holder_record_catalog_tests;
 #[cfg(test)]
@@ -139,6 +145,8 @@ use crate::tally_circuit::TallyCircuitError;
 use crate::{encoding::CanonicalError, foundation::CanonicalCodecError};
 
 pub(crate) use binary_field::BinaryFieldElement256;
+#[cfg(feature = "preparation-field-measurement")]
+pub(crate) use binary_field_320::measure_binary_field_320_multiplications;
 pub(crate) use context::TallyPreparationContext;
 pub(crate) use geometry::TallyPreparationGeometry;
 #[cfg(test)]
@@ -462,6 +470,8 @@ pub(crate) enum TallyPreparationError {
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
+    BallotAttemptCountZero,
+    MaximumPreparationAttemptCountZero,
     ArithmeticOverflow,
     WireIndexOutOfRange {
         wire_index: u32,
@@ -1018,6 +1028,12 @@ impl fmt::Display for TallyPreparationError {
             ),
             Self::GeometryMismatch => formatter
                 .write_str("tally preparation geometry does not match the compiled circuit"),
+            Self::BallotAttemptCountZero => {
+                formatter.write_str("ballot-attempt count must be positive")
+            }
+            Self::MaximumPreparationAttemptCountZero => {
+                formatter.write_str("maximum preparation-attempt count must be positive")
+            }
             Self::ArithmeticOverflow => {
                 formatter.write_str("tally preparation arithmetic overflow")
             }

@@ -7,6 +7,9 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+preparation-field-measurement = []
+
 [dependencies]
 fips203 = { version = "=0.4.3", default-features = false, features = ["ml-kem-768"] }
 serde = { version = "1", features = ["derive"] }

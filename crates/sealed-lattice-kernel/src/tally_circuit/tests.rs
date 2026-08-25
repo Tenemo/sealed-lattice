@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    BooleanOperation, TALLY_CANDIDATE_ATTEMPT_COUNT, TALLY_CIRCUIT_ARTIFACT_MAGIC,
-    TallyCandidateAttemptInput, TallyCircuitError, TallyCircuitProfile, TallyEvaluationInput,
+    BooleanOperation, TALLY_BALLOT_ATTEMPT_COUNT, TALLY_CIRCUIT_ARTIFACT_MAGIC,
+    TallyBallotAttemptInput, TallyCircuitError, TallyCircuitProfile, TallyEvaluationInput,
     codec::{decode_canonical_tally_circuit, encode_canonical_tally_circuit},
     compiler::{compile_tally_circuit, tally_circuit_compiler_identity},
     direct_evaluator::{evaluate_tally_directly, tally_direct_evaluator_identity},
@@ -18,23 +18,23 @@ fn profile(participant_count: u16, option_count: u16, top_count: u16) -> TallyCi
         .expect("test profile must be admitted")
 }
 
-fn candidate_attempt(is_present: bool, score_encodings: Vec<u8>) -> TallyCandidateAttemptInput {
-    TallyCandidateAttemptInput::new(is_present, score_encodings)
+fn ballot_attempt(is_present: bool, score_encodings: Vec<u8>) -> TallyBallotAttemptInput {
+    TallyBallotAttemptInput::new(is_present, score_encodings)
 }
 
-fn absent_candidate_attempt(option_count: usize) -> TallyCandidateAttemptInput {
-    candidate_attempt(false, vec![0; option_count])
+fn absent_ballot_attempt(option_count: usize) -> TallyBallotAttemptInput {
+    ballot_attempt(false, vec![0; option_count])
 }
 
 fn participant_with_first_attempt(
     is_present: bool,
     score_encodings: Vec<u8>,
-) -> Vec<TallyCandidateAttemptInput> {
+) -> Vec<TallyBallotAttemptInput> {
     let option_count = score_encodings.len();
     vec![
-        candidate_attempt(is_present, score_encodings),
-        absent_candidate_attempt(option_count),
-        absent_candidate_attempt(option_count),
+        ballot_attempt(is_present, score_encodings),
+        absent_ballot_attempt(option_count),
+        absent_ballot_attempt(option_count),
     ]
 }
 
@@ -42,8 +42,8 @@ fn empty_election_input(participant_count: usize, option_count: usize) -> TallyE
     TallyEvaluationInput::new(
         (0..participant_count)
             .map(|_| {
-                (0..TALLY_CANDIDATE_ATTEMPT_COUNT)
-                    .map(|_| absent_candidate_attempt(option_count))
+                (0..TALLY_BALLOT_ATTEMPT_COUNT)
+                    .map(|_| absent_ballot_attempt(option_count))
                     .collect()
             })
             .collect(),
@@ -80,9 +80,9 @@ fn completion_profile_full_ranking_reproduces_corrected_reference_geometry() {
     let geometry = compiled_circuit.geometry();
 
     assert_eq!(geometry.input_bit_count, 1_230);
-    assert_eq!(geometry.candidate_attempt_presence_input_bit_count, 30);
+    assert_eq!(geometry.ballot_attempt_presence_input_bit_count, 30);
     assert_eq!(geometry.private_score_input_bit_count, 1_200);
-    assert_eq!(geometry.candidate_attempt_count, 3);
+    assert_eq!(geometry.ballot_attempt_count, 3);
     assert_eq!(geometry.constant_operation_count, 2);
     assert_eq!(geometry.conjunction_gate_count, 5_422);
     assert_eq!(geometry.exclusive_or_gate_count, 6_283);
@@ -119,10 +119,10 @@ fn randomized_elections_match_for_every_admitted_structural_profile() {
                 let option_count = usize::from(option_count);
                 assert_eq!(
                     geometry.input_bit_count,
-                    participant_count * TALLY_CANDIDATE_ATTEMPT_COUNT * (1 + option_count * 4)
+                    participant_count * TALLY_BALLOT_ATTEMPT_COUNT * (1 + option_count * 4)
                 );
                 assert_eq!(
-                    compiled_circuit.candidate_attempt_presence_wires().len(),
+                    compiled_circuit.ballot_attempt_presence_wires().len(),
                     participant_count
                 );
                 assert_eq!(
@@ -211,17 +211,16 @@ fn source_bound_identities_and_artifact_bytes_are_reproducible() {
 #[test]
 fn every_four_bit_score_encoding_is_checked_in_every_attempt_and_option_position() {
     let selected_profile = profile(3, 2, 2);
-    for attempt_position in 0..TALLY_CANDIDATE_ATTEMPT_COUNT {
+    for attempt_position in 0..TALLY_BALLOT_ATTEMPT_COUNT {
         for option_position in 0..2 {
             for score_encoding in 0_u8..16 {
                 let mut input = empty_election_input(3, 2);
-                let participant_attempts = &mut input.participant_candidate_attempts[0];
-                participant_attempts[attempt_position] = candidate_attempt(true, vec![7, 7]);
+                let participant_attempts = &mut input.participant_ballot_attempts[0];
+                participant_attempts[attempt_position] = ballot_attempt(true, vec![7, 7]);
                 participant_attempts[attempt_position].score_encodings[option_position] =
                     score_encoding;
-                if attempt_position + 1 < TALLY_CANDIDATE_ATTEMPT_COUNT {
-                    participant_attempts[attempt_position + 1] =
-                        candidate_attempt(true, vec![10, 1]);
+                if attempt_position + 1 < TALLY_BALLOT_ATTEMPT_COUNT {
+                    participant_attempts[attempt_position + 1] = ballot_attempt(true, vec![10, 1]);
                 }
                 compare_interpreter_and_direct_evaluator(selected_profile, &input);
             }
@@ -236,7 +235,7 @@ fn every_presence_and_private_validity_retry_pattern_selects_the_first_valid_att
     for presence_pattern in 0_u8..8 {
         for validity_pattern in 0_u8..8 {
             let mut input = empty_election_input(3, 3);
-            for attempt_position in 0..TALLY_CANDIDATE_ATTEMPT_COUNT {
+            for attempt_position in 0..TALLY_BALLOT_ATTEMPT_COUNT {
                 let is_present = (presence_pattern >> attempt_position) & 1 == 1;
                 let is_valid = (validity_pattern >> attempt_position) & 1 == 1;
                 let scores = if is_valid {
@@ -246,13 +245,13 @@ fn every_presence_and_private_validity_retry_pattern_selects_the_first_valid_att
                     invalid_scores[attempt_position] = 15;
                     invalid_scores
                 };
-                input.participant_candidate_attempts[0][attempt_position] =
-                    candidate_attempt(is_present, scores);
+                input.participant_ballot_attempts[0][attempt_position] =
+                    ballot_attempt(is_present, scores);
             }
 
             compare_interpreter_and_direct_evaluator(selected_profile, &input);
             let outcome = evaluate_tally_directly(selected_profile, &input).unwrap();
-            let selected_attempt = (0..TALLY_CANDIDATE_ATTEMPT_COUNT).find(|attempt_position| {
+            let selected_attempt = (0..TALLY_BALLOT_ATTEMPT_COUNT).find(|attempt_position| {
                 (presence_pattern >> attempt_position) & 1 == 1
                     && (validity_pattern >> attempt_position) & 1 == 1
             });
@@ -279,14 +278,14 @@ fn every_presence_and_private_validity_retry_pattern_selects_the_first_valid_att
 fn invalid_first_attempt_does_not_block_a_later_valid_attempt() {
     let selected_profile = profile(10, 3, 3);
     let mut input = empty_election_input(10, 3);
-    input.participant_candidate_attempts[0] = vec![
-        candidate_attempt(true, vec![15, 1, 1]),
-        candidate_attempt(true, vec![10, 9, 1]),
-        candidate_attempt(false, vec![0, 0, 0]),
+    input.participant_ballot_attempts[0] = vec![
+        ballot_attempt(true, vec![15, 1, 1]),
+        ballot_attempt(true, vec![10, 9, 1]),
+        ballot_attempt(false, vec![0, 0, 0]),
     ];
     for participant_position in 1..10 {
-        input.participant_candidate_attempts[participant_position][0] =
-            candidate_attempt(true, vec![1, 1, 1]);
+        input.participant_ballot_attempts[participant_position][0] =
+            ballot_attempt(true, vec![1, 1, 1]);
     }
 
     compare_interpreter_and_direct_evaluator(selected_profile, &input);
@@ -315,9 +314,9 @@ fn empty_submission_and_all_invalid_attempts_both_produce_no_result() {
         (0..3)
             .map(|participant_position| {
                 vec![
-                    candidate_attempt(true, vec![0, 1, 2]),
-                    candidate_attempt(true, vec![11, 3, 4]),
-                    candidate_attempt(true, vec![5, 15, participant_position as u8]),
+                    ballot_attempt(true, vec![0, 1, 2]),
+                    ballot_attempt(true, vec![11, 3, 4]),
+                    ballot_attempt(true, vec![5, 15, participant_position as u8]),
                 ]
             })
             .collect(),
@@ -336,7 +335,7 @@ fn one_ballot_maximum_sums_and_complete_ties_have_stable_ordering() {
     let selected_profile = profile(10, 10, 10);
 
     let mut one_ballot_input = empty_election_input(10, 10);
-    one_ballot_input.participant_candidate_attempts[4] =
+    one_ballot_input.participant_ballot_attempts[4] =
         participant_with_first_attempt(true, vec![1, 10, 3, 9, 5, 8, 7, 6, 4, 2]);
     compare_interpreter_and_direct_evaluator(selected_profile, &one_ballot_input);
     assert_eq!(
@@ -420,12 +419,12 @@ fn canonical_verifier_rejects_operation_wiring_constant_input_retry_and_output_m
     assert_canonical_mutation_refuses(&constant_mutation);
 
     let mut input_mapping_mutation = canonical_circuit.clone();
-    input_mapping_mutation.candidate_attempt_score_wires[0][0][0].swap(0, 1);
+    input_mapping_mutation.ballot_attempt_score_wires[0][0][0].swap(0, 1);
     assert_canonical_mutation_refuses(&input_mapping_mutation);
 
     let mut retry_order_mutation = canonical_circuit.clone();
-    retry_order_mutation.candidate_attempt_presence_wires[0].swap(0, 1);
-    retry_order_mutation.candidate_attempt_score_wires[0].swap(0, 1);
+    retry_order_mutation.ballot_attempt_presence_wires[0].swap(0, 1);
+    retry_order_mutation.ballot_attempt_score_wires[0].swap(0, 1);
     assert_canonical_mutation_refuses(&retry_order_mutation);
 
     let mut public_output_mutation = canonical_circuit.clone();
@@ -496,15 +495,15 @@ fn input_mapping_is_participant_attempt_option_and_little_endian_bit_order() {
     let selected_profile = profile(3, 2, 2);
     let compiled_circuit = compile_tally_circuit(selected_profile).unwrap();
     assert_eq!(
-        compiled_circuit.candidate_attempt_presence_wires[0],
+        compiled_circuit.ballot_attempt_presence_wires[0],
         [0, 9, 18]
     );
     assert_eq!(
-        compiled_circuit.candidate_attempt_presence_wires[1],
+        compiled_circuit.ballot_attempt_presence_wires[1],
         [27, 36, 45]
     );
     assert_eq!(
-        compiled_circuit.candidate_attempt_score_wires[0][0],
+        compiled_circuit.ballot_attempt_score_wires[0][0],
         [vec![1, 2, 3, 4], vec![5, 6, 7, 8]]
     );
 
@@ -563,17 +562,17 @@ fn malformed_profiles_and_transport_shapes_refuse_with_typed_errors() {
     ));
 
     let mut wrong_attempt_count = empty_election_input(3, 2);
-    wrong_attempt_count.participant_candidate_attempts[1].pop();
+    wrong_attempt_count.participant_ballot_attempts[1].pop();
     assert!(matches!(
         evaluate_tally_directly(selected_profile, &wrong_attempt_count),
-        Err(TallyCircuitError::InputAttemptCountMismatch {
+        Err(TallyCircuitError::InputBallotAttemptCountMismatch {
             participant_position: 1,
             ..
         })
     ));
 
     let mut wrong_option_count = empty_election_input(3, 2);
-    wrong_option_count.participant_candidate_attempts[1][2]
+    wrong_option_count.participant_ballot_attempts[1][2]
         .score_encodings
         .pop();
     assert!(matches!(
@@ -586,7 +585,7 @@ fn malformed_profiles_and_transport_shapes_refuse_with_typed_errors() {
     ));
 
     let mut out_of_range_encoding = empty_election_input(3, 2);
-    out_of_range_encoding.participant_candidate_attempts[2][1].score_encodings[0] = 16;
+    out_of_range_encoding.participant_ballot_attempts[2][1].score_encodings[0] = 16;
     assert!(matches!(
         evaluate_tally_directly(selected_profile, &out_of_range_encoding),
         Err(TallyCircuitError::ScoreEncodingOutOfRange {
@@ -606,13 +605,13 @@ fn random_election_input(
     TallyEvaluationInput::new(
         (0..participant_count)
             .map(|_| {
-                (0..TALLY_CANDIDATE_ATTEMPT_COUNT)
+                (0..TALLY_BALLOT_ATTEMPT_COUNT)
                     .map(|_| {
                         let is_present = generator.next_bool();
                         let score_encodings = (0..option_count)
                             .map(|_| generator.next_bounded(16) as u8)
                             .collect();
-                        candidate_attempt(is_present, score_encodings)
+                        ballot_attempt(is_present, score_encodings)
                     })
                     .collect()
             })

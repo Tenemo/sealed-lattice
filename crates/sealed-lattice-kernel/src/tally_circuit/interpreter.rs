@@ -1,5 +1,5 @@
 use super::{
-    BooleanOperation, CompiledTallyCircuit, TALLY_CANDIDATE_ATTEMPT_COUNT, TallyCircuitError,
+    BooleanOperation, CompiledTallyCircuit, TALLY_BALLOT_ATTEMPT_COUNT, TallyCircuitError,
     TallyEvaluationInput, TallyEvaluationOutcome, WireIndex,
 };
 
@@ -76,48 +76,43 @@ pub(crate) fn interpret_boolean_operations(
     Ok(wire_values)
 }
 
-fn encode_tally_input_bits(
+pub(super) fn encode_tally_input_bits(
     circuit: &CompiledTallyCircuit,
     input: &TallyEvaluationInput,
 ) -> Result<Vec<bool>, TallyCircuitError> {
     let participant_count = usize::from(circuit.profile().participant_count());
     let option_count = usize::from(circuit.profile().option_count());
-    let participant_candidate_attempts = input.participant_candidate_attempts();
-    if participant_candidate_attempts.len() != participant_count {
+    let participant_ballot_attempts = input.participant_ballot_attempts();
+    if participant_ballot_attempts.len() != participant_count {
         return Err(TallyCircuitError::InputParticipantCountMismatch {
             expected: participant_count,
-            actual: participant_candidate_attempts.len(),
+            actual: participant_ballot_attempts.len(),
         });
     }
 
     let score_bit_width = circuit.geometry().score_bit_width;
     let maximum_score_encoding = (1_usize << score_bit_width) - 1;
     let mut input_bits = Vec::with_capacity(circuit.geometry().input_bit_count);
-    for (participant_position, candidate_attempts) in
-        participant_candidate_attempts.iter().enumerate()
-    {
-        if candidate_attempts.len() != TALLY_CANDIDATE_ATTEMPT_COUNT {
-            return Err(TallyCircuitError::InputAttemptCountMismatch {
+    for (participant_position, ballot_attempts) in participant_ballot_attempts.iter().enumerate() {
+        if ballot_attempts.len() != TALLY_BALLOT_ATTEMPT_COUNT {
+            return Err(TallyCircuitError::InputBallotAttemptCountMismatch {
                 participant_position,
-                expected: TALLY_CANDIDATE_ATTEMPT_COUNT,
-                actual: candidate_attempts.len(),
+                expected: TALLY_BALLOT_ATTEMPT_COUNT,
+                actual: ballot_attempts.len(),
             });
         }
-        for (attempt_position, candidate_attempt) in candidate_attempts.iter().enumerate() {
-            if candidate_attempt.score_encodings().len() != option_count {
+        for (attempt_position, ballot_attempt) in ballot_attempts.iter().enumerate() {
+            if ballot_attempt.score_encodings().len() != option_count {
                 return Err(TallyCircuitError::InputOptionCountMismatch {
                     participant_position,
                     attempt_position,
                     expected: option_count,
-                    actual: candidate_attempt.score_encodings().len(),
+                    actual: ballot_attempt.score_encodings().len(),
                 });
             }
-            input_bits.push(candidate_attempt.is_present());
-            for (option_position, score_encoding) in candidate_attempt
-                .score_encodings()
-                .iter()
-                .copied()
-                .enumerate()
+            input_bits.push(ballot_attempt.is_present());
+            for (option_position, score_encoding) in
+                ballot_attempt.score_encodings().iter().copied().enumerate()
             {
                 if usize::from(score_encoding) > maximum_score_encoding {
                     return Err(TallyCircuitError::ScoreEncodingOutOfRange {
@@ -136,7 +131,7 @@ fn encode_tally_input_bits(
     Ok(input_bits)
 }
 
-fn read_wire(wire_values: &[bool], wire: WireIndex) -> Result<bool, TallyCircuitError> {
+pub(super) fn read_wire(wire_values: &[bool], wire: WireIndex) -> Result<bool, TallyCircuitError> {
     let wire_position =
         usize::try_from(wire).map_err(|_| TallyCircuitError::InvalidWireReference {
             wire,

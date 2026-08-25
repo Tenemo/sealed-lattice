@@ -4,7 +4,7 @@ use crate::{
 };
 
 use super::{
-    BooleanOperation, CompiledTallyCircuit, TALLY_CANDIDATE_ATTEMPT_COUNT,
+    BooleanOperation, CompiledTallyCircuit, TALLY_BALLOT_ATTEMPT_COUNT,
     TALLY_CIRCUIT_ARTIFACT_MAGIC, TallyCircuitError, TallyCircuitProfile, WireIndex,
     compiler::{compile_tally_circuit, tally_circuit_compiler_identity},
     direct_evaluator::tally_direct_evaluator_identity,
@@ -31,7 +31,7 @@ pub(crate) fn encode_canonical_tally_circuit(
     append_varuint(&mut bytes, u64::from(circuit.profile().top_count()));
     append_varuint(
         &mut bytes,
-        u64::try_from(TALLY_CANDIDATE_ATTEMPT_COUNT)
+        u64::try_from(TALLY_BALLOT_ATTEMPT_COUNT)
             .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
     );
     append_varuint(
@@ -107,7 +107,7 @@ pub(crate) fn decode_canonical_tally_circuit(
         read_u16(&mut reader)?,
     )?;
     let expected_circuit = compile_tally_circuit(profile)?;
-    if read_usize(&mut reader)? != TALLY_CANDIDATE_ATTEMPT_COUNT {
+    if read_usize(&mut reader)? != TALLY_BALLOT_ATTEMPT_COUNT {
         return Err(TallyCircuitError::CircuitMismatch);
     }
     let score_bit_width = read_usize(&mut reader)?;
@@ -120,7 +120,7 @@ pub(crate) fn decode_canonical_tally_circuit(
         return Err(TallyCircuitError::CircuitMismatch);
     }
 
-    let (candidate_attempt_presence_wires, candidate_attempt_score_wires) =
+    let (ballot_attempt_presence_wires, ballot_attempt_score_wires) =
         decode_input_mapping(&mut reader, &expected_circuit)?;
     let operation_count = read_usize(&mut reader)?;
     if operation_count != expected_circuit.operations().len() {
@@ -162,8 +162,8 @@ pub(crate) fn decode_canonical_tally_circuit(
         profile,
         geometry: expected_circuit.geometry(),
         operations,
-        candidate_attempt_presence_wires,
-        candidate_attempt_score_wires,
+        ballot_attempt_presence_wires,
+        ballot_attempt_score_wires,
         nonempty_output_wire,
         ordered_option_position_wires,
     };
@@ -180,13 +180,13 @@ fn encode_input_mapping(
 ) -> Result<(), TallyCircuitError> {
     append_varuint(
         bytes,
-        u64::try_from(circuit.candidate_attempt_presence_wires().len())
+        u64::try_from(circuit.ballot_attempt_presence_wires().len())
             .map_err(|_| TallyCircuitError::ArithmeticOverflow)?,
     );
     for (participant_presence_wires, participant_score_wires) in circuit
-        .candidate_attempt_presence_wires()
+        .ballot_attempt_presence_wires()
         .iter()
-        .zip(circuit.candidate_attempt_score_wires())
+        .zip(circuit.ballot_attempt_score_wires())
     {
         append_varuint(
             bytes,
@@ -218,24 +218,24 @@ fn encode_input_mapping(
     Ok(())
 }
 
-type CandidateAttemptPresenceWires = Vec<Vec<WireIndex>>;
-type CandidateAttemptScoreWires = Vec<Vec<Vec<Vec<WireIndex>>>>;
+type BallotAttemptPresenceWires = Vec<Vec<WireIndex>>;
+type BallotAttemptScoreWires = Vec<Vec<Vec<Vec<WireIndex>>>>;
 
 fn decode_input_mapping(
     reader: &mut CanonicalReader<'_>,
     expected_circuit: &CompiledTallyCircuit,
-) -> Result<(CandidateAttemptPresenceWires, CandidateAttemptScoreWires), TallyCircuitError> {
+) -> Result<(BallotAttemptPresenceWires, BallotAttemptScoreWires), TallyCircuitError> {
     let participant_count = read_usize(reader)?;
-    if participant_count != expected_circuit.candidate_attempt_presence_wires().len() {
+    if participant_count != expected_circuit.ballot_attempt_presence_wires().len() {
         return Err(TallyCircuitError::CircuitMismatch);
     }
     let option_count = usize::from(expected_circuit.profile().option_count());
     let score_bit_width = expected_circuit.geometry().score_bit_width;
-    let mut candidate_attempt_presence_wires = Vec::with_capacity(participant_count);
-    let mut candidate_attempt_score_wires = Vec::with_capacity(participant_count);
+    let mut ballot_attempt_presence_wires = Vec::with_capacity(participant_count);
+    let mut ballot_attempt_score_wires = Vec::with_capacity(participant_count);
     for _participant_position in 0..participant_count {
         let attempt_count = read_usize(reader)?;
-        if attempt_count != TALLY_CANDIDATE_ATTEMPT_COUNT {
+        if attempt_count != TALLY_BALLOT_ATTEMPT_COUNT {
             return Err(TallyCircuitError::CircuitMismatch);
         }
         let mut participant_presence_wires = Vec::with_capacity(attempt_count);
@@ -258,13 +258,10 @@ fn decode_input_mapping(
             }
             participant_score_wires.push(attempt_score_wires);
         }
-        candidate_attempt_presence_wires.push(participant_presence_wires);
-        candidate_attempt_score_wires.push(participant_score_wires);
+        ballot_attempt_presence_wires.push(participant_presence_wires);
+        ballot_attempt_score_wires.push(participant_score_wires);
     }
-    Ok((
-        candidate_attempt_presence_wires,
-        candidate_attempt_score_wires,
-    ))
+    Ok((ballot_attempt_presence_wires, ballot_attempt_score_wires))
 }
 
 fn encode_operation(bytes: &mut Vec<u8>, operation: &BooleanOperation) {
@@ -326,18 +323,18 @@ fn validate_circuit_structure(circuit: &CompiledTallyCircuit) -> Result<(), Tall
     let participant_count = usize::from(circuit.profile().participant_count());
     let option_count = usize::from(circuit.profile().option_count());
     let score_bit_width = circuit.geometry().score_bit_width;
-    if circuit.candidate_attempt_presence_wires().len() != participant_count
-        || circuit.candidate_attempt_score_wires().len() != participant_count
+    if circuit.ballot_attempt_presence_wires().len() != participant_count
+        || circuit.ballot_attempt_score_wires().len() != participant_count
     {
         return Err(TallyCircuitError::CircuitMismatch);
     }
     for (participant_presence_wires, participant_score_wires) in circuit
-        .candidate_attempt_presence_wires()
+        .ballot_attempt_presence_wires()
         .iter()
-        .zip(circuit.candidate_attempt_score_wires())
+        .zip(circuit.ballot_attempt_score_wires())
     {
-        if participant_presence_wires.len() != TALLY_CANDIDATE_ATTEMPT_COUNT
-            || participant_score_wires.len() != TALLY_CANDIDATE_ATTEMPT_COUNT
+        if participant_presence_wires.len() != TALLY_BALLOT_ATTEMPT_COUNT
+            || participant_score_wires.len() != TALLY_BALLOT_ATTEMPT_COUNT
             || participant_score_wires.iter().any(|attempt_score_wires| {
                 attempt_score_wires.len() != option_count
                     || attempt_score_wires
@@ -350,7 +347,7 @@ fn validate_circuit_structure(circuit: &CompiledTallyCircuit) -> Result<(), Tall
     }
     let mut mapped_input_wires = vec![false; input_bit_count];
     for input_wire in circuit
-        .candidate_attempt_presence_wires()
+        .ballot_attempt_presence_wires()
         .iter()
         .flatten()
         .copied()

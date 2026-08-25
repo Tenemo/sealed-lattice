@@ -1,7 +1,7 @@
 use crate::hashing::hash_framed_parts_512;
 
 use super::{
-    TALLY_CANDIDATE_ATTEMPT_COUNT, TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN, TallyCircuitError,
+    TALLY_BALLOT_ATTEMPT_COUNT, TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN, TallyCircuitError,
     TallyCircuitProfile, TallyEvaluationInput, TallyEvaluationOutcome, bit_width_for_maximum_value,
     foundation_score_bounds,
 };
@@ -15,7 +15,7 @@ pub(crate) fn tally_direct_evaluator_identity() -> Result<[u8; 64], TallyCircuit
         TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN,
         &[
             TALLY_DIRECT_EVALUATOR_SOURCE,
-            &u64::try_from(TALLY_CANDIDATE_ATTEMPT_COUNT)
+            &u64::try_from(TALLY_BALLOT_ATTEMPT_COUNT)
                 .map_err(|_| TallyCircuitError::ArithmeticOverflow)?
                 .to_le_bytes(),
             &minimum_score.to_le_bytes(),
@@ -33,12 +33,12 @@ pub(crate) fn evaluate_tally_directly(
     let participant_count = usize::from(profile.participant_count());
     let option_count = usize::from(profile.option_count());
     let top_count = usize::from(profile.top_count());
-    let participant_candidate_attempts = input.participant_candidate_attempts();
+    let participant_ballot_attempts = input.participant_ballot_attempts();
 
-    if participant_candidate_attempts.len() != participant_count {
+    if participant_ballot_attempts.len() != participant_count {
         return Err(TallyCircuitError::InputParticipantCountMismatch {
             expected: participant_count,
-            actual: participant_candidate_attempts.len(),
+            actual: participant_ballot_attempts.len(),
         });
     }
 
@@ -47,30 +47,25 @@ pub(crate) fn evaluate_tally_directly(
     let mut aggregate_scores = vec![0_u32; option_count];
     let mut has_selected_ballot = false;
 
-    for (participant_position, candidate_attempts) in
-        participant_candidate_attempts.iter().enumerate()
-    {
-        if candidate_attempts.len() != TALLY_CANDIDATE_ATTEMPT_COUNT {
-            return Err(TallyCircuitError::InputAttemptCountMismatch {
+    for (participant_position, ballot_attempts) in participant_ballot_attempts.iter().enumerate() {
+        if ballot_attempts.len() != TALLY_BALLOT_ATTEMPT_COUNT {
+            return Err(TallyCircuitError::InputBallotAttemptCountMismatch {
                 participant_position,
-                expected: TALLY_CANDIDATE_ATTEMPT_COUNT,
-                actual: candidate_attempts.len(),
+                expected: TALLY_BALLOT_ATTEMPT_COUNT,
+                actual: ballot_attempts.len(),
             });
         }
-        for (attempt_position, candidate_attempt) in candidate_attempts.iter().enumerate() {
-            if candidate_attempt.score_encodings().len() != option_count {
+        for (attempt_position, ballot_attempt) in ballot_attempts.iter().enumerate() {
+            if ballot_attempt.score_encodings().len() != option_count {
                 return Err(TallyCircuitError::InputOptionCountMismatch {
                     participant_position,
                     attempt_position,
                     expected: option_count,
-                    actual: candidate_attempt.score_encodings().len(),
+                    actual: ballot_attempt.score_encodings().len(),
                 });
             }
-            for (option_position, score_encoding) in candidate_attempt
-                .score_encodings()
-                .iter()
-                .copied()
-                .enumerate()
+            for (option_position, score_encoding) in
+                ballot_attempt.score_encodings().iter().copied().enumerate()
             {
                 if usize::from(score_encoding) > maximum_score_encoding {
                     return Err(TallyCircuitError::ScoreEncodingOutOfRange {
@@ -83,16 +78,16 @@ pub(crate) fn evaluate_tally_directly(
             }
         }
 
-        let selected_scores = candidate_attempts.iter().find_map(|candidate_attempt| {
-            (candidate_attempt.is_present()
-                && candidate_attempt
+        let selected_scores = ballot_attempts.iter().find_map(|ballot_attempt| {
+            (ballot_attempt.is_present()
+                && ballot_attempt
                     .score_encodings()
                     .iter()
                     .copied()
                     .all(|score_encoding| {
                         (minimum_score..=maximum_score).contains(&u16::from(score_encoding))
                     }))
-            .then_some(candidate_attempt.score_encodings())
+            .then_some(ballot_attempt.score_encodings())
         });
         if let Some(selected_scores) = selected_scores {
             has_selected_ballot = true;

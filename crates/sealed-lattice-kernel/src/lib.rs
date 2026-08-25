@@ -89,6 +89,19 @@ pub unsafe extern "C" fn sealed_lattice_transcript_core_command_with_length(
     leak_bytes(output)
 }
 
+/// Runs an exact number of scalar candidate-field multiplications.
+///
+/// This diagnostic-only export is absent from the production WebAssembly
+/// package and exists solely in the feature-gated focused measurement build.
+#[cfg(feature = "preparation-field-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_measure_binary_field_320_multiplications(
+    multiplication_count: u32,
+    seed: u64,
+) -> u64 {
+    tally_preparation::measure_binary_field_320_multiplications(multiplication_count, seed)
+}
+
 #[cfg(test)]
 mod tests {
     use core::ptr;

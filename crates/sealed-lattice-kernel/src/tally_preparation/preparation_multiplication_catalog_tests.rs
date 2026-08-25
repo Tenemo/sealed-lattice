@@ -89,7 +89,7 @@ fn completion_catalog_streams_every_multiplication_in_dependency_order() {
     );
     assert_eq!(
         to_hex(catalog.identity().as_bytes()),
-        "383bdbce8ea5373a1d21324d343d07fc648536f821bf9683dcc6e80a2312ab9611534fc3daaf758881ebce0606a9a23cd1cfa10f7eedc175f8619cbb8e43c3dd"
+        "7df404b46a4f86297300b3a16cfcd194ab0cf5b2d972226d9331ce003403f09c33018246cd5dfc2c94f926e753f589beb5329bf702458727ebed8f0d5522e818"
     );
 }
 

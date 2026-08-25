@@ -162,7 +162,7 @@ fn completion_catalog_streams_every_holder_record_in_source_order() {
     );
     assert_eq!(
         to_hex(catalog.identity().as_bytes()),
-        "5bdc5844512d6319e964a13108ad87f4867a161c9d41ee043aaf4c9a66ec7b42853bec57773bbccb2923cf5d738f0202ad1fe241100fd000f8be137164394ed3"
+        "2efc6a8747cd8fe2d26c1abc4b9406cb20a2f486f01c6eb2501b4690742797716dd5eed079d710ac27c00cdea4123fa9ce01bc187fbabbaf3dee9b54409ffcdd"
     );
 }
 
