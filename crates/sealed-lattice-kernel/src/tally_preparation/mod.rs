@@ -15,6 +15,7 @@ mod garbling_alternative_resource_model;
 mod geometry;
 mod label_encoding;
 mod output_sharing;
+mod preparation_arithmetic_graph;
 mod random_state;
 mod random_tape;
 
@@ -30,6 +31,8 @@ mod garbling_alternative_resource_model_tests;
 mod garbling_tests;
 #[cfg(test)]
 mod label_encoding_tests;
+#[cfg(test)]
+mod preparation_arithmetic_graph_tests;
 #[cfg(test)]
 mod randomness_tests;
 #[cfg(test)]
