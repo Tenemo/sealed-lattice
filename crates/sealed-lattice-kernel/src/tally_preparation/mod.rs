@@ -25,6 +25,8 @@ mod output_sharing;
 mod preparation_arithmetic_graph;
 mod random_state;
 mod random_tape;
+mod replicated_key_ceremony;
+mod replicated_key_ceremony_resource_model;
 mod replicated_random_sharing;
 mod tower_field_multiplication_circuit;
 
@@ -58,6 +60,10 @@ mod malicious_mpc_communication_floor_tests;
 mod preparation_arithmetic_graph_tests;
 #[cfg(test)]
 mod randomness_tests;
+#[cfg(test)]
+mod replicated_key_ceremony_resource_model_tests;
+#[cfg(test)]
+mod replicated_key_ceremony_tests;
 #[cfg(test)]
 mod replicated_random_sharing_tests;
 #[cfg(test)]
@@ -116,6 +122,33 @@ pub(crate) enum TallyPreparationError {
         version: u64,
     },
     TrailingAuthenticatedShareVerificationKeyBytes,
+    ReplicatedKeyArtifactMagicMismatch {
+        artifact: &'static str,
+    },
+    UnsupportedReplicatedKeyArtifactVersion {
+        artifact: &'static str,
+        version: u64,
+    },
+    TrailingReplicatedKeyArtifactBytes {
+        artifact: &'static str,
+    },
+    ReplicatedKeyFieldByteLength {
+        field: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    ReplicatedKeyCoordinateMismatch,
+    ReplicatedKeyPurposeOutOfRange,
+    ReplicatedKeyContributorNotMember {
+        contributor_position: u16,
+    },
+    ReplicatedKeyRecipientNotMember {
+        recipient_position: u16,
+    },
+    ReplicatedKeySelfDelivery,
+    ReplicatedKeyCommitmentMismatch,
+    ReplicatedKeyInventoryMismatch,
+    ReplicatedKeyAcknowledgementMismatch,
     AffineLabelPointBitMismatch,
     AffineLabelCommitmentsEqual {
         component_position: usize,
@@ -291,6 +324,52 @@ impl fmt::Display for TallyPreparationError {
             ),
             Self::TrailingAuthenticatedShareVerificationKeyBytes => formatter
                 .write_str("authenticated share verification key artifact has trailing bytes"),
+            Self::ReplicatedKeyArtifactMagicMismatch { artifact } => {
+                write!(formatter, "replicated-key {artifact} magic does not match")
+            }
+            Self::UnsupportedReplicatedKeyArtifactVersion { artifact, version } => write!(
+                formatter,
+                "unsupported replicated-key {artifact} version {version}"
+            ),
+            Self::TrailingReplicatedKeyArtifactBytes { artifact } => write!(
+                formatter,
+                "replicated-key {artifact} artifact has trailing bytes"
+            ),
+            Self::ReplicatedKeyFieldByteLength {
+                field,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "replicated-key {field} has {actual} bytes; expected {expected}"
+            ),
+            Self::ReplicatedKeyCoordinateMismatch => {
+                formatter.write_str("replicated-key coordinate does not match")
+            }
+            Self::ReplicatedKeyPurposeOutOfRange => {
+                formatter.write_str("replicated-key purpose is outside the roster geometry")
+            }
+            Self::ReplicatedKeyContributorNotMember {
+                contributor_position,
+            } => write!(
+                formatter,
+                "replicated-key contributor {contributor_position} is not a member of the authorized subset"
+            ),
+            Self::ReplicatedKeyRecipientNotMember { recipient_position } => write!(
+                formatter,
+                "replicated-key recipient {recipient_position} is not a member of the authorized subset"
+            ),
+            Self::ReplicatedKeySelfDelivery => formatter
+                .write_str("replicated-key component delivery cannot target its contributor"),
+            Self::ReplicatedKeyCommitmentMismatch => {
+                formatter.write_str("replicated-key component commitment does not match")
+            }
+            Self::ReplicatedKeyInventoryMismatch => {
+                formatter.write_str("replicated-key inventory does not match the canonical roster")
+            }
+            Self::ReplicatedKeyAcknowledgementMismatch => {
+                formatter.write_str("replicated-key delivery acknowledgement does not match")
+            }
             Self::AffineLabelPointBitMismatch => formatter
                 .write_str("affine label alternatives must have canonical zero and one point bits"),
             Self::AffineLabelCommitmentsEqual { component_position } => write!(

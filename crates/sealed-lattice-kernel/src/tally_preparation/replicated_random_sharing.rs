@@ -175,6 +175,27 @@ impl ReplicatedRandomSharingSubset {
         Ok(self.excluded_position_mask & position_bit == 0)
     }
 
+    pub(crate) const fn participant_count(self) -> u16 {
+        self.participant_count
+    }
+
+    pub(crate) const fn active_fault_bound(self) -> u16 {
+        self.active_fault_bound
+    }
+
+    pub(crate) const fn excluded_position_mask(self) -> u32 {
+        self.excluded_position_mask
+    }
+
+    pub(crate) fn member_positions(self) -> Vec<u16> {
+        (0..self.participant_count)
+            .filter(|roster_position| {
+                let position_bit = 1_u32 << u32::from(*roster_position);
+                self.excluded_position_mask & position_bit == 0
+            })
+            .collect()
+    }
+
     pub(crate) fn excluded_positions(self) -> Vec<u16> {
         (0..self.participant_count)
             .filter(|roster_position| {
