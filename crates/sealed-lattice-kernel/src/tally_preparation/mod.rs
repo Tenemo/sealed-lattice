@@ -5,11 +5,13 @@
 //! It does not select a preparation protocol, mint a capability, or activate a
 //! suite.
 
+mod adaptive_oracle_repair;
 mod authenticated_opening;
 mod binary_field;
 mod context;
 mod garbled_resource_model;
 mod garbling;
+mod garbling_alternative_resource_model;
 mod geometry;
 mod label_encoding;
 mod output_sharing;
@@ -17,9 +19,13 @@ mod random_state;
 mod random_tape;
 
 #[cfg(test)]
+mod adaptive_oracle_repair_tests;
+#[cfg(test)]
 mod authenticated_opening_tests;
 #[cfg(test)]
 mod garbled_resource_model_tests;
+#[cfg(test)]
+mod garbling_alternative_resource_model_tests;
 #[cfg(test)]
 mod garbling_tests;
 #[cfg(test)]
@@ -55,6 +61,10 @@ pub(crate) enum TallyPreparationError {
     AuthenticatedShareVerificationKeyLimbCountMismatch {
         expected: usize,
         actual: usize,
+    },
+    SubmittedParticipantCountOutOfRange {
+        submitted_participant_count: u64,
+        participant_count: u64,
     },
     AuthenticatedShareCommitmentByteLength {
         expected: usize,
@@ -212,6 +222,13 @@ impl fmt::Display for TallyPreparationError {
                     "authenticated share verification key has {actual} coefficients; expected {expected}"
                 )
             }
+            Self::SubmittedParticipantCountOutOfRange {
+                submitted_participant_count,
+                participant_count,
+            } => write!(
+                formatter,
+                "received candidate packages from {submitted_participant_count} participants for a roster of {participant_count}"
+            ),
             Self::AuthenticatedShareCommitmentByteLength { expected, actual } => write!(
                 formatter,
                 "authenticated share commitment has {actual} bytes; expected {expected}"
