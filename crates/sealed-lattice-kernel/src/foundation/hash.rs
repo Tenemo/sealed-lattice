@@ -67,6 +67,24 @@ pub fn hash_foundation_tuple_512(
     Ok(Hash512(output))
 }
 
+/// Expands one canonically framed foundation tuple through one bounded
+/// SHAKE256 invocation.
+///
+/// The caller must include the exact requested output width in the typed
+/// tuple whenever output width is part of the protocol query. This helper
+/// performs one XOF call; it does not synthesize a stream from multiple
+/// fixed-width hash calls.
+pub(crate) fn xof_foundation_tuple(
+    domain: &str,
+    items: &[CanonicalItem],
+    output_byte_length: usize,
+) -> Result<Vec<u8>, CanonicalCodecError> {
+    let hasher = foundation_tuple_hasher(domain, items)?;
+    let mut output = vec![0_u8; output_byte_length];
+    hasher.finalize_xof().read(&mut output);
+    Ok(output)
+}
+
 fn foundation_tuple_hasher(
     domain: &str,
     items: &[CanonicalItem],

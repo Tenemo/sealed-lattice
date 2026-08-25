@@ -9,6 +9,7 @@ mod authenticated_opening;
 mod binary_field;
 mod context;
 mod garbled_resource_model;
+mod garbling;
 mod geometry;
 mod label_encoding;
 mod output_sharing;
@@ -20,6 +21,8 @@ mod authenticated_opening_tests;
 #[cfg(test)]
 mod garbled_resource_model_tests;
 #[cfg(test)]
+mod garbling_tests;
+#[cfg(test)]
 mod label_encoding_tests;
 #[cfg(test)]
 mod randomness_tests;
@@ -28,8 +31,8 @@ mod tests;
 
 use core::fmt;
 
-use crate::encoding::CanonicalError;
 use crate::tally_circuit::TallyCircuitError;
+use crate::{encoding::CanonicalError, foundation::CanonicalCodecError};
 
 pub(crate) use binary_field::BinaryFieldElement256;
 pub(crate) use context::TallyPreparationContext;
@@ -73,6 +76,27 @@ pub(crate) enum TallyPreparationError {
         version: u64,
     },
     TrailingAuthenticatedShareVerificationKeyBytes,
+    AffineLabelPointBitMismatch,
+    AffineLabelCommitmentsEqual {
+        component_position: usize,
+    },
+    GarblingContributorPositionOutOfRange {
+        contributor_position: u16,
+        participant_count: u16,
+    },
+    GarblingInputPointBitMismatch {
+        component_position: u16,
+        input_side: &'static str,
+    },
+    GarblingOutputBasePointBitNonzero,
+    GarblingLabelCommitmentMembershipMismatch {
+        component_position: usize,
+    },
+    GarblingComponentPointBitMismatch {
+        component_position: usize,
+    },
+    GarblingAuthenticatedRowValueNotBit,
+    GarblingAuthenticatedRowBitMismatch,
     FieldElementByteLength {
         expected: usize,
         actual: usize,
@@ -166,6 +190,7 @@ pub(crate) enum TallyPreparationError {
     IntegerConversion,
     TallyCircuit(TallyCircuitError),
     CanonicalEncoding(CanonicalError),
+    FoundationCanonicalEncoding(CanonicalCodecError),
 }
 
 impl fmt::Display for TallyPreparationError {
@@ -219,6 +244,43 @@ impl fmt::Display for TallyPreparationError {
             ),
             Self::TrailingAuthenticatedShareVerificationKeyBytes => formatter
                 .write_str("authenticated share verification key artifact has trailing bytes"),
+            Self::AffineLabelPointBitMismatch => formatter
+                .write_str("affine label alternatives must have canonical zero and one point bits"),
+            Self::AffineLabelCommitmentsEqual { component_position } => write!(
+                formatter,
+                "affine label commitments are equal at component {component_position}"
+            ),
+            Self::GarblingContributorPositionOutOfRange {
+                contributor_position,
+                participant_count,
+            } => write!(
+                formatter,
+                "garbling contributor position {contributor_position} is outside participant count {participant_count}"
+            ),
+            Self::GarblingInputPointBitMismatch {
+                component_position,
+                input_side,
+            } => write!(
+                formatter,
+                "garbling {input_side} input label at component {component_position} has the wrong point bit"
+            ),
+            Self::GarblingOutputBasePointBitNonzero => {
+                formatter.write_str("garbling output base label has a nonzero point bit")
+            }
+            Self::GarblingLabelCommitmentMembershipMismatch { component_position } => write!(
+                formatter,
+                "garbling output component {component_position} does not have exactly one matching affine label commitment"
+            ),
+            Self::GarblingComponentPointBitMismatch { component_position } => write!(
+                formatter,
+                "garbling output component {component_position} has an inconsistent point bit"
+            ),
+            Self::GarblingAuthenticatedRowValueNotBit => {
+                formatter.write_str("authenticated garbling row value is not a canonical bit")
+            }
+            Self::GarblingAuthenticatedRowBitMismatch => formatter.write_str(
+                "authenticated garbling row bit does not match the evaluated output point bit",
+            ),
             Self::FieldElementByteLength { expected, actual } => write!(
                 formatter,
                 "binary field element has {actual} bytes; expected {expected}"
@@ -354,6 +416,7 @@ impl fmt::Display for TallyPreparationError {
             }
             Self::TallyCircuit(error) => error.fmt(formatter),
             Self::CanonicalEncoding(error) => error.fmt(formatter),
+            Self::FoundationCanonicalEncoding(error) => error.fmt(formatter),
         }
     }
 }
@@ -369,5 +432,11 @@ impl From<CanonicalError> for TallyPreparationError {
 impl From<TallyCircuitError> for TallyPreparationError {
     fn from(error: TallyCircuitError) -> Self {
         Self::TallyCircuit(error)
+    }
+}
+
+impl From<CanonicalCodecError> for TallyPreparationError {
+    fn from(error: CanonicalCodecError) -> Self {
+        Self::FoundationCanonicalEncoding(error)
     }
 }

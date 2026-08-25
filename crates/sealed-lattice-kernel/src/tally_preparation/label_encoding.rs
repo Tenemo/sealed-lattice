@@ -48,6 +48,12 @@ impl LabelBody {
         &self.0
     }
 
+    pub(crate) fn exclusive_or(self, other: Self) -> Self {
+        Self(core::array::from_fn(|byte_position| {
+            self.0[byte_position] ^ other.0[byte_position]
+        }))
+    }
+
     fn field_limbs(self) -> [BinaryFieldElement256; LABEL_BODY_FIELD_LIMB_COUNT] {
         core::array::from_fn(|limb_position| {
             let start = limb_position * BinaryFieldElement256::CANONICAL_BYTE_LENGTH;
@@ -107,6 +113,17 @@ impl WireLabel {
 
     pub(crate) const fn body(self) -> LabelBody {
         self.body
+    }
+
+    pub(crate) const fn point_bit(self) -> bool {
+        self.point_bit
+    }
+
+    pub(crate) fn exclusive_or(self, other: Self) -> Self {
+        Self {
+            body: self.body.exclusive_or(other.body),
+            point_bit: self.point_bit ^ other.point_bit,
+        }
     }
 
     pub(crate) fn canonical_bytes(self) -> [u8; WIRE_LABEL_CANONICAL_BYTE_LENGTH] {

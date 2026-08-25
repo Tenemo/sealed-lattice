@@ -122,7 +122,7 @@ pub(crate) use hash::canonical_foundation_tuple_hash_preimage;
 pub(crate) use hash::{
     BoundedFoundationTupleXofReader, FoundationTupleHash512BlockReader,
     StreamingFoundationHashError, StreamingFoundationTupleHash512,
-    foundation_tuple_hash512_seeded_stream_query_count,
+    foundation_tuple_hash512_seeded_stream_query_count, xof_foundation_tuple,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
 #[cfg(feature = "primitive-measurement-evidence")]
