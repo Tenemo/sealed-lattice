@@ -2,6 +2,7 @@ use crate::{foundation::derive_foundation_roster_parameters, tally_circuit::Comp
 
 use super::{
     BinaryFieldElement256, TallyPreparationError,
+    binary_field_multiplication_circuit::karatsuba_conjunction_count,
     garbling_alternative_resource_model::IndependentLabelGarblingResourceLowerBound,
     preparation_arithmetic_graph::PreparationArithmeticGraph,
 };
@@ -37,6 +38,11 @@ pub(crate) struct BinaryRingPackedMpcCircuitEvaluationFloor {
     pub(crate) current_scalar_evaluation_bit_length: u64,
     pub(crate) current_scalar_evaluation_byte_length: u64,
     pub(crate) minimum_maximum_participant_current_scalar_upload_byte_length: u64,
+    pub(crate) karatsuba_field_multiplication_conjunction_count: u64,
+    pub(crate) karatsuba_binary_conjunction_count: u64,
+    pub(crate) karatsuba_evaluation_bit_length: u64,
+    pub(crate) karatsuba_evaluation_byte_length: u64,
+    pub(crate) minimum_maximum_participant_karatsuba_upload_byte_length: u64,
     pub(crate) bilinear_field_multiplication_conjunction_floor: u64,
     pub(crate) bilinear_binary_conjunction_floor: u64,
     pub(crate) bilinear_evaluation_bit_length_floor: u64,
@@ -49,10 +55,11 @@ pub(crate) struct BinaryRingPackedMpcCircuitEvaluationFloor {
 ///
 /// The current scalar count translates the kernel's fixed 256-step
 /// shift-and-add field multiplication into one binary conjunction per product
-/// bit. The bilinear count uses the `2m - 1` rank floor for a degree-`m` field
-/// multiplication and is only a comparison floor for bilinear algorithms. It
-/// is not an executable multiplier and does not prove that the floor is
-/// attainable over `GF(2)` at degree 256.
+/// bit. The executable Karatsuba circuit provides a smaller conservative
+/// realization. The bilinear count uses the `2m - 1` rank floor for a
+/// degree-`m` field multiplication and is only a comparison floor for bilinear
+/// algorithms. It is not an executable multiplier and does not prove that the
+/// floor is attainable over `GF(2)` at degree 256.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BinaryRingPackedMpcEvaluationFloor {
     pub(crate) participant_count: u64,
@@ -164,6 +171,7 @@ fn derive_circuit_floor(
 ) -> Result<BinaryRingPackedMpcCircuitEvaluationFloor, TallyPreparationError> {
     let current_scalar_field_multiplication_conjunction_count =
         checked_multiply(FIELD_BIT_LENGTH, FIELD_BIT_LENGTH)?;
+    let karatsuba_field_multiplication_conjunction_count = karatsuba_conjunction_count()?;
     let bilinear_field_multiplication_conjunction_floor = checked_multiply(FIELD_BIT_LENGTH, 2)?
         .checked_sub(1)
         .ok_or(TallyPreparationError::GeometryMismatch)?;
@@ -179,6 +187,12 @@ fn derive_circuit_floor(
         bit_multiplication_count,
         bilinear_field_multiplication_conjunction_floor,
     )?;
+    let karatsuba_binary_conjunction_count = derive_binary_conjunction_count(
+        full_field_multiplication_count,
+        bit_by_field_multiplication_count,
+        bit_multiplication_count,
+        karatsuba_field_multiplication_conjunction_count,
+    )?;
     let current_scalar_evaluation_bit_length = checked_multiply(
         current_scalar_binary_conjunction_count,
         remote_evaluation_bit_count_per_binary_conjunction,
@@ -187,8 +201,14 @@ fn derive_circuit_floor(
         bilinear_binary_conjunction_floor,
         remote_evaluation_bit_count_per_binary_conjunction,
     )?;
+    let karatsuba_evaluation_bit_length = checked_multiply(
+        karatsuba_binary_conjunction_count,
+        remote_evaluation_bit_count_per_binary_conjunction,
+    )?;
     let current_scalar_evaluation_byte_length =
         checked_ceiling_divide(current_scalar_evaluation_bit_length, u8::BITS.into())?;
+    let karatsuba_evaluation_byte_length =
+        checked_ceiling_divide(karatsuba_evaluation_bit_length, u8::BITS.into())?;
     let bilinear_evaluation_byte_length_floor =
         checked_ceiling_divide(bilinear_evaluation_bit_length_floor, u8::BITS.into())?;
 
@@ -202,6 +222,14 @@ fn derive_circuit_floor(
         current_scalar_evaluation_byte_length,
         minimum_maximum_participant_current_scalar_upload_byte_length: checked_ceiling_divide(
             current_scalar_evaluation_byte_length,
+            participant_count,
+        )?,
+        karatsuba_field_multiplication_conjunction_count,
+        karatsuba_binary_conjunction_count,
+        karatsuba_evaluation_bit_length,
+        karatsuba_evaluation_byte_length,
+        minimum_maximum_participant_karatsuba_upload_byte_length: checked_ceiling_divide(
+            karatsuba_evaluation_byte_length,
             participant_count,
         )?,
         bilinear_field_multiplication_conjunction_floor,

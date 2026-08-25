@@ -39,6 +39,11 @@ fn completion_profile_reproduces_both_binary_ring_evaluation_floors() {
             current_scalar_evaluation_bit_length: 2_288_827_710_072,
             current_scalar_evaluation_byte_length: 286_103_463_759,
             minimum_maximum_participant_current_scalar_upload_byte_length: 28_610_346_376,
+            karatsuba_field_multiplication_conjunction_count: 6_561,
+            karatsuba_binary_conjunction_count: 6_514_927_252,
+            karatsuba_evaluation_bit_length: 234_537_381_072,
+            karatsuba_evaluation_byte_length: 29_317_172_634,
+            minimum_maximum_participant_karatsuba_upload_byte_length: 2_931_717_264,
             bilinear_field_multiplication_conjunction_floor: 511,
             bilinear_binary_conjunction_floor: 661_007_752,
             bilinear_evaluation_bit_length_floor: 23_796_279_072,
@@ -57,6 +62,11 @@ fn completion_profile_reproduces_both_binary_ring_evaluation_floors() {
             current_scalar_evaluation_bit_length: 2_935_307_623_032,
             current_scalar_evaluation_byte_length: 366_913_452_879,
             minimum_maximum_participant_current_scalar_upload_byte_length: 36_691_345_288,
+            karatsuba_field_multiplication_conjunction_count: 6_561,
+            karatsuba_binary_conjunction_count: 8_499_913_612,
+            karatsuba_evaluation_bit_length: 305_996_890_032,
+            karatsuba_evaluation_byte_length: 38_249_611_254,
+            minimum_maximum_participant_karatsuba_upload_byte_length: 3_824_961_126,
             bilinear_field_multiplication_conjunction_floor: 511,
             bilinear_binary_conjunction_floor: 1_007_412_112,
             bilinear_evaluation_bit_length_floor: 36_266_836_032,
@@ -129,12 +139,27 @@ fn assert_circuit_floor_is_consistent(
     );
     assert!(
         circuit_floor.current_scalar_evaluation_byte_length
+            > circuit_floor.karatsuba_evaluation_byte_length
+    );
+    assert!(
+        circuit_floor.karatsuba_evaluation_byte_length
             > circuit_floor.bilinear_evaluation_byte_length_floor
+    );
+    assert_eq!(
+        circuit_floor.karatsuba_evaluation_bit_length,
+        circuit_floor.karatsuba_binary_conjunction_count
+            * remote_evaluation_bit_count_per_binary_conjunction
     );
     assert_eq!(
         circuit_floor.minimum_maximum_participant_current_scalar_upload_byte_length,
         circuit_floor
             .current_scalar_evaluation_byte_length
+            .div_ceil(participant_count)
+    );
+    assert_eq!(
+        circuit_floor.minimum_maximum_participant_karatsuba_upload_byte_length,
+        circuit_floor
+            .karatsuba_evaluation_byte_length
             .div_ceil(participant_count)
     );
     assert_eq!(
