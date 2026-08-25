@@ -4,18 +4,15 @@
 
 ## Responsibilities
 
-- Validate pre-protocol poll input and compile canonical manifests.
-- Derive roster, threshold, option-count, pair-layout, and evaluator schedules from canonical inputs.
-- Coordinate canonical board state, authenticated mailbox delivery, browser-local encrypted custody, checkpoints, and state witnessing.
-- Bind kernel-owned verifier cursor profiles to exact source digests in the authenticated checkpoint store, preserve the previous committed cursor until replacement is durable, and keep fresh and resumed custody mutually exclusive. Cursor sizes, boundary counts, source coordinates, and state domains come from canonical kernel owners rather than TypeScript copies.
-- Assemble inputs for setup, ballot, aggregation, evaluator, finality, and target-release verification without reimplementing certified cryptography in TypeScript.
-- Expose typed protocol helpers through the package entry point for workspace consumers.
+- Validate pre-protocol poll input.
+- Translate validated poll input into the canonical foundation-manifest ingress shape.
+- Expose only those implemented helpers through the package entry point.
 
 ## Boundaries
 
 General structural code covers `3 <= n <= 20` participants and `2 <= optionCount <= 20` options. Only the exact `n = 10`, `optionCount = 10` profile is the current cryptographic and runtime evidence target; admitting another size does not qualify it.
 
-The package may coordinate bytes, storage, cancellation, and typed results. It does not replace Rust/WebAssembly proof generation or verification, establish parameter security, freeze a suite, or turn a partial workflow into an accepted ceremony. Relays and storage remain untrusted.
+The package does not currently orchestrate collective preparation, candidate views, activation, certified evaluation, finality, release, browser custody, or checkpoints. Those operations remain future Rust/WebAssembly-backed integration work. TypeScript must not replace their cryptography or mint acceptance from transport status. No cryptographic suite is activated.
 
 Current implementation status belongs to the repository [README](../../README.md), and current security limitations belong to [SECURITY.md](../../SECURITY.md). Package documentation intentionally does not repeat proof geometry, benchmark snapshots, theorem ledgers, or historical backend decisions.
 

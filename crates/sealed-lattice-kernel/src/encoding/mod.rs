@@ -6,8 +6,6 @@ mod command;
 mod command_fields;
 mod foundation_command;
 mod json_ingress;
-mod mailbox_command;
-mod private_randomness_command;
 
 const MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
 const COMMAND_ERROR_LENGTH_FALLBACK: &[u8] = br#"{"error":{"code":"MalformedLength","message":"command error response exceeds the accepted byte length"},"success":false}"#;
@@ -103,10 +101,6 @@ pub fn append_bytes(output: &mut Vec<u8>, value: &[u8]) {
     output.extend(value);
 }
 
-pub fn append_string(output: &mut Vec<u8>, value: &str) {
-    append_bytes(output, value.as_bytes());
-}
-
 pub struct CanonicalReader<'a> {
     bytes: &'a [u8],
     offset: usize,
@@ -195,12 +189,6 @@ impl<'a> CanonicalReader<'a> {
         })?;
 
         Ok(self.read_exact(length)?.to_vec())
-    }
-
-    pub fn read_string(&mut self) -> CanonicalResult<String> {
-        String::from_utf8(self.read_bytes()?).map_err(|_| {
-            CanonicalError::new(CanonicalErrorCode::InvalidUtf8, "string is not valid UTF-8")
-        })
     }
 }
 

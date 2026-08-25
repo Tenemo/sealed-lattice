@@ -5,8 +5,8 @@
 ## Responsibilities
 
 - Build the canonical kernel from Rust source and optimize its generated WebAssembly artifact.
-- Load fresh or cached kernel instances and expose typed boundary wrappers.
-- Preserve canonical byte, hash, refusal, and verification behavior across Node.js and browser consumers.
+- Load fresh or cached kernel instances and expose the canonical foundation command boundary.
+- Preserve foundation byte, hash, refusal, and verification behavior across Node.js and browser consumers.
 - Copy the exact producer bytes into the public SDK build and verify their integrity.
 
 ## Runtime boundaries
@@ -15,11 +15,11 @@ The canonical participant artifact must remain scalar-capable. Optional SIMD mea
 
 The browser bridge transfers ordinary owned binary buffers. It must reacquire WebAssembly memory views after any operation that can grow memory. Long-running protocol orchestration must publish proactive authenticated checkpoints and cannot assume that a hidden page or worker will keep running or receive a termination callback.
 
-Transport validation is deliberately narrower than proof verification. It may check canonical structure and openings but cannot verify all equations or mint a positive capability. Full acceptance belongs to the Rust kernel, and only a completed positive result may cross the typed bridge. Generation and verification must remain a matched release-WebAssembly pair.
+The current scalar artifact exports allocation, deallocation, and one foundation-command entry point. It does not expose preparation, opening, garbling, state, finality, release, or long-operation cursor APIs. Adding those operations requires matched Rust generation and verification plus typed positive-verification results; transport status cannot mint a capability.
 
-Long-running kernel cursors contain canonical, source-bound progress rather than opaque runtime state. The protocol package owns authenticated custody and worker orchestration; this package owns cursor encoding, restore validation, bounded polling, cancellation, and linear-state disposal.
+Future long-running kernel work must use canonical source-bound cursors, authenticated browser custody, restore validation, bounded polling, cancellation, and linear-state disposal. None of that lifecycle is implemented by the current package.
 
-Test-only proof workbenches and native or desktop results are not an accepted ceremony or supported-phone evidence. The repository [README](../../README.md) owns current implementation status, and [SECURITY.md](../../SECURITY.md) owns security limitations.
+Test-only workbenches and native or desktop results are not an accepted ceremony or supported-phone evidence. No suite is activated, and rejected protocol bridges have been removed. The repository [README](../../README.md) owns current implementation status, and [SECURITY.md](../../SECURITY.md) owns security limitations.
 
 ## Development
 

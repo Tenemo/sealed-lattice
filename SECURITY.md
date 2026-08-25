@@ -1,6 +1,6 @@
 # Security policy
 
-`sealed-lattice` is an unaudited research prototype. The open issues below prohibit its use for real elections or other security-sensitive activity. Use synthetic data only.
+`sealed-lattice` is an unaudited research prototype. The open issues below prohibit real elections and other security-sensitive use. Use synthetic data only.
 
 ## Report a vulnerability
 
@@ -10,61 +10,54 @@ Include the affected package version or commit, a minimal reproduction, the expe
 
 ## Supported profile
 
-No released version is supported for production use. The sole current cryptographic-completion, integration, performance, and supported-phone evidence target is one exact build with `n = 10` roster participants and `optionCount = 10` options. It derives:
+No released version is supported for production use. The sole cryptographic-completion, integration, performance, and supported-phone target is one exact scalar package with `n = 10` roster participants and `optionCount = 10`. It derives an active corruption bound of three, a reconstruction threshold of four, and candidate-view, finality, and state quorums of seven.
 
-- active Byzantine bound `f = 3`;
-- share-reconstruction threshold `r = 4`; and
-- finality and state quorums of seven.
+Schemas and tally-circuit compilers admit rosters in `3..20` and option counts in `2..20`, but other profiles are structurally admitted only. The concrete preparation and sharing candidate is completion-profile-specific and carries no security or runtime claim for another roster size.
 
-Schemas admit rosters in `3..20` and option counts in `2..20`, but other profiles are structurally admitted only and carry no security or runtime claim.
+The active target is an 80-bit reduced-assurance, post-quantum-oriented research prototype. Every load-bearing component and the composed protocol must retain at least `2^80` modeled attack work under the exact reductions, assumptions, query bounds, and resource limits. This is not a NIST category, production rating, audit, or certification, and it has not been established end to end.
 
-The active profile has a minimum 80-bit post-quantum security target. Every load-bearing cryptographic component and the composed protocol must retain at least `2^80` modeled classical and quantum attack work under the stated models, reductions, assumptions, and resource bounds. This reduced-assurance research target is not a NIST security category, production rating, audit, or certification, and the open issues below mean it has not yet been established end to end.
+Cryptographic admission and supported-phone qualification are independent results for the same exact bytes. Both are incomplete. Only release Chrome on the selected physical phone can provide supported-phone evidence.
 
-Cryptographic completion and supported-phone qualification are independent results for the same exact bytes. Both are currently incomplete. The sole phone qualification target is Chrome on the selected physical phone. Native Rust, Node.js, desktop Chromium, emulated devices, and partial phone runs are development evidence only.
-
-## Security model and required boundary
+## Security model
 
 - The protocol protects ballot secrecy, not voter anonymity. The frozen roster and accepted ballot authorship are public.
-- Identity vetting, enrollment, reusable invitations, organizer workflow, interface behavior, notifications, and visit cadence belong to the host application. The protocol provides roster binding and auditability, not Sybil resistance.
-- The host designates exactly one organizer from the frozen roster. That person is an ordinary participant and eligible voter, may submit no ballot, and gains no special key, proof bypass, quorum weight, finality power, or decryption authority. The organizer designation is not a protocol input.
-- All ten participants complete collective setup before any ballot can use the collective public and evaluator keys. A smaller privileged setup group is not permitted.
-- The active adversary statically corrupts at most three participants. The separate passive-share-exposure game covers at most three disclosed shares; those bounds are not added into a larger active coalition.
-- Transcript, private-mailbox, and storage services are untrusted. They may censor, delay, reorder, duplicate, fork, or replace bytes, but acceptance depends on canonical encoding, recomputed hashes and roots, signatures, proofs, and externally anchored manifest and roster data.
-- Only roster participants acting through their own clients may witness state, establish finality, or release target-bound shares. There is no trusted tally server, organizer finalizer, external witness, remote prover, or remote verifier.
-- Verification is positive: only a completed verifier result may mint a capability. Producer status fields, test oracles, transport validation, fixtures, and self-consistent records never establish acceptance.
-- Finality authorizes exactly one result target. Every decryption share and proof binds to that target, and no accepted interface may decrypt ballots, individual scores, aggregate scores or shares, margins, comparison or selection bits, ranks, evaluator intermediates, or other broader results.
-- Participant action state is bound to one browser profile. There is no backup, export, migration, or replacement-device continuation. Missing, corrupt, stale, or unauthenticated state retires that participant from the action.
-- Long operations proactively commit authenticated checkpoints at deterministic safe boundaries. Correctness cannot depend on a wake lock, hidden-page execution, lifecycle callback, or final worker notification.
-- Durable storage must account atomically for committed, staged, and orphanable bytes, reserve repair headroom, qualify persistence and eviction behavior, and reconcile local state with an external recency anchor before treating it as newest.
-- Ballot and proof randomness comes only from the browser-local platform cryptographic random-number generator and domain-separated protocol derivation. A distinct attempt always requires fresh randomness.
-- Every required participant operation remains in that participant's mobile browser and scalar-capable WebAssembly path. A desktop, native helper, trusted server, or stronger device cannot substitute for it.
+- The host owns identity vetting, enrollment, invitations, organizer workflow, interface behavior, notifications, and visit cadence. The organizer is an ordinary roster participant and has no protocol field or special authority.
+- Every roster participant contributes to tally preparation. No smaller privileged group or trusted dealer can complete it.
+- The adversary statically corrupts at most three participants and may rush, equivocate, withhold, replay, or schedule their messages. The separate passive-share-exposure game covers at most three disclosed shares; the bounds are not combined.
+- Transcript, mailbox, and storage services are untrusted. Canonical encoding, recomputed hashes and roots, signatures, authenticated openings, source correspondence, and positive verifiers determine acceptance.
+- Candidate presence, score validity, retry selection, scores, aggregates, comparisons, ranks, and result masks remain protected. The only permitted public result is the ordered selected option identifiers.
+- Only roster participants using their own clients may witness state, authorize a candidate view, establish finality, or release target-bound output-mask shares. There is no trusted tally server, organizer finalizer, remote prover or verifier, or external witness.
+- Finality authorizes one verifier-derived opaque target. Raw shares, caller-selected targets, signatures alone, test fixtures, and producer status cannot enter reconstruction.
+- Participant action state is bound to one browser profile. There is no backup, export, migration, or replacement-device continuation. Missing or unauthenticated state retires that participant from the action.
+- Long operations require proactive authenticated checkpoints at deterministic safe boundaries. Correctness cannot depend on a wake lock, hidden-page execution, lifecycle callback, or final worker notification.
+- Durable storage must account atomically for committed, staged, and orphanable bytes, reserve repair headroom, verify persistence and quota, reconcile local state with an external recency anchor, and measure physical reclamation.
+- Cryptographic randomness comes only from browser-local platform randomness and domain-separated protocol derivation. Every new attempt uses fresh randomness.
+- Every required participant operation remains available through scalar-capable, single-worker mobile-browser WebAssembly without a native helper or stronger-device exception.
 
-These claims assume honest delivered application code, uncompromised participant devices, an accepted externally vetted roster, and closure of the cryptographic and implementation issues below.
+These properties assume honest delivered application code while secrets are handled, uncompromised honest devices, an accepted externally vetted roster, and closure of the issues below.
 
 ## Open security issues
 
-- `SEC-001`: No independent audit, certification, or production hardening exists. Every result remains prototype evidence.
-- `SEC-002`: No exact ten-participant, ten-option setup-to-release ceremony is implemented and accepted end to end.
-- `SEC-003`: No independent mechanism certifies that a locally consistent participant snapshot is the newest one. By design, lost or unverifiable state retires that participant from the action instead of permitting recovery or migration.
-- `SEC-004`: No production cryptographic construction is selected. Production geometry rejects the incumbent common-proof lowering and its packet redesign; neither it nor the previously rejected backend may provide fallback or completion evidence. The unactivated multiparty garbled-tally candidate has exact circuit semantics, canonical encodings, and a conservative resource lower bound, but lacks an exact malicious preparation protocol, preparation-value authentication proof, public certified-path verifier, correlated-transcript quantum privacy proof, fixed-SHAKE composition, target-bound release correspondence, complete resource accounting, and scalar-browser evidence.
-- `SEC-005`: The rejected compact reference implementation has positive algebraic, native, and scalar-WebAssembly development evidence for one family. It still lacks accepted-proof knowledge and extraction, emitted-byte privacy, shared fixed-Keccak and Fiat--Shamir composition, and complete probability accounting. It establishes neither a production proof system nor the profile security target and cannot supply fallback evidence.
-- `SEC-006`: The participant bridge does not yet carry verifier-minted capabilities and authenticated checkpoint custody from setup through release.
-- `SEC-007`: Direct ballot creation, proof generation, transport, and acceptance are incomplete. Ballots remain gated on `VerifiedSetup`; no provisional or pre-ratification ballot path is authorized.
-- `SEC-008`: No physical-phone Chrome profile has completed every participant operation.
-- `SEC-010`: Homomorphic-encryption, verifiable-secret-sharing, and proof parameters remain provisional and lack a complete reviewed joint-exposure reduction.
-- `SEC-011`: Evaluation-key material relies on assumptions about encrypting key-related material, and malicious collective-setup composition remains incomplete.
-- `SEC-016`: Target-bound release lacks its complete production proof, correctness and privacy closure, participant finality producer, checkpoint lifecycle, and public workflow.
-- `SEC-017`: Caller-key storage adapters do not safely support equivalent-key reimport or reuse across runtime lifecycles.
-- `SEC-018`: The tracked collective-setup record establishes internal consistency only. Its authority and packet chronology are not independently derived, and it cannot mint a capability or select a suite.
-- `SEC-019`: No immutable, content-addressed evidence record yet binds every construction input and the exact release WebAssembly bytes. Test-only fingerprints cannot select a cryptographic suite or authorize acceptance.
-- `SEC-020`: The required checkpoint and interruption boundary is not yet fully implemented or evidenced in a release browser build.
-- `SEC-021`: The required storage boundary is not yet fully implemented or evidenced for browser persistence, failure, rollback, and reclamation. A nonqualifying desktop Chromium replay found that namespace-wide capacity scans multiply normal-operation storage work and that internal cleanup does not yet establish physical browser reclamation. Authenticated incremental accounting and bounded exclusive repair remain required.
+- `SEC-001`: No independent audit, certification, production hardening, or production approval exists.
+- `SEC-002`: No exact ten-participant, ten-option preparation-to-release ceremony is implemented and positively accepted end to end.
+- `SEC-003`: No independent mechanism yet certifies that a locally consistent participant snapshot is newest. Lost or unverifiable state must retire that participant instead of permitting recovery or migration.
+- `SEC-004`: No cryptographic suite is activated, and the public package exposes foundation operations only. Deterministic circuit semantics and internal arithmetic models exist, but exact malicious preparation, authoritative authenticated-opening provenance and hiding, a complete public preparation verifier, circuit-wide certified evaluation and target uniqueness, correlated-transcript quantum privacy, shared ideal-oracle and fixed-Keccak composition, complete advantage accounting, target-bound release proof, and exact scalar-browser realization remain open.
+- `SEC-006`: No participant bridge yet carries verifier-minted preparation, activation, audit, finality, target-share, and result capabilities with authenticated checkpoint custody through the complete ceremony.
+- `SEC-007`: Candidate-vector production, rollback-safe quorum authorization of one explicit candidate-view body, activation, one-label opening, and complete positive evaluation are not connected through production byte interfaces.
+- `SEC-008`: No physical-phone Chrome profile has completed every participant operation for the exact scalar package.
+- `SEC-016`: Target-bound output-mask release lacks complete preparation provenance, target-uniqueness composition, production share verification, finality production, checkpoint lifecycle, and public workflow.
+- `SEC-017`: Browser-local key custody does not yet demonstrate equivalent-key reimport and safe reuse across required cold runtime lifecycles.
+- `SEC-019`: No immutable, content-addressed evidence bundle binds every active construction input, reduction, production counter, and exact release WebAssembly byte. Test fingerprints cannot activate a suite or authorize acceptance.
+- `SEC-020`: The required checkpoint, interruption, cold-restoration, and bounded lost-work behavior is not fully implemented or evidenced in a release browser build.
+- `SEC-021`: Browser persistence, quota, rollback reconciliation, bounded repair, storage amplification, and physical reclamation are not fully implemented or evidenced for the active direction.
+- `SEC-022`: Governing product requirements still contain two threshold-homomorphic mechanism clauses that conflict with the selected direction. The project owner must align them before any suite activation or completion claim.
+- `SEC-023`: No malicious tally-preparation realization currently satisfies both the leakage model and mobile resource plan. The evaluated scalar AAY, fixed-roster segment, packed binary-ring, and addition-local re-encoding routes fail their construction-specific transfer gates, but those results do not lower-bound every protocol. The primary live replacement uses fixed-roster replicated-key pseudorandom sharing and Beaver multiplication. Canonical key components, complete recipient-inventory verification, and bounded field streams are development evidence only; commitment and mailbox composition, selective-abort simulation, the exact pseudorandom function and quantum reduction, malicious multiplication, robust online decoding, complete wrapper and fault-path resources, scalar runtime, and the conditional common-coefficient optimization remain unproved.
 
-Identifiers are stable and are not reused. `SEC-009` and `SEC-012` through `SEC-015` are retired.
+Identifiers are stable and are not reused. `SEC-005`, `SEC-009` through `SEC-015`, and `SEC-018` are retired because they describe removed constructions or superseded status boundaries.
 
 ## Outside the current model
 
-A compromised participant device holds that participant's keys and authority. It can disclose local secrets and send arbitrary messages; local locks and storage checks cannot make it honest. The following are outside the current security boundary:
+A compromised participant device holds that participant's keys and authority. It can disclose local secrets and send arbitrary messages. The following remain outside the security boundary:
 
 - compromise beyond the active fault bound;
 - data already present on a compromised device;
@@ -72,6 +65,6 @@ A compromised participant device holds that participant's keys and authority. It
 - adaptive corruption and post-action device compromise;
 - everlasting secrecy, receipt freeness, coercion resistance, and endpoint security;
 - denial of service and guaranteed availability; and
-- timing, traffic-analysis, power, and other side channels.
+- timing, traffic-analysis, power, cache, speculative-execution, and other side channels.
 
-Protocol safety instead relies on verified proofs, accepted-board rules, one-shot state, and the stated threshold and endpoint assumptions. See the [README](README.md) for the current implementation boundary.
+Protocol safety instead relies on the accepted roster, positive verification, one-shot state, exact target binding, and the stated cryptographic and endpoint assumptions. See the [README](README.md) for the current implementation boundary.

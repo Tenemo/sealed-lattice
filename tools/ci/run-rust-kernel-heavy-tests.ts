@@ -22,7 +22,7 @@ export type ParsedRustKernelHeavyArguments = Readonly<{
     testFilter: string;
 }>;
 
-const usage = 'Usage: run-rust-kernel-heavy-tests.ts [<heavy Rust test name>].';
+const usage = 'Usage: run-rust-kernel-heavy-tests.ts <heavy Rust test name>.';
 let rustKernelHeavyProcessMemoryGuard: ProcessMemoryGuard | undefined;
 
 const getRustKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
@@ -52,10 +52,17 @@ export const parseRustKernelHeavyArguments = (
     }
 
     const positionalFilter = positionalArguments[0];
-    const testFilter =
-        positionalFilter === undefined
-            ? heavyRustKernelTestNamePrefix
-            : normalizeRustTestFilter(positionalFilter);
+    if (positionalFilter === undefined) {
+        throw new Error(
+            `Heavy Rust kernel runs require an exact active test filter. ${usage}`,
+        );
+    }
+    const testFilter = normalizeRustTestFilter(positionalFilter);
+    if (!testFilter.startsWith(heavyRustKernelTestNamePrefix)) {
+        throw new Error(
+            `Heavy Rust kernel filters must start with ${heavyRustKernelTestNamePrefix}. ${usage}`,
+        );
+    }
     return { testFilter };
 };
 
@@ -76,7 +83,6 @@ export const buildRustKernelHeavyTestCommand = (
                 CARGO_INCREMENTAL: '0',
                 RAYON_NUM_THREADS: '1',
                 RUST_BACKTRACE: 'full',
-                SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
             },
             logFileSlug: 'cargo-test-rust-kernel-heavy',
         },

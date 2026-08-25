@@ -4,11 +4,6 @@ import type { TestCase, TestModule } from 'vitest/node';
 import type { Reporter } from 'vitest/reporters';
 
 import {
-    desktopBrowserProofMeasurementConsolePrefix,
-    parseDesktopBrowserProofMeasurementRecord,
-} from '../../tests/support/desktop-browser-proof-measurement.js';
-
-import {
     redactDiagnosticText,
     serializeErrorDiagnostic,
 } from './run-log-diagnostics.js';
@@ -113,30 +108,6 @@ export class VitestDiagnosticReporter implements Reporter {
         readonly taskId?: string;
         readonly type: 'stderr' | 'stdout';
     }): void {
-        if (log.type === 'stdout') {
-            for (const line of log.content.split(/\r?\n/u)) {
-                if (
-                    !line.startsWith(
-                        desktopBrowserProofMeasurementConsolePrefix,
-                    )
-                ) {
-                    continue;
-                }
-                const encodedRecord = line.slice(
-                    desktopBrowserProofMeasurementConsolePrefix.length,
-                );
-                const record = parseDesktopBrowserProofMeasurementRecord(
-                    JSON.parse(encodedRecord) as unknown,
-                );
-                this.#writeEvent('desktop-browser-proof-measurement', {
-                    ...record,
-                    browser: log.browser,
-                    origin: log.origin,
-                    testIdentifier: log.taskId,
-                });
-            }
-            return;
-        }
         if (log.type !== 'stderr') {
             return;
         }

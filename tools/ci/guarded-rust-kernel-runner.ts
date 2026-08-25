@@ -1,18 +1,10 @@
-import path from 'node:path';
-
-import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
-import {
-    createHeavyTestProgressReporter,
-    resolveFocusedRustTestRunResult,
-} from './heavy-test-progress.js';
-import { safeLogSlug, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     createProcessMemoryGuard,
     deriveProcessMemoryLimitGigabytes,
     resolveProcessMemoryLimitGigabytes,
     type ProcessMemoryGuard,
 } from './process-memory-guard.js';
-import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
+import type { CommandInvocation } from './run-command.js';
 
 const memoryLimitEnvironmentVariable =
     'SEALED_LATTICE_GUARDED_RUST_MEMORY_LIMIT_GIB';
@@ -22,11 +14,6 @@ type BuiltGuardedRustKernelCommand = Readonly<{
     command: CommandInvocation;
     progressLabel: string;
     setupMessages: readonly string[];
-}>;
-
-type GuardedRustKernelCommand = Readonly<{
-    builtCommand: BuiltGuardedRustKernelCommand;
-    expectedTestFilter?: string;
 }>;
 
 export const deriveGuardedRustMemoryLimitGigabytes = (input: {
@@ -154,111 +141,5 @@ export const guardRustKernelCommand = (
         diagnosticsPath,
         memoryLimitBytes:
             memoryLimitBytes ?? processMemoryGuard.memoryLimitBytes,
-    });
-};
-
-const buildGuardedRustKernelDiagnosticFileNames = (input: {
-    readonly commandIndex: number;
-    readonly progressLabel: string;
-}): Readonly<{
-    processMemoryGuard: string;
-    testEvents: string;
-}> => {
-    const commandOrdinal = String(input.commandIndex + 1).padStart(2, '0');
-    const diagnosticSlug = safeLogSlug(input.progressLabel);
-
-    return {
-        processMemoryGuard: `process-memory-guard-${commandOrdinal}-${diagnosticSlug}.jsonl`,
-        testEvents: `${commandOrdinal}-${diagnosticSlug}.jsonl`,
-    };
-};
-
-const writeRunnerSetupMessages = (
-    runLog: ActiveLocalRunLog,
-    setupMessages: readonly string[],
-): void => {
-    for (const message of setupMessages) {
-        console.log(message);
-        runLog.writeCombinedOutput(`${message}\n`);
-    }
-};
-
-export const runGuardedRustKernelCommands = async (input: {
-    readonly commands: readonly GuardedRustKernelCommand[];
-    readonly laneLabel: string;
-    readonly processMemoryGuardAlreadyVerified?: boolean;
-    readonly runLog: ActiveLocalRunLog;
-}): Promise<void> => {
-    const { runLog } = input;
-    for (const command of input.commands) {
-        writeRunnerSetupMessages(runLog, command.builtCommand.setupMessages);
-    }
-    process.exitCode = await withLocalHeavyLaneLease({
-        action: async () => {
-            let exitCode = 0;
-            if (input.processMemoryGuardAlreadyVerified !== true) {
-                exitCode = await runCommandsInSeries(
-                    [verifyGuardedRustProcessMemoryGuardCommand()],
-                    { outputMode: 'inherit', runLog },
-                );
-                if (exitCode !== 0) return exitCode;
-            }
-
-            for (const [commandIndex, command] of input.commands.entries()) {
-                const diagnosticFileNames =
-                    buildGuardedRustKernelDiagnosticFileNames({
-                        commandIndex,
-                        progressLabel: command.builtCommand.progressLabel,
-                    });
-                const guardedCommand = guardRustKernelCommand(
-                    command.builtCommand.command,
-                    undefined,
-                    path.join(
-                        runLog.runDirectoryPath,
-                        'resources',
-                        diagnosticFileNames.processMemoryGuard,
-                    ),
-                );
-                const progressReporter = createHeavyTestProgressReporter({
-                    eventFilePath: path.join(
-                        runLog.runDirectoryPath,
-                        'tests',
-                        diagnosticFileNames.testEvents,
-                    ),
-                    label: command.builtCommand.progressLabel,
-                    threadCount: 1,
-                });
-                try {
-                    exitCode = await runCommandsInSeries([guardedCommand], {
-                        observer: progressReporter.observer,
-                        outputMode: 'inherit',
-                        runLog,
-                        terminalOutputFilter:
-                            progressReporter.terminalOutputFilter,
-                    });
-                } finally {
-                    progressReporter.stop();
-                }
-                if (command.expectedTestFilter !== undefined) {
-                    const focusedRunResult = resolveFocusedRustTestRunResult({
-                        commandExitCode: exitCode,
-                        executedTestCount: progressReporter.executedTestCount(),
-                        runnerName: input.laneLabel,
-                        testFilter: command.expectedTestFilter,
-                    });
-                    exitCode = focusedRunResult.exitCode;
-                    if (focusedRunResult.failureMessage !== undefined) {
-                        console.error(focusedRunResult.failureMessage);
-                        runLog.writeCombinedOutput(
-                            `${focusedRunResult.failureMessage}\n`,
-                        );
-                    }
-                }
-                if (exitCode !== 0) break;
-            }
-            return exitCode;
-        },
-        laneLabel: input.laneLabel,
-        runLog,
     });
 };

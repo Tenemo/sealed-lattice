@@ -5,14 +5,6 @@ import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
 
-import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
-type DeriveCollectiveBgvSetupRosterHash = (
-    entries: readonly Readonly<{
-        readonly rosterPosition: number;
-        readonly trusteeIdentity: string;
-        readonly signingPublicKeyHash: string;
-    }>[],
-) => string;
 type CreateCanonicalManifest = (input: {
     readonly options: readonly string[];
     readonly pollId: string;
@@ -30,8 +22,6 @@ type VerifyCanonicalManifest = (canonicalBytes: Uint8Array) => Promise<
     | Readonly<{ readonly isValid: false; readonly refusalReason: string }>
 >;
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
-const deriveCollectiveBgvSetupRosterHash =
-    publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash as DeriveCollectiveBgvSetupRosterHash;
 const createCanonicalManifest =
     publicApiRuntimeRecord.createCanonicalManifest as CreateCanonicalManifest;
 const verifyCanonicalManifest =
@@ -40,14 +30,12 @@ const expectedPublicRuntimeExportNames = [
     'createCanonicalActionDefinition',
     'createCanonicalBoardPolicy',
     'createCanonicalManifest',
-    'deriveCollectiveBgvSetupRosterHash',
     'validatePollSpec',
     'verifyCanonicalActionContext',
     'verifyCanonicalActionDefinition',
     'verifyCanonicalBoardPolicy',
     'verifyCanonicalCeremonyContext',
     'verifyCanonicalManifest',
-    'verifyCanonicalSuiteRecord',
 ] as const;
 
 describe('election foundation public package API in Node', () => {
@@ -61,41 +49,6 @@ describe('election foundation public package API in Node', () => {
                 publicFunctionName,
             ).toBe('function');
         }
-    });
-
-    it('derives the setup roster hash used by setup package verification', () => {
-        const expectedSetupRosterHash = deriveCanonicalObjectHash({
-            objectType: 'CollectiveBgvSetupRoster',
-            rosterEntries: [
-                {
-                    objectType: 'CollectiveBgvSetupRosterEntry',
-                    rosterPosition: 0,
-                    trusteeIdentity: 'trustee-0',
-                    signingPublicKeyHash: 'a'.repeat(128),
-                },
-                {
-                    objectType: 'CollectiveBgvSetupRosterEntry',
-                    rosterPosition: 1,
-                    trusteeIdentity: 'trustee-1',
-                    signingPublicKeyHash: 'b'.repeat(128),
-                },
-            ],
-        });
-
-        expect(
-            deriveCollectiveBgvSetupRosterHash([
-                {
-                    rosterPosition: 1,
-                    trusteeIdentity: 'trustee-1',
-                    signingPublicKeyHash: 'b'.repeat(128),
-                },
-                {
-                    rosterPosition: 0,
-                    trusteeIdentity: 'trustee-0',
-                    signingPublicKeyHash: 'a'.repeat(128),
-                },
-            ]),
-        ).toBe(expectedSetupRosterHash);
     });
 
     it('creates and verifies canonical manifest bytes through the packaged kernel', async () => {
@@ -116,15 +69,17 @@ describe('election foundation public package API in Node', () => {
         });
     });
 
-    it('publishes setup verification as a result-only operation', () => {
+    it('emits declarations for the foundation verification result', () => {
         const declarations = readFileSync(
             new URL('../../dist/index.d.ts', import.meta.url),
             'utf8',
         );
 
-        expect(declarations).not.toContain('derivePollSpecHash');
         expect(declarations).toContain(
-            'declare const createCanonicalManifest:',
+            'declare const verifyCanonicalManifest:',
+        );
+        expect(declarations).toContain(
+            'Promise<FoundationManifestVerification>',
         );
     });
 });

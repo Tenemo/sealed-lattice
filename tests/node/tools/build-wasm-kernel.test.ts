@@ -39,9 +39,7 @@ describe('WASM kernel build environment', () => {
             'wasm32-unknown-unknown',
             '--release',
         ]);
-        expect(
-            createWasmCargoBuildArguments(['primitive-measurement-evidence']),
-        ).toEqual([
+        expect(createWasmCargoBuildArguments(['example-feature'])).toEqual([
             'build',
             '--locked',
             '--package',
@@ -51,7 +49,7 @@ describe('WASM kernel build environment', () => {
             'wasm32-unknown-unknown',
             '--release',
             '--features',
-            'primitive-measurement-evidence',
+            'example-feature',
         ]);
     });
 

@@ -1,9 +1,7 @@
 import {
-    deriveCollectiveBgvSetupRosterHash as deriveCollectiveBgvSetupRosterHashInternal,
     prepareFoundationManifestIngress,
     validatePollSpec as validatePollSpecInternal,
 } from '@sealed-lattice/protocol';
-import type { CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput } from '@sealed-lattice/protocol';
 import {
     type PollSpecInput,
     type PollSpecValidation,
@@ -19,7 +17,6 @@ import {
     type FoundationBoardPolicyVerification,
     type FoundationCeremonyContextVerification,
     type FoundationManifestVerification,
-    type FoundationSuiteRecordVerification,
 } from '@sealed-lattice/wasm/published-sdk';
 
 import { loadFreshTranscriptCoreKernel } from './kernel.js';
@@ -43,14 +40,7 @@ export type {
     FoundationBoardPolicyVerification,
     FoundationCeremonyContextVerification,
     FoundationManifestVerification,
-    FoundationSuiteRecordVerification,
 };
-export type CollectiveBgvSetupRosterEntryInput =
-    ProtocolCollectiveBgvSetupRosterEntryInput;
-
-export const deriveCollectiveBgvSetupRosterHash =
-    deriveCollectiveBgvSetupRosterHashInternal;
-
 export const validatePollSpec = (input: unknown): PollSpecValidation =>
     validatePollSpecInternal(input);
 
@@ -100,15 +90,9 @@ export const verifyCanonicalBoardPolicy = async (
 ): Promise<FoundationBoardPolicyVerification> =>
     (await loadFoundationCeremonyRuntime()).verifyBoardPolicy(canonicalBytes);
 
-export const verifyCanonicalSuiteRecord = async (
-    canonicalBytes: Uint8Array,
-): Promise<FoundationSuiteRecordVerification> =>
-    (await loadFoundationCeremonyRuntime()).verifySuiteRecord(canonicalBytes);
-
 export const verifyCanonicalCeremonyContext = async (input: {
     readonly canonicalManifestBytes: Uint8Array;
     readonly canonicalRosterBytes: Uint8Array;
-    readonly canonicalSuiteRecordBytes: Uint8Array;
     readonly ceremonyIdentifier: string;
     readonly expectedSuiteId: ProtocolHash;
 }): Promise<FoundationCeremonyContextVerification> =>
@@ -120,7 +104,6 @@ export const verifyCanonicalActionContext = async (input: {
     readonly canonicalBoardPolicyBytes: Uint8Array;
     readonly canonicalManifestBytes: Uint8Array;
     readonly canonicalRosterBytes: Uint8Array;
-    readonly canonicalSuiteRecordBytes: Uint8Array;
     readonly ceremonyIdentifier: string;
     readonly expectedCeremonyContextHash: ProtocolHash;
     readonly expectedSuiteId: ProtocolHash;

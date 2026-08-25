@@ -277,6 +277,7 @@ impl FoundationTupleHash512BlockReader {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn discard(
         &mut self,
         output_byte_length: usize,
@@ -334,23 +335,6 @@ impl BoundedFoundationTupleXofReader {
         }
         self.reader.read(output_fragment);
         self.remaining_output_byte_length -= output_fragment.len();
-        Ok(())
-    }
-
-    pub(crate) fn discard(
-        &mut self,
-        output_byte_length: usize,
-    ) -> Result<(), StreamingFoundationHashError> {
-        if output_byte_length > self.remaining_output_byte_length {
-            return Err(StreamingFoundationHashError::OutputOverrun);
-        }
-        let mut buffer = [0_u8; 256];
-        let mut remaining_byte_length = output_byte_length;
-        while remaining_byte_length > 0 {
-            let fragment_byte_length = remaining_byte_length.min(buffer.len());
-            self.read(&mut buffer[..fragment_byte_length])?;
-            remaining_byte_length -= fragment_byte_length;
-        }
         Ok(())
     }
 

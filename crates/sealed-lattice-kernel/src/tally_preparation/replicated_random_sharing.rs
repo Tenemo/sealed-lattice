@@ -108,26 +108,67 @@ pub(crate) struct ReplicatedRandomSharingSubset {
     excluded_position_mask: u32,
 }
 
-impl ReplicatedRandomSharingSubset {
-    pub(crate) fn all(participant_count: u16) -> Result<Vec<Self>, TallyPreparationError> {
-        let roster_parameters = derive_foundation_roster_parameters(participant_count)
-            .ok_or(TallyPreparationError::GeometryMismatch)?;
-        let mask_limit = 1_u32
-            .checked_shl(u32::from(participant_count))
-            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
-        let mut subsets = Vec::new();
-        for excluded_position_mask in 0..mask_limit {
-            if excluded_position_mask.count_ones()
-                == u32::from(roster_parameters.active_fault_bound)
-            {
-                subsets.push(Self {
-                    participant_count,
-                    active_fault_bound: roster_parameters.active_fault_bound,
+#[derive(Debug, Clone)]
+pub(crate) struct ReplicatedRandomSharingSubsetIterator {
+    participant_count: u16,
+    active_fault_bound: u16,
+    next_excluded_position_mask: u32,
+    excluded_position_mask_limit: u32,
+    remaining_subset_count: u64,
+}
+
+impl Iterator for ReplicatedRandomSharingSubsetIterator {
+    type Item = ReplicatedRandomSharingSubset;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.next_excluded_position_mask < self.excluded_position_mask_limit {
+            let excluded_position_mask = self.next_excluded_position_mask;
+            self.next_excluded_position_mask += 1;
+            if excluded_position_mask.count_ones() == u32::from(self.active_fault_bound) {
+                self.remaining_subset_count = self.remaining_subset_count.saturating_sub(1);
+                return Some(ReplicatedRandomSharingSubset {
+                    participant_count: self.participant_count,
+                    active_fault_bound: self.active_fault_bound,
                     excluded_position_mask,
                 });
             }
         }
-        Ok(subsets)
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = usize::try_from(self.remaining_subset_count).unwrap_or(usize::MAX);
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for ReplicatedRandomSharingSubsetIterator {}
+
+impl ReplicatedRandomSharingSubset {
+    pub(crate) fn iter(
+        participant_count: u16,
+    ) -> Result<ReplicatedRandomSharingSubsetIterator, TallyPreparationError> {
+        let roster_parameters = derive_foundation_roster_parameters(participant_count)
+            .ok_or(TallyPreparationError::GeometryMismatch)?;
+        let excluded_position_mask_limit = 1_u32
+            .checked_shl(u32::from(participant_count))
+            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+        let remaining_subset_count = checked_binomial_coefficient(
+            u64::from(participant_count),
+            u64::from(roster_parameters.active_fault_bound),
+        )?;
+        Ok(ReplicatedRandomSharingSubsetIterator {
+            participant_count,
+            active_fault_bound: roster_parameters.active_fault_bound,
+            next_excluded_position_mask: 0,
+            excluded_position_mask_limit,
+            remaining_subset_count,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn all(participant_count: u16) -> Result<Vec<Self>, TallyPreparationError> {
+        Ok(Self::iter(participant_count)?.collect())
     }
 
     pub(crate) fn from_excluded_positions(

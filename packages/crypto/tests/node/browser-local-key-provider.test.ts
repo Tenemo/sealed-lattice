@@ -1,7 +1,7 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
-import { recipientPrivateVssShareMailboxPayloadType } from '@sealed-lattice/types';
+import { replicatedKeyComponentOpeningMailboxPayloadType } from '@sealed-lattice/types';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -46,7 +46,7 @@ const setupMailboxSlot = Object.freeze({
     ...defaultResetSafeSetupMailboxScope,
     recipientParticipantId: '66'.repeat(64),
     producerSequence: '0',
-    payloadType: recipientPrivateVssShareMailboxPayloadType,
+    payloadType: replicatedKeyComponentOpeningMailboxPayloadType,
     statementHash: '77'.repeat(64),
     orderedMaterialRoots: Object.freeze(['88'.repeat(64)]),
 });

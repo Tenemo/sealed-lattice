@@ -7,7 +7,6 @@ use super::schemas::{
     SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_u64,
     read_variable_item, require_header,
 };
-use super::suite::SuiteRecord;
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
     FoundationSchemaError, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
@@ -335,31 +334,18 @@ pub struct CeremonyContext {
 
 impl CeremonyContext {
     pub fn new(
-        suite: &SuiteRecord,
+        suite_id: Hash512,
         manifest: &Manifest,
         roster: &Roster,
         ceremony_identifier: String,
     ) -> SchemaResult<Self> {
         validate_external_identifier(&ceremony_identifier)?;
-        if roster.entries.len() != usize::from(suite.roster_size()) {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongContext,
-                "ceremony roster size does not match the suite record",
-            ));
-        }
         let manifest_option_count = u16::try_from(manifest.options().len()).map_err(|_| {
             FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "manifest option count does not fit the suite field",
+                "manifest option count does not fit the context field",
             )
         })?;
-        if manifest_option_count != suite.option_count() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongContext,
-                "ceremony manifest option count does not match the suite record",
-            ));
-        }
-        let suite_id = suite.suite_id()?;
         let manifest_hash = manifest.manifest_hash()?;
         let roster_hash = roster.roster_hash()?;
         let context_hash = hash_foundation_tuple_512(
@@ -544,7 +530,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::foundation::{ArtifactKind, ArtifactReference, RosterEntry, SuiteCountLimits};
+    use crate::foundation::RosterEntry;
 
     fn display_text(value: &str) -> StabilizedDisplayText {
         StabilizedDisplayText::from_ingress_utf8(value.as_bytes())
@@ -593,25 +579,8 @@ mod tests {
         Roster::new(entries).expect("test roster is valid")
     }
 
-    fn sample_suite() -> SuiteRecord {
-        let count_limits = SuiteCountLimits::new(3, 10, 64, 128, 20, 100)
-            .expect("test suite count limits are valid");
-        let artifacts = ArtifactKind::ALL
-            .into_iter()
-            .map(|artifact_kind| {
-                ArtifactReference::new(
-                    artifact_kind,
-                    1,
-                    Hash512::from_bytes(
-                        [u8::try_from(artifact_kind.canonical_code())
-                            .expect("test artifact kind fits u8");
-                            Hash512::BYTE_LENGTH],
-                    ),
-                )
-                .expect("test artifact reference is valid")
-            })
-            .collect();
-        SuiteRecord::new(count_limits, artifacts).expect("test suite is valid")
+    fn sample_suite_identity() -> Hash512 {
+        Hash512::from_bytes([0x5a; Hash512::BYTE_LENGTH])
     }
 
     #[test]
@@ -773,36 +742,23 @@ mod tests {
     }
 
     #[test]
-    fn ceremony_and_action_contexts_bind_the_suite_option_count() {
-        let suite = sample_suite();
+    fn ceremony_and_action_contexts_bind_the_manifest_option_count() {
+        let suite_identity = sample_suite_identity();
         let roster = sample_roster();
-        assert_eq!(suite.option_count(), FOUNDATION_PROFILE.option_count);
-        assert_eq!(
-            CeremonyContext::new(
-                &suite,
-                &manifest_for_option_count(FOUNDATION_PROFILE.option_count - 1),
-                &roster,
-                "wrong-option-count".to_owned(),
-            )
-            .expect_err("manifest count must match its suite")
-            .refusal_reason,
-            RefusalReason::WrongContext
-        );
-
         let ceremony = CeremonyContext::new(
-            &suite,
-            &sample_manifest(),
+            suite_identity,
+            &manifest_for_option_count(FOUNDATION_PROFILE.option_count - 1),
             &roster,
-            "matching-option-count".to_owned(),
+            "manifest-owned-option-count".to_owned(),
         )
-        .expect("matching ceremony derives");
+        .expect("structural ceremony derives");
         let board_policy =
             BoardPolicy::new("https://board.example".to_owned()).expect("board policy derives");
         assert_eq!(
             ActionContext::new(
                 &ceremony,
                 "too-wide-action".to_owned(),
-                ActionDefinition::new(FOUNDATION_PROFILE.option_count + 1, 0)
+                ActionDefinition::new(FOUNDATION_PROFILE.option_count, 0)
                     .expect("top count remains structurally bounded"),
                 &board_policy,
             )
@@ -816,10 +772,10 @@ mod tests {
     fn context_hashes_bind_every_canonical_input_and_identifier_boundary() {
         let manifest = sample_manifest();
         let roster = sample_roster();
-        let suite = sample_suite();
-        let suite_id = suite.suite_id().expect("suite identifier derives");
-        let ceremony = CeremonyContext::new(&suite, &manifest, &roster, "ceremony-2026".to_owned())
-            .expect("schema-level ceremony context derives");
+        let suite_id = sample_suite_identity();
+        let ceremony =
+            CeremonyContext::new(suite_id, &manifest, &roster, "ceremony-2026".to_owned())
+                .expect("schema-level ceremony context derives");
         let action_definition =
             ActionDefinition::new(7, 1_800_000_000_000).expect("action definition is valid");
         let board_policy =
@@ -872,49 +828,36 @@ mod tests {
             "bad\nidentifier".to_owned(),
             "a".repeat(FOUNDATION_PROFILE.maximum_identifier_byte_length + 1),
         ] {
-            assert!(CeremonyContext::new(&suite, &manifest, &roster, invalid_identifier,).is_err());
+            assert!(
+                CeremonyContext::new(suite_id, &manifest, &roster, invalid_identifier).is_err()
+            );
         }
     }
 
     #[test]
-    fn ceremony_context_is_structural_and_does_not_select_a_suite() {
-        let suite = sample_suite();
+    fn ceremony_context_binds_an_opaque_suite_identity_without_activating_it() {
+        let suite_id = sample_suite_identity();
         let ceremony_context = CeremonyContext::new(
-            &suite,
+            suite_id,
             &sample_manifest(),
             &sample_roster(),
             "ceremony-2026".to_owned(),
         )
-        .expect("a structurally valid suite can bind a ceremony context");
-        assert_eq!(
-            ceremony_context.suite_id(),
-            suite.suite_id().expect("suite identifier derives")
-        );
-
-        let error = super::super::selected_suite::require_selected_suite_record(&suite)
-            .expect_err("structural validation must not grant selected-suite authority");
-        assert!(matches!(
-            error.refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite | RefusalReason::OutsideSupportedProfile
-        ));
+        .expect("an opaque identity can bind a structural ceremony context");
+        assert_eq!(ceremony_context.suite_id(), suite_id);
     }
 
     #[test]
-    fn ceremony_context_requires_the_suite_and_roster_sizes_to_match() {
-        let suite = sample_suite();
+    fn ceremony_context_accepts_every_structurally_admitted_roster_size() {
         let short_roster = Roster::new(sample_roster().entries.into_iter().take(3).collect())
             .expect("three-participant roster is structural");
-        assert_eq!(
-            CeremonyContext::new(
-                &suite,
-                &sample_manifest(),
-                &short_roster,
-                "ceremony-2026".to_owned(),
-            )
-            .expect_err("a selected-profile suite cannot bind a different roster size")
-            .refusal_reason,
-            RefusalReason::WrongContext
-        );
+        CeremonyContext::new(
+            sample_suite_identity(),
+            &sample_manifest(),
+            &short_roster,
+            "ceremony-2026".to_owned(),
+        )
+        .expect("structural admission does not claim suite activation");
     }
 
     #[test]

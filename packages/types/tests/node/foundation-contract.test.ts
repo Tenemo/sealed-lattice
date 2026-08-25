@@ -15,6 +15,7 @@ describe('foundation contract', () => {
     it('pins the complete selected foundation profile', () => {
         expect(foundationProfile).toEqual({
             activeFaultBound: 3,
+            candidateViewQuorum: 7,
             finalityQuorum: 7,
             maximumCanonicalStreamByteLength: 4_294_967_291,
             maximumCopiedBufferByteLength: 8_388_608,
@@ -47,6 +48,7 @@ describe('foundation contract', () => {
         });
         expect(deriveFoundationRosterParameters(10)).toEqual({
             activeFaultBound: 3,
+            candidateViewQuorum: 7,
             finalityQuorum: 7,
             participantCount: 10,
             reconstructionThreshold: 4,
@@ -71,10 +73,14 @@ describe('foundation contract', () => {
                     (participantCount + parameters.activeFaultBound) / 2,
                 ) + 1;
             expect(parameters.finalityQuorum).toBe(expectedQuorum);
+            expect(parameters.candidateViewQuorum).toBe(expectedQuorum);
             expect(parameters.stateWitnessQuorum).toBe(expectedQuorum);
             expect(participantCount).toBeGreaterThan(
                 3 * parameters.activeFaultBound,
             );
+            expect(
+                2 * parameters.candidateViewQuorum - participantCount,
+            ).toBeGreaterThan(parameters.activeFaultBound);
             expect(
                 2 * parameters.finalityQuorum - participantCount,
             ).toBeGreaterThan(parameters.activeFaultBound);

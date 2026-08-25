@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { buildRustTestInventoryArguments } from '#tools/ci/rust-test-inventory';
 
 describe('Rust test inventory command', () => {
-    it('uses the owning release profile and feature set for measurement inventory', () => {
+    it('uses the requested release profile and feature set', () => {
         expect(
             buildRustTestInventoryArguments({
-                cargoFeatures: ['primitive-measurement-evidence'],
+                cargoFeatures: ['example-feature'],
                 ignoredOnly: true,
                 useReleaseProfile: true,
             }),
@@ -17,7 +17,7 @@ describe('Rust test inventory command', () => {
             'sealed-lattice-kernel',
             '--release',
             '--features',
-            'primitive-measurement-evidence',
+            'example-feature',
             '--',
             '--ignored',
             '--list',

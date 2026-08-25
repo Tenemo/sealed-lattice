@@ -3,16 +3,16 @@ use core::fmt;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
-    encoding::{CanonicalReader, append_bytes, append_varuint},
+    encoding::{CanonicalReader, append_bytes, append_varuint, encode_varuint},
     foundation::Hash512,
-    hashing::hash_framed_parts_512,
+    hashing::{StreamingHash512, hash_framed_parts_512},
 };
 
 use super::{
     TallyPreparationContext, TallyPreparationError,
     replicated_random_sharing::{
         PSEUDORANDOM_SHARING_KEY_BYTE_LENGTH, ReplicatedRandomSharingGeometry,
-        ReplicatedRandomSharingSubset,
+        ReplicatedRandomSharingSubset, ReplicatedRandomSharingSubsetIterator,
     },
 };
 
@@ -74,36 +74,22 @@ impl ReplicatedRandomSharingKeyCoordinate {
         })
     }
 
+    pub(crate) fn iter(
+        context: TallyPreparationContext,
+    ) -> Result<ReplicatedRandomSharingKeyCoordinateIterator, TallyPreparationError> {
+        Ok(ReplicatedRandomSharingKeyCoordinateIterator {
+            context,
+            subsets: ReplicatedRandomSharingSubset::iter(context.participant_count())?,
+            current_subset: None,
+            next_purpose_ordinal: 0,
+        })
+    }
+
+    #[cfg(test)]
     pub(crate) fn all(
         context: TallyPreparationContext,
     ) -> Result<Vec<Self>, TallyPreparationError> {
-        let subsets = ReplicatedRandomSharingSubset::all(context.participant_count())?;
-        let geometry = ReplicatedRandomSharingGeometry::derive(context.participant_count())?;
-        let mut coordinates = Vec::with_capacity(
-            usize::try_from(geometry.total_key_count)
-                .map_err(|_| TallyPreparationError::IntegerConversion)?,
-        );
-        for subset in subsets {
-            coordinates.push(Self::new(
-                context,
-                subset,
-                ReplicatedRandomSharingKeyPurpose::RandomSharing,
-            )?);
-            for basis_position in 0..subset.active_fault_bound() {
-                coordinates.push(Self::new(
-                    context,
-                    subset,
-                    ReplicatedRandomSharingKeyPurpose::DegreeDoubleZeroSharing { basis_position },
-                )?);
-            }
-        }
-        if coordinates.len()
-            != usize::try_from(geometry.total_key_count)
-                .map_err(|_| TallyPreparationError::IntegerConversion)?
-        {
-            return Err(TallyPreparationError::ReplicatedKeyInventoryMismatch);
-        }
-        Ok(coordinates)
+        Ok(Self::iter(context)?.collect())
     }
 
     pub(crate) const fn context_identity(self) -> Hash512 {
@@ -197,6 +183,44 @@ impl ReplicatedRandomSharingKeyCoordinate {
             &excluded_positions,
         )
         .map_err(|_| TallyPreparationError::ReplicatedKeyCoordinateMismatch)
+    }
+}
+
+pub(crate) struct ReplicatedRandomSharingKeyCoordinateIterator {
+    context: TallyPreparationContext,
+    subsets: ReplicatedRandomSharingSubsetIterator,
+    current_subset: Option<ReplicatedRandomSharingSubset>,
+    next_purpose_ordinal: u16,
+}
+
+impl Iterator for ReplicatedRandomSharingKeyCoordinateIterator {
+    type Item = ReplicatedRandomSharingKeyCoordinate;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(subset) = self.current_subset {
+                let purpose = if self.next_purpose_ordinal == 0 {
+                    ReplicatedRandomSharingKeyPurpose::RandomSharing
+                } else if self.next_purpose_ordinal <= subset.active_fault_bound() {
+                    ReplicatedRandomSharingKeyPurpose::DegreeDoubleZeroSharing {
+                        basis_position: self.next_purpose_ordinal - 1,
+                    }
+                } else {
+                    self.current_subset = None;
+                    continue;
+                };
+                self.next_purpose_ordinal += 1;
+                return Some(ReplicatedRandomSharingKeyCoordinate {
+                    context_identity: self.context.identity(),
+                    participant_count: subset.participant_count(),
+                    excluded_position_mask: subset.excluded_position_mask(),
+                    purpose,
+                });
+            }
+            self.current_subset = self.subsets.next();
+            self.next_purpose_ordinal = 0;
+            self.current_subset?;
+        }
     }
 }
 
@@ -337,6 +361,41 @@ impl fmt::Debug for ReplicatedRandomSharingKey {
 impl Drop for ReplicatedRandomSharingKey {
     fn drop(&mut self) {
         self.bytes.zeroize();
+    }
+}
+
+/// Verifier-minted recipient custody for one complete replicated-key
+/// inventory. Raw delivery records cannot construct this capability.
+pub(crate) struct VerifiedReplicatedKeyRecipientInventory {
+    context_identity: Hash512,
+    participant_count: u16,
+    recipient_position: u16,
+    commitment_manifest_root: Hash512,
+    remote_delivery_count: u64,
+    combined_keys: Box<[ReplicatedRandomSharingKey]>,
+}
+
+impl VerifiedReplicatedKeyRecipientInventory {
+    pub(crate) const fn recipient_position(&self) -> u16 {
+        self.recipient_position
+    }
+
+    pub(crate) fn combined_keys(&self) -> &[ReplicatedRandomSharingKey] {
+        &self.combined_keys
+    }
+}
+
+impl fmt::Debug for VerifiedReplicatedKeyRecipientInventory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VerifiedReplicatedKeyRecipientInventory")
+            .field("context_identity", &self.context_identity)
+            .field("participant_count", &self.participant_count)
+            .field("recipient_position", &self.recipient_position)
+            .field("commitment_manifest_root", &self.commitment_manifest_root)
+            .field("remote_delivery_count", &self.remote_delivery_count)
+            .field("combined_key_count", &self.combined_keys.len())
+            .finish()
     }
 }
 
@@ -566,21 +625,52 @@ pub(crate) fn combine_replicated_random_sharing_key(
     })
 }
 
+pub(crate) struct ReplicatedKeyComponentSlotIterator {
+    coordinates: ReplicatedRandomSharingKeyCoordinateIterator,
+    current_coordinate: Option<ReplicatedRandomSharingKeyCoordinate>,
+    next_contributor_position: u16,
+}
+
+impl Iterator for ReplicatedKeyComponentSlotIterator {
+    type Item = (ReplicatedRandomSharingKeyCoordinate, u16);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(coordinate) = self.current_coordinate {
+                while self.next_contributor_position < coordinate.participant_count {
+                    let contributor_position = self.next_contributor_position;
+                    self.next_contributor_position += 1;
+                    let position_bit = 1_u32 << u32::from(contributor_position);
+                    if coordinate.excluded_position_mask & position_bit == 0 {
+                        return Some((coordinate, contributor_position));
+                    }
+                }
+            }
+            self.current_coordinate = self.coordinates.next();
+            self.next_contributor_position = 0;
+            self.current_coordinate?;
+        }
+    }
+}
+
+pub(crate) fn replicated_key_component_slots(
+    context: TallyPreparationContext,
+) -> Result<ReplicatedKeyComponentSlotIterator, TallyPreparationError> {
+    Ok(ReplicatedKeyComponentSlotIterator {
+        coordinates: ReplicatedRandomSharingKeyCoordinate::iter(context)?,
+        current_coordinate: None,
+        next_contributor_position: 0,
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn expected_replicated_key_component_slots(
     context: TallyPreparationContext,
 ) -> Result<Vec<(ReplicatedRandomSharingKeyCoordinate, u16)>, TallyPreparationError> {
     let geometry = ReplicatedRandomSharingGeometry::derive(context.participant_count())?;
     let expected_slot_count =
         checked_multiply(geometry.total_key_count, geometry.authorized_subset_size)?;
-    let mut slots = Vec::with_capacity(
-        usize::try_from(expected_slot_count)
-            .map_err(|_| TallyPreparationError::IntegerConversion)?,
-    );
-    for coordinate in ReplicatedRandomSharingKeyCoordinate::all(context)? {
-        for contributor_position in coordinate.member_positions()? {
-            slots.push((coordinate, contributor_position));
-        }
-    }
+    let slots = replicated_key_component_slots(context)?.collect::<Vec<_>>();
     if slots.len()
         != usize::try_from(expected_slot_count)
             .map_err(|_| TallyPreparationError::IntegerConversion)?
@@ -594,58 +684,223 @@ pub(crate) fn derive_replicated_key_commitment_manifest(
     context: TallyPreparationContext,
     commitments: &[ReplicatedKeyComponentCommitment],
 ) -> Result<ReplicatedKeyCommitmentManifest, TallyPreparationError> {
-    let expected_slots = expected_replicated_key_component_slots(context)?;
-    if commitments.len() != expected_slots.len() {
+    let geometry = ReplicatedRandomSharingGeometry::derive(context.participant_count())?;
+    let expected_commitment_count =
+        checked_multiply(geometry.total_key_count, geometry.authorized_subset_size)?;
+    if u64::try_from(commitments.len()).map_err(|_| TallyPreparationError::IntegerConversion)?
+        != expected_commitment_count
+    {
         return Err(TallyPreparationError::ReplicatedKeyInventoryMismatch);
     }
 
-    let mut manifest_payload = Vec::new();
-    append_varuint(
-        &mut manifest_payload,
-        u64::try_from(commitments.len()).map_err(|_| TallyPreparationError::IntegerConversion)?,
+    let commitment_count =
+        u64::try_from(commitments.len()).map_err(|_| TallyPreparationError::IntegerConversion)?;
+    let encoded_commitment_count = encode_varuint(commitment_count);
+    let manifest_payload_byte_length = commitments.iter().try_fold(
+        encoded_commitment_count.len(),
+        |byte_length, commitment| {
+            let canonical_commitment_byte_length = commitment.canonical_bytes().len();
+            let framed_length_byte_length = encode_varuint(
+                u64::try_from(canonical_commitment_byte_length)
+                    .map_err(|_| TallyPreparationError::IntegerConversion)?,
+            )
+            .len();
+            byte_length
+                .checked_add(framed_length_byte_length)
+                .and_then(|length| length.checked_add(canonical_commitment_byte_length))
+                .ok_or(TallyPreparationError::ArithmeticOverflow)
+        },
+    )?;
+    let mut manifest_hasher = StreamingHash512::new(REPLICATED_KEY_COMMITMENT_MANIFEST_DOMAIN, 2);
+    manifest_hasher.absorb_part(context.identity().as_bytes());
+    manifest_hasher.begin_part(
+        u64::try_from(manifest_payload_byte_length)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?,
     );
+    manifest_hasher.absorb_raw(&encoded_commitment_count);
     for ((expected_coordinate, expected_contributor), commitment) in
-        expected_slots.iter().zip(commitments)
+        replicated_key_component_slots(context)?.zip(commitments)
     {
-        if commitment.coordinate != *expected_coordinate
-            || commitment.contributor_position != *expected_contributor
+        if commitment.coordinate != expected_coordinate
+            || commitment.contributor_position != expected_contributor
         {
             return Err(TallyPreparationError::ReplicatedKeyInventoryMismatch);
         }
-        append_bytes(&mut manifest_payload, &commitment.canonical_bytes());
+        let canonical_commitment = commitment.canonical_bytes();
+        let framed_commitment_byte_length = encode_varuint(
+            u64::try_from(canonical_commitment.len())
+                .map_err(|_| TallyPreparationError::IntegerConversion)?,
+        );
+        manifest_hasher.absorb_raw(&framed_commitment_byte_length);
+        manifest_hasher.absorb_raw(&canonical_commitment);
     }
-    let root = Hash512::from_bytes(hash_framed_parts_512(
-        REPLICATED_KEY_COMMITMENT_MANIFEST_DOMAIN,
-        &[context.identity().as_bytes(), &manifest_payload],
-    ));
+    let root = Hash512::from_bytes(manifest_hasher.finalize());
     Ok(ReplicatedKeyCommitmentManifest {
         context_identity: context.identity(),
         participant_count: context.participant_count(),
-        commitment_count: u64::try_from(commitments.len())
-            .map_err(|_| TallyPreparationError::IntegerConversion)?,
+        commitment_count,
         root,
     })
 }
 
-pub(crate) fn create_replicated_key_delivery_acknowledgement(
+pub(crate) fn verify_replicated_key_recipient_inventory<'opening>(
     context: TallyPreparationContext,
     manifest: ReplicatedKeyCommitmentManifest,
+    commitments: &[ReplicatedKeyComponentCommitment],
     recipient_position: u16,
-) -> Result<ReplicatedKeyDeliveryAcknowledgement, TallyPreparationError> {
+    openings: impl IntoIterator<Item = &'opening ReplicatedKeyComponentOpening>,
+) -> Result<VerifiedReplicatedKeyRecipientInventory, TallyPreparationError> {
     if manifest.context_identity != context.identity()
         || manifest.participant_count != context.participant_count()
         || recipient_position >= context.participant_count()
     {
-        return Err(TallyPreparationError::ReplicatedKeyAcknowledgementMismatch);
+        return Err(TallyPreparationError::ReplicatedKeyInventoryMismatch);
     }
+    if derive_replicated_key_commitment_manifest(context, commitments)? != manifest {
+        return Err(TallyPreparationError::ReplicatedKeyCommitmentMismatch);
+    }
+
     let geometry = ReplicatedRandomSharingGeometry::derive(context.participant_count())?;
-    Ok(ReplicatedKeyDeliveryAcknowledgement {
+    let mut supplied_openings = openings.into_iter();
+    let mut combined_keys = Vec::with_capacity(
+        usize::try_from(geometry.key_count_per_participant)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?,
+    );
+    let mut current_coordinate = None;
+    let mut current_component_count = 0_u64;
+    let mut combined_key_bytes = Zeroizing::new([0_u8; REPLICATED_KEY_COMPONENT_BYTE_LENGTH]);
+    let mut remote_delivery_count = 0_u64;
+
+    for ((expected_coordinate, expected_contributor), commitment) in
+        replicated_key_component_slots(context)?.zip(commitments)
+    {
+        if !expected_coordinate.contains(recipient_position)? {
+            continue;
+        }
+
+        if current_coordinate != Some(expected_coordinate) {
+            if let Some(previous_coordinate) = current_coordinate {
+                if current_component_count != geometry.authorized_subset_size {
+                    return Err(TallyPreparationError::ReplicatedKeyInventoryMismatch);
+                }
+                combined_keys.push(ReplicatedRandomSharingKey {
+                    coordinate: previous_coordinate,
+                    bytes: core::mem::replace(
+                        &mut *combined_key_bytes,
+                        [0_u8; REPLICATED_KEY_COMPONENT_BYTE_LENGTH],
+                    ),
+                });
+            }
+            current_coordinate = Some(expected_coordinate);
+            current_component_count = 0;
+        }
+
+        let opening = supplied_openings
+            .next()
+            .ok_or(TallyPreparationError::ReplicatedKeyInventoryMismatch)?;
+        verify_replicated_key_component(
+            expected_coordinate,
+            expected_contributor,
+            *commitment,
+            opening,
+        )?;
+        if expected_contributor != recipient_position {
+            validate_replicated_key_delivery_recipient(
+                expected_coordinate,
+                expected_contributor,
+                recipient_position,
+            )?;
+            remote_delivery_count = remote_delivery_count
+                .checked_add(1)
+                .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+        }
+        for (combined_byte, component_byte) in
+            combined_key_bytes.iter_mut().zip(opening.component.iter())
+        {
+            *combined_byte ^= component_byte;
+        }
+        current_component_count = current_component_count
+            .checked_add(1)
+            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+    }
+
+    let final_coordinate =
+        current_coordinate.ok_or(TallyPreparationError::ReplicatedKeyInventoryMismatch)?;
+    if current_component_count != geometry.authorized_subset_size {
+        return Err(TallyPreparationError::ReplicatedKeyInventoryMismatch);
+    }
+    combined_keys.push(ReplicatedRandomSharingKey {
+        coordinate: final_coordinate,
+        bytes: core::mem::replace(
+            &mut *combined_key_bytes,
+            [0_u8; REPLICATED_KEY_COMPONENT_BYTE_LENGTH],
+        ),
+    });
+
+    if supplied_openings.next().is_some()
+        || u64::try_from(combined_keys.len())
+            .map_err(|_| TallyPreparationError::IntegerConversion)?
+            != geometry.key_count_per_participant
+        || remote_delivery_count != delivery_count_per_participant(geometry)?
+    {
+        return Err(TallyPreparationError::ReplicatedKeyInventoryMismatch);
+    }
+
+    Ok(VerifiedReplicatedKeyRecipientInventory {
         context_identity: context.identity(),
         participant_count: context.participant_count(),
         recipient_position,
         commitment_manifest_root: manifest.root,
-        expected_delivery_count: delivery_count_per_participant(geometry)?,
+        remote_delivery_count,
+        combined_keys: combined_keys.into_boxed_slice(),
     })
+}
+
+pub(crate) fn create_replicated_key_delivery_acknowledgement(
+    verified_inventory: &VerifiedReplicatedKeyRecipientInventory,
+) -> ReplicatedKeyDeliveryAcknowledgement {
+    ReplicatedKeyDeliveryAcknowledgement {
+        context_identity: verified_inventory.context_identity,
+        participant_count: verified_inventory.participant_count,
+        recipient_position: verified_inventory.recipient_position,
+        commitment_manifest_root: verified_inventory.commitment_manifest_root,
+        expected_delivery_count: verified_inventory.remote_delivery_count,
+    }
+}
+
+pub(crate) fn replicated_key_commitment_manifest_canonical_byte_length(
+    context: TallyPreparationContext,
+) -> Result<u64, TallyPreparationError> {
+    let geometry = ReplicatedRandomSharingGeometry::derive(context.participant_count())?;
+    let commitment_count =
+        checked_multiply(geometry.total_key_count, geometry.authorized_subset_size)?;
+    let manifest = ReplicatedKeyCommitmentManifest {
+        context_identity: context.identity(),
+        participant_count: context.participant_count(),
+        commitment_count,
+        root: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+    };
+    u64::try_from(manifest.canonical_bytes().len())
+        .map_err(|_| TallyPreparationError::IntegerConversion)
+}
+
+pub(crate) fn replicated_key_delivery_acknowledgement_canonical_byte_length(
+    context: TallyPreparationContext,
+    recipient_position: u16,
+) -> Result<u64, TallyPreparationError> {
+    if recipient_position >= context.participant_count() {
+        return Err(TallyPreparationError::ReplicatedKeyAcknowledgementMismatch);
+    }
+    let geometry = ReplicatedRandomSharingGeometry::derive(context.participant_count())?;
+    let acknowledgement = ReplicatedKeyDeliveryAcknowledgement {
+        context_identity: context.identity(),
+        participant_count: context.participant_count(),
+        recipient_position,
+        commitment_manifest_root: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+        expected_delivery_count: delivery_count_per_participant(geometry)?,
+    };
+    u64::try_from(acknowledgement.canonical_bytes().len())
+        .map_err(|_| TallyPreparationError::IntegerConversion)
 }
 
 pub(crate) fn derive_replicated_key_delivery_acknowledgement_root(

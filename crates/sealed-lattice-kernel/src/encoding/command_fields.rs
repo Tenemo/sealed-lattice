@@ -72,25 +72,6 @@ pub(super) fn required_lowercase_hex_bytes(
     decode_hex(required_string(object, field_name)?)
 }
 
-pub(super) fn required_exact_lowercase_hex<const BYTE_LENGTH: usize>(
-    object: &Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<[u8; BYTE_LENGTH]> {
-    decode_exact_lowercase_hex(required_string(object, field_name)?, field_name)
-}
-
-pub(super) fn decode_exact_lowercase_hex<const BYTE_LENGTH: usize>(
-    value: &str,
-    field_name: &str,
-) -> CanonicalResult<[u8; BYTE_LENGTH]> {
-    let bytes = decode_hex(value)?;
-    bytes.try_into().map_err(|_| {
-        invalid_value(format!(
-            "{field_name} must contain exactly {BYTE_LENGTH} bytes"
-        ))
-    })
-}
-
 pub(super) fn invalid_value(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
@@ -112,22 +93,6 @@ mod tests {
         assert_eq!(
             error.message,
             "number must be a canonical unsigned decimal string"
-        );
-    }
-
-    #[test]
-    fn exact_lowercase_hex_distinguishes_alphabet_and_length_failures() {
-        for (value, expected_code) in [
-            ("AA", CanonicalErrorCode::InvalidHex),
-            ("00", CanonicalErrorCode::InvalidProtocolObject),
-        ] {
-            let error = decode_exact_lowercase_hex::<2>(value, "digest")
-                .expect_err("noncanonical or wrong-length hex must refuse");
-            assert_eq!(error.code, expected_code);
-        }
-        assert_eq!(
-            decode_exact_lowercase_hex::<2>("00ff", "digest"),
-            Ok([0x00, 0xff])
         );
     }
 }

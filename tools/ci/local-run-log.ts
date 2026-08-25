@@ -169,7 +169,7 @@ export const currentProcessExitCode = (): number => {
     return 1;
 };
 
-export const safeLogSlug = (value: string): string => {
+const safeLogSlug = (value: string): string => {
     const slug = value
         .trim()
         .replace(/[^a-zA-Z0-9]+/gu, '-')

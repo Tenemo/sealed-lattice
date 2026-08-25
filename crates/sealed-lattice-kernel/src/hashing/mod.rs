@@ -45,9 +45,46 @@ pub fn hash_framed_parts_512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
     output
 }
 
+/// Streaming form of [`hash_framed_parts_512`] for callers that know each
+/// framed part's exact byte length before producing its contents.
+pub(crate) struct StreamingHash512 {
+    hasher: Shake256,
+}
+
+impl StreamingHash512 {
+    pub(crate) fn new(domain: &str, part_count: u64) -> Self {
+        let mut hasher = Shake256::default();
+        hasher.update(HASH512_PREIMAGE_PREFIX);
+        update_varuint(&mut hasher, domain.len() as u64);
+        hasher.update(domain.as_bytes());
+        update_varuint(&mut hasher, part_count);
+        Self { hasher }
+    }
+
+    pub(crate) fn absorb_part(&mut self, part: &[u8]) {
+        self.begin_part(part.len() as u64);
+        self.absorb_raw(part);
+    }
+
+    pub(crate) fn begin_part(&mut self, byte_length: u64) {
+        update_varuint(&mut self.hasher, byte_length);
+    }
+
+    pub(crate) fn absorb_raw(&mut self, bytes: &[u8]) {
+        self.hasher.update(bytes);
+    }
+
+    pub(crate) fn finalize(self) -> [u8; 64] {
+        let mut reader = self.hasher.finalize_xof();
+        let mut output = [0_u8; 64];
+        reader.read(&mut output);
+        output
+    }
+}
+
 /// Returns the exact canonical byte string absorbed by
-/// [`hash_framed_parts_512`]. The common-proof oracle correspondence uses this
-/// to test its primary-preimage grammar against the deployed encoder.
+/// [`hash_framed_parts_512`]. Security experiments and cross-implementation
+/// tests use this to match their preimage grammar to the deployed encoder.
 pub(crate) fn framed_hash512_preimage(domain: &str, parts: &[&[u8]]) -> Vec<u8> {
     // Length-framed, domain-separated preimage: fixed prefix, then the length-
     // framed domain, then a varuint part count, then each part length-prefixed.
@@ -67,45 +104,6 @@ pub(crate) fn framed_hash512_preimage(domain: &str, parts: &[&[u8]]) -> Vec<u8> 
 #[cfg(test)]
 pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
     to_hex(&hash_framed_parts_512(domain, parts))
-}
-
-/// Streaming form of [`hash_framed_parts_512`] for a caller that produces one
-/// framed part incrementally. The caller declares the part count and streamed
-/// byte length before supplying bytes, preserving the exact canonical framing
-/// without buffering a complete proof row.
-pub(crate) struct StreamingHash512 {
-    hasher: Shake256,
-}
-
-impl StreamingHash512 {
-    pub(crate) fn new(domain: &str, part_count: u64) -> Self {
-        let mut hasher = Shake256::default();
-        hasher.update(HASH512_PREIMAGE_PREFIX);
-        update_varuint(&mut hasher, domain.len() as u64);
-        hasher.update(domain.as_bytes());
-        update_varuint(&mut hasher, part_count);
-        Self { hasher }
-    }
-
-    pub(crate) fn absorb_part(&mut self, part: &[u8]) {
-        update_varuint(&mut self.hasher, part.len() as u64);
-        self.hasher.update(part);
-    }
-
-    pub(crate) fn begin_part(&mut self, byte_length: u64) {
-        update_varuint(&mut self.hasher, byte_length);
-    }
-
-    pub(crate) fn absorb_raw(&mut self, bytes: &[u8]) {
-        self.hasher.update(bytes);
-    }
-
-    pub(crate) fn finalize(self) -> [u8; 64] {
-        let mut reader = self.hasher.finalize_xof();
-        let mut output = [0_u8; 64];
-        reader.read(&mut output);
-        output
-    }
 }
 
 fn update_varuint(hasher: &mut Shake256, value: u64) {
@@ -149,11 +147,6 @@ fn finalize_hash512_hex(hasher: Shake256) -> String {
     reader.read(&mut output);
 
     to_hex(&output)
-}
-
-#[cfg(test)]
-pub fn namespace_root(namespace: &str, canonical_bytes: &[u8]) -> String {
-    hash512_hex(namespace, &[canonical_bytes])
 }
 
 // Match the JavaScript reference's key ordering exactly. Canonical hash keys

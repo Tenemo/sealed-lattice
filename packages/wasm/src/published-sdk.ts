@@ -4,7 +4,6 @@ export type {
     FoundationBoardPolicyVerification,
     FoundationCeremonyContextVerification,
     FoundationManifestVerification,
-    FoundationSuiteRecordVerification,
     PublishedSdkKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';

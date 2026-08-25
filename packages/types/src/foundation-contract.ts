@@ -31,11 +31,11 @@ export type VerificationResult<VerifiedValue> =
           readonly refusalReason: RefusalReason;
       };
 
-/** Canonical payload assignments for the shared authenticated mailbox. */
-export const recipientPrivateVssShareMailboxPayloadType = 0x0002;
+/** Canonical payload assignment for one replicated-key component opening. */
+export const replicatedKeyComponentOpeningMailboxPayloadType = 0x0002;
 
 export type MailboxPayloadType =
-    typeof recipientPrivateVssShareMailboxPayloadType;
+    typeof replicatedKeyComponentOpeningMailboxPayloadType;
 
 /** Canonical public inputs that bind one authenticated-mailbox key schedule. */
 export type MailboxKeyScheduleInput = Readonly<{
@@ -99,6 +99,7 @@ export type FoundationRosterParameters = Readonly<{
     participantCount: number;
     activeFaultBound: number;
     reconstructionThreshold: number;
+    candidateViewQuorum: number;
     finalityQuorum: number;
     stateWitnessQuorum: number;
 }>;
@@ -126,6 +127,7 @@ export const deriveFoundationRosterParameters = (
         participantCount,
         activeFaultBound,
         reconstructionThreshold: Math.floor(participantCount / 3) + 1,
+        candidateViewQuorum: quorum,
         finalityQuorum: quorum,
         stateWitnessQuorum: quorum,
     });
@@ -153,14 +155,3 @@ export const foundationProfile = Object.freeze({
     maximumCopiedBufferByteLength: 8_388_608,
     maximumWasmMemoryByteLength: 671_088_640,
 } as const);
-
-/** Fixed capability-kind assignments for non-forking state authorization. */
-export const stateCapabilityKinds = Object.freeze({
-    finalitySignature: 2,
-    targetRelease: 3,
-    setupActionRandomnessRoot: 4,
-    setupTerminalPackage: 8,
-} as const);
-
-export type StateCapabilityKind =
-    (typeof stateCapabilityKinds)[keyof typeof stateCapabilityKinds];

@@ -14,23 +14,8 @@ enum TranscriptCoreCommand {
     VerifyFoundationActionDefinition,
     EncodeFoundationBoardPolicy,
     VerifyFoundationBoardPolicy,
-    VerifyFoundationSuiteRecord,
     VerifyFoundationCeremonyContext,
     VerifyFoundationActionContext,
-    EncodeMailboxKeyScheduleInput,
-    DecodeMailboxKeyScheduleInput,
-    EncodeMailboxAssociatedData,
-    DecodeMailboxAssociatedData,
-    EncodeStreamDescriptor,
-    DecodeStreamDescriptor,
-    EncodeSignedMailboxEnvelope,
-    DecodeSignedMailboxEnvelope,
-    DeriveMailboxEnvelopeHash,
-    DeriveSetupMailboxSlotHash,
-    EncodePrivateRandomCursor,
-    DecodePrivateRandomCursor,
-    DescribeBgvRnsParameters,
-    DescribeCollectiveBgvSetupParameters,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -86,66 +71,11 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::VerifyFoundationBoardPolicy => {
             super::foundation_command::verify_foundation_board_policy(&request)
         }
-        TranscriptCoreCommand::VerifyFoundationSuiteRecord => {
-            super::foundation_command::verify_foundation_suite_record(&request)
-        }
         TranscriptCoreCommand::VerifyFoundationCeremonyContext => {
             super::foundation_command::verify_foundation_ceremony_context(&request)
         }
         TranscriptCoreCommand::VerifyFoundationActionContext => {
             super::foundation_command::verify_foundation_action_context(&request)
         }
-        TranscriptCoreCommand::EncodeMailboxKeyScheduleInput => {
-            super::mailbox_command::encode_mailbox_key_schedule_input(&request)
-        }
-        TranscriptCoreCommand::DecodeMailboxKeyScheduleInput => {
-            super::mailbox_command::decode_mailbox_key_schedule_input(&request)
-        }
-        TranscriptCoreCommand::EncodeMailboxAssociatedData => {
-            super::mailbox_command::encode_mailbox_associated_data(&request)
-        }
-        TranscriptCoreCommand::DecodeMailboxAssociatedData => {
-            super::mailbox_command::decode_mailbox_associated_data(&request)
-        }
-        TranscriptCoreCommand::EncodeStreamDescriptor => {
-            super::mailbox_command::encode_stream_descriptor(&request)
-        }
-        TranscriptCoreCommand::DecodeStreamDescriptor => {
-            super::mailbox_command::decode_stream_descriptor(&request)
-        }
-        TranscriptCoreCommand::EncodeSignedMailboxEnvelope => {
-            super::mailbox_command::encode_signed_mailbox_envelope(&request)
-        }
-        TranscriptCoreCommand::DecodeSignedMailboxEnvelope => {
-            super::mailbox_command::decode_signed_mailbox_envelope(&request)
-        }
-        TranscriptCoreCommand::DeriveMailboxEnvelopeHash => {
-            super::mailbox_command::derive_mailbox_envelope_hash_command(&request)
-        }
-        TranscriptCoreCommand::DeriveSetupMailboxSlotHash => {
-            super::mailbox_command::derive_setup_mailbox_slot_hash_command(&request)
-        }
-        TranscriptCoreCommand::EncodePrivateRandomCursor => {
-            super::private_randomness_command::encode_private_random_cursor(&request)
-        }
-        TranscriptCoreCommand::DecodePrivateRandomCursor => {
-            super::private_randomness_command::decode_private_random_cursor(&request)
-        }
-        TranscriptCoreCommand::DescribeBgvRnsParameters
-        | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
-            run_bgv_command(command, &request)
-        }
-    }
-}
-
-fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> CanonicalResult<Value> {
-    match command {
-        TranscriptCoreCommand::DescribeBgvRnsParameters => {
-            crate::bgv::commands::describe_bgv_rns_parameters()
-        }
-        TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
-            crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request(request)
-        }
-        _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }
 }

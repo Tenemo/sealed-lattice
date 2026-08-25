@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn duplicate_fields_refuse_at_every_object_depth() {
         for request in [
-            br#"{"command":"DescribeBgvRnsParameters","command":"DeriveCanonicalObjectHash"}"#.as_slice(),
+            br#"{"command":"EncodeFoundationManifest","command":"DeriveCanonicalObjectHash"}"#.as_slice(),
             br#"{"command":"DeriveCanonicalObjectHash","value":{"objectType":"CanonicalJsonTestObject","objectType":"Other"}}"#.as_slice(),
         ] {
             let error = parse_transcript_core_request(request)
@@ -345,7 +345,7 @@ mod tests {
     fn non_interoperable_integer_literals_refuse_before_command_dispatch() {
         for unsafe_integer in ["9007199254740992", "-9007199254740992", "1e20"] {
             let request =
-                format!("{{\"command\":\"DescribeBgvRnsParameters\",\"value\":{unsafe_integer}}}");
+                format!("{{\"command\":\"EncodeFoundationManifest\",\"value\":{unsafe_integer}}}");
             let error = parse_transcript_core_request(request.as_bytes())
                 .expect_err("unsafe JSON integer must refuse");
             assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
@@ -360,7 +360,7 @@ mod tests {
 
         for scalar_request in [
             b"null".as_slice(),
-            br#""DescribeBgvRnsParameters""#.as_slice(),
+            br#""EncodeFoundationManifest""#.as_slice(),
             b"[]".as_slice(),
         ] {
             let error = parse_transcript_core_request(scalar_request)
@@ -373,7 +373,7 @@ mod tests {
     fn request_nesting_depth_accepts_the_exact_boundary_and_refuses_one_more_container() {
         let request_with_array_depth = |array_depth: usize| {
             format!(
-                "{{\"command\":\"DescribeBgvRnsParameters\",\"nested\":{}null{}}}",
+                "{{\"command\":\"EncodeFoundationManifest\",\"nested\":{}null{}}}",
                 "[".repeat(array_depth),
                 "]".repeat(array_depth),
             )
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn request_limit_accepts_the_exact_boundary_and_refuses_one_byte_over() {
-        let request = br#"{"command":"DescribeBgvRnsParameters"}"#;
+        let request = br#"{"command":"EncodeFoundationManifest"}"#;
         assert!(
             parse_transcript_core_request_with_limit(request, request.len()).is_ok(),
             "the exact request boundary must be accepted"
@@ -407,7 +407,7 @@ mod tests {
     fn compact_json_structure_refuses_before_exceeding_the_logical_allocation_budget() {
         let compact_values = ["null"; 32].join(",");
         let request =
-            format!("{{\"command\":\"DescribeBgvRnsParameters\",\"values\":[{compact_values}]}}");
+            format!("{{\"command\":\"EncodeFoundationManifest\",\"values\":[{compact_values}]}}");
         let error =
             parse_transcript_core_request_with_limits(request.as_bytes(), request.len(), 256)
                 .expect_err("compact structural amplification must refuse");

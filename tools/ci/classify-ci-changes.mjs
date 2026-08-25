@@ -346,7 +346,7 @@ const main = () => {
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         process.stderr.write(
-            `Could not classify changed paths (${message}); running routine and expensive proof lanes.\n`,
+            `Could not classify changed paths (${message}); running routine and expensive cryptographic lanes.\n`,
         );
     }
 

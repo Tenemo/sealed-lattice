@@ -29,7 +29,7 @@ if (declarationEntryPath === undefined) {
 }
 
 const bundledWorkspacePackagePattern =
-    /^@sealed-lattice\/(?:crypto|protocol|types|wasm)$/u;
+    /^@sealed-lattice\/(?:protocol|types|wasm)$/u;
 const externalCryptographyPackagePattern = /^@noble\//u;
 const externalNodeBuiltinPattern = /^node:/u;
 const dependencyPolicy = {

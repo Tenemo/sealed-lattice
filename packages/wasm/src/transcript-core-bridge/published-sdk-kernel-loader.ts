@@ -4,9 +4,8 @@ import type {
     TranscriptCoreKernelLoaderOptions,
 } from './kernel-runtime.js';
 import { instantiateTranscriptCoreKernelCommandRuntime } from './kernel-runtime.js';
-import { registerKernelContexts } from './register-kernel-contexts.js';
 
-export const createCachedKernelLoader = <Kernel>(
+const createCachedKernelLoader = <Kernel>(
     loadKernel: () => Promise<Kernel>,
 ): (() => Promise<Kernel>) => {
     let kernelPromise: Promise<Kernel> | undefined;
@@ -21,7 +20,7 @@ export const createCachedKernelLoader = <Kernel>(
     };
 };
 
-export const createPublishedSdkKernelBindings = (
+const createPublishedSdkKernelBindings = (
     runtime: TranscriptCoreKernelCommandRuntime,
 ): PublishedSdkKernel => {
     return {
@@ -74,13 +73,6 @@ export const createPublishedSdkKernelBindings = (
                 command: 'VerifyFoundationBoardPolicy',
                 canonicalBytesHex: input.canonicalBytesHex,
             }),
-        verifyFoundationSuiteRecord: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['verifyFoundationSuiteRecord']>
-            >({
-                command: 'VerifyFoundationSuiteRecord',
-                canonicalBytesHex: input.canonicalBytesHex,
-            }),
         verifyFoundationCeremonyContext: (input) =>
             runtime.executeCommand<
                 ReturnType<
@@ -90,8 +82,6 @@ export const createPublishedSdkKernelBindings = (
                 command: 'VerifyFoundationCeremonyContext',
                 canonicalManifestBytesHex: input.canonicalManifestBytesHex,
                 canonicalRosterBytesHex: input.canonicalRosterBytesHex,
-                canonicalSuiteRecordBytesHex:
-                    input.canonicalSuiteRecordBytesHex,
                 ceremonyIdentifier: input.ceremonyIdentifier,
                 expectedSuiteId: input.expectedSuiteId,
             }),
@@ -107,8 +97,6 @@ export const createPublishedSdkKernelBindings = (
                     input.canonicalBoardPolicyBytesHex,
                 canonicalManifestBytesHex: input.canonicalManifestBytesHex,
                 canonicalRosterBytesHex: input.canonicalRosterBytesHex,
-                canonicalSuiteRecordBytesHex:
-                    input.canonicalSuiteRecordBytesHex,
                 ceremonyIdentifier: input.ceremonyIdentifier,
                 expectedCeremonyContextHash: input.expectedCeremonyContextHash,
                 expectedSuiteId: input.expectedSuiteId,
@@ -126,7 +114,6 @@ export const createPublishedSdkKernelLoader = (
             options,
         );
         const kernel = createPublishedSdkKernelBindings(runtime);
-        registerKernelContexts(kernel, runtime);
 
         return kernel;
     });

@@ -1,5 +1,8 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
-import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
+import {
+    configurableOptionCountRange,
+    type ProtocolHash,
+} from '@sealed-lattice/types';
 
 import { isUint8Array } from './byte-array.js';
 import {
@@ -12,7 +15,6 @@ import type {
     FoundationBoardPolicyVerification,
     FoundationCeremonyContextVerification,
     FoundationManifestVerification,
-    FoundationSuiteRecordVerification,
     PublishedSdkKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 
@@ -55,7 +57,6 @@ export type FoundationCeremonyRuntime = Readonly<{
         readonly canonicalBoardPolicyBytes: Uint8Array;
         readonly canonicalManifestBytes: Uint8Array;
         readonly canonicalRosterBytes: Uint8Array;
-        readonly canonicalSuiteRecordBytes: Uint8Array;
         readonly ceremonyIdentifier: string;
         readonly expectedCeremonyContextHash: ProtocolHash;
         readonly expectedSuiteId: ProtocolHash;
@@ -69,14 +70,10 @@ export type FoundationCeremonyRuntime = Readonly<{
     verifyCeremonyContext(input: {
         readonly canonicalManifestBytes: Uint8Array;
         readonly canonicalRosterBytes: Uint8Array;
-        readonly canonicalSuiteRecordBytes: Uint8Array;
         readonly ceremonyIdentifier: string;
         readonly expectedSuiteId: ProtocolHash;
     }): FoundationCeremonyContextVerification;
     verifyManifest(canonicalBytes: Uint8Array): FoundationManifestVerification;
-    verifySuiteRecord(
-        canonicalBytes: Uint8Array,
-    ): FoundationSuiteRecordVerification;
 }>;
 
 const maximumUnsigned64 = (1n << 64n) - 1n;
@@ -199,9 +196,12 @@ const snapshotManifestInput = (input: unknown): FoundationManifestInput => {
         ),
         'optionDefinitions.length',
     );
-    if (optionDefinitionCount !== foundationProfile.optionCount) {
+    if (
+        optionDefinitionCount < configurableOptionCountRange.minimum ||
+        optionDefinitionCount > configurableOptionCountRange.maximum
+    ) {
         throw new RangeError(
-            `optionDefinitions must contain exactly ${String(foundationProfile.optionCount)} entries.`,
+            `optionDefinitions must contain from ${String(configurableOptionCountRange.minimum)} through ${String(configurableOptionCountRange.maximum)} entries.`,
         );
     }
     const optionDefinitions = Array.from(
@@ -341,10 +341,6 @@ export const openFoundationCeremonyRuntime = (
             snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
             'canonicalRosterBytes',
         );
-        const canonicalSuiteRecordBytesHex = canonicalBytesHex(
-            snapshotDataProperty(input, 'canonicalSuiteRecordBytes', 'input'),
-            'canonicalSuiteRecordBytes',
-        );
         const ceremonyIdentifier = requireWellFormedString(
             snapshotDataProperty(input, 'ceremonyIdentifier', 'input'),
             'ceremonyIdentifier',
@@ -363,7 +359,6 @@ export const openFoundationCeremonyRuntime = (
             canonicalBoardPolicyBytesHex,
             canonicalManifestBytesHex,
             canonicalRosterBytesHex,
-            canonicalSuiteRecordBytesHex,
             ceremonyIdentifier,
             expectedCeremonyContextHash,
             expectedSuiteId,
@@ -392,10 +387,6 @@ export const openFoundationCeremonyRuntime = (
             snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
             'canonicalRosterBytes',
         );
-        const canonicalSuiteRecordBytesHex = canonicalBytesHex(
-            snapshotDataProperty(input, 'canonicalSuiteRecordBytes', 'input'),
-            'canonicalSuiteRecordBytes',
-        );
         const ceremonyIdentifier = requireWellFormedString(
             snapshotDataProperty(input, 'ceremonyIdentifier', 'input'),
             'ceremonyIdentifier',
@@ -407,20 +398,12 @@ export const openFoundationCeremonyRuntime = (
         return kernel.verifyFoundationCeremonyContext({
             canonicalManifestBytesHex,
             canonicalRosterBytesHex,
-            canonicalSuiteRecordBytesHex,
             ceremonyIdentifier,
             expectedSuiteId,
         });
     },
     verifyManifest: (canonicalBytes) =>
         kernel.verifyFoundationManifest({
-            canonicalBytesHex: canonicalBytesHex(
-                canonicalBytes,
-                'canonicalBytes',
-            ),
-        }),
-    verifySuiteRecord: (canonicalBytes) =>
-        kernel.verifyFoundationSuiteRecord({
             canonicalBytesHex: canonicalBytesHex(
                 canonicalBytes,
                 'canonicalBytes',

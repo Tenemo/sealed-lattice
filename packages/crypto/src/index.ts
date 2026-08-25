@@ -8,7 +8,6 @@ export type {
     CanonicalJsonByteSourcePullInput,
 } from './canonical-json.js';
 export { deriveCanonicalObjectHash } from './hashes.js';
-export { encodeCanonicalProtocolSignatureMessage } from './protocol-signature-message.js';
 export {
     BrowserLocalKeyProviderError,
     openBrowserLocalExternalKeyProvider,

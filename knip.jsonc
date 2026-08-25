@@ -4,9 +4,6 @@
         ".": {
             "entry": [
                 "tests/**/*.test.ts",
-                "tools/ci/desktop-browser-compact-cfw-storage-diagnostic-host.ts",
-                "tools/ci/desktop-browser-compact-cfw-storage-diagnostic-worker.ts",
-                "tools/ci/desktop-browser-primitive-measurement-page.ts",
                 "tools/ci/packed-package-smoke.mjs",
                 "tools/ci/sdk-package-tsdown.config.ts",
             ],
@@ -18,16 +15,14 @@
                 "binaryen",
                 // The root browser harness resolves these deep-import optimizer entries from string-valued Vitest configuration.
                 "@noble/hashes",
-                "@noble/post-quantum",
             ],
         },
         "packages/sdk": {
             "entry": ["src/index.ts", "tests/**/*.test.ts"],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
             "ignoreDependencies": [
-                // The public package intentionally declares the crypto backends used by the vendored runtime surface.
+                // The public package intentionally declares the hash backend used by the bundled runtime surface.
                 "@noble/hashes",
-                "@noble/post-quantum",
             ],
         },
         "packages/types": {
@@ -35,10 +30,7 @@
             "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/protocol": {
-            "entry": [
-                "tests/**/*.test.ts",
-                "tests/support/*-browser-worker.ts",
-            ],
+            "entry": ["tests/**/*.test.ts"],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/crypto": {
@@ -46,10 +38,7 @@
             "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/wasm": {
-            "entry": [
-                "tests/**/*.test.ts",
-                "tests/support/*-browser-worker.ts",
-            ],
+            "entry": ["tests/**/*.test.ts"],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
     },

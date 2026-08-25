@@ -8,7 +8,7 @@ use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::{
     ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CeremonyContext,
     FoundationSchemaError, Hash512, Manifest, OptionDefinition, RefusalReason, Roster,
-    StabilizedDisplayText, SuiteRecord,
+    StabilizedDisplayText,
 };
 use crate::transcript_core::encode_hex;
 
@@ -102,34 +102,17 @@ pub(super) fn verify_foundation_board_policy(request: &Value) -> CanonicalResult
     Ok(verification_response(verification))
 }
 
-pub(super) fn verify_foundation_suite_record(request: &Value) -> CanonicalResult<Value> {
-    let canonical_bytes = required_canonical_bytes(request)?;
-    let verification = (|| {
-        let suite = decode_suite_record(&canonical_bytes)?;
-        let suite_id = schema_refusal(suite.suite_id())?;
-        Ok(json!({ "suiteId": suite_id.to_lowercase_hex() }))
-    })();
-
-    Ok(verification_response(verification))
-}
-
 pub(super) fn verify_foundation_ceremony_context(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
-    let suite_bytes = required_lowercase_hex_bytes(request, "canonicalSuiteRecordBytesHex")?;
     let manifest_bytes = required_lowercase_hex_bytes(request, "canonicalManifestBytesHex")?;
     let roster_bytes = required_lowercase_hex_bytes(request, "canonicalRosterBytesHex")?;
     let expected_suite_id = required_hash(request, "expectedSuiteId")?;
     let ceremony_identifier = required_string(request, "ceremonyIdentifier")?.to_owned();
     let verification = (|| {
-        let suite = decode_suite_record(&suite_bytes)?;
-        let suite_id = schema_refusal(suite.suite_id())?;
-        if suite_id != expected_suite_id {
-            return Err(RefusalReason::WrongContext);
-        }
         let manifest = decode_manifest(&manifest_bytes)?;
         let roster = decode_roster(&roster_bytes)?;
         let ceremony_context = schema_refusal(CeremonyContext::new(
-            &suite,
+            expected_suite_id,
             &manifest,
             &roster,
             ceremony_identifier,
@@ -148,7 +131,6 @@ pub(super) fn verify_foundation_ceremony_context(request: &Value) -> CanonicalRe
 
 pub(super) fn verify_foundation_action_context(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
-    let suite_bytes = required_lowercase_hex_bytes(request, "canonicalSuiteRecordBytesHex")?;
     let manifest_bytes = required_lowercase_hex_bytes(request, "canonicalManifestBytesHex")?;
     let roster_bytes = required_lowercase_hex_bytes(request, "canonicalRosterBytesHex")?;
     let action_definition_bytes =
@@ -159,14 +141,10 @@ pub(super) fn verify_foundation_action_context(request: &Value) -> CanonicalResu
     let ceremony_identifier = required_string(request, "ceremonyIdentifier")?.to_owned();
     let action_identifier = required_string(request, "actionIdentifier")?.to_owned();
     let verification = (|| {
-        let suite = decode_suite_record(&suite_bytes)?;
-        if schema_refusal(suite.suite_id())? != expected_suite_id {
-            return Err(RefusalReason::WrongContext);
-        }
         let manifest = decode_manifest(&manifest_bytes)?;
         let roster = decode_roster(&roster_bytes)?;
         let ceremony_context = schema_refusal(CeremonyContext::new(
-            &suite,
+            expected_suite_id,
             &manifest,
             &roster,
             ceremony_identifier,
@@ -222,15 +200,6 @@ fn decode_board_policy(canonical_bytes: &[u8]) -> Result<BoardPolicy, RefusalRea
     ))?;
     require_identical_round_trip(canonical_bytes, schema_refusal(board_policy.encode())?)?;
     Ok(board_policy)
-}
-
-fn decode_suite_record(canonical_bytes: &[u8]) -> Result<SuiteRecord, RefusalReason> {
-    let suite = schema_refusal(SuiteRecord::decode(
-        canonical_bytes,
-        &CanonicalDecodeLimits::default(),
-    ))?;
-    require_identical_round_trip(canonical_bytes, schema_refusal(suite.encode())?)?;
-    Ok(suite)
 }
 
 fn decode_roster(canonical_bytes: &[u8]) -> Result<Roster, RefusalReason> {

@@ -5,7 +5,7 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
     foundationProfile,
-    recipientPrivateVssShareMailboxPayloadType,
+    replicatedKeyComponentOpeningMailboxPayloadType,
     type ProtocolHash,
     type SetupMailboxSlot,
 } from '@sealed-lattice/types';
@@ -43,7 +43,7 @@ import {
     fixedBytesItem,
     foundationHash512,
     variableBytesItem,
-} from '#packages/wasm/tests/canonical-tuple-test-helpers';
+} from '#packages/crypto/tests/support/canonical-tuple-test-helpers';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -1014,7 +1014,7 @@ const associatedData: SetupMailboxSlot = Object.freeze({
     sourceParticipantId: configuredSourceRoster.sourceParticipantId,
     recipientParticipantId: '66'.repeat(64),
     producerSequence: '7',
-    payloadType: recipientPrivateVssShareMailboxPayloadType,
+    payloadType: replicatedKeyComponentOpeningMailboxPayloadType,
     statementHash: '77'.repeat(64),
     orderedMaterialRoots: ['88'.repeat(64)],
 });
@@ -1744,7 +1744,7 @@ describe('authenticated mailbox', () => {
         });
         const plaintext = textEncoder.encode(
             canonicalJson({
-                objectType: 'RecipientPrivateVssPayload',
+                objectType: 'ReplicatedKeyComponentOpening',
                 value: 3,
             }),
         );

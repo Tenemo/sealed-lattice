@@ -5,24 +5,28 @@ import {
     buildRustKernelHeavyTestCommand,
     parseRustKernelHeavyArguments,
 } from '#tools/ci/run-rust-kernel-heavy-tests';
-import {
-    cargoTestArgumentsForRustKernelHeavy,
-    heavyRustKernelTestNamePrefix,
-} from '#tools/ci/rust-kernel-test-arguments';
+import { cargoTestArgumentsForRustKernelHeavy } from '#tools/ci/rust-kernel-test-arguments';
 
 describe('Rust kernel heavy runner', () => {
-    it('owns only ignored tests under the heavy prefix by default', () => {
-        const parsed = parseRustKernelHeavyArguments([]);
-        expect(parsed.testFilter).toBe(heavyRustKernelTestNamePrefix);
-
+    it('requires an exact active heavy-test filter before inventory compilation', () => {
+        expect(() => parseRustKernelHeavyArguments([])).toThrow(
+            'require an exact active test filter',
+        );
+        expect(() => parseRustKernelHeavyArguments(['ordinary_test'])).toThrow(
+            'must start with heavy_rust_kernel_',
+        );
+        const parsed = parseRustKernelHeavyArguments([
+            'heavy_rust_kernel_expensive_relation',
+        ]);
         const arguments_ = cargoTestArgumentsForRustKernelHeavy(
             parsed.testFilter,
         );
-        expect(arguments_).toContain(heavyRustKernelTestNamePrefix);
+        expect(arguments_).toContain('heavy_rust_kernel_expensive_relation');
         expect(arguments_).toContain('--ignored');
         expect(arguments_).toContain('--nocapture');
         expect(arguments_).not.toContain('--show-output');
         expect(arguments_).toContain('--test-threads');
+        expect(arguments_).not.toContain('--skip');
     });
 
     it('normalizes a focused heavy filter', () => {
@@ -35,7 +39,7 @@ describe('Rust kernel heavy runner', () => {
         });
     });
 
-    it('refuses proof-evidence checkpoint arguments outside their owning lane', () => {
+    it('refuses unsupported checkpoint arguments', () => {
         expect(() =>
             parseRustKernelHeavyArguments(['--resume-checkpoints']),
         ).toThrow(/Unknown argument/u);
@@ -54,7 +58,6 @@ describe('Rust kernel heavy runner', () => {
             CARGO_BUILD_JOBS: '1',
             CARGO_INCREMENTAL: '0',
             RAYON_NUM_THREADS: '1',
-            SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
         });
         expect(
             buildRustKernelHeavyProcessMemoryGuardVerificationCommand().args,

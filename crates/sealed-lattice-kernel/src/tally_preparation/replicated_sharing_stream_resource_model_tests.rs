@@ -24,6 +24,7 @@ fn completion_profile_reproduces_the_exact_chunked_stream_census() {
             field_element_byte_length: 32,
             field_element_count_per_full_chunk: 32_768,
             configured_chunk_byte_length: 1_048_576,
+            shake256_rate_byte_length: 136,
             independent_authentication: ReplicatedSharingFieldStreamScheduleModel {
                 field_stream_count_per_participant: 504,
                 naive_per_field_xof_invocation_count_per_participant: 821_673_216,
@@ -35,8 +36,13 @@ fn completion_profile_reproduces_the_exact_chunked_stream_census() {
                 minimum_absorbed_query_byte_length_per_participant: 9_275_700,
                 maximum_absorbed_query_byte_length_per_participant: 9_280_200,
                 total_absorbed_query_byte_length: 92_788_500,
+                complete_absorbed_rate_block_count_per_participant: 50_400,
+                output_rate_block_count_per_participant: 193_357_080,
+                fixed_keccak_f1600_permutation_count_per_participant: 193_407_480,
+                total_fixed_keccak_f1600_permutation_count: 1_934_074_800,
                 maximum_single_query_byte_length: 369,
                 maximum_single_output_byte_length: 1_048_576,
+                maximum_fixed_keccak_f1600_permutation_count_per_chunk: 7_713,
                 maximum_chunk_boundary_recomputation_byte_length: 1_048_576,
             },
             common_coefficient_authentication: ReplicatedSharingFieldStreamScheduleModel {
@@ -50,8 +56,13 @@ fn completion_profile_reproduces_the_exact_chunked_stream_census() {
                 minimum_absorbed_query_byte_length_per_participant: 8_565_781,
                 maximum_absorbed_query_byte_length_per_participant: 8_569_936,
                 total_absorbed_query_byte_length: 85_686_895,
+                complete_absorbed_rate_block_count_per_participant: 46_536,
+                output_rate_block_count_per_participant: 174_231_624,
+                fixed_keccak_f1600_permutation_count_per_participant: 174_278_160,
+                total_fixed_keccak_f1600_permutation_count: 1_742_781_600,
                 maximum_single_query_byte_length: 369,
                 maximum_single_output_byte_length: 1_048_576,
+                maximum_fixed_keccak_f1600_permutation_count_per_chunk: 7_713,
                 maximum_chunk_boundary_recomputation_byte_length: 1_048_576,
             },
         }
@@ -92,6 +103,18 @@ fn independent_completion_derivation_matches_each_production_schedule() {
             .chunked_xof_invocation_count_per_participant
     );
     assert_eq!(
+        independent.independent_keccak_f1600_permutations_per_participant,
+        production
+            .independent_authentication
+            .fixed_keccak_f1600_permutation_count_per_participant
+    );
+    assert_eq!(
+        independent.common_keccak_f1600_permutations_per_participant,
+        production
+            .common_coefficient_authentication
+            .fixed_keccak_f1600_permutation_count_per_participant
+    );
+    assert_eq!(
         production
             .independent_authentication
             .field_output_count_per_participant,
@@ -117,16 +140,46 @@ struct IndependentCompletionScheduleInputs {
     independent_absorbed_query_bytes: u64,
     common_absorbed_query_bytes: u64,
     maximum_query_byte_length: u64,
+    independent_keccak_f1600_permutations_per_participant: u64,
+    common_keccak_f1600_permutations_per_participant: u64,
 }
 
 fn independently_derive_completion_schedule_inputs() -> IndependentCompletionScheduleInputs {
     let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
     let active_fault_bound = u64::from(FOUNDATION_PROFILE.active_fault_bound);
     assert_eq!((participant_count, active_fault_bound), (10, 3));
-    let independent_chunk_count = 50_u64;
-    let ordinary_chunk_count = 21_u64;
-    let authentication_chunk_count = 30_u64;
-    let common_coefficient_chunk_count = 1_u64;
+    let shake256_rate_byte_length = 136_u64;
+    let field_element_byte_length = 32_u64;
+    let configured_chunk_byte_length = 1_048_576_u64;
+    let independent_field_count = 1_630_304_u64;
+    let ordinary_field_count = 662_714_u64;
+    let authentication_field_count = 967_590_u64;
+    let common_coefficient_field_count = 40_u64;
+    let independent_chunk_count = independent_ceiling_divide(
+        independent_field_count * field_element_byte_length,
+        configured_chunk_byte_length,
+    );
+    let ordinary_chunk_count = independent_ceiling_divide(
+        ordinary_field_count * field_element_byte_length,
+        configured_chunk_byte_length,
+    );
+    let authentication_chunk_count = independent_ceiling_divide(
+        authentication_field_count * field_element_byte_length,
+        configured_chunk_byte_length,
+    );
+    let common_coefficient_chunk_count = independent_ceiling_divide(
+        common_coefficient_field_count * field_element_byte_length,
+        configured_chunk_byte_length,
+    );
+    assert_eq!(
+        (
+            independent_chunk_count,
+            ordinary_chunk_count,
+            authentication_chunk_count,
+            common_coefficient_chunk_count,
+        ),
+        (50, 21, 30, 1)
+    );
     let independent_random_calls_per_subset = 3 * independent_chunk_count;
     let independent_zero_calls_per_subset = active_fault_bound * independent_chunk_count;
     let common_random_calls_per_subset =
@@ -137,6 +190,10 @@ fn independently_derive_completion_schedule_inputs() -> IndependentCompletionSch
     let mut common_absorbed_query_bytes = 0_u64;
     let mut independent_calls_by_participant = vec![0_u64; participant_count as usize];
     let mut common_calls_by_participant = vec![0_u64; participant_count as usize];
+    let mut independent_absorbed_rate_blocks_by_participant =
+        vec![0_u64; participant_count as usize];
+    let mut common_absorbed_rate_blocks_by_participant = vec![0_u64; participant_count as usize];
+    let mut subset_membership_count_by_participant = vec![0_u64; participant_count as usize];
     let mut maximum_query_byte_length = 0_u64;
 
     for excluded_mask in 0_u32..(1_u32 << participant_count) {
@@ -162,6 +219,17 @@ fn independently_derive_completion_schedule_inputs() -> IndependentCompletionSch
             let common_calls = common_random_calls_per_subset + common_zero_calls_per_subset;
             independent_calls_by_participant[participant_position as usize] += independent_calls;
             common_calls_by_participant[participant_position as usize] += common_calls;
+            subset_membership_count_by_participant[participant_position as usize] += 1;
+            independent_absorbed_rate_blocks_by_participant[participant_position as usize] +=
+                random_query_byte_length / shake256_rate_byte_length
+                    * independent_random_calls_per_subset
+                    + zero_query_byte_length / shake256_rate_byte_length
+                        * independent_zero_calls_per_subset;
+            common_absorbed_rate_blocks_by_participant[participant_position as usize] +=
+                random_query_byte_length / shake256_rate_byte_length
+                    * common_random_calls_per_subset
+                    + zero_query_byte_length / shake256_rate_byte_length
+                        * common_zero_calls_per_subset;
             independent_absorbed_query_bytes += random_query_byte_length
                 * independent_random_calls_per_subset
                 + zero_query_byte_length * independent_zero_calls_per_subset;
@@ -171,6 +239,9 @@ fn independently_derive_completion_schedule_inputs() -> IndependentCompletionSch
         }
     }
 
+    let subset_count_per_participant = uniform(&subset_membership_count_by_participant);
+    assert_eq!(subset_count_per_participant, 84);
+
     IndependentCompletionScheduleInputs {
         participant_count,
         independent_xof_calls_per_participant: uniform(&independent_calls_by_participant),
@@ -178,7 +249,80 @@ fn independently_derive_completion_schedule_inputs() -> IndependentCompletionSch
         independent_absorbed_query_bytes,
         common_absorbed_query_bytes,
         maximum_query_byte_length,
+        independent_keccak_f1600_permutations_per_participant: uniform(
+            &independent_absorbed_rate_blocks_by_participant,
+        ) + subset_count_per_participant
+            * 6
+            * independent_chunk_output_rate_block_count(
+                independent_field_count,
+                field_element_byte_length,
+                configured_chunk_byte_length,
+                shake256_rate_byte_length,
+            ),
+        common_keccak_f1600_permutations_per_participant: uniform(
+            &common_absorbed_rate_blocks_by_participant,
+        ) + subset_count_per_participant
+            * (6 * independent_chunk_output_rate_block_count(
+                ordinary_field_count,
+                field_element_byte_length,
+                configured_chunk_byte_length,
+                shake256_rate_byte_length,
+            ) + independent_chunk_output_rate_block_count(
+                common_coefficient_field_count,
+                field_element_byte_length,
+                configured_chunk_byte_length,
+                shake256_rate_byte_length,
+            ) + 5 * independent_chunk_output_rate_block_count(
+                authentication_field_count,
+                field_element_byte_length,
+                configured_chunk_byte_length,
+                shake256_rate_byte_length,
+            )),
     }
+}
+
+fn independent_chunk_output_rate_block_count(
+    field_count: u64,
+    field_element_byte_length: u64,
+    configured_chunk_byte_length: u64,
+    rate_byte_length: u64,
+) -> u64 {
+    assert!(field_count > 0);
+    let output_byte_length = field_count * field_element_byte_length;
+    let complete_chunk_count = output_byte_length / configured_chunk_byte_length;
+    let final_chunk_byte_length = output_byte_length % configured_chunk_byte_length;
+    if final_chunk_byte_length == 0 {
+        complete_chunk_count
+            * independent_ceiling_divide(configured_chunk_byte_length, rate_byte_length)
+    } else {
+        complete_chunk_count
+            * independent_ceiling_divide(configured_chunk_byte_length, rate_byte_length)
+            + independent_ceiling_divide(final_chunk_byte_length, rate_byte_length)
+    }
+}
+
+#[test]
+fn independent_chunk_rate_block_count_covers_exact_and_partial_boundaries() {
+    assert_eq!(
+        independent_chunk_output_rate_block_count(1, 32, 1_048_576, 136),
+        1
+    );
+    assert_eq!(
+        independent_chunk_output_rate_block_count(32_768, 32, 1_048_576, 136),
+        7_711
+    );
+    assert_eq!(
+        independent_chunk_output_rate_block_count(32_769, 32, 1_048_576, 136),
+        7_712
+    );
+    assert_eq!(
+        independent_chunk_output_rate_block_count(65_536, 32, 1_048_576, 136),
+        15_422
+    );
+}
+
+fn independent_ceiling_divide(dividend: u64, divisor: u64) -> u64 {
+    dividend / divisor + u64::from(!dividend.is_multiple_of(divisor))
 }
 
 fn independent_coordinate_byte_length(

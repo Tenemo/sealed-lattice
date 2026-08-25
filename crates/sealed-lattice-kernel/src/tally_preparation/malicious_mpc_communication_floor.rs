@@ -10,8 +10,8 @@ const FIELD_ELEMENT_BYTE_LENGTH: u64 = BinaryFieldElement256::CANONICAL_BYTE_LEN
 const LABEL_BODY_FIELD_LIMB_COUNT: u64 = 3;
 const CONJUNCTION_ROW_COUNT: u64 = 4;
 
-/// Exact remote share-material floors implied by the selected perfect-MPC
-/// theorem routes before any concrete VSS realization is compiled.
+/// Exact remote share-material floors implied by the evaluated AAY perfect-MPC
+/// routes before any concrete VSS realization is compiled.
 ///
 /// The source construction invokes one dealer subprotocol per participant. For
 /// each logical output and remote recipient, its optimistic hybrid output has

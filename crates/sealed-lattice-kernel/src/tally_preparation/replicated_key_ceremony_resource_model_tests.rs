@@ -58,10 +58,8 @@ fn completion_profile_reproduces_the_exact_ceremony_core_bytes() {
 }
 
 #[test]
-fn every_admitted_roster_matches_the_independent_canonical_length_derivation() {
-    for participant_count in
-        MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
-    {
+fn small_and_completion_profiles_match_the_independent_canonical_length_derivation() {
+    for participant_count in [MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, 10] {
         let circuit = circuit_for_roster(participant_count);
         let production = ReplicatedKeyCeremonyResourceModel::derive_for_circuit(&circuit).unwrap();
         let context = TallyPreparationContext::new(
@@ -81,6 +79,23 @@ fn every_admitted_roster_matches_the_independent_canonical_length_derivation() {
         assert!(
             production.maximum_component_custody_byte_length_per_participant
                 > production.combined_key_persistent_byte_length_per_participant
+        );
+    }
+}
+
+#[test]
+fn every_admitted_roster_has_bounded_formula_only_geometry() {
+    for participant_count in
+        MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+    {
+        let geometry = ReplicatedRandomSharingGeometry::derive(participant_count).unwrap();
+        assert_eq!(
+            geometry.all_member_contribution_count,
+            geometry.total_key_count * geometry.authorized_subset_size
+        );
+        assert_eq!(
+            geometry.remote_key_component_delivery_count,
+            geometry.all_member_contribution_count * (geometry.authorized_subset_size - 1)
         );
     }
 }

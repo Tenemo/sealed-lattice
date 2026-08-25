@@ -45,34 +45,32 @@ describe('Guarded Rust kernel runner', () => {
         );
 
         const featureGatedCommand = buildGuardedRustKernelCommand(
-            'theorem_test',
+            'feature_gated_test',
             {
-                cargoFeatures: ['theorem-evidence'],
-                logFileSlug: 'theorem-test',
-                progressLabel: 'theorem-test',
-                runName: 'Theorem test',
+                cargoFeatures: ['example-feature'],
+                logFileSlug: 'feature-gated-test',
+                progressLabel: 'feature-gated-test',
+                runName: 'Feature-gated test',
                 targetDirectoryPath: 'guarded-target',
             },
         );
         expect(featureGatedCommand.command.args).toContain('--features');
-        expect(featureGatedCommand.command.args).toContain('theorem-evidence');
+        expect(featureGatedCommand.command.args).toContain('example-feature');
 
-        const releaseMeasurementCommand = buildGuardedRustKernelCommand(
-            'selected_measurement',
+        const releaseProfileCommand = buildGuardedRustKernelCommand(
+            'release_profile_test',
             {
-                cargoFeatures: ['primitive-measurement-evidence'],
-                logFileSlug: 'selected-measurement',
-                progressLabel: 'selected-measurement',
-                runName: 'Selected measurement',
+                cargoFeatures: ['example-feature'],
+                logFileSlug: 'release-profile-test',
+                progressLabel: 'release-profile-test',
+                runName: 'Release-profile test',
                 targetDirectoryPath: 'guarded-target',
                 useReleaseProfile: true,
             },
         );
-        expect(releaseMeasurementCommand.command.args).toContain('--release');
-        expect(releaseMeasurementCommand.command.args).toContain(
-            'primitive-measurement-evidence',
-        );
-        expect(releaseMeasurementCommand.setupMessages[0]).toContain(
+        expect(releaseProfileCommand.command.args).toContain('--release');
+        expect(releaseProfileCommand.command.args).toContain('example-feature');
+        expect(releaseProfileCommand.setupMessages[0]).toContain(
             'release profile',
         );
     });

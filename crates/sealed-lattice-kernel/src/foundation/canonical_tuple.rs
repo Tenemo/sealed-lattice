@@ -119,7 +119,6 @@ mod decoding;
 mod value;
 
 pub use decoding::IncrementalCanonicalTupleDecoder;
-pub(in crate::foundation) use decoding::validate_item_bytes;
 pub use value::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 #[cfg(test)]

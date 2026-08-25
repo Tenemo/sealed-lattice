@@ -18,6 +18,7 @@ use super::{
 };
 
 const FIELD_ELEMENT_BYTE_LENGTH: u64 = BinaryFieldElement256::CANONICAL_BYTE_LENGTH as u64;
+const SHAKE256_RATE_BYTE_LENGTH: u64 = 136;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReplicatedSharingFieldStreamScheduleModel {
@@ -31,8 +32,13 @@ pub(crate) struct ReplicatedSharingFieldStreamScheduleModel {
     pub(crate) minimum_absorbed_query_byte_length_per_participant: u64,
     pub(crate) maximum_absorbed_query_byte_length_per_participant: u64,
     pub(crate) total_absorbed_query_byte_length: u64,
+    pub(crate) complete_absorbed_rate_block_count_per_participant: u64,
+    pub(crate) output_rate_block_count_per_participant: u64,
+    pub(crate) fixed_keccak_f1600_permutation_count_per_participant: u64,
+    pub(crate) total_fixed_keccak_f1600_permutation_count: u64,
     pub(crate) maximum_single_query_byte_length: u64,
     pub(crate) maximum_single_output_byte_length: u64,
+    pub(crate) maximum_fixed_keccak_f1600_permutation_count_per_chunk: u64,
     pub(crate) maximum_chunk_boundary_recomputation_byte_length: u64,
 }
 
@@ -52,6 +58,7 @@ pub(crate) struct ReplicatedSharingFieldStreamResourceModel {
     pub(crate) field_element_byte_length: u64,
     pub(crate) field_element_count_per_full_chunk: u64,
     pub(crate) configured_chunk_byte_length: u64,
+    pub(crate) shake256_rate_byte_length: u64,
     pub(crate) independent_authentication: ReplicatedSharingFieldStreamScheduleModel,
     pub(crate) common_coefficient_authentication: ReplicatedSharingFieldStreamScheduleModel,
 }
@@ -65,7 +72,7 @@ impl ReplicatedSharingFieldStreamResourceModel {
             [0_u8; 32],
             circuit,
         )?;
-        let coordinates = ReplicatedRandomSharingKeyCoordinate::all(context)?;
+        let coordinates = ReplicatedRandomSharingKeyCoordinate::iter(context)?.collect::<Vec<_>>();
         let configured_chunk_byte_length =
             u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
@@ -135,6 +142,7 @@ impl ReplicatedSharingFieldStreamResourceModel {
             field_element_byte_length: FIELD_ELEMENT_BYTE_LENGTH,
             field_element_count_per_full_chunk,
             configured_chunk_byte_length,
+            shake256_rate_byte_length: SHAKE256_RATE_BYTE_LENGTH,
             independent_authentication: derive_schedule_model(
                 context,
                 &coordinates,
@@ -182,6 +190,8 @@ struct ParticipantAccumulator {
     xof_invocation_count: u64,
     field_output_count: u64,
     absorbed_query_byte_length: u64,
+    complete_absorbed_rate_block_count: u64,
+    output_rate_block_count: u64,
 }
 
 fn derive_schedule_model(
@@ -195,6 +205,7 @@ fn derive_schedule_model(
     let mut participants = vec![ParticipantAccumulator::default(); participant_count_usize];
     let mut maximum_single_query_byte_length = 0_u64;
     let mut maximum_single_output_byte_length = 0_u64;
+    let mut maximum_fixed_keccak_f1600_permutation_count_per_chunk = 0_u64;
 
     for coordinate in coordinates.iter().copied() {
         let coordinate_uses_zero_sharing_key = matches!(
@@ -225,8 +236,13 @@ fn derive_schedule_model(
             }
             let absorbed_query_byte_length =
                 checked_multiply(first_query_byte_length, chunk_count)?;
+            let complete_absorbed_rate_block_count = checked_multiply(
+                first_query_byte_length / SHAKE256_RATE_BYTE_LENGTH,
+                chunk_count,
+            )?;
             let output_byte_length =
                 checked_multiply(specification.field_count, FIELD_ELEMENT_BYTE_LENGTH)?;
+            let output_rate_block_count = output_rate_block_count(specification.field_count)?;
             let maximum_stream_chunk_output_byte_length = output_byte_length.min(
                 u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
                     .map_err(|_| TallyPreparationError::IntegerConversion)?,
@@ -235,6 +251,14 @@ fn derive_schedule_model(
                 maximum_single_query_byte_length.max(first_query_byte_length);
             maximum_single_output_byte_length =
                 maximum_single_output_byte_length.max(maximum_stream_chunk_output_byte_length);
+            maximum_fixed_keccak_f1600_permutation_count_per_chunk =
+                maximum_fixed_keccak_f1600_permutation_count_per_chunk.max(checked_add(
+                    first_query_byte_length / SHAKE256_RATE_BYTE_LENGTH,
+                    checked_ceiling_divide(
+                        maximum_stream_chunk_output_byte_length,
+                        SHAKE256_RATE_BYTE_LENGTH,
+                    )?,
+                )?);
 
             for member_position in &member_positions {
                 let participant = participants
@@ -249,6 +273,12 @@ fn derive_schedule_model(
                     participant.absorbed_query_byte_length,
                     absorbed_query_byte_length,
                 )?;
+                participant.complete_absorbed_rate_block_count = checked_add(
+                    participant.complete_absorbed_rate_block_count,
+                    complete_absorbed_rate_block_count,
+                )?;
+                participant.output_rate_block_count =
+                    checked_add(participant.output_rate_block_count, output_rate_block_count)?;
             }
         }
     }
@@ -289,6 +319,18 @@ fn derive_schedule_model(
         participants.iter().try_fold(0_u64, |total, participant| {
             checked_add(total, participant.absorbed_query_byte_length)
         })?;
+    let complete_absorbed_rate_block_count_per_participant =
+        uniform_participant_value(&participants, |participant| {
+            participant.complete_absorbed_rate_block_count
+        })?;
+    let output_rate_block_count_per_participant =
+        uniform_participant_value(&participants, |participant| {
+            participant.output_rate_block_count
+        })?;
+    let fixed_keccak_f1600_permutation_count_per_participant = checked_add(
+        complete_absorbed_rate_block_count_per_participant,
+        output_rate_block_count_per_participant,
+    )?;
 
     Ok(ReplicatedSharingFieldStreamScheduleModel {
         field_stream_count_per_participant,
@@ -307,10 +349,44 @@ fn derive_schedule_model(
         minimum_absorbed_query_byte_length_per_participant,
         maximum_absorbed_query_byte_length_per_participant,
         total_absorbed_query_byte_length,
+        complete_absorbed_rate_block_count_per_participant,
+        output_rate_block_count_per_participant,
+        fixed_keccak_f1600_permutation_count_per_participant,
+        total_fixed_keccak_f1600_permutation_count: checked_multiply(
+            fixed_keccak_f1600_permutation_count_per_participant,
+            participant_count,
+        )?,
         maximum_single_query_byte_length,
         maximum_single_output_byte_length,
+        maximum_fixed_keccak_f1600_permutation_count_per_chunk,
         maximum_chunk_boundary_recomputation_byte_length: maximum_single_output_byte_length,
     })
+}
+
+fn output_rate_block_count(total_field_count: u64) -> Result<u64, TallyPreparationError> {
+    let chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+    let field_count_per_chunk = chunk_byte_length
+        .checked_div(FIELD_ELEMENT_BYTE_LENGTH)
+        .filter(|count| *count > 0)
+        .ok_or(TallyPreparationError::GeometryMismatch)?;
+    let chunk_count = replicated_sharing_field_chunk_count(total_field_count)?;
+    let complete_chunk_count = chunk_count
+        .checked_sub(1)
+        .ok_or(TallyPreparationError::GeometryMismatch)?;
+    let complete_chunk_field_count = checked_multiply(complete_chunk_count, field_count_per_chunk)?;
+    let final_chunk_field_count = total_field_count
+        .checked_sub(complete_chunk_field_count)
+        .filter(|count| *count > 0 && *count <= field_count_per_chunk)
+        .ok_or(TallyPreparationError::GeometryMismatch)?;
+    let full_chunk_rate_block_count =
+        checked_ceiling_divide(chunk_byte_length, SHAKE256_RATE_BYTE_LENGTH)?;
+    let final_chunk_output_byte_length =
+        checked_multiply(final_chunk_field_count, FIELD_ELEMENT_BYTE_LENGTH)?;
+    checked_add(
+        checked_multiply(complete_chunk_count, full_chunk_rate_block_count)?,
+        checked_ceiling_divide(final_chunk_output_byte_length, SHAKE256_RATE_BYTE_LENGTH)?,
+    )
 }
 
 fn uniform_participant_value(
@@ -339,5 +415,15 @@ fn checked_add(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
 
 fn checked_multiply(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
     left.checked_mul(right)
+        .ok_or(TallyPreparationError::ArithmeticOverflow)
+}
+
+fn checked_ceiling_divide(dividend: u64, divisor: u64) -> Result<u64, TallyPreparationError> {
+    if divisor == 0 {
+        return Err(TallyPreparationError::GeometryMismatch);
+    }
+    let quotient = dividend / divisor;
+    quotient
+        .checked_add(u64::from(!dividend.is_multiple_of(divisor)))
         .ok_or(TallyPreparationError::ArithmeticOverflow)
 }

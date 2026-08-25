@@ -2,7 +2,7 @@ import { hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
-    recipientPrivateVssShareMailboxPayloadType,
+    replicatedKeyComponentOpeningMailboxPayloadType,
     type ProtocolHash,
     type RefusalReason,
     type SetupMailboxSlot,
@@ -299,10 +299,10 @@ const copySetupMailboxSlot = (value: SetupMailboxSlot): SetupMailboxSlot => {
     }
     const payloadType = (value as Readonly<{ payloadType?: unknown }>)
         .payloadType;
-    if (payloadType !== recipientPrivateVssShareMailboxPayloadType) {
+    if (payloadType !== replicatedKeyComponentOpeningMailboxPayloadType) {
         throw new BrowserLocalKeyProviderError(
             'MalformedRandomness',
-            'The setup-mailbox payload type must be recipient-private VSS.',
+            'The setup-mailbox payload type must be a replicated-key component opening.',
         );
     }
     if (orderedMaterialRoots.length === 0) {

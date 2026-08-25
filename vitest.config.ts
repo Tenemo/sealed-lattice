@@ -6,15 +6,6 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
-import {
-    desktopBrowserProofEvidenceSessionDefinitions,
-    manualDesktopBrowserProofEvidenceTestGlobs,
-    ordinaryDesktopBrowserExcludedTestGlobs,
-} from './tools/ci/browser-test-project-selection.js';
-import {
-    manualNodeKernelProofEvidenceTestGlobs,
-    nodeKernelProofEvidenceProjectName,
-} from './tools/ci/node-kernel-proof-evidence-selection.js';
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
@@ -58,7 +49,6 @@ const nodeTestProjectDefinitions = [
         testTimeout: nodeKernelTestTimeoutMs,
     },
     {
-        exclude: manualNodeKernelProofEvidenceTestGlobs,
         fileParallelism: false,
         include: kernelNodeTestGlobs,
         projectName: 'node-kernel-fast',
@@ -95,14 +85,7 @@ for (const diagnosticDirectoryPath of [
     }
 }
 
-const browserOptimizedDependencies = [
-    '@noble/hashes/hkdf.js',
-    '@noble/hashes/sha2.js',
-    '@noble/hashes/sha3.js',
-    '@noble/hashes/utils.js',
-    '@noble/post-quantum/ml-dsa.js',
-    '@noble/post-quantum/ml-kem.js',
-] as const;
+const browserOptimizedDependencies = ['@noble/hashes/utils.js'] as const;
 
 const rootPrivateAliases = [
     {
@@ -130,14 +113,6 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
         name: 'chromium-desktop',
     },
 ];
-
-const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] =
-    desktopBrowserProofEvidenceSessionDefinitions.map(
-        ({ browserEngine, vitestProjectName }) => ({
-            browser: browserEngine,
-            name: vitestProjectName,
-        }),
-    );
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
@@ -277,25 +252,10 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            makeNodeProject({
-                fileParallelism: false,
-                include: manualNodeKernelProofEvidenceTestGlobs,
-                projectName: nodeKernelProofEvidenceProjectName,
-                testTimeout: 12 * 60 * 60_000,
-            }),
             makeBrowserProject({
-                exclude: ordinaryDesktopBrowserExcludedTestGlobs,
                 include: desktopBrowserTestGlobs,
                 instances: desktopBrowserInstances,
                 projectName: 'browser-desktop',
-            }),
-            makeBrowserProject({
-                hookTimeout: 30 * 60_000,
-                include: manualDesktopBrowserProofEvidenceTestGlobs,
-                instances: desktopBrowserProofEvidenceInstances,
-                projectName: 'browser-desktop-proof-evidence',
-                retainFailureTrace: true,
-                testTimeout: 12 * 60 * 60_000,
             }),
         ],
     },

@@ -1,7 +1,7 @@
 {
     "name": "sealed-lattice",
     "version": "0.0.19",
-    "description": "Browser-first post-quantum threshold homomorphic voting verification helpers.",
+    "description": "Browser-first post-quantum-oriented private-score polling helpers.",
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
     "type": "module",
@@ -42,12 +42,11 @@
         "cryptography",
         "security",
         "post-quantum",
-        "lattice",
-        "threshold-encryption",
+        "garbled-circuits",
+        "multiparty-computation",
         "voting"
     ],
     "dependencies": {
-        "@noble/hashes": "2.2.0",
-        "@noble/post-quantum": "0.6.1"
+        "@noble/hashes": "2.2.0"
     }
 }

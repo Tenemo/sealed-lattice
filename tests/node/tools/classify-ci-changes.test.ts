@@ -14,7 +14,7 @@ describe('CI heavy-lane change classification', () => {
         for (const changedPaths of [
             ['README.md', 'SECURITY.md', 'reference-documents/paper.txt'],
             [
-                'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/profile-and-state.kernel.test.ts',
+                'packages/wasm/tests/node/foundation-ceremony-runtime.kernel.test.ts',
                 'tests/node/tools/run-command.test.ts',
                 'tools/internal/generate-fixture.ts',
             ],
@@ -25,7 +25,7 @@ describe('CI heavy-lane change classification', () => {
         for (const changedPath of [
             'packages/sdk/src/index.ts',
             'pnpm-lock.yaml',
-            'crates/sealed-lattice-kernel/src/bgv/setup.rs',
+            'crates/sealed-lattice-kernel/src/tally_preparation/replicated_key_ceremony.rs',
             '.github/workflows/ci.yml',
             'tools/ci/run-rust-kernel-heavy-tests.ts',
             'tools/ci/new-heavy-lane-runner.ts',

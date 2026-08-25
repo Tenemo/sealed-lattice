@@ -1,61 +1,56 @@
 # sealed-lattice
 
-`sealed-lattice` is a browser-oriented TypeScript and Rust/WebAssembly research prototype for fixed-roster threshold homomorphic polling. It explores how a small group can verify a public poll transcript and release an agreed result without revealing individual scores or trusting a tally server.
+`sealed-lattice` is a browser-oriented TypeScript and Rust/WebAssembly research prototype for fixed-roster, private-score, top-count polling. It explores how a small group can verify a public poll transcript and release one agreed result without revealing individual scores or trusting a tally server.
 
 The project is for synthetic data only. It has not been independently audited, certified, or approved for production elections. Do not use it with real ballots, credentials, keys, or secret material. Read the current [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md) before experimenting with the library.
 
 ## Library boundary
 
-`sealed-lattice` owns cryptographic objects, protocol verification, and the participant-side workflow. A separate host application, currently planned as `sealed-vote`, owns identity vetting, enrollment, reusable invitations, organizer workflow, interface copy, notifications, and visit cadence.
+`sealed-lattice` owns cryptographic objects, protocol verification, and participant-side workflow. A separate host application owns identity vetting, enrollment, invitations, organizer workflow, interface copy, notifications, and visit cadence.
 
-The host designates exactly one organizer, who must be a member of the frozen roster. The organizer is otherwise an ordinary roster participant and eligible voter. They may submit no ballot or the same kind of ballot as anyone else, including an all-ones ballot. The organizer designation is not sent to or verified by `sealed-lattice` and grants no special key, proof bypass, quorum weight, finality power, or decryption authority.
+The host designates one organizer from the frozen roster. That person is otherwise an ordinary participant and eligible voter. The designation is not a protocol input and grants no special key, bypass, quorum weight, finality power, or release authority.
 
-## How it works
+## Intended ceremony
 
-The intended ceremony is:
+1. The host supplies a poll definition and an externally vetted public roster, and participants freeze one action context.
+2. Every roster participant contributes to maliciously secure tally preparation and verifies the public transcript and their private deliveries in their own browser.
+3. A participant may submit no ballot or one fixed candidate vector. Scores and retry validity remain protected circuit inputs.
+4. A roster quorum uses one-shot state to authorize one explicit candidate view. Participants verify it, derive its exact activation, and release only the authorized input-label alternatives.
+5. Each participant independently replays the public certified evaluation of the fixed tally circuit. An empty usable-ballot set produces no target; otherwise the verifier derives one opaque masked result target.
+6. Available roster participants establish finality for exactly that target.
+7. A valid reconstruction threshold releases only the target-bound output masks needed to decode the ordered result.
 
-1. The host supplies a poll definition and an externally vetted, public, frozen roster.
-2. Every roster participant contributes to collective setup and verifies the resulting public and private setup material in their own browser.
-3. Any roster participant may submit one ballot or none. A submitted ballot contains one score from `1` through `10` for every option. There is no cryptographic skip value; a host interface may map an omitted score to `1`.
-4. Participant clients verify the submitted ballots and derive a canonical aggregate from a nonempty selected subset. If nobody submits a usable ballot, there is no aggregate or result.
-5. Clients replay the bounded homomorphic evaluator over that aggregate.
-6. Available roster participants establish finality for exactly one result target and release target-bound decryption shares. The organizer cannot select a privileged helper group.
-7. Any valid reconstruction threshold reveals only the approved result.
+The only permitted public result is the ordered list of the selected `topCount` option identifiers, or the complete ordering when all options are selected. Individual scores, aggregate scores, margins, comparisons, ranks, retry positions, output masks, and evaluator intermediates are not public outputs.
 
-The only permitted public result is the ordered list of the selected `topCount` option identifiers, or the complete ordering when all options are selected. Exact sums, margins, individual scores, aggregate shares, comparison bits, selection bits, ranks, and evaluator intermediates are not public outputs.
-
-The protocol provides ballot secrecy, not voter anonymity. The frozen roster and accepted ballot authorship are public.
-
-No phase requires simultaneous presence. The protocol must support a schedule in which one participant at a time opens the application, verifies all available data, performs every authorized action, publishes signed messages, and leaves. If too few participants return, the ceremony waits or remains unresolved; it never lowers a threshold or uses an unsafe fallback.
+The protocol provides ballot secrecy, not voter anonymity. The frozen roster and accepted ballot authorship are public. No phase requires simultaneous presence. If required participation is missing, the ceremony waits or remains unresolved; it never lowers a threshold or uses an unsafe fallback.
 
 ## Supported scope
 
-Schemas, formulas, validators, and deterministic compilers cover:
+Schemas, formulas, validators, and deterministic tally-circuit compilers cover:
 
 - `3 <= n <= 20` frozen roster participants;
 - `2 <= optionCount <= 20` ordered options;
 - scores in `1..10`; and
 - `1 <= topCount <= optionCount`.
 
-The sole cryptographic-completion, integration, performance, and supported-phone evidence target is currently `n = 10`, `optionCount = 10`. Other admitted sizes are not qualified.
+The sole cryptographic-completion, integration, performance, and supported-phone evidence target is `n = 10`, `optionCount = 10`. Concrete preparation and sharing work is currently specific to that target. Other admitted sizes are structural inputs only and carry no security, runtime, or support claim.
 
-The active cryptographic target is an **80-bit reduced-assurance mobile research prototype**. Every load-bearing cryptographic component and the composed protocol must meet a minimum 80-bit post-quantum security level under the stated models and assumptions. The implementation has not yet established that target end to end, and the target is not a production rating or certification.
+The target is an 80-bit reduced-assurance, post-quantum-oriented mobile research prototype. That target has not been established end to end and is not a production rating or certification.
 
-Every participant-facing setup, proof, verification, aggregation, evaluation, finality, and release operation must retain a scalar-capable mobile-browser WebAssembly path. Transcript, mailbox, and storage services relay untrusted bytes only. They never prove, verify, tally, finalize, or decrypt.
-
-The sole browser qualification target is Chrome on the selected physical phone for the exact frozen build. Desktop Chromium, Node.js, native Rust, and emulated devices provide development evidence only.
+Every required participant operation must retain a scalar-capable, single-worker mobile-browser WebAssembly path. Transcript, mailbox, and storage services relay untrusted bytes only. The sole browser qualification target is Chrome on the selected physical phone for the exact frozen package bytes. Native Rust, Node.js, desktop Chromium, and emulated devices provide development evidence only.
 
 ## Current status
 
-The complete ceremony is not implemented or certified.
+The complete ceremony is not implemented, cryptographically admitted, or phone-qualified.
 
-- **Foundation and public SDK:** Canonical poll validation, manifest construction, foundation decoding, typed bindings, and reproducible Rust/WebAssembly package bytes exist. Downstream ceremony capabilities remain incomplete and are not yet public APIs.
-- **Cryptographic construction:** The incumbent common-proof lowering and its packet redesign are rejected by production-derived resource and relation gates. Their lower-level implementation remains comparison material and cannot provide fallback or completion evidence. An unactivated multiparty garbled-tally candidate now has an exact three-attempt private tally circuit, independent interpreted and direct semantics, canonical circuit bytes, field and share encodings, and a conservative resource lower bound. It is not selected: exact malicious preparation, authenticated-opening provenance, public certified-path verification, correlated-transcript quantum privacy, fixed-SHAKE composition, target-bound release correspondence, and the complete resource model remain open. No production cryptographic construction is selected.
-- **Browser runtime and custody:** Scalar WebAssembly packaging, typed worker foundations, authenticated checkpoint primitives, browser-storage groundwork, and one matched reference proof generation-and-verification development path exist. That reference path belongs to the rejected common-proof direction and does not qualify the replacement candidate. The garbled-tally candidate has no complete scalar WebAssembly generation, verification, checkpoint, or browser-custody path. Incremental storage accounting, bounded repair, persistence, quota, eviction, rollback, worker-loss restoration, and physical reclamation also remain incomplete.
-- **Ceremony workflow:** Setup, ballot, aggregation, evaluation, finality, and release are not yet connected end to end through participant-owned browser capabilities.
-- **Phone and product evidence:** No physical-phone Chrome qualification or connected ten-participant host-application rehearsal exists.
+- Canonical poll validation, manifest construction, foundation decoding, typed bindings, and reproducible Rust/WebAssembly packaging exist.
+- The selected sealed-lattice design uses a fixed tally circuit, malicious collective preparation, multiparty garbling, authenticated one-time openings, public certified evaluation, finality, and target-bound output-mask release. Internal Rust owners exist for deterministic circuit semantics, canonical circuit bytes, completion-profile sharing and labels, authenticated-opening algebra, gate-local evaluation, and preparation research models.
+- The primary preparation candidate uses fixed-roster replicated-key pseudorandom sharing and Beaver multiplication. Its canonical key-component inventory, verifier-gated recipient combination, bounded field streams, and incomplete resource models exist. No exact malicious preparation theorem, complete positive verifier, end-to-end security argument, or matched scalar WebAssembly ceremony exists.
+- The former threshold-homomorphic and common-proof implementation, dependencies, bridges, fixtures, selectors, and evidence commands have been removed from the active source tree. Historical diagnostics remain development history and cannot authorize the selected design.
+- The public scalar WebAssembly package exposes canonical foundation operations only. The selected design has no complete generation, verification, participant custody, checkpoint, interruption, repair, reclamation, or physical-phone path.
+- Governing product requirements still contain two mechanism-specific clauses from the rejected direction. They must be aligned by the project owner before any protocol activation claim.
 
-Cryptographic completion and supported-phone qualification are independent results for the same exact suite and build bytes. Phone size, memory, storage, transfer, and runtime goals are planning targets, not verifier inputs. A reasonable overage is reported; an unexplained orders-of-magnitude overage requires redesign without making otherwise valid cryptographic bytes invalid.
+Cryptographic completion and supported-phone qualification remain independent results for the same exact bytes. Runtime planning targets are not verifier inputs.
 
 ## Install
 
@@ -98,7 +93,7 @@ const manifest = await createCanonicalManifest(pollValidation.normalized);
 console.log(manifest.manifestHash, manifest.canonicalBytes);
 ```
 
-`validatePollSpec` handles pre-protocol user input only. Protocol identity starts with the canonical manifest bytes and hash produced by the Rust/WebAssembly kernel. In that pre-protocol input, `topOptionCount` names the desired result length. The canonical action binds the same concept as `topCount`; the manifest itself contains only the ordered option definitions. Import public APIs from the package root; workspace packages, test fixtures, and internal source paths are not public API.
+`validatePollSpec` handles pre-protocol user input only. Protocol identity starts with the canonical manifest bytes and hash produced by the Rust/WebAssembly kernel. Import public APIs from the package root; workspace packages, test fixtures, and internal source paths are not public API.
 
 ## Development
 
@@ -109,7 +104,7 @@ pnpm install --frozen-lockfile
 pnpm run check
 ```
 
-Use `pnpm run check:desktop` when browser-facing code changes and `pnpm run smoke:pack:npm` when public package behavior changes. Specialized proof and measurement runners are manual evidence lanes and are intentionally excluded from routine checks.
+Use `pnpm run check:desktop` for browser-facing changes and `pnpm run smoke:pack:npm` for public-package changes. Rejected-architecture evidence has no source-controlled command or executable selector.
 
 ## License
 

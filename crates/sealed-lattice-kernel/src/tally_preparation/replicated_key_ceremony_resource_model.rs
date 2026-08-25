@@ -7,9 +7,8 @@ use super::{
     TallyPreparationContext, TallyPreparationError,
     replicated_key_ceremony::{
         REPLICATED_KEY_COMPONENT_BYTE_LENGTH, create_replicated_key_component,
-        create_replicated_key_delivery_acknowledgement, derive_replicated_key_commitment_manifest,
-        derive_replicated_key_delivery_acknowledgement_root,
-        expected_replicated_key_component_slots,
+        replicated_key_commitment_manifest_canonical_byte_length, replicated_key_component_slots,
+        replicated_key_delivery_acknowledgement_canonical_byte_length,
     },
     replicated_random_sharing::ReplicatedRandomSharingGeometry,
 };
@@ -58,8 +57,7 @@ impl ReplicatedKeyCeremonyResourceModel {
         let participant_count = geometry.participant_count;
         let participant_count_usize = usize::try_from(participant_count)
             .map_err(|_| TallyPreparationError::IntegerConversion)?;
-        let slots = expected_replicated_key_component_slots(context)?;
-        let mut commitments = Vec::with_capacity(slots.len());
+        let component_commitment_count = geometry.all_member_contribution_count;
         let mut component_commitment_canonical_byte_length = 0_u64;
         let mut unique_component_opening_canonical_byte_length = 0_u64;
         let mut private_delivery_plaintext_byte_length = 0_u64;
@@ -67,8 +65,12 @@ impl ReplicatedKeyCeremonyResourceModel {
         let mut private_uploads = vec![0_u64; participant_count_usize];
         let mut private_downloads = vec![0_u64; participant_count_usize];
         let mut own_component_opening_bytes = vec![0_u64; participant_count_usize];
+        let mut observed_component_commitment_count = 0_u64;
+        let mut observed_private_delivery_count = 0_u64;
 
-        for (coordinate, contributor_position) in slots.iter().copied() {
+        for (coordinate, contributor_position) in replicated_key_component_slots(context)? {
+            observed_component_commitment_count =
+                checked_add(observed_component_commitment_count, 1)?;
             let (commitment, opening) = create_replicated_key_component(
                 coordinate,
                 contributor_position,
@@ -103,36 +105,27 @@ impl ReplicatedKeyCeremonyResourceModel {
                 let recipient_index = usize::from(recipient_position);
                 private_downloads[recipient_index] =
                     checked_add(private_downloads[recipient_index], opening_byte_length)?;
+                observed_private_delivery_count = checked_add(observed_private_delivery_count, 1)?;
             }
-            commitments.push(commitment);
+        }
+        if observed_component_commitment_count != component_commitment_count
+            || observed_private_delivery_count != geometry.remote_key_component_delivery_count
+        {
+            return Err(TallyPreparationError::GeometryMismatch);
         }
 
-        let manifest = derive_replicated_key_commitment_manifest(context, &commitments)?;
         let commitment_manifest_canonical_byte_length =
-            usize_to_u64(manifest.canonical_bytes().len())?;
-        let acknowledgements = (0..context.participant_count())
-            .map(|recipient_position| {
-                create_replicated_key_delivery_acknowledgement(
-                    context,
-                    manifest,
-                    recipient_position,
+            replicated_key_commitment_manifest_canonical_byte_length(context)?;
+        let delivery_acknowledgement_canonical_byte_length = (0..context.participant_count())
+            .try_fold(0_u64, |byte_length, recipient_position| {
+                checked_add(
+                    byte_length,
+                    replicated_key_delivery_acknowledgement_canonical_byte_length(
+                        context,
+                        recipient_position,
+                    )?,
                 )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let delivery_acknowledgement_canonical_byte_length =
-            acknowledgements
-                .iter()
-                .try_fold(0_u64, |byte_length, acknowledgement| {
-                    checked_add(
-                        byte_length,
-                        usize_to_u64(acknowledgement.canonical_bytes().len())?,
-                    )
-                })?;
-        let _acknowledgement_root = derive_replicated_key_delivery_acknowledgement_root(
-            context,
-            manifest,
-            &acknowledgements,
-        )?;
+            })?;
         let public_core_byte_length = checked_sum(&[
             component_commitment_canonical_byte_length,
             commitment_manifest_canonical_byte_length,
@@ -154,11 +147,11 @@ impl ReplicatedKeyCeremonyResourceModel {
             authorized_subset_size: geometry.authorized_subset_size,
             key_count: geometry.total_key_count,
             key_count_per_participant: geometry.key_count_per_participant,
-            component_commitment_count: usize_to_u64(commitments.len())?,
-            unique_component_opening_count: usize_to_u64(slots.len())?,
+            component_commitment_count,
+            unique_component_opening_count: component_commitment_count,
             private_component_delivery_count: geometry.remote_key_component_delivery_count,
             raw_component_byte_length: checked_multiply(
-                usize_to_u64(slots.len())?,
+                component_commitment_count,
                 usize_to_u64(REPLICATED_KEY_COMPONENT_BYTE_LENGTH)?,
             )?,
             raw_private_component_delivery_byte_length: geometry.remote_key_component_byte_length,
@@ -166,7 +159,7 @@ impl ReplicatedKeyCeremonyResourceModel {
             unique_component_opening_canonical_byte_length,
             private_delivery_plaintext_byte_length,
             commitment_manifest_canonical_byte_length,
-            delivery_acknowledgement_count: usize_to_u64(acknowledgements.len())?,
+            delivery_acknowledgement_count: participant_count,
             delivery_acknowledgement_canonical_byte_length,
             acknowledgement_root_byte_length: ACKNOWLEDGEMENT_ROOT_BYTE_LENGTH,
             public_core_byte_length,

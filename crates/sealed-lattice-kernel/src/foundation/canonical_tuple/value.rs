@@ -214,35 +214,6 @@ impl CanonicalItem {
         })
     }
 
-    /// Wraps an already typed local tuple using caller-derived structural
-    /// encoding limits. This path does not parse the tuple bytes again: every
-    /// contained [`CanonicalItem`] was already constructed canonically, and
-    /// the supplied limits bound the only new allocation and framing work.
-    pub(crate) fn nested_tuple_with_limits(
-        value: &CanonicalTuple,
-        limits: &CanonicalDecodeLimits,
-    ) -> Result<Self, CanonicalCodecError> {
-        let canonical_bytes = value.encode_with_limits(limits)?;
-        if u32::try_from(canonical_bytes.len()).is_err() {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                0,
-                "nested tuple length does not fit u32",
-            ));
-        }
-        if canonical_bytes.len() > limits.maximum_item_byte_length {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "nested tuple exceeds the configured item limit",
-            ));
-        }
-        Ok(Self {
-            item_type: CanonicalItemType::NestedTuple,
-            canonical_bytes,
-        })
-    }
-
     pub fn optional(
         contained_type: CanonicalItemType,
         value: Option<&CanonicalItem>,
