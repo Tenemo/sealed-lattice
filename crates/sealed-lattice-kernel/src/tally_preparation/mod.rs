@@ -5,6 +5,7 @@
 //! It does not select a preparation protocol, mint a capability, or activate a
 //! suite.
 
+mod authenticated_opening;
 mod binary_field;
 mod context;
 mod garbled_resource_model;
@@ -14,6 +15,8 @@ mod output_sharing;
 mod random_state;
 mod random_tape;
 
+#[cfg(test)]
+mod authenticated_opening_tests;
 #[cfg(test)]
 mod garbled_resource_model_tests;
 #[cfg(test)]
@@ -41,6 +44,35 @@ pub(crate) use random_tape::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TallyPreparationError {
+    AuthenticatedShareContextEmpty,
+    AuthenticatedShareCoordinateEmpty,
+    AuthenticatedShareValueLimbCount {
+        actual: usize,
+    },
+    AuthenticatedShareVerificationKeyLimbCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedShareCommitmentByteLength {
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedShareSaltByteLength {
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedShareCommitmentMismatch,
+    AuthenticatedShareTagMismatch,
+    AuthenticatedShareOpeningMagicMismatch,
+    UnsupportedAuthenticatedShareOpeningVersion {
+        version: u64,
+    },
+    TrailingAuthenticatedShareOpeningBytes,
+    AuthenticatedShareVerificationKeyMagicMismatch,
+    UnsupportedAuthenticatedShareVerificationKeyVersion {
+        version: u64,
+    },
+    TrailingAuthenticatedShareVerificationKeyBytes,
     FieldElementByteLength {
         expected: usize,
         actual: usize,
@@ -139,6 +171,54 @@ pub(crate) enum TallyPreparationError {
 impl fmt::Display for TallyPreparationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AuthenticatedShareContextEmpty => {
+                formatter.write_str("authenticated share context must not be empty")
+            }
+            Self::AuthenticatedShareCoordinateEmpty => {
+                formatter.write_str("authenticated share coordinate must not be empty")
+            }
+            Self::AuthenticatedShareValueLimbCount { actual } => write!(
+                formatter,
+                "authenticated share value has {actual} limbs; expected one or three"
+            ),
+            Self::AuthenticatedShareVerificationKeyLimbCountMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "authenticated share verification key has {actual} coefficients; expected {expected}"
+                )
+            }
+            Self::AuthenticatedShareCommitmentByteLength { expected, actual } => write!(
+                formatter,
+                "authenticated share commitment has {actual} bytes; expected {expected}"
+            ),
+            Self::AuthenticatedShareSaltByteLength { expected, actual } => write!(
+                formatter,
+                "authenticated share salt has {actual} bytes; expected {expected}"
+            ),
+            Self::AuthenticatedShareCommitmentMismatch => {
+                formatter.write_str("authenticated share commitment does not match")
+            }
+            Self::AuthenticatedShareTagMismatch => {
+                formatter.write_str("authenticated share tag does not match")
+            }
+            Self::AuthenticatedShareOpeningMagicMismatch => {
+                formatter.write_str("authenticated share opening artifact magic does not match")
+            }
+            Self::UnsupportedAuthenticatedShareOpeningVersion { version } => write!(
+                formatter,
+                "unsupported authenticated share opening artifact version {version}"
+            ),
+            Self::TrailingAuthenticatedShareOpeningBytes => {
+                formatter.write_str("authenticated share opening artifact has trailing bytes")
+            }
+            Self::AuthenticatedShareVerificationKeyMagicMismatch => formatter
+                .write_str("authenticated share verification key artifact magic does not match"),
+            Self::UnsupportedAuthenticatedShareVerificationKeyVersion { version } => write!(
+                formatter,
+                "unsupported authenticated share verification key artifact version {version}"
+            ),
+            Self::TrailingAuthenticatedShareVerificationKeyBytes => formatter
+                .write_str("authenticated share verification key artifact has trailing bytes"),
             Self::FieldElementByteLength { expected, actual } => write!(
                 formatter,
                 "binary field element has {actual} bytes; expected {expected}"

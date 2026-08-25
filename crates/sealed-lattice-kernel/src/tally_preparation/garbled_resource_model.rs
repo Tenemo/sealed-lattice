@@ -42,6 +42,11 @@ pub(crate) struct GarbledTallyResourceLowerBound {
     pub(crate) label_share_record_count: u64,
     pub(crate) scalar_share_record_count: u64,
     pub(crate) total_share_record_count: u64,
+    pub(crate) label_share_value_field_element_count: u64,
+    pub(crate) scalar_share_value_field_element_count: u64,
+    pub(crate) total_share_value_field_element_count: u64,
+    pub(crate) dkac_verification_key_field_element_count: u64,
+    pub(crate) dkac_tag_generation_field_multiplication_count: u64,
     pub(crate) raw_label_share_storage_byte_length: u64,
     pub(crate) raw_scalar_share_storage_byte_length: u64,
     pub(crate) raw_share_storage_byte_length: u64,
@@ -49,6 +54,14 @@ pub(crate) struct GarbledTallyResourceLowerBound {
     pub(crate) dkac_salt_byte_length: u64,
     pub(crate) dkac_tag_byte_length: u64,
     pub(crate) dkac_verification_key_byte_length: u64,
+    pub(crate) required_active_label_opening_record_count: u64,
+    pub(crate) required_scalar_opening_record_count: u64,
+    pub(crate) required_authenticated_opening_record_count: u64,
+    pub(crate) required_authenticated_opening_value_field_element_count: u64,
+    pub(crate) maximum_active_label_opening_record_count: u64,
+    pub(crate) maximum_scalar_opening_record_count: u64,
+    pub(crate) maximum_authenticated_opening_record_count: u64,
+    pub(crate) maximum_authenticated_opening_value_field_element_count: u64,
     pub(crate) active_label_opening_upper_bound_byte_length: u64,
     pub(crate) input_mask_opening_upper_bound_byte_length: u64,
     pub(crate) active_row_opening_byte_length: u64,
@@ -117,6 +130,15 @@ impl GarbledTallyResourceLowerBound {
         ])?;
         let total_share_record_count =
             checked_add(label_share_record_count, scalar_share_record_count)?;
+        let label_share_value_field_element_count = checked_multiply(
+            label_share_record_count,
+            u64_from_usize(LABEL_BODY_FIELD_LIMB_COUNT)?,
+        )?;
+        let scalar_share_value_field_element_count = scalar_share_record_count;
+        let total_share_value_field_element_count = checked_add(
+            label_share_value_field_element_count,
+            scalar_share_value_field_element_count,
+        )?;
         let raw_label_share_storage_byte_length = checked_multiply(
             label_share_record_count,
             u64_from_usize(LABEL_SHARE_VALUE_BYTE_LENGTH)?,
@@ -133,22 +155,58 @@ impl GarbledTallyResourceLowerBound {
             checked_multiply(total_share_record_count, DKAC_SALT_BYTE_LENGTH)?;
         let dkac_tag_byte_length =
             checked_multiply(total_share_record_count, FIELD_ELEMENT_BYTE_LENGTH)?;
-        let label_record_verification_key_byte_length = checked_multiply(
+        let dkac_verification_key_field_element_count = checked_add(
             checked_multiply(
+                label_share_record_count,
                 u64_from_usize(LABEL_BODY_FIELD_LIMB_COUNT)?
                     .checked_add(1)
                     .ok_or(TallyPreparationError::ArithmeticOverflow)?,
-                FIELD_ELEMENT_BYTE_LENGTH,
             )?,
-            label_share_record_count,
+            checked_multiply(scalar_share_record_count, 2)?,
         )?;
-        let scalar_record_verification_key_byte_length = checked_multiply(
-            checked_multiply(2, FIELD_ELEMENT_BYTE_LENGTH)?,
-            scalar_share_record_count,
+        let dkac_verification_key_byte_length = checked_multiply(
+            dkac_verification_key_field_element_count,
+            FIELD_ELEMENT_BYTE_LENGTH,
         )?;
-        let dkac_verification_key_byte_length = checked_add(
-            label_record_verification_key_byte_length,
-            scalar_record_verification_key_byte_length,
+        let dkac_tag_generation_field_multiplication_count = total_share_value_field_element_count;
+
+        let required_active_label_opening_record_count = checked_multiply(
+            checked_multiply(input_bit_count, participant_count)?,
+            reconstruction_threshold,
+        )?;
+        let required_scalar_opening_record_count = checked_multiply(
+            checked_sum(&[input_bit_count, conjunction_gate_count, output_bit_count])?,
+            reconstruction_threshold,
+        )?;
+        let required_authenticated_opening_record_count = checked_add(
+            required_active_label_opening_record_count,
+            required_scalar_opening_record_count,
+        )?;
+        let required_authenticated_opening_value_field_element_count = checked_add(
+            checked_multiply(
+                required_active_label_opening_record_count,
+                u64_from_usize(LABEL_BODY_FIELD_LIMB_COUNT)?,
+            )?,
+            required_scalar_opening_record_count,
+        )?;
+        let maximum_active_label_opening_record_count = checked_multiply(
+            checked_multiply(input_bit_count, participant_count)?,
+            participant_count,
+        )?;
+        let maximum_scalar_opening_record_count = checked_multiply(
+            checked_sum(&[input_bit_count, conjunction_gate_count, output_bit_count])?,
+            participant_count,
+        )?;
+        let maximum_authenticated_opening_record_count = checked_add(
+            maximum_active_label_opening_record_count,
+            maximum_scalar_opening_record_count,
+        )?;
+        let maximum_authenticated_opening_value_field_element_count = checked_add(
+            checked_multiply(
+                maximum_active_label_opening_record_count,
+                u64_from_usize(LABEL_BODY_FIELD_LIMB_COUNT)?,
+            )?,
+            maximum_scalar_opening_record_count,
         )?;
 
         let vector_opening_byte_length = checked_sum(&[
@@ -226,6 +284,11 @@ impl GarbledTallyResourceLowerBound {
             label_share_record_count,
             scalar_share_record_count,
             total_share_record_count,
+            label_share_value_field_element_count,
+            scalar_share_value_field_element_count,
+            total_share_value_field_element_count,
+            dkac_verification_key_field_element_count,
+            dkac_tag_generation_field_multiplication_count,
             raw_label_share_storage_byte_length,
             raw_scalar_share_storage_byte_length,
             raw_share_storage_byte_length,
@@ -233,6 +296,14 @@ impl GarbledTallyResourceLowerBound {
             dkac_salt_byte_length,
             dkac_tag_byte_length,
             dkac_verification_key_byte_length,
+            required_active_label_opening_record_count,
+            required_scalar_opening_record_count,
+            required_authenticated_opening_record_count,
+            required_authenticated_opening_value_field_element_count,
+            maximum_active_label_opening_record_count,
+            maximum_scalar_opening_record_count,
+            maximum_authenticated_opening_record_count,
+            maximum_authenticated_opening_value_field_element_count,
             active_label_opening_upper_bound_byte_length,
             input_mask_opening_upper_bound_byte_length,
             active_row_opening_byte_length,

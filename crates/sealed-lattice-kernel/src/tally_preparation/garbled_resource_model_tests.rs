@@ -46,6 +46,11 @@ fn completion_profile_reproduces_the_corrected_known_lower_bound() {
             label_share_record_count: 246_000,
             scalar_share_record_count: 229_590,
             total_share_record_count: 475_590,
+            label_share_value_field_element_count: 738_000,
+            scalar_share_value_field_element_count: 229_590,
+            total_share_value_field_element_count: 967_590,
+            dkac_verification_key_field_element_count: 1_443_180,
+            dkac_tag_generation_field_multiplication_count: 967_590,
             raw_label_share_storage_byte_length: 23_616_000,
             raw_scalar_share_storage_byte_length: 7_346_880,
             raw_share_storage_byte_length: 30_962_880,
@@ -53,6 +58,14 @@ fn completion_profile_reproduces_the_corrected_known_lower_bound() {
             dkac_salt_byte_length: 45_656_640,
             dkac_tag_byte_length: 15_218_880,
             dkac_verification_key_byte_length: 46_181_760,
+            required_active_label_opening_record_count: 49_200,
+            required_scalar_opening_record_count: 26_772,
+            required_authenticated_opening_record_count: 75_972,
+            required_authenticated_opening_value_field_element_count: 174_372,
+            maximum_active_label_opening_record_count: 123_000,
+            maximum_scalar_opening_record_count: 66_930,
+            maximum_authenticated_opening_record_count: 189_930,
+            maximum_authenticated_opening_value_field_element_count: 435_930,
             active_label_opening_upper_bound_byte_length: 11_020_800,
             input_mask_opening_upper_bound_byte_length: 787_200,
             active_row_opening_byte_length: 3_470_080,
@@ -82,6 +95,15 @@ fn independent_completion_inventory_rederives_every_composed_total() {
         + and_row_count * participant_count
         + output_bit_count * participant_count;
     let total_record_count = label_record_count + scalar_record_count;
+    let label_value_field_element_count = label_record_count * 3;
+    let total_value_field_element_count = label_value_field_element_count + scalar_record_count;
+    let verification_key_field_element_count = label_record_count * 4 + scalar_record_count * 2;
+    let required_label_opening_count = input_bit_count * participant_count * release_threshold;
+    let required_scalar_opening_count =
+        (input_bit_count + conjunction_gate_count + output_bit_count) * release_threshold;
+    let maximum_label_opening_count = input_bit_count * participant_count * participant_count;
+    let maximum_scalar_opening_count =
+        (input_bit_count + conjunction_gate_count + output_bit_count) * participant_count;
     let raw_share_storage = label_record_count * 96 + scalar_record_count * 32;
     let static_public = participant_count * and_row_count * garbling_output_byte_length
         + and_row_count * garbling_output_byte_length
@@ -96,6 +118,20 @@ fn independent_completion_inventory_rederives_every_composed_total() {
         + release_threshold * (32 + 32 + 96);
 
     assert_eq!(raw_share_storage, 30_962_880);
+    assert_eq!(total_value_field_element_count, 967_590);
+    assert_eq!(verification_key_field_element_count, 1_443_180);
+    assert_eq!(required_label_opening_count, 49_200);
+    assert_eq!(required_scalar_opening_count, 26_772);
+    assert_eq!(
+        required_label_opening_count * 3 + required_scalar_opening_count,
+        174_372
+    );
+    assert_eq!(maximum_label_opening_count, 123_000);
+    assert_eq!(maximum_scalar_opening_count, 66_930);
+    assert_eq!(
+        maximum_label_opening_count * 3 + maximum_scalar_opening_count,
+        435_930
+    );
     assert_eq!(static_public, 276_465_616);
     assert_eq!(online_public, 15_304_320);
     assert_eq!(static_public + online_public, 291_769_936);
@@ -146,6 +182,24 @@ fn resource_formulas_follow_every_admitted_circuit_shape_and_roster_formula() {
                 assert_eq!(
                     derived.raw_label_share_storage_byte_length,
                     derived.label_share_record_count * 96
+                );
+                assert_eq!(
+                    derived.total_share_value_field_element_count,
+                    derived.label_share_record_count * 3 + derived.scalar_share_record_count
+                );
+                assert_eq!(
+                    derived.dkac_verification_key_field_element_count,
+                    derived.label_share_record_count * 4 + derived.scalar_share_record_count * 2
+                );
+                assert_eq!(
+                    derived.required_authenticated_opening_record_count,
+                    derived.required_active_label_opening_record_count
+                        + derived.required_scalar_opening_record_count
+                );
+                assert_eq!(
+                    derived.maximum_authenticated_opening_record_count,
+                    derived.maximum_active_label_opening_record_count
+                        + derived.maximum_scalar_opening_record_count
                 );
                 assert_eq!(
                     derived.combined_known_public_lower_bound_byte_length,

@@ -315,7 +315,7 @@ pub(crate) fn reconstruct_degree_three_label_body(
     shares: &[DegreeThreeLabelShare],
 ) -> Result<LabelBody, TallyPreparationError> {
     let mut reconstructed_limbs = [BinaryFieldElement256::ZERO; LABEL_BODY_FIELD_LIMB_COUNT];
-    for limb_position in 0..LABEL_BODY_FIELD_LIMB_COUNT {
+    for (limb_position, reconstructed_limb) in reconstructed_limbs.iter_mut().enumerate() {
         let limb_shares = shares
             .iter()
             .map(|share| {
@@ -327,7 +327,7 @@ pub(crate) fn reconstruct_degree_three_label_body(
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        reconstructed_limbs[limb_position] =
+        *reconstructed_limb =
             reconstruct_degree_three_mask(expected_participant_count, &limb_shares)?;
     }
     LabelBody::from_field_limbs(reconstructed_limbs)
