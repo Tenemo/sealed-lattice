@@ -14,13 +14,13 @@ The host designates one organizer from the frozen roster. That person is otherwi
 
 1. The host supplies a poll definition and an externally vetted public roster, and participants freeze one action context.
 2. Every roster participant contributes to maliciously secure tally preparation and verifies the public transcript and their private deliveries in their own browser.
-3. A participant may submit no ballot or one fixed candidate vector. Scores and retry validity remain protected circuit inputs.
-4. A roster quorum uses one-shot state to authorize one explicit candidate view. Participants verify it, derive its exact activation, and release only the authorized input-label alternatives.
+3. A participant may submit no ballot or one fixed three-attempt ballot submission. Scores, validity, and retry selection remain protected circuit inputs.
+4. A roster quorum uses one-shot state to authorize one explicit selected ballot set. Participants verify it, derive its exact activation, and release only the authorized input-label alternatives.
 5. Each participant independently replays the public certified evaluation of the fixed tally circuit. An empty usable-ballot set produces no target; otherwise the verifier derives one opaque masked result target.
 6. Available roster participants establish finality for exactly that target.
-7. A valid reconstruction threshold releases only the target-bound output masks needed to decode the ordered result.
+7. A valid reconstruction threshold releases only the target-bound result masks needed to decode the ordered result.
 
-The only permitted public result is the ordered list of the selected `topCount` option identifiers, or the complete ordering when all options are selected. Individual scores, aggregate scores, margins, comparisons, ranks, retry positions, output masks, and evaluator intermediates are not public outputs.
+The only permitted public result is the ordered list of the selected `topCount` option identifiers, or the complete ordering when all options are selected. Individual scores, aggregate scores, margins, comparisons, ranks, retry positions, result masks, and evaluator intermediates are not public outputs.
 
 The protocol provides ballot secrecy, not voter anonymity. The frozen roster and accepted ballot authorship are public. No phase requires simultaneous presence. If required participation is missing, the ceremony waits or remains unresolved; it never lowers a threshold or uses an unsafe fallback.
 
@@ -44,11 +44,11 @@ Every required participant operation must retain a scalar-capable, single-worker
 The complete ceremony is not implemented, cryptographically admitted, or phone-qualified.
 
 - Canonical poll validation, manifest construction, foundation decoding, typed bindings, and reproducible Rust/WebAssembly packaging exist.
-- The selected sealed-lattice design uses a fixed tally circuit, malicious collective preparation, multiparty garbling, authenticated one-time openings, public certified evaluation, finality, and target-bound output-mask release. Internal Rust owners exist for deterministic circuit semantics, canonical circuit bytes, completion-profile sharing and labels, authenticated-opening algebra, gate-local evaluation, and preparation research models.
-- The primary preparation candidate uses fixed-roster replicated-key pseudorandom sharing and Beaver multiplication. Its canonical key-component inventory, verifier-gated recipient combination, bounded field streams, and incomplete resource models exist. No exact malicious preparation theorem, complete positive verifier, end-to-end security argument, or matched scalar WebAssembly ceremony exists.
+- The active sealed-lattice research direction uses a fixed tally circuit, independent wire labels, malicious all-roster pseudorandom-sharing preparation, publicly checkable garbling, certified evaluation, finality, and target-bound result-mask release. Its local circuit and algebraic research results do not yet form an emitted protocol or security theorem.
+- Internal Rust owners provide deterministic circuit semantics, canonical circuit bytes, completion-profile field and sharing primitives, and preparation research models. Much of the current preparation workbench still describes a superseded shared-offset and multiplication-preprocessing route; it cannot authorize the active direction. No exact malicious preparation protocol, complete positive verifier, end-to-end security argument, or matched scalar WebAssembly ceremony exists.
 - The former threshold-homomorphic and common-proof implementation, dependencies, bridges, fixtures, selectors, and evidence commands have been removed from the active source tree. Historical diagnostics remain development history and cannot authorize the selected design.
-- The internal protocol runtime has authenticated copy-on-write storage, candidate- and runtime-bound local record protection, checkpoint lineage and interrupted-publication repair, and a strict-durability IndexedDB adapter. These foundations are not connected to operation-specific Rust cursors, external recency, persistence admission, quota and reclamation evidence, the complete participant worker path, or physical-phone qualification. The public scalar WebAssembly package still exposes canonical foundation operations only.
-- Governing product requirements still contain two mechanism-specific clauses from the rejected direction. They must be aligned by the project owner before any protocol activation claim.
+- The internal protocol runtime has authenticated copy-on-write storage, suite- and runtime-bound local record protection, checkpoint lineage and interrupted-publication repair, and a strict-durability IndexedDB adapter. These foundations are not connected to operation-specific Rust cursors, external recency, persistence admission, quota and reclamation evidence, the complete participant worker path, or physical-phone qualification. The public scalar WebAssembly package still exposes canonical foundation operations only.
+- Governing product requirements still contain threshold-homomorphic mechanism wording from the rejected direction. The project owner must replace it with mechanism-neutral outcome and trust-boundary requirements before any protocol activation claim.
 
 Cryptographic completion and supported-phone qualification remain independent results for the same exact bytes. Runtime planning targets are not verifier inputs.
 
