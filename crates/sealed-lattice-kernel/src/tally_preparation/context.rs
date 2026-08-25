@@ -49,6 +49,21 @@ impl TallyPreparationContext {
         self.participant_count
     }
 
+    pub(crate) fn is_bound_to_circuit(
+        self,
+        circuit: &CompiledTallyCircuit,
+    ) -> Result<bool, TallyPreparationError> {
+        let profile = circuit.profile();
+        Ok(
+            self.circuit_identity == Hash512::from_bytes(circuit.circuit_identity()?)
+                && self.compiler_identity
+                    == Hash512::from_bytes(CompiledTallyCircuit::compiler_identity()?)
+                && self.participant_count == profile.participant_count()
+                && self.option_count == profile.option_count()
+                && self.top_count == profile.top_count(),
+        )
+    }
+
     pub(crate) fn canonical_bytes(self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(370);
         append_bytes(&mut bytes, TALLY_PREPARATION_CONTEXT_MAGIC);

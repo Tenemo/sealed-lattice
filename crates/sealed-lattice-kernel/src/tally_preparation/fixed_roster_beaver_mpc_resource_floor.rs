@@ -96,11 +96,11 @@ impl FixedRosterBeaverMpcResourceFloor {
         )?;
         let independent_authentication_key_field_element_count = checked_add(
             authenticated_tag_multiplication_count,
-            arithmetic_graph.authenticated_tag_output_field_element_count,
+            arithmetic_graph.authenticated_record_count,
         )?;
         let common_coefficient_authentication_key_field_element_count = checked_add(
             common_authentication_coefficient_group_count,
-            arithmetic_graph.authenticated_tag_output_field_element_count,
+            arithmetic_graph.authenticated_record_count,
         )?;
 
         let private_key_component_delivery_byte_length =

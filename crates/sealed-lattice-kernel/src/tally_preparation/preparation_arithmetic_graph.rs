@@ -69,6 +69,10 @@ pub(crate) struct PreparationArithmeticGraph {
     pub(crate) row_bit_share_tag_multiplication_count: u64,
     pub(crate) output_mask_share_tag_multiplication_count: u64,
     pub(crate) authenticated_tag_multiplication_count: u64,
+    pub(crate) first_layer_authenticated_tag_multiplication_count: u64,
+    pub(crate) second_layer_authenticated_tag_multiplication_count: u64,
+    pub(crate) first_layer_authenticated_tag_output_count: u64,
+    pub(crate) second_layer_authenticated_tag_output_count: u64,
     pub(crate) first_layer_multiplication_count: u64,
     pub(crate) second_layer_multiplication_count: u64,
     pub(crate) total_multiplication_count: u64,
@@ -76,7 +80,6 @@ pub(crate) struct PreparationArithmeticGraph {
     pub(crate) first_layer_public_zero_check_count: u64,
     pub(crate) first_layer_derived_row_value_count: u64,
     pub(crate) second_layer_row_offset_output_field_element_count: u64,
-    pub(crate) authenticated_tag_output_field_element_count: u64,
     pub(crate) one_field_share_per_participant_lower_bound_byte_length: u64,
 }
 
@@ -179,13 +182,28 @@ impl PreparationArithmeticGraph {
             return Err(TallyPreparationError::GeometryMismatch);
         }
 
-        let first_layer_multiplication_count = checked_add(
+        let first_layer_authenticated_tag_multiplication_count = checked_sum(&[
+            label_share_tag_multiplication_count,
+            input_mask_share_tag_multiplication_count,
+            output_mask_share_tag_multiplication_count,
+        ])?;
+        let second_layer_authenticated_tag_multiplication_count =
+            row_bit_share_tag_multiplication_count;
+        let first_layer_authenticated_tag_output_count = checked_sum(&[
+            resources.label_share_record_count,
+            input_mask_share_record_count,
+            output_mask_share_record_count,
+        ])?;
+        let second_layer_authenticated_tag_output_count = row_bit_share_record_count;
+
+        let first_layer_multiplication_count = checked_sum(&[
             mask_bitness_multiplication_count,
             mask_product_multiplication_count,
-        )?;
+            first_layer_authenticated_tag_multiplication_count,
+        ])?;
         let second_layer_multiplication_count = checked_add(
             row_offset_limb_multiplication_count,
-            authenticated_tag_multiplication_count,
+            second_layer_authenticated_tag_multiplication_count,
         )?;
         let total_multiplication_count = checked_add(
             first_layer_multiplication_count,
@@ -231,6 +249,10 @@ impl PreparationArithmeticGraph {
             row_bit_share_tag_multiplication_count,
             output_mask_share_tag_multiplication_count,
             authenticated_tag_multiplication_count,
+            first_layer_authenticated_tag_multiplication_count,
+            second_layer_authenticated_tag_multiplication_count,
+            first_layer_authenticated_tag_output_count,
+            second_layer_authenticated_tag_output_count,
             first_layer_multiplication_count,
             second_layer_multiplication_count,
             total_multiplication_count,
@@ -239,7 +261,6 @@ impl PreparationArithmeticGraph {
             first_layer_derived_row_value_count: resources.and_row_count,
             second_layer_row_offset_output_field_element_count:
                 row_offset_limb_multiplication_count,
-            authenticated_tag_output_field_element_count: resources.total_share_record_count,
             one_field_share_per_participant_lower_bound_byte_length,
         })
     }
@@ -259,34 +280,34 @@ impl PreparationArithmeticGraph {
                 consumes_layer_one_derived_value: false,
             },
             PreparationMultiplicationFamilyGeometry {
+                family: PreparationMultiplicationFamily::LabelShareTagLimbProduct,
+                multiplicative_layer: 1,
+                operation_count: self.label_share_tag_multiplication_count,
+                consumes_layer_one_derived_value: false,
+            },
+            PreparationMultiplicationFamilyGeometry {
+                family: PreparationMultiplicationFamily::InputMaskShareTagProduct,
+                multiplicative_layer: 1,
+                operation_count: self.input_mask_share_tag_multiplication_count,
+                consumes_layer_one_derived_value: false,
+            },
+            PreparationMultiplicationFamilyGeometry {
+                family: PreparationMultiplicationFamily::OutputMaskShareTagProduct,
+                multiplicative_layer: 1,
+                operation_count: self.output_mask_share_tag_multiplication_count,
+                consumes_layer_one_derived_value: false,
+            },
+            PreparationMultiplicationFamilyGeometry {
                 family: PreparationMultiplicationFamily::RowOffsetLimbProduct,
                 multiplicative_layer: 2,
                 operation_count: self.row_offset_limb_multiplication_count,
                 consumes_layer_one_derived_value: true,
             },
             PreparationMultiplicationFamilyGeometry {
-                family: PreparationMultiplicationFamily::LabelShareTagLimbProduct,
-                multiplicative_layer: 2,
-                operation_count: self.label_share_tag_multiplication_count,
-                consumes_layer_one_derived_value: false,
-            },
-            PreparationMultiplicationFamilyGeometry {
-                family: PreparationMultiplicationFamily::InputMaskShareTagProduct,
-                multiplicative_layer: 2,
-                operation_count: self.input_mask_share_tag_multiplication_count,
-                consumes_layer_one_derived_value: false,
-            },
-            PreparationMultiplicationFamilyGeometry {
                 family: PreparationMultiplicationFamily::RowBitShareTagProduct,
                 multiplicative_layer: 2,
                 operation_count: self.row_bit_share_tag_multiplication_count,
                 consumes_layer_one_derived_value: true,
-            },
-            PreparationMultiplicationFamilyGeometry {
-                family: PreparationMultiplicationFamily::OutputMaskShareTagProduct,
-                multiplicative_layer: 2,
-                operation_count: self.output_mask_share_tag_multiplication_count,
-                consumes_layer_one_derived_value: false,
             },
         ]
     }

@@ -24,6 +24,7 @@ mod label_encoding;
 mod malicious_mpc_communication_floor;
 mod output_sharing;
 mod preparation_arithmetic_graph;
+mod preparation_multiplication_catalog;
 mod random_state;
 mod random_tape;
 mod replicated_key_ceremony;
@@ -64,6 +65,8 @@ mod label_encoding_tests;
 mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
 mod preparation_arithmetic_graph_tests;
+#[cfg(test)]
+mod preparation_multiplication_catalog_tests;
 #[cfg(test)]
 mod randomness_tests;
 #[cfg(test)]
@@ -261,6 +264,12 @@ pub(crate) enum TallyPreparationError {
         version: u64,
     },
     TrailingLabelShareArtifactBytes,
+    PreparationContextCircuitMismatch,
+    PreparationMultiplicationIndexOutOfRange {
+        operation_index: u64,
+        operation_count: u64,
+    },
+    NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
     ArithmeticOverflow,
     WireIndexOutOfRange {
@@ -559,6 +568,18 @@ impl fmt::Display for TallyPreparationError {
             Self::TrailingLabelShareArtifactBytes => {
                 formatter.write_str("degree-three label share artifact has trailing bytes")
             }
+            Self::PreparationContextCircuitMismatch => formatter
+                .write_str("preparation context does not match the compiled tally circuit"),
+            Self::PreparationMultiplicationIndexOutOfRange {
+                operation_index,
+                operation_count,
+            } => write!(
+                formatter,
+                "preparation multiplication index {operation_index} is outside operation count {operation_count}"
+            ),
+            Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
+                "preparation compiler source identity requires canonical UTF-8 with LF line endings",
+            ),
             Self::GeometryMismatch => formatter
                 .write_str("tally preparation geometry does not match the compiled circuit"),
             Self::ArithmeticOverflow => {

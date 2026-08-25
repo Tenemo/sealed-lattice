@@ -8,6 +8,7 @@ use super::{
 
 const FIELD_ELEMENT_BYTE_LENGTH: u64 = BinaryFieldElement256::CANONICAL_BYTE_LENGTH as u64;
 const LABEL_BODY_FIELD_LIMB_COUNT: u64 = 3;
+const CONJUNCTION_ROW_COUNT: u64 = 4;
 
 /// Exact remote share-material floors implied by the selected perfect-MPC
 /// theorem routes before any concrete VSS realization is compiled.
@@ -91,13 +92,14 @@ impl PerfectMpcCommunicationFloor {
                 .ok_or(TallyPreparationError::GeometryMismatch)?;
 
         let direct_logical_output_count = arithmetic_graph.total_multiplication_count;
-        let first_layer_logical_output_count = checked_add(
+        let first_layer_logical_output_count = checked_sum(&[
             arithmetic_graph.first_layer_public_zero_check_count,
-            arithmetic_graph.mask_product_multiplication_count,
-        )?;
+            arithmetic_graph.first_layer_derived_row_value_count,
+            arithmetic_graph.first_layer_authenticated_tag_output_count,
+        ])?;
         let second_layer_logical_output_count = checked_sum(&[
             arithmetic_graph.second_layer_row_offset_output_field_element_count,
-            arithmetic_graph.authenticated_tag_output_field_element_count,
+            arithmetic_graph.second_layer_authenticated_tag_output_count,
             arithmetic_graph.additive_correlation_correction_component_count,
         ])?;
         let maximal_layer_logical_output_count = checked_add(
@@ -144,13 +146,28 @@ impl PerfectMpcCommunicationFloor {
             checked_multiply(independent_resources.paid_gate_row_count, participant_count)?,
             LABEL_BODY_FIELD_LIMB_COUNT,
         )?;
-        let independent_label_first_layer_logical_output_count = checked_add(
+        let independent_label_first_layer_authenticated_tag_output_count = checked_sum(&[
+            independent_resources.label_share_record_count,
+            checked_multiply(independent_resources.input_bit_count, participant_count)?,
+            checked_multiply(
+                checked_add(
+                    independent_resources.public_output_bit_count,
+                    independent_resources.private_result_bit_count,
+                )?,
+                participant_count,
+            )?,
+        ])?;
+        let independent_label_first_layer_logical_output_count = checked_sum(&[
             independent_label_fresh_semantic_mask_count,
-            independent_resources.conjunction_gate_count,
-        )?;
+            checked_multiply(
+                independent_resources.conjunction_gate_count,
+                CONJUNCTION_ROW_COUNT,
+            )?,
+            independent_label_first_layer_authenticated_tag_output_count,
+        ])?;
         let independent_label_second_layer_logical_output_count = checked_sum(&[
             independent_label_row_offset_limb_multiplication_count,
-            independent_resources.total_share_record_count,
+            checked_multiply(independent_resources.paid_gate_row_count, participant_count)?,
             checked_multiply(independent_resources.paid_gate_row_count, participant_count)?,
         ])?;
         let independent_label_direct_logical_output_count = checked_sum(&[

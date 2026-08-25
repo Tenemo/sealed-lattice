@@ -51,14 +51,17 @@ fn completion_profile_reproduces_the_ideal_preparation_arithmetic_graph() {
             row_bit_share_tag_multiplication_count: 216_880,
             output_mask_share_tag_multiplication_count: 410,
             authenticated_tag_multiplication_count: 967_590,
-            first_layer_multiplication_count: 12_074,
-            second_layer_multiplication_count: 1_618_230,
+            first_layer_authenticated_tag_multiplication_count: 750_710,
+            second_layer_authenticated_tag_multiplication_count: 216_880,
+            first_layer_authenticated_tag_output_count: 258_710,
+            second_layer_authenticated_tag_output_count: 216_880,
+            first_layer_multiplication_count: 762_784,
+            second_layer_multiplication_count: 867_520,
             total_multiplication_count: 1_630_304,
             multiplicative_depth: 2,
             first_layer_public_zero_check_count: 6_652,
             first_layer_derived_row_value_count: 21_688,
             second_layer_row_offset_output_field_element_count: 650_640,
-            authenticated_tag_output_field_element_count: 475_590,
             one_field_share_per_participant_lower_bound_byte_length: 521_697_280,
         }
     );
@@ -78,34 +81,34 @@ fn completion_profile_reproduces_the_ideal_preparation_arithmetic_graph() {
                 consumes_layer_one_derived_value: false,
             },
             PreparationMultiplicationFamilyGeometry {
+                family: PreparationMultiplicationFamily::LabelShareTagLimbProduct,
+                multiplicative_layer: 1,
+                operation_count: 738_000,
+                consumes_layer_one_derived_value: false,
+            },
+            PreparationMultiplicationFamilyGeometry {
+                family: PreparationMultiplicationFamily::InputMaskShareTagProduct,
+                multiplicative_layer: 1,
+                operation_count: 12_300,
+                consumes_layer_one_derived_value: false,
+            },
+            PreparationMultiplicationFamilyGeometry {
+                family: PreparationMultiplicationFamily::OutputMaskShareTagProduct,
+                multiplicative_layer: 1,
+                operation_count: 410,
+                consumes_layer_one_derived_value: false,
+            },
+            PreparationMultiplicationFamilyGeometry {
                 family: PreparationMultiplicationFamily::RowOffsetLimbProduct,
                 multiplicative_layer: 2,
                 operation_count: 650_640,
                 consumes_layer_one_derived_value: true,
             },
             PreparationMultiplicationFamilyGeometry {
-                family: PreparationMultiplicationFamily::LabelShareTagLimbProduct,
-                multiplicative_layer: 2,
-                operation_count: 738_000,
-                consumes_layer_one_derived_value: false,
-            },
-            PreparationMultiplicationFamilyGeometry {
-                family: PreparationMultiplicationFamily::InputMaskShareTagProduct,
-                multiplicative_layer: 2,
-                operation_count: 12_300,
-                consumes_layer_one_derived_value: false,
-            },
-            PreparationMultiplicationFamilyGeometry {
                 family: PreparationMultiplicationFamily::RowBitShareTagProduct,
                 multiplicative_layer: 2,
                 operation_count: 216_880,
                 consumes_layer_one_derived_value: true,
-            },
-            PreparationMultiplicationFamilyGeometry {
-                family: PreparationMultiplicationFamily::OutputMaskShareTagProduct,
-                multiplicative_layer: 2,
-                operation_count: 410,
-                consumes_layer_one_derived_value: false,
             },
         ]
     );
@@ -153,6 +156,16 @@ fn every_admitted_circuit_shape_rederives_the_operation_families() {
                     graph.authenticated_record_value_field_element_count
                 );
                 assert_eq!(family_total, graph.total_multiplication_count);
+                assert_eq!(
+                    graph.first_layer_authenticated_tag_multiplication_count
+                        + graph.second_layer_authenticated_tag_multiplication_count,
+                    graph.authenticated_tag_multiplication_count
+                );
+                assert_eq!(
+                    graph.first_layer_authenticated_tag_output_count
+                        + graph.second_layer_authenticated_tag_output_count,
+                    graph.authenticated_record_count
+                );
                 assert_eq!(
                     graph.first_layer_multiplication_count
                         + graph.second_layer_multiplication_count,
