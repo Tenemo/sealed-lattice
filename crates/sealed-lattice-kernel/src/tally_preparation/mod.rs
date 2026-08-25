@@ -8,6 +8,7 @@
 mod adaptive_oracle_repair;
 mod authenticated_opening;
 mod binary_field;
+mod binary_ring_packed_mpc_evaluation_floor;
 mod context;
 mod fixed_roster_linear_mpc_communication_floor;
 mod garbled_resource_model;
@@ -25,6 +26,8 @@ mod random_tape;
 mod adaptive_oracle_repair_tests;
 #[cfg(test)]
 mod authenticated_opening_tests;
+#[cfg(test)]
+mod binary_ring_packed_mpc_evaluation_floor_tests;
 #[cfg(test)]
 mod fixed_roster_linear_mpc_communication_floor_tests;
 #[cfg(test)]
