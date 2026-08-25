@@ -7,10 +7,11 @@
 
 mod adaptive_oracle_repair;
 mod amortized_binary_mpc_communication_floor;
-mod authenticated_opening;
 mod authenticated_key_release;
 mod authenticated_key_release_resource_floor;
 mod authenticated_key_share_vector;
+mod authenticated_key_share_vector_manifest;
+mod authenticated_opening;
 mod binary_field;
 mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
@@ -48,13 +49,15 @@ mod adaptive_oracle_repair_tests;
 #[cfg(test)]
 mod amortized_binary_mpc_communication_floor_tests;
 #[cfg(test)]
-mod authenticated_opening_tests;
+mod authenticated_key_release_resource_floor_tests;
 #[cfg(test)]
 mod authenticated_key_release_tests;
 #[cfg(test)]
-mod authenticated_key_release_resource_floor_tests;
+mod authenticated_key_share_vector_manifest_tests;
 #[cfg(test)]
 mod authenticated_key_share_vector_tests;
+#[cfg(test)]
+mod authenticated_opening_tests;
 #[cfg(test)]
 mod binary_field_multiplication_circuit_tests;
 #[cfg(test)]
@@ -325,6 +328,11 @@ pub(crate) enum TallyPreparationError {
         expected_roster_position: u16,
         actual_roster_position: u16,
     },
+    AuthenticatedKeyReleaseProfileMismatch {
+        participant_count: u16,
+        derived_reconstruction_threshold: u16,
+        supported_reconstruction_threshold: u16,
+    },
     AuthenticatedKeyShareVectorArtifactMagicMismatch,
     UnsupportedAuthenticatedKeyShareVectorArtifactVersion {
         version: u64,
@@ -361,6 +369,30 @@ pub(crate) enum TallyPreparationError {
     AuthenticatedKeyShareVectorFieldPositionOutOfRange {
         position_within_chunk: u64,
         field_count: u64,
+    },
+    AuthenticatedKeyShareVectorManifestMagicMismatch,
+    UnsupportedAuthenticatedKeyShareVectorManifestVersion {
+        version: u64,
+    },
+    TrailingAuthenticatedKeyShareVectorManifestBytes,
+    AuthenticatedKeyShareVectorManifestDescriptorCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedKeyShareVectorManifestMismatch,
+    AuthenticatedKeyShareVectorAcknowledgementMagicMismatch,
+    UnsupportedAuthenticatedKeyShareVectorAcknowledgementVersion {
+        version: u64,
+    },
+    TrailingAuthenticatedKeyShareVectorAcknowledgementBytes,
+    AuthenticatedKeyShareVectorAcknowledgementMismatch,
+    AuthenticatedKeyShareVectorAcknowledgementCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedKeyShareVectorControlByteLengthOutOfRange {
+        actual: usize,
+        maximum: usize,
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
@@ -730,6 +762,14 @@ impl fmt::Display for TallyPreparationError {
                 formatter,
                 "authenticated-key release basis position {basis_position} contains roster position {actual_roster_position}; expected {expected_roster_position}"
             ),
+            Self::AuthenticatedKeyReleaseProfileMismatch {
+                participant_count,
+                derived_reconstruction_threshold,
+                supported_reconstruction_threshold,
+            } => write!(
+                formatter,
+                "authenticated-key release participant count {participant_count} derives reconstruction threshold {derived_reconstruction_threshold}; the degree-three checker requires {supported_reconstruction_threshold}"
+            ),
             Self::AuthenticatedKeyShareVectorArtifactMagicMismatch => formatter
                 .write_str("authenticated-key share-vector descriptor magic does not match"),
             Self::UnsupportedAuthenticatedKeyShareVectorArtifactVersion { version } => write!(
@@ -793,6 +833,47 @@ impl fmt::Display for TallyPreparationError {
                 formatter,
                 "authenticated-key share-vector field position {position_within_chunk} is outside chunk field count {field_count}"
             ),
+            Self::AuthenticatedKeyShareVectorManifestMagicMismatch => formatter
+                .write_str("authenticated-key share-vector manifest magic does not match"),
+            Self::UnsupportedAuthenticatedKeyShareVectorManifestVersion { version } => write!(
+                formatter,
+                "unsupported authenticated-key share-vector manifest version {version}"
+            ),
+            Self::TrailingAuthenticatedKeyShareVectorManifestBytes => formatter
+                .write_str("authenticated-key share-vector manifest has trailing bytes"),
+            Self::AuthenticatedKeyShareVectorManifestDescriptorCountMismatch {
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector manifest has {actual} descriptors; expected {expected}"
+            ),
+            Self::AuthenticatedKeyShareVectorManifestMismatch => formatter
+                .write_str("authenticated-key share-vector manifest does not match"),
+            Self::AuthenticatedKeyShareVectorAcknowledgementMagicMismatch => formatter
+                .write_str("authenticated-key share-vector acknowledgement magic does not match"),
+            Self::UnsupportedAuthenticatedKeyShareVectorAcknowledgementVersion { version } => {
+                write!(
+                    formatter,
+                    "unsupported authenticated-key share-vector acknowledgement version {version}"
+                )
+            }
+            Self::TrailingAuthenticatedKeyShareVectorAcknowledgementBytes => formatter
+                .write_str("authenticated-key share-vector acknowledgement has trailing bytes"),
+            Self::AuthenticatedKeyShareVectorAcknowledgementMismatch => formatter
+                .write_str("authenticated-key share-vector acknowledgement does not match"),
+            Self::AuthenticatedKeyShareVectorAcknowledgementCountMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "authenticated-key share-vector acknowledgement set has {actual} entries; expected {expected}"
+                )
+            }
+            Self::AuthenticatedKeyShareVectorControlByteLengthOutOfRange { actual, maximum } => {
+                write!(
+                    formatter,
+                    "authenticated-key share-vector control body has {actual} bytes; maximum is {maximum}"
+                )
+            }
             Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
                 "preparation compiler source identity requires canonical UTF-8 with LF line endings",
             ),

@@ -42,7 +42,12 @@ fn completion_key_release_floor_corrects_the_reconstructed_key_undercount() {
             quorum_checked_share_payload_byte_length: 184_727_040,
             quorum_checked_share_descriptor_byte_length: 13_044,
             quorum_checked_share_payload_and_descriptor_byte_length: 184_740_084,
-            quorum_checked_additional_byte_length: 138_558_324,
+            quorum_checked_share_manifest_byte_length: 651,
+            acknowledgement_body_byte_length_per_participant: 130,
+            all_roster_acknowledgement_body_byte_length: 1_300,
+            quorum_checked_share_control_byte_length: 14_995,
+            quorum_checked_share_payload_and_control_byte_length: 184_742_035,
+            quorum_checked_additional_byte_length: 138_560_275,
             all_roster_share_sender_count: 10,
             all_roster_share_payload_byte_length: 461_817_600,
             all_roster_share_descriptor_byte_length: 32_610,
@@ -130,6 +135,59 @@ fn independent_completion_derivation_matches_the_production_floor() {
         model.quorum_checked_share_payload_byte_length
             + model.quorum_checked_share_descriptor_byte_length
     );
+    let manifest_magic_byte_length =
+        b"sealed-lattice/authenticated-key-share-vector-manifest".len() as u64;
+    let independent_manifest_byte_length = varuint_byte_length(manifest_magic_byte_length)
+        + manifest_magic_byte_length
+        + varuint_byte_length(1)
+        + 5 * framed_hash_byte_length
+        + varuint_byte_length(model.participant_count)
+        + varuint_byte_length(model.reconstruction_threshold)
+        + varuint_byte_length(model.verification_key_field_element_count)
+        + varuint_byte_length(model.reconstruction_threshold)
+        + (0..model.reconstruction_threshold)
+            .map(|sender_position| varuint_byte_length(sender_position) + framed_hash_byte_length)
+            .sum::<u64>();
+    assert_eq!(
+        model.quorum_checked_share_manifest_byte_length,
+        independent_manifest_byte_length
+    );
+    let acknowledgement_magic_byte_length =
+        b"sealed-lattice/authenticated-key-share-vector-acknowledgement".len() as u64;
+    let independent_acknowledgement_body_byte_length = |participant_position| {
+        varuint_byte_length(acknowledgement_magic_byte_length)
+            + acknowledgement_magic_byte_length
+            + varuint_byte_length(1)
+            + framed_hash_byte_length
+            + varuint_byte_length(model.participant_count)
+            + varuint_byte_length(participant_position)
+    };
+    assert_eq!(
+        model.acknowledgement_body_byte_length_per_participant,
+        independent_acknowledgement_body_byte_length(0)
+    );
+    assert_eq!(
+        model.all_roster_acknowledgement_body_byte_length,
+        (0..model.participant_count)
+            .map(independent_acknowledgement_body_byte_length)
+            .sum::<u64>()
+    );
+    assert_eq!(
+        model.quorum_checked_share_control_byte_length,
+        model.quorum_checked_share_descriptor_byte_length
+            + model.quorum_checked_share_manifest_byte_length
+            + model.all_roster_acknowledgement_body_byte_length
+    );
+    assert_eq!(
+        model.quorum_checked_share_payload_and_control_byte_length,
+        model.quorum_checked_share_payload_byte_length
+            + model.quorum_checked_share_control_byte_length
+    );
+    assert_eq!(
+        model.quorum_checked_additional_byte_length,
+        model.quorum_checked_share_payload_and_control_byte_length
+            - model.reconstructed_key_byte_length
+    );
     assert_eq!(
         model.all_roster_share_payload_byte_length,
         model.participant_count * model.reconstructed_key_byte_length
@@ -183,6 +241,22 @@ fn every_admitted_shape_derives_thresholds_and_key_widths_from_canonical_owners(
                 assert_eq!(
                     model.quorum_checked_share_sender_count,
                     model.reconstruction_threshold
+                );
+                assert_eq!(
+                    model.quorum_checked_share_control_byte_length,
+                    model.quorum_checked_share_descriptor_byte_length
+                        + model.quorum_checked_share_manifest_byte_length
+                        + model.all_roster_acknowledgement_body_byte_length
+                );
+                assert_eq!(
+                    model.quorum_checked_share_payload_and_control_byte_length,
+                    model.quorum_checked_share_payload_byte_length
+                        + model.quorum_checked_share_control_byte_length
+                );
+                assert_eq!(
+                    model.all_roster_acknowledgement_body_byte_length,
+                    model.participant_count
+                        * model.acknowledgement_body_byte_length_per_participant
                 );
                 assert_eq!(model.all_roster_share_sender_count, model.participant_count);
                 assert!(

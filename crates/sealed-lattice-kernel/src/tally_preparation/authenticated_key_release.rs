@@ -1,5 +1,7 @@
 use subtle::ConstantTimeEq;
 
+use crate::foundation::derive_foundation_roster_parameters;
+
 use super::{
     BinaryFieldElement256, TallyPreparationError,
     output_sharing::{
@@ -24,6 +26,25 @@ pub(crate) fn reconstruct_locally_checked_authenticated_key_field(
     published_basis_shares: &[DegreeThreeMaskShare],
     local_share: DegreeThreeMaskShare,
 ) -> Result<BinaryFieldElement256, TallyPreparationError> {
+    let roster_parameters = derive_foundation_roster_parameters(expected_participant_count).ok_or(
+        TallyPreparationError::ParticipantCountOutOfRange {
+            participant_count: expected_participant_count,
+        },
+    )?;
+    if usize::from(roster_parameters.reconstruction_threshold)
+        != DEGREE_THREE_RECONSTRUCTION_THRESHOLD
+    {
+        return Err(
+            TallyPreparationError::AuthenticatedKeyReleaseProfileMismatch {
+                participant_count: expected_participant_count,
+                derived_reconstruction_threshold: roster_parameters.reconstruction_threshold,
+                supported_reconstruction_threshold: u16::try_from(
+                    DEGREE_THREE_RECONSTRUCTION_THRESHOLD,
+                )
+                .map_err(|_| TallyPreparationError::IntegerConversion)?,
+            },
+        );
+    }
     if published_basis_shares.len() != DEGREE_THREE_RECONSTRUCTION_THRESHOLD {
         return Err(
             TallyPreparationError::AuthenticatedKeyReleaseBasisCountMismatch {

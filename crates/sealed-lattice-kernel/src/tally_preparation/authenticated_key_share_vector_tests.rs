@@ -145,7 +145,7 @@ fn completion_descriptor_streams_exact_payload_geometry_and_hash_matched_fields(
     assert_eq!(first_chunk.first_field_index(), 0);
     assert_eq!(first_chunk.field_count(), 32_768);
     assert_eq!(
-        first_chunk.field_share(0).unwrap().value(),
+        first_chunk.field_value(0).unwrap(),
         BinaryFieldElement256::from_canonical_bytes(&[0x53; 32]).unwrap()
     );
     let final_chunk = descriptor
@@ -154,11 +154,11 @@ fn completion_descriptor_streams_exact_payload_geometry_and_hash_matched_fields(
     assert_eq!(final_chunk.first_field_index(), 1_441_792);
     assert_eq!(final_chunk.field_count(), 1_388);
     assert_eq!(
-        final_chunk.field_share(1_387).unwrap().value(),
+        final_chunk.field_value(1_387).unwrap(),
         BinaryFieldElement256::from_canonical_bytes(&[0x64; 32]).unwrap()
     );
     assert_eq!(
-        final_chunk.field_share(1_388),
+        final_chunk.field_value(1_388),
         Err(
             TallyPreparationError::AuthenticatedKeyShareVectorFieldPositionOutOfRange {
                 position_within_chunk: 1_388,
@@ -438,7 +438,7 @@ fn compiler_identity_requires_canonical_lf_source_and_is_exact() {
     let identity = authenticated_key_share_vector_compiler_identity().unwrap();
     assert_eq!(
         to_hex(identity.as_bytes()),
-        "35c67bcb7f2dd8b2181f70b7ad6a8c7c5873627d4bf03be7b021178bc64856543f1ecc2f828a93182eae4d0f7384772588d6d88efe798b53308ec5cfe3469b51"
+        "73972000df4f1a4e560a2bfc8757ca6510529c6d33d587bb8a0aaaf8d1259f7073f29b2dd1c44044783f04610fc4e566423502a95c00c4530052d81b9fdc6f9c"
     );
     assert_eq!(
         compiler_identity_from_source_for_test(b"valid source\n").unwrap(),

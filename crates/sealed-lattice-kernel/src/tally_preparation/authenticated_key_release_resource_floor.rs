@@ -9,6 +9,10 @@ use super::{
         authenticated_key_share_vector_descriptor_canonical_byte_length,
         authenticated_key_share_vector_payload_chunk_preimage_byte_length,
     },
+    authenticated_key_share_vector_manifest::{
+        authenticated_key_share_vector_acknowledgement_canonical_byte_length,
+        authenticated_key_share_vector_manifest_canonical_byte_length,
+    },
     preparation_holder_record_catalog::PreparationHolderRecordInventory,
 };
 
@@ -28,12 +32,14 @@ const SHAKE256_RATE_BYTE_LENGTH: u64 = 136;
 /// conservative route publishes all ten vectors so a public verifier can
 /// check the degree-three codeword directly.
 ///
-/// The descriptor count includes the certificate-free source, predecessor,
-/// sender, geometry, and ordered chunk-digest framing. Both routes still
-/// exclude detached signatures and state certificates, all-ten
-/// acknowledgements, transition indexes, retransmission, checkpoints, and
-/// physical storage amplification. This model is an admission floor, not a
-/// complete protocol ledger.
+/// The quorum-checked route includes certificate-free descriptors, one
+/// source-bound manifest, and all-roster unsigned acknowledgement bodies. It
+/// still excludes detached signatures, signature-key binding, state
+/// certificates, transition indexes, the derived acknowledgement root,
+/// retransmission, checkpoints, and physical storage amplification. The
+/// conservative all-roster route includes only its payloads and descriptors;
+/// its distinct control graph remains unmodeled. This model is an admission
+/// floor, not a complete protocol ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AuthenticatedKeyReleaseResourceFloor {
     pub(crate) participant_count: u64,
@@ -54,6 +60,11 @@ pub(crate) struct AuthenticatedKeyReleaseResourceFloor {
     pub(crate) quorum_checked_share_payload_byte_length: u64,
     pub(crate) quorum_checked_share_descriptor_byte_length: u64,
     pub(crate) quorum_checked_share_payload_and_descriptor_byte_length: u64,
+    pub(crate) quorum_checked_share_manifest_byte_length: u64,
+    pub(crate) acknowledgement_body_byte_length_per_participant: u64,
+    pub(crate) all_roster_acknowledgement_body_byte_length: u64,
+    pub(crate) quorum_checked_share_control_byte_length: u64,
+    pub(crate) quorum_checked_share_payload_and_control_byte_length: u64,
     pub(crate) quorum_checked_additional_byte_length: u64,
     pub(crate) all_roster_share_sender_count: u64,
     pub(crate) all_roster_share_payload_byte_length: u64,
@@ -139,6 +150,43 @@ impl AuthenticatedKeyReleaseResourceFloor {
             quorum_checked_share_payload_byte_length,
             quorum_checked_share_descriptor_byte_length,
         )?;
+        let quorum_checked_share_manifest_byte_length =
+            authenticated_key_share_vector_manifest_canonical_byte_length(
+                circuit.profile().participant_count(),
+                verification_key_field_element_count,
+            )?;
+        let acknowledgement_body_byte_length_per_participant =
+            authenticated_key_share_vector_acknowledgement_canonical_byte_length(
+                circuit.profile().participant_count(),
+                0,
+            )?;
+        let mut all_roster_acknowledgement_body_byte_length = 0_u64;
+        for participant_position in 0..circuit.profile().participant_count() {
+            let acknowledgement_body_byte_length =
+                authenticated_key_share_vector_acknowledgement_canonical_byte_length(
+                    circuit.profile().participant_count(),
+                    participant_position,
+                )?;
+            if acknowledgement_body_byte_length != acknowledgement_body_byte_length_per_participant
+            {
+                return Err(TallyPreparationError::GeometryMismatch);
+            }
+            all_roster_acknowledgement_body_byte_length = checked_add(
+                all_roster_acknowledgement_body_byte_length,
+                acknowledgement_body_byte_length,
+            )?;
+        }
+        let quorum_checked_share_control_byte_length = checked_add(
+            checked_add(
+                quorum_checked_share_descriptor_byte_length,
+                quorum_checked_share_manifest_byte_length,
+            )?,
+            all_roster_acknowledgement_body_byte_length,
+        )?;
+        let quorum_checked_share_payload_and_control_byte_length = checked_add(
+            quorum_checked_share_payload_byte_length,
+            quorum_checked_share_control_byte_length,
+        )?;
         let all_roster_share_payload_byte_length =
             checked_multiply(participant_count, share_vector_byte_length_per_sender)?;
         let all_roster_share_descriptor_byte_length = checked_multiply(
@@ -172,8 +220,13 @@ impl AuthenticatedKeyReleaseResourceFloor {
             quorum_checked_share_payload_byte_length,
             quorum_checked_share_descriptor_byte_length,
             quorum_checked_share_payload_and_descriptor_byte_length,
+            quorum_checked_share_manifest_byte_length,
+            acknowledgement_body_byte_length_per_participant,
+            all_roster_acknowledgement_body_byte_length,
+            quorum_checked_share_control_byte_length,
+            quorum_checked_share_payload_and_control_byte_length,
             quorum_checked_additional_byte_length: checked_subtract(
-                quorum_checked_share_payload_and_descriptor_byte_length,
+                quorum_checked_share_payload_and_control_byte_length,
                 reconstructed_key_byte_length,
             )?,
             all_roster_share_sender_count: participant_count,

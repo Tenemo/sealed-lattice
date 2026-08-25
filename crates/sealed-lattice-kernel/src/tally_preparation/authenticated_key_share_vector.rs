@@ -444,8 +444,6 @@ impl AuthenticatedKeyShareVectorDescriptor {
             return Err(TallyPreparationError::AuthenticatedKeyShareVectorPayloadDigestMismatch);
         }
         Ok(AuthenticatedKeyShareVectorPayloadChunk {
-            sender_position: self.sender_position,
-            participant_count: self.participant_count,
             first_field_index: payload_geometry.first_field_index,
             field_count: payload_geometry.field_count,
             payload,
@@ -455,8 +453,6 @@ impl AuthenticatedKeyShareVectorDescriptor {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct AuthenticatedKeyShareVectorPayloadChunk<'payload> {
-    sender_position: u16,
-    participant_count: u16,
     first_field_index: u64,
     field_count: u64,
     payload: &'payload [u8],
@@ -471,10 +467,10 @@ impl AuthenticatedKeyShareVectorPayloadChunk<'_> {
         self.field_count
     }
 
-    pub(crate) fn field_share(
+    pub(crate) fn field_value(
         &self,
         position_within_chunk: u64,
-    ) -> Result<super::output_sharing::DegreeThreeMaskShare, TallyPreparationError> {
+    ) -> Result<BinaryFieldElement256, TallyPreparationError> {
         if position_within_chunk >= self.field_count {
             return Err(
                 TallyPreparationError::AuthenticatedKeyShareVectorFieldPositionOutOfRange {
@@ -491,17 +487,7 @@ impl AuthenticatedKeyShareVectorPayloadChunk<'_> {
         let end = start
             .checked_add(BinaryFieldElement256::CANONICAL_BYTE_LENGTH)
             .ok_or(TallyPreparationError::ArithmeticOverflow)?;
-        let value = BinaryFieldElement256::from_canonical_bytes(&self.payload[start..end])?;
-        let evaluation_point = super::output_sharing::canonical_evaluation_point(
-            self.participant_count,
-            self.sender_position,
-        )?;
-        super::output_sharing::DegreeThreeMaskShare::new(
-            self.participant_count,
-            self.sender_position,
-            evaluation_point,
-            value,
-        )
+        BinaryFieldElement256::from_canonical_bytes(&self.payload[start..end])
     }
 }
 

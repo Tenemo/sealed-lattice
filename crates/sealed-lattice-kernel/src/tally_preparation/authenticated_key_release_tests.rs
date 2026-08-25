@@ -165,6 +165,38 @@ fn checker_refuses_a_wrong_nonbasis_private_point() {
     );
 }
 
+#[test]
+fn checker_derives_its_supported_threshold_from_the_roster_formula() {
+    let supported_polynomial = polynomial(0xc6, [0x67, 0x89, 0xab]);
+    let supported_shares = supported_polynomial.shares(9).unwrap();
+    assert_eq!(
+        reconstruct_locally_checked_authenticated_key_field(
+            9,
+            &supported_shares[..4],
+            supported_shares[8],
+        )
+        .unwrap(),
+        field(0xc6)
+    );
+
+    let unsupported_polynomial = polynomial(0xd7, [0x78, 0x9a, 0xbc]);
+    let unsupported_shares = unsupported_polynomial.shares(12).unwrap();
+    assert_eq!(
+        reconstruct_locally_checked_authenticated_key_field(
+            12,
+            &unsupported_shares[..4],
+            unsupported_shares[4],
+        ),
+        Err(
+            TallyPreparationError::AuthenticatedKeyReleaseProfileMismatch {
+                participant_count: 12,
+                derived_reconstruction_threshold: 5,
+                supported_reconstruction_threshold: 4,
+            }
+        )
+    );
+}
+
 fn polynomial(secret: u16, coefficients: [u16; 3]) -> DegreeThreeMaskPolynomial {
     DegreeThreeMaskPolynomial::new(field(secret), coefficients.map(field))
 }
