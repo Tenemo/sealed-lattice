@@ -9,6 +9,7 @@ mod adaptive_oracle_repair;
 mod authenticated_opening;
 mod binary_field;
 mod binary_field_multiplication_circuit;
+mod binary_linear_circuit;
 mod binary_ring_packed_mpc_evaluation_floor;
 mod context;
 mod fixed_roster_linear_mpc_communication_floor;
@@ -30,6 +31,8 @@ mod adaptive_oracle_repair_tests;
 mod authenticated_opening_tests;
 #[cfg(test)]
 mod binary_field_multiplication_circuit_tests;
+#[cfg(test)]
+mod binary_linear_circuit_tests;
 #[cfg(test)]
 mod binary_ring_packed_mpc_evaluation_floor_tests;
 #[cfg(test)]

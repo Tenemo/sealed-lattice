@@ -15,10 +15,12 @@ fn tower_interpolation_circuit_has_the_derived_conjunction_geometry() {
     let circuit = compiled_circuit();
 
     assert_eq!(tower_field_multiplication_conjunction_count(), 1_701);
-    assert_eq!(tower_field_multiplication_exclusive_or_count(), 648_034);
+    assert_eq!(tower_field_multiplication_exclusive_or_count(), 198_048);
     assert_eq!(circuit.conjunction_count(), 1_701);
     assert_eq!(circuit.distinct_input_linear_form_count(), 1_701);
-    assert_eq!(circuit.exclusive_or_count(), 648_034);
+    assert_eq!(circuit.exclusive_or_count(), 198_048);
+    assert_eq!(circuit.input_linear_window_width(), 8);
+    assert_eq!(circuit.output_linear_window_width(), 9);
 }
 
 #[test]
@@ -63,7 +65,7 @@ fn tower_interpolation_circuit_matches_the_independent_scalar_field_owner() {
         (descending, ascending),
     ];
     for (left, right) in fixed_cases {
-        assert_eq!(circuit.multiply(left, right), left.multiply(right));
+        assert_eq!(circuit.multiply(left, right).unwrap(), left.multiply(right));
     }
     for (left_position, left) in deterministic_inputs.iter().copied().enumerate() {
         for right in deterministic_inputs
@@ -72,8 +74,8 @@ fn tower_interpolation_circuit_matches_the_independent_scalar_field_owner() {
             .skip(left_position % deterministic_inputs.len())
             .take(5)
         {
-            assert_eq!(circuit.multiply(left, right), left.multiply(right));
-            assert_eq!(circuit.multiply(right, left), right.multiply(left));
+            assert_eq!(circuit.multiply(left, right).unwrap(), left.multiply(right));
+            assert_eq!(circuit.multiply(right, left).unwrap(), right.multiply(left));
         }
     }
 }

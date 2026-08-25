@@ -1,4 +1,7 @@
-use super::{BinaryFieldElement256, TallyPreparationError};
+use super::{
+    BinaryFieldElement256, TallyPreparationError,
+    binary_linear_circuit::CompiledBinaryLinearCircuit,
+};
 
 const CANONICAL_FIELD_BIT_LENGTH: usize =
     BinaryFieldElement256::CANONICAL_BYTE_LENGTH * u8::BITS as usize;
@@ -7,7 +10,8 @@ const TOWER_EXTENSION_DEGREE: usize = CANONICAL_FIELD_BIT_LENGTH / SUBFIELD_BIT_
 const EVALUATION_POINT_COUNT: usize = TOWER_EXTENSION_DEGREE * 2 - 1;
 const SUBFIELD_KARATSUBA_TERM_COUNT: usize = 27;
 const TOWER_FIELD_MULTIPLICATION_CONJUNCTION_COUNT: u64 = 1_701;
-const TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT: u64 = 648_034;
+const DIRECT_TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT: u64 = 648_034;
+const WINDOWED_TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT: u64 = 198_048;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct BinaryLinearMask256 {
@@ -107,6 +111,9 @@ struct CanonicalFieldBilinearTerm {
 pub(crate) struct CompiledTowerFieldMultiplicationCircuit {
     terms: Vec<CanonicalFieldBilinearTerm>,
     distinct_input_masks: Vec<BinaryLinearMask256>,
+    term_input_linear_form_positions: Vec<(usize, usize)>,
+    input_linear_circuit: CompiledBinaryLinearCircuit,
+    output_linear_circuit: CompiledBinaryLinearCircuit,
     exclusive_or_count: u64,
 }
 
@@ -175,10 +182,44 @@ impl CompiledTowerFieldMultiplicationCircuit {
         {
             return Err(TallyPreparationError::GeometryMismatch);
         }
-        let exclusive_or_count =
+        let direct_exclusive_or_count =
             exact_straight_line_exclusive_or_count(&terms, &distinct_input_masks)?;
         if terms.len() as u64 != TOWER_FIELD_MULTIPLICATION_CONJUNCTION_COUNT
-            || exclusive_or_count != TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT
+            || direct_exclusive_or_count != DIRECT_TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT
+        {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let term_input_linear_form_positions = terms
+            .iter()
+            .map(|term| {
+                Ok((
+                    distinct_input_masks
+                        .binary_search(&term.left_mask)
+                        .map_err(|_| TallyPreparationError::GeometryMismatch)?,
+                    distinct_input_masks
+                        .binary_search(&term.right_mask)
+                        .map_err(|_| TallyPreparationError::GeometryMismatch)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, TallyPreparationError>>()?;
+        let input_targets = distinct_input_masks
+            .iter()
+            .copied()
+            .map(|input_mask| binary_target(input_mask, CANONICAL_FIELD_BIT_LENGTH))
+            .collect::<Result<Vec<_>, _>>()?;
+        let input_linear_circuit = CompiledBinaryLinearCircuit::compile_smallest_windowed(
+            &input_targets,
+            CANONICAL_FIELD_BIT_LENGTH,
+        )?;
+        let output_targets = output_targets(&terms)?;
+        let output_linear_circuit =
+            CompiledBinaryLinearCircuit::compile_smallest_windowed(&output_targets, terms.len())?;
+        let exclusive_or_count = checked_add(
+            checked_multiply(input_linear_circuit.operation_count(), 2)?,
+            output_linear_circuit.operation_count(),
+        )?;
+        if exclusive_or_count != WINDOWED_TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT
+            || exclusive_or_count >= direct_exclusive_or_count
         {
             return Err(TallyPreparationError::GeometryMismatch);
         }
@@ -186,6 +227,9 @@ impl CompiledTowerFieldMultiplicationCircuit {
         Ok(Self {
             terms,
             distinct_input_masks,
+            term_input_linear_form_positions,
+            input_linear_circuit,
+            output_linear_circuit,
             exclusive_or_count,
         })
     }
@@ -202,20 +246,45 @@ impl CompiledTowerFieldMultiplicationCircuit {
         self.distinct_input_masks.len() as u64
     }
 
+    pub(crate) fn input_linear_window_width(&self) -> u64 {
+        self.input_linear_circuit.window_width()
+    }
+
+    pub(crate) fn output_linear_window_width(&self) -> u64 {
+        self.output_linear_circuit.window_width()
+    }
+
     pub(crate) fn multiply(
         &self,
         left: BinaryFieldElement256,
         right: BinaryFieldElement256,
-    ) -> BinaryFieldElement256 {
-        self.terms
+    ) -> Result<BinaryFieldElement256, TallyPreparationError> {
+        let left_linear_forms = self.input_linear_circuit.evaluate(&canonical_bits(left))?;
+        let right_linear_forms = self.input_linear_circuit.evaluate(&canonical_bits(right))?;
+        let conjunction_values = self
+            .term_input_linear_form_positions
             .iter()
-            .fold(BinaryFieldElement256::ZERO, |product, term| {
-                if term.left_mask.parity(left) && term.right_mask.parity(right) {
-                    product.add(term.output)
-                } else {
-                    product
-                }
+            .map(|(left_position, right_position)| {
+                Ok(*left_linear_forms
+                    .get(*left_position)
+                    .ok_or(TallyPreparationError::GeometryMismatch)?
+                    & *right_linear_forms
+                        .get(*right_position)
+                        .ok_or(TallyPreparationError::GeometryMismatch)?)
             })
+            .collect::<Result<Vec<_>, TallyPreparationError>>()?;
+        let output_bits = self.output_linear_circuit.evaluate(&conjunction_values)?;
+        if output_bits.len() != CANONICAL_FIELD_BIT_LENGTH {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let mut output_bytes = [0_u8; BinaryFieldElement256::CANONICAL_BYTE_LENGTH];
+        for (output_bit_position, output_bit) in output_bits.iter().copied().enumerate() {
+            if output_bit {
+                output_bytes[output_bit_position / u8::BITS as usize] |=
+                    1_u8 << (output_bit_position % u8::BITS as usize);
+            }
+        }
+        BinaryFieldElement256::from_canonical_bytes(&output_bytes)
     }
 }
 
@@ -224,7 +293,7 @@ pub(crate) fn tower_field_multiplication_conjunction_count() -> u64 {
 }
 
 pub(crate) fn tower_field_multiplication_exclusive_or_count() -> u64 {
-    TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT
+    WINDOWED_TOWER_FIELD_MULTIPLICATION_EXCLUSIVE_OR_COUNT
 }
 
 fn find_subfield_generator() -> Result<BinaryFieldElement256, TallyPreparationError> {
@@ -654,6 +723,43 @@ fn distinct_input_masks(terms: &[CanonicalFieldBilinearTerm]) -> Vec<BinaryLinea
     masks.sort_unstable();
     masks.dedup();
     masks
+}
+
+fn binary_target(
+    mask: BinaryLinearMask256,
+    bit_length: usize,
+) -> Result<Vec<bool>, TallyPreparationError> {
+    if bit_length > CANONICAL_FIELD_BIT_LENGTH {
+        return Err(TallyPreparationError::GeometryMismatch);
+    }
+    (0..bit_length)
+        .map(|bit_position| mask.bit(bit_position))
+        .collect()
+}
+
+fn output_targets(
+    terms: &[CanonicalFieldBilinearTerm],
+) -> Result<Vec<Vec<bool>>, TallyPreparationError> {
+    let mut targets = vec![vec![false; terms.len()]; CANONICAL_FIELD_BIT_LENGTH];
+    for (term_position, term) in terms.iter().enumerate() {
+        let output_mask = BinaryLinearMask256::from_field_element(term.output);
+        for (output_bit_position, target) in targets.iter_mut().enumerate() {
+            target[term_position] = output_mask.bit(output_bit_position)?;
+        }
+    }
+    Ok(targets)
+}
+
+fn canonical_bits(element: BinaryFieldElement256) -> Vec<bool> {
+    let canonical_bytes = element.canonical_bytes();
+    (0..CANONICAL_FIELD_BIT_LENGTH)
+        .map(|bit_position| {
+            (canonical_bytes[bit_position / u8::BITS as usize]
+                >> (bit_position % u8::BITS as usize))
+                & 1_u8
+                == 1_u8
+        })
+        .collect()
 }
 
 fn exact_straight_line_exclusive_or_count(
