@@ -29,6 +29,10 @@ mod random_state;
 mod random_tape;
 mod replicated_key_ceremony;
 mod replicated_key_ceremony_resource_model;
+mod replicated_random_bit_catalog;
+mod replicated_random_bit_resource_model;
+mod replicated_random_bit_sharing;
+mod replicated_random_bit_stream;
 mod replicated_random_sharing;
 mod replicated_sharing_field_stream;
 mod replicated_sharing_simulator_basis;
@@ -73,6 +77,10 @@ mod randomness_tests;
 mod replicated_key_ceremony_resource_model_tests;
 #[cfg(test)]
 mod replicated_key_ceremony_tests;
+#[cfg(test)]
+mod replicated_random_bit_resource_model_tests;
+#[cfg(test)]
+mod replicated_random_bit_tests;
 #[cfg(test)]
 mod replicated_random_sharing_tests;
 #[cfg(test)]
@@ -173,6 +181,29 @@ pub(crate) enum TallyPreparationError {
     ReplicatedSharingFieldPositionOutOfRange {
         position_within_chunk: u64,
         field_count: u64,
+    },
+    ReplicatedRandomBitCountZero,
+    ReplicatedRandomBitChunkOutOfRange {
+        chunk_index: u64,
+        chunk_count: u64,
+    },
+    ReplicatedRandomBitPositionOutOfRange {
+        position_within_chunk: u64,
+        bit_count: u64,
+    },
+    ReplicatedRandomBitIndexOutOfRange {
+        bit_index: u64,
+        total_bit_count: u64,
+    },
+    ReplicatedRandomBitCoordinateMismatch,
+    ReplicatedRandomBitKeyPurposeMismatch,
+    ReplicatedRandomBitComponentCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    ReplicatedRandomBitComponentNonCanonical {
+        component_position: usize,
+        value: u8,
     },
     AffineLabelPointBitMismatch,
     AffineLabelCommitmentsEqual {
@@ -426,6 +457,47 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "replicated-sharing field position {position_within_chunk} is outside chunk field count {field_count}"
+            ),
+            Self::ReplicatedRandomBitCountZero => {
+                formatter.write_str("replicated random-bit stream must contain a bit")
+            }
+            Self::ReplicatedRandomBitChunkOutOfRange {
+                chunk_index,
+                chunk_count,
+            } => write!(
+                formatter,
+                "replicated random-bit chunk {chunk_index} is outside chunk count {chunk_count}"
+            ),
+            Self::ReplicatedRandomBitPositionOutOfRange {
+                position_within_chunk,
+                bit_count,
+            } => write!(
+                formatter,
+                "replicated random-bit position {position_within_chunk} is outside chunk bit count {bit_count}"
+            ),
+            Self::ReplicatedRandomBitIndexOutOfRange {
+                bit_index,
+                total_bit_count,
+            } => write!(
+                formatter,
+                "replicated random-bit index {bit_index} is outside catalog bit count {total_bit_count}"
+            ),
+            Self::ReplicatedRandomBitCoordinateMismatch => {
+                formatter.write_str("replicated random-bit coordinate is outside its catalog")
+            }
+            Self::ReplicatedRandomBitKeyPurposeMismatch => {
+                formatter.write_str("replicated random-bit stream requires a random-sharing key")
+            }
+            Self::ReplicatedRandomBitComponentCountMismatch { expected, actual } => write!(
+                formatter,
+                "replicated random-bit share received {actual} subset components; expected {expected}"
+            ),
+            Self::ReplicatedRandomBitComponentNonCanonical {
+                component_position,
+                value,
+            } => write!(
+                formatter,
+                "replicated random-bit component {component_position} has non-bit value {value}"
             ),
             Self::AffineLabelPointBitMismatch => formatter
                 .write_str("affine label alternatives must have canonical zero and one point bits"),
