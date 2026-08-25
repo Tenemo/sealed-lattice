@@ -37,6 +37,7 @@ mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
 mod random_state;
 mod random_tape;
+mod replicated_beaver_opening;
 mod replicated_key_ceremony;
 mod replicated_key_ceremony_resource_model;
 mod replicated_random_bit_catalog;
@@ -103,6 +104,8 @@ mod preparation_holder_record_catalog_tests;
 mod preparation_multiplication_catalog_tests;
 #[cfg(test)]
 mod randomness_tests;
+#[cfg(test)]
+mod replicated_beaver_opening_tests;
 #[cfg(test)]
 mod replicated_key_ceremony_resource_model_tests;
 #[cfg(test)]
