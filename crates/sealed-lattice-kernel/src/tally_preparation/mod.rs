@@ -8,6 +8,7 @@
 mod adaptive_oracle_repair;
 mod amortized_binary_mpc_communication_floor;
 mod authenticated_opening;
+mod authenticated_key_release;
 mod authenticated_key_release_resource_floor;
 mod binary_field;
 mod binary_field_multiplication_circuit;
@@ -47,6 +48,8 @@ mod adaptive_oracle_repair_tests;
 mod amortized_binary_mpc_communication_floor_tests;
 #[cfg(test)]
 mod authenticated_opening_tests;
+#[cfg(test)]
+mod authenticated_key_release_tests;
 #[cfg(test)]
 mod authenticated_key_release_resource_floor_tests;
 #[cfg(test)]
@@ -309,6 +312,15 @@ pub(crate) enum TallyPreparationError {
     PreparationHolderRecordIndexOutOfRange {
         record_index: u64,
         record_count: u64,
+    },
+    AuthenticatedKeyReleaseBasisCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedKeyReleaseBasisPositionMismatch {
+        basis_position: usize,
+        expected_roster_position: u16,
+        actual_roster_position: u16,
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
@@ -665,6 +677,18 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "preparation holder-record index {record_index} is outside record count {record_count}"
+            ),
+            Self::AuthenticatedKeyReleaseBasisCountMismatch { expected, actual } => write!(
+                formatter,
+                "authenticated-key release received {actual} basis shares; expected {expected}"
+            ),
+            Self::AuthenticatedKeyReleaseBasisPositionMismatch {
+                basis_position,
+                expected_roster_position,
+                actual_roster_position,
+            } => write!(
+                formatter,
+                "authenticated-key release basis position {basis_position} contains roster position {actual_roster_position}; expected {expected_roster_position}"
             ),
             Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
                 "preparation compiler source identity requires canonical UTF-8 with LF line endings",
