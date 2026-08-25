@@ -30,6 +30,7 @@ mod replicated_key_ceremony;
 mod replicated_key_ceremony_resource_model;
 mod replicated_random_sharing;
 mod replicated_sharing_field_stream;
+mod replicated_sharing_simulator_basis;
 mod replicated_sharing_stream_resource_model;
 mod tower_field_multiplication_circuit;
 
@@ -73,6 +74,8 @@ mod replicated_key_ceremony_tests;
 mod replicated_random_sharing_tests;
 #[cfg(test)]
 mod replicated_sharing_field_stream_tests;
+#[cfg(test)]
+mod replicated_sharing_simulator_basis_tests;
 #[cfg(test)]
 mod replicated_sharing_stream_resource_model_tests;
 #[cfg(test)]
