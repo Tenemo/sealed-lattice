@@ -5,12 +5,18 @@ use crate::{
 
 use super::{
     BinaryFieldElement256, TallyPreparationContext, TallyPreparationError,
+    authenticated_key_share_vector::{
+        authenticated_key_share_vector_descriptor_canonical_byte_length,
+        authenticated_key_share_vector_payload_chunk_preimage_byte_length,
+    },
     preparation_holder_record_catalog::PreparationHolderRecordInventory,
 };
 
 const FIELD_ELEMENT_BYTE_LENGTH: u64 = BinaryFieldElement256::CANONICAL_BYTE_LENGTH as u64;
+const HASH512_OUTPUT_BYTE_LENGTH: u64 = 64;
+const SHAKE256_RATE_BYTE_LENGTH: u64 = 136;
 
-/// Payload-only lower bounds for releasing the authenticated-opening keys.
+/// Lower bounds for releasing the authenticated-opening keys.
 ///
 /// A public key vector is the constant term of degree-three Shamir polynomials
 /// generated inside preparation. Counting only those constants omits the
@@ -22,9 +28,12 @@ const FIELD_ELEMENT_BYTE_LENGTH: u64 = BinaryFieldElement256::CANONICAL_BYTE_LEN
 /// conservative route publishes all ten vectors so a public verifier can
 /// check the degree-three codeword directly.
 ///
-/// Both routes exclude coordinates, framing, signatures, roots, state,
-/// retransmission, checkpoints, and physical storage amplification. This
-/// model is an admission floor, not a complete protocol ledger.
+/// The descriptor count includes the certificate-free source, predecessor,
+/// sender, geometry, and ordered chunk-digest framing. Both routes still
+/// exclude detached signatures and state certificates, all-ten
+/// acknowledgements, transition indexes, retransmission, checkpoints, and
+/// physical storage amplification. This model is an admission floor, not a
+/// complete protocol ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AuthenticatedKeyReleaseResourceFloor {
     pub(crate) participant_count: u64,
@@ -35,11 +44,21 @@ pub(crate) struct AuthenticatedKeyReleaseResourceFloor {
     pub(crate) share_vector_byte_length_per_sender: u64,
     pub(crate) share_vector_chunk_count_per_sender: u64,
     pub(crate) final_share_vector_chunk_byte_length: u64,
+    pub(crate) share_vector_descriptor_byte_length_per_sender: u64,
+    pub(crate) payload_chunk_hash_invocation_count_per_sender: u64,
+    pub(crate) payload_chunk_hash_absorbed_byte_length_per_sender: u64,
+    pub(crate) payload_chunk_hash_output_byte_length_per_sender: u64,
+    pub(crate) payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender: u64,
+    pub(crate) maximum_payload_chunk_hash_fixed_keccak_f1600_permutation_count: u64,
     pub(crate) quorum_checked_share_sender_count: u64,
     pub(crate) quorum_checked_share_payload_byte_length: u64,
+    pub(crate) quorum_checked_share_descriptor_byte_length: u64,
+    pub(crate) quorum_checked_share_payload_and_descriptor_byte_length: u64,
     pub(crate) quorum_checked_additional_byte_length: u64,
     pub(crate) all_roster_share_sender_count: u64,
     pub(crate) all_roster_share_payload_byte_length: u64,
+    pub(crate) all_roster_share_descriptor_byte_length: u64,
+    pub(crate) all_roster_share_payload_and_descriptor_byte_length: u64,
     pub(crate) all_roster_additional_byte_length: u64,
 }
 
@@ -77,12 +96,59 @@ impl AuthenticatedKeyReleaseResourceFloor {
             )?)
             .filter(|byte_length| *byte_length > 0)
             .ok_or(TallyPreparationError::GeometryMismatch)?;
+        let share_vector_descriptor_byte_length_per_sender =
+            authenticated_key_share_vector_descriptor_canonical_byte_length(
+                circuit.profile().participant_count(),
+                0,
+                verification_key_field_element_count,
+            )?;
+        let mut payload_chunk_hash_absorbed_byte_length_per_sender = 0_u64;
+        let mut payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender = 0_u64;
+        let mut maximum_payload_chunk_hash_fixed_keccak_f1600_permutation_count = 0_u64;
+        for chunk_index in 0..share_vector_chunk_count_per_sender {
+            let query_byte_length =
+                authenticated_key_share_vector_payload_chunk_preimage_byte_length(
+                    verification_key_field_element_count,
+                    chunk_index,
+                )?;
+            let permutation_count = checked_add(
+                query_byte_length / SHAKE256_RATE_BYTE_LENGTH,
+                checked_ceiling_divide(HASH512_OUTPUT_BYTE_LENGTH, SHAKE256_RATE_BYTE_LENGTH)?,
+            )?;
+            payload_chunk_hash_absorbed_byte_length_per_sender = checked_add(
+                payload_chunk_hash_absorbed_byte_length_per_sender,
+                query_byte_length,
+            )?;
+            payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender = checked_add(
+                payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender,
+                permutation_count,
+            )?;
+            maximum_payload_chunk_hash_fixed_keccak_f1600_permutation_count =
+                maximum_payload_chunk_hash_fixed_keccak_f1600_permutation_count
+                    .max(permutation_count);
+        }
         let quorum_checked_share_payload_byte_length = checked_multiply(
             reconstruction_threshold,
             share_vector_byte_length_per_sender,
         )?;
+        let quorum_checked_share_descriptor_byte_length = checked_multiply(
+            reconstruction_threshold,
+            share_vector_descriptor_byte_length_per_sender,
+        )?;
+        let quorum_checked_share_payload_and_descriptor_byte_length = checked_add(
+            quorum_checked_share_payload_byte_length,
+            quorum_checked_share_descriptor_byte_length,
+        )?;
         let all_roster_share_payload_byte_length =
             checked_multiply(participant_count, share_vector_byte_length_per_sender)?;
+        let all_roster_share_descriptor_byte_length = checked_multiply(
+            participant_count,
+            share_vector_descriptor_byte_length_per_sender,
+        )?;
+        let all_roster_share_payload_and_descriptor_byte_length = checked_add(
+            all_roster_share_payload_byte_length,
+            all_roster_share_descriptor_byte_length,
+        )?;
 
         Ok(Self {
             participant_count,
@@ -93,16 +159,29 @@ impl AuthenticatedKeyReleaseResourceFloor {
             share_vector_byte_length_per_sender,
             share_vector_chunk_count_per_sender,
             final_share_vector_chunk_byte_length,
+            share_vector_descriptor_byte_length_per_sender,
+            payload_chunk_hash_invocation_count_per_sender: share_vector_chunk_count_per_sender,
+            payload_chunk_hash_absorbed_byte_length_per_sender,
+            payload_chunk_hash_output_byte_length_per_sender: checked_multiply(
+                share_vector_chunk_count_per_sender,
+                HASH512_OUTPUT_BYTE_LENGTH,
+            )?,
+            payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender,
+            maximum_payload_chunk_hash_fixed_keccak_f1600_permutation_count,
             quorum_checked_share_sender_count: reconstruction_threshold,
             quorum_checked_share_payload_byte_length,
+            quorum_checked_share_descriptor_byte_length,
+            quorum_checked_share_payload_and_descriptor_byte_length,
             quorum_checked_additional_byte_length: checked_subtract(
-                quorum_checked_share_payload_byte_length,
+                quorum_checked_share_payload_and_descriptor_byte_length,
                 reconstructed_key_byte_length,
             )?,
             all_roster_share_sender_count: participant_count,
             all_roster_share_payload_byte_length,
+            all_roster_share_descriptor_byte_length,
+            all_roster_share_payload_and_descriptor_byte_length,
             all_roster_additional_byte_length: checked_subtract(
-                all_roster_share_payload_byte_length,
+                all_roster_share_payload_and_descriptor_byte_length,
                 reconstructed_key_byte_length,
             )?,
         })
@@ -111,6 +190,11 @@ impl AuthenticatedKeyReleaseResourceFloor {
 
 fn checked_multiply(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
     left.checked_mul(right)
+        .ok_or(TallyPreparationError::ArithmeticOverflow)
+}
+
+fn checked_add(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
+    left.checked_add(right)
         .ok_or(TallyPreparationError::ArithmeticOverflow)
 }
 

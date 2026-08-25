@@ -10,6 +10,7 @@ mod amortized_binary_mpc_communication_floor;
 mod authenticated_opening;
 mod authenticated_key_release;
 mod authenticated_key_release_resource_floor;
+mod authenticated_key_share_vector;
 mod binary_field;
 mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
@@ -52,6 +53,8 @@ mod authenticated_opening_tests;
 mod authenticated_key_release_tests;
 #[cfg(test)]
 mod authenticated_key_release_resource_floor_tests;
+#[cfg(test)]
+mod authenticated_key_share_vector_tests;
 #[cfg(test)]
 mod binary_field_multiplication_circuit_tests;
 #[cfg(test)]
@@ -321,6 +324,43 @@ pub(crate) enum TallyPreparationError {
         basis_position: usize,
         expected_roster_position: u16,
         actual_roster_position: u16,
+    },
+    AuthenticatedKeyShareVectorArtifactMagicMismatch,
+    UnsupportedAuthenticatedKeyShareVectorArtifactVersion {
+        version: u64,
+    },
+    TrailingAuthenticatedKeyShareVectorArtifactBytes,
+    AuthenticatedKeyShareVectorHashByteLength {
+        field: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    AuthenticatedKeyShareVectorDescriptorByteLengthOutOfRange {
+        actual: usize,
+        maximum: usize,
+    },
+    AuthenticatedKeyShareVectorSourceMismatch,
+    AuthenticatedKeyShareVectorSenderPositionOutOfRange {
+        sender_position: u16,
+        participant_count: u16,
+    },
+    AuthenticatedKeyShareVectorGeometryMismatch,
+    AuthenticatedKeyShareVectorChunkOutOfRange {
+        chunk_index: u64,
+        chunk_count: u64,
+    },
+    AuthenticatedKeyShareVectorPayloadByteLengthMismatch {
+        expected: u64,
+        actual: u64,
+    },
+    AuthenticatedKeyShareVectorPayloadDigestMismatch,
+    AuthenticatedKeyShareVectorIncomplete {
+        expected_chunk_count: u64,
+        actual_chunk_count: u64,
+    },
+    AuthenticatedKeyShareVectorFieldPositionOutOfRange {
+        position_within_chunk: u64,
+        field_count: u64,
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
@@ -689,6 +729,69 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "authenticated-key release basis position {basis_position} contains roster position {actual_roster_position}; expected {expected_roster_position}"
+            ),
+            Self::AuthenticatedKeyShareVectorArtifactMagicMismatch => formatter
+                .write_str("authenticated-key share-vector descriptor magic does not match"),
+            Self::UnsupportedAuthenticatedKeyShareVectorArtifactVersion { version } => write!(
+                formatter,
+                "unsupported authenticated-key share-vector artifact version {version}"
+            ),
+            Self::TrailingAuthenticatedKeyShareVectorArtifactBytes => formatter
+                .write_str("authenticated-key share-vector descriptor has trailing bytes"),
+            Self::AuthenticatedKeyShareVectorHashByteLength {
+                field,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector {field} has {actual} bytes; expected {expected}"
+            ),
+            Self::AuthenticatedKeyShareVectorDescriptorByteLengthOutOfRange {
+                actual,
+                maximum,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector descriptor has {actual} bytes; maximum is {maximum}"
+            ),
+            Self::AuthenticatedKeyShareVectorSourceMismatch => formatter
+                .write_str("authenticated-key share-vector source binding does not match"),
+            Self::AuthenticatedKeyShareVectorSenderPositionOutOfRange {
+                sender_position,
+                participant_count,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector sender {sender_position} is outside participant count {participant_count}"
+            ),
+            Self::AuthenticatedKeyShareVectorGeometryMismatch => formatter
+                .write_str("authenticated-key share-vector geometry does not match"),
+            Self::AuthenticatedKeyShareVectorChunkOutOfRange {
+                chunk_index,
+                chunk_count,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector chunk {chunk_index} is outside chunk count {chunk_count}"
+            ),
+            Self::AuthenticatedKeyShareVectorPayloadByteLengthMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "authenticated-key share-vector payload has {actual} bytes; expected {expected}"
+                )
+            }
+            Self::AuthenticatedKeyShareVectorPayloadDigestMismatch => formatter
+                .write_str("authenticated-key share-vector payload digest does not match"),
+            Self::AuthenticatedKeyShareVectorIncomplete {
+                expected_chunk_count,
+                actual_chunk_count,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector has {actual_chunk_count} payload chunks; expected {expected_chunk_count}"
+            ),
+            Self::AuthenticatedKeyShareVectorFieldPositionOutOfRange {
+                position_within_chunk,
+                field_count,
+            } => write!(
+                formatter,
+                "authenticated-key share-vector field position {position_within_chunk} is outside chunk field count {field_count}"
             ),
             Self::NonCanonicalPreparationSourceEncoding => formatter.write_str(
                 "preparation compiler source identity requires canonical UTF-8 with LF line endings",

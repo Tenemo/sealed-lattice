@@ -32,12 +32,22 @@ fn completion_key_release_floor_corrects_the_reconstructed_key_undercount() {
             share_vector_byte_length_per_sender: 46_181_760,
             share_vector_chunk_count_per_sender: 45,
             final_share_vector_chunk_byte_length: 44_416,
+            share_vector_descriptor_byte_length_per_sender: 3_261,
+            payload_chunk_hash_invocation_count_per_sender: 45,
+            payload_chunk_hash_absorbed_byte_length_per_sender: 46_200_030,
+            payload_chunk_hash_output_byte_length_per_sender: 2_880,
+            payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender: 339_746,
+            maximum_payload_chunk_hash_fixed_keccak_f1600_permutation_count: 7_714,
             quorum_checked_share_sender_count: 4,
             quorum_checked_share_payload_byte_length: 184_727_040,
-            quorum_checked_additional_byte_length: 138_545_280,
+            quorum_checked_share_descriptor_byte_length: 13_044,
+            quorum_checked_share_payload_and_descriptor_byte_length: 184_740_084,
+            quorum_checked_additional_byte_length: 138_558_324,
             all_roster_share_sender_count: 10,
             all_roster_share_payload_byte_length: 461_817_600,
-            all_roster_additional_byte_length: 415_635_840,
+            all_roster_share_descriptor_byte_length: 32_610,
+            all_roster_share_payload_and_descriptor_byte_length: 461_850_210,
+            all_roster_additional_byte_length: 415_668_450,
         }
     );
 }
@@ -65,9 +75,72 @@ fn independent_completion_derivation_matches_the_production_floor() {
         model.quorum_checked_share_payload_byte_length,
         model.reconstruction_threshold * model.reconstructed_key_byte_length
     );
+    let descriptor_magic_byte_length =
+        b"sealed-lattice/authenticated-key-share-vector-descriptor".len() as u64;
+    let framed_hash_byte_length = 1 + 64;
+    let independent_descriptor_byte_length = varuint_byte_length(descriptor_magic_byte_length)
+        + descriptor_magic_byte_length
+        + varuint_byte_length(1)
+        + 4 * framed_hash_byte_length
+        + varuint_byte_length(model.participant_count)
+        + varuint_byte_length(0)
+        + varuint_byte_length(model.verification_key_field_element_count)
+        + varuint_byte_length(FIELD_ELEMENT_BYTE_LENGTH)
+        + varuint_byte_length(FOUNDATION_PROFILE.stream_chunk_byte_length as u64)
+        + varuint_byte_length(model.share_vector_byte_length_per_sender)
+        + varuint_byte_length(model.share_vector_chunk_count_per_sender)
+        + varuint_byte_length(model.final_share_vector_chunk_byte_length)
+        + varuint_byte_length(model.share_vector_chunk_count_per_sender)
+        + model.share_vector_chunk_count_per_sender * framed_hash_byte_length;
+    assert_eq!(
+        independent_descriptor_byte_length,
+        model.share_vector_descriptor_byte_length_per_sender
+    );
+    let hash_preimage_fixed_byte_length = 19
+        + framed_byte_length(62)
+        + varuint_byte_length(13)
+        + 4 * framed_hash_byte_length
+        + 2 * framed_byte_length(2)
+        + 6 * framed_byte_length(8);
+    let complete_chunk_query_byte_length = hash_preimage_fixed_byte_length
+        + framed_byte_length(FOUNDATION_PROFILE.stream_chunk_byte_length as u64);
+    let final_chunk_query_byte_length = hash_preimage_fixed_byte_length
+        + framed_byte_length(model.final_share_vector_chunk_byte_length);
+    assert_eq!(
+        model.payload_chunk_hash_absorbed_byte_length_per_sender,
+        (model.share_vector_chunk_count_per_sender - 1) * complete_chunk_query_byte_length
+            + final_chunk_query_byte_length
+    );
+    assert_eq!(
+        model.payload_chunk_hash_output_byte_length_per_sender,
+        model.payload_chunk_hash_invocation_count_per_sender * 64
+    );
+    assert_eq!(
+        model.payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender,
+        (model.share_vector_chunk_count_per_sender - 1)
+            * (complete_chunk_query_byte_length / 136 + 1)
+            + (final_chunk_query_byte_length / 136 + 1)
+    );
+    assert_eq!(
+        model.quorum_checked_share_descriptor_byte_length,
+        model.reconstruction_threshold * independent_descriptor_byte_length
+    );
+    assert_eq!(
+        model.quorum_checked_share_payload_and_descriptor_byte_length,
+        model.quorum_checked_share_payload_byte_length
+            + model.quorum_checked_share_descriptor_byte_length
+    );
     assert_eq!(
         model.all_roster_share_payload_byte_length,
         model.participant_count * model.reconstructed_key_byte_length
+    );
+    assert_eq!(
+        model.all_roster_share_descriptor_byte_length,
+        model.participant_count * independent_descriptor_byte_length
+    );
+    assert_eq!(
+        model.all_roster_share_payload_and_descriptor_byte_length,
+        model.all_roster_share_payload_byte_length + model.all_roster_share_descriptor_byte_length
     );
 }
 
@@ -112,6 +185,10 @@ fn every_admitted_shape_derives_thresholds_and_key_widths_from_canonical_owners(
                     model.reconstruction_threshold
                 );
                 assert_eq!(model.all_roster_share_sender_count, model.participant_count);
+                assert!(
+                    model.share_vector_descriptor_byte_length_per_sender
+                        <= u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length).unwrap()
+                );
                 assert!(model.final_share_vector_chunk_byte_length > 0);
                 assert!(
                     model.final_share_vector_chunk_byte_length
@@ -120,6 +197,19 @@ fn every_admitted_shape_derives_thresholds_and_key_widths_from_canonical_owners(
             }
         }
     }
+}
+
+fn varuint_byte_length(mut value: u64) -> u64 {
+    let mut byte_length = 1_u64;
+    while value >= 128 {
+        value >>= 7;
+        byte_length += 1;
+    }
+    byte_length
+}
+
+fn framed_byte_length(payload_byte_length: u64) -> u64 {
+    varuint_byte_length(payload_byte_length) + payload_byte_length
 }
 
 fn context(marker: u8, circuit: &CompiledTallyCircuit) -> TallyPreparationContext {
