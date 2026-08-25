@@ -85,7 +85,10 @@ for (const diagnosticDirectoryPath of [
     }
 }
 
-const browserOptimizedDependencies = ['@noble/hashes/utils.js'] as const;
+const browserOptimizedDependencies = [
+    '@noble/hashes/sha3.js',
+    '@noble/hashes/utils.js',
+] as const;
 
 const rootPrivateAliases = [
     {

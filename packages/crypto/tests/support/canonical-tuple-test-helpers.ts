@@ -3,7 +3,9 @@ import { hashCanonicalCarrierFixtureFrame } from '#packages/crypto/tests/support
 const canonicalTupleVersion = 1;
 const textEncoder = new TextEncoder();
 
-const concatenateBytes = (...byteArrays: readonly Uint8Array[]): Uint8Array => {
+export const concatenateBytes = (
+    ...byteArrays: readonly Uint8Array[]
+): Uint8Array => {
     const byteLength = byteArrays.reduce(
         (totalByteLength, bytes) => totalByteLength + bytes.byteLength,
         0,
@@ -17,22 +19,28 @@ const concatenateBytes = (...byteArrays: readonly Uint8Array[]): Uint8Array => {
     return result;
 };
 
-const unsigned16LittleEndian = (value: number): Uint8Array => {
+export const unsigned16LittleEndian = (value: number): Uint8Array => {
     const bytes = new Uint8Array(2);
     new DataView(bytes.buffer).setUint16(0, value, true);
     return bytes;
 };
 
-const unsigned32LittleEndian = (value: number): Uint8Array => {
+export const unsigned32LittleEndian = (value: number): Uint8Array => {
     const bytes = new Uint8Array(4);
     new DataView(bytes.buffer).setUint32(0, value, true);
+    return bytes;
+};
+
+const unsigned64LittleEndian = (value: bigint): Uint8Array => {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, value, true);
     return bytes;
 };
 
 const variableValue = (value: Uint8Array): Uint8Array =>
     concatenateBytes(unsigned32LittleEndian(value.byteLength), value);
 
-const canonicalItem = (
+export const canonicalItem = (
     itemType: number,
     canonicalValue: Uint8Array,
 ): Uint8Array =>
@@ -42,7 +50,7 @@ const canonicalItem = (
         canonicalValue,
     );
 
-const canonicalTuple = (
+export const canonicalTuple = (
     schemaIdentifier: number,
     ...items: readonly Uint8Array[]
 ): Uint8Array =>
@@ -53,7 +61,7 @@ const canonicalTuple = (
         ...items,
     );
 
-const asciiItem = (value: string): Uint8Array =>
+export const asciiItem = (value: string): Uint8Array =>
     canonicalItem(0x02, variableValue(textEncoder.encode(value)));
 
 const unsigned16Item = (value: number): Uint8Array =>
@@ -64,6 +72,12 @@ export const variableBytesItem = (value: Uint8Array): Uint8Array =>
 
 export const fixedBytesItem = (value: Uint8Array): Uint8Array =>
     canonicalItem(0x01, value);
+
+export const unsigned64Item = (value: bigint): Uint8Array =>
+    canonicalItem(0x05, unsigned64LittleEndian(value));
+
+export const hashItem = (value: Uint8Array): Uint8Array =>
+    canonicalItem(0x06, value);
 
 export const foundationHash512 = (
     domain: string,

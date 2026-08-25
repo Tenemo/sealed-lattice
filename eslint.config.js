@@ -48,6 +48,7 @@ const packageSourceImportPatterns = [
     {
         group: [
             '@sealed-lattice/*/*',
+            '!@sealed-lattice/crypto/canonical-json',
             '!@sealed-lattice/wasm/published-sdk',
             'sealed-lattice/*',
         ],

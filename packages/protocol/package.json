@@ -20,6 +20,8 @@
     "build": "del-cli dist && tsc --project tsconfig.json"
   },
   "dependencies": {
+    "@noble/hashes": "2.2.0",
+    "@sealed-lattice/crypto": "workspace:*",
     "@sealed-lattice/types": "workspace:*",
     "@sealed-lattice/wasm": "workspace:*"
   },
