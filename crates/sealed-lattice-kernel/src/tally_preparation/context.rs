@@ -49,6 +49,10 @@ impl TallyPreparationContext {
         self.participant_count
     }
 
+    pub(crate) const fn roster_hash(self) -> Hash512 {
+        self.roster_hash
+    }
+
     pub(crate) fn is_bound_to_circuit(
         self,
         circuit: &CompiledTallyCircuit,

@@ -22,6 +22,7 @@ const TRIPLE_REDUCTION_OPENING_COORDINATE_IDENTITY_DOMAIN: &str =
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TripleReductionOpeningCoordinate {
     identity: Hash512,
+    context_identity: Hash512,
     participant_count: u16,
     maximum_degree: usize,
 }
@@ -74,6 +75,7 @@ impl TripleReductionOpeningCoordinate {
         ));
         Ok(Self {
             identity,
+            context_identity: context.identity(),
             participant_count,
             maximum_degree,
         })
@@ -81,6 +83,10 @@ impl TripleReductionOpeningCoordinate {
 
     pub(crate) const fn identity(self) -> Hash512 {
         self.identity
+    }
+
+    pub(crate) const fn context_identity(self) -> Hash512 {
+        self.context_identity
     }
 
     pub(crate) const fn participant_count(self) -> u16 {
@@ -100,6 +106,7 @@ impl TripleReductionOpeningCoordinate {
 /// establish that source correspondence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TripleReductionOpeningSubmission {
+    source_record_identity: Option<Hash512>,
     coordinate_identity: Hash512,
     participant_count: u16,
     roster_position: u16,
@@ -114,6 +121,7 @@ impl TripleReductionOpeningSubmission {
         value: BinaryFieldElement256,
     ) -> Result<Self, TripleReductionOpeningError> {
         Ok(Self {
+            source_record_identity: None,
             coordinate_identity: coordinate.identity,
             participant_count: coordinate.participant_count,
             roster_position,
@@ -133,6 +141,25 @@ impl TripleReductionOpeningSubmission {
         value: BinaryFieldElement256,
     ) -> Self {
         Self {
+            source_record_identity: None,
+            coordinate_identity,
+            participant_count,
+            roster_position,
+            evaluation_point,
+            value,
+        }
+    }
+
+    pub(in crate::tally_preparation) const fn from_verified_fields(
+        source_record_identity: Hash512,
+        coordinate_identity: Hash512,
+        participant_count: u16,
+        roster_position: u16,
+        evaluation_point: BinaryFieldElement256,
+        value: BinaryFieldElement256,
+    ) -> Self {
+        Self {
+            source_record_identity: Some(source_record_identity),
             coordinate_identity,
             participant_count,
             roster_position,
