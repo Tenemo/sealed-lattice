@@ -13,6 +13,7 @@ mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
 mod binary_ring_packed_mpc_evaluation_floor;
 mod context;
+mod degree_three_opening_decoder;
 mod fixed_roster_beaver_mpc_resource_floor;
 mod fixed_roster_linear_mpc_communication_floor;
 mod garbled_resource_model;
@@ -44,6 +45,8 @@ mod binary_field_multiplication_circuit_tests;
 mod binary_linear_circuit_tests;
 #[cfg(test)]
 mod binary_ring_packed_mpc_evaluation_floor_tests;
+#[cfg(test)]
+mod degree_three_opening_decoder_tests;
 #[cfg(test)]
 mod fixed_roster_beaver_mpc_resource_floor_tests;
 #[cfg(test)]
@@ -234,6 +237,13 @@ pub(crate) enum TallyPreparationError {
     },
     DuplicateSharePosition {
         roster_position: u16,
+    },
+    DegreeThreeOpeningProfileMismatch {
+        participant_count: u16,
+        reconstruction_threshold: usize,
+    },
+    DegreeThreeOpeningDecodingFailure {
+        maximum_inconsistent_share_count: usize,
     },
     InconsistentShare {
         roster_position: u16,
@@ -508,6 +518,19 @@ impl fmt::Display for TallyPreparationError {
             Self::DuplicateSharePosition { roster_position } => write!(
                 formatter,
                 "mask shares repeat roster position {roster_position}"
+            ),
+            Self::DegreeThreeOpeningProfileMismatch {
+                participant_count,
+                reconstruction_threshold,
+            } => write!(
+                formatter,
+                "participant count {participant_count} has reconstruction threshold {reconstruction_threshold} and cannot uniquely correct its active-fault bound for a degree-three opening"
+            ),
+            Self::DegreeThreeOpeningDecodingFailure {
+                maximum_inconsistent_share_count,
+            } => write!(
+                formatter,
+                "degree-three opening does not have a polynomial within {maximum_inconsistent_share_count} inconsistent shares"
             ),
             Self::InconsistentShare { roster_position } => write!(
                 formatter,

@@ -316,7 +316,7 @@ impl LagrangeInterpolationBasis {
     }
 }
 
-fn batch_invert_four(
+pub(super) fn batch_invert_four(
     values: [BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD],
 ) -> Result<[BinaryFieldElement256; DEGREE_THREE_RECONSTRUCTION_THRESHOLD], TallyPreparationError> {
     let mut prefix_products = [BinaryFieldElement256::ONE; DEGREE_THREE_RECONSTRUCTION_THRESHOLD];
