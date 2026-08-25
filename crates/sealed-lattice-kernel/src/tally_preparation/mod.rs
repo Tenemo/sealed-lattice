@@ -13,6 +13,7 @@ mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
 mod binary_ring_packed_mpc_evaluation_floor;
 mod context;
+mod fixed_roster_beaver_mpc_resource_floor;
 mod fixed_roster_linear_mpc_communication_floor;
 mod garbled_resource_model;
 mod garbling;
@@ -39,6 +40,8 @@ mod binary_field_multiplication_circuit_tests;
 mod binary_linear_circuit_tests;
 #[cfg(test)]
 mod binary_ring_packed_mpc_evaluation_floor_tests;
+#[cfg(test)]
+mod fixed_roster_beaver_mpc_resource_floor_tests;
 #[cfg(test)]
 mod fixed_roster_linear_mpc_communication_floor_tests;
 #[cfg(test)]
