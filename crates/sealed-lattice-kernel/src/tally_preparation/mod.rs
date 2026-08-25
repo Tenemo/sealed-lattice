@@ -7,11 +7,17 @@
 
 mod binary_field;
 mod context;
+mod garbled_resource_model;
 mod geometry;
+mod label_encoding;
 mod output_sharing;
 mod random_state;
 mod random_tape;
 
+#[cfg(test)]
+mod garbled_resource_model_tests;
+#[cfg(test)]
+mod label_encoding_tests;
 #[cfg(test)]
 mod randomness_tests;
 #[cfg(test)]
@@ -39,6 +45,27 @@ pub(crate) enum TallyPreparationError {
         expected: usize,
         actual: usize,
     },
+    LabelBodyByteLength {
+        expected: usize,
+        actual: usize,
+    },
+    WireLabelByteLength {
+        expected: usize,
+        actual: usize,
+    },
+    LabelBodyPaddingNonzero,
+    NonCanonicalPointBit {
+        value: u8,
+    },
+    GarblingOutputComponentCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    GarblingOutputByteLength {
+        expected: usize,
+        actual: usize,
+    },
+    GarblingOutputPaddingNonzero,
     ZeroHasNoMultiplicativeInverse,
     ParticipantCountOutOfRange {
         participant_count: u16,
@@ -71,6 +98,11 @@ pub(crate) enum TallyPreparationError {
         version: u64,
     },
     TrailingShareArtifactBytes,
+    LabelShareArtifactMagicMismatch,
+    UnsupportedLabelShareArtifactVersion {
+        version: u64,
+    },
+    TrailingLabelShareArtifactBytes,
     GeometryMismatch,
     ArithmeticOverflow,
     WireIndexOutOfRange {
@@ -111,6 +143,30 @@ impl fmt::Display for TallyPreparationError {
                 formatter,
                 "binary field element has {actual} bytes; expected {expected}"
             ),
+            Self::LabelBodyByteLength { expected, actual } => write!(
+                formatter,
+                "label body has {actual} bytes; expected {expected}"
+            ),
+            Self::WireLabelByteLength { expected, actual } => write!(
+                formatter,
+                "wire label has {actual} bytes; expected {expected}"
+            ),
+            Self::LabelBodyPaddingNonzero => formatter.write_str(
+                "the reconstructed label body has nonzero high padding in its third field limb",
+            ),
+            Self::NonCanonicalPointBit { value } => {
+                write!(formatter, "point bit encoding {value} is not zero or one")
+            }
+            Self::GarblingOutputComponentCountMismatch { expected, actual } => write!(
+                formatter,
+                "garbling output has {actual} label components; expected {expected}"
+            ),
+            Self::GarblingOutputByteLength { expected, actual } => write!(
+                formatter,
+                "garbling output has {actual} bytes; expected {expected}"
+            ),
+            Self::GarblingOutputPaddingNonzero => formatter
+                .write_str("garbling output has nonzero unused high bits in its final byte"),
             Self::ZeroHasNoMultiplicativeInverse => {
                 formatter.write_str("zero has no multiplicative inverse")
             }
@@ -163,6 +219,16 @@ impl fmt::Display for TallyPreparationError {
             ),
             Self::TrailingShareArtifactBytes => {
                 formatter.write_str("degree-three mask share artifact has trailing bytes")
+            }
+            Self::LabelShareArtifactMagicMismatch => {
+                formatter.write_str("degree-three label share artifact magic does not match")
+            }
+            Self::UnsupportedLabelShareArtifactVersion { version } => write!(
+                formatter,
+                "unsupported degree-three label share artifact version {version}"
+            ),
+            Self::TrailingLabelShareArtifactBytes => {
+                formatter.write_str("degree-three label share artifact has trailing bytes")
             }
             Self::GeometryMismatch => formatter
                 .write_str("tally preparation geometry does not match the compiled circuit"),
