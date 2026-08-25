@@ -9,6 +9,7 @@ mod adaptive_oracle_repair;
 mod authenticated_opening;
 mod binary_field;
 mod context;
+mod fixed_roster_linear_mpc_communication_floor;
 mod garbled_resource_model;
 mod garbling;
 mod garbling_alternative_resource_model;
@@ -24,6 +25,8 @@ mod random_tape;
 mod adaptive_oracle_repair_tests;
 #[cfg(test)]
 mod authenticated_opening_tests;
+#[cfg(test)]
+mod fixed_roster_linear_mpc_communication_floor_tests;
 #[cfg(test)]
 mod garbled_resource_model_tests;
 #[cfg(test)]
