@@ -27,7 +27,7 @@ fn completion_profile_reproduces_both_binary_ring_evaluation_floors() {
             residue_field_cardinality: 32,
         }
     );
-    assert_eq!(floor.remote_evaluation_bit_count_per_binary_conjunction, 36);
+    assert_eq!(floor.remote_evaluation_bit_count_per_binary_gate, 36);
     assert_eq!(
         floor.shared_offset,
         BinaryRingPackedMpcCircuitEvaluationFloor {
@@ -44,6 +44,14 @@ fn completion_profile_reproduces_both_binary_ring_evaluation_floors() {
             karatsuba_evaluation_bit_length: 234_537_381_072,
             karatsuba_evaluation_byte_length: 29_317_172_634,
             minimum_maximum_participant_karatsuba_upload_byte_length: 2_931_717_264,
+            tower_field_multiplication_conjunction_count: 1_701,
+            tower_field_multiplication_exclusive_or_count: 648_034,
+            tower_binary_conjunction_count: 1_812_439_852,
+            tower_binary_exclusive_or_count: 627_031_218_060,
+            tower_binary_gate_count: 628_843_657_912,
+            tower_evaluation_bit_length: 22_638_371_684_832,
+            tower_evaluation_byte_length: 2_829_796_460_604,
+            minimum_maximum_participant_tower_upload_byte_length: 282_979_646_061,
             bilinear_field_multiplication_conjunction_floor: 511,
             bilinear_binary_conjunction_floor: 661_007_752,
             bilinear_evaluation_bit_length_floor: 23_796_279_072,
@@ -67,6 +75,14 @@ fn completion_profile_reproduces_both_binary_ring_evaluation_floors() {
             karatsuba_evaluation_bit_length: 305_996_890_032,
             karatsuba_evaluation_byte_length: 38_249_611_254,
             minimum_maximum_participant_karatsuba_upload_byte_length: 3_824_961_126,
+            tower_field_multiplication_conjunction_count: 1_701,
+            tower_field_multiplication_exclusive_or_count: 648_034,
+            tower_binary_conjunction_count: 2_481_143_812,
+            tower_binary_exclusive_or_count: 802_544_746_620,
+            tower_binary_gate_count: 805_025_890_432,
+            tower_evaluation_bit_length: 28_980_932_055_552,
+            tower_evaluation_byte_length: 3_622_616_506_944,
+            minimum_maximum_participant_tower_upload_byte_length: 362_261_650_695,
             bilinear_field_multiplication_conjunction_floor: 511,
             bilinear_binary_conjunction_floor: 1_007_412_112,
             bilinear_evaluation_bit_length_floor: 36_266_836_032,
@@ -97,12 +113,12 @@ fn every_admitted_shape_uses_an_explicit_large_enough_residue_field() {
                 );
                 assert_circuit_floor_is_consistent(
                     floor.shared_offset,
-                    floor.remote_evaluation_bit_count_per_binary_conjunction,
+                    floor.remote_evaluation_bit_count_per_binary_gate,
                     floor.participant_count,
                 );
                 assert_circuit_floor_is_consistent(
                     floor.independent_label,
-                    floor.remote_evaluation_bit_count_per_binary_conjunction,
+                    floor.remote_evaluation_bit_count_per_binary_gate,
                     floor.participant_count,
                 );
                 assert!(
@@ -124,18 +140,18 @@ fn every_admitted_shape_uses_an_explicit_large_enough_residue_field() {
 
 fn assert_circuit_floor_is_consistent(
     circuit_floor: BinaryRingPackedMpcCircuitEvaluationFloor,
-    remote_evaluation_bit_count_per_binary_conjunction: u64,
+    remote_evaluation_bit_count_per_binary_gate: u64,
     participant_count: u64,
 ) {
     assert_eq!(
         circuit_floor.current_scalar_evaluation_bit_length,
         circuit_floor.current_scalar_binary_conjunction_count
-            * remote_evaluation_bit_count_per_binary_conjunction
+            * remote_evaluation_bit_count_per_binary_gate
     );
     assert_eq!(
         circuit_floor.bilinear_evaluation_bit_length_floor,
         circuit_floor.bilinear_binary_conjunction_floor
-            * remote_evaluation_bit_count_per_binary_conjunction
+            * remote_evaluation_bit_count_per_binary_gate
     );
     assert!(
         circuit_floor.current_scalar_evaluation_byte_length
@@ -145,10 +161,23 @@ fn assert_circuit_floor_is_consistent(
         circuit_floor.karatsuba_evaluation_byte_length
             > circuit_floor.bilinear_evaluation_byte_length_floor
     );
+    assert!(
+        circuit_floor.tower_evaluation_byte_length
+            > circuit_floor.current_scalar_evaluation_byte_length
+    );
     assert_eq!(
         circuit_floor.karatsuba_evaluation_bit_length,
         circuit_floor.karatsuba_binary_conjunction_count
-            * remote_evaluation_bit_count_per_binary_conjunction
+            * remote_evaluation_bit_count_per_binary_gate
+    );
+    assert_eq!(
+        circuit_floor.tower_binary_gate_count,
+        circuit_floor.tower_binary_conjunction_count
+            + circuit_floor.tower_binary_exclusive_or_count
+    );
+    assert_eq!(
+        circuit_floor.tower_evaluation_bit_length,
+        circuit_floor.tower_binary_gate_count * remote_evaluation_bit_count_per_binary_gate
     );
     assert_eq!(
         circuit_floor.minimum_maximum_participant_current_scalar_upload_byte_length,
@@ -160,6 +189,12 @@ fn assert_circuit_floor_is_consistent(
         circuit_floor.minimum_maximum_participant_karatsuba_upload_byte_length,
         circuit_floor
             .karatsuba_evaluation_byte_length
+            .div_ceil(participant_count)
+    );
+    assert_eq!(
+        circuit_floor.minimum_maximum_participant_tower_upload_byte_length,
+        circuit_floor
+            .tower_evaluation_byte_length
             .div_ceil(participant_count)
     );
     assert_eq!(

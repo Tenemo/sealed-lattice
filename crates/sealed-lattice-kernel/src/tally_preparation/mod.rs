@@ -22,6 +22,7 @@ mod output_sharing;
 mod preparation_arithmetic_graph;
 mod random_state;
 mod random_tape;
+mod tower_field_multiplication_circuit;
 
 #[cfg(test)]
 mod adaptive_oracle_repair_tests;
@@ -49,6 +50,8 @@ mod preparation_arithmetic_graph_tests;
 mod randomness_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tower_field_multiplication_circuit_tests;
 
 use core::fmt;
 
