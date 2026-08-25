@@ -34,6 +34,18 @@ impl TripleReductionOpeningCoordinate {
         multiplication_ordinal: u64,
     ) -> Result<Self, TripleReductionOpeningError> {
         let catalog = PreparationMultiplicationCatalog::derive(context, circuit)?;
+        Self::derive_from_catalog(context, &catalog, predecessor_root, multiplication_ordinal)
+    }
+
+    pub(crate) fn derive_from_catalog(
+        context: TallyPreparationContext,
+        catalog: &PreparationMultiplicationCatalog,
+        predecessor_root: Hash512,
+        multiplication_ordinal: u64,
+    ) -> Result<Self, TripleReductionOpeningError> {
+        if catalog.context_identity() != context.identity() {
+            return Err(TallyPreparationError::GeometryMismatch.into());
+        }
         catalog.operation(multiplication_ordinal)?;
         let participant_count = context.participant_count();
         let roster_parameters = derive_foundation_roster_parameters(participant_count)

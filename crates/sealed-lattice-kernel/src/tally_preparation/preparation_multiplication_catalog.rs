@@ -711,6 +711,10 @@ impl PreparationMultiplicationCatalog {
         self.identity
     }
 
+    pub(crate) const fn context_identity(&self) -> Hash512 {
+        self.inventory.context_identity
+    }
+
     pub(crate) const fn operation_stream_byte_length(&self) -> u64 {
         self.operation_stream_byte_length
     }

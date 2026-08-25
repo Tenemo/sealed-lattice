@@ -9,6 +9,7 @@ use crate::{
 use super::{
     BinaryFieldElement256, TallyPreparationContext, TallyPreparationError,
     output_sharing::{DEGREE_THREE_RECONSTRUCTION_THRESHOLD, canonical_evaluation_point},
+    preparation_multiplication_catalog::PreparationMultiplicationCatalog,
     replicated_beaver_opening::{
         TripleReductionOpeningBurnReason, TripleReductionOpeningCollector,
         TripleReductionOpeningCoordinate, TripleReductionOpeningError,
@@ -402,6 +403,25 @@ fn opening_coordinate_rejects_an_out_of_range_multiplication_ordinal() {
             TallyPreparationError::PreparationMultiplicationIndexOutOfRange { .. }
         ))
     ));
+}
+
+#[test]
+fn cached_multiplication_catalog_must_match_the_preparation_context() {
+    let circuit = circuit(COMPLETION_PARTICIPANT_COUNT, 2, 1);
+    let catalog_context = preparation_context(0x27, &circuit);
+    let mismatched_context = preparation_context(0x28, &circuit);
+    let catalog = PreparationMultiplicationCatalog::derive(catalog_context, &circuit).unwrap();
+    assert_eq!(
+        TripleReductionOpeningCoordinate::derive_from_catalog(
+            mismatched_context,
+            &catalog,
+            hash(0x38),
+            0,
+        ),
+        Err(TripleReductionOpeningError::Preparation(
+            TallyPreparationError::GeometryMismatch,
+        ))
+    );
 }
 
 fn complete_opening(
