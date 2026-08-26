@@ -2,10 +2,13 @@ use core::fmt;
 
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::foundation::Hash512;
+use crate::foundation::{
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalTuple,
+    Hash512,
+};
 
 use super::{
-    TallyPreparationError,
+    TallyPreparationContext, TallyPreparationError,
     pseudorandom_zero_sharing_pair_and_coin_seed_320::{
         COLLECTIVE_COIN_SOURCE_BYTE_LENGTH, CommitmentMatchedCollectiveCoinSource320,
         CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320,
@@ -37,6 +40,10 @@ use super::{
         PseudorandomZeroSharingSubsetMasterScope320,
     },
 };
+
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN: &str =
+    "sealed-lattice/tally-preparation/pseudorandom-zero-sharing/joined-seed-master-custody/v1";
+const PREPARATION_ATTEMPT_ORDINAL: u16 = 0;
 
 /// One bounded local opening and inclusion path in canonical catalog order.
 #[derive(Clone, Copy)]
@@ -411,7 +418,10 @@ impl Drop for LocallyJoinedCollectiveCoinSource320 {
 /// continuation authority. A later state owner must durably retain these exact
 /// masters and the unopened coin source before deleting persistent raw custody.
 pub(crate) struct LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
+    parameter_identity: Hash512,
+    preparation_context: TallyPreparationContext,
     root_terminal_identity: Hash512,
+    root_terminal_certificate_identity: Hash512,
     receipt_terminal_identity: Hash512,
     receipt_terminal_certificate_identity: Hash512,
     authenticated_recipient_inventory_identity: Hash512,
@@ -424,8 +434,20 @@ pub(crate) struct LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
 }
 
 impl LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
+    pub(crate) const fn parameter_identity(&self) -> Hash512 {
+        self.parameter_identity
+    }
+
+    pub(crate) const fn preparation_context(&self) -> TallyPreparationContext {
+        self.preparation_context
+    }
+
     pub(crate) const fn root_terminal_identity(&self) -> Hash512 {
         self.root_terminal_identity
+    }
+
+    pub(crate) const fn root_terminal_certificate_identity(&self) -> Hash512 {
+        self.root_terminal_certificate_identity
     }
 
     pub(crate) const fn receipt_terminal_identity(&self) -> Hash512 {
@@ -479,13 +501,97 @@ impl LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
             .and_then(|length| length.checked_add(COLLECTIVE_COIN_SOURCE_BYTE_LENGTH))
             .ok_or(PseudorandomZeroSharingSeedMasterJoinError320::ArithmeticOverflow)
     }
+
+    /// Encodes the exact joined secrets and their verified semantic provenance
+    /// for encrypted local retention.
+    ///
+    /// The bytes remain inert secret custody. Decoding them is deliberately not
+    /// a master constructor and cannot create coin-opening, burn, or preparation-
+    /// continuation authority.
+    pub(crate) fn custody_payload_bytes(
+        &self,
+    ) -> Result<Zeroizing<Vec<u8>>, PseudorandomZeroSharingSeedMasterJoinError320> {
+        let subset_master_count = u16::try_from(self.subset_masters.len())
+            .map_err(|_| PseudorandomZeroSharingSeedMasterJoinError320::IntegerConversion)?;
+        let pair_master_count = u16::try_from(self.pair_masters.len())
+            .map_err(|_| PseudorandomZeroSharingSeedMasterJoinError320::IntegerConversion)?;
+        let retained_secret_byte_length = self.retained_secret_byte_length()?;
+        let mut retained_secret_bytes =
+            Zeroizing::new(Vec::with_capacity(retained_secret_byte_length));
+        for master in &self.subset_masters {
+            retained_secret_bytes.extend_from_slice(master.as_bytes());
+        }
+        for master in &self.pair_masters {
+            retained_secret_bytes.extend_from_slice(master.as_bytes());
+        }
+        retained_secret_bytes.extend_from_slice(self.collective_coin_source.as_bytes());
+
+        let tuple = Zeroizing::new(CanonicalTuple::new(
+            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+            CANONICAL_TUPLE_VERSION,
+            vec![
+                CanonicalItem::nonempty_ascii(
+                    PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN,
+                )
+                .map_err(|error| {
+                    PseudorandomZeroSharingSeedMasterJoinError320::Preparation {
+                        phase: "joined seed-master custody domain encoding",
+                        error: error.into(),
+                    }
+                })?,
+                CanonicalItem::hash512(self.parameter_identity.into_bytes()),
+                CanonicalItem::variable_bytes(self.preparation_context.canonical_bytes()).map_err(
+                    |error| PseudorandomZeroSharingSeedMasterJoinError320::Preparation {
+                        phase: "joined seed-master preparation-context encoding",
+                        error: error.into(),
+                    },
+                )?,
+                CanonicalItem::hash512(self.preparation_context.identity().into_bytes()),
+                CanonicalItem::unsigned16(PREPARATION_ATTEMPT_ORDINAL),
+                CanonicalItem::unsigned16(self.preparation_context.participant_count()),
+                CanonicalItem::unsigned16(self.participant_position),
+                CanonicalItem::hash512(self.root_terminal_identity.into_bytes()),
+                CanonicalItem::hash512(self.root_terminal_certificate_identity.into_bytes()),
+                CanonicalItem::hash512(self.receipt_terminal_identity.into_bytes()),
+                CanonicalItem::hash512(self.receipt_terminal_certificate_identity.into_bytes()),
+                CanonicalItem::hash512(
+                    self.authenticated_recipient_inventory_identity.into_bytes(),
+                ),
+                CanonicalItem::hash512(self.receipt_body_identity.into_bytes()),
+                CanonicalItem::hash512(self.receipt_envelope_identity.into_bytes()),
+                CanonicalItem::unsigned16(subset_master_count),
+                CanonicalItem::unsigned16(pair_master_count),
+                CanonicalItem::variable_bytes(&*retained_secret_bytes).map_err(|error| {
+                    PseudorandomZeroSharingSeedMasterJoinError320::Preparation {
+                        phase: "joined seed-master secret payload encoding",
+                        error: error.into(),
+                    }
+                })?,
+            ],
+        ));
+        Ok(Zeroizing::new(tuple.encode().map_err(|error| {
+            PseudorandomZeroSharingSeedMasterJoinError320::Preparation {
+                phase: "joined seed-master custody tuple encoding",
+                error: error.into(),
+            }
+        })?))
+    }
 }
 
 impl fmt::Debug for LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("LocallyJoinedPseudorandomZeroSharingSeedMasters320")
+            .field("parameter_identity", &self.parameter_identity)
+            .field(
+                "preparation_context_identity",
+                &self.preparation_context.identity(),
+            )
             .field("root_terminal_identity", &self.root_terminal_identity)
+            .field(
+                "root_terminal_certificate_identity",
+                &self.root_terminal_certificate_identity,
+            )
             .field("receipt_terminal_identity", &self.receipt_terminal_identity)
             .field(
                 "receipt_terminal_certificate_identity",
@@ -549,6 +655,8 @@ pub(crate) fn join_pseudorandom_zero_sharing_seed_masters_320(
     let receipt_terminal_identity = receipt_terminal
         .identity()
         .map_err(PseudorandomZeroSharingSeedMasterJoinError320::ReceiptTerminal)?;
+    let root_terminal_certificate_identity =
+        receipt_terminal.root_terminal().certificate_identity();
     let receipt_terminal_certificate_identity = receipt_terminal.certificate_identity();
     let expected_catalog_identities = (0..local_catalog.layout.participant_count())
         .map(|contributor_position| {
@@ -715,7 +823,10 @@ pub(crate) fn join_pseudorandom_zero_sharing_seed_masters_320(
     let (_, collective_coin_source_bytes) = local_catalog.collective_coin_source.into_parts();
     let collective_coin_source_bytes = Zeroizing::new(collective_coin_source_bytes);
     Ok(LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
+        parameter_identity: local_catalog.layout.parameter_identity(),
+        preparation_context: local_catalog.layout.preparation_context(),
         root_terminal_identity: receipt_terminal_root_identity,
+        root_terminal_certificate_identity,
         receipt_terminal_identity,
         receipt_terminal_certificate_identity,
         authenticated_recipient_inventory_identity,

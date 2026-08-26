@@ -124,6 +124,20 @@ type OpenedSeedRecipientReceiptRecord = Readonly<{
     sealedBytes: Uint8Array;
 }>;
 
+/**
+ * Exact authenticated predecessor bytes admitted only for the local/global
+ * master transition. The caller must erase both arrays after the transition.
+ */
+export type CompletedSeedRecipientReceiptCustodyForMasterJoin = Readonly<{
+    recordBytes: Uint8Array;
+    recordKey: string;
+    sealedBytes: Uint8Array;
+}>;
+
+export const snapshotSeedRecipientReceiptCustodyLimitsForMasterJoin = (
+    value: unknown,
+): SeedRecipientReceiptCustodyLimits => copyLimits(value);
+
 const snapshotDataProperty = (
     container: unknown,
     propertyName: string,
@@ -1068,6 +1082,64 @@ const readRecord = async (
         opened.sealedBytes.fill(0);
     }
 };
+
+export const readCompletedSeedRecipientReceiptCustodyForMasterJoin =
+    async (input: {
+        context: SeedRecipientReceiptCustodyContext;
+        limits: SeedRecipientReceiptCustodyLimits;
+        protection: RuntimeRecordProtection;
+        store: UntrustedStorageTransactionStore;
+    }): Promise<
+        | CompletedSeedRecipientReceiptCustodyForMasterJoin
+        | 'incomplete'
+        | undefined
+    > => {
+        const context = copyContext(input.context);
+        const limits = copyLimits(input.limits);
+        const recordKey = logicalRecordKey(context);
+        const opened = await readRuntimeRecord({
+            logicalRecordKey: recordKey,
+            operationDomain: receiptCustodyOperationDomain,
+            protection: input.protection,
+            store: input.store,
+        });
+        if (opened === undefined) {
+            destroyContext(context);
+            return undefined;
+        }
+        let decoded: SeedRecipientReceiptRecord | undefined;
+        let canonicalRecordBytes: Uint8Array | undefined;
+        try {
+            decoded = decodeRecord(opened.plaintext, limits);
+            if (!contextsEqual(decoded.context, context)) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'Conflict',
+                    'The seed-recipient receipt predecessor is bound to a different context.',
+                );
+            }
+            if (decoded.kind !== 'completed') {
+                return 'incomplete';
+            }
+            canonicalRecordBytes = encodeRecord(decoded);
+            if (!bytesEqual(canonicalRecordBytes, opened.plaintext)) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'AuthenticationFailed',
+                    'The seed-recipient receipt predecessor is not canonical.',
+                );
+            }
+            return Object.freeze({
+                recordBytes: opened.plaintext.slice(),
+                recordKey,
+                sealedBytes: opened.sealedBytes.slice(),
+            });
+        } finally {
+            canonicalRecordBytes?.fill(0);
+            destroyRecord(decoded);
+            destroyContext(context);
+            opened.plaintext.fill(0);
+            opened.sealedBytes.fill(0);
+        }
+    };
 
 const closeTransactionAfterFailure = async (
     transaction: UntrustedStorageTransaction,

@@ -1,7 +1,10 @@
 use zeroize::Zeroizing;
 
 use crate::{
-    foundation::{FOUNDATION_PROFILE, Hash512},
+    foundation::{
+        CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalDecodeLimits,
+        CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, Hash512,
+    },
     tally_circuit::{CompiledTallyCircuit, TallyCircuitProfile},
 };
 
@@ -26,6 +29,7 @@ use super::{
         seed_mailbox_test_fixture_320, seed_mailbox_test_fixture_with_parameter_marker_320,
     },
     pseudorandom_zero_sharing_seed_master_join_320::{
+        PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN,
         PseudorandomZeroSharingLocalSeedCatalogEntryBytes320,
         PseudorandomZeroSharingSeedMasterJoinError320, combine_pair_master_for_test,
         combine_subset_master_for_test, join_pseudorandom_zero_sharing_seed_masters_320,
@@ -137,9 +141,15 @@ fn actual_authenticated_receipts_join_every_completion_master_and_unopened_coin_
     );
     assert_eq!(joined.retained_secret_byte_length().unwrap(), 3_760);
     assert_eq!(joined.participant_position(), participant_position);
+    assert_eq!(joined.parameter_identity(), layout.parameter_identity());
+    assert_eq!(joined.preparation_context(), layout.preparation_context());
     assert_eq!(
         joined.root_terminal_identity(),
         fixture.root_terminal.identity().unwrap()
+    );
+    assert_eq!(
+        joined.root_terminal_certificate_identity(),
+        fixture.root_terminal.certificate_identity()
     );
     assert_eq!(
         joined.authenticated_recipient_inventory_identity(),
@@ -154,6 +164,149 @@ fn actual_authenticated_receipts_join_every_completion_master_and_unopened_coin_
         joined.receipt_envelope_identity()
     );
     assert!(format!("{joined:?}").contains("[redacted]"));
+
+    let custody_payload_bytes = joined.custody_payload_bytes().unwrap();
+    let custody_tuple =
+        CanonicalTuple::decode(&custody_payload_bytes, &CanonicalDecodeLimits::default()).unwrap();
+    assert_eq!(
+        custody_tuple.schema_identifier,
+        CANONICAL_TUPLE_SCHEMA_IDENTIFIER
+    );
+    assert_eq!(custody_tuple.schema_version, CANONICAL_TUPLE_VERSION);
+    assert_eq!(custody_tuple.items.len(), 17);
+    assert_eq!(
+        custody_tuple.items[0].variable_value_bytes().unwrap(),
+        PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN.as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[1].canonical_bytes(),
+        layout.parameter_identity().as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[2].variable_value_bytes().unwrap(),
+        layout.preparation_context().canonical_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[3].canonical_bytes(),
+        layout.preparation_context().identity().as_bytes()
+    );
+    assert_eq!(read_custody_u16(&custody_tuple, 4), 0);
+    assert_eq!(
+        read_custody_u16(&custody_tuple, 5),
+        FOUNDATION_PROFILE.participant_count
+    );
+    assert_eq!(read_custody_u16(&custody_tuple, 6), participant_position);
+    assert_eq!(
+        custody_tuple.items[7].canonical_bytes(),
+        joined.root_terminal_identity().as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[8].canonical_bytes(),
+        joined.root_terminal_certificate_identity().as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[9].canonical_bytes(),
+        joined.receipt_terminal_identity().as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[10].canonical_bytes(),
+        joined.receipt_terminal_certificate_identity().as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[11].canonical_bytes(),
+        joined
+            .authenticated_recipient_inventory_identity()
+            .as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[12].canonical_bytes(),
+        joined.receipt_body_identity().as_bytes()
+    );
+    assert_eq!(
+        custody_tuple.items[13].canonical_bytes(),
+        joined.receipt_envelope_identity().as_bytes()
+    );
+    assert_eq!(read_custody_u16(&custody_tuple, 14), 84);
+    assert_eq!(read_custody_u16(&custody_tuple, 15), 9);
+
+    let mut independently_joined_secret_bytes = Zeroizing::new(Vec::new());
+    for subset in layout
+        .coordinates()
+        .unwrap()
+        .filter_map(|coordinate| match coordinate {
+            PseudorandomZeroSharingSeedCatalogCoordinate320::Subset(subset) => Some(subset),
+            _ => None,
+        })
+    {
+        independently_joined_secret_bytes
+            .extend_from_slice(&independent_subset_master(layout, subset));
+    }
+    for counterpart_position in (0..FOUNDATION_PROFILE.participant_count)
+        .filter(|position| *position != participant_position)
+    {
+        independently_joined_secret_bytes.extend_from_slice(&independent_pair_master(
+            layout,
+            participant_position,
+            counterpart_position,
+        ));
+    }
+    independently_joined_secret_bytes.extend_from_slice(&independent_coin_source(layout));
+    assert_eq!(independently_joined_secret_bytes.len(), 3_760);
+    assert_eq!(
+        custody_tuple.items[16].item_type(),
+        CanonicalItemType::RawBytes
+    );
+    assert_eq!(
+        custody_tuple.items[16].variable_value_bytes().unwrap(),
+        &*independently_joined_secret_bytes
+    );
+
+    let independently_derived_payload_byte_length = 8
+        + 17 * 6
+        + 4
+        + PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN.len()
+        + 9 * 64
+        + 4
+        + layout.preparation_context().canonical_bytes().len()
+        + 5 * 2
+        + 4
+        + independently_joined_secret_bytes.len();
+    assert_eq!(
+        custody_payload_bytes.len(),
+        independently_derived_payload_byte_length
+    );
+
+    for truncated_byte_length in [0, 1, custody_payload_bytes.len() - 1] {
+        assert!(
+            CanonicalTuple::decode(
+                &custody_payload_bytes[..truncated_byte_length],
+                &CanonicalDecodeLimits::default(),
+            )
+            .is_err()
+        );
+    }
+    let mut payload_with_trailing_byte = custody_payload_bytes.to_vec();
+    payload_with_trailing_byte.push(0);
+    assert!(
+        CanonicalTuple::decode(
+            &payload_with_trailing_byte,
+            &CanonicalDecodeLimits::default(),
+        )
+        .is_err()
+    );
+}
+
+fn read_custody_u16(tuple: &CanonicalTuple, item_index: usize) -> u16 {
+    assert_eq!(
+        tuple.items[item_index].item_type(),
+        CanonicalItemType::Unsigned16
+    );
+    u16::from_le_bytes(
+        tuple.items[item_index]
+            .canonical_bytes()
+            .try_into()
+            .unwrap(),
+    )
 }
 
 #[test]
