@@ -16,6 +16,7 @@ import {
     checkedAdd,
     bytesEqual,
     bytesToHex,
+    hexToExactBytes,
     createWebCryptoIdentifier,
     defaultMonotonicClockMilliseconds,
     assertLimits,
@@ -809,6 +810,14 @@ export class UntrustedStorageTransactionStore {
                     authenticatedHeadDigest: derivedDigest.slice(),
                     namespaceSequence:
                         repair.currentHead?.transitionSequence ?? 0n,
+                    predecessorAuthenticatedHeadDigest:
+                        repair.currentHead === undefined
+                            ? undefined
+                            : hexToExactBytes(
+                                  repair.currentHead.predecessorHeadDigest,
+                                  64,
+                                  'authenticated repair predecessor digest',
+                              ),
                     storageInstanceIdentity: this.copyStorageInstanceIdentity(),
                 });
             } catch (error) {

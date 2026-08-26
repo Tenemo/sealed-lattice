@@ -243,6 +243,7 @@ export const authenticatedRepairProtectionForTestAdapter = (
 
 export const openRuntimeTestStore = async (input?: {
     adapter?: InMemoryRuntimeStorageAdapter;
+    createIdentifier?: (kind: 'lease' | 'transaction') => string;
     limits?: Partial<UntrustedStorageTransactionLimits>;
     namespace?: string;
 }): Promise<{
@@ -259,7 +260,7 @@ export const openRuntimeTestStore = async (input?: {
                 adapter,
                 namespace,
             ),
-        createIdentifier: createIdentifierFactory(),
+        createIdentifier: input?.createIdentifier ?? createIdentifierFactory(),
         limits: { ...defaultLimits, ...input?.limits },
         monotonicClockMilliseconds: () => 0,
         namespace,

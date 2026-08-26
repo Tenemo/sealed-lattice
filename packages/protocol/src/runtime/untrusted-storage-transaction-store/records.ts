@@ -164,6 +164,7 @@ export type UntrustedStorageTransactionStoreOpenResult = Readonly<{
 export type UntrustedStorageAuthenticatedHeadSnapshot = Readonly<{
     authenticatedHeadDigest: Uint8Array;
     namespaceSequence: bigint;
+    predecessorAuthenticatedHeadDigest: Uint8Array | undefined;
     storageInstanceIdentity: Uint8Array;
 }>;
 
@@ -341,7 +342,7 @@ export const isUint8Array = (value: unknown): value is Uint8Array =>
     ArrayBuffer.isView(value) &&
     Object.prototype.toString.call(value) === '[object Uint8Array]';
 
-const hexToExactBytes = (
+export const hexToExactBytes = (
     encodedBytes: string,
     expectedByteLength: number,
     label: string,

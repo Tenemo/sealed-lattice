@@ -170,6 +170,9 @@ describe('authenticated storage head', () => {
         const secondSnapshot = await second.store.authenticateCurrentHead();
 
         expect(firstSnapshot.namespaceSequence).toBe(0n);
+        expect(
+            firstSnapshot.predecessorAuthenticatedHeadDigest,
+        ).toBeUndefined();
         expect(firstSnapshot.storageInstanceIdentity).toHaveLength(64);
         expect(firstSnapshot.authenticatedHeadDigest).toHaveLength(64);
         expect(repeatedSnapshot).toEqual(firstSnapshot);
@@ -205,6 +208,12 @@ describe('authenticated storage head', () => {
 
         expect(firstTransition.namespaceSequence).toBe(1n);
         expect(secondTransition.namespaceSequence).toBe(2n);
+        expect(firstTransition.predecessorAuthenticatedHeadDigest).toEqual(
+            new Uint8Array(64),
+        );
+        expect(secondTransition.predecessorAuthenticatedHeadDigest).toEqual(
+            firstTransition.authenticatedHeadDigest,
+        );
         expect(firstTransition.authenticatedHeadDigest).not.toEqual(
             emptySnapshot.authenticatedHeadDigest,
         );
