@@ -37,6 +37,7 @@ mod preparation_arithmetic_graph;
 mod preparation_attempt_resource_model;
 mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
+mod pseudorandom_zero_sharing_320;
 mod random_state;
 mod random_tape;
 mod replicated_beaver_opening;
@@ -110,6 +111,8 @@ mod preparation_attempt_resource_model_tests;
 mod preparation_holder_record_catalog_tests;
 #[cfg(test)]
 mod preparation_multiplication_catalog_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_320_tests;
 #[cfg(test)]
 mod randomness_tests;
 #[cfg(test)]

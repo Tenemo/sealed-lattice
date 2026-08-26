@@ -1,0 +1,470 @@
+use crate::foundation::derive_foundation_roster_parameters;
+use subtle::ConstantTimeEq;
+
+use super::{
+    TallyPreparationError,
+    binary_field_320::BinaryFieldElement320,
+    replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
+};
+
+/// Formula-only inputs for the subset-seeded zero-sharing candidate.
+///
+/// The model accounts for one contribution and one independently salted
+/// opening per subset member, one wrapper per ordered mailbox stream, local
+/// pseudorandom field output, precomputed basis weights, and the exact
+/// all-roster zero-codeword check. It does not claim that a malicious seed
+/// ceremony, commitment scheme, KMAC invocation, checkpoint layout, or
+/// authenticated mailbox schema has been admitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PseudorandomZeroSharingResourceInput {
+    pub(crate) participant_count: u16,
+    pub(crate) zero_sharing_count: u64,
+    pub(crate) seed_contribution_byte_length: u64,
+    pub(crate) commitment_salt_byte_length: u64,
+    pub(crate) field_element_byte_length: u64,
+    pub(crate) mailbox_stream_wrapper_byte_length: u64,
+    pub(crate) maximum_transport_payload_byte_length: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PseudorandomZeroSharingResourceModel {
+    pub(crate) participant_count: u64,
+    pub(crate) active_fault_bound: u64,
+    pub(crate) authorized_subset_size: u64,
+    pub(crate) authorized_subset_count: u64,
+    pub(crate) authorized_subset_count_per_participant: u64,
+    pub(crate) seed_contribution_count: u64,
+    pub(crate) remote_seed_opening_delivery_count: u64,
+    pub(crate) seed_opening_byte_length: u64,
+    pub(crate) private_seed_opening_delivery_byte_length: u64,
+    pub(crate) ordered_mailbox_stream_count: u64,
+    pub(crate) private_mailbox_wrapper_byte_length: u64,
+    pub(crate) private_setup_delivery_byte_length: u64,
+    pub(crate) maximum_private_setup_upload_byte_length_per_participant: u64,
+    pub(crate) maximum_private_setup_download_byte_length_per_participant: u64,
+    pub(crate) combined_seed_custody_byte_length_per_participant: u64,
+    pub(crate) subset_basis_stream_count_per_participant: u64,
+    pub(crate) basis_weight_live_byte_length_per_participant: u64,
+    pub(crate) basis_precomputation_field_multiplication_count_per_participant: u64,
+    pub(crate) field_output_count_per_participant: u64,
+    pub(crate) field_output_byte_length_per_participant: u64,
+    pub(crate) full_chunk_field_count: u64,
+    pub(crate) full_chunk_payload_byte_length: u64,
+    pub(crate) field_output_chunk_count_per_participant: u64,
+    pub(crate) final_chunk_field_count: u64,
+    pub(crate) final_chunk_payload_byte_length: u64,
+    pub(crate) stream_field_multiplication_count_per_participant: u64,
+    pub(crate) stream_field_addition_count_per_participant: u64,
+    pub(crate) zero_codeword_check_field_multiplication_count_per_participant: u64,
+    pub(crate) zero_codeword_check_field_addition_count_per_participant: u64,
+    pub(crate) zero_codeword_check_comparison_count_per_participant: u64,
+    pub(crate) total_field_multiplication_floor_per_participant: u64,
+}
+
+impl PseudorandomZeroSharingResourceModel {
+    pub(crate) fn derive(
+        input: PseudorandomZeroSharingResourceInput,
+    ) -> Result<Self, TallyPreparationError> {
+        if input.zero_sharing_count == 0
+            || input.seed_contribution_byte_length == 0
+            || input.commitment_salt_byte_length == 0
+            || input.field_element_byte_length == 0
+            || input.mailbox_stream_wrapper_byte_length == 0
+            || input.maximum_transport_payload_byte_length == 0
+        {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+
+        let geometry = ReplicatedRandomSharingGeometry::derive(input.participant_count)?;
+        if geometry.active_fault_bound == 0 {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let seed_opening_byte_length = checked_add(
+            input.seed_contribution_byte_length,
+            input.commitment_salt_byte_length,
+        )?;
+        let seed_contribution_count = checked_multiply(
+            geometry.authorized_subset_count,
+            geometry.authorized_subset_size,
+        )?;
+        let remote_recipient_count = geometry
+            .authorized_subset_size
+            .checked_sub(1)
+            .ok_or(TallyPreparationError::GeometryMismatch)?;
+        let remote_seed_opening_delivery_count =
+            checked_multiply(seed_contribution_count, remote_recipient_count)?;
+        let private_seed_opening_delivery_byte_length =
+            checked_multiply(remote_seed_opening_delivery_count, seed_opening_byte_length)?;
+        let ordered_mailbox_stream_count = checked_multiply(
+            geometry.participant_count,
+            geometry
+                .participant_count
+                .checked_sub(1)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+        )?;
+        let private_mailbox_wrapper_byte_length = checked_multiply(
+            ordered_mailbox_stream_count,
+            input.mailbox_stream_wrapper_byte_length,
+        )?;
+        let private_setup_delivery_byte_length = checked_add(
+            private_seed_opening_delivery_byte_length,
+            private_mailbox_wrapper_byte_length,
+        )?;
+
+        let remote_seed_opening_delivery_count_per_participant = checked_multiply(
+            geometry.authorized_subset_count_per_participant,
+            remote_recipient_count,
+        )?;
+        let seed_opening_delivery_byte_length_per_participant = checked_multiply(
+            remote_seed_opening_delivery_count_per_participant,
+            seed_opening_byte_length,
+        )?;
+        let mailbox_stream_wrapper_byte_length_per_participant = checked_multiply(
+            geometry
+                .participant_count
+                .checked_sub(1)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+            input.mailbox_stream_wrapper_byte_length,
+        )?;
+        let maximum_private_setup_upload_byte_length_per_participant = checked_add(
+            seed_opening_delivery_byte_length_per_participant,
+            mailbox_stream_wrapper_byte_length_per_participant,
+        )?;
+
+        let combined_seed_custody_byte_length_per_participant = checked_multiply(
+            geometry.authorized_subset_count_per_participant,
+            input.seed_contribution_byte_length,
+        )?;
+        let subset_basis_stream_count_per_participant = checked_multiply(
+            geometry.authorized_subset_count_per_participant,
+            geometry.active_fault_bound,
+        )?;
+        let basis_weight_live_byte_length_per_participant = checked_multiply(
+            subset_basis_stream_count_per_participant,
+            input.field_element_byte_length,
+        )?;
+        let basis_multiplications_per_subset = checked_add(
+            geometry.active_fault_bound,
+            geometry
+                .active_fault_bound
+                .checked_sub(1)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+        )?;
+        let basis_precomputation_field_multiplication_count_per_participant = checked_multiply(
+            geometry.authorized_subset_count_per_participant,
+            basis_multiplications_per_subset,
+        )?;
+
+        let field_output_count_per_participant = checked_multiply(
+            input.zero_sharing_count,
+            subset_basis_stream_count_per_participant,
+        )?;
+        let field_output_byte_length_per_participant = checked_multiply(
+            field_output_count_per_participant,
+            input.field_element_byte_length,
+        )?;
+        let full_chunk_field_count =
+            input.maximum_transport_payload_byte_length / input.field_element_byte_length;
+        if full_chunk_field_count == 0 {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let full_chunk_payload_byte_length =
+            checked_multiply(full_chunk_field_count, input.field_element_byte_length)?;
+        let chunk_count_per_subset_basis_stream =
+            checked_ceiling_division(input.zero_sharing_count, full_chunk_field_count)?;
+        let field_output_chunk_count_per_participant = checked_multiply(
+            subset_basis_stream_count_per_participant,
+            chunk_count_per_subset_basis_stream,
+        )?;
+        let preceding_full_chunk_count_per_stream = chunk_count_per_subset_basis_stream
+            .checked_sub(1)
+            .ok_or(TallyPreparationError::GeometryMismatch)?;
+        let final_chunk_field_count = input
+            .zero_sharing_count
+            .checked_sub(checked_multiply(
+                preceding_full_chunk_count_per_stream,
+                full_chunk_field_count,
+            )?)
+            .ok_or(TallyPreparationError::GeometryMismatch)?;
+        let final_chunk_payload_byte_length =
+            checked_multiply(final_chunk_field_count, input.field_element_byte_length)?;
+
+        let stream_field_multiplication_count_per_participant = field_output_count_per_participant;
+        let stream_field_addition_count_per_participant = field_output_count_per_participant
+            .checked_sub(input.zero_sharing_count)
+            .ok_or(TallyPreparationError::GeometryMismatch)?;
+
+        let zero_codeword_basis_point_count =
+            checked_add(checked_multiply(geometry.active_fault_bound, 2)?, 1)?;
+        let zero_codeword_interpolation_target_count = checked_add(
+            geometry
+                .participant_count
+                .checked_sub(zero_codeword_basis_point_count)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+            1,
+        )?;
+        let zero_codeword_check_field_multiplication_count_per_participant = checked_product(&[
+            input.zero_sharing_count,
+            zero_codeword_interpolation_target_count,
+            zero_codeword_basis_point_count,
+        ])?;
+        let zero_codeword_check_field_addition_count_per_participant = checked_product(&[
+            input.zero_sharing_count,
+            zero_codeword_interpolation_target_count,
+            zero_codeword_basis_point_count
+                .checked_sub(1)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+        ])?;
+        let zero_codeword_check_comparison_count_per_participant = checked_multiply(
+            input.zero_sharing_count,
+            zero_codeword_interpolation_target_count,
+        )?;
+        let total_field_multiplication_floor_per_participant = checked_sum(&[
+            basis_precomputation_field_multiplication_count_per_participant,
+            stream_field_multiplication_count_per_participant,
+            zero_codeword_check_field_multiplication_count_per_participant,
+        ])?;
+
+        Ok(Self {
+            participant_count: geometry.participant_count,
+            active_fault_bound: geometry.active_fault_bound,
+            authorized_subset_size: geometry.authorized_subset_size,
+            authorized_subset_count: geometry.authorized_subset_count,
+            authorized_subset_count_per_participant: geometry
+                .authorized_subset_count_per_participant,
+            seed_contribution_count,
+            remote_seed_opening_delivery_count,
+            seed_opening_byte_length,
+            private_seed_opening_delivery_byte_length,
+            ordered_mailbox_stream_count,
+            private_mailbox_wrapper_byte_length,
+            private_setup_delivery_byte_length,
+            maximum_private_setup_upload_byte_length_per_participant,
+            maximum_private_setup_download_byte_length_per_participant:
+                maximum_private_setup_upload_byte_length_per_participant,
+            combined_seed_custody_byte_length_per_participant,
+            subset_basis_stream_count_per_participant,
+            basis_weight_live_byte_length_per_participant,
+            basis_precomputation_field_multiplication_count_per_participant,
+            field_output_count_per_participant,
+            field_output_byte_length_per_participant,
+            full_chunk_field_count,
+            full_chunk_payload_byte_length,
+            field_output_chunk_count_per_participant,
+            final_chunk_field_count,
+            final_chunk_payload_byte_length,
+            stream_field_multiplication_count_per_participant,
+            stream_field_addition_count_per_participant,
+            zero_codeword_check_field_multiplication_count_per_participant,
+            zero_codeword_check_field_addition_count_per_participant,
+            zero_codeword_check_comparison_count_per_participant,
+            total_field_multiplication_floor_per_participant,
+        })
+    }
+}
+
+/// Checks the all-roster degree-`2t` codeword and its zero constant term.
+///
+/// The first `2t + 1` canonical roster points determine the polynomial. The
+/// checker verifies its value at zero and every remaining roster point. It
+/// authenticates no source, root, receipt, state transition, or release and
+/// cannot mint a protocol capability.
+#[derive(Debug, Clone)]
+pub(crate) struct CanonicalZeroSharingCodewordVerifier320 {
+    participant_count: u16,
+    basis_point_count: usize,
+    constant_term_coefficients: Box<[BinaryFieldElement320]>,
+    nonbasis_point_coefficients: Box<[Box<[BinaryFieldElement320]>]>,
+}
+
+impl CanonicalZeroSharingCodewordVerifier320 {
+    pub(crate) fn new(participant_count: u16) -> Result<Self, TallyPreparationError> {
+        let roster_parameters = derive_foundation_roster_parameters(participant_count)
+            .ok_or(TallyPreparationError::GeometryMismatch)?;
+        let basis_point_count = usize::from(roster_parameters.active_fault_bound)
+            .checked_mul(2)
+            .and_then(|degree| degree.checked_add(1))
+            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+        if basis_point_count >= usize::from(participant_count) {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+
+        let basis_points = (0..basis_point_count)
+            .map(|roster_position| {
+                canonical_evaluation_point_320(
+                    participant_count,
+                    u16::try_from(roster_position)
+                        .map_err(|_| TallyPreparationError::IntegerConversion)?,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let inverse_denominators = basis_points
+            .iter()
+            .enumerate()
+            .map(|(selected_position, selected_point)| {
+                basis_points
+                    .iter()
+                    .enumerate()
+                    .filter(|(other_position, _)| *other_position != selected_position)
+                    .map(|(_, other_point)| selected_point.add(*other_point))
+                    .fold(BinaryFieldElement320::ONE, |product, factor| {
+                        product.multiply(factor)
+                    })
+                    .multiplicative_inverse()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let constant_term_coefficients = interpolation_coefficients(
+            &basis_points,
+            &inverse_denominators,
+            BinaryFieldElement320::ZERO,
+        );
+        let nonbasis_point_coefficients = (basis_point_count..usize::from(participant_count))
+            .map(|roster_position| {
+                Ok(interpolation_coefficients(
+                    &basis_points,
+                    &inverse_denominators,
+                    canonical_evaluation_point_320(
+                        participant_count,
+                        u16::try_from(roster_position)
+                            .map_err(|_| TallyPreparationError::IntegerConversion)?,
+                    )?,
+                )
+                .into_boxed_slice())
+            })
+            .collect::<Result<Vec<_>, TallyPreparationError>>()?;
+
+        Ok(Self {
+            participant_count,
+            basis_point_count,
+            constant_term_coefficients: constant_term_coefficients.into_boxed_slice(),
+            nonbasis_point_coefficients: nonbasis_point_coefficients.into_boxed_slice(),
+        })
+    }
+
+    pub(crate) fn verify(
+        &self,
+        values: &[BinaryFieldElement320],
+    ) -> Result<bool, TallyPreparationError> {
+        if values.len() != usize::from(self.participant_count) {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let basis_values = &values[..self.basis_point_count];
+        let mut validity = interpolate_values(basis_values, &self.constant_term_coefficients)
+            .ct_eq(&BinaryFieldElement320::ZERO);
+        for (nonbasis_offset, coefficients) in self.nonbasis_point_coefficients.iter().enumerate() {
+            let expected_value = interpolate_values(basis_values, coefficients);
+            validity &= values[self.basis_point_count + nonbasis_offset].ct_eq(&expected_value);
+        }
+        Ok(bool::from(validity))
+    }
+}
+
+pub(crate) fn evaluate_pseudorandom_zero_sharing_subset_at_point(
+    subset: ReplicatedRandomSharingSubset,
+    pseudorandom_components: &[BinaryFieldElement320],
+    evaluation_point: BinaryFieldElement320,
+) -> Result<BinaryFieldElement320, TallyPreparationError> {
+    if pseudorandom_components.len() != usize::from(subset.active_fault_bound()) {
+        return Err(TallyPreparationError::GeometryMismatch);
+    }
+
+    let mut current_basis_value = evaluation_point;
+    for excluded_position in subset.excluded_positions() {
+        current_basis_value = current_basis_value.multiply(evaluation_point.add(
+            canonical_evaluation_point_320(subset.participant_count(), excluded_position)?,
+        ));
+    }
+
+    let mut evaluated_value = BinaryFieldElement320::ZERO;
+    for (component_position, component) in pseudorandom_components.iter().copied().enumerate() {
+        evaluated_value = evaluated_value.add(component.multiply(current_basis_value));
+        if component_position + 1 < pseudorandom_components.len() {
+            current_basis_value = current_basis_value.multiply(evaluation_point);
+        }
+    }
+    Ok(evaluated_value)
+}
+
+pub(crate) fn canonical_evaluation_point_320(
+    participant_count: u16,
+    roster_position: u16,
+) -> Result<BinaryFieldElement320, TallyPreparationError> {
+    derive_foundation_roster_parameters(participant_count)
+        .ok_or(TallyPreparationError::GeometryMismatch)?;
+    if roster_position >= participant_count {
+        return Err(TallyPreparationError::RosterPositionOutOfRange {
+            roster_position,
+            participant_count,
+        });
+    }
+    let point_value = roster_position
+        .checked_add(1)
+        .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+    Ok(BinaryFieldElement320::from_low_polynomial_u16(point_value))
+}
+
+fn interpolation_coefficients(
+    basis_points: &[BinaryFieldElement320],
+    inverse_denominators: &[BinaryFieldElement320],
+    evaluation_point: BinaryFieldElement320,
+) -> Vec<BinaryFieldElement320> {
+    basis_points
+        .iter()
+        .enumerate()
+        .map(|(selected_position, _)| {
+            basis_points
+                .iter()
+                .enumerate()
+                .filter(|(other_position, _)| *other_position != selected_position)
+                .map(|(_, other_point)| evaluation_point.add(*other_point))
+                .fold(BinaryFieldElement320::ONE, |product, factor| {
+                    product.multiply(factor)
+                })
+                .multiply(inverse_denominators[selected_position])
+        })
+        .collect()
+}
+
+fn interpolate_values(
+    values: &[BinaryFieldElement320],
+    coefficients: &[BinaryFieldElement320],
+) -> BinaryFieldElement320 {
+    values
+        .iter()
+        .copied()
+        .zip(coefficients.iter().copied())
+        .fold(BinaryFieldElement320::ZERO, |sum, (value, coefficient)| {
+            sum.add(value.multiply(coefficient))
+        })
+}
+
+fn checked_add(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
+    left.checked_add(right)
+        .ok_or(TallyPreparationError::ArithmeticOverflow)
+}
+
+fn checked_multiply(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
+    left.checked_mul(right)
+        .ok_or(TallyPreparationError::ArithmeticOverflow)
+}
+
+fn checked_product(values: &[u64]) -> Result<u64, TallyPreparationError> {
+    values
+        .iter()
+        .try_fold(1_u64, |product, value| checked_multiply(product, *value))
+}
+
+fn checked_sum(values: &[u64]) -> Result<u64, TallyPreparationError> {
+    values
+        .iter()
+        .try_fold(0_u64, |sum, value| checked_add(sum, *value))
+}
+
+fn checked_ceiling_division(dividend: u64, divisor: u64) -> Result<u64, TallyPreparationError> {
+    if divisor == 0 {
+        return Err(TallyPreparationError::GeometryMismatch);
+    }
+    let quotient = dividend / divisor;
+    let remainder = dividend % divisor;
+    checked_add(quotient, u64::from(remainder != 0))
+}
