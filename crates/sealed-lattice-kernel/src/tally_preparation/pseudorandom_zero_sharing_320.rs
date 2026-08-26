@@ -34,15 +34,20 @@ use super::{
         pseudorandom_zero_sharing_seed_mailbox_control_and_tag_byte_length,
         pseudorandom_zero_sharing_seed_mailbox_manifest_body_byte_length,
     },
+    pseudorandom_zero_sharing_seed_receipt_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_ENVELOPE_BYTE_LENGTH,
+        PseudorandomZeroSharingSeedReceiptError320,
+        pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_body_byte_length,
+    },
     pseudorandom_zero_sharing_subset_seed_320::PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH,
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
 
 /// Formula-only inputs for the subset-seeded zero-sharing candidate.
 ///
-/// Canonical opening, catalog-proof, mailbox, and terminal widths come from
-/// their unactivated codec owners. Signed recipient receipts remain a separate
-/// public owner and are not included in this private-delivery model.
+/// Canonical opening, catalog-proof, mailbox, receipt, and terminal widths come
+/// from their unactivated codec owners.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PseudorandomZeroSharingResourceInput {
     pub(crate) participant_count: u16,
@@ -110,6 +115,13 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) mailbox_recipient_key_identity_generation_count: u64,
     pub(crate) mailbox_recipient_key_identity_verification_count: u64,
     pub(crate) recipient_inventory_body_byte_length_per_participant: u64,
+    pub(crate) authenticated_recipient_inventory_body_byte_length_per_participant: u64,
+    pub(crate) recipient_receipt_body_byte_length: u64,
+    pub(crate) recipient_receipt_envelope_count: u64,
+    pub(crate) recipient_receipt_envelope_byte_length: u64,
+    pub(crate) retained_public_recipient_receipt_envelope_byte_length: u64,
+    pub(crate) recipient_receipt_signature_generation_count: u64,
+    pub(crate) recipient_receipt_signature_verification_count: u64,
     pub(crate) combined_subset_seed_custody_byte_length_per_participant: u64,
     pub(crate) combined_pair_seed_custody_byte_length_per_participant: u64,
     pub(crate) collective_coin_source_custody_byte_length_per_participant: u64,
@@ -165,6 +177,19 @@ impl PseudorandomZeroSharingResourceModel {
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let recipient_inventory_body_byte_length_per_participant =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let authenticated_recipient_inventory_body_byte_length_per_participant = u64::try_from(
+            pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_body_byte_length(
+                input.participant_count,
+            )
+            .map_err(map_receipt_resource_error)?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let recipient_receipt_body_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_BODY_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let recipient_receipt_envelope_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_ENVELOPE_BYTE_LENGTH)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let mailbox_header_body_byte_length =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH)
@@ -379,6 +404,13 @@ impl PseudorandomZeroSharingResourceModel {
         let mailbox_recipient_nonce_derivation_count = mailbox_chunk_count;
         let mailbox_recipient_key_identity_generation_count = ordered_mailbox_stream_count;
         let mailbox_recipient_key_identity_verification_count = ordered_mailbox_stream_count;
+        let recipient_receipt_envelope_count = geometry.participant_count;
+        let retained_public_recipient_receipt_envelope_byte_length = checked_multiply(
+            recipient_receipt_envelope_count,
+            recipient_receipt_envelope_byte_length,
+        )?;
+        let recipient_receipt_signature_generation_count = recipient_receipt_envelope_count;
+        let recipient_receipt_signature_verification_count = recipient_receipt_envelope_count;
 
         let combined_subset_seed_custody_byte_length_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
@@ -542,6 +574,13 @@ impl PseudorandomZeroSharingResourceModel {
             mailbox_recipient_key_identity_generation_count,
             mailbox_recipient_key_identity_verification_count,
             recipient_inventory_body_byte_length_per_participant,
+            authenticated_recipient_inventory_body_byte_length_per_participant,
+            recipient_receipt_body_byte_length,
+            recipient_receipt_envelope_count,
+            recipient_receipt_envelope_byte_length,
+            retained_public_recipient_receipt_envelope_byte_length,
+            recipient_receipt_signature_generation_count,
+            recipient_receipt_signature_verification_count,
             combined_subset_seed_custody_byte_length_per_participant,
             combined_pair_seed_custody_byte_length_per_participant,
             collective_coin_source_custody_byte_length_per_participant,
@@ -770,6 +809,17 @@ fn map_mailbox_resource_error(
         }
         PseudorandomZeroSharingSeedMailboxError320::IntegerConversion => {
             TallyPreparationError::IntegerConversion
+        }
+        _ => TallyPreparationError::GeometryMismatch,
+    }
+}
+
+fn map_receipt_resource_error(
+    error: PseudorandomZeroSharingSeedReceiptError320,
+) -> TallyPreparationError {
+    match error {
+        PseudorandomZeroSharingSeedReceiptError320::ArithmeticOverflow => {
+            TallyPreparationError::ArithmeticOverflow
         }
         _ => TallyPreparationError::GeometryMismatch,
     }

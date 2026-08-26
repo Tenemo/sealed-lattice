@@ -7,6 +7,7 @@ use super::{
     },
     pseudorandom_zero_sharing_seed_delivery_320::derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320,
     pseudorandom_zero_sharing_seed_mailbox_320::{
+        AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320,
         ML_KEM_768_CIPHERTEXT_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_ALGORITHM_IDENTIFIER,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATION_TAG_BYTE_LENGTH,
@@ -601,6 +602,38 @@ fn seal_mailbox_stream(
         signature_envelope_bytes,
         encrypted_chunks,
     }
+}
+
+pub(super) fn authenticated_mailbox_delivery_320(
+    fixture: &SeedMailboxTestFixture320,
+    encapsulation_randomness: [u8; 32],
+    signature_seed_marker: u8,
+) -> AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320 {
+    let sealed = seal_mailbox_stream(
+        fixture,
+        fixture.recipient_position,
+        &fixture.descriptor_bytes,
+        &fixture.payload_bytes,
+        encapsulation_randomness,
+        signature_seed_marker,
+    );
+    let mut verifier = PseudorandomZeroSharingSeedMailboxVerifier320::new(
+        &fixture.root_terminal,
+        &fixture.roster,
+        fixture.sender_position,
+        fixture.recipient_position,
+        &sealed.header_bytes,
+        &sealed.manifest_bytes,
+        &sealed.signature_envelope_bytes,
+        &fixture.mailbox_decapsulation_keys[usize::from(fixture.recipient_position)],
+    )
+    .unwrap();
+    for encrypted_chunk in &sealed.encrypted_chunks {
+        verifier
+            .absorb_next_encrypted_chunk(encrypted_chunk)
+            .unwrap();
+    }
+    verifier.finish().unwrap()
 }
 
 fn sign_manifest(
