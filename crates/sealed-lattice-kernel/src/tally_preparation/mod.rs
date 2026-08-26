@@ -39,6 +39,7 @@ mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
 mod pseudorandom_zero_sharing_320;
 mod pseudorandom_zero_sharing_field_stream_320;
+mod pseudorandom_zero_sharing_subset_seed_320;
 mod random_state;
 mod random_tape;
 mod replicated_beaver_opening;
@@ -116,6 +117,8 @@ mod preparation_multiplication_catalog_tests;
 mod pseudorandom_zero_sharing_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_field_stream_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_subset_seed_320_tests;
 #[cfg(test)]
 mod randomness_tests;
 #[cfg(test)]
@@ -251,6 +254,26 @@ pub(crate) enum TallyPreparationError {
     PseudorandomZeroSharingFieldStreamPositionOutOfRange {
         position_within_chunk: u64,
         field_count: u64,
+    },
+    PseudorandomZeroSharingSubsetSeedSubsetParticipantCountMismatch {
+        subset_participant_count: u16,
+        context_participant_count: u16,
+    },
+    PseudorandomZeroSharingSubsetSeedContributorNotMember {
+        contributor_position: u16,
+    },
+    PseudorandomZeroSharingSubsetSeedObjectMismatch {
+        field: &'static str,
+    },
+    PseudorandomZeroSharingSubsetSeedCoordinateMismatch,
+    PseudorandomZeroSharingSubsetSeedCommitmentMismatch,
+    PseudorandomZeroSharingSubsetSeedCommitmentHashFailure,
+    PseudorandomZeroSharingSubsetSeedInventoryCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    PseudorandomZeroSharingSubsetSeedDuplicateContributor {
+        contributor_position: u16,
     },
     ReplicatedRandomBitCountZero,
     ReplicatedRandomBitChunkOutOfRange {
@@ -680,6 +703,44 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "pseudorandom zero-sharing field position {position_within_chunk} is outside chunk field count {field_count}"
+            ),
+            Self::PseudorandomZeroSharingSubsetSeedSubsetParticipantCountMismatch {
+                subset_participant_count,
+                context_participant_count,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing subset-seed participant count {subset_participant_count} does not match preparation context participant count {context_participant_count}"
+            ),
+            Self::PseudorandomZeroSharingSubsetSeedContributorNotMember {
+                contributor_position,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing subset-seed contributor {contributor_position} is not a member of the subset"
+            ),
+            Self::PseudorandomZeroSharingSubsetSeedObjectMismatch { field } => write!(
+                formatter,
+                "pseudorandom zero-sharing subset-seed object has a wrong {field}"
+            ),
+            Self::PseudorandomZeroSharingSubsetSeedCoordinateMismatch => formatter.write_str(
+                "pseudorandom zero-sharing subset-seed commitment and opening coordinates do not match the expected coordinate",
+            ),
+            Self::PseudorandomZeroSharingSubsetSeedCommitmentMismatch => formatter.write_str(
+                "pseudorandom zero-sharing subset-seed opening does not match its commitment",
+            ),
+            Self::PseudorandomZeroSharingSubsetSeedCommitmentHashFailure => formatter.write_str(
+                "pseudorandom zero-sharing subset-seed commitment hash framing failed",
+            ),
+            Self::PseudorandomZeroSharingSubsetSeedInventoryCountMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "pseudorandom zero-sharing subset-seed inventory has {actual} contributions; expected {expected}"
+                )
+            }
+            Self::PseudorandomZeroSharingSubsetSeedDuplicateContributor {
+                contributor_position,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing subset-seed inventory repeats contributor {contributor_position}"
             ),
             Self::ReplicatedRandomBitCountZero => {
                 formatter.write_str("replicated random-bit stream must contain a bit")
