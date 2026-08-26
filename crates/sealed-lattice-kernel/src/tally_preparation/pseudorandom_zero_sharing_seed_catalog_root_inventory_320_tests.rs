@@ -6,6 +6,7 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes, Signer},
 };
+use zeroize::Zeroizing;
 
 use crate::{
     foundation::{
@@ -18,7 +19,15 @@ use crate::{
 
 use super::{
     TallyPreparationContext,
+    pseudorandom_zero_sharing_pair_and_coin_seed_320::{
+        COLLECTIVE_COIN_SOURCE_BYTE_LENGTH, CollectiveCoinSourceCoordinate320,
+        PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH,
+        PseudorandomZeroSharingPairSeedContributionCoordinate320,
+        SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH, create_collective_coin_source_320,
+        create_pseudorandom_zero_sharing_pair_seed_contribution_320,
+    },
     pseudorandom_zero_sharing_seed_catalog_320::{
+        PseudorandomZeroSharingSeedCatalogCoordinate320,
         PseudorandomZeroSharingSeedCatalogLayout320, PseudorandomZeroSharingSeedCatalogRootBody320,
         PseudorandomZeroSharingSeedCatalogTree320,
     },
@@ -26,6 +35,7 @@ use super::{
         PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_INVENTORY_BODY_DOMAIN,
         PseudorandomZeroSharingSeedCatalogRootAuthorizationPackageBytes320,
         PseudorandomZeroSharingSeedCatalogRootInventoryError,
+        VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
         verify_pseudorandom_zero_sharing_seed_catalog_root_inventory_320,
     },
     pseudorandom_zero_sharing_seed_catalog_signature_320::{
@@ -48,6 +58,19 @@ use super::{
         PseudorandomZeroSharingSeedCatalogRootStateOutputWitnessAuthorizationBody320,
         PseudorandomZeroSharingSeedCatalogRootStateOutputWitnessEnvelope320,
     },
+    pseudorandom_zero_sharing_seed_delivery_320::{
+        PseudorandomZeroSharingSeedDeliveryEntryBytes320,
+        PseudorandomZeroSharingSeedDeliveryError320, PseudorandomZeroSharingSeedDeliveryLayout320,
+        RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320,
+        derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320,
+        verify_pseudorandom_zero_sharing_seed_delivery_320,
+        verify_pseudorandom_zero_sharing_seed_recipient_inventory_320,
+    },
+    pseudorandom_zero_sharing_subset_seed_320::{
+        PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH,
+        create_pseudorandom_zero_sharing_subset_seed_contribution_320,
+    },
 };
 
 const COMPLETION_ROOT_INVENTORY_BODY_BYTE_LENGTH: usize = 931;
@@ -67,6 +90,25 @@ impl OwnedRootAuthorizationPackage320 {
             &self.reservation_certificate_bytes,
             &self.exact_output_certificate_bytes,
             &self.contributor_signature_envelope_bytes,
+        )
+    }
+}
+
+struct SeedCatalogFixture320 {
+    tree: PseudorandomZeroSharingSeedCatalogTree320,
+    opening_bytes: Box<[Zeroizing<Vec<u8>>]>,
+}
+
+struct OwnedSeedDeliveryEntry320 {
+    opening_bytes: Zeroizing<Vec<u8>>,
+    inclusion_proof_bytes: Vec<u8>,
+}
+
+impl OwnedSeedDeliveryEntry320 {
+    fn borrowed(&self) -> PseudorandomZeroSharingSeedDeliveryEntryBytes320<'_> {
+        PseudorandomZeroSharingSeedDeliveryEntryBytes320::new(
+            &self.opening_bytes,
+            &self.inclusion_proof_bytes,
         )
     }
 }
@@ -409,6 +451,468 @@ fn root_inventory_refuses_missing_reordered_mixed_and_wrong_context_packages() {
     assert!(package_debug.contains("[redacted]"));
 }
 
+#[test]
+fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
+    let participant_count = FOUNDATION_PROFILE.participant_count;
+    let (roster, signing_keys) = roster_and_signing_keys(participant_count, 0xc1);
+    let preparation_context = build_preparation_context(&roster, 0xc3);
+    let parameter_identity = deterministic_hash(0xc5, 0);
+    let catalog_fixtures = (0..participant_count)
+        .map(|sender_position| {
+            let layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
+                parameter_identity,
+                preparation_context,
+                sender_position,
+            )
+            .unwrap();
+            seed_catalog_fixture(layout, 0xc7_u8.wrapping_add(sender_position as u8))
+        })
+        .collect::<Vec<_>>();
+    let owned_packages = catalog_fixtures
+        .iter()
+        .enumerate()
+        .map(|(sender_index, fixture)| {
+            authorize_root_body(
+                fixture.tree.root_body(),
+                &roster,
+                &signing_keys,
+                0xd1_u8.wrapping_add(sender_index as u8),
+                false,
+            )
+        })
+        .collect::<Vec<_>>();
+    let verified_root_inventory = verify_pseudorandom_zero_sharing_seed_catalog_root_inventory_320(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &borrowed_packages(&owned_packages),
+    )
+    .unwrap();
+
+    let sender_position = 2;
+    let recipient_position = 7;
+    let descriptor = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
+        &verified_root_inventory,
+        sender_position,
+        recipient_position,
+    )
+    .unwrap();
+    let descriptor_bytes = descriptor.canonical_bytes().unwrap();
+    let owned_entries = seed_delivery_entries(
+        &catalog_fixtures[usize::from(sender_position)],
+        recipient_position,
+    );
+    let entries = borrowed_delivery_entries(&owned_entries);
+    let expected_layout = PseudorandomZeroSharingSeedDeliveryLayout320::derive(
+        catalog_fixtures[usize::from(sender_position)]
+            .tree
+            .root_body()
+            .layout(),
+        recipient_position,
+    )
+    .unwrap();
+
+    assert_eq!(descriptor_bytes.len(), 328);
+    assert_eq!(descriptor.parameter_identity(), parameter_identity);
+    assert_eq!(
+        descriptor.preparation_context_identity(),
+        preparation_context.identity()
+    );
+    assert_eq!(
+        descriptor.root_inventory_identity(),
+        verified_root_inventory.identity().unwrap()
+    );
+    assert_eq!(descriptor.participant_count(), participant_count);
+    assert_eq!(descriptor.sender_position(), sender_position);
+    assert_eq!(descriptor.recipient_position(), recipient_position);
+    assert_eq!(descriptor.payload_byte_length(), 62_590);
+    assert_eq!(entries.len(), 57);
+    assert_eq!(
+        owned_entries
+            .iter()
+            .map(|entry| entry.opening_bytes.len() + entry.inclusion_proof_bytes.len())
+            .sum::<usize>(),
+        expected_layout.payload_byte_length()
+    );
+
+    let verified_delivery = verify_pseudorandom_zero_sharing_seed_delivery_320(
+        &verified_root_inventory,
+        sender_position,
+        recipient_position,
+        &descriptor_bytes,
+        &entries,
+    )
+    .unwrap();
+    assert_eq!(verified_delivery.descriptor(), descriptor);
+    assert_eq!(verified_delivery.layout(), &expected_layout);
+    assert_eq!(verified_delivery.subset_entries().len(), 56);
+    for (entry, expected_subset) in verified_delivery
+        .subset_entries()
+        .iter()
+        .zip(expected_layout.subsets())
+    {
+        assert_eq!(entry.subset(), *expected_subset);
+        let _ = entry.contribution();
+    }
+    let pair_scope = verified_delivery.pair_contribution().coordinate().scope();
+    assert_eq!(pair_scope.lower_roster_position(), sender_position);
+    assert_eq!(pair_scope.upper_roster_position(), recipient_position);
+    assert_eq!(
+        verified_delivery.identity().unwrap(),
+        descriptor.identity().unwrap()
+    );
+    assert!(format!("{verified_delivery:?}").contains("[redacted]"));
+    assert!(format!("{:?}", entries[0]).contains("[redacted]"));
+
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_delivery_320(
+            &verified_root_inventory,
+            sender_position,
+            recipient_position,
+            &descriptor_bytes,
+            &entries[..entries.len() - 1],
+        ),
+        Err(
+            PseudorandomZeroSharingSeedDeliveryError320::DeliveryEntryCount {
+                expected: 57,
+                actual: 56,
+            }
+        )
+    ));
+    let mut reordered_entries = entries.clone();
+    reordered_entries.swap(0, 1);
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_delivery_320(
+            &verified_root_inventory,
+            sender_position,
+            recipient_position,
+            &descriptor_bytes,
+            &reordered_entries,
+        ),
+        Err(PseudorandomZeroSharingSeedDeliveryError320::Preparation(
+            super::TallyPreparationError::PseudorandomZeroSharingSubsetSeedCoordinateMismatch
+        ))
+    ));
+    let mut changed_proof_entries = seed_delivery_entries(
+        &catalog_fixtures[usize::from(sender_position)],
+        recipient_position,
+    );
+    *changed_proof_entries[0]
+        .inclusion_proof_bytes
+        .last_mut()
+        .unwrap() ^= 0x40;
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_delivery_320(
+            &verified_root_inventory,
+            sender_position,
+            recipient_position,
+            &descriptor_bytes,
+            &borrowed_delivery_entries(&changed_proof_entries),
+        ),
+        Err(PseudorandomZeroSharingSeedDeliveryError320::Preparation(
+            super::TallyPreparationError::PseudorandomZeroSharingSeedCatalogRootMismatch
+        ))
+    ));
+    let other_recipient_descriptor = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
+        &verified_root_inventory,
+        sender_position,
+        recipient_position + 1,
+    )
+    .unwrap()
+    .canonical_bytes()
+    .unwrap();
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_delivery_320(
+            &verified_root_inventory,
+            sender_position,
+            recipient_position,
+            &other_recipient_descriptor,
+            &entries,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedDeliveryError320::DescriptorMismatch {
+                field: "recipient position"
+            }
+        )
+    ));
+    let mut changed_descriptor_bytes = descriptor_bytes.clone();
+    *changed_descriptor_bytes.last_mut().unwrap() ^= 0x80;
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_delivery_320(
+            &verified_root_inventory,
+            sender_position,
+            recipient_position,
+            &changed_descriptor_bytes,
+            &entries,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedDeliveryError320::DescriptorMismatch {
+                field: "payload byte length"
+            }
+        )
+    ));
+    for truncated_length in 0..descriptor_bytes.len() {
+        assert!(
+            verify_pseudorandom_zero_sharing_seed_delivery_320(
+                &verified_root_inventory,
+                sender_position,
+                recipient_position,
+                &descriptor_bytes[..truncated_length],
+                &entries,
+            )
+            .is_err()
+        );
+    }
+    assert!(
+        verify_pseudorandom_zero_sharing_seed_delivery_320(
+            &verified_root_inventory,
+            sender_position,
+            recipient_position,
+            &vec![0_u8; 4_097],
+            &entries,
+        )
+        .is_err()
+    );
+
+    let recipient_position = 5;
+    let deliveries = verified_deliveries_for_recipient(
+        &catalog_fixtures,
+        &verified_root_inventory,
+        recipient_position,
+    );
+    let recipient_inventory = verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
+        &verified_root_inventory,
+        recipient_position,
+        deliveries,
+    )
+    .unwrap();
+    assert_eq!(recipient_inventory.deliveries().len(), 9);
+    assert_eq!(
+        recipient_inventory.body().parameter_identity(),
+        parameter_identity
+    );
+    assert_eq!(
+        recipient_inventory.body().preparation_context_identity(),
+        preparation_context.identity()
+    );
+    assert_eq!(
+        recipient_inventory.body().root_inventory_identity(),
+        verified_root_inventory.identity().unwrap()
+    );
+    assert_eq!(
+        recipient_inventory.body().participant_count(),
+        participant_count
+    );
+    assert_eq!(
+        recipient_inventory.body().recipient_position(),
+        recipient_position
+    );
+    assert_eq!(
+        recipient_inventory.body().canonical_bytes().unwrap().len(),
+        306
+    );
+    let _ = recipient_inventory.body().identity().unwrap();
+    assert!(format!("{recipient_inventory:?}").contains("[redacted]"));
+    assert_eq!(recipient_inventory.into_deliveries().len(), 9);
+
+    let mut reordered_deliveries = verified_deliveries_for_recipient(
+        &catalog_fixtures,
+        &verified_root_inventory,
+        recipient_position,
+    );
+    reordered_deliveries.swap(0, 1);
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
+            &verified_root_inventory,
+            recipient_position,
+            reordered_deliveries,
+        ),
+        Err(PseudorandomZeroSharingSeedDeliveryError320::DeliveryOrder {
+            delivery_index: 0,
+            expected_sender_position: 0,
+            actual_sender_position: 1,
+        })
+    ));
+    let mut incomplete_deliveries = verified_deliveries_for_recipient(
+        &catalog_fixtures,
+        &verified_root_inventory,
+        recipient_position,
+    );
+    incomplete_deliveries.pop();
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
+            &verified_root_inventory,
+            recipient_position,
+            incomplete_deliveries,
+        ),
+        Err(PseudorandomZeroSharingSeedDeliveryError320::DeliveryCount {
+            expected: 9,
+            actual: 8,
+        })
+    ));
+}
+
+fn seed_catalog_fixture(
+    layout: PseudorandomZeroSharingSeedCatalogLayout320,
+    marker: u8,
+) -> SeedCatalogFixture320 {
+    let mut commitment_digests = Vec::with_capacity(layout.leaf_count() as usize);
+    let mut opening_bytes = Vec::with_capacity(layout.leaf_count() as usize);
+    for (leaf_index, coordinate) in layout.coordinates().unwrap().enumerate() {
+        let leaf_ordinal = leaf_index as u64;
+        let salt = marked_bytes::<SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH>(
+            marker.wrapping_add(0x11),
+            leaf_ordinal,
+        );
+        match coordinate {
+            PseudorandomZeroSharingSeedCatalogCoordinate320::Subset(subset) => {
+                let subset_coordinate = layout.subset_seed_coordinate(subset).unwrap();
+                let (commitment, opening) =
+                    create_pseudorandom_zero_sharing_subset_seed_contribution_320(
+                        subset_coordinate,
+                        marked_bytes::<
+                            PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH,
+                        >(marker.wrapping_add(0x21), leaf_ordinal),
+                        marked_bytes::<
+                            PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH,
+                        >(marker.wrapping_add(0x31), leaf_ordinal),
+                    )
+                    .unwrap();
+                commitment_digests.push(commitment.digest());
+                opening_bytes.push(opening.canonical_bytes().unwrap());
+            }
+            PseudorandomZeroSharingSeedCatalogCoordinate320::Pair {
+                lower_roster_position,
+                upper_roster_position,
+            } => {
+                let counterpart_position = if layout.contributor_position() == lower_roster_position
+                {
+                    upper_roster_position
+                } else {
+                    lower_roster_position
+                };
+                let pair_coordinate =
+                    PseudorandomZeroSharingPairSeedContributionCoordinate320::from_catalog_layout(
+                        layout,
+                        counterpart_position,
+                    )
+                    .unwrap();
+                let (commitment, opening) =
+                    create_pseudorandom_zero_sharing_pair_seed_contribution_320(
+                        pair_coordinate,
+                        marked_bytes::<PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH>(
+                            marker.wrapping_add(0x41),
+                            leaf_ordinal,
+                        ),
+                        salt,
+                    )
+                    .unwrap();
+                commitment_digests.push(commitment.digest());
+                opening_bytes.push(opening.canonical_bytes().unwrap());
+            }
+            PseudorandomZeroSharingSeedCatalogCoordinate320::CollectiveCoin => {
+                let coin_coordinate =
+                    CollectiveCoinSourceCoordinate320::from_catalog_layout(layout).unwrap();
+                let (commitment, opening) = create_collective_coin_source_320(
+                    coin_coordinate,
+                    marked_bytes::<COLLECTIVE_COIN_SOURCE_BYTE_LENGTH>(
+                        marker.wrapping_add(0x51),
+                        leaf_ordinal,
+                    ),
+                    salt,
+                )
+                .unwrap();
+                commitment_digests.push(commitment.digest());
+                opening_bytes.push(opening.canonical_bytes().unwrap());
+            }
+        }
+    }
+    SeedCatalogFixture320 {
+        tree: PseudorandomZeroSharingSeedCatalogTree320::create(layout, commitment_digests)
+            .unwrap(),
+        opening_bytes: opening_bytes.into_boxed_slice(),
+    }
+}
+
+fn seed_delivery_entries(
+    fixture: &SeedCatalogFixture320,
+    recipient_position: u16,
+) -> Vec<OwnedSeedDeliveryEntry320> {
+    let catalog_layout = fixture.tree.root_body().layout();
+    let delivery_layout =
+        PseudorandomZeroSharingSeedDeliveryLayout320::derive(catalog_layout, recipient_position)
+            .unwrap();
+    let mut coordinates = delivery_layout
+        .subsets()
+        .iter()
+        .copied()
+        .map(PseudorandomZeroSharingSeedCatalogCoordinate320::Subset)
+        .collect::<Vec<_>>();
+    coordinates.push(catalog_layout.pair_coordinate(recipient_position).unwrap());
+    coordinates
+        .into_iter()
+        .map(|coordinate| {
+            let leaf_ordinal = catalog_layout.leaf_ordinal(coordinate).unwrap();
+            OwnedSeedDeliveryEntry320 {
+                opening_bytes: Zeroizing::new(
+                    fixture.opening_bytes[usize::try_from(leaf_ordinal).unwrap()].to_vec(),
+                ),
+                inclusion_proof_bytes: fixture
+                    .tree
+                    .inclusion_proof(leaf_ordinal)
+                    .unwrap()
+                    .canonical_bytes()
+                    .unwrap(),
+            }
+        })
+        .collect()
+}
+
+fn borrowed_delivery_entries(
+    entries: &[OwnedSeedDeliveryEntry320],
+) -> Vec<PseudorandomZeroSharingSeedDeliveryEntryBytes320<'_>> {
+    entries
+        .iter()
+        .map(OwnedSeedDeliveryEntry320::borrowed)
+        .collect()
+}
+
+fn verified_deliveries_for_recipient(
+    fixtures: &[SeedCatalogFixture320],
+    root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+    recipient_position: u16,
+) -> Vec<RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320> {
+    (0..root_inventory.body().participant_count())
+        .filter(|sender_position| *sender_position != recipient_position)
+        .map(|sender_position| {
+            let descriptor = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
+                root_inventory,
+                sender_position,
+                recipient_position,
+            )
+            .unwrap();
+            let owned_entries =
+                seed_delivery_entries(&fixtures[usize::from(sender_position)], recipient_position);
+            verify_pseudorandom_zero_sharing_seed_delivery_320(
+                root_inventory,
+                sender_position,
+                recipient_position,
+                &descriptor.canonical_bytes().unwrap(),
+                &borrowed_delivery_entries(&owned_entries),
+            )
+            .unwrap()
+        })
+        .collect()
+}
+
+fn marked_bytes<const BYTE_LENGTH: usize>(marker: u8, ordinal: u64) -> [u8; BYTE_LENGTH] {
+    let mut bytes = [marker; BYTE_LENGTH];
+    let ordinal_bytes = ordinal.to_le_bytes();
+    let copied_byte_length = BYTE_LENGTH.min(ordinal_bytes.len());
+    bytes[..copied_byte_length].copy_from_slice(&ordinal_bytes[..copied_byte_length]);
+    bytes
+}
+
 fn root_authorization_packages(
     parameter_identity: Hash512,
     preparation_context: TallyPreparationContext,
@@ -448,9 +952,27 @@ fn root_authorization_package(
     )
     .unwrap();
     let root_body = catalog_root(layout, contributor_root_marker);
+    authorize_root_body(
+        root_body,
+        roster,
+        signing_keys,
+        contributor_root_marker,
+        alternate_authorization,
+    )
+}
+
+fn authorize_root_body(
+    root_body: PseudorandomZeroSharingSeedCatalogRootBody320,
+    roster: &Roster,
+    signing_keys: &[ml_dsa_65::PrivateKey],
+    contributor_root_marker: u8,
+    alternate_authorization: bool,
+) -> OwnedRootAuthorizationPackage320 {
+    let layout = root_body.layout();
+    let contributor_position = layout.contributor_position();
     let root_body_bytes = root_body.canonical_bytes().unwrap();
     let witness_positions = canonical_witness_positions(
-        preparation_context.participant_count(),
+        layout.participant_count(),
         contributor_position,
         alternate_authorization,
     );

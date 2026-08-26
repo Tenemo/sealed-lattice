@@ -49,6 +49,9 @@ pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_INCLUSION_PROOF_DOMAIN: 
 
 const ROOT_BODY_ITEM_COUNT: usize = 15;
 const INCLUSION_PROOF_PREFIX_ITEM_COUNT: usize = 4;
+const CANONICAL_TUPLE_HEADER_BYTE_LENGTH: usize = 8;
+const CANONICAL_ITEM_HEADER_BYTE_LENGTH: usize = 6;
+const CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH: usize = 4;
 const MAXIMUM_SEED_CATALOG_CONTROL_OBJECT_BYTE_LENGTH: usize = 4_096;
 const MAXIMUM_SEED_CATALOG_CONTROL_OBJECT_ITEM_COUNT: usize = 64;
 const MAXIMUM_SEED_CATALOG_CONTROL_OBJECT_ITEM_BYTE_LENGTH: usize = 512;
@@ -562,6 +565,38 @@ pub(crate) struct PseudorandomZeroSharingSeedCatalogInclusionProof320 {
 }
 
 impl PseudorandomZeroSharingSeedCatalogInclusionProof320 {
+    pub(crate) fn canonical_byte_length_for_layout(
+        layout: PseudorandomZeroSharingSeedCatalogLayout320,
+    ) -> Result<usize, TallyPreparationError> {
+        let sibling_count = usize::from(layout.tree_height());
+        let item_count = INCLUSION_PROOF_PREFIX_ITEM_COUNT
+            .checked_add(sibling_count)
+            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+        CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+            .checked_add(
+                item_count
+                    .checked_mul(CANONICAL_ITEM_HEADER_BYTE_LENGTH)
+                    .ok_or(TallyPreparationError::ArithmeticOverflow)?,
+            )
+            .and_then(|length| {
+                length.checked_add(CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH)
+            })
+            .and_then(|length| {
+                length.checked_add(
+                    PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_INCLUSION_PROOF_DOMAIN.len(),
+                )
+            })
+            .and_then(|length| length.checked_add(Hash512::BYTE_LENGTH))
+            .and_then(|length| length.checked_add(size_of::<u64>()))
+            .and_then(|length| length.checked_add(size_of::<u16>()))
+            .and_then(|length| {
+                sibling_count
+                    .checked_mul(Hash512::BYTE_LENGTH)
+                    .and_then(|sibling_byte_length| length.checked_add(sibling_byte_length))
+            })
+            .ok_or(TallyPreparationError::ArithmeticOverflow)
+    }
+
     pub(crate) fn canonical_bytes(&self) -> Result<Vec<u8>, TallyPreparationError> {
         let mut items =
             Vec::with_capacity(INCLUSION_PROOF_PREFIX_ITEM_COUNT + self.sibling_digests.len());
