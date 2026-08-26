@@ -38,6 +38,7 @@ mod preparation_attempt_resource_model;
 mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
 mod pseudorandom_zero_sharing_320;
+mod pseudorandom_zero_sharing_field_stream_320;
 mod random_state;
 mod random_tape;
 mod replicated_beaver_opening;
@@ -113,6 +114,8 @@ mod preparation_holder_record_catalog_tests;
 mod preparation_multiplication_catalog_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_field_stream_320_tests;
 #[cfg(test)]
 mod randomness_tests;
 #[cfg(test)]
@@ -229,6 +232,23 @@ pub(crate) enum TallyPreparationError {
         chunk_count: u64,
     },
     ReplicatedSharingFieldPositionOutOfRange {
+        position_within_chunk: u64,
+        field_count: u64,
+    },
+    PseudorandomZeroSharingFieldCountZero,
+    PseudorandomZeroSharingFieldStreamSubsetParticipantCountMismatch {
+        subset_participant_count: u16,
+        context_participant_count: u16,
+    },
+    PseudorandomZeroSharingFieldStreamBasisPositionOutOfRange {
+        basis_position: u16,
+        active_fault_bound: u16,
+    },
+    PseudorandomZeroSharingFieldStreamChunkOutOfRange {
+        chunk_index: u64,
+        chunk_count: u64,
+    },
+    PseudorandomZeroSharingFieldStreamPositionOutOfRange {
         position_within_chunk: u64,
         field_count: u64,
     },
@@ -630,6 +650,36 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "replicated-sharing field position {position_within_chunk} is outside chunk field count {field_count}"
+            ),
+            Self::PseudorandomZeroSharingFieldCountZero => formatter
+                .write_str("pseudorandom zero-sharing field stream must contain a field element"),
+            Self::PseudorandomZeroSharingFieldStreamSubsetParticipantCountMismatch {
+                subset_participant_count,
+                context_participant_count,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing field stream subset participant count {subset_participant_count} does not match preparation context participant count {context_participant_count}"
+            ),
+            Self::PseudorandomZeroSharingFieldStreamBasisPositionOutOfRange {
+                basis_position,
+                active_fault_bound,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing basis position {basis_position} is outside active fault bound {active_fault_bound}"
+            ),
+            Self::PseudorandomZeroSharingFieldStreamChunkOutOfRange {
+                chunk_index,
+                chunk_count,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing field chunk {chunk_index} is outside chunk count {chunk_count}"
+            ),
+            Self::PseudorandomZeroSharingFieldStreamPositionOutOfRange {
+                position_within_chunk,
+                field_count,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing field position {position_within_chunk} is outside chunk field count {field_count}"
             ),
             Self::ReplicatedRandomBitCountZero => {
                 formatter.write_str("replicated random-bit stream must contain a bit")

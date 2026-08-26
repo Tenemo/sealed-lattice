@@ -274,11 +274,8 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
                     PseudorandomZeroSharingResourceInput {
                         participant_count,
                         zero_sharing_count: 19,
-                        seed_contribution_byte_length: 40,
                         commitment_salt_byte_length: 64,
-                        field_element_byte_length: 40,
                         mailbox_stream_wrapper_byte_length: 5_120,
-                        maximum_transport_payload_byte_length: 1_048_576,
                     },
                 ),
                 Err(TallyPreparationError::GeometryMismatch)
@@ -290,11 +287,8 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
             PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
                 participant_count,
                 zero_sharing_count: 19,
-                seed_contribution_byte_length: 40,
                 commitment_salt_byte_length: 64,
-                field_element_byte_length: 40,
                 mailbox_stream_wrapper_byte_length: 5_120,
-                maximum_transport_payload_byte_length: 1_048_576,
             })
             .unwrap();
 
@@ -322,11 +316,8 @@ fn invalid_or_overflowing_resource_shapes_and_algebra_inputs_are_rejected() {
     let invalid_input = PseudorandomZeroSharingResourceInput {
         participant_count: FOUNDATION_PROFILE.participant_count,
         zero_sharing_count: 0,
-        seed_contribution_byte_length: 40,
         commitment_salt_byte_length: 64,
-        field_element_byte_length: 40,
         mailbox_stream_wrapper_byte_length: 5_120,
-        maximum_transport_payload_byte_length: 1_048_576,
     };
     assert_eq!(
         PseudorandomZeroSharingResourceModel::derive(invalid_input),
@@ -342,7 +333,7 @@ fn invalid_or_overflowing_resource_shapes_and_algebra_inputs_are_rejected() {
     assert_eq!(
         PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
             zero_sharing_count: 1,
-            maximum_transport_payload_byte_length: 39,
+            commitment_salt_byte_length: 0,
             ..invalid_input
         }),
         Err(TallyPreparationError::GeometryMismatch)
@@ -368,11 +359,8 @@ fn completion_resource_model() -> PseudorandomZeroSharingResourceModel {
     PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
         participant_count: FOUNDATION_PROFILE.participant_count,
         zero_sharing_count: COMPLETION_ZERO_SHARING_COUNT,
-        seed_contribution_byte_length: 40,
         commitment_salt_byte_length: 64,
-        field_element_byte_length: 40,
         mailbox_stream_wrapper_byte_length: 5_120,
-        maximum_transport_payload_byte_length: 1_048_576,
     })
     .unwrap()
 }

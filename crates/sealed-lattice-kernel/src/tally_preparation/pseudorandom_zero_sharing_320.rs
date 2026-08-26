@@ -4,6 +4,11 @@ use subtle::ConstantTimeEq;
 use super::{
     TallyPreparationError,
     binary_field_320::BinaryFieldElement320,
+    pseudorandom_zero_sharing_field_stream_320::{
+        PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH,
+        pseudorandom_zero_sharing_field_chunk_count,
+        pseudorandom_zero_sharing_field_elements_per_chunk,
+    },
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
 
@@ -12,18 +17,16 @@ use super::{
 /// The model accounts for one contribution and one independently salted
 /// opening per subset member, one wrapper per ordered mailbox stream, local
 /// pseudorandom field output, precomputed basis weights, and the exact
-/// all-roster zero-codeword check. It does not claim that a malicious seed
-/// ceremony, commitment scheme, KMAC invocation, checkpoint layout, or
+/// all-roster zero-codeword check. Stream geometry is imported from the exact
+/// unactivated KMACXOF256 cursor implementation. The model does not claim that
+/// a malicious seed ceremony, commitment scheme, checkpoint layout, or
 /// authenticated mailbox schema has been admitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PseudorandomZeroSharingResourceInput {
     pub(crate) participant_count: u16,
     pub(crate) zero_sharing_count: u64,
-    pub(crate) seed_contribution_byte_length: u64,
     pub(crate) commitment_salt_byte_length: u64,
-    pub(crate) field_element_byte_length: u64,
     pub(crate) mailbox_stream_wrapper_byte_length: u64,
-    pub(crate) maximum_transport_payload_byte_length: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,21 +69,24 @@ impl PseudorandomZeroSharingResourceModel {
         input: PseudorandomZeroSharingResourceInput,
     ) -> Result<Self, TallyPreparationError> {
         if input.zero_sharing_count == 0
-            || input.seed_contribution_byte_length == 0
             || input.commitment_salt_byte_length == 0
-            || input.field_element_byte_length == 0
             || input.mailbox_stream_wrapper_byte_length == 0
-            || input.maximum_transport_payload_byte_length == 0
         {
             return Err(TallyPreparationError::GeometryMismatch);
         }
+
+        let seed_contribution_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let field_element_byte_length = u64::try_from(BinaryFieldElement320::CANONICAL_BYTE_LENGTH)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
 
         let geometry = ReplicatedRandomSharingGeometry::derive(input.participant_count)?;
         if geometry.active_fault_bound == 0 {
             return Err(TallyPreparationError::GeometryMismatch);
         }
         let seed_opening_byte_length = checked_add(
-            input.seed_contribution_byte_length,
+            seed_contribution_byte_length,
             input.commitment_salt_byte_length,
         )?;
         let seed_contribution_count = checked_multiply(
@@ -133,7 +139,7 @@ impl PseudorandomZeroSharingResourceModel {
 
         let combined_seed_custody_byte_length_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
-            input.seed_contribution_byte_length,
+            seed_contribution_byte_length,
         )?;
         let subset_basis_stream_count_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
@@ -141,7 +147,7 @@ impl PseudorandomZeroSharingResourceModel {
         )?;
         let basis_weight_live_byte_length_per_participant = checked_multiply(
             subset_basis_stream_count_per_participant,
-            input.field_element_byte_length,
+            field_element_byte_length,
         )?;
         let basis_multiplications_per_subset = checked_add(
             geometry.active_fault_bound,
@@ -161,17 +167,13 @@ impl PseudorandomZeroSharingResourceModel {
         )?;
         let field_output_byte_length_per_participant = checked_multiply(
             field_output_count_per_participant,
-            input.field_element_byte_length,
+            field_element_byte_length,
         )?;
-        let full_chunk_field_count =
-            input.maximum_transport_payload_byte_length / input.field_element_byte_length;
-        if full_chunk_field_count == 0 {
-            return Err(TallyPreparationError::GeometryMismatch);
-        }
+        let full_chunk_field_count = pseudorandom_zero_sharing_field_elements_per_chunk()?;
         let full_chunk_payload_byte_length =
-            checked_multiply(full_chunk_field_count, input.field_element_byte_length)?;
+            checked_multiply(full_chunk_field_count, field_element_byte_length)?;
         let chunk_count_per_subset_basis_stream =
-            checked_ceiling_division(input.zero_sharing_count, full_chunk_field_count)?;
+            pseudorandom_zero_sharing_field_chunk_count(input.zero_sharing_count)?;
         let field_output_chunk_count_per_participant = checked_multiply(
             subset_basis_stream_count_per_participant,
             chunk_count_per_subset_basis_stream,
@@ -187,7 +189,7 @@ impl PseudorandomZeroSharingResourceModel {
             )?)
             .ok_or(TallyPreparationError::GeometryMismatch)?;
         let final_chunk_payload_byte_length =
-            checked_multiply(final_chunk_field_count, input.field_element_byte_length)?;
+            checked_multiply(final_chunk_field_count, field_element_byte_length)?;
 
         let stream_field_multiplication_count_per_participant = field_output_count_per_participant;
         let stream_field_addition_count_per_participant = field_output_count_per_participant
@@ -458,13 +460,4 @@ fn checked_sum(values: &[u64]) -> Result<u64, TallyPreparationError> {
     values
         .iter()
         .try_fold(0_u64, |sum, value| checked_add(sum, *value))
-}
-
-fn checked_ceiling_division(dividend: u64, divisor: u64) -> Result<u64, TallyPreparationError> {
-    if divisor == 0 {
-        return Err(TallyPreparationError::GeometryMismatch);
-    }
-    let quotient = dividend / divisor;
-    let remainder = dividend % divisor;
-    checked_add(quotient, u64::from(remainder != 0))
 }
