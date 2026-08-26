@@ -41,6 +41,7 @@ mod pseudorandom_zero_sharing_320;
 mod pseudorandom_zero_sharing_field_stream_320;
 mod pseudorandom_zero_sharing_seed_catalog_320;
 mod pseudorandom_zero_sharing_seed_catalog_signature_320;
+mod pseudorandom_zero_sharing_seed_catalog_state_320;
 mod pseudorandom_zero_sharing_subset_seed_320;
 mod random_state;
 mod random_tape;
@@ -123,6 +124,8 @@ mod pseudorandom_zero_sharing_field_stream_320_tests;
 mod pseudorandom_zero_sharing_seed_catalog_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_catalog_signature_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_seed_catalog_state_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_subset_seed_320_tests;
 #[cfg(test)]

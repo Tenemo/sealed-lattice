@@ -94,9 +94,9 @@ impl std::error::Error for PseudorandomZeroSharingSeedCatalogSignatureError {}
 
 /// Canonical message signed by the catalog contributor.
 ///
-/// The state-reservation identity is byte-bound but not verified here. This
-/// prevents a direct signature-over-root shortcut while the one-shot state
-/// certificate verifier remains a separate predecessor.
+/// The state-authorization certificate identity is byte-bound but not verified
+/// here. This prevents a direct signature-over-root shortcut while the one-shot
+/// state certificate verifier remains a separate predecessor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
     preparation_context_identity: Hash512,
@@ -290,7 +290,8 @@ impl fmt::Debug for PseudorandomZeroSharingSignedSeedCatalogRootEnvelope320 {
     }
 }
 
-/// Positive roster-signature result for one root and state identity.
+/// Positive roster-signature result for one root and state-authorization
+/// identity.
 ///
 /// It does not verify that the state-reservation identity names a valid
 /// certificate and therefore cannot authorize private delivery or seed use.
@@ -318,9 +319,9 @@ impl RosterSignatureMatchedPseudorandomZeroSharingSeedCatalogRoot320 {
 /// Verifies the exact canonical root, signature carrier, fixed ML-DSA purpose,
 /// and roster key selected by the catalog contributor position.
 ///
-/// The expected state identity is only matched to signed bytes. A later
-/// verifier must supply its positively verified state certificate before any
-/// continuation can consume this result.
+/// The expected state-authorization identity is only matched to signed bytes. A
+/// later verifier must supply its positively verified state certificate before
+/// any continuation can consume this result.
 pub(crate) fn verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
     expected_layout: PseudorandomZeroSharingSeedCatalogLayout320,
     root_body_bytes: &[u8],
