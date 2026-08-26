@@ -446,7 +446,7 @@ fn authenticated_inventory_length_refuses_unsupported_roster_sizes() {
     ));
 }
 
-fn authenticated_delivery_set(
+pub(super) fn authenticated_delivery_set(
     recipient_position: u16,
     encapsulation_marker: u8,
 ) -> (
@@ -484,7 +484,7 @@ fn authenticated_delivery_set(
     (owner_fixture, authenticated_deliveries)
 }
 
-fn sign_receipt(
+pub(super) fn sign_receipt(
     fixture: &SeedMailboxTestFixture320,
     receipt_body: PseudorandomZeroSharingSeedRecipientReceiptBody320,
     signer_position: u16,

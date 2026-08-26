@@ -40,6 +40,14 @@ use super::{
         PseudorandomZeroSharingSeedReceiptError320,
         pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_body_byte_length,
     },
+    pseudorandom_zero_sharing_seed_receipt_terminal_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_ENDORSEMENT_AUTHORIZATION_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_ENDORSEMENT_ENVELOPE_BYTE_LENGTH,
+        PseudorandomZeroSharingSeedReceiptTerminalError320,
+        PseudorandomZeroSharingSeedRecipientReceiptTerminalCertificate320,
+        pseudorandom_zero_sharing_seed_recipient_receipt_inventory_body_byte_length,
+    },
     pseudorandom_zero_sharing_subset_seed_320::PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH,
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
@@ -81,6 +89,7 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) root_terminal_endorsement_authorization_body_byte_length: u64,
     pub(crate) root_terminal_endorsement_envelope_byte_length: u64,
     pub(crate) root_terminal_certificate_byte_length: u64,
+    pub(crate) root_terminal_signature_generation_count: u64,
     pub(crate) root_terminal_signature_verification_count: u64,
     pub(crate) ordered_mailbox_stream_count: u64,
     pub(crate) mailbox_chunk_count_per_stream: u64,
@@ -122,6 +131,15 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) retained_public_recipient_receipt_envelope_byte_length: u64,
     pub(crate) recipient_receipt_signature_generation_count: u64,
     pub(crate) recipient_receipt_signature_verification_count: u64,
+    pub(crate) recipient_receipt_inventory_body_byte_length: u64,
+    pub(crate) receipt_terminal_body_byte_length: u64,
+    pub(crate) receipt_terminal_endorsement_count: u64,
+    pub(crate) receipt_terminal_endorsement_authorization_body_byte_length: u64,
+    pub(crate) receipt_terminal_endorsement_envelope_byte_length: u64,
+    pub(crate) receipt_terminal_certificate_byte_length: u64,
+    pub(crate) retained_public_receipt_terminal_certificate_byte_length: u64,
+    pub(crate) receipt_terminal_signature_generation_count: u64,
+    pub(crate) receipt_terminal_signature_verification_count: u64,
     pub(crate) combined_subset_seed_custody_byte_length_per_participant: u64,
     pub(crate) combined_pair_seed_custody_byte_length_per_participant: u64,
     pub(crate) collective_coin_source_custody_byte_length_per_participant: u64,
@@ -191,6 +209,25 @@ impl PseudorandomZeroSharingResourceModel {
         let recipient_receipt_envelope_byte_length =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_ENVELOPE_BYTE_LENGTH)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let recipient_receipt_inventory_body_byte_length = u64::try_from(
+            pseudorandom_zero_sharing_seed_recipient_receipt_inventory_body_byte_length(
+                input.participant_count,
+            )
+            .map_err(map_receipt_terminal_resource_error)?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let receipt_terminal_body_byte_length = u64::try_from(
+            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_BODY_BYTE_LENGTH,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let receipt_terminal_endorsement_authorization_body_byte_length = u64::try_from(
+            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_ENDORSEMENT_AUTHORIZATION_BODY_BYTE_LENGTH,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let receipt_terminal_endorsement_envelope_byte_length = u64::try_from(
+            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_ENDORSEMENT_ENVELOPE_BYTE_LENGTH,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let mailbox_header_body_byte_length =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
@@ -229,7 +266,20 @@ impl PseudorandomZeroSharingResourceModel {
             .map_err(|_| TallyPreparationError::GeometryMismatch)?,
         )
         .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let root_terminal_signature_generation_count = root_terminal_endorsement_count;
         let root_terminal_signature_verification_count = root_terminal_endorsement_count;
+        let receipt_terminal_endorsement_count = geometry.participant_count;
+        let receipt_terminal_certificate_byte_length = u64::try_from(
+            PseudorandomZeroSharingSeedRecipientReceiptTerminalCertificate320::canonical_byte_length_for_participant_count(
+                input.participant_count,
+            )
+            .map_err(map_receipt_terminal_resource_error)?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let retained_public_receipt_terminal_certificate_byte_length =
+            receipt_terminal_certificate_byte_length;
+        let receipt_terminal_signature_generation_count = receipt_terminal_endorsement_count;
+        let receipt_terminal_signature_verification_count = receipt_terminal_endorsement_count;
         let subset_seed_contribution_count = checked_multiply(
             geometry.authorized_subset_count,
             geometry.authorized_subset_size,
@@ -540,6 +590,7 @@ impl PseudorandomZeroSharingResourceModel {
             root_terminal_endorsement_authorization_body_byte_length,
             root_terminal_endorsement_envelope_byte_length,
             root_terminal_certificate_byte_length,
+            root_terminal_signature_generation_count,
             root_terminal_signature_verification_count,
             ordered_mailbox_stream_count,
             mailbox_chunk_count_per_stream,
@@ -581,6 +632,15 @@ impl PseudorandomZeroSharingResourceModel {
             retained_public_recipient_receipt_envelope_byte_length,
             recipient_receipt_signature_generation_count,
             recipient_receipt_signature_verification_count,
+            recipient_receipt_inventory_body_byte_length,
+            receipt_terminal_body_byte_length,
+            receipt_terminal_endorsement_count,
+            receipt_terminal_endorsement_authorization_body_byte_length,
+            receipt_terminal_endorsement_envelope_byte_length,
+            receipt_terminal_certificate_byte_length,
+            retained_public_receipt_terminal_certificate_byte_length,
+            receipt_terminal_signature_generation_count,
+            receipt_terminal_signature_verification_count,
             combined_subset_seed_custody_byte_length_per_participant,
             combined_pair_seed_custody_byte_length_per_participant,
             collective_coin_source_custody_byte_length_per_participant,
@@ -819,6 +879,17 @@ fn map_receipt_resource_error(
 ) -> TallyPreparationError {
     match error {
         PseudorandomZeroSharingSeedReceiptError320::ArithmeticOverflow => {
+            TallyPreparationError::ArithmeticOverflow
+        }
+        _ => TallyPreparationError::GeometryMismatch,
+    }
+}
+
+fn map_receipt_terminal_resource_error(
+    error: PseudorandomZeroSharingSeedReceiptTerminalError320,
+) -> TallyPreparationError {
+    match error {
+        PseudorandomZeroSharingSeedReceiptTerminalError320::ArithmeticOverflow => {
             TallyPreparationError::ArithmeticOverflow
         }
         _ => TallyPreparationError::GeometryMismatch,

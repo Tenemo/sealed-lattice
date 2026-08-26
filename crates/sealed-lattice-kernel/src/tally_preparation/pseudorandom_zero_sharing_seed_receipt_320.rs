@@ -487,6 +487,42 @@ impl PseudorandomZeroSharingSeedRecipientReceiptBody320 {
         Ok(expected)
     }
 
+    fn decode(bytes: &[u8]) -> Result<Self, PseudorandomZeroSharingSeedReceiptError320> {
+        let tuple = CanonicalTuple::decode(bytes, &receipt_control_object_decode_limits())?;
+        require_object_header(
+            &tuple,
+            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_BODY_DOMAIN,
+            RECIPIENT_RECEIPT_BODY_ITEM_COUNT,
+        )?;
+        require_u16(
+            &tuple.items[3],
+            PREPARATION_ATTEMPT_ORDINAL,
+            "preparation attempt ordinal",
+        )?;
+        let participant_count = read_u16(&tuple.items[5], "participant count")?;
+        if derive_foundation_roster_parameters(participant_count).is_none() {
+            return Err(PseudorandomZeroSharingSeedReceiptError320::GeometryMismatch);
+        }
+        let recipient_position = read_u16(&tuple.items[6], "recipient position")?;
+        if recipient_position >= participant_count {
+            return Err(PseudorandomZeroSharingSeedReceiptError320::GeometryMismatch);
+        }
+        Ok(Self {
+            parameter_identity: read_hash512(&tuple.items[1], "parameter identity")?,
+            preparation_context_identity: read_hash512(
+                &tuple.items[2],
+                "preparation context identity",
+            )?,
+            root_terminal_identity: read_hash512(&tuple.items[4], "root-terminal identity")?,
+            participant_count,
+            recipient_position,
+            authenticated_recipient_inventory_identity: read_hash512(
+                &tuple.items[7],
+                "authenticated recipient-inventory identity",
+            )?,
+        })
+    }
+
     pub(crate) fn identity(self) -> Result<Hash512, PseudorandomZeroSharingSeedReceiptError320> {
         Ok(hash_foundation_tuple_512(
             PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_IDENTITY_DOMAIN,
@@ -568,6 +604,34 @@ impl PseudorandomZeroSharingSignedSeedRecipientReceiptEnvelope320 {
         })
     }
 
+    fn decode(bytes: &[u8]) -> Result<Self, PseudorandomZeroSharingSeedReceiptError320> {
+        let tuple = CanonicalTuple::decode(bytes, &receipt_control_object_decode_limits())?;
+        require_object_header(
+            &tuple,
+            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_ENVELOPE_DOMAIN,
+            RECIPIENT_RECEIPT_ENVELOPE_ITEM_COUNT,
+        )?;
+        if tuple.items[1].item_type() != CanonicalItemType::RawBytes {
+            return Err(receipt_object_mismatch("receipt body"));
+        }
+        let receipt_body = PseudorandomZeroSharingSeedRecipientReceiptBody320::decode(
+            tuple.items[1].variable_value_bytes()?,
+        )?;
+        if tuple.items[2].item_type() != CanonicalItemType::RawBytes {
+            return Err(receipt_object_mismatch("signature"));
+        }
+        let signature = tuple.items[2].canonical_bytes().try_into().map_err(|_| {
+            PseudorandomZeroSharingSeedReceiptError320::SignatureByteLength {
+                expected: ML_DSA_65_SIGNATURE_BYTE_LENGTH,
+                actual: tuple.items[2].canonical_bytes().len(),
+            }
+        })?;
+        Ok(Self {
+            receipt_body,
+            signature,
+        })
+    }
+
     pub(crate) fn identity(&self) -> Result<Hash512, PseudorandomZeroSharingSeedReceiptError320> {
         Ok(hash_foundation_tuple_512(
             PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_ENVELOPE_IDENTITY_DOMAIN,
@@ -584,6 +648,83 @@ impl fmt::Debug for PseudorandomZeroSharingSignedSeedRecipientReceiptEnvelope320
             .field("signature", &"[redacted]")
             .finish()
     }
+}
+
+/// Publicly verifiable recipient attestation over one opaque authenticated
+/// delivery-inventory identity.
+///
+/// An honest recipient creates the signed body only after local delivery
+/// verification. A corrupt recipient can attest to an arbitrary inventory
+/// identity, so this type proves only the roster signature and exact root-
+/// terminal scope. It has no local-delivery or continuation authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RosterSignedPseudorandomZeroSharingSeedRecipientReceipt320 {
+    receipt_body: PseudorandomZeroSharingSeedRecipientReceiptBody320,
+    receipt_envelope_identity: Hash512,
+}
+
+impl RosterSignedPseudorandomZeroSharingSeedRecipientReceipt320 {
+    pub(crate) const fn receipt_body(self) -> PseudorandomZeroSharingSeedRecipientReceiptBody320 {
+        self.receipt_body
+    }
+
+    pub(crate) const fn receipt_envelope_identity(self) -> Hash512 {
+        self.receipt_envelope_identity
+    }
+}
+
+pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_receipt_announcement_320(
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    roster: &Roster,
+    expected_recipient_position: u16,
+    receipt_envelope_bytes: &[u8],
+) -> Result<
+    RosterSignedPseudorandomZeroSharingSeedRecipientReceipt320,
+    PseudorandomZeroSharingSeedReceiptError320,
+> {
+    validate_roster_for_terminal(root_terminal, roster)?;
+    let root_inventory_body = root_terminal.root_inventory().body();
+    let receipt_envelope = PseudorandomZeroSharingSignedSeedRecipientReceiptEnvelope320::decode(
+        receipt_envelope_bytes,
+    )?;
+    let receipt_body = receipt_envelope.receipt_body;
+    if receipt_body.parameter_identity != root_inventory_body.parameter_identity() {
+        return Err(receipt_object_mismatch("parameter identity"));
+    }
+    if receipt_body.preparation_context_identity
+        != root_inventory_body.preparation_context_identity()
+    {
+        return Err(receipt_object_mismatch("preparation context identity"));
+    }
+    if receipt_body.root_terminal_identity != root_terminal.identity()? {
+        return Err(receipt_object_mismatch("root-terminal identity"));
+    }
+    if receipt_body.participant_count != root_inventory_body.participant_count() {
+        return Err(receipt_object_mismatch("participant count"));
+    }
+    if receipt_body.recipient_position != expected_recipient_position {
+        return Err(receipt_object_mismatch("recipient position"));
+    }
+    let recipient_entry = roster
+        .entries
+        .get(usize::from(expected_recipient_position))
+        .filter(|entry| entry.roster_position == expected_recipient_position)
+        .ok_or(PseudorandomZeroSharingSeedReceiptError320::RosterMismatch)?;
+    let verification_key = ml_dsa_65::PublicKey::try_from_bytes(
+        recipient_entry.signing_verification_key,
+    )
+    .map_err(|_| PseudorandomZeroSharingSeedReceiptError320::MalformedSigningVerificationKey)?;
+    if !verification_key.verify(
+        &receipt_body.canonical_bytes()?,
+        &receipt_envelope.signature,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
+    ) {
+        return Err(PseudorandomZeroSharingSeedReceiptError320::InvalidRecipientSignature);
+    }
+    Ok(RosterSignedPseudorandomZeroSharingSeedRecipientReceipt320 {
+        receipt_body,
+        receipt_envelope_identity: receipt_envelope.identity()?,
+    })
 }
 
 /// Positive roster signature over one complete authenticated recipient
@@ -645,34 +786,22 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
     if expected_receipt_body.root_terminal_identity != root_terminal.identity()? {
         return Err(receipt_object_mismatch("root-terminal identity"));
     }
-    let envelope =
-        PseudorandomZeroSharingSignedSeedRecipientReceiptEnvelope320::from_canonical_bytes(
-            expected_receipt_body,
+    let recipient_position = expected_receipt_body.recipient_position;
+    let roster_signed_receipt =
+        verify_pseudorandom_zero_sharing_seed_recipient_receipt_announcement_320(
+            root_terminal,
+            roster,
+            recipient_position,
             receipt_envelope_bytes,
         )?;
-    let recipient_position = expected_receipt_body.recipient_position;
-    let recipient_entry = roster
-        .entries
-        .get(usize::from(recipient_position))
-        .filter(|entry| entry.roster_position == recipient_position)
-        .ok_or(PseudorandomZeroSharingSeedReceiptError320::RosterMismatch)?;
-    let verification_key = ml_dsa_65::PublicKey::try_from_bytes(
-        recipient_entry.signing_verification_key,
-    )
-    .map_err(|_| PseudorandomZeroSharingSeedReceiptError320::MalformedSigningVerificationKey)?;
-    if !verification_key.verify(
-        &envelope.receipt_body.canonical_bytes()?,
-        &envelope.signature,
-        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
-    ) {
-        return Err(PseudorandomZeroSharingSeedReceiptError320::InvalidRecipientSignature);
+    if roster_signed_receipt.receipt_body() != expected_receipt_body {
+        return Err(receipt_object_mismatch("authenticated recipient inventory"));
     }
-    let receipt_envelope_identity = envelope.identity()?;
     Ok(
         RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320 {
             recipient_inventory,
             receipt_body: expected_receipt_body,
-            receipt_envelope_identity,
+            receipt_envelope_identity: roster_signed_receipt.receipt_envelope_identity(),
         },
     )
 }
@@ -736,6 +865,20 @@ fn require_hash512(
     Ok(())
 }
 
+fn read_hash512(
+    item: &CanonicalItem,
+    field: &'static str,
+) -> Result<Hash512, PseudorandomZeroSharingSeedReceiptError320> {
+    if item.item_type() != CanonicalItemType::Hash512 {
+        return Err(receipt_object_mismatch(field));
+    }
+    let bytes: [u8; Hash512::BYTE_LENGTH] = item
+        .canonical_bytes()
+        .try_into()
+        .map_err(|_| receipt_object_mismatch(field))?;
+    Ok(Hash512::from_bytes(bytes))
+}
+
 fn require_u16(
     item: &CanonicalItem,
     expected: u16,
@@ -747,6 +890,20 @@ fn require_u16(
         return Err(receipt_object_mismatch(field));
     }
     Ok(())
+}
+
+fn read_u16(
+    item: &CanonicalItem,
+    field: &'static str,
+) -> Result<u16, PseudorandomZeroSharingSeedReceiptError320> {
+    if item.item_type() != CanonicalItemType::Unsigned16 {
+        return Err(receipt_object_mismatch(field));
+    }
+    let bytes: [u8; size_of::<u16>()] = item
+        .canonical_bytes()
+        .try_into()
+        .map_err(|_| receipt_object_mismatch(field))?;
+    Ok(u16::from_le_bytes(bytes))
 }
 
 fn receipt_object_mismatch(field: &'static str) -> PseudorandomZeroSharingSeedReceiptError320 {
