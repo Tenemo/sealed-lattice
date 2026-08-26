@@ -2,8 +2,9 @@ use core::fmt;
 
 use fips204::{
     ml_dsa_65,
-    traits::{SerDes, Verifier},
+    traits::{SerDes, Signer, Verifier},
 };
+use zeroize::Zeroizing;
 
 use crate::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
@@ -19,6 +20,7 @@ use super::{
     pseudorandom_zero_sharing_seed_catalog_signature_320::ML_DSA_65_SIGNATURE_BYTE_LENGTH,
     pseudorandom_zero_sharing_seed_receipt_320::{
         PseudorandomZeroSharingSeedReceiptError320,
+        RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
         RosterSignedPseudorandomZeroSharingSeedRecipientReceipt320,
         verify_pseudorandom_zero_sharing_seed_recipient_receipt_announcement_320,
     },
@@ -140,6 +142,16 @@ pub(crate) enum PseudorandomZeroSharingSeedReceiptTerminalError320 {
     InvalidEndorsementSignature {
         endorser_position: u16,
     },
+    RetainedLocalReceiptMismatch {
+        field: &'static str,
+    },
+    EndorserSigningKeyMismatch {
+        endorser_position: u16,
+    },
+    InvalidSignatureRandomness,
+    SignatureGenerationFailed {
+        endorser_position: u16,
+    },
     ArithmeticOverflow,
 }
 
@@ -210,6 +222,21 @@ impl fmt::Display for PseudorandomZeroSharingSeedReceiptTerminalError320 {
             Self::InvalidEndorsementSignature { endorser_position } => write!(
                 formatter,
                 "seed-receipt terminal endorser {endorser_position} has an invalid ML-DSA-65 signature"
+            ),
+            Self::RetainedLocalReceiptMismatch { field } => write!(
+                formatter,
+                "seed-receipt terminal public inventory does not match the retained local receipt {field}"
+            ),
+            Self::EndorserSigningKeyMismatch { endorser_position } => write!(
+                formatter,
+                "seed-receipt terminal signing key does not match roster endorser {endorser_position}"
+            ),
+            Self::InvalidSignatureRandomness => formatter.write_str(
+                "seed-receipt terminal signature randomness must be a nonzero 32-byte value",
+            ),
+            Self::SignatureGenerationFailed { endorser_position } => write!(
+                formatter,
+                "seed-receipt terminal signature generation failed for endorser {endorser_position}"
             ),
             Self::ArithmeticOverflow => {
                 formatter.write_str("seed-receipt terminal arithmetic overflowed")
@@ -474,6 +501,98 @@ impl PseudorandomZeroSharingSeedRecipientReceiptTerminalBody320 {
     }
 }
 
+/// Public receipt inventory and terminal body after the endorser's public
+/// receipt has been matched to its retained authenticated local receipt.
+///
+/// This is the exact alternative that durable state must lock before signing.
+/// It contains no signing key, signature randomness, burn result, seed-
+/// combination authority, coin-opening authority, or preparation-continuation
+/// authority.
+#[derive(Debug)]
+pub(crate) struct PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+    root_terminal: RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    receipt_inventory: VerifiedPseudorandomZeroSharingSeedRecipientReceiptInventory320,
+    terminal_body: PseudorandomZeroSharingSeedRecipientReceiptTerminalBody320,
+    endorser_position: u16,
+}
+
+impl PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+    pub(crate) const fn root_terminal(
+        &self,
+    ) -> &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320 {
+        &self.root_terminal
+    }
+
+    pub(crate) const fn receipt_inventory(
+        &self,
+    ) -> &VerifiedPseudorandomZeroSharingSeedRecipientReceiptInventory320 {
+        &self.receipt_inventory
+    }
+
+    pub(crate) const fn terminal_body(
+        &self,
+    ) -> PseudorandomZeroSharingSeedRecipientReceiptTerminalBody320 {
+        self.terminal_body
+    }
+
+    pub(crate) const fn endorser_position(&self) -> u16 {
+        self.endorser_position
+    }
+}
+
+pub(crate) fn prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+    root_terminal: RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    receipt_inventory: VerifiedPseudorandomZeroSharingSeedRecipientReceiptInventory320,
+    roster: &Roster,
+    retained_local_receipt: &RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+) -> Result<
+    PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320,
+    PseudorandomZeroSharingSeedReceiptTerminalError320,
+> {
+    validate_roster(&root_terminal, roster)?;
+    if receipt_inventory.body.root_terminal_identity != root_terminal.identity()? {
+        return Err(terminal_object_mismatch("root-terminal identity"));
+    }
+    let terminal_body =
+        PseudorandomZeroSharingSeedRecipientReceiptTerminalBody320::new(&receipt_inventory)?;
+    let retained_receipt_body = retained_local_receipt.receipt_body();
+    let endorser_position = retained_receipt_body.recipient_position();
+    validate_endorser_position(terminal_body, endorser_position)?;
+    let public_receipt = receipt_inventory
+        .receipts()
+        .get(usize::from(endorser_position))
+        .ok_or(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::EndorserPositionOutOfRange {
+                endorser_position,
+                participant_count: terminal_body.participant_count(),
+            },
+        )?;
+    if public_receipt.receipt_body() != retained_receipt_body {
+        return Err(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::RetainedLocalReceiptMismatch {
+                field: "body",
+            },
+        );
+    }
+    if public_receipt.receipt_envelope_identity()
+        != retained_local_receipt.receipt_envelope_identity()
+    {
+        return Err(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::RetainedLocalReceiptMismatch {
+                field: "envelope identity",
+            },
+        );
+    }
+    Ok(
+        PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+            root_terminal,
+            receipt_inventory,
+            terminal_body,
+            endorser_position,
+        },
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementAuthorizationBody320
 {
@@ -619,6 +738,141 @@ impl fmt::Debug for PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorseme
             .field("signature", &"[redacted]")
             .finish()
     }
+}
+
+/// Exact terminal endorsement produced only after the public receipt inventory
+/// matches the endorser's retained authenticated local receipt.
+///
+/// The result is positively decoded and signature-verified before it is
+/// returned. It has no all-roster terminal, burn, seed-combination, coin-
+/// opening, or preparation-continuation authority.
+pub(crate) struct ProducedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+    prepared_endorsement: PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320,
+    endorsement_envelope: PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementEnvelope320,
+    endorsement_envelope_bytes: Vec<u8>,
+}
+
+impl ProducedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+    pub(crate) const fn prepared_endorsement(
+        &self,
+    ) -> &PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+        &self.prepared_endorsement
+    }
+
+    pub(crate) const fn endorsement_envelope(
+        &self,
+    ) -> &PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementEnvelope320 {
+        &self.endorsement_envelope
+    }
+
+    pub(crate) fn endorsement_envelope_bytes(&self) -> &[u8] {
+        &self.endorsement_envelope_bytes
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320,
+        PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementEnvelope320,
+        Vec<u8>,
+    ) {
+        (
+            self.prepared_endorsement,
+            self.endorsement_envelope,
+            self.endorsement_envelope_bytes,
+        )
+    }
+}
+
+impl fmt::Debug for ProducedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct(
+                "ProducedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320",
+            )
+            .field("terminal_body", &self.prepared_endorsement.terminal_body)
+            .field(
+                "endorser_position",
+                &self.prepared_endorsement.endorser_position,
+            )
+            .field(
+                "endorsement_envelope_byte_length",
+                &self.endorsement_envelope_bytes.len(),
+            )
+            .field("endorsement_signature", &"[redacted]")
+            .finish()
+    }
+}
+
+pub(crate) fn produce_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+    prepared_endorsement: PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320,
+    roster: &Roster,
+    endorser_signing_key: &ml_dsa_65::PrivateKey,
+    signature_randomness: [u8; 32],
+) -> Result<
+    ProducedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320,
+    PseudorandomZeroSharingSeedReceiptTerminalError320,
+> {
+    validate_prepared_terminal_endorsement(&prepared_endorsement, roster)?;
+    let endorser_position = prepared_endorsement.endorser_position;
+    let roster_entry = roster
+        .entries
+        .get(usize::from(endorser_position))
+        .filter(|entry| entry.roster_position == endorser_position)
+        .ok_or(PseudorandomZeroSharingSeedReceiptTerminalError320::RosterMismatch)?;
+    if endorser_signing_key.get_public_key().into_bytes() != roster_entry.signing_verification_key {
+        return Err(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::EndorserSigningKeyMismatch {
+                endorser_position,
+            },
+        );
+    }
+    let signature_randomness = Zeroizing::new(signature_randomness);
+    if signature_randomness.iter().all(|byte| *byte == 0) {
+        return Err(PseudorandomZeroSharingSeedReceiptTerminalError320::InvalidSignatureRandomness);
+    }
+    let authorization_body =
+        PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementAuthorizationBody320::new(
+            prepared_endorsement.terminal_body,
+            endorser_position,
+        )?;
+    let signature = endorser_signing_key
+        .try_sign_with_seed(
+            &signature_randomness,
+            &authorization_body.canonical_bytes()?,
+            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_SIGNATURE_CONTEXT,
+        )
+        .map_err(|_| {
+            PseudorandomZeroSharingSeedReceiptTerminalError320::SignatureGenerationFailed {
+                endorser_position,
+            }
+        })?;
+    let endorsement_envelope =
+        PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementEnvelope320::new(
+            authorization_body,
+            signature,
+        );
+    let endorsement_envelope_bytes = endorsement_envelope.canonical_bytes()?;
+    let decoded_endorsement =
+        PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementEnvelope320::from_canonical_bytes(
+            prepared_endorsement.terminal_body,
+            &endorsement_envelope_bytes,
+        )?;
+    if decoded_endorsement != endorsement_envelope {
+        return Err(terminal_object_mismatch("produced endorsement envelope"));
+    }
+    verify_terminal_endorsement_signature(
+        prepared_endorsement.terminal_body,
+        roster,
+        &decoded_endorsement,
+    )?;
+    Ok(
+        ProducedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320 {
+            prepared_endorsement,
+            endorsement_envelope,
+            endorsement_envelope_bytes,
+        },
+    )
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -867,39 +1121,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_3
             terminal_certificate_bytes,
         )?;
     for endorsement_envelope in terminal_certificate.endorsement_envelopes() {
-        let endorser_position = endorsement_envelope
-            .authorization_body()
-            .endorser_position();
-        let roster_entry = roster.entries.get(usize::from(endorser_position)).ok_or(
-            PseudorandomZeroSharingSeedReceiptTerminalError320::EndorserPositionOutOfRange {
-                endorser_position,
-                participant_count: terminal_body.participant_count(),
-            },
-        )?;
-        if roster_entry.roster_position != endorser_position {
-            return Err(PseudorandomZeroSharingSeedReceiptTerminalError320::RosterMismatch);
-        }
-        let public_key = ml_dsa_65::PublicKey::try_from_bytes(
-            roster_entry.signing_verification_key,
-        )
-        .map_err(|_| {
-            PseudorandomZeroSharingSeedReceiptTerminalError320::MalformedSigningVerificationKey {
-                endorser_position,
-            }
-        })?;
-        if !public_key.verify(
-            &endorsement_envelope
-                .authorization_body()
-                .canonical_bytes()?,
-            &endorsement_envelope.signature,
-            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_SIGNATURE_CONTEXT,
-        ) {
-            return Err(
-                PseudorandomZeroSharingSeedReceiptTerminalError320::InvalidEndorsementSignature {
-                    endorser_position,
-                },
-            );
-        }
+        verify_terminal_endorsement_signature(terminal_body, roster, endorsement_envelope)?;
     }
     Ok(
         RosterEndorsedPseudorandomZeroSharingSeedRecipientReceiptTerminal320 {
@@ -930,6 +1152,71 @@ fn validate_roster(
             != first_root.layout().preparation_context().roster_hash()
     {
         return Err(PseudorandomZeroSharingSeedReceiptTerminalError320::RosterMismatch);
+    }
+    Ok(())
+}
+
+fn validate_prepared_terminal_endorsement(
+    prepared_endorsement: &PreparedPseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsement320,
+    roster: &Roster,
+) -> Result<(), PseudorandomZeroSharingSeedReceiptTerminalError320> {
+    validate_roster(&prepared_endorsement.root_terminal, roster)?;
+    if prepared_endorsement
+        .receipt_inventory
+        .body
+        .root_terminal_identity
+        != prepared_endorsement.root_terminal.identity()?
+    {
+        return Err(terminal_object_mismatch("root-terminal identity"));
+    }
+    if PseudorandomZeroSharingSeedRecipientReceiptTerminalBody320::new(
+        &prepared_endorsement.receipt_inventory,
+    )? != prepared_endorsement.terminal_body
+    {
+        return Err(terminal_object_mismatch("terminal body"));
+    }
+    validate_endorser_position(
+        prepared_endorsement.terminal_body,
+        prepared_endorsement.endorser_position,
+    )
+}
+
+fn verify_terminal_endorsement_signature(
+    terminal_body: PseudorandomZeroSharingSeedRecipientReceiptTerminalBody320,
+    roster: &Roster,
+    endorsement_envelope: &PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementEnvelope320,
+) -> Result<(), PseudorandomZeroSharingSeedReceiptTerminalError320> {
+    let authorization_body = endorsement_envelope.authorization_body();
+    if authorization_body.terminal_body_identity != terminal_body.identity()? {
+        return Err(terminal_object_mismatch("terminal-body identity"));
+    }
+    let endorser_position = authorization_body.endorser_position();
+    validate_endorser_position(terminal_body, endorser_position)?;
+    let roster_entry = roster.entries.get(usize::from(endorser_position)).ok_or(
+        PseudorandomZeroSharingSeedReceiptTerminalError320::EndorserPositionOutOfRange {
+            endorser_position,
+            participant_count: terminal_body.participant_count(),
+        },
+    )?;
+    if roster_entry.roster_position != endorser_position {
+        return Err(PseudorandomZeroSharingSeedReceiptTerminalError320::RosterMismatch);
+    }
+    let public_key = ml_dsa_65::PublicKey::try_from_bytes(roster_entry.signing_verification_key)
+        .map_err(|_| {
+            PseudorandomZeroSharingSeedReceiptTerminalError320::MalformedSigningVerificationKey {
+                endorser_position,
+            }
+        })?;
+    if !public_key.verify(
+        &authorization_body.canonical_bytes()?,
+        &endorsement_envelope.signature,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_SIGNATURE_CONTEXT,
+    ) {
+        return Err(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::InvalidEndorsementSignature {
+                endorser_position,
+            },
+        );
     }
     Ok(())
 }

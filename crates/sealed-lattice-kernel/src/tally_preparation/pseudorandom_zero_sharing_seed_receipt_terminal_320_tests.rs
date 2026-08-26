@@ -15,6 +15,8 @@ use super::{
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
         PseudorandomZeroSharingSeedReceiptError320,
         PseudorandomZeroSharingSeedRecipientReceiptBody320,
+        RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+        produce_pseudorandom_zero_sharing_seed_recipient_receipt_320,
         verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320,
         verify_pseudorandom_zero_sharing_seed_recipient_receipt_320,
     },
@@ -37,6 +39,8 @@ use super::{
         PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementAuthorizationBody320,
         PseudorandomZeroSharingSeedRecipientReceiptTerminalEndorsementEnvelope320,
         VerifiedPseudorandomZeroSharingSeedRecipientReceiptInventory320,
+        prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320,
+        produce_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320,
         pseudorandom_zero_sharing_seed_recipient_receipt_inventory_body_byte_length,
         verify_pseudorandom_zero_sharing_seed_recipient_receipt_inventory_320,
         verify_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_320,
@@ -49,7 +53,7 @@ const COMPLETION_RECEIPT_TERMINAL_CERTIFICATE_BYTE_LENGTH: usize = 36_340;
 #[test]
 fn all_roster_terminal_binds_one_semantic_receipt_inventory() {
     let fixture = seed_mailbox_test_fixture_320(0, 1);
-    let (first_receipt_envelopes, alternate_receipt_envelopes) =
+    let (first_receipt_envelopes, alternate_receipt_envelopes, retained_first_recipient_receipt) =
         signed_receipt_envelopes_from_authenticated_deliveries(0x31, 0x41, 0x51);
     let first_inventory = verified_receipt_inventory(&fixture, &first_receipt_envelopes);
     let alternate_inventory = verified_receipt_inventory(&fixture, &alternate_receipt_envelopes);
@@ -81,12 +85,166 @@ fn all_roster_terminal_binds_one_semantic_receipt_inventory() {
 
     let terminal_body =
         PseudorandomZeroSharingSeedRecipientReceiptTerminalBody320::new(&first_inventory).unwrap();
-    let first_certificate = signed_terminal_certificate(
-        &first_inventory,
+    let different_receipt_envelopes = signed_receipt_envelopes(
+        &fixture,
+        0x91,
+        0xa1,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
+    );
+    let different_receipt_inventory =
+        verified_receipt_inventory(&fixture, &different_receipt_envelopes);
+    assert!(matches!(
+        prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            fixture.root_terminal.clone(),
+            different_receipt_inventory,
+            &fixture.roster,
+            &retained_first_recipient_receipt,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::RetainedLocalReceiptMismatch {
+                field: "body"
+            }
+        )
+    ));
+    assert!(matches!(
+        prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            fixture.root_terminal.clone(),
+            alternate_inventory.clone(),
+            &fixture.roster,
+            &retained_first_recipient_receipt,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::RetainedLocalReceiptMismatch {
+                field: "envelope identity"
+            }
+        )
+    ));
+
+    let zero_randomness_preparation =
+        prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            fixture.root_terminal.clone(),
+            first_inventory.clone(),
+            &fixture.roster,
+            &retained_first_recipient_receipt,
+        )
+        .unwrap();
+    assert!(matches!(
+        produce_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            zero_randomness_preparation,
+            &fixture.roster,
+            &fixture.signing_keys[0],
+            [0; 32],
+        ),
+        Err(PseudorandomZeroSharingSeedReceiptTerminalError320::InvalidSignatureRandomness)
+    ));
+
+    let wrong_key_preparation =
+        prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            fixture.root_terminal.clone(),
+            first_inventory.clone(),
+            &fixture.roster,
+            &retained_first_recipient_receipt,
+        )
+        .unwrap();
+    assert!(matches!(
+        produce_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            wrong_key_preparation,
+            &fixture.roster,
+            &fixture.signing_keys[1],
+            [0x61; 32],
+        ),
+        Err(
+            PseudorandomZeroSharingSeedReceiptTerminalError320::EndorserSigningKeyMismatch {
+                endorser_position: 0
+            }
+        )
+    ));
+
+    let prepared_endorsement =
+        prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            fixture.root_terminal.clone(),
+            first_inventory.clone(),
+            &fixture.roster,
+            &retained_first_recipient_receipt,
+        )
+        .unwrap();
+    assert_eq!(prepared_endorsement.endorser_position(), 0);
+    assert_eq!(prepared_endorsement.terminal_body(), terminal_body);
+    assert_eq!(
+        prepared_endorsement.root_terminal().identity().unwrap(),
+        fixture.root_terminal.identity().unwrap()
+    );
+    assert_eq!(
+        prepared_endorsement.receipt_inventory().identity().unwrap(),
+        first_inventory.identity().unwrap()
+    );
+    let produced_endorsement =
+        produce_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            prepared_endorsement,
+            &fixture.roster,
+            &fixture.signing_keys[0],
+            [0x61; 32],
+        )
+        .unwrap();
+    assert_eq!(
+        produced_endorsement.endorsement_envelope_bytes().len(),
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_ENDORSEMENT_ENVELOPE_BYTE_LENGTH
+    );
+    assert_eq!(
+        produced_endorsement.endorsement_envelope_bytes(),
+        produced_endorsement
+            .endorsement_envelope()
+            .canonical_bytes()
+            .unwrap()
+    );
+    assert!(format!("{produced_endorsement:?}").contains("[redacted]"));
+
+    let alternate_randomness_preparation =
+        prepare_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            fixture.root_terminal.clone(),
+            first_inventory.clone(),
+            &fixture.roster,
+            &retained_first_recipient_receipt,
+        )
+        .unwrap();
+    let alternate_randomness_endorsement =
+        produce_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_endorsement_320(
+            alternate_randomness_preparation,
+            &fixture.roster,
+            &fixture.signing_keys[0],
+            [0x62; 32],
+        )
+        .unwrap();
+    assert_eq!(
+        produced_endorsement.prepared_endorsement().terminal_body(),
+        alternate_randomness_endorsement
+            .prepared_endorsement()
+            .terminal_body()
+    );
+    assert_ne!(
+        produced_endorsement.endorsement_envelope_bytes(),
+        alternate_randomness_endorsement.endorsement_envelope_bytes()
+    );
+
+    let mut first_endorsement_envelopes = signed_terminal_endorsement_envelopes(
+        terminal_body,
         &fixture.signing_keys,
         0x61,
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_SIGNATURE_CONTEXT,
     );
+    let (produced_preparation, produced_envelope, produced_envelope_bytes) =
+        produced_endorsement.into_parts();
+    assert_eq!(produced_preparation.terminal_body(), terminal_body);
+    assert_eq!(
+        produced_envelope_bytes,
+        produced_envelope.canonical_bytes().unwrap()
+    );
+    first_endorsement_envelopes[0] = produced_envelope;
+    let first_certificate = PseudorandomZeroSharingSeedRecipientReceiptTerminalCertificate320::new(
+        terminal_body,
+        first_endorsement_envelopes,
+    )
+    .unwrap();
     let alternate_certificate = signed_terminal_certificate(
         &alternate_inventory,
         &fixture.signing_keys,
@@ -608,52 +766,85 @@ fn signed_receipt_envelopes_from_authenticated_deliveries(
     encapsulation_marker: u8,
     first_signature_seed_marker: u8,
     alternate_signature_seed_marker: u8,
-) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-    (0..FOUNDATION_PROFILE.participant_count)
-        .map(|recipient_position| {
-            let (fixture, authenticated_deliveries) =
-                super::pseudorandom_zero_sharing_seed_receipt_320_tests::authenticated_delivery_set(
-                    recipient_position,
-                    encapsulation_marker
-                        .wrapping_add((recipient_position as u8).wrapping_mul(0x10)),
-                );
-            let authenticated_inventory =
-                verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
-                    &fixture.root_terminal,
-                    recipient_position,
-                    authenticated_deliveries,
-                )
+) -> (
+    Vec<Vec<u8>>,
+    Vec<Vec<u8>>,
+    RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+) {
+    let mut first_receipt_envelopes = Vec::new();
+    let mut alternate_receipt_envelopes = Vec::new();
+    let mut retained_first_recipient_receipt = None;
+    for recipient_position in 0..FOUNDATION_PROFILE.participant_count {
+        let (fixture, authenticated_deliveries) =
+            super::pseudorandom_zero_sharing_seed_receipt_320_tests::authenticated_delivery_set(
+                recipient_position,
+                encapsulation_marker.wrapping_add((recipient_position as u8).wrapping_mul(0x10)),
+            );
+        let authenticated_inventory =
+            verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
+                &fixture.root_terminal,
+                recipient_position,
+                authenticated_deliveries,
+            )
+            .unwrap();
+        let receipt_body =
+            PseudorandomZeroSharingSeedRecipientReceiptBody320::new(&authenticated_inventory)
                 .unwrap();
-            let receipt_body =
-                PseudorandomZeroSharingSeedRecipientReceiptBody320::new(&authenticated_inventory)
-                    .unwrap();
-            let first_receipt_envelope =
+        let alternate_receipt_envelope =
+            super::pseudorandom_zero_sharing_seed_receipt_320_tests::sign_receipt(
+                &fixture,
+                receipt_body,
+                recipient_position,
+                alternate_signature_seed_marker.wrapping_add(recipient_position as u8),
+                PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
+            );
+        let first_signature_seed_marker =
+            first_signature_seed_marker.wrapping_add(recipient_position as u8);
+        let first_receipt_envelope = if recipient_position == 0 {
+            let produced_receipt = produce_pseudorandom_zero_sharing_seed_recipient_receipt_320(
+                &fixture.root_terminal,
+                &fixture.roster,
+                authenticated_inventory,
+                &fixture.signing_keys[usize::from(recipient_position)],
+                [first_signature_seed_marker; 32],
+            )
+            .unwrap();
+            assert_eq!(
+                produced_receipt
+                    .roster_authenticated_receipt()
+                    .receipt_body(),
+                receipt_body
+            );
+            let (verified_receipt, receipt_envelope_bytes) = produced_receipt.into_parts();
+            retained_first_recipient_receipt = Some(verified_receipt);
+            receipt_envelope_bytes
+        } else {
+            let receipt_envelope_bytes =
                 super::pseudorandom_zero_sharing_seed_receipt_320_tests::sign_receipt(
                     &fixture,
                     receipt_body,
                     recipient_position,
-                    first_signature_seed_marker.wrapping_add(recipient_position as u8),
-                    PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
-                );
-            let alternate_receipt_envelope =
-                super::pseudorandom_zero_sharing_seed_receipt_320_tests::sign_receipt(
-                    &fixture,
-                    receipt_body,
-                    recipient_position,
-                    alternate_signature_seed_marker.wrapping_add(recipient_position as u8),
+                    first_signature_seed_marker,
                     PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
                 );
             let verified_receipt = verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
                 &fixture.root_terminal,
                 &fixture.roster,
                 authenticated_inventory,
-                &first_receipt_envelope,
+                &receipt_envelope_bytes,
             )
             .unwrap();
             assert_eq!(verified_receipt.receipt_body(), receipt_body);
-            (first_receipt_envelope, alternate_receipt_envelope)
-        })
-        .unzip()
+            receipt_envelope_bytes
+        };
+        first_receipt_envelopes.push(first_receipt_envelope);
+        alternate_receipt_envelopes.push(alternate_receipt_envelope);
+    }
+    (
+        first_receipt_envelopes,
+        alternate_receipt_envelopes,
+        retained_first_recipient_receipt.unwrap(),
+    )
 }
 
 fn signed_receipt_envelope(
