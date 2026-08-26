@@ -199,10 +199,6 @@ pub(crate) struct PseudorandomZeroSharingSubsetSeedCommitment320 {
 }
 
 impl PseudorandomZeroSharingSubsetSeedCommitment320 {
-    pub(crate) const fn coordinate(self) -> PseudorandomZeroSharingSubsetSeedCoordinate320 {
-        self.coordinate
-    }
-
     pub(crate) const fn digest(self) -> Hash512 {
         self.digest
     }
@@ -411,15 +407,14 @@ pub(crate) fn verify_pseudorandom_zero_sharing_subset_seed_contribution_320(
 {
     let commitment =
         PseudorandomZeroSharingSubsetSeedCommitment320::from_canonical_bytes(commitment_bytes)?;
-    let opening = PseudorandomZeroSharingSubsetSeedOpening320::from_canonical_bytes(opening_bytes)?;
-    if commitment.coordinate != expected_coordinate || opening.coordinate != expected_coordinate {
+    if commitment.coordinate != expected_coordinate {
         return Err(TallyPreparationError::PseudorandomZeroSharingSubsetSeedCoordinateMismatch);
     }
-    let expected_digest = derive_subset_seed_commitment_digest(
-        opening.coordinate,
-        &opening.commitment_salt,
-        &opening.contribution,
-    )?;
+    let (expected_digest, matched_contribution) =
+        verify_pseudorandom_zero_sharing_subset_seed_opening_320(
+            expected_coordinate,
+            opening_bytes,
+        )?;
     if !bool::from(
         commitment
             .digest
@@ -428,12 +423,38 @@ pub(crate) fn verify_pseudorandom_zero_sharing_subset_seed_contribution_320(
     ) {
         return Err(TallyPreparationError::PseudorandomZeroSharingSubsetSeedCommitmentMismatch);
     }
-    Ok(
+    Ok(matched_contribution)
+}
+
+/// Recomputes the salted commitment digest directly from one canonical
+/// opening. A later catalog verifier can therefore avoid carrying a redundant
+/// commitment object in the private-delivery stream.
+pub(crate) fn verify_pseudorandom_zero_sharing_subset_seed_opening_320(
+    expected_coordinate: PseudorandomZeroSharingSubsetSeedCoordinate320,
+    opening_bytes: &[u8],
+) -> Result<
+    (
+        Hash512,
+        CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320,
+    ),
+    TallyPreparationError,
+> {
+    let opening = PseudorandomZeroSharingSubsetSeedOpening320::from_canonical_bytes(opening_bytes)?;
+    if opening.coordinate != expected_coordinate {
+        return Err(TallyPreparationError::PseudorandomZeroSharingSubsetSeedCoordinateMismatch);
+    }
+    let commitment_digest = derive_subset_seed_commitment_digest(
+        opening.coordinate,
+        &opening.commitment_salt,
+        &opening.contribution,
+    )?;
+    Ok((
+        commitment_digest,
         CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320 {
             coordinate: opening.coordinate,
             contribution: opening.contribution,
         },
-    )
+    ))
 }
 
 /// Combines one commitment-matched contribution from every subset member.

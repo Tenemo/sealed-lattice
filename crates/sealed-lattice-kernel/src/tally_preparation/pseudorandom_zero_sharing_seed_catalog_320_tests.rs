@@ -22,7 +22,7 @@ use super::{
         PseudorandomZeroSharingSeedCatalogLayout320, PseudorandomZeroSharingSeedCatalogRootBody320,
         PseudorandomZeroSharingSeedCatalogTree320, compiler_identity_from_source_for_test,
         verify_pseudorandom_zero_sharing_seed_catalog_inclusion_320,
-        verify_pseudorandom_zero_sharing_subset_seed_catalog_inclusion_320,
+        verify_pseudorandom_zero_sharing_subset_seed_opening_catalog_inclusion_320,
     },
     pseudorandom_zero_sharing_subset_seed_320::{
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH,
@@ -185,7 +185,7 @@ fn completion_catalog_has_ninety_four_leaves_and_every_proof_roundtrips() {
 }
 
 #[test]
-fn subset_adapter_binds_the_catalog_identity_coordinate_commitment_and_path() {
+fn subset_opening_adapter_binds_the_catalog_identity_coordinate_digest_and_path() {
     let layout = completion_layout(2, 0x61);
     let subset = layout
         .coordinates()
@@ -196,13 +196,12 @@ fn subset_adapter_binds_the_catalog_identity_coordinate_commitment_and_path() {
         })
         .unwrap();
     let subset_seed_coordinate = layout.subset_seed_coordinate(subset).unwrap();
-    let (commitment, _) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
+    let (commitment, opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         subset_seed_coordinate,
         [0x73; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
         [0x79; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH],
     )
     .unwrap();
-    let commitment_bytes = commitment.canonical_bytes().unwrap();
     let leaf_ordinal = layout
         .leaf_ordinal(layout.subset_coordinate(subset).unwrap())
         .unwrap();
@@ -217,14 +216,15 @@ fn subset_adapter_binds_the_catalog_identity_coordinate_commitment_and_path() {
         .canonical_bytes()
         .unwrap();
 
-    verify_pseudorandom_zero_sharing_subset_seed_catalog_inclusion_320(
+    let (included, _) = verify_pseudorandom_zero_sharing_subset_seed_opening_catalog_inclusion_320(
         layout,
         subset,
         &root_body_bytes,
-        &commitment_bytes,
+        &opening.canonical_bytes().unwrap(),
         &proof_bytes,
     )
     .unwrap();
+    assert_eq!(included.commitment_digest(), commitment.digest());
 
     let other_layout = completion_layout(2, 0x62);
     let wrong_scope = PseudorandomZeroSharingSubsetSeedScope320::new(
@@ -236,22 +236,22 @@ fn subset_adapter_binds_the_catalog_identity_coordinate_commitment_and_path() {
     .unwrap();
     let wrong_coordinate =
         PseudorandomZeroSharingSubsetSeedCoordinate320::new(wrong_scope, 2).unwrap();
-    let (wrong_commitment, _) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
+    let (_, wrong_opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         wrong_coordinate,
         [0x73; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
         [0x79; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH],
     )
     .unwrap();
-    assert_eq!(
-        verify_pseudorandom_zero_sharing_subset_seed_catalog_inclusion_320(
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_subset_seed_opening_catalog_inclusion_320(
             layout,
             subset,
             &root_body_bytes,
-            &wrong_commitment.canonical_bytes().unwrap(),
+            &wrong_opening.canonical_bytes().unwrap(),
             &proof_bytes,
         ),
-        Err(TallyPreparationError::PseudorandomZeroSharingSeedCatalogCoordinateMismatch)
-    );
+        Err(TallyPreparationError::PseudorandomZeroSharingSubsetSeedCoordinateMismatch)
+    ));
 }
 
 #[test]

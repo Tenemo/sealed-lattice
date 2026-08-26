@@ -11,8 +11,9 @@ use crate::{
 use super::{
     TallyPreparationContext, TallyPreparationError,
     pseudorandom_zero_sharing_subset_seed_320::{
-        PseudorandomZeroSharingSubsetSeedCommitment320,
+        CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320,
         PseudorandomZeroSharingSubsetSeedCoordinate320, PseudorandomZeroSharingSubsetSeedScope320,
+        verify_pseudorandom_zero_sharing_subset_seed_opening_320,
     },
     replicated_random_sharing::{
         ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset,
@@ -829,28 +830,36 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_catalog_inclusion_320(
     })
 }
 
-/// Subset-specific adapter that also checks the canonical commitment body and
-/// its exact catalog-derived contribution coordinate.
-pub(crate) fn verify_pseudorandom_zero_sharing_subset_seed_catalog_inclusion_320(
+/// Recomputes one subset commitment from its opening and checks its exact
+/// unsigned catalog path. No redundant commitment object is needed in the
+/// private-delivery stream.
+pub(crate) fn verify_pseudorandom_zero_sharing_subset_seed_opening_catalog_inclusion_320(
     expected_layout: PseudorandomZeroSharingSeedCatalogLayout320,
     subset: ReplicatedRandomSharingSubset,
     root_body_bytes: &[u8],
-    commitment_bytes: &[u8],
+    opening_bytes: &[u8],
     inclusion_proof_bytes: &[u8],
-) -> Result<CatalogIncludedSeedCommitment320, TallyPreparationError> {
+) -> Result<
+    (
+        CatalogIncludedSeedCommitment320,
+        CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320,
+    ),
+    TallyPreparationError,
+> {
     let expected_subset_coordinate = expected_layout.subset_seed_coordinate(subset)?;
-    let commitment =
-        PseudorandomZeroSharingSubsetSeedCommitment320::from_canonical_bytes(commitment_bytes)?;
-    if commitment.coordinate() != expected_subset_coordinate {
-        return Err(TallyPreparationError::PseudorandomZeroSharingSeedCatalogCoordinateMismatch);
-    }
-    verify_pseudorandom_zero_sharing_seed_catalog_inclusion_320(
+    let (commitment_digest, matched_contribution) =
+        verify_pseudorandom_zero_sharing_subset_seed_opening_320(
+            expected_subset_coordinate,
+            opening_bytes,
+        )?;
+    let catalog_inclusion = verify_pseudorandom_zero_sharing_seed_catalog_inclusion_320(
         expected_layout,
         root_body_bytes,
         expected_layout.subset_coordinate(subset)?,
-        commitment.digest(),
+        commitment_digest,
         inclusion_proof_bytes,
-    )
+    )?;
+    Ok((catalog_inclusion, matched_contribution))
 }
 
 fn seed_catalog_leaf_digest(
