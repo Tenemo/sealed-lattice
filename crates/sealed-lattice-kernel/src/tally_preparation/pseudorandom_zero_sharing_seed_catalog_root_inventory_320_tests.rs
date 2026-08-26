@@ -59,6 +59,8 @@ use super::{
         PseudorandomZeroSharingSeedCatalogRootStateOutputWitnessEnvelope320,
     },
     pseudorandom_zero_sharing_seed_delivery_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH,
         PseudorandomZeroSharingSeedDeliveryEntryBytes320,
         PseudorandomZeroSharingSeedDeliveryError320, PseudorandomZeroSharingSeedDeliveryLayout320,
         RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320,
@@ -512,7 +514,10 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     )
     .unwrap();
 
-    assert_eq!(descriptor_bytes.len(), 328);
+    assert_eq!(
+        descriptor_bytes.len(),
+        PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH
+    );
     assert_eq!(descriptor.parameter_identity(), parameter_identity);
     assert_eq!(
         descriptor.preparation_context_identity(),
@@ -709,7 +714,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     );
     assert_eq!(
         recipient_inventory.body().canonical_bytes().unwrap().len(),
-        306
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH
     );
     let _ = recipient_inventory.body().identity().unwrap();
     assert!(format!("{recipient_inventory:?}").contains("[redacted]"));

@@ -1,5 +1,5 @@
 use crate::foundation::{
-    FOUNDATION_PROFILE, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    FOUNDATION_PROFILE, Hash512, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
     MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, derive_foundation_roster_parameters,
 };
 
@@ -15,6 +15,7 @@ use super::{
         PseudorandomZeroSharingResourceModel, canonical_evaluation_point_320,
         evaluate_pseudorandom_zero_sharing_subset_at_point,
     },
+    pseudorandom_zero_sharing_seed_catalog_320::PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_INCLUSION_PROOF_DOMAIN,
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
 
@@ -173,24 +174,69 @@ fn completion_resource_model_reproduces_setup_stream_and_codeword_work() {
     assert_eq!(model.authorized_subset_size, 7);
     assert_eq!(model.authorized_subset_count, 120);
     assert_eq!(model.authorized_subset_count_per_participant, 84);
-    assert_eq!(model.seed_contribution_count, 840);
-    assert_eq!(model.remote_seed_opening_delivery_count, 5_040);
-    assert_eq!(model.seed_opening_byte_length, 104);
-    assert_eq!(model.private_seed_opening_delivery_byte_length, 524_160);
+    assert_eq!(model.subset_seed_contribution_count, 840);
+    assert_eq!(model.remote_subset_seed_opening_delivery_count, 5_040);
+    assert_eq!(model.subset_seed_opening_object_byte_length, 440);
+    assert_eq!(
+        model.private_subset_seed_opening_delivery_byte_length,
+        2_217_600
+    );
+    assert_eq!(model.pair_seed_opening_delivery_count, 90);
+    assert_eq!(model.pair_seed_opening_object_byte_length, 444);
+    assert_eq!(model.private_pair_seed_opening_delivery_byte_length, 39_960);
+    assert_eq!(model.seed_catalog_inclusion_proof_delivery_count, 5_130);
+    assert_eq!(model.seed_catalog_inclusion_proof_byte_length, 658);
+    assert_eq!(
+        model.private_seed_catalog_inclusion_proof_delivery_byte_length,
+        3_375_540
+    );
+    assert_eq!(model.seed_delivery_descriptor_count, 90);
+    assert_eq!(model.seed_delivery_descriptor_body_byte_length, 328);
+    assert_eq!(model.private_seed_delivery_descriptor_byte_length, 29_520);
+    assert_eq!(
+        model.seed_opening_proof_and_descriptor_delivery_byte_length,
+        5_662_620
+    );
     assert_eq!(model.ordered_mailbox_stream_count, 90);
-    assert_eq!(model.private_mailbox_wrapper_byte_length, 460_800);
-    assert_eq!(model.private_setup_delivery_byte_length, 984_960);
     assert_eq!(
-        model.maximum_private_setup_upload_byte_length_per_participant,
-        98_496
+        model.provisional_private_mailbox_wrapper_byte_length,
+        460_800
     );
     assert_eq!(
-        model.maximum_private_setup_download_byte_length_per_participant,
-        98_496
+        model.provisional_private_setup_delivery_byte_length,
+        6_123_420
     );
     assert_eq!(
-        model.combined_seed_custody_byte_length_per_participant,
+        model.seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
+        566_262
+    );
+    assert_eq!(
+        model.maximum_provisional_private_setup_upload_byte_length_per_participant,
+        612_342
+    );
+    assert_eq!(
+        model.maximum_provisional_private_setup_download_byte_length_per_participant,
+        612_342
+    );
+    assert_eq!(
+        model.recipient_inventory_body_byte_length_per_participant,
+        306
+    );
+    assert_eq!(
+        model.combined_subset_seed_custody_byte_length_per_participant,
         3_360
+    );
+    assert_eq!(
+        model.combined_pair_seed_custody_byte_length_per_participant,
+        360
+    );
+    assert_eq!(
+        model.collective_coin_source_custody_byte_length_per_participant,
+        40
+    );
+    assert_eq!(
+        model.retained_seed_custody_byte_length_per_participant,
+        3_760
     );
     assert_eq!(model.subset_basis_stream_count_per_participant, 252);
     assert_eq!(model.basis_weight_live_byte_length_per_participant, 10_080);
@@ -229,7 +275,92 @@ fn completion_resource_model_reproduces_setup_stream_and_codeword_work() {
 }
 
 #[test]
-fn replacement_setup_and_one_attempt_policy_fit_the_formula_only_upload_target() {
+fn independent_completion_delivery_ledger_matches_every_production_subtotal() {
+    let model = completion_resource_model();
+    let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
+    let active_fault_bound = u64::from(
+        derive_foundation_roster_parameters(FOUNDATION_PROFILE.participant_count)
+            .unwrap()
+            .active_fault_bound,
+    );
+    let authorized_subset_size = participant_count - active_fault_bound;
+    let authorized_subset_count = choose(participant_count, active_fault_bound);
+    let subset_seed_contribution_count = authorized_subset_count * authorized_subset_size;
+    let remote_subset_seed_opening_delivery_count =
+        subset_seed_contribution_count * (authorized_subset_size - 1);
+    let ordered_mailbox_stream_count = participant_count * (participant_count - 1);
+    let seed_catalog_inclusion_proof_delivery_count =
+        remote_subset_seed_opening_delivery_count + ordered_mailbox_stream_count;
+    let catalog_leaf_count =
+        choose(participant_count - 1, active_fault_bound) + (participant_count - 1) + 1;
+    let tree_height = u64::from(catalog_leaf_count.next_power_of_two().ilog2());
+    let inclusion_proof_byte_length = 8
+        + (4 + tree_height) * 6
+        + 4
+        + u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_INCLUSION_PROOF_DOMAIN.len())
+            .unwrap()
+        + u64::try_from(Hash512::BYTE_LENGTH).unwrap()
+        + 8
+        + 2
+        + tree_height * u64::try_from(Hash512::BYTE_LENGTH).unwrap();
+    let subset_opening_byte_length = 440_u64;
+    let pair_opening_byte_length = 444_u64;
+    let descriptor_byte_length = 328_u64;
+    let subset_opening_delivery_byte_length =
+        remote_subset_seed_opening_delivery_count * subset_opening_byte_length;
+    let pair_opening_delivery_byte_length = ordered_mailbox_stream_count * pair_opening_byte_length;
+    let inclusion_proof_delivery_byte_length =
+        seed_catalog_inclusion_proof_delivery_count * inclusion_proof_byte_length;
+    let descriptor_delivery_byte_length = ordered_mailbox_stream_count * descriptor_byte_length;
+    let exact_delivery_byte_length = subset_opening_delivery_byte_length
+        + pair_opening_delivery_byte_length
+        + inclusion_proof_delivery_byte_length
+        + descriptor_delivery_byte_length;
+
+    assert_eq!(
+        model.subset_seed_contribution_count,
+        subset_seed_contribution_count
+    );
+    assert_eq!(
+        model.remote_subset_seed_opening_delivery_count,
+        remote_subset_seed_opening_delivery_count
+    );
+    assert_eq!(
+        model.private_subset_seed_opening_delivery_byte_length,
+        subset_opening_delivery_byte_length
+    );
+    assert_eq!(
+        model.pair_seed_opening_delivery_count,
+        ordered_mailbox_stream_count
+    );
+    assert_eq!(
+        model.private_pair_seed_opening_delivery_byte_length,
+        pair_opening_delivery_byte_length
+    );
+    assert_eq!(
+        model.seed_catalog_inclusion_proof_delivery_count,
+        seed_catalog_inclusion_proof_delivery_count
+    );
+    assert_eq!(
+        model.seed_catalog_inclusion_proof_byte_length,
+        inclusion_proof_byte_length
+    );
+    assert_eq!(
+        model.private_seed_catalog_inclusion_proof_delivery_byte_length,
+        inclusion_proof_delivery_byte_length
+    );
+    assert_eq!(
+        model.private_seed_delivery_descriptor_byte_length,
+        descriptor_delivery_byte_length
+    );
+    assert_eq!(
+        model.seed_opening_proof_and_descriptor_delivery_byte_length,
+        exact_delivery_byte_length
+    );
+}
+
+#[test]
+fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
     let model = completion_resource_model();
     let superseded_private_delivery_byte_length = 1_620_152_640_u64;
     let superseded_zero_slice_delivery_byte_length = 480_182_400_u64;
@@ -237,10 +368,10 @@ fn replacement_setup_and_one_attempt_policy_fit_the_formula_only_upload_target()
     let replacement_private_delivery_byte_length = superseded_private_delivery_byte_length
         - superseded_zero_slice_delivery_byte_length
         - superseded_zero_check_delivery_byte_length
-        + model.private_setup_delivery_byte_length;
-    assert_eq!(replacement_private_delivery_byte_length, 1_140_919_200);
+        + model.provisional_private_setup_delivery_byte_length;
+    assert_eq!(replacement_private_delivery_byte_length, 1_146_057_660);
 
-    let floor = PreparationAttemptResourceFloor::derive(
+    let selected_single_attempt_floor = PreparationAttemptResourceFloor::derive(
         PreparationAttemptLimits::for_current_tally_circuit(1).unwrap(),
         PreparationAttemptResourceFloorInput {
             private_delivery_byte_length_per_fully_delivered_attempt:
@@ -250,13 +381,46 @@ fn replacement_setup_and_one_attempt_policy_fit_the_formula_only_upload_target()
         },
     )
     .unwrap();
-    assert_eq!(floor.maximum_reachable_upload_byte_length, 1_567_083_036);
     assert_eq!(
-        ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET - floor.maximum_reachable_upload_byte_length,
-        580_400_612
+        selected_single_attempt_floor.maximum_reachable_upload_byte_length,
+        1_572_221_496
+    );
+    assert_eq!(
+        ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET
+            - selected_single_attempt_floor.maximum_reachable_upload_byte_length,
+        575_262_152
     );
     assert!(
-        !floor
+        !selected_single_attempt_floor
+            .exceeds_architecture_review_boundary(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET)
+            .unwrap()
+    );
+
+    let three_attempt_hostile_floor = PreparationAttemptResourceFloor::derive(
+        PreparationAttemptLimits::for_current_tally_circuit(3).unwrap(),
+        PreparationAttemptResourceFloorInput {
+            private_delivery_byte_length_per_fully_delivered_attempt:
+                replacement_private_delivery_byte_length,
+            retained_public_byte_length_per_burned_attempt: 0,
+            retained_public_byte_length_per_successful_attempt: 426_163_836,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        three_attempt_hostile_floor.maximum_fully_delivered_private_byte_length,
+        3_438_172_980
+    );
+    assert_eq!(
+        three_attempt_hostile_floor.maximum_reachable_upload_byte_length,
+        3_864_336_816
+    );
+    assert_eq!(
+        three_attempt_hostile_floor
+            .excess_over_upload_target(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET),
+        1_716_853_168
+    );
+    assert!(
+        three_attempt_hostile_floor
             .exceeds_architecture_review_boundary(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET)
             .unwrap()
     );
@@ -274,8 +438,7 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
                     PseudorandomZeroSharingResourceInput {
                         participant_count,
                         zero_sharing_count: 19,
-                        commitment_salt_byte_length: 64,
-                        mailbox_stream_wrapper_byte_length: 5_120,
+                        provisional_mailbox_stream_wrapper_byte_length: 5_120,
                     },
                 ),
                 Err(TallyPreparationError::GeometryMismatch)
@@ -287,22 +450,45 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
             PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
                 participant_count,
                 zero_sharing_count: 19,
-                commitment_salt_byte_length: 64,
-                mailbox_stream_wrapper_byte_length: 5_120,
+                provisional_mailbox_stream_wrapper_byte_length: 5_120,
             })
             .unwrap();
 
         assert_eq!(
-            model.seed_contribution_count,
+            model.subset_seed_contribution_count,
             geometry.authorized_subset_count * geometry.authorized_subset_size
         );
         assert_eq!(
-            model.remote_seed_opening_delivery_count,
-            model.seed_contribution_count * (geometry.authorized_subset_size - 1)
+            model.remote_subset_seed_opening_delivery_count,
+            model.subset_seed_contribution_count * (geometry.authorized_subset_size - 1)
         );
         assert_eq!(
             model.ordered_mailbox_stream_count,
             u64::from(participant_count) * u64::from(participant_count - 1)
+        );
+        assert_eq!(
+            model.pair_seed_opening_delivery_count,
+            model.ordered_mailbox_stream_count
+        );
+        assert_eq!(
+            model.seed_catalog_inclusion_proof_delivery_count,
+            model.remote_subset_seed_opening_delivery_count
+                + model.pair_seed_opening_delivery_count
+        );
+        assert_eq!(
+            model.seed_delivery_descriptor_count,
+            model.ordered_mailbox_stream_count
+        );
+        assert_eq!(
+            model.seed_opening_proof_and_descriptor_delivery_byte_length,
+            model.seed_opening_proof_and_descriptor_upload_byte_length_per_participant
+                * u64::from(participant_count)
+        );
+        assert_eq!(
+            model.retained_seed_custody_byte_length_per_participant,
+            model.combined_subset_seed_custody_byte_length_per_participant
+                + model.combined_pair_seed_custody_byte_length_per_participant
+                + model.collective_coin_source_custody_byte_length_per_participant
         );
         assert_eq!(
             model.field_output_count_per_participant,
@@ -316,8 +502,7 @@ fn invalid_or_overflowing_resource_shapes_and_algebra_inputs_are_rejected() {
     let invalid_input = PseudorandomZeroSharingResourceInput {
         participant_count: FOUNDATION_PROFILE.participant_count,
         zero_sharing_count: 0,
-        commitment_salt_byte_length: 64,
-        mailbox_stream_wrapper_byte_length: 5_120,
+        provisional_mailbox_stream_wrapper_byte_length: 5_120,
     };
     assert_eq!(
         PseudorandomZeroSharingResourceModel::derive(invalid_input),
@@ -333,7 +518,7 @@ fn invalid_or_overflowing_resource_shapes_and_algebra_inputs_are_rejected() {
     assert_eq!(
         PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
             zero_sharing_count: 1,
-            commitment_salt_byte_length: 0,
+            provisional_mailbox_stream_wrapper_byte_length: 0,
             ..invalid_input
         }),
         Err(TallyPreparationError::GeometryMismatch)
@@ -359,8 +544,7 @@ fn completion_resource_model() -> PseudorandomZeroSharingResourceModel {
     PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
         participant_count: FOUNDATION_PROFILE.participant_count,
         zero_sharing_count: COMPLETION_ZERO_SHARING_COUNT,
-        commitment_salt_byte_length: 64,
-        mailbox_stream_wrapper_byte_length: 5_120,
+        provisional_mailbox_stream_wrapper_byte_length: 5_120,
     })
     .unwrap()
 }
@@ -393,4 +577,11 @@ fn three_by_three_determinant(matrix: [[BinaryFieldElement320; 3]; 3]) -> Binary
     ]
     .into_iter()
     .fold(BinaryFieldElement320::ZERO, BinaryFieldElement320::add)
+}
+
+fn choose(total: u64, selected: u64) -> u64 {
+    let selected = selected.min(total - selected);
+    (0..selected).fold(1_u64, |value, offset| {
+        value * (total - offset) / (offset + 1)
+    })
 }

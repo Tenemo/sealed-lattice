@@ -13,8 +13,10 @@ use super::{
         PseudorandomZeroSharingSeedCatalogLayout320,
     },
     pseudorandom_zero_sharing_seed_delivery_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_IDENTITY_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_IDENTITY_DOMAIN,
         PseudorandomZeroSharingSeedDeliveryError320, PseudorandomZeroSharingSeedDeliveryLayout320,
@@ -141,6 +143,14 @@ fn delivery_layout_refuses_self_and_out_of_roster_endpoints() {
 
 #[test]
 fn delivery_and_recipient_domains_are_exact_and_distinct() {
+    assert_eq!(
+        PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH,
+        328
+    );
+    assert_eq!(
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH,
+        306
+    );
     assert_eq!(
         PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_DOMAIN,
         "sealed-lattice/v1/preparation/seed-delivery-descriptor"

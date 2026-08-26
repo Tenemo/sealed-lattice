@@ -9,24 +9,31 @@ use super::{
         pseudorandom_zero_sharing_field_chunk_count,
         pseudorandom_zero_sharing_field_elements_per_chunk,
     },
+    pseudorandom_zero_sharing_pair_and_coin_seed_320::{
+        COLLECTIVE_COIN_SOURCE_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_OPENING_OBJECT_BYTE_LENGTH,
+    },
+    pseudorandom_zero_sharing_seed_catalog_320::PseudorandomZeroSharingSeedCatalogInclusionProof320,
+    pseudorandom_zero_sharing_seed_delivery_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH,
+    },
+    pseudorandom_zero_sharing_subset_seed_320::PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH,
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
 
 /// Formula-only inputs for the subset-seeded zero-sharing candidate.
 ///
-/// The model accounts for one contribution and one independently salted
-/// opening per subset member, one wrapper per ordered mailbox stream, local
-/// pseudorandom field output, precomputed basis weights, and the exact
-/// all-roster zero-codeword check. Stream geometry is imported from the exact
-/// unactivated KMACXOF256 cursor implementation. The model does not claim that
-/// a malicious seed ceremony, commitment scheme, checkpoint layout, or
-/// authenticated mailbox schema has been admitted.
+/// Canonical opening, catalog-proof, and descriptor widths come from their
+/// unactivated codec owners. The mailbox wrapper remains a provisional input
+/// until the KEM, AEAD, receipt, and chunk schemas exist; every total containing
+/// it is named accordingly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PseudorandomZeroSharingResourceInput {
     pub(crate) participant_count: u16,
     pub(crate) zero_sharing_count: u64,
-    pub(crate) commitment_salt_byte_length: u64,
-    pub(crate) mailbox_stream_wrapper_byte_length: u64,
+    pub(crate) provisional_mailbox_stream_wrapper_byte_length: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,16 +43,31 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) authorized_subset_size: u64,
     pub(crate) authorized_subset_count: u64,
     pub(crate) authorized_subset_count_per_participant: u64,
-    pub(crate) seed_contribution_count: u64,
-    pub(crate) remote_seed_opening_delivery_count: u64,
-    pub(crate) seed_opening_byte_length: u64,
-    pub(crate) private_seed_opening_delivery_byte_length: u64,
+    pub(crate) subset_seed_contribution_count: u64,
+    pub(crate) remote_subset_seed_opening_delivery_count: u64,
+    pub(crate) subset_seed_opening_object_byte_length: u64,
+    pub(crate) private_subset_seed_opening_delivery_byte_length: u64,
+    pub(crate) pair_seed_opening_delivery_count: u64,
+    pub(crate) pair_seed_opening_object_byte_length: u64,
+    pub(crate) private_pair_seed_opening_delivery_byte_length: u64,
+    pub(crate) seed_catalog_inclusion_proof_delivery_count: u64,
+    pub(crate) seed_catalog_inclusion_proof_byte_length: u64,
+    pub(crate) private_seed_catalog_inclusion_proof_delivery_byte_length: u64,
+    pub(crate) seed_delivery_descriptor_count: u64,
+    pub(crate) seed_delivery_descriptor_body_byte_length: u64,
+    pub(crate) private_seed_delivery_descriptor_byte_length: u64,
+    pub(crate) seed_opening_proof_and_descriptor_delivery_byte_length: u64,
     pub(crate) ordered_mailbox_stream_count: u64,
-    pub(crate) private_mailbox_wrapper_byte_length: u64,
-    pub(crate) private_setup_delivery_byte_length: u64,
-    pub(crate) maximum_private_setup_upload_byte_length_per_participant: u64,
-    pub(crate) maximum_private_setup_download_byte_length_per_participant: u64,
-    pub(crate) combined_seed_custody_byte_length_per_participant: u64,
+    pub(crate) provisional_private_mailbox_wrapper_byte_length: u64,
+    pub(crate) provisional_private_setup_delivery_byte_length: u64,
+    pub(crate) seed_opening_proof_and_descriptor_upload_byte_length_per_participant: u64,
+    pub(crate) maximum_provisional_private_setup_upload_byte_length_per_participant: u64,
+    pub(crate) maximum_provisional_private_setup_download_byte_length_per_participant: u64,
+    pub(crate) recipient_inventory_body_byte_length_per_participant: u64,
+    pub(crate) combined_subset_seed_custody_byte_length_per_participant: u64,
+    pub(crate) combined_pair_seed_custody_byte_length_per_participant: u64,
+    pub(crate) collective_coin_source_custody_byte_length_per_participant: u64,
+    pub(crate) retained_seed_custody_byte_length_per_participant: u64,
     pub(crate) subset_basis_stream_count_per_participant: u64,
     pub(crate) basis_weight_live_byte_length_per_participant: u64,
     pub(crate) basis_precomputation_field_multiplication_count_per_participant: u64,
@@ -69,14 +91,36 @@ impl PseudorandomZeroSharingResourceModel {
         input: PseudorandomZeroSharingResourceInput,
     ) -> Result<Self, TallyPreparationError> {
         if input.zero_sharing_count == 0
-            || input.commitment_salt_byte_length == 0
-            || input.mailbox_stream_wrapper_byte_length == 0
+            || input.provisional_mailbox_stream_wrapper_byte_length == 0
         {
             return Err(TallyPreparationError::GeometryMismatch);
         }
 
-        let seed_contribution_byte_length =
+        let subset_seed_master_byte_length =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let pair_seed_master_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let collective_coin_source_byte_length = u64::try_from(COLLECTIVE_COIN_SOURCE_BYTE_LENGTH)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let subset_seed_opening_object_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let pair_seed_opening_object_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_OPENING_OBJECT_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let seed_catalog_inclusion_proof_byte_length = u64::try_from(
+            PseudorandomZeroSharingSeedCatalogInclusionProof320::canonical_byte_length_for_participant_count(
+                input.participant_count,
+            )?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let seed_delivery_descriptor_body_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let recipient_inventory_body_byte_length_per_participant =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let field_element_byte_length = u64::try_from(BinaryFieldElement320::CANONICAL_BYTE_LENGTH)
             .map_err(|_| TallyPreparationError::IntegerConversion)?;
@@ -85,11 +129,7 @@ impl PseudorandomZeroSharingResourceModel {
         if geometry.active_fault_bound == 0 {
             return Err(TallyPreparationError::GeometryMismatch);
         }
-        let seed_opening_byte_length = checked_add(
-            seed_contribution_byte_length,
-            input.commitment_salt_byte_length,
-        )?;
-        let seed_contribution_count = checked_multiply(
+        let subset_seed_contribution_count = checked_multiply(
             geometry.authorized_subset_count,
             geometry.authorized_subset_size,
         )?;
@@ -97,10 +137,12 @@ impl PseudorandomZeroSharingResourceModel {
             .authorized_subset_size
             .checked_sub(1)
             .ok_or(TallyPreparationError::GeometryMismatch)?;
-        let remote_seed_opening_delivery_count =
-            checked_multiply(seed_contribution_count, remote_recipient_count)?;
-        let private_seed_opening_delivery_byte_length =
-            checked_multiply(remote_seed_opening_delivery_count, seed_opening_byte_length)?;
+        let remote_subset_seed_opening_delivery_count =
+            checked_multiply(subset_seed_contribution_count, remote_recipient_count)?;
+        let private_subset_seed_opening_delivery_byte_length = checked_multiply(
+            remote_subset_seed_opening_delivery_count,
+            subset_seed_opening_object_byte_length,
+        )?;
         let ordered_mailbox_stream_count = checked_multiply(
             geometry.participant_count,
             geometry
@@ -108,39 +150,104 @@ impl PseudorandomZeroSharingResourceModel {
                 .checked_sub(1)
                 .ok_or(TallyPreparationError::GeometryMismatch)?,
         )?;
-        let private_mailbox_wrapper_byte_length = checked_multiply(
-            ordered_mailbox_stream_count,
-            input.mailbox_stream_wrapper_byte_length,
+        let pair_seed_opening_delivery_count = ordered_mailbox_stream_count;
+        let private_pair_seed_opening_delivery_byte_length = checked_multiply(
+            pair_seed_opening_delivery_count,
+            pair_seed_opening_object_byte_length,
         )?;
-        let private_setup_delivery_byte_length = checked_add(
-            private_seed_opening_delivery_byte_length,
-            private_mailbox_wrapper_byte_length,
+        let seed_catalog_inclusion_proof_delivery_count = checked_add(
+            remote_subset_seed_opening_delivery_count,
+            pair_seed_opening_delivery_count,
+        )?;
+        let private_seed_catalog_inclusion_proof_delivery_byte_length = checked_multiply(
+            seed_catalog_inclusion_proof_delivery_count,
+            seed_catalog_inclusion_proof_byte_length,
+        )?;
+        let seed_delivery_descriptor_count = ordered_mailbox_stream_count;
+        let private_seed_delivery_descriptor_byte_length = checked_multiply(
+            seed_delivery_descriptor_count,
+            seed_delivery_descriptor_body_byte_length,
+        )?;
+        let seed_opening_proof_and_descriptor_delivery_byte_length = checked_sum(&[
+            private_subset_seed_opening_delivery_byte_length,
+            private_pair_seed_opening_delivery_byte_length,
+            private_seed_catalog_inclusion_proof_delivery_byte_length,
+            private_seed_delivery_descriptor_byte_length,
+        ])?;
+        let provisional_private_mailbox_wrapper_byte_length = checked_multiply(
+            ordered_mailbox_stream_count,
+            input.provisional_mailbox_stream_wrapper_byte_length,
+        )?;
+        let provisional_private_setup_delivery_byte_length = checked_add(
+            seed_opening_proof_and_descriptor_delivery_byte_length,
+            provisional_private_mailbox_wrapper_byte_length,
         )?;
 
-        let remote_seed_opening_delivery_count_per_participant = checked_multiply(
+        let remote_subset_seed_opening_delivery_count_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
             remote_recipient_count,
         )?;
-        let seed_opening_delivery_byte_length_per_participant = checked_multiply(
-            remote_seed_opening_delivery_count_per_participant,
-            seed_opening_byte_length,
+        let subset_seed_opening_delivery_byte_length_per_participant = checked_multiply(
+            remote_subset_seed_opening_delivery_count_per_participant,
+            subset_seed_opening_object_byte_length,
         )?;
-        let mailbox_stream_wrapper_byte_length_per_participant = checked_multiply(
-            geometry
-                .participant_count
-                .checked_sub(1)
-                .ok_or(TallyPreparationError::GeometryMismatch)?,
-            input.mailbox_stream_wrapper_byte_length,
+        let ordered_mailbox_stream_count_per_participant = geometry
+            .participant_count
+            .checked_sub(1)
+            .ok_or(TallyPreparationError::GeometryMismatch)?;
+        let pair_seed_opening_delivery_byte_length_per_participant = checked_multiply(
+            ordered_mailbox_stream_count_per_participant,
+            pair_seed_opening_object_byte_length,
         )?;
-        let maximum_private_setup_upload_byte_length_per_participant = checked_add(
-            seed_opening_delivery_byte_length_per_participant,
-            mailbox_stream_wrapper_byte_length_per_participant,
+        let seed_catalog_inclusion_proof_count_per_participant = checked_add(
+            remote_subset_seed_opening_delivery_count_per_participant,
+            ordered_mailbox_stream_count_per_participant,
+        )?;
+        let seed_catalog_inclusion_proof_delivery_byte_length_per_participant = checked_multiply(
+            seed_catalog_inclusion_proof_count_per_participant,
+            seed_catalog_inclusion_proof_byte_length,
+        )?;
+        let seed_delivery_descriptor_byte_length_per_participant = checked_multiply(
+            ordered_mailbox_stream_count_per_participant,
+            seed_delivery_descriptor_body_byte_length,
+        )?;
+        let seed_opening_proof_and_descriptor_upload_byte_length_per_participant = checked_sum(&[
+            subset_seed_opening_delivery_byte_length_per_participant,
+            pair_seed_opening_delivery_byte_length_per_participant,
+            seed_catalog_inclusion_proof_delivery_byte_length_per_participant,
+            seed_delivery_descriptor_byte_length_per_participant,
+        ])?;
+        if checked_multiply(
+            seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
+            geometry.participant_count,
+        )? != seed_opening_proof_and_descriptor_delivery_byte_length
+        {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let provisional_mailbox_stream_wrapper_byte_length_per_participant = checked_multiply(
+            ordered_mailbox_stream_count_per_participant,
+            input.provisional_mailbox_stream_wrapper_byte_length,
+        )?;
+        let maximum_provisional_private_setup_upload_byte_length_per_participant = checked_add(
+            seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
+            provisional_mailbox_stream_wrapper_byte_length_per_participant,
         )?;
 
-        let combined_seed_custody_byte_length_per_participant = checked_multiply(
+        let combined_subset_seed_custody_byte_length_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
-            seed_contribution_byte_length,
+            subset_seed_master_byte_length,
         )?;
+        let combined_pair_seed_custody_byte_length_per_participant = checked_multiply(
+            ordered_mailbox_stream_count_per_participant,
+            pair_seed_master_byte_length,
+        )?;
+        let collective_coin_source_custody_byte_length_per_participant =
+            collective_coin_source_byte_length;
+        let retained_seed_custody_byte_length_per_participant = checked_sum(&[
+            combined_subset_seed_custody_byte_length_per_participant,
+            combined_pair_seed_custody_byte_length_per_participant,
+            collective_coin_source_custody_byte_length_per_participant,
+        ])?;
         let subset_basis_stream_count_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
             geometry.active_fault_bound,
@@ -234,17 +341,32 @@ impl PseudorandomZeroSharingResourceModel {
             authorized_subset_count: geometry.authorized_subset_count,
             authorized_subset_count_per_participant: geometry
                 .authorized_subset_count_per_participant,
-            seed_contribution_count,
-            remote_seed_opening_delivery_count,
-            seed_opening_byte_length,
-            private_seed_opening_delivery_byte_length,
+            subset_seed_contribution_count,
+            remote_subset_seed_opening_delivery_count,
+            subset_seed_opening_object_byte_length,
+            private_subset_seed_opening_delivery_byte_length,
+            pair_seed_opening_delivery_count,
+            pair_seed_opening_object_byte_length,
+            private_pair_seed_opening_delivery_byte_length,
+            seed_catalog_inclusion_proof_delivery_count,
+            seed_catalog_inclusion_proof_byte_length,
+            private_seed_catalog_inclusion_proof_delivery_byte_length,
+            seed_delivery_descriptor_count,
+            seed_delivery_descriptor_body_byte_length,
+            private_seed_delivery_descriptor_byte_length,
+            seed_opening_proof_and_descriptor_delivery_byte_length,
             ordered_mailbox_stream_count,
-            private_mailbox_wrapper_byte_length,
-            private_setup_delivery_byte_length,
-            maximum_private_setup_upload_byte_length_per_participant,
-            maximum_private_setup_download_byte_length_per_participant:
-                maximum_private_setup_upload_byte_length_per_participant,
-            combined_seed_custody_byte_length_per_participant,
+            provisional_private_mailbox_wrapper_byte_length,
+            provisional_private_setup_delivery_byte_length,
+            seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
+            maximum_provisional_private_setup_upload_byte_length_per_participant,
+            maximum_provisional_private_setup_download_byte_length_per_participant:
+                maximum_provisional_private_setup_upload_byte_length_per_participant,
+            recipient_inventory_body_byte_length_per_participant,
+            combined_subset_seed_custody_byte_length_per_participant,
+            combined_pair_seed_custody_byte_length_per_participant,
+            collective_coin_source_custody_byte_length_per_participant,
+            retained_seed_custody_byte_length_per_participant,
             subset_basis_stream_count_per_participant,
             basis_weight_live_byte_length_per_participant,
             basis_precomputation_field_multiplication_count_per_participant,

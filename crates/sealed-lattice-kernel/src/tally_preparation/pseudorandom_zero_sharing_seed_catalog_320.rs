@@ -98,6 +98,45 @@ impl PseudorandomZeroSharingSeedCatalogCoordinate320 {
     }
 }
 
+/// Context-independent tree geometry shared by the catalog and its resource
+/// compiler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PseudorandomZeroSharingSeedCatalogShape320 {
+    subset_leaf_count: u64,
+    pair_leaf_count: u64,
+    leaf_count: u64,
+    tree_capacity: u64,
+    tree_height: u16,
+}
+
+impl PseudorandomZeroSharingSeedCatalogShape320 {
+    fn derive(participant_count: u16) -> Result<Self, TallyPreparationError> {
+        let geometry = ReplicatedRandomSharingGeometry::derive(participant_count)?;
+        let subset_leaf_count = geometry.authorized_subset_count_per_participant;
+        let pair_leaf_count = u64::from(
+            participant_count
+                .checked_sub(1)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+        );
+        let leaf_count = subset_leaf_count
+            .checked_add(pair_leaf_count)
+            .and_then(|count| count.checked_add(COLLECTIVE_COIN_LEAF_COUNT))
+            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+        let tree_capacity = leaf_count
+            .checked_next_power_of_two()
+            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
+        let tree_height = u16::try_from(tree_capacity.ilog2())
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        Ok(Self {
+            subset_leaf_count,
+            pair_leaf_count,
+            leaf_count,
+            tree_capacity,
+            tree_height,
+        })
+    }
+}
+
 /// Deterministic, value-independent coordinate owner for one sender catalog.
 ///
 /// The identity is computed before any commitment value. It binds the exact
@@ -133,22 +172,7 @@ impl PseudorandomZeroSharingSeedCatalogLayout320 {
                 },
             );
         }
-        let geometry = ReplicatedRandomSharingGeometry::derive(participant_count)?;
-        let subset_leaf_count = geometry.authorized_subset_count_per_participant;
-        let pair_leaf_count = u64::from(
-            participant_count
-                .checked_sub(1)
-                .ok_or(TallyPreparationError::GeometryMismatch)?,
-        );
-        let leaf_count = subset_leaf_count
-            .checked_add(pair_leaf_count)
-            .and_then(|count| count.checked_add(COLLECTIVE_COIN_LEAF_COUNT))
-            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
-        let tree_capacity = leaf_count
-            .checked_next_power_of_two()
-            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
-        let tree_height = u16::try_from(tree_capacity.ilog2())
-            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let shape = PseudorandomZeroSharingSeedCatalogShape320::derive(participant_count)?;
         let compiler_identity = pseudorandom_zero_sharing_seed_catalog_compiler_identity()?;
         let identity = hash_foundation_tuple_512(
             PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_IDENTITY_DOMAIN,
@@ -159,12 +183,12 @@ impl PseudorandomZeroSharingSeedCatalogLayout320 {
                 CanonicalItem::hash512(compiler_identity.into_bytes()),
                 CanonicalItem::unsigned16(participant_count),
                 CanonicalItem::unsigned16(contributor_position),
-                CanonicalItem::unsigned64(subset_leaf_count),
-                CanonicalItem::unsigned64(pair_leaf_count),
+                CanonicalItem::unsigned64(shape.subset_leaf_count),
+                CanonicalItem::unsigned64(shape.pair_leaf_count),
                 CanonicalItem::unsigned64(COLLECTIVE_COIN_LEAF_COUNT),
-                CanonicalItem::unsigned64(leaf_count),
-                CanonicalItem::unsigned64(tree_capacity),
-                CanonicalItem::unsigned16(tree_height),
+                CanonicalItem::unsigned64(shape.leaf_count),
+                CanonicalItem::unsigned64(shape.tree_capacity),
+                CanonicalItem::unsigned16(shape.tree_height),
             ],
         )?;
         Ok(Self {
@@ -173,11 +197,11 @@ impl PseudorandomZeroSharingSeedCatalogLayout320 {
             contributor_position,
             compiler_identity,
             identity,
-            subset_leaf_count,
-            pair_leaf_count,
-            leaf_count,
-            tree_capacity,
-            tree_height,
+            subset_leaf_count: shape.subset_leaf_count,
+            pair_leaf_count: shape.pair_leaf_count,
+            leaf_count: shape.leaf_count,
+            tree_capacity: shape.tree_capacity,
+            tree_height: shape.tree_height,
         })
     }
 
@@ -565,10 +589,23 @@ pub(crate) struct PseudorandomZeroSharingSeedCatalogInclusionProof320 {
 }
 
 impl PseudorandomZeroSharingSeedCatalogInclusionProof320 {
+    pub(crate) fn canonical_byte_length_for_participant_count(
+        participant_count: u16,
+    ) -> Result<usize, TallyPreparationError> {
+        let shape = PseudorandomZeroSharingSeedCatalogShape320::derive(participant_count)?;
+        Self::canonical_byte_length_for_tree_height(shape.tree_height)
+    }
+
     pub(crate) fn canonical_byte_length_for_layout(
         layout: PseudorandomZeroSharingSeedCatalogLayout320,
     ) -> Result<usize, TallyPreparationError> {
-        let sibling_count = usize::from(layout.tree_height());
+        Self::canonical_byte_length_for_tree_height(layout.tree_height())
+    }
+
+    fn canonical_byte_length_for_tree_height(
+        tree_height: u16,
+    ) -> Result<usize, TallyPreparationError> {
+        let sibling_count = usize::from(tree_height);
         let item_count = INCLUSION_PROOF_PREFIX_ITEM_COUNT
             .checked_add(sibling_count)
             .ok_or(TallyPreparationError::ArithmeticOverflow)?;
