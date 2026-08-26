@@ -3,71 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
     AuthenticatedStorageRecencyCoordinator,
     authenticatedStorageRecencyCoordinateByteLength,
-    type AuthenticatedStorageRecencyAnchor,
 } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import type { UntrustedStorageTransactionStore } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
+    InMemoryAuthenticatedStorageRecencyAnchor,
     InMemoryRuntimeStorageAdapter,
     openRuntimeTestStore,
 } from '#packages/protocol/tests/support/runtime-storage-test-support';
-
-const bytesEqual = (
-    left: Uint8Array | undefined,
-    right: Uint8Array | undefined,
-): boolean => {
-    if (left === undefined || right === undefined) {
-        return left === right;
-    }
-    if (left.byteLength !== right.byteLength) {
-        return false;
-    }
-    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
-        if (left[byteIndex] !== right[byteIndex]) {
-            return false;
-        }
-    }
-    return true;
-};
-
-class InMemoryAuthenticatedStorageRecencyAnchor implements AuthenticatedStorageRecencyAnchor {
-    public compareAndSetCallCount = 0;
-    public failNextCompareAndSetCount = 0;
-    public failNextReadCount = 0;
-    #bytes: Uint8Array | undefined;
-
-    public compareAndSet(input: {
-        expectedBytes: Uint8Array | null;
-        nextBytes: Uint8Array;
-    }): Promise<boolean> {
-        this.compareAndSetCallCount += 1;
-        if (this.failNextCompareAndSetCount > 0) {
-            this.failNextCompareAndSetCount -= 1;
-            return Promise.reject(new Error('Injected anchor write failure.'));
-        }
-        const expectedBytes = input.expectedBytes ?? undefined;
-        if (!bytesEqual(this.#bytes, expectedBytes)) {
-            return Promise.resolve(false);
-        }
-        this.#bytes = input.nextBytes.slice();
-        return Promise.resolve(true);
-    }
-
-    public read(): Promise<Uint8Array | undefined> {
-        if (this.failNextReadCount > 0) {
-            this.failNextReadCount -= 1;
-            return Promise.reject(new Error('Injected anchor read failure.'));
-        }
-        return Promise.resolve(this.#bytes);
-    }
-
-    public copyBytes(): Uint8Array | undefined {
-        return this.#bytes?.slice();
-    }
-
-    public replaceBytes(bytes: Uint8Array | undefined): void {
-        this.#bytes = bytes?.slice();
-    }
-}
 
 const commitRecord = async (
     store: UntrustedStorageTransactionStore,

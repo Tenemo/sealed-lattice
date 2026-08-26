@@ -4,14 +4,17 @@ import {
     createRuntimeRecordProtection,
     createRuntimeRecordProtectionFromSession,
     maximumRuntimeRecordDerivationCount,
+    readRuntimeRecord,
     releaseRuntimeRecordProtection,
     runtimeRecordEnvelopeOverheadByteLength,
     sampleRuntimeIdentifier,
     sealRuntimeRecord,
+    stageRuntimeRecordWrite,
     type RuntimeRecordProtectionSession,
 } from '#packages/protocol/src/runtime/authenticated-runtime-record';
 import {
     generateRuntimeStorageRootKey,
+    openRuntimeTestStore,
     runtimeAuthorityContext,
 } from '#packages/protocol/tests/support/runtime-storage-test-support';
 
@@ -284,5 +287,38 @@ describe('authenticated runtime records', () => {
             }),
         ).rejects.toMatchObject({ code: 'StorageFailure' });
         await releaseRuntimeRecordProtection(protection);
+    });
+
+    it('does not mistake a non-error storage rejection for a missing record', async () => {
+        const opened = await openRuntimeTestStore({
+            namespace: 'runtime-record-non-error-rejection',
+        });
+        const protection = createRuntimeRecordProtection({
+            authorityContext: runtimeAuthorityContext(),
+            maximumRecordSealingCount: 2,
+            rootKey: await generateRuntimeStorageRootKey(),
+        });
+        const transaction = await opened.store.beginTransaction({
+            lifetimeMilliseconds: 1_000,
+        });
+        await stageRuntimeRecordWrite({
+            expectedCurrentSealedBytes: null,
+            logicalRecordKey: 'rejected-read',
+            operationDomain: 'sealed-lattice/test/rejected-read/v1',
+            plaintext: new Uint8Array([1, 2, 3]),
+            protection,
+            transaction,
+        });
+        await transaction.commit();
+        opened.adapter.rejectNextReadWith(undefined);
+
+        await expect(
+            readRuntimeRecord({
+                logicalRecordKey: 'rejected-read',
+                operationDomain: 'sealed-lattice/test/rejected-read/v1',
+                protection,
+                store: opened.store,
+            }),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
     });
 });

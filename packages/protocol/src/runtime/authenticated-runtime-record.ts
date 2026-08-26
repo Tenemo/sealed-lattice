@@ -1003,6 +1003,7 @@ export const readRuntimeRecord = async (input: {
     store: UntrustedStorageTransactionStore;
 }): Promise<OpenedRuntimeRecord | undefined> => {
     let authenticatedPlaintext: Uint8Array | undefined;
+    let authenticationFailed = false;
     let authenticationFailure: unknown;
     let sealedBytes: Uint8Array | undefined;
     try {
@@ -1019,9 +1020,10 @@ export const readRuntimeRecord = async (input: {
             logicalRecordKey: input.logicalRecordKey,
         });
     } catch (error) {
+        authenticationFailed = true;
         authenticationFailure = error;
     }
-    if (authenticationFailure !== undefined) {
+    if (authenticationFailed) {
         authenticatedPlaintext?.fill(0);
         if (authenticationFailure instanceof AuthenticatedRuntimeRecordError) {
             throw authenticationFailure;

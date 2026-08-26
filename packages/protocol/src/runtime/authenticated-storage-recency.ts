@@ -240,14 +240,16 @@ export class AuthenticatedStorageRecencyCoordinator {
         });
     }
 
-    public runRead<Result>(operation: () => Promise<Result>): Promise<Result> {
+    public runRead<Result>(
+        operation: (store: UntrustedStorageTransactionStore) => Promise<Result>,
+    ): Promise<Result> {
         return this.#runExclusive(async () => {
             const before = await this.#reconcileInternal();
             let operationFailed = false;
             let operationFailure: unknown;
             let result: Result | undefined;
             try {
-                result = await operation();
+                result = await operation(this.#store);
             } catch (error) {
                 operationFailed = true;
                 operationFailure = error;
@@ -293,7 +295,7 @@ export class AuthenticatedStorageRecencyCoordinator {
     }
 
     public runMutation<Result>(
-        operation: () => Promise<Result>,
+        operation: (store: UntrustedStorageTransactionStore) => Promise<Result>,
     ): Promise<Result> {
         return this.#runExclusive(async () => {
             const before = await this.#reconcileInternal();
@@ -301,7 +303,7 @@ export class AuthenticatedStorageRecencyCoordinator {
             let operationFailure: unknown;
             let result: Result | undefined;
             try {
-                result = await operation();
+                result = await operation(this.#store);
             } catch (error) {
                 operationFailed = true;
                 operationFailure = error;

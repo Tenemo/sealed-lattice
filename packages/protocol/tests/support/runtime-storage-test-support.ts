@@ -3,6 +3,7 @@ import {
     maximumRuntimeRecordDerivationCount,
 } from '#packages/protocol/src/runtime/authenticated-runtime-record';
 import type { RuntimeStorageAuthorityContext } from '#packages/protocol/src/runtime/authenticated-runtime-record';
+import type { AuthenticatedStorageRecencyAnchor } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import {
     openUntrustedStorageTransactionStore,
     type UntrustedStorageAdapter,
@@ -31,8 +32,50 @@ const bytesEqual = (
     return true;
 };
 
+export class InMemoryAuthenticatedStorageRecencyAnchor implements AuthenticatedStorageRecencyAnchor {
+    public compareAndSetCallCount = 0;
+    public failNextCompareAndSetCount = 0;
+    public failNextReadCount = 0;
+    #bytes: Uint8Array | undefined;
+
+    public compareAndSet(input: {
+        expectedBytes: Uint8Array | null;
+        nextBytes: Uint8Array;
+    }): Promise<boolean> {
+        this.compareAndSetCallCount += 1;
+        if (this.failNextCompareAndSetCount > 0) {
+            this.failNextCompareAndSetCount -= 1;
+            return Promise.reject(new Error('Injected anchor write failure.'));
+        }
+        const expectedBytes = input.expectedBytes ?? undefined;
+        if (!bytesEqual(this.#bytes, expectedBytes)) {
+            return Promise.resolve(false);
+        }
+        this.#bytes = input.nextBytes.slice();
+        return Promise.resolve(true);
+    }
+
+    public read(): Promise<Uint8Array | undefined> {
+        if (this.failNextReadCount > 0) {
+            this.failNextReadCount -= 1;
+            return Promise.reject(new Error('Injected anchor read failure.'));
+        }
+        return Promise.resolve(this.#bytes?.slice());
+    }
+
+    public copyBytes(): Uint8Array | undefined {
+        return this.#bytes?.slice();
+    }
+
+    public replaceBytes(bytes: Uint8Array | undefined): void {
+        this.#bytes = bytes?.slice();
+    }
+}
+
 export class InMemoryRuntimeStorageAdapter implements UntrustedStorageAdapter {
     readonly #failedAtomicMutationNumbers = new Set<number>();
+    #hasNextReadRejection = false;
+    #nextReadRejection: unknown;
     #values = new Map<string, Uint8Array>();
     public afterAtomicMutation:
         | ((mutation: UntrustedStorageAtomicMutation) => void)
@@ -52,6 +95,14 @@ export class InMemoryRuntimeStorageAdapter implements UntrustedStorageAdapter {
     public forceNextAtomicConflict = false;
 
     public read(key: string): Promise<Uint8Array | undefined> {
+        if (this.#hasNextReadRejection) {
+            this.#hasNextReadRejection = false;
+            const rejection = this.#nextReadRejection;
+            this.#nextReadRejection = undefined;
+            return new Promise((_resolve, reject) => {
+                Reflect.apply(reject, undefined, [rejection]);
+            });
+        }
         if (this.failNextReadCount > 0) {
             this.failNextReadCount -= 1;
             return Promise.reject(new Error('injected read failure'));
@@ -188,6 +239,11 @@ export class InMemoryRuntimeStorageAdapter implements UntrustedStorageAdapter {
 
     public rawWrite(key: string, value: Uint8Array): void {
         this.#values.set(key, value.slice());
+    }
+
+    public rejectNextReadWith(rejection: unknown): void {
+        this.#hasNextReadRejection = true;
+        this.#nextReadRejection = rejection;
     }
 }
 
