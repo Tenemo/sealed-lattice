@@ -39,6 +39,7 @@ mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
 mod pseudorandom_zero_sharing_320;
 mod pseudorandom_zero_sharing_field_stream_320;
+mod pseudorandom_zero_sharing_seed_catalog_320;
 mod pseudorandom_zero_sharing_subset_seed_320;
 mod random_state;
 mod random_tape;
@@ -117,6 +118,8 @@ mod preparation_multiplication_catalog_tests;
 mod pseudorandom_zero_sharing_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_field_stream_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_seed_catalog_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_subset_seed_320_tests;
 #[cfg(test)]
@@ -274,6 +277,27 @@ pub(crate) enum TallyPreparationError {
     },
     PseudorandomZeroSharingSubsetSeedDuplicateContributor {
         contributor_position: u16,
+    },
+    PseudorandomZeroSharingSeedCatalogContributorPositionOutOfRange {
+        contributor_position: u16,
+        participant_count: u16,
+    },
+    PseudorandomZeroSharingSeedCatalogCoordinateMismatch,
+    PseudorandomZeroSharingSeedCatalogLeafCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    PseudorandomZeroSharingSeedCatalogLeafOrdinalOutOfRange {
+        leaf_ordinal: u64,
+        leaf_count: u64,
+    },
+    PseudorandomZeroSharingSeedCatalogProofLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    PseudorandomZeroSharingSeedCatalogRootMismatch,
+    PseudorandomZeroSharingSeedCatalogObjectMismatch {
+        field: &'static str,
     },
     ReplicatedRandomBitCountZero,
     ReplicatedRandomBitChunkOutOfRange {
@@ -741,6 +765,42 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "pseudorandom zero-sharing subset-seed inventory repeats contributor {contributor_position}"
+            ),
+            Self::PseudorandomZeroSharingSeedCatalogContributorPositionOutOfRange {
+                contributor_position,
+                participant_count,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing seed-catalog contributor {contributor_position} is outside participant count {participant_count}"
+            ),
+            Self::PseudorandomZeroSharingSeedCatalogCoordinateMismatch => formatter.write_str(
+                "pseudorandom zero-sharing seed-catalog coordinate does not belong to the expected catalog",
+            ),
+            Self::PseudorandomZeroSharingSeedCatalogLeafCountMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "pseudorandom zero-sharing seed catalog has {actual} leaves; expected {expected}"
+                )
+            }
+            Self::PseudorandomZeroSharingSeedCatalogLeafOrdinalOutOfRange {
+                leaf_ordinal,
+                leaf_count,
+            } => write!(
+                formatter,
+                "pseudorandom zero-sharing seed-catalog leaf ordinal {leaf_ordinal} is outside leaf count {leaf_count}"
+            ),
+            Self::PseudorandomZeroSharingSeedCatalogProofLengthMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "pseudorandom zero-sharing seed-catalog proof has {actual} siblings; expected {expected}"
+                )
+            }
+            Self::PseudorandomZeroSharingSeedCatalogRootMismatch => formatter.write_str(
+                "pseudorandom zero-sharing seed-catalog inclusion proof does not match the expected root",
+            ),
+            Self::PseudorandomZeroSharingSeedCatalogObjectMismatch { field } => write!(
+                formatter,
+                "pseudorandom zero-sharing seed-catalog object has a wrong {field}"
             ),
             Self::ReplicatedRandomBitCountZero => {
                 formatter.write_str("replicated random-bit stream must contain a bit")

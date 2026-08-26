@@ -199,6 +199,10 @@ pub(crate) struct PseudorandomZeroSharingSubsetSeedCommitment320 {
 }
 
 impl PseudorandomZeroSharingSubsetSeedCommitment320 {
+    pub(crate) const fn coordinate(self) -> PseudorandomZeroSharingSubsetSeedCoordinate320 {
+        self.coordinate
+    }
+
     pub(crate) const fn digest(self) -> Hash512 {
         self.digest
     }
