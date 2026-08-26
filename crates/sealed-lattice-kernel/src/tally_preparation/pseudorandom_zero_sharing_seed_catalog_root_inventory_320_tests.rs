@@ -120,6 +120,101 @@ struct OwnedSeedDeliveryEntry320 {
     inclusion_proof_bytes: Vec<u8>,
 }
 
+pub(super) struct SeedMailboxTestFixture320 {
+    pub(super) roster: Roster,
+    pub(super) signing_keys: Vec<ml_dsa_65::PrivateKey>,
+    pub(super) mailbox_decapsulation_keys: Vec<ml_kem_768::DecapsKey>,
+    pub(super) root_terminal: RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    pub(super) sender_position: u16,
+    pub(super) recipient_position: u16,
+    pub(super) descriptor_bytes: Vec<u8>,
+    pub(super) payload_bytes: Zeroizing<Vec<u8>>,
+}
+
+pub(super) fn seed_mailbox_test_fixture_320(
+    sender_position: u16,
+    recipient_position: u16,
+) -> SeedMailboxTestFixture320 {
+    let participant_count = FOUNDATION_PROFILE.participant_count;
+    assert!(sender_position < participant_count);
+    assert!(recipient_position < participant_count);
+    assert_ne!(sender_position, recipient_position);
+    let (roster, signing_keys, mailbox_decapsulation_keys) =
+        roster_signing_and_mailbox_keys(participant_count, 0x19);
+    let preparation_context = build_preparation_context(&roster, 0x1b);
+    let parameter_identity = deterministic_hash(0x1d, 0);
+    let catalog_fixtures = (0..participant_count)
+        .map(|contributor_position| {
+            let layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
+                parameter_identity,
+                preparation_context,
+                contributor_position,
+            )
+            .unwrap();
+            seed_catalog_fixture(layout, 0x21_u8.wrapping_add(contributor_position as u8))
+        })
+        .collect::<Vec<_>>();
+    let owned_packages = catalog_fixtures
+        .iter()
+        .enumerate()
+        .map(|(contributor_index, fixture)| {
+            authorize_root_body(
+                fixture.tree.root_body(),
+                &roster,
+                &signing_keys,
+                0x41_u8.wrapping_add(contributor_index as u8),
+                false,
+            )
+        })
+        .collect::<Vec<_>>();
+    let root_inventory = verify_pseudorandom_zero_sharing_seed_catalog_root_inventory_320(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &borrowed_packages(&owned_packages),
+    )
+    .unwrap();
+    let terminal_certificate =
+        signed_root_terminal_certificate(&root_inventory, &signing_keys, 0x61);
+    let root_terminal = verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+        root_inventory,
+        &roster,
+        &terminal_certificate.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    let descriptor_bytes = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
+        &root_terminal,
+        sender_position,
+        recipient_position,
+    )
+    .unwrap()
+    .canonical_bytes()
+    .unwrap();
+    let entries = seed_delivery_entries(
+        &catalog_fixtures[usize::from(sender_position)],
+        recipient_position,
+    );
+    let payload_byte_length = entries
+        .iter()
+        .map(|entry| entry.opening_bytes.len() + entry.inclusion_proof_bytes.len())
+        .sum();
+    let mut payload_bytes = Zeroizing::new(Vec::with_capacity(payload_byte_length));
+    for entry in entries {
+        payload_bytes.extend_from_slice(&entry.opening_bytes);
+        payload_bytes.extend_from_slice(&entry.inclusion_proof_bytes);
+    }
+    SeedMailboxTestFixture320 {
+        roster,
+        signing_keys,
+        mailbox_decapsulation_keys,
+        root_terminal,
+        sender_position,
+        recipient_position,
+        descriptor_bytes,
+        payload_bytes,
+    }
+}
+
 impl OwnedSeedDeliveryEntry320 {
     fn borrowed(&self) -> PseudorandomZeroSharingSeedDeliveryEntryBytes320<'_> {
         PseudorandomZeroSharingSeedDeliveryEntryBytes320::new(
@@ -1474,7 +1569,20 @@ fn roster_and_signing_keys(
     participant_count: u16,
     marker: u8,
 ) -> (Roster, Vec<ml_dsa_65::PrivateKey>) {
+    let (roster, signing_keys, _) = roster_signing_and_mailbox_keys(participant_count, marker);
+    (roster, signing_keys)
+}
+
+fn roster_signing_and_mailbox_keys(
+    participant_count: u16,
+    marker: u8,
+) -> (
+    Roster,
+    Vec<ml_dsa_65::PrivateKey>,
+    Vec<ml_kem_768::DecapsKey>,
+) {
     let mut signing_keys = Vec::with_capacity(usize::from(participant_count));
+    let mut mailbox_decapsulation_keys = Vec::with_capacity(usize::from(participant_count));
     let entries = (0..participant_count)
         .map(|roster_position| {
             let mut signing_seed = [marker; 32];
@@ -1487,8 +1595,9 @@ fn roster_and_signing_keys(
             mailbox_seed[0] ^= roster_position as u8;
             let mut mailbox_fallback_seed = [marker.wrapping_add(0x53); 32];
             mailbox_fallback_seed[31] ^= roster_position as u8;
-            let (mailbox_encapsulation_key, _) =
+            let (mailbox_encapsulation_key, mailbox_decapsulation_key) =
                 ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
+            mailbox_decapsulation_keys.push(mailbox_decapsulation_key);
             RosterEntry::new(
                 roster_position,
                 signing_verification_key.into_bytes(),
@@ -1497,7 +1606,11 @@ fn roster_and_signing_keys(
             .unwrap()
         })
         .collect();
-    (Roster::new(entries).unwrap(), signing_keys)
+    (
+        Roster::new(entries).unwrap(),
+        signing_keys,
+        mailbox_decapsulation_keys,
+    )
 }
 
 fn build_preparation_context(roster: &Roster, attempt_marker: u8) -> TallyPreparationContext {

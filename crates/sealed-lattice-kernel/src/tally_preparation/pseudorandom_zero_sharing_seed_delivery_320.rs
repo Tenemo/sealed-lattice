@@ -361,7 +361,7 @@ impl PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
         .encode()?)
     }
 
-    fn from_canonical_bytes(
+    pub(crate) fn from_canonical_bytes(
         bytes: &[u8],
     ) -> Result<Self, PseudorandomZeroSharingSeedDeliveryError320> {
         let tuple = CanonicalTuple::decode(bytes, &delivery_control_object_decode_limits())?;
@@ -560,30 +560,19 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_delivery_320(
     RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320,
     PseudorandomZeroSharingSeedDeliveryError320,
 > {
-    let expected_descriptor = PseudorandomZeroSharingSeedDeliveryDescriptorBody320::new(
-        root_terminal,
-        expected_sender_position,
+    let expected_entry_count = PseudorandomZeroSharingSeedDeliveryLayout320::derive(
+        root_terminal
+            .root_inventory()
+            .root_body(expected_sender_position)
+            .ok_or(
+                PseudorandomZeroSharingSeedDeliveryError320::MissingSenderRoot {
+                    sender_position: expected_sender_position,
+                },
+            )?
+            .layout(),
         expected_recipient_position,
-    )?;
-    let descriptor = PseudorandomZeroSharingSeedDeliveryDescriptorBody320::from_canonical_bytes(
-        descriptor_bytes,
-    )?;
-    require_descriptor_match(descriptor, expected_descriptor)?;
-
-    let root_body = root_terminal
-        .root_inventory()
-        .root_body(expected_sender_position)
-        .ok_or(
-            PseudorandomZeroSharingSeedDeliveryError320::MissingSenderRoot {
-                sender_position: expected_sender_position,
-            },
-        )?;
-    let root_body_bytes = root_body.canonical_bytes()?;
-    let layout = PseudorandomZeroSharingSeedDeliveryLayout320::derive(
-        root_body.layout(),
-        expected_recipient_position,
-    )?;
-    let expected_entry_count = layout.leaf_count()?;
+    )?
+    .leaf_count()?;
     if entries.len() != expected_entry_count {
         return Err(
             PseudorandomZeroSharingSeedDeliveryError320::DeliveryEntryCount {
@@ -592,46 +581,165 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_delivery_320(
             },
         );
     }
-    let mut subset_entries = Vec::with_capacity(layout.subsets.len());
-    for (subset, entry) in layout
-        .subsets
-        .iter()
-        .copied()
-        .zip(&entries[..layout.subsets.len()])
-    {
-        let (_, contribution) =
-            super::pseudorandom_zero_sharing_seed_catalog_320::verify_pseudorandom_zero_sharing_subset_seed_opening_catalog_inclusion_320(
-                root_body.layout(),
-                subset,
-                &root_body_bytes,
-                entry.opening_bytes,
-                entry.inclusion_proof_bytes,
-            )?;
-        subset_entries.push(RootInventoryMatchedSubsetSeedDeliveryEntry320 {
-            subset,
-            contribution,
-        });
-    }
-    let pair_entry = entries.last().ok_or(
-        PseudorandomZeroSharingSeedDeliveryError320::DeliveryEntryCount {
-            expected: expected_entry_count,
-            actual: entries.len(),
-        },
+    let mut verifier = PseudorandomZeroSharingSeedDeliveryVerifier320::new(
+        root_terminal,
+        expected_sender_position,
+        expected_recipient_position,
+        descriptor_bytes,
     )?;
-    let (_, pair_contribution) =
-        verify_pseudorandom_zero_sharing_pair_seed_opening_catalog_inclusion_320(
+    for entry in entries {
+        verifier.absorb_next_entry(entry.opening_bytes, entry.inclusion_proof_bytes)?;
+    }
+    verifier.finish()
+}
+
+/// Sequential verifier for one exact private seed payload.
+///
+/// It retains only verified seed contributions and the sender's public root
+/// body. A mailbox decoder can therefore decrypt and erase one bounded chunk
+/// at a time without retaining the complete secret-bearing payload.
+pub(crate) struct PseudorandomZeroSharingSeedDeliveryVerifier320 {
+    descriptor: PseudorandomZeroSharingSeedDeliveryDescriptorBody320,
+    layout: PseudorandomZeroSharingSeedDeliveryLayout320,
+    root_body_bytes: Vec<u8>,
+    next_entry_index: usize,
+    subset_entries: Vec<RootInventoryMatchedSubsetSeedDeliveryEntry320>,
+    pair_contribution: Option<CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320>,
+}
+
+impl PseudorandomZeroSharingSeedDeliveryVerifier320 {
+    pub(crate) fn new(
+        root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+        expected_sender_position: u16,
+        expected_recipient_position: u16,
+        descriptor_bytes: &[u8],
+    ) -> Result<Self, PseudorandomZeroSharingSeedDeliveryError320> {
+        let expected_descriptor = PseudorandomZeroSharingSeedDeliveryDescriptorBody320::new(
+            root_terminal,
+            expected_sender_position,
+            expected_recipient_position,
+        )?;
+        let descriptor =
+            PseudorandomZeroSharingSeedDeliveryDescriptorBody320::from_canonical_bytes(
+                descriptor_bytes,
+            )?;
+        require_descriptor_match(descriptor, expected_descriptor)?;
+
+        let root_body = root_terminal
+            .root_inventory()
+            .root_body(expected_sender_position)
+            .ok_or(
+                PseudorandomZeroSharingSeedDeliveryError320::MissingSenderRoot {
+                    sender_position: expected_sender_position,
+                },
+            )?;
+        let root_body_bytes = root_body.canonical_bytes()?;
+        let layout = PseudorandomZeroSharingSeedDeliveryLayout320::derive(
             root_body.layout(),
             expected_recipient_position,
-            &root_body_bytes,
-            pair_entry.opening_bytes,
-            pair_entry.inclusion_proof_bytes,
         )?;
-    Ok(RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320 {
-        descriptor,
-        layout,
-        subset_entries: subset_entries.into_boxed_slice(),
-        pair_contribution,
-    })
+        let subset_capacity = layout.subsets.len();
+        Ok(Self {
+            descriptor,
+            layout,
+            root_body_bytes,
+            next_entry_index: 0,
+            subset_entries: Vec::with_capacity(subset_capacity),
+            pair_contribution: None,
+        })
+    }
+
+    pub(crate) fn expected_entry_count(
+        &self,
+    ) -> Result<usize, PseudorandomZeroSharingSeedDeliveryError320> {
+        self.layout.leaf_count()
+    }
+
+    pub(crate) fn next_entry_byte_lengths(&self) -> Option<(usize, usize)> {
+        let opening_byte_length = if self.next_entry_index < self.layout.subsets.len() {
+            PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH
+        } else if self.next_entry_index == self.layout.subsets.len() {
+            PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_OPENING_OBJECT_BYTE_LENGTH
+        } else {
+            return None;
+        };
+        Some((opening_byte_length, self.layout.inclusion_proof_byte_length))
+    }
+
+    pub(crate) fn absorb_next_entry(
+        &mut self,
+        opening_bytes: &[u8],
+        inclusion_proof_bytes: &[u8],
+    ) -> Result<(), PseudorandomZeroSharingSeedDeliveryError320> {
+        let expected_entry_count = self.expected_entry_count()?;
+        if self.next_entry_index >= expected_entry_count {
+            return Err(
+                PseudorandomZeroSharingSeedDeliveryError320::DeliveryEntryCount {
+                    expected: expected_entry_count,
+                    actual: self.next_entry_index.saturating_add(1),
+                },
+            );
+        }
+        if let Some(subset) = self.layout.subsets.get(self.next_entry_index).copied() {
+            let (_, contribution) =
+                super::pseudorandom_zero_sharing_seed_catalog_320::verify_pseudorandom_zero_sharing_subset_seed_opening_catalog_inclusion_320(
+                    self.layout.sender_catalog_layout,
+                    subset,
+                    &self.root_body_bytes,
+                    opening_bytes,
+                    inclusion_proof_bytes,
+                )?;
+            self.subset_entries
+                .push(RootInventoryMatchedSubsetSeedDeliveryEntry320 {
+                    subset,
+                    contribution,
+                });
+        } else {
+            let (_, pair_contribution) =
+                verify_pseudorandom_zero_sharing_pair_seed_opening_catalog_inclusion_320(
+                    self.layout.sender_catalog_layout,
+                    self.layout.recipient_position,
+                    &self.root_body_bytes,
+                    opening_bytes,
+                    inclusion_proof_bytes,
+                )?;
+            self.pair_contribution = Some(pair_contribution);
+        }
+        self.next_entry_index = self
+            .next_entry_index
+            .checked_add(1)
+            .ok_or(PseudorandomZeroSharingSeedDeliveryError320::ArithmeticOverflow)?;
+        Ok(())
+    }
+
+    pub(crate) fn finish(
+        self,
+    ) -> Result<
+        RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320,
+        PseudorandomZeroSharingSeedDeliveryError320,
+    > {
+        let expected_entry_count = self.expected_entry_count()?;
+        if self.next_entry_index != expected_entry_count {
+            return Err(
+                PseudorandomZeroSharingSeedDeliveryError320::DeliveryEntryCount {
+                    expected: expected_entry_count,
+                    actual: self.next_entry_index,
+                },
+            );
+        }
+        let pair_contribution = self.pair_contribution.ok_or(
+            PseudorandomZeroSharingSeedDeliveryError320::DeliveryEntryCount {
+                expected: expected_entry_count,
+                actual: self.next_entry_index.saturating_sub(1),
+            },
+        )?;
+        Ok(RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320 {
+            descriptor: self.descriptor,
+            layout: self.layout,
+            subset_entries: self.subset_entries.into_boxed_slice(),
+            pair_contribution,
+        })
+    }
 }
 
 /// Certificate-free semantic body for one recipient's complete remote seed

@@ -16,6 +16,13 @@ use super::{
         evaluate_pseudorandom_zero_sharing_subset_at_point,
     },
     pseudorandom_zero_sharing_seed_catalog_320::PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_INCLUSION_PROOF_DOMAIN,
+    pseudorandom_zero_sharing_seed_mailbox_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_ALGORITHM_IDENTIFIER,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_MANIFEST_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_BODY_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_ENVELOPE_DOMAIN,
+    },
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
 
@@ -193,10 +200,8 @@ fn completion_resource_model_reproduces_setup_stream_and_codeword_work() {
     assert_eq!(model.seed_delivery_descriptor_count, 90);
     assert_eq!(model.seed_delivery_descriptor_body_byte_length, 328);
     assert_eq!(model.private_seed_delivery_descriptor_byte_length, 29_520);
-    assert_eq!(
-        model.seed_opening_proof_and_descriptor_delivery_byte_length,
-        5_662_620
-    );
+    assert_eq!(model.seed_delivery_plaintext_byte_length_per_stream, 62_590);
+    assert_eq!(model.private_seed_delivery_plaintext_byte_length, 5_633_100);
     assert_eq!(model.root_terminal_body_byte_length, 144);
     assert_eq!(model.root_terminal_endorsement_count, 10);
     assert_eq!(
@@ -207,26 +212,52 @@ fn completion_resource_model_reproduces_setup_stream_and_codeword_work() {
     assert_eq!(model.root_terminal_certificate_byte_length, 36_230);
     assert_eq!(model.root_terminal_signature_verification_count, 10);
     assert_eq!(model.ordered_mailbox_stream_count, 90);
+    assert_eq!(model.mailbox_chunk_count_per_stream, 1);
+    assert_eq!(model.mailbox_chunk_count, 90);
+    assert_eq!(model.mailbox_header_body_byte_length, 1_655);
+    assert_eq!(model.private_mailbox_header_byte_length, 148_950);
+    assert_eq!(model.mailbox_manifest_body_byte_length_per_stream, 215);
+    assert_eq!(model.private_mailbox_manifest_byte_length, 19_350);
+    assert_eq!(model.mailbox_signature_body_byte_length, 309);
+    assert_eq!(model.mailbox_signature_envelope_byte_length, 3_713);
     assert_eq!(
-        model.provisional_private_mailbox_wrapper_byte_length,
-        460_800
+        model.private_mailbox_signature_envelope_byte_length,
+        334_170
+    );
+    assert_eq!(model.mailbox_authentication_tag_byte_length, 16);
+    assert_eq!(model.private_mailbox_authentication_tag_byte_length, 1_440);
+    assert_eq!(model.mailbox_control_and_tag_byte_length_per_stream, 5_599);
+    assert_eq!(model.private_mailbox_control_and_tag_byte_length, 503_910);
+    assert_eq!(
+        model.authenticated_private_setup_delivery_byte_length,
+        6_137_010
     );
     assert_eq!(
-        model.provisional_private_setup_delivery_byte_length,
-        6_123_420
+        model.seed_delivery_plaintext_upload_byte_length_per_participant,
+        563_310
     );
     assert_eq!(
-        model.seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
-        566_262
+        model.authenticated_private_setup_upload_byte_length_per_participant,
+        613_701
     );
     assert_eq!(
-        model.maximum_provisional_private_setup_upload_byte_length_per_participant,
-        612_342
+        model.authenticated_private_setup_download_byte_length_per_participant,
+        613_701
     );
-    assert_eq!(
-        model.maximum_provisional_private_setup_download_byte_length_per_participant,
-        612_342
-    );
+    assert_eq!(model.mailbox_encapsulation_count, 90);
+    assert_eq!(model.mailbox_decapsulation_count, 90);
+    assert_eq!(model.mailbox_sender_signature_generation_count, 90);
+    assert_eq!(model.mailbox_sender_signature_verification_count, 90);
+    assert_eq!(model.mailbox_authenticated_encryption_count, 90);
+    assert_eq!(model.mailbox_authenticated_decryption_count, 90);
+    assert_eq!(model.mailbox_chunk_digest_generation_count, 90);
+    assert_eq!(model.mailbox_chunk_digest_verification_count, 90);
+    assert_eq!(model.mailbox_sender_key_derivation_count, 90);
+    assert_eq!(model.mailbox_recipient_key_derivation_count, 90);
+    assert_eq!(model.mailbox_sender_nonce_derivation_count, 90);
+    assert_eq!(model.mailbox_recipient_nonce_derivation_count, 90);
+    assert_eq!(model.mailbox_recipient_key_identity_generation_count, 90);
+    assert_eq!(model.mailbox_recipient_key_identity_verification_count, 90);
     assert_eq!(
         model.recipient_inventory_body_byte_length_per_participant,
         306
@@ -321,10 +352,57 @@ fn independent_completion_delivery_ledger_matches_every_production_subtotal() {
     let inclusion_proof_delivery_byte_length =
         seed_catalog_inclusion_proof_delivery_count * inclusion_proof_byte_length;
     let descriptor_delivery_byte_length = ordered_mailbox_stream_count * descriptor_byte_length;
-    let exact_delivery_byte_length = subset_opening_delivery_byte_length
+    let plaintext_delivery_byte_length = subset_opening_delivery_byte_length
         + pair_opening_delivery_byte_length
-        + inclusion_proof_delivery_byte_length
-        + descriptor_delivery_byte_length;
+        + inclusion_proof_delivery_byte_length;
+    let plaintext_byte_length_per_stream =
+        plaintext_delivery_byte_length / ordered_mailbox_stream_count;
+    let maximum_plaintext_chunk_byte_length = 1_048_576_u64 - 16;
+    let chunk_count_per_stream =
+        plaintext_byte_length_per_stream.div_ceil(maximum_plaintext_chunk_byte_length);
+    let total_chunk_count = ordered_mailbox_stream_count * chunk_count_per_stream;
+    let mailbox_header_body_byte_length = 8
+        + 8 * 6
+        + 4
+        + u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_DOMAIN.len()).unwrap()
+        + 4
+        + u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_ALGORITHM_IDENTIFIER.len()).unwrap()
+        + 4
+        + descriptor_byte_length
+        + u64::try_from(Hash512::BYTE_LENGTH).unwrap()
+        + 1_088
+        + 3 * 8;
+    let mailbox_manifest_body_byte_length = 8
+        + 3 * 6
+        + 4
+        + u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_MANIFEST_DOMAIN.len()).unwrap()
+        + u64::try_from(Hash512::BYTE_LENGTH).unwrap()
+        + 6
+        + chunk_count_per_stream * u64::try_from(Hash512::BYTE_LENGTH).unwrap();
+    let mailbox_signature_body_byte_length = 8
+        + 7 * 6
+        + 4
+        + u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_BODY_DOMAIN.len())
+            .unwrap()
+        + 3 * u64::try_from(Hash512::BYTE_LENGTH).unwrap()
+        + 3 * 2;
+    let mailbox_signature_envelope_byte_length = 8
+        + 3 * 6
+        + 4
+        + u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_ENVELOPE_DOMAIN.len())
+            .unwrap()
+        + 4
+        + mailbox_signature_body_byte_length
+        + 3_309;
+    let mailbox_authentication_tag_byte_length = 16_u64;
+    let mailbox_control_and_tag_byte_length_per_stream = mailbox_header_body_byte_length
+        + mailbox_manifest_body_byte_length
+        + mailbox_signature_envelope_byte_length
+        + chunk_count_per_stream * mailbox_authentication_tag_byte_length;
+    let private_mailbox_control_and_tag_byte_length =
+        ordered_mailbox_stream_count * mailbox_control_and_tag_byte_length_per_stream;
+    let authenticated_private_setup_delivery_byte_length =
+        plaintext_delivery_byte_length + private_mailbox_control_and_tag_byte_length;
     let root_terminal_body_byte_length = 8 + 2 * 6 + 4 + 56 + 64;
     let root_terminal_endorsement_authorization_body_byte_length = 8 + 3 * 6 + 4 + 73 + 64 + 2;
     let root_terminal_endorsement_envelope_byte_length =
@@ -374,8 +452,58 @@ fn independent_completion_delivery_ledger_matches_every_production_subtotal() {
         descriptor_delivery_byte_length
     );
     assert_eq!(
-        model.seed_opening_proof_and_descriptor_delivery_byte_length,
-        exact_delivery_byte_length
+        model.private_seed_delivery_plaintext_byte_length,
+        plaintext_delivery_byte_length
+    );
+    assert_eq!(
+        model.seed_delivery_plaintext_byte_length_per_stream,
+        plaintext_byte_length_per_stream
+    );
+    assert_eq!(model.mailbox_chunk_count_per_stream, chunk_count_per_stream);
+    assert_eq!(model.mailbox_chunk_count, total_chunk_count);
+    assert_eq!(
+        model.mailbox_header_body_byte_length,
+        mailbox_header_body_byte_length
+    );
+    assert_eq!(
+        model.private_mailbox_header_byte_length,
+        ordered_mailbox_stream_count * mailbox_header_body_byte_length
+    );
+    assert_eq!(
+        model.mailbox_manifest_body_byte_length_per_stream,
+        mailbox_manifest_body_byte_length
+    );
+    assert_eq!(
+        model.private_mailbox_manifest_byte_length,
+        ordered_mailbox_stream_count * mailbox_manifest_body_byte_length
+    );
+    assert_eq!(
+        model.mailbox_signature_body_byte_length,
+        mailbox_signature_body_byte_length
+    );
+    assert_eq!(
+        model.mailbox_signature_envelope_byte_length,
+        mailbox_signature_envelope_byte_length
+    );
+    assert_eq!(
+        model.private_mailbox_signature_envelope_byte_length,
+        ordered_mailbox_stream_count * mailbox_signature_envelope_byte_length
+    );
+    assert_eq!(
+        model.private_mailbox_authentication_tag_byte_length,
+        total_chunk_count * mailbox_authentication_tag_byte_length
+    );
+    assert_eq!(
+        model.mailbox_control_and_tag_byte_length_per_stream,
+        mailbox_control_and_tag_byte_length_per_stream
+    );
+    assert_eq!(
+        model.private_mailbox_control_and_tag_byte_length,
+        private_mailbox_control_and_tag_byte_length
+    );
+    assert_eq!(
+        model.authenticated_private_setup_delivery_byte_length,
+        authenticated_private_setup_delivery_byte_length
     );
     assert_eq!(
         model.root_terminal_body_byte_length,
@@ -409,8 +537,8 @@ fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
     let replacement_private_delivery_byte_length = superseded_private_delivery_byte_length
         - superseded_zero_slice_delivery_byte_length
         - superseded_zero_check_delivery_byte_length
-        + model.provisional_private_setup_delivery_byte_length;
-    assert_eq!(replacement_private_delivery_byte_length, 1_146_057_660);
+        + model.authenticated_private_setup_delivery_byte_length;
+    assert_eq!(replacement_private_delivery_byte_length, 1_146_071_250);
     let retained_public_byte_length_per_successful_attempt =
         426_163_836 + model.root_terminal_certificate_byte_length;
     let retained_public_byte_length_per_burned_attempt =
@@ -428,12 +556,12 @@ fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
     .unwrap();
     assert_eq!(
         selected_single_attempt_floor.maximum_reachable_upload_byte_length,
-        1_572_257_726
+        1_572_271_316
     );
     assert_eq!(
         ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET
             - selected_single_attempt_floor.maximum_reachable_upload_byte_length,
-        575_225_922
+        575_212_332
     );
     assert!(
         !selected_single_attempt_floor
@@ -453,16 +581,16 @@ fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
     .unwrap();
     assert_eq!(
         three_attempt_hostile_floor.maximum_fully_delivered_private_byte_length,
-        3_438_172_980
+        3_438_213_750
     );
     assert_eq!(
         three_attempt_hostile_floor.maximum_reachable_upload_byte_length,
-        3_864_445_506
+        3_864_486_276
     );
     assert_eq!(
         three_attempt_hostile_floor
             .excess_over_upload_target(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET),
-        1_716_961_858
+        1_717_002_628
     );
     assert!(
         three_attempt_hostile_floor
@@ -483,7 +611,6 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
                     PseudorandomZeroSharingResourceInput {
                         participant_count,
                         zero_sharing_count: 19,
-                        provisional_mailbox_stream_wrapper_byte_length: 5_120,
                     },
                 ),
                 Err(TallyPreparationError::GeometryMismatch)
@@ -495,7 +622,6 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
             PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
                 participant_count,
                 zero_sharing_count: 19,
-                provisional_mailbox_stream_wrapper_byte_length: 5_120,
             })
             .unwrap();
 
@@ -533,8 +659,13 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
             u64::from(participant_count)
         );
         assert_eq!(
-            model.seed_opening_proof_and_descriptor_delivery_byte_length,
-            model.seed_opening_proof_and_descriptor_upload_byte_length_per_participant
+            model.private_seed_delivery_plaintext_byte_length,
+            model.seed_delivery_plaintext_upload_byte_length_per_participant
+                * u64::from(participant_count)
+        );
+        assert_eq!(
+            model.authenticated_private_setup_delivery_byte_length,
+            model.authenticated_private_setup_upload_byte_length_per_participant
                 * u64::from(participant_count)
         );
         assert_eq!(
@@ -555,7 +686,6 @@ fn invalid_or_overflowing_resource_shapes_and_algebra_inputs_are_rejected() {
     let invalid_input = PseudorandomZeroSharingResourceInput {
         participant_count: FOUNDATION_PROFILE.participant_count,
         zero_sharing_count: 0,
-        provisional_mailbox_stream_wrapper_byte_length: 5_120,
     };
     assert_eq!(
         PseudorandomZeroSharingResourceModel::derive(invalid_input),
@@ -568,15 +698,6 @@ fn invalid_or_overflowing_resource_shapes_and_algebra_inputs_are_rejected() {
         }),
         Err(TallyPreparationError::ArithmeticOverflow)
     );
-    assert_eq!(
-        PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
-            zero_sharing_count: 1,
-            provisional_mailbox_stream_wrapper_byte_length: 0,
-            ..invalid_input
-        }),
-        Err(TallyPreparationError::GeometryMismatch)
-    );
-
     let subset =
         ReplicatedRandomSharingSubset::all(FOUNDATION_PROFILE.participant_count).unwrap()[0];
     assert_eq!(
@@ -597,7 +718,6 @@ fn completion_resource_model() -> PseudorandomZeroSharingResourceModel {
     PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
         participant_count: FOUNDATION_PROFILE.participant_count,
         zero_sharing_count: COMPLETION_ZERO_SHARING_COUNT,
-        provisional_mailbox_stream_wrapper_byte_length: 5_120,
     })
     .unwrap()
 }

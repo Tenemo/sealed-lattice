@@ -25,21 +25,28 @@ use super::{
         PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH,
     },
+    pseudorandom_zero_sharing_seed_mailbox_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATION_TAG_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_ENVELOPE_BYTE_LENGTH,
+        PseudorandomZeroSharingSeedMailboxError320, derive_mailbox_stream_geometry,
+        pseudorandom_zero_sharing_seed_mailbox_control_and_tag_byte_length,
+        pseudorandom_zero_sharing_seed_mailbox_manifest_body_byte_length,
+    },
     pseudorandom_zero_sharing_subset_seed_320::PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH,
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
 
 /// Formula-only inputs for the subset-seeded zero-sharing candidate.
 ///
-/// Canonical opening, catalog-proof, and descriptor widths come from their
-/// unactivated codec owners. The mailbox wrapper remains a provisional input
-/// until the KEM, AEAD, receipt, and chunk schemas exist; every total containing
-/// it is named accordingly.
+/// Canonical opening, catalog-proof, mailbox, and terminal widths come from
+/// their unactivated codec owners. Signed recipient receipts remain a separate
+/// public owner and are not included in this private-delivery model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PseudorandomZeroSharingResourceInput {
     pub(crate) participant_count: u16,
     pub(crate) zero_sharing_count: u64,
-    pub(crate) provisional_mailbox_stream_wrapper_byte_length: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +69,8 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) seed_delivery_descriptor_count: u64,
     pub(crate) seed_delivery_descriptor_body_byte_length: u64,
     pub(crate) private_seed_delivery_descriptor_byte_length: u64,
-    pub(crate) seed_opening_proof_and_descriptor_delivery_byte_length: u64,
+    pub(crate) seed_delivery_plaintext_byte_length_per_stream: u64,
+    pub(crate) private_seed_delivery_plaintext_byte_length: u64,
     pub(crate) root_terminal_body_byte_length: u64,
     pub(crate) root_terminal_endorsement_count: u64,
     pub(crate) root_terminal_endorsement_authorization_body_byte_length: u64,
@@ -70,11 +78,37 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) root_terminal_certificate_byte_length: u64,
     pub(crate) root_terminal_signature_verification_count: u64,
     pub(crate) ordered_mailbox_stream_count: u64,
-    pub(crate) provisional_private_mailbox_wrapper_byte_length: u64,
-    pub(crate) provisional_private_setup_delivery_byte_length: u64,
-    pub(crate) seed_opening_proof_and_descriptor_upload_byte_length_per_participant: u64,
-    pub(crate) maximum_provisional_private_setup_upload_byte_length_per_participant: u64,
-    pub(crate) maximum_provisional_private_setup_download_byte_length_per_participant: u64,
+    pub(crate) mailbox_chunk_count_per_stream: u64,
+    pub(crate) mailbox_chunk_count: u64,
+    pub(crate) mailbox_header_body_byte_length: u64,
+    pub(crate) private_mailbox_header_byte_length: u64,
+    pub(crate) mailbox_manifest_body_byte_length_per_stream: u64,
+    pub(crate) private_mailbox_manifest_byte_length: u64,
+    pub(crate) mailbox_signature_body_byte_length: u64,
+    pub(crate) mailbox_signature_envelope_byte_length: u64,
+    pub(crate) private_mailbox_signature_envelope_byte_length: u64,
+    pub(crate) mailbox_authentication_tag_byte_length: u64,
+    pub(crate) private_mailbox_authentication_tag_byte_length: u64,
+    pub(crate) mailbox_control_and_tag_byte_length_per_stream: u64,
+    pub(crate) private_mailbox_control_and_tag_byte_length: u64,
+    pub(crate) authenticated_private_setup_delivery_byte_length: u64,
+    pub(crate) seed_delivery_plaintext_upload_byte_length_per_participant: u64,
+    pub(crate) authenticated_private_setup_upload_byte_length_per_participant: u64,
+    pub(crate) authenticated_private_setup_download_byte_length_per_participant: u64,
+    pub(crate) mailbox_encapsulation_count: u64,
+    pub(crate) mailbox_decapsulation_count: u64,
+    pub(crate) mailbox_sender_signature_generation_count: u64,
+    pub(crate) mailbox_sender_signature_verification_count: u64,
+    pub(crate) mailbox_authenticated_encryption_count: u64,
+    pub(crate) mailbox_authenticated_decryption_count: u64,
+    pub(crate) mailbox_chunk_digest_generation_count: u64,
+    pub(crate) mailbox_chunk_digest_verification_count: u64,
+    pub(crate) mailbox_sender_key_derivation_count: u64,
+    pub(crate) mailbox_recipient_key_derivation_count: u64,
+    pub(crate) mailbox_sender_nonce_derivation_count: u64,
+    pub(crate) mailbox_recipient_nonce_derivation_count: u64,
+    pub(crate) mailbox_recipient_key_identity_generation_count: u64,
+    pub(crate) mailbox_recipient_key_identity_verification_count: u64,
     pub(crate) recipient_inventory_body_byte_length_per_participant: u64,
     pub(crate) combined_subset_seed_custody_byte_length_per_participant: u64,
     pub(crate) combined_pair_seed_custody_byte_length_per_participant: u64,
@@ -102,9 +136,7 @@ impl PseudorandomZeroSharingResourceModel {
     pub(crate) fn derive(
         input: PseudorandomZeroSharingResourceInput,
     ) -> Result<Self, TallyPreparationError> {
-        if input.zero_sharing_count == 0
-            || input.provisional_mailbox_stream_wrapper_byte_length == 0
-        {
+        if input.zero_sharing_count == 0 {
             return Err(TallyPreparationError::GeometryMismatch);
         }
 
@@ -133,6 +165,18 @@ impl PseudorandomZeroSharingResourceModel {
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let recipient_inventory_body_byte_length_per_participant =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let mailbox_header_body_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let mailbox_signature_body_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_BODY_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let mailbox_signature_envelope_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_ENVELOPE_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let mailbox_authentication_tag_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATION_TAG_BYTE_LENGTH)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let root_terminal_body_byte_length =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_BYTE_LENGTH)
@@ -200,19 +244,63 @@ impl PseudorandomZeroSharingResourceModel {
             seed_delivery_descriptor_count,
             seed_delivery_descriptor_body_byte_length,
         )?;
-        let seed_opening_proof_and_descriptor_delivery_byte_length = checked_sum(&[
+        let private_seed_delivery_plaintext_byte_length = checked_sum(&[
             private_subset_seed_opening_delivery_byte_length,
             private_pair_seed_opening_delivery_byte_length,
             private_seed_catalog_inclusion_proof_delivery_byte_length,
-            private_seed_delivery_descriptor_byte_length,
         ])?;
-        let provisional_private_mailbox_wrapper_byte_length = checked_multiply(
+        let seed_delivery_plaintext_byte_length_per_stream = checked_divide_exact(
+            private_seed_delivery_plaintext_byte_length,
             ordered_mailbox_stream_count,
-            input.provisional_mailbox_stream_wrapper_byte_length,
         )?;
-        let provisional_private_setup_delivery_byte_length = checked_add(
-            seed_opening_proof_and_descriptor_delivery_byte_length,
-            provisional_private_mailbox_wrapper_byte_length,
+        let (mailbox_chunk_count_per_stream, _) =
+            derive_mailbox_stream_geometry(seed_delivery_plaintext_byte_length_per_stream)
+                .map_err(map_mailbox_resource_error)?;
+        let mailbox_chunk_count =
+            checked_multiply(ordered_mailbox_stream_count, mailbox_chunk_count_per_stream)?;
+        let private_mailbox_header_byte_length = checked_multiply(
+            ordered_mailbox_stream_count,
+            mailbox_header_body_byte_length,
+        )?;
+        let mailbox_manifest_body_byte_length_per_stream = u64::try_from(
+            pseudorandom_zero_sharing_seed_mailbox_manifest_body_byte_length(
+                mailbox_chunk_count_per_stream,
+            )
+            .map_err(map_mailbox_resource_error)?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let private_mailbox_manifest_byte_length = checked_multiply(
+            ordered_mailbox_stream_count,
+            mailbox_manifest_body_byte_length_per_stream,
+        )?;
+        let private_mailbox_signature_envelope_byte_length = checked_multiply(
+            ordered_mailbox_stream_count,
+            mailbox_signature_envelope_byte_length,
+        )?;
+        let private_mailbox_authentication_tag_byte_length =
+            checked_multiply(mailbox_chunk_count, mailbox_authentication_tag_byte_length)?;
+        let mailbox_control_and_tag_byte_length_per_stream =
+            pseudorandom_zero_sharing_seed_mailbox_control_and_tag_byte_length(
+                mailbox_chunk_count_per_stream,
+            )
+            .map_err(map_mailbox_resource_error)?;
+        let private_mailbox_control_and_tag_byte_length = checked_multiply(
+            ordered_mailbox_stream_count,
+            mailbox_control_and_tag_byte_length_per_stream,
+        )?;
+        if private_mailbox_control_and_tag_byte_length
+            != checked_sum(&[
+                private_mailbox_header_byte_length,
+                private_mailbox_manifest_byte_length,
+                private_mailbox_signature_envelope_byte_length,
+                private_mailbox_authentication_tag_byte_length,
+            ])?
+        {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let authenticated_private_setup_delivery_byte_length = checked_add(
+            private_seed_delivery_plaintext_byte_length,
+            private_mailbox_control_and_tag_byte_length,
         )?;
 
         let remote_subset_seed_opening_delivery_count_per_participant = checked_multiply(
@@ -243,27 +331,54 @@ impl PseudorandomZeroSharingResourceModel {
             ordered_mailbox_stream_count_per_participant,
             seed_delivery_descriptor_body_byte_length,
         )?;
-        let seed_opening_proof_and_descriptor_upload_byte_length_per_participant = checked_sum(&[
+        let seed_delivery_plaintext_upload_byte_length_per_participant = checked_sum(&[
             subset_seed_opening_delivery_byte_length_per_participant,
             pair_seed_opening_delivery_byte_length_per_participant,
             seed_catalog_inclusion_proof_delivery_byte_length_per_participant,
-            seed_delivery_descriptor_byte_length_per_participant,
         ])?;
         if checked_multiply(
-            seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
+            seed_delivery_plaintext_upload_byte_length_per_participant,
             geometry.participant_count,
-        )? != seed_opening_proof_and_descriptor_delivery_byte_length
+        )? != private_seed_delivery_plaintext_byte_length
+            || checked_multiply(
+                seed_delivery_descriptor_byte_length_per_participant,
+                geometry.participant_count,
+            )? != private_seed_delivery_descriptor_byte_length
         {
             return Err(TallyPreparationError::GeometryMismatch);
         }
-        let provisional_mailbox_stream_wrapper_byte_length_per_participant = checked_multiply(
+        let mailbox_control_and_tag_byte_length_per_participant = checked_multiply(
             ordered_mailbox_stream_count_per_participant,
-            input.provisional_mailbox_stream_wrapper_byte_length,
+            mailbox_control_and_tag_byte_length_per_stream,
         )?;
-        let maximum_provisional_private_setup_upload_byte_length_per_participant = checked_add(
-            seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
-            provisional_mailbox_stream_wrapper_byte_length_per_participant,
+        let authenticated_private_setup_upload_byte_length_per_participant = checked_add(
+            seed_delivery_plaintext_upload_byte_length_per_participant,
+            mailbox_control_and_tag_byte_length_per_participant,
         )?;
+        if checked_multiply(
+            authenticated_private_setup_upload_byte_length_per_participant,
+            geometry.participant_count,
+        )? != authenticated_private_setup_delivery_byte_length
+        {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        let authenticated_private_setup_download_byte_length_per_participant =
+            authenticated_private_setup_upload_byte_length_per_participant;
+
+        let mailbox_encapsulation_count = ordered_mailbox_stream_count;
+        let mailbox_decapsulation_count = ordered_mailbox_stream_count;
+        let mailbox_sender_signature_generation_count = ordered_mailbox_stream_count;
+        let mailbox_sender_signature_verification_count = ordered_mailbox_stream_count;
+        let mailbox_authenticated_encryption_count = mailbox_chunk_count;
+        let mailbox_authenticated_decryption_count = mailbox_chunk_count;
+        let mailbox_chunk_digest_generation_count = mailbox_chunk_count;
+        let mailbox_chunk_digest_verification_count = mailbox_chunk_count;
+        let mailbox_sender_key_derivation_count = ordered_mailbox_stream_count;
+        let mailbox_recipient_key_derivation_count = ordered_mailbox_stream_count;
+        let mailbox_sender_nonce_derivation_count = mailbox_chunk_count;
+        let mailbox_recipient_nonce_derivation_count = mailbox_chunk_count;
+        let mailbox_recipient_key_identity_generation_count = ordered_mailbox_stream_count;
+        let mailbox_recipient_key_identity_verification_count = ordered_mailbox_stream_count;
 
         let combined_subset_seed_custody_byte_length_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
@@ -386,7 +501,8 @@ impl PseudorandomZeroSharingResourceModel {
             seed_delivery_descriptor_count,
             seed_delivery_descriptor_body_byte_length,
             private_seed_delivery_descriptor_byte_length,
-            seed_opening_proof_and_descriptor_delivery_byte_length,
+            seed_delivery_plaintext_byte_length_per_stream,
+            private_seed_delivery_plaintext_byte_length,
             root_terminal_body_byte_length,
             root_terminal_endorsement_count,
             root_terminal_endorsement_authorization_body_byte_length,
@@ -394,12 +510,37 @@ impl PseudorandomZeroSharingResourceModel {
             root_terminal_certificate_byte_length,
             root_terminal_signature_verification_count,
             ordered_mailbox_stream_count,
-            provisional_private_mailbox_wrapper_byte_length,
-            provisional_private_setup_delivery_byte_length,
-            seed_opening_proof_and_descriptor_upload_byte_length_per_participant,
-            maximum_provisional_private_setup_upload_byte_length_per_participant,
-            maximum_provisional_private_setup_download_byte_length_per_participant:
-                maximum_provisional_private_setup_upload_byte_length_per_participant,
+            mailbox_chunk_count_per_stream,
+            mailbox_chunk_count,
+            mailbox_header_body_byte_length,
+            private_mailbox_header_byte_length,
+            mailbox_manifest_body_byte_length_per_stream,
+            private_mailbox_manifest_byte_length,
+            mailbox_signature_body_byte_length,
+            mailbox_signature_envelope_byte_length,
+            private_mailbox_signature_envelope_byte_length,
+            mailbox_authentication_tag_byte_length,
+            private_mailbox_authentication_tag_byte_length,
+            mailbox_control_and_tag_byte_length_per_stream,
+            private_mailbox_control_and_tag_byte_length,
+            authenticated_private_setup_delivery_byte_length,
+            seed_delivery_plaintext_upload_byte_length_per_participant,
+            authenticated_private_setup_upload_byte_length_per_participant,
+            authenticated_private_setup_download_byte_length_per_participant,
+            mailbox_encapsulation_count,
+            mailbox_decapsulation_count,
+            mailbox_sender_signature_generation_count,
+            mailbox_sender_signature_verification_count,
+            mailbox_authenticated_encryption_count,
+            mailbox_authenticated_decryption_count,
+            mailbox_chunk_digest_generation_count,
+            mailbox_chunk_digest_verification_count,
+            mailbox_sender_key_derivation_count,
+            mailbox_recipient_key_derivation_count,
+            mailbox_sender_nonce_derivation_count,
+            mailbox_recipient_nonce_derivation_count,
+            mailbox_recipient_key_identity_generation_count,
+            mailbox_recipient_key_identity_verification_count,
             recipient_inventory_body_byte_length_per_participant,
             combined_subset_seed_custody_byte_length_per_participant,
             combined_pair_seed_custody_byte_length_per_participant,
@@ -608,6 +749,30 @@ fn checked_add(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
 fn checked_multiply(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
     left.checked_mul(right)
         .ok_or(TallyPreparationError::ArithmeticOverflow)
+}
+
+fn checked_divide_exact(dividend: u64, divisor: u64) -> Result<u64, TallyPreparationError> {
+    let quotient = dividend
+        .checked_div(divisor)
+        .ok_or(TallyPreparationError::GeometryMismatch)?;
+    if checked_multiply(quotient, divisor)? != dividend {
+        return Err(TallyPreparationError::GeometryMismatch);
+    }
+    Ok(quotient)
+}
+
+fn map_mailbox_resource_error(
+    error: PseudorandomZeroSharingSeedMailboxError320,
+) -> TallyPreparationError {
+    match error {
+        PseudorandomZeroSharingSeedMailboxError320::ArithmeticOverflow => {
+            TallyPreparationError::ArithmeticOverflow
+        }
+        PseudorandomZeroSharingSeedMailboxError320::IntegerConversion => {
+            TallyPreparationError::IntegerConversion
+        }
+        _ => TallyPreparationError::GeometryMismatch,
+    }
 }
 
 fn checked_product(values: &[u64]) -> Result<u64, TallyPreparationError> {
