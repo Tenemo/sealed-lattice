@@ -436,13 +436,6 @@ const sampleRandomBytes = (
             error,
         );
     }
-    if (bytes.every((byte) => byte === 0)) {
-        bytes.fill(0);
-        throw new AuthenticatedRuntimeRecordError(
-            'EntropyFailure',
-            `${label} sampling returned an invalid value.`,
-        );
-    }
     return bytes;
 };
 
@@ -475,38 +468,34 @@ const deriveRuntimeRecordEncryptionKey = async (input: {
     }
 };
 
-export const sampleRuntimeIdentifier = (
+export const sampleRuntimeSecretBytes = (
     protection: RuntimeRecordProtection,
-    issuedIdentifiers: Set<string>,
+    byteLength: number,
     label: string,
 ): Uint8Array => {
+    if (
+        !Number.isSafeInteger(byteLength) ||
+        byteLength < 1 ||
+        byteLength > 0xffff
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidConfiguration',
+            `${label} byte length is outside the runtime secret profile.`,
+        );
+    }
     const { session } = requireRuntimeRecordProtection(protection);
     let sampled: Uint8Array | undefined;
     try {
         sampled = session.sampleIdentifier({
-            byteLength: identifierByteLength,
+            byteLength,
             purpose: label,
         });
-        if (
-            !isUint8Array(sampled) ||
-            sampled.byteLength !== identifierByteLength
-        ) {
+        if (!isUint8Array(sampled) || sampled.byteLength !== byteLength) {
             throw new AuthenticatedRuntimeRecordError(
                 'EntropyFailure',
                 `${label} sampling returned an invalid byte length.`,
             );
         }
-        const encoded = bytesToHex(sampled);
-        if (
-            sampled.every((byte) => byte === 0) ||
-            issuedIdentifiers.has(encoded)
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'EntropyFailure',
-                `${label} sampling returned an invalid or reused value.`,
-            );
-        }
-        issuedIdentifiers.add(encoded);
         return sampled.slice();
     } catch (error) {
         if (error instanceof AuthenticatedRuntimeRecordError) {
@@ -519,6 +508,34 @@ export const sampleRuntimeIdentifier = (
         );
     } finally {
         sampled?.fill(0);
+    }
+};
+
+export const sampleRuntimeIdentifier = (
+    protection: RuntimeRecordProtection,
+    issuedIdentifiers: Set<string>,
+    label: string,
+): Uint8Array => {
+    const sampled = sampleRuntimeSecretBytes(
+        protection,
+        identifierByteLength,
+        label,
+    );
+    try {
+        const encoded = bytesToHex(sampled);
+        if (
+            sampled.every((byte) => byte === 0) ||
+            issuedIdentifiers.has(encoded)
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'EntropyFailure',
+                `${label} sampling returned an invalid or reused value.`,
+            );
+        }
+        issuedIdentifiers.add(encoded);
+        return sampled.slice();
+    } finally {
+        sampled.fill(0);
     }
 };
 
