@@ -103,13 +103,13 @@ pub(crate) struct PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
     participant_count: u16,
     contributor_position: u16,
     root_body_identity: Hash512,
-    state_reservation_identity: Hash512,
+    authorization_certificate_identity: Hash512,
 }
 
 impl PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
     pub(crate) fn new(
         root_body: PseudorandomZeroSharingSeedCatalogRootBody320,
-        state_reservation_identity: Hash512,
+        authorization_certificate_identity: Hash512,
     ) -> Result<Self, PseudorandomZeroSharingSeedCatalogSignatureError> {
         let layout = root_body.layout();
         Ok(Self {
@@ -117,7 +117,7 @@ impl PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
             participant_count: layout.participant_count(),
             contributor_position: layout.contributor_position(),
             root_body_identity: root_body.identity()?,
-            state_reservation_identity,
+            authorization_certificate_identity,
         })
     }
 
@@ -129,8 +129,8 @@ impl PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
         self.root_body_identity
     }
 
-    pub(crate) const fn state_reservation_identity(self) -> Hash512 {
-        self.state_reservation_identity
+    pub(crate) const fn authorization_certificate_identity(self) -> Hash512 {
+        self.authorization_certificate_identity
     }
 
     pub(crate) fn canonical_bytes(
@@ -148,7 +148,7 @@ impl PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
                 CanonicalItem::unsigned16(self.participant_count),
                 CanonicalItem::unsigned16(self.contributor_position),
                 CanonicalItem::hash512(self.root_body_identity.into_bytes()),
-                CanonicalItem::hash512(self.state_reservation_identity.into_bytes()),
+                CanonicalItem::hash512(self.authorization_certificate_identity.into_bytes()),
             ],
         )
         .encode()?)
@@ -156,10 +156,13 @@ impl PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
 
     fn from_canonical_bytes(
         expected_root_body: PseudorandomZeroSharingSeedCatalogRootBody320,
-        expected_state_reservation_identity: Hash512,
+        expected_authorization_certificate_identity: Hash512,
         bytes: &[u8],
     ) -> Result<Self, PseudorandomZeroSharingSeedCatalogSignatureError> {
-        let expected = Self::new(expected_root_body, expected_state_reservation_identity)?;
+        let expected = Self::new(
+            expected_root_body,
+            expected_authorization_certificate_identity,
+        )?;
         let tuple = CanonicalTuple::decode(bytes, &signature_control_object_decode_limits())?;
         require_object_header(
             &tuple,
@@ -193,8 +196,8 @@ impl PseudorandomZeroSharingSeedCatalogRootSignatureBody320 {
         )?;
         require_hash(
             &tuple.items[6],
-            expected.state_reservation_identity,
-            "state-reservation identity",
+            expected.authorization_certificate_identity,
+            "authorization-certificate identity",
         )?;
         Ok(expected)
     }
@@ -244,7 +247,7 @@ impl PseudorandomZeroSharingSignedSeedCatalogRootEnvelope320 {
 
     fn from_canonical_bytes(
         expected_root_body: PseudorandomZeroSharingSeedCatalogRootBody320,
-        expected_state_reservation_identity: Hash512,
+        expected_authorization_certificate_identity: Hash512,
         bytes: &[u8],
     ) -> Result<Self, PseudorandomZeroSharingSeedCatalogSignatureError> {
         let tuple = CanonicalTuple::decode(bytes, &signature_control_object_decode_limits())?;
@@ -259,7 +262,7 @@ impl PseudorandomZeroSharingSignedSeedCatalogRootEnvelope320 {
         let signature_body =
             PseudorandomZeroSharingSeedCatalogRootSignatureBody320::from_canonical_bytes(
                 expected_root_body,
-                expected_state_reservation_identity,
+                expected_authorization_certificate_identity,
                 tuple.items[1].variable_value_bytes()?,
             )?;
         if tuple.items[2].item_type() != CanonicalItemType::RawBytes {
@@ -293,13 +296,13 @@ impl fmt::Debug for PseudorandomZeroSharingSignedSeedCatalogRootEnvelope320 {
 /// Positive roster-signature result for one root and state-authorization
 /// identity.
 ///
-/// It does not verify that the state-reservation identity names a valid
+/// It does not verify that the state-authorization identity names a valid
 /// certificate and therefore cannot authorize private delivery or seed use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RosterSignatureMatchedPseudorandomZeroSharingSeedCatalogRoot320 {
     root_body: PseudorandomZeroSharingSeedCatalogRootBody320,
     root_body_identity: Hash512,
-    state_reservation_identity: Hash512,
+    authorization_certificate_identity: Hash512,
 }
 
 impl RosterSignatureMatchedPseudorandomZeroSharingSeedCatalogRoot320 {
@@ -311,8 +314,8 @@ impl RosterSignatureMatchedPseudorandomZeroSharingSeedCatalogRoot320 {
         self.root_body_identity
     }
 
-    pub(crate) const fn state_reservation_identity(self) -> Hash512 {
-        self.state_reservation_identity
+    pub(crate) const fn authorization_certificate_identity(self) -> Hash512 {
+        self.authorization_certificate_identity
     }
 }
 
@@ -325,7 +328,7 @@ impl RosterSignatureMatchedPseudorandomZeroSharingSeedCatalogRoot320 {
 pub(crate) fn verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
     expected_layout: PseudorandomZeroSharingSeedCatalogLayout320,
     root_body_bytes: &[u8],
-    expected_state_reservation_identity: Hash512,
+    expected_authorization_certificate_identity: Hash512,
     roster: &Roster,
     signature_envelope_bytes: &[u8],
 ) -> Result<
@@ -349,7 +352,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
     }
     let envelope = PseudorandomZeroSharingSignedSeedCatalogRootEnvelope320::from_canonical_bytes(
         root_body,
-        expected_state_reservation_identity,
+        expected_authorization_certificate_identity,
         signature_envelope_bytes,
     )?;
     let contributor_position = expected_layout.contributor_position();
@@ -376,7 +379,9 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
         RosterSignatureMatchedPseudorandomZeroSharingSeedCatalogRoot320 {
             root_body,
             root_body_identity: envelope.signature_body.root_body_identity,
-            state_reservation_identity: envelope.signature_body.state_reservation_identity,
+            authorization_certificate_identity: envelope
+                .signature_body
+                .authorization_certificate_identity,
         },
     )
 }

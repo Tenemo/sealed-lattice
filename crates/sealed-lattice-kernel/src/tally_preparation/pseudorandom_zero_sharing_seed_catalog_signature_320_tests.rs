@@ -52,10 +52,11 @@ fn every_completion_contributor_signature_matches_only_its_roster_key_and_root()
         .unwrap();
         let root_body = tree.root_body();
         let root_body_bytes = root_body.canonical_bytes().unwrap();
-        let state_reservation_identity = deterministic_hash(0x51, u64::from(contributor_position));
+        let authorization_certificate_identity =
+            deterministic_hash(0x51, u64::from(contributor_position));
         let signature_body = PseudorandomZeroSharingSeedCatalogRootSignatureBody320::new(
             root_body,
-            state_reservation_identity,
+            authorization_certificate_identity,
         )
         .unwrap();
         assert_eq!(signature_body.contributor_position(), contributor_position);
@@ -64,8 +65,8 @@ fn every_completion_contributor_signature_matches_only_its_roster_key_and_root()
             root_body.identity().unwrap()
         );
         assert_eq!(
-            signature_body.state_reservation_identity(),
-            state_reservation_identity
+            signature_body.authorization_certificate_identity(),
+            authorization_certificate_identity
         );
         let signature_body_bytes = signature_body.canonical_bytes().unwrap();
         let signature = signing_keys[usize::from(contributor_position)]
@@ -102,7 +103,7 @@ fn every_completion_contributor_signature_matches_only_its_roster_key_and_root()
         let matched = verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &envelope_bytes,
         )
@@ -110,8 +111,8 @@ fn every_completion_contributor_signature_matches_only_its_roster_key_and_root()
         assert_eq!(matched.root_body(), root_body);
         assert_eq!(matched.root_body_identity(), root_body.identity().unwrap());
         assert_eq!(
-            matched.state_reservation_identity(),
-            state_reservation_identity
+            matched.authorization_certificate_identity(),
+            authorization_certificate_identity
         );
     }
 }
@@ -134,10 +135,10 @@ fn verifier_refuses_wrong_signer_signature_context_state_root_and_roster() {
     .unwrap();
     let root_body = tree.root_body();
     let root_body_bytes = root_body.canonical_bytes().unwrap();
-    let state_reservation_identity = Hash512::from_bytes([0x79; 64]);
+    let authorization_certificate_identity = Hash512::from_bytes([0x79; 64]);
     let signature_body = PseudorandomZeroSharingSeedCatalogRootSignatureBody320::new(
         root_body,
-        state_reservation_identity,
+        authorization_certificate_identity,
     )
     .unwrap();
     let signature_body_bytes = signature_body.canonical_bytes().unwrap();
@@ -153,7 +154,7 @@ fn verifier_refuses_wrong_signer_signature_context_state_root_and_roster() {
         verify_with_envelope(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             signature_body,
             wrong_signer_signature,
@@ -172,7 +173,7 @@ fn verifier_refuses_wrong_signer_signature_context_state_root_and_roster() {
         verify_with_envelope(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             signature_body,
             wrong_context_signature,
@@ -197,13 +198,13 @@ fn verifier_refuses_wrong_signer_signature_context_state_root_and_roster() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            changed_hash(state_reservation_identity),
+            changed_hash(authorization_certificate_identity),
             &roster,
             &valid_envelope_bytes,
         ),
         Err(
             PseudorandomZeroSharingSeedCatalogSignatureError::ObjectMismatch {
-                field: "state-reservation identity"
+                field: "authorization-certificate identity"
             }
         )
     ));
@@ -214,7 +215,7 @@ fn verifier_refuses_wrong_signer_signature_context_state_root_and_roster() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &changed_root_body_tuple.encode().unwrap(),
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &valid_envelope_bytes,
         ),
@@ -230,7 +231,7 @@ fn verifier_refuses_wrong_signer_signature_context_state_root_and_roster() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &other_roster,
             &valid_envelope_bytes,
         ),
@@ -243,7 +244,7 @@ fn verifier_refuses_wrong_signer_signature_context_state_root_and_roster() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &changed_signature_envelope,
         ),
@@ -268,10 +269,10 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
     .unwrap();
     let root_body = tree.root_body();
     let root_body_bytes = root_body.canonical_bytes().unwrap();
-    let state_reservation_identity = Hash512::from_bytes([0x99; 64]);
+    let authorization_certificate_identity = Hash512::from_bytes([0x99; 64]);
     let signature_body = PseudorandomZeroSharingSeedCatalogRootSignatureBody320::new(
         root_body,
-        state_reservation_identity,
+        authorization_certificate_identity,
     )
     .unwrap();
     let signature = signing_keys[1]
@@ -306,7 +307,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
             verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
                 layout,
                 &root_body_bytes,
-                state_reservation_identity,
+                authorization_certificate_identity,
                 &roster,
                 &changed_envelope_tuple.encode().unwrap(),
             )
@@ -327,7 +328,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &wrong_body_domain_envelope.encode().unwrap(),
         ),
@@ -347,7 +348,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &wrong_envelope_domain.encode().unwrap(),
         ),
@@ -365,7 +366,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &short_signature_envelope.encode().unwrap(),
         ),
@@ -381,7 +382,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &extra_item_envelope.encode().unwrap(),
         ),
@@ -397,7 +398,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
             verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
                 layout,
                 &root_body_bytes,
-                state_reservation_identity,
+                authorization_certificate_identity,
                 &roster,
                 &envelope_bytes[..truncated_length],
             )
@@ -408,7 +409,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
         verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
             layout,
             &root_body_bytes,
-            state_reservation_identity,
+            authorization_certificate_identity,
             &roster,
             &[0_u8; 8_193],
         )
@@ -429,7 +430,7 @@ fn authorization_body_binds_every_field_and_envelope_decoder_is_strict() {
 fn verify_with_envelope(
     layout: PseudorandomZeroSharingSeedCatalogLayout320,
     root_body_bytes: &[u8],
-    state_reservation_identity: Hash512,
+    authorization_certificate_identity: Hash512,
     roster: &Roster,
     signature_body: PseudorandomZeroSharingSeedCatalogRootSignatureBody320,
     signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
@@ -444,7 +445,7 @@ fn verify_with_envelope(
     verify_pseudorandom_zero_sharing_seed_catalog_root_signature_320(
         layout,
         root_body_bytes,
-        state_reservation_identity,
+        authorization_certificate_identity,
         roster,
         &envelope_bytes,
     )
