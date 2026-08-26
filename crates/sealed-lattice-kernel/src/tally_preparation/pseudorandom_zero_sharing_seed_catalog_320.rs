@@ -437,6 +437,10 @@ pub(crate) struct PseudorandomZeroSharingSeedCatalogRootBody320 {
 }
 
 impl PseudorandomZeroSharingSeedCatalogRootBody320 {
+    pub(crate) const fn layout(self) -> PseudorandomZeroSharingSeedCatalogLayout320 {
+        self.layout
+    }
+
     pub(crate) const fn root_digest(self) -> Hash512 {
         self.root_digest
     }
