@@ -5,11 +5,44 @@ import { describe, expect, it } from 'vitest';
 import {
     isVersionOnlyReleaseManifestChange,
     parseNullDelimitedGitNameStatus,
+    resolveHeavyCiLaneSelection,
     shouldRunHeavyCiLanes,
     shouldRunRoutineCiLanes,
 } from '#tools/ci/classify-ci-changes.mjs';
 
 describe('CI heavy-lane change classification', () => {
+    it('requires active registry entries and emits one exact matrix row per entry', () => {
+        expect(
+            resolveHeavyCiLaneSelection(['crates/kernel.rs'], false, []),
+        ).toEqual({
+            heavyTestMatrix: { include: [] },
+            runHeavyLanes: false,
+        });
+
+        const activeTestFilters = [
+            'heavy_rust_kernel_expensive_relation',
+            'heavy_rust_kernel_second_relation',
+        ];
+        expect(
+            resolveHeavyCiLaneSelection(
+                ['crates/kernel.rs'],
+                false,
+                activeTestFilters,
+            ),
+        ).toEqual({
+            heavyTestMatrix: {
+                include: activeTestFilters.map((testFilter) => ({
+                    testFilter,
+                })),
+            },
+            runHeavyLanes: true,
+        });
+        expect(
+            resolveHeavyCiLaneSelection(['README.md'], false, activeTestFilters)
+                .runHeavyLanes,
+        ).toBe(false);
+    });
+
     it('skips documentation and non-lane tooling while failing closed for lane definitions, runtime, and unknown changes', () => {
         for (const changedPaths of [
             ['README.md', 'SECURITY.md', 'reference-documents/paper.txt'],

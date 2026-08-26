@@ -1,4 +1,6 @@
-export const heavyRustKernelTestNamePrefix = 'heavy_rust_kernel_';
+import { heavyRustKernelTestNamePrefix } from './rust-kernel-heavy-test-registry.mjs';
+
+export { heavyRustKernelTestNamePrefix };
 
 export const normalizeRustTestFilter = (filter: string): string => {
     const normalizedSeparators = filter.replace(/\\/gu, '/');

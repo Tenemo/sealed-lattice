@@ -2,6 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
+import {
+    activeHeavyRustKernelTests,
+    buildHeavyRustKernelTestMatrix,
+} from './rust-kernel-heavy-test-registry.mjs';
+
 /**
  * @typedef {{ readonly paths: readonly string[], readonly status: string }} GitNameStatusEntry
  * @typedef {{ readonly baseRevision: string, readonly headRevision: string }} CiRevisions
@@ -147,6 +152,25 @@ export const shouldRunHeavyCiLanes = (
             !isToolingOnlyCiPath(normalizedPath)
         );
     });
+};
+
+/**
+ * @param {readonly string[]} changedPaths
+ * @param {boolean} versionOnlyReleaseChange
+ * @param {readonly string[]} [activeTestFilters]
+ */
+export const resolveHeavyCiLaneSelection = (
+    changedPaths,
+    versionOnlyReleaseChange,
+    activeTestFilters = activeHeavyRustKernelTests,
+) => {
+    const heavyTestMatrix = buildHeavyRustKernelTestMatrix(activeTestFilters);
+    return {
+        heavyTestMatrix,
+        runHeavyLanes:
+            heavyTestMatrix.include.length > 0 &&
+            shouldRunHeavyCiLanes(changedPaths, versionOnlyReleaseChange),
+    };
 };
 
 /** @param {import('node:buffer').Buffer} nameStatusBuffer */
@@ -316,7 +340,10 @@ const collectChangedEntries = (revisions) =>
     );
 
 const main = () => {
-    let runHeavyLanes = true;
+    let { heavyTestMatrix, runHeavyLanes } = resolveHeavyCiLaneSelection(
+        [],
+        false,
+    );
     let runRoutineLanes = true;
     try {
         const revisions = resolveCiRevisions(process.env);
@@ -339,20 +366,21 @@ const main = () => {
             changedPaths,
             versionOnlyReleaseChange,
         );
-        runHeavyLanes = shouldRunHeavyCiLanes(
+        ({ heavyTestMatrix, runHeavyLanes } = resolveHeavyCiLaneSelection(
             changedPaths,
             versionOnlyReleaseChange,
-        );
+        ));
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         process.stderr.write(
-            `Could not classify changed paths (${message}); running routine and expensive cryptographic lanes.\n`,
+            `Could not classify changed paths (${message}); running routine lanes and every source-controlled active expensive cryptographic test.\n`,
         );
     }
 
     const output =
         `run_routine=${runRoutineLanes ? 'true' : 'false'}\n` +
-        `run_heavy=${runHeavyLanes ? 'true' : 'false'}\n`;
+        `run_heavy=${runHeavyLanes ? 'true' : 'false'}\n` +
+        `heavy_matrix=${JSON.stringify(heavyTestMatrix)}\n`;
     const githubOutputPath = process.env.GITHUB_OUTPUT;
     if (githubOutputPath !== undefined && githubOutputPath.length > 0) {
         appendFileSync(githubOutputPath, output, 'utf8');

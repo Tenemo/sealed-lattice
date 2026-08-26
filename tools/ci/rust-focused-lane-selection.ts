@@ -28,6 +28,11 @@ const ownersForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
 const rustLaneOwnerDescription = (owner: FocusedRustLane): string =>
     focusedRustLaneScripts[owner];
 
+const rustTestLeafName = (testName: string): string => {
+    const nameParts = testName.split('::');
+    return nameParts[nameParts.length - 1] ?? testName;
+};
+
 export const validateCompleteRustLaneOwnership = (
     tests: readonly RustTestInventoryEntry[],
 ): void => {
@@ -60,6 +65,17 @@ export const validateFocusedRustLaneSelection = (input: {
     if (input.tests.length === 0) {
         throw new Error(
             `${requestedScript} filter ${input.testFilter} selects zero tests.`,
+        );
+    }
+    const onlySelectedTest =
+        input.tests.length === 1 ? input.tests[0] : undefined;
+    if (
+        input.lane === 'rust-kernel-heavy' &&
+        (onlySelectedTest === undefined ||
+            rustTestLeafName(onlySelectedTest.testName) !== input.testFilter)
+    ) {
+        throw new Error(
+            `${requestedScript} filter ${input.testFilter} must select exactly one test with the same leaf name.`,
         );
     }
 

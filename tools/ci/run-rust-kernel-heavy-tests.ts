@@ -12,6 +12,7 @@ import {
 } from './process-memory-guard.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
+import { activeHeavyRustKernelTests } from './rust-kernel-heavy-test-registry.mjs';
 import {
     cargoTestArgumentsForRustKernelHeavy,
     heavyRustKernelTestNamePrefix,
@@ -35,6 +36,7 @@ const getRustKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
 
 export const parseRustKernelHeavyArguments = (
     commandArguments: readonly string[],
+    activeTestFilters: readonly string[] = activeHeavyRustKernelTests,
 ): ParsedRustKernelHeavyArguments => {
     const positionalArguments: string[] = [];
     for (const argument of commandArguments) {
@@ -61,6 +63,11 @@ export const parseRustKernelHeavyArguments = (
     if (!testFilter.startsWith(heavyRustKernelTestNamePrefix)) {
         throw new Error(
             `Heavy Rust kernel filters must start with ${heavyRustKernelTestNamePrefix}. ${usage}`,
+        );
+    }
+    if (!activeTestFilters.includes(testFilter)) {
+        throw new Error(
+            `Heavy Rust kernel filter ${testFilter} is not in the source-controlled active registry. ${usage}`,
         );
     }
     return { testFilter };

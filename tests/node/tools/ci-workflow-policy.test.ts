@@ -25,6 +25,23 @@ describe('CI workflow policy', () => {
         expect(ciWorkflow).toContain('run: pnpm run test:browser:built');
     });
 
+    it('runs every active heavy Rust test through an exact registry matrix entry', async () => {
+        const ciWorkflow = await readFile(ciWorkflowPath, 'utf8');
+
+        expect(ciWorkflow).toContain(
+            'heavy_matrix: ${{ steps.classify.outputs.heavy_matrix }}',
+        );
+        expect(ciWorkflow).toContain(
+            'matrix: ${{ fromJSON(needs.changes.outputs.heavy_matrix) }}',
+        );
+        expect(ciWorkflow).toContain(
+            'pnpm run test:rust:kernel:heavy -- "${{ matrix.testFilter }}"',
+        );
+        expect(ciWorkflow).not.toMatch(
+            /^ {14}run: pnpm run test:rust:kernel:heavy\r?$/gmu,
+        );
+    });
+
     it('waits for exact-source CI before releasing without repeating the CI graph', async () => {
         const releaseWorkflow = await readFile(releaseWorkflowPath, 'utf8');
 

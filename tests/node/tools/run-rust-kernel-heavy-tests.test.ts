@@ -9,15 +9,20 @@ import { cargoTestArgumentsForRustKernelHeavy } from '#tools/ci/rust-kernel-test
 
 describe('Rust kernel heavy runner', () => {
     it('requires an exact active heavy-test filter before inventory compilation', () => {
+        const activeTestFilter = 'heavy_rust_kernel_expensive_relation';
         expect(() => parseRustKernelHeavyArguments([])).toThrow(
             'require an exact active test filter',
         );
         expect(() => parseRustKernelHeavyArguments(['ordinary_test'])).toThrow(
             'must start with heavy_rust_kernel_',
         );
-        const parsed = parseRustKernelHeavyArguments([
-            'heavy_rust_kernel_expensive_relation',
-        ]);
+        expect(() => parseRustKernelHeavyArguments([activeTestFilter])).toThrow(
+            'not in the source-controlled active registry',
+        );
+        const parsed = parseRustKernelHeavyArguments(
+            [activeTestFilter],
+            [activeTestFilter],
+        );
         const arguments_ = cargoTestArgumentsForRustKernelHeavy(
             parsed.testFilter,
         );
@@ -31,9 +36,10 @@ describe('Rust kernel heavy runner', () => {
 
     it('normalizes a focused heavy filter', () => {
         expect(
-            parseRustKernelHeavyArguments([
-                'heavy_rust_kernel_expensive_relation.rs',
-            ]),
+            parseRustKernelHeavyArguments(
+                ['heavy_rust_kernel_expensive_relation.rs'],
+                ['heavy_rust_kernel_expensive_relation'],
+            ),
         ).toEqual({
             testFilter: 'heavy_rust_kernel_expensive_relation',
         });

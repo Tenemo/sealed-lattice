@@ -49,15 +49,21 @@ describe('focused Rust lane selection', () => {
             'rust-kernel-fast' as const,
             false,
             'tally_preparation::tests::ordinary',
+            'focused',
         ],
-        ['rust-kernel-heavy' as const, true, heavyTestName],
+        [
+            'rust-kernel-heavy' as const,
+            true,
+            heavyTestName,
+            'heavy_rust_kernel_expensive_relation',
+        ],
     ])(
         'accepts %s tests only in their owning lane',
-        (lane, ignored, testName) => {
+        (lane, ignored, testName, testFilter) => {
             expect(() =>
                 validateFocusedRustLaneSelection({
                     lane,
-                    testFilter: 'focused',
+                    testFilter,
                     tests: [{ ignored, testName }],
                 }),
             ).not.toThrow();
@@ -91,6 +97,27 @@ describe('focused Rust lane selection', () => {
                 ],
             }),
         ).toThrow('dedicated guarded command');
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-kernel-heavy',
+                testFilter: 'heavy_rust_kernel_expensive_relation',
+                tests: [
+                    { ignored: true, testName: heavyTestName },
+                    {
+                        ignored: true,
+                        testName:
+                            'tally_preparation::tests::heavy_rust_kernel_expensive_relation_variant',
+                    },
+                ],
+            }),
+        ).toThrow('must select exactly one test');
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-kernel-heavy',
+                testFilter: 'heavy_rust_kernel_expensive',
+                tests: [{ ignored: true, testName: heavyTestName }],
+            }),
+        ).toThrow('same leaf name');
     });
 
     it('exposes only the two live generic Rust lanes', () => {

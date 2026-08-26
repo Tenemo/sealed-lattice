@@ -20,6 +20,7 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 10
         outputs:
+            heavy_matrix: ${{ steps.classify.outputs.heavy_matrix }}
             run_heavy: ${{ steps.classify.outputs.run_heavy }}
             run_routine: ${{ steps.classify.outputs.run_routine }}
         steps:
@@ -107,12 +108,15 @@ jobs:
                   path: logs
 
     rust-heavy:
-        name: rust heavy
+        name: rust heavy (${{ matrix.testFilter }})
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
         runs-on: ubuntu-24.04
         timeout-minutes: 130
+        strategy:
+            fail-fast: false
+            matrix: ${{ fromJSON(needs.changes.outputs.heavy_matrix) }}
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -124,7 +128,7 @@ jobs:
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
             - name: Run measured-heavy Rust kernel tests
               timeout-minutes: 110
-              run: pnpm run test:rust:kernel:heavy
+              run: pnpm run test:rust:kernel:heavy -- "${{ matrix.testFilter }}"
             - name: Upload measured-heavy Rust kernel logs
               if: ${{ always() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
