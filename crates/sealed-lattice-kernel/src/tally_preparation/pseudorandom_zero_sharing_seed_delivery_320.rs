@@ -19,9 +19,9 @@ use super::{
         PseudorandomZeroSharingSeedCatalogInclusionProof320,
         PseudorandomZeroSharingSeedCatalogLayout320,
     },
-    pseudorandom_zero_sharing_seed_catalog_root_inventory_320::{
-        PseudorandomZeroSharingSeedCatalogRootInventoryError,
-        VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+    pseudorandom_zero_sharing_seed_catalog_root_terminal_320::{
+        PseudorandomZeroSharingSeedCatalogRootTerminalError320,
+        RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     },
     pseudorandom_zero_sharing_subset_seed_320::{
         CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320,
@@ -69,7 +69,7 @@ pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LE
 pub(crate) enum PseudorandomZeroSharingSeedDeliveryError320 {
     Canonical(CanonicalCodecError),
     Preparation(TallyPreparationError),
-    RootInventory(PseudorandomZeroSharingSeedCatalogRootInventoryError),
+    RootTerminal(PseudorandomZeroSharingSeedCatalogRootTerminalError320),
     SecretLeaf(SeedCatalogSecretLeafError320),
     EndpointMismatch {
         sender_position: u16,
@@ -111,11 +111,11 @@ impl From<TallyPreparationError> for PseudorandomZeroSharingSeedDeliveryError320
     }
 }
 
-impl From<PseudorandomZeroSharingSeedCatalogRootInventoryError>
+impl From<PseudorandomZeroSharingSeedCatalogRootTerminalError320>
     for PseudorandomZeroSharingSeedDeliveryError320
 {
-    fn from(error: PseudorandomZeroSharingSeedCatalogRootInventoryError) -> Self {
-        Self::RootInventory(error)
+    fn from(error: PseudorandomZeroSharingSeedCatalogRootTerminalError320) -> Self {
+        Self::RootTerminal(error)
     }
 }
 
@@ -132,8 +132,8 @@ impl fmt::Display for PseudorandomZeroSharingSeedDeliveryError320 {
             Self::Preparation(error) => {
                 write!(formatter, "seed-delivery preparation error: {error}")
             }
-            Self::RootInventory(error) => {
-                write!(formatter, "seed-delivery root-inventory error: {error}")
+            Self::RootTerminal(error) => {
+                write!(formatter, "seed-delivery root-terminal error: {error}")
             }
             Self::SecretLeaf(error) => {
                 write!(formatter, "seed-delivery secret-leaf error: {error}")
@@ -277,7 +277,7 @@ impl PseudorandomZeroSharingSeedDeliveryLayout320 {
 pub(crate) struct PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
     parameter_identity: Hash512,
     preparation_context_identity: Hash512,
-    root_inventory_identity: Hash512,
+    root_terminal_identity: Hash512,
     participant_count: u16,
     sender_position: u16,
     recipient_position: u16,
@@ -286,10 +286,11 @@ pub(crate) struct PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
 
 impl PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
     fn new(
-        root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+        root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
         sender_position: u16,
         recipient_position: u16,
     ) -> Result<Self, PseudorandomZeroSharingSeedDeliveryError320> {
+        let root_inventory = root_terminal.root_inventory();
         let root_body = root_inventory.root_body(sender_position).ok_or(
             PseudorandomZeroSharingSeedDeliveryError320::MissingSenderRoot { sender_position },
         )?;
@@ -300,7 +301,7 @@ impl PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
         Ok(Self {
             parameter_identity: root_inventory.body().parameter_identity(),
             preparation_context_identity: root_inventory.body().preparation_context_identity(),
-            root_inventory_identity: root_inventory.identity()?,
+            root_terminal_identity: root_terminal.identity()?,
             participant_count: root_inventory.body().participant_count(),
             sender_position,
             recipient_position,
@@ -317,8 +318,8 @@ impl PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
         self.preparation_context_identity
     }
 
-    pub(crate) const fn root_inventory_identity(self) -> Hash512 {
-        self.root_inventory_identity
+    pub(crate) const fn root_terminal_identity(self) -> Hash512 {
+        self.root_terminal_identity
     }
 
     pub(crate) const fn participant_count(self) -> u16 {
@@ -350,7 +351,7 @@ impl PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
                 CanonicalItem::hash512(self.parameter_identity.into_bytes()),
                 CanonicalItem::hash512(self.preparation_context_identity.into_bytes()),
                 CanonicalItem::unsigned16(PREPARATION_ATTEMPT_ORDINAL),
-                CanonicalItem::hash512(self.root_inventory_identity.into_bytes()),
+                CanonicalItem::hash512(self.root_terminal_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.participant_count),
                 CanonicalItem::unsigned16(self.sender_position),
                 CanonicalItem::unsigned16(self.recipient_position),
@@ -382,10 +383,10 @@ impl PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
                 "seed-delivery descriptor",
                 "preparation context identity",
             )?,
-            root_inventory_identity: read_hash512(
+            root_terminal_identity: read_hash512(
                 &tuple.items[4],
                 "seed-delivery descriptor",
-                "root-inventory identity",
+                "root-terminal identity",
             )?,
             participant_count: read_u16(
                 &tuple.items[5],
@@ -425,7 +426,7 @@ impl PseudorandomZeroSharingSeedDeliveryDescriptorBody320 {
 }
 
 pub(crate) fn derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
-    root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     sender_position: u16,
     recipient_position: u16,
 ) -> Result<
@@ -433,7 +434,7 @@ pub(crate) fn derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
     PseudorandomZeroSharingSeedDeliveryError320,
 > {
     PseudorandomZeroSharingSeedDeliveryDescriptorBody320::new(
-        root_inventory,
+        root_terminal,
         sender_position,
         recipient_position,
     )
@@ -550,7 +551,7 @@ impl fmt::Debug for RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320 {
 }
 
 pub(crate) fn verify_pseudorandom_zero_sharing_seed_delivery_320(
-    root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     expected_sender_position: u16,
     expected_recipient_position: u16,
     descriptor_bytes: &[u8],
@@ -560,7 +561,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_delivery_320(
     PseudorandomZeroSharingSeedDeliveryError320,
 > {
     let expected_descriptor = PseudorandomZeroSharingSeedDeliveryDescriptorBody320::new(
-        root_inventory,
+        root_terminal,
         expected_sender_position,
         expected_recipient_position,
     )?;
@@ -569,11 +570,14 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_delivery_320(
     )?;
     require_descriptor_match(descriptor, expected_descriptor)?;
 
-    let root_body = root_inventory.root_body(expected_sender_position).ok_or(
-        PseudorandomZeroSharingSeedDeliveryError320::MissingSenderRoot {
-            sender_position: expected_sender_position,
-        },
-    )?;
+    let root_body = root_terminal
+        .root_inventory()
+        .root_body(expected_sender_position)
+        .ok_or(
+            PseudorandomZeroSharingSeedDeliveryError320::MissingSenderRoot {
+                sender_position: expected_sender_position,
+            },
+        )?;
     let root_body_bytes = root_body.canonical_bytes()?;
     let layout = PseudorandomZeroSharingSeedDeliveryLayout320::derive(
         root_body.layout(),
@@ -637,7 +641,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_delivery_320(
 pub(crate) struct PseudorandomZeroSharingSeedRecipientInventoryBody320 {
     parameter_identity: Hash512,
     preparation_context_identity: Hash512,
-    root_inventory_identity: Hash512,
+    root_terminal_identity: Hash512,
     participant_count: u16,
     recipient_position: u16,
 }
@@ -651,8 +655,8 @@ impl PseudorandomZeroSharingSeedRecipientInventoryBody320 {
         self.preparation_context_identity
     }
 
-    pub(crate) const fn root_inventory_identity(self) -> Hash512 {
-        self.root_inventory_identity
+    pub(crate) const fn root_terminal_identity(self) -> Hash512 {
+        self.root_terminal_identity
     }
 
     pub(crate) const fn participant_count(self) -> u16 {
@@ -676,7 +680,7 @@ impl PseudorandomZeroSharingSeedRecipientInventoryBody320 {
                 CanonicalItem::hash512(self.parameter_identity.into_bytes()),
                 CanonicalItem::hash512(self.preparation_context_identity.into_bytes()),
                 CanonicalItem::unsigned16(PREPARATION_ATTEMPT_ORDINAL),
-                CanonicalItem::hash512(self.root_inventory_identity.into_bytes()),
+                CanonicalItem::hash512(self.root_terminal_identity.into_bytes()),
                 CanonicalItem::unsigned16(self.participant_count),
                 CanonicalItem::unsigned16(self.recipient_position),
             ],
@@ -731,13 +735,14 @@ impl fmt::Debug for RootInventoryMatchedPseudorandomZeroSharingSeedRecipientInve
 }
 
 pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
-    root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     recipient_position: u16,
     deliveries: Vec<RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320>,
 ) -> Result<
     RootInventoryMatchedPseudorandomZeroSharingSeedRecipientInventory320,
     PseudorandomZeroSharingSeedDeliveryError320,
 > {
+    let root_inventory = root_terminal.root_inventory();
     let participant_count = root_inventory.body().participant_count();
     if recipient_position >= participant_count {
         return Err(
@@ -759,7 +764,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
             actual: deliveries.len(),
         });
     }
-    let root_inventory_identity = root_inventory.identity()?;
+    let root_terminal_identity = root_terminal.identity()?;
     for (delivery_index, (delivery, expected_sender_position)) in deliveries
         .iter()
         .zip((0..participant_count).filter(|position| *position != recipient_position))
@@ -787,8 +792,8 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
             "preparation context identity",
         )?;
         require_descriptor_field(
-            descriptor.root_inventory_identity == root_inventory_identity,
-            "root-inventory identity",
+            descriptor.root_terminal_identity == root_terminal_identity,
+            "root-terminal identity",
         )?;
         require_descriptor_field(
             descriptor.participant_count == participant_count,
@@ -800,7 +805,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
             body: PseudorandomZeroSharingSeedRecipientInventoryBody320 {
                 parameter_identity: root_inventory.body().parameter_identity(),
                 preparation_context_identity: root_inventory.body().preparation_context_identity(),
-                root_inventory_identity,
+                root_terminal_identity,
                 participant_count,
                 recipient_position,
             },
@@ -822,8 +827,8 @@ fn require_descriptor_match(
         "preparation context identity",
     )?;
     require_descriptor_field(
-        actual.root_inventory_identity == expected.root_inventory_identity,
-        "root-inventory identity",
+        actual.root_terminal_identity == expected.root_terminal_identity,
+        "root-terminal identity",
     )?;
     require_descriptor_field(
         actual.participant_count == expected.participant_count,

@@ -38,6 +38,20 @@ use super::{
         VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
         verify_pseudorandom_zero_sharing_seed_catalog_root_inventory_320,
     },
+    pseudorandom_zero_sharing_seed_catalog_root_terminal_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_AUTHORIZATION_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_ENVELOPE_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_SIGNATURE_CONTEXT,
+        PseudorandomZeroSharingSeedCatalogRootTerminalBody320,
+        PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320,
+        PseudorandomZeroSharingSeedCatalogRootTerminalEndorsementAuthorizationBody320,
+        PseudorandomZeroSharingSeedCatalogRootTerminalEndorsementEnvelope320,
+        PseudorandomZeroSharingSeedCatalogRootTerminalError320,
+        RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+        verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320,
+    },
     pseudorandom_zero_sharing_seed_catalog_signature_320::{
         PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_SIGNATURE_CONTEXT,
         PseudorandomZeroSharingSeedCatalogRootSignatureBody320,
@@ -287,6 +301,260 @@ fn inventory_identity_ignores_authorization_carrier_choices_and_binds_every_root
 }
 
 #[test]
+fn root_terminal_requires_all_roster_endorsements_and_separates_semantics_from_carriers() {
+    assert_eq!(
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_DOMAIN,
+        "sealed-lattice/v1/preparation/seed-catalog-root-terminal"
+    );
+    assert_eq!(
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_BYTE_LENGTH,
+        144
+    );
+    assert_eq!(
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_AUTHORIZATION_BODY_BYTE_LENGTH,
+        169
+    );
+    assert_eq!(
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_ENVELOPE_BYTE_LENGTH,
+        3_589
+    );
+
+    let participant_count = FOUNDATION_PROFILE.participant_count;
+    let (roster, signing_keys) = roster_and_signing_keys(participant_count, 0x81);
+    let preparation_context = build_preparation_context(&roster, 0x83);
+    let parameter_identity = deterministic_hash(0x85, 0);
+    let owned_packages = root_authorization_packages(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &signing_keys,
+        0x87,
+        false,
+    );
+    let root_inventory = verify_pseudorandom_zero_sharing_seed_catalog_root_inventory_320(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &borrowed_packages(&owned_packages),
+    )
+    .unwrap();
+    let terminal_body =
+        PseudorandomZeroSharingSeedCatalogRootTerminalBody320::new(&root_inventory).unwrap();
+    let first_certificate = signed_root_terminal_certificate(&root_inventory, &signing_keys, 0x91);
+    let alternate_signature_certificate =
+        signed_root_terminal_certificate(&root_inventory, &signing_keys, 0xa1);
+
+    assert_eq!(
+        terminal_body.root_inventory_identity(),
+        root_inventory.identity().unwrap()
+    );
+    assert_eq!(terminal_body.participant_count(), participant_count);
+    assert_eq!(
+        terminal_body.canonical_bytes().unwrap().len(),
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_BYTE_LENGTH
+    );
+    let expected_certificate_byte_length =
+        PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320::canonical_byte_length_for_participant_count(
+            participant_count,
+        )
+        .unwrap();
+    assert_eq!(expected_certificate_byte_length, 36_230);
+    assert_eq!(
+        first_certificate.canonical_bytes().unwrap().len(),
+        expected_certificate_byte_length
+    );
+    assert_eq!(first_certificate.endorsement_envelopes().len(), 10);
+    assert!(format!("{first_certificate:?}").contains("[redacted]"));
+    assert!(format!("{:?}", first_certificate.endorsement_envelopes()[0]).contains("[redacted]"));
+
+    let first_terminal = verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+        root_inventory.clone(),
+        &roster,
+        &first_certificate.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    let alternate_signature_terminal =
+        verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+            root_inventory,
+            &roster,
+            &alternate_signature_certificate.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(first_terminal.terminal_body(), terminal_body);
+    assert_eq!(
+        first_terminal.identity().unwrap(),
+        terminal_body.identity().unwrap()
+    );
+    assert_eq!(
+        first_terminal.identity().unwrap(),
+        alternate_signature_terminal.identity().unwrap(),
+        "different valid signature randomness must not fork the semantic terminal"
+    );
+    assert_ne!(
+        first_terminal.certificate_identity(),
+        alternate_signature_terminal.certificate_identity(),
+        "carrier identities must still bind the exact signatures"
+    );
+    assert_eq!(
+        first_terminal.root_inventory().identity().unwrap(),
+        terminal_body.root_inventory_identity()
+    );
+}
+
+#[test]
+fn root_terminal_refuses_incomplete_reordered_forged_and_mismatched_endorsements() {
+    let participant_count = FOUNDATION_PROFILE.participant_count;
+    let (roster, signing_keys) = roster_and_signing_keys(participant_count, 0xb1);
+    let preparation_context = build_preparation_context(&roster, 0xb3);
+    let parameter_identity = deterministic_hash(0xb5, 0);
+    let owned_packages = root_authorization_packages(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &signing_keys,
+        0xb7,
+        false,
+    );
+    let root_inventory = verify_pseudorandom_zero_sharing_seed_catalog_root_inventory_320(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &borrowed_packages(&owned_packages),
+    )
+    .unwrap();
+    let terminal_body =
+        PseudorandomZeroSharingSeedCatalogRootTerminalBody320::new(&root_inventory).unwrap();
+    let endorsement_envelopes =
+        signed_root_terminal_endorsement_envelopes(terminal_body, &signing_keys, 0xc1);
+
+    assert!(matches!(
+        PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320::new(
+            terminal_body,
+            endorsement_envelopes[..endorsement_envelopes.len() - 1].to_vec(),
+        ),
+        Err(
+            PseudorandomZeroSharingSeedCatalogRootTerminalError320::EndorsementCount {
+                expected: 10,
+                actual: 9,
+            }
+        )
+    ));
+    let mut extra_endorsements = endorsement_envelopes.clone();
+    extra_endorsements.push(endorsement_envelopes[0].clone());
+    assert!(matches!(
+        PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320::new(
+            terminal_body,
+            extra_endorsements,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedCatalogRootTerminalError320::EndorsementCount {
+                expected: 10,
+                actual: 11,
+            }
+        )
+    ));
+    let mut reordered_endorsements = endorsement_envelopes.clone();
+    reordered_endorsements.swap(2, 3);
+    assert_eq!(
+        PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320::new(
+            terminal_body,
+            reordered_endorsements,
+        ),
+        Err(PseudorandomZeroSharingSeedCatalogRootTerminalError320::EndorsementOrder)
+    );
+    assert!(matches!(
+        PseudorandomZeroSharingSeedCatalogRootTerminalEndorsementAuthorizationBody320::new(
+            terminal_body,
+            participant_count,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedCatalogRootTerminalError320::EndorserPositionOutOfRange {
+                endorser_position: 10,
+                participant_count: 10,
+            }
+        )
+    ));
+
+    let certificate = PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320::new(
+        terminal_body,
+        endorsement_envelopes,
+    )
+    .unwrap();
+    let certificate_bytes = certificate.canonical_bytes().unwrap();
+    let mut forged_certificate_bytes = certificate_bytes.clone();
+    *forged_certificate_bytes.last_mut().unwrap() ^= 0x80;
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+            root_inventory.clone(),
+            &roster,
+            &forged_certificate_bytes,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedCatalogRootTerminalError320::InvalidEndorsementSignature {
+                endorser_position: 9,
+            }
+        )
+    ));
+
+    let (wrong_roster, _) = roster_and_signing_keys(participant_count, 0xd1);
+    assert_eq!(
+        verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+            root_inventory.clone(),
+            &wrong_roster,
+            &certificate_bytes,
+        ),
+        Err(PseudorandomZeroSharingSeedCatalogRootTerminalError320::RosterMismatch)
+    );
+
+    let changed_packages = root_authorization_packages(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &signing_keys,
+        0xd3,
+        false,
+    );
+    let changed_inventory = verify_pseudorandom_zero_sharing_seed_catalog_root_inventory_320(
+        parameter_identity,
+        preparation_context,
+        &roster,
+        &borrowed_packages(&changed_packages),
+    )
+    .unwrap();
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+            changed_inventory,
+            &roster,
+            &certificate_bytes,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedCatalogRootTerminalError320::ObjectMismatch {
+                field: "root-inventory identity",
+            }
+        )
+    ));
+
+    for truncated_length in [0, 1, 7, 8, 143, 1_024, certificate_bytes.len() - 1] {
+        assert!(
+            verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+                root_inventory.clone(),
+                &roster,
+                &certificate_bytes[..truncated_length],
+            )
+            .is_err()
+        );
+    }
+    assert!(
+        verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+            root_inventory,
+            &roster,
+            &vec![0_u8; 131_073],
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn root_inventory_refuses_missing_reordered_mixed_and_wrong_context_packages() {
     let participant_count = FOUNDATION_PROFILE.participant_count;
     let (roster, signing_keys) = roster_and_signing_keys(participant_count, 0xa1);
@@ -454,7 +722,7 @@ fn root_inventory_refuses_missing_reordered_mixed_and_wrong_context_packages() {
 }
 
 #[test]
-fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
+fn ordered_seed_deliveries_require_the_roster_root_terminal_before_mailbox_authority() {
     let participant_count = FOUNDATION_PROFILE.participant_count;
     let (roster, signing_keys) = roster_and_signing_keys(participant_count, 0xc1);
     let preparation_context = build_preparation_context(&roster, 0xc3);
@@ -490,11 +758,19 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
         &borrowed_packages(&owned_packages),
     )
     .unwrap();
+    let root_terminal_certificate =
+        signed_root_terminal_certificate(&verified_root_inventory, &signing_keys, 0xe1);
+    let verified_root_terminal = verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
+        verified_root_inventory,
+        &roster,
+        &root_terminal_certificate.canonical_bytes().unwrap(),
+    )
+    .unwrap();
 
     let sender_position = 2;
     let recipient_position = 7;
     let descriptor = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
-        &verified_root_inventory,
+        &verified_root_terminal,
         sender_position,
         recipient_position,
     )
@@ -524,8 +800,8 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
         preparation_context.identity()
     );
     assert_eq!(
-        descriptor.root_inventory_identity(),
-        verified_root_inventory.identity().unwrap()
+        descriptor.root_terminal_identity(),
+        verified_root_terminal.identity().unwrap()
     );
     assert_eq!(descriptor.participant_count(), participant_count);
     assert_eq!(descriptor.sender_position(), sender_position);
@@ -541,7 +817,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     );
 
     let verified_delivery = verify_pseudorandom_zero_sharing_seed_delivery_320(
-        &verified_root_inventory,
+        &verified_root_terminal,
         sender_position,
         recipient_position,
         &descriptor_bytes,
@@ -571,7 +847,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
 
     assert!(matches!(
         verify_pseudorandom_zero_sharing_seed_delivery_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             sender_position,
             recipient_position,
             &descriptor_bytes,
@@ -588,7 +864,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     reordered_entries.swap(0, 1);
     assert!(matches!(
         verify_pseudorandom_zero_sharing_seed_delivery_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             sender_position,
             recipient_position,
             &descriptor_bytes,
@@ -608,7 +884,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
         .unwrap() ^= 0x40;
     assert!(matches!(
         verify_pseudorandom_zero_sharing_seed_delivery_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             sender_position,
             recipient_position,
             &descriptor_bytes,
@@ -619,7 +895,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
         ))
     ));
     let other_recipient_descriptor = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
-        &verified_root_inventory,
+        &verified_root_terminal,
         sender_position,
         recipient_position + 1,
     )
@@ -628,7 +904,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     .unwrap();
     assert!(matches!(
         verify_pseudorandom_zero_sharing_seed_delivery_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             sender_position,
             recipient_position,
             &other_recipient_descriptor,
@@ -644,7 +920,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     *changed_descriptor_bytes.last_mut().unwrap() ^= 0x80;
     assert!(matches!(
         verify_pseudorandom_zero_sharing_seed_delivery_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             sender_position,
             recipient_position,
             &changed_descriptor_bytes,
@@ -659,7 +935,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     for truncated_length in 0..descriptor_bytes.len() {
         assert!(
             verify_pseudorandom_zero_sharing_seed_delivery_320(
-                &verified_root_inventory,
+                &verified_root_terminal,
                 sender_position,
                 recipient_position,
                 &descriptor_bytes[..truncated_length],
@@ -670,7 +946,7 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     }
     assert!(
         verify_pseudorandom_zero_sharing_seed_delivery_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             sender_position,
             recipient_position,
             &vec![0_u8; 4_097],
@@ -682,11 +958,11 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     let recipient_position = 5;
     let deliveries = verified_deliveries_for_recipient(
         &catalog_fixtures,
-        &verified_root_inventory,
+        &verified_root_terminal,
         recipient_position,
     );
     let recipient_inventory = verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
-        &verified_root_inventory,
+        &verified_root_terminal,
         recipient_position,
         deliveries,
     )
@@ -701,8 +977,8 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
         preparation_context.identity()
     );
     assert_eq!(
-        recipient_inventory.body().root_inventory_identity(),
-        verified_root_inventory.identity().unwrap()
+        recipient_inventory.body().root_terminal_identity(),
+        verified_root_terminal.identity().unwrap()
     );
     assert_eq!(
         recipient_inventory.body().participant_count(),
@@ -722,13 +998,13 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
 
     let mut reordered_deliveries = verified_deliveries_for_recipient(
         &catalog_fixtures,
-        &verified_root_inventory,
+        &verified_root_terminal,
         recipient_position,
     );
     reordered_deliveries.swap(0, 1);
     assert!(matches!(
         verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             recipient_position,
             reordered_deliveries,
         ),
@@ -740,13 +1016,13 @@ fn ordered_seed_deliveries_match_authorized_roots_before_mailbox_authority() {
     ));
     let mut incomplete_deliveries = verified_deliveries_for_recipient(
         &catalog_fixtures,
-        &verified_root_inventory,
+        &verified_root_terminal,
         recipient_position,
     );
     incomplete_deliveries.pop();
     assert!(matches!(
         verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
-            &verified_root_inventory,
+            &verified_root_terminal,
             recipient_position,
             incomplete_deliveries,
         ),
@@ -884,14 +1160,14 @@ fn borrowed_delivery_entries(
 
 fn verified_deliveries_for_recipient(
     fixtures: &[SeedCatalogFixture320],
-    root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     recipient_position: u16,
 ) -> Vec<RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320> {
-    (0..root_inventory.body().participant_count())
+    (0..root_terminal.root_inventory().body().participant_count())
         .filter(|sender_position| *sender_position != recipient_position)
         .map(|sender_position| {
             let descriptor = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
-                root_inventory,
+                root_terminal,
                 sender_position,
                 recipient_position,
             )
@@ -899,7 +1175,7 @@ fn verified_deliveries_for_recipient(
             let owned_entries =
                 seed_delivery_entries(&fixtures[usize::from(sender_position)], recipient_position);
             verify_pseudorandom_zero_sharing_seed_delivery_320(
-                root_inventory,
+                root_terminal,
                 sender_position,
                 recipient_position,
                 &descriptor.canonical_bytes().unwrap(),
@@ -916,6 +1192,52 @@ fn marked_bytes<const BYTE_LENGTH: usize>(marker: u8, ordinal: u64) -> [u8; BYTE
     let copied_byte_length = BYTE_LENGTH.min(ordinal_bytes.len());
     bytes[..copied_byte_length].copy_from_slice(&ordinal_bytes[..copied_byte_length]);
     bytes
+}
+
+fn signed_root_terminal_certificate(
+    root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
+    signing_keys: &[ml_dsa_65::PrivateKey],
+    signature_seed_marker: u8,
+) -> PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320 {
+    let terminal_body =
+        PseudorandomZeroSharingSeedCatalogRootTerminalBody320::new(root_inventory).unwrap();
+    PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320::new(
+        terminal_body,
+        signed_root_terminal_endorsement_envelopes(
+            terminal_body,
+            signing_keys,
+            signature_seed_marker,
+        ),
+    )
+    .unwrap()
+}
+
+fn signed_root_terminal_endorsement_envelopes(
+    terminal_body: PseudorandomZeroSharingSeedCatalogRootTerminalBody320,
+    signing_keys: &[ml_dsa_65::PrivateKey],
+    signature_seed_marker: u8,
+) -> Vec<PseudorandomZeroSharingSeedCatalogRootTerminalEndorsementEnvelope320> {
+    (0..terminal_body.participant_count())
+        .map(|endorser_position| {
+            let authorization_body =
+                PseudorandomZeroSharingSeedCatalogRootTerminalEndorsementAuthorizationBody320::new(
+                    terminal_body,
+                    endorser_position,
+                )
+                .unwrap();
+            let signature = signing_keys[usize::from(endorser_position)]
+                .try_sign_with_seed(
+                    &[signature_seed_marker.wrapping_add(endorser_position as u8); 32],
+                    &authorization_body.canonical_bytes().unwrap(),
+                    PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_SIGNATURE_CONTEXT,
+                )
+                .unwrap();
+            PseudorandomZeroSharingSeedCatalogRootTerminalEndorsementEnvelope320::new(
+                authorization_body,
+                signature,
+            )
+        })
+        .collect()
 }
 
 fn root_authorization_packages(

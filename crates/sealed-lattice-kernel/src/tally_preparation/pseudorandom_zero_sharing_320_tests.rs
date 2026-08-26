@@ -197,6 +197,15 @@ fn completion_resource_model_reproduces_setup_stream_and_codeword_work() {
         model.seed_opening_proof_and_descriptor_delivery_byte_length,
         5_662_620
     );
+    assert_eq!(model.root_terminal_body_byte_length, 144);
+    assert_eq!(model.root_terminal_endorsement_count, 10);
+    assert_eq!(
+        model.root_terminal_endorsement_authorization_body_byte_length,
+        169
+    );
+    assert_eq!(model.root_terminal_endorsement_envelope_byte_length, 3_589);
+    assert_eq!(model.root_terminal_certificate_byte_length, 36_230);
+    assert_eq!(model.root_terminal_signature_verification_count, 10);
     assert_eq!(model.ordered_mailbox_stream_count, 90);
     assert_eq!(
         model.provisional_private_mailbox_wrapper_byte_length,
@@ -316,6 +325,17 @@ fn independent_completion_delivery_ledger_matches_every_production_subtotal() {
         + pair_opening_delivery_byte_length
         + inclusion_proof_delivery_byte_length
         + descriptor_delivery_byte_length;
+    let root_terminal_body_byte_length = 8 + 2 * 6 + 4 + 56 + 64;
+    let root_terminal_endorsement_authorization_body_byte_length = 8 + 3 * 6 + 4 + 73 + 64 + 2;
+    let root_terminal_endorsement_envelope_byte_length =
+        8 + 3 * 6 + 4 + 77 + 4 + root_terminal_endorsement_authorization_body_byte_length + 3_309;
+    let root_terminal_certificate_byte_length = 8
+        + (2 + participant_count) * 6
+        + 4
+        + 68
+        + 4
+        + root_terminal_body_byte_length
+        + participant_count * (4 + root_terminal_endorsement_envelope_byte_length);
 
     assert_eq!(
         model.subset_seed_contribution_count,
@@ -357,6 +377,27 @@ fn independent_completion_delivery_ledger_matches_every_production_subtotal() {
         model.seed_opening_proof_and_descriptor_delivery_byte_length,
         exact_delivery_byte_length
     );
+    assert_eq!(
+        model.root_terminal_body_byte_length,
+        root_terminal_body_byte_length
+    );
+    assert_eq!(model.root_terminal_endorsement_count, participant_count);
+    assert_eq!(
+        model.root_terminal_endorsement_authorization_body_byte_length,
+        root_terminal_endorsement_authorization_body_byte_length
+    );
+    assert_eq!(
+        model.root_terminal_endorsement_envelope_byte_length,
+        root_terminal_endorsement_envelope_byte_length
+    );
+    assert_eq!(
+        model.root_terminal_certificate_byte_length,
+        root_terminal_certificate_byte_length
+    );
+    assert_eq!(
+        model.root_terminal_signature_verification_count,
+        participant_count
+    );
 }
 
 #[test]
@@ -370,25 +411,29 @@ fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
         - superseded_zero_check_delivery_byte_length
         + model.provisional_private_setup_delivery_byte_length;
     assert_eq!(replacement_private_delivery_byte_length, 1_146_057_660);
+    let retained_public_byte_length_per_successful_attempt =
+        426_163_836 + model.root_terminal_certificate_byte_length;
+    let retained_public_byte_length_per_burned_attempt =
+        model.root_terminal_certificate_byte_length;
 
     let selected_single_attempt_floor = PreparationAttemptResourceFloor::derive(
         PreparationAttemptLimits::for_current_tally_circuit(1).unwrap(),
         PreparationAttemptResourceFloorInput {
             private_delivery_byte_length_per_fully_delivered_attempt:
                 replacement_private_delivery_byte_length,
-            retained_public_byte_length_per_burned_attempt: 0,
-            retained_public_byte_length_per_successful_attempt: 426_163_836,
+            retained_public_byte_length_per_burned_attempt,
+            retained_public_byte_length_per_successful_attempt,
         },
     )
     .unwrap();
     assert_eq!(
         selected_single_attempt_floor.maximum_reachable_upload_byte_length,
-        1_572_221_496
+        1_572_257_726
     );
     assert_eq!(
         ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET
             - selected_single_attempt_floor.maximum_reachable_upload_byte_length,
-        575_262_152
+        575_225_922
     );
     assert!(
         !selected_single_attempt_floor
@@ -401,8 +446,8 @@ fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
         PreparationAttemptResourceFloorInput {
             private_delivery_byte_length_per_fully_delivered_attempt:
                 replacement_private_delivery_byte_length,
-            retained_public_byte_length_per_burned_attempt: 0,
-            retained_public_byte_length_per_successful_attempt: 426_163_836,
+            retained_public_byte_length_per_burned_attempt,
+            retained_public_byte_length_per_successful_attempt,
         },
     )
     .unwrap();
@@ -412,12 +457,12 @@ fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
     );
     assert_eq!(
         three_attempt_hostile_floor.maximum_reachable_upload_byte_length,
-        3_864_336_816
+        3_864_445_506
     );
     assert_eq!(
         three_attempt_hostile_floor
             .excess_over_upload_target(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET),
-        1_716_853_168
+        1_716_961_858
     );
     assert!(
         three_attempt_hostile_floor
@@ -478,6 +523,14 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
         assert_eq!(
             model.seed_delivery_descriptor_count,
             model.ordered_mailbox_stream_count
+        );
+        assert_eq!(
+            model.root_terminal_endorsement_count,
+            u64::from(participant_count)
+        );
+        assert_eq!(
+            model.root_terminal_signature_verification_count,
+            u64::from(participant_count)
         );
         assert_eq!(
             model.seed_opening_proof_and_descriptor_delivery_byte_length,

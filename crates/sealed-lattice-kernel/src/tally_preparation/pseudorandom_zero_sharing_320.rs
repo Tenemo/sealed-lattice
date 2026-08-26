@@ -15,6 +15,12 @@ use super::{
         PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_OPENING_OBJECT_BYTE_LENGTH,
     },
     pseudorandom_zero_sharing_seed_catalog_320::PseudorandomZeroSharingSeedCatalogInclusionProof320,
+    pseudorandom_zero_sharing_seed_catalog_root_terminal_320::{
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_AUTHORIZATION_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_ENVELOPE_BYTE_LENGTH,
+        PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320,
+    },
     pseudorandom_zero_sharing_seed_delivery_320::{
         PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH,
@@ -57,6 +63,12 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) seed_delivery_descriptor_body_byte_length: u64,
     pub(crate) private_seed_delivery_descriptor_byte_length: u64,
     pub(crate) seed_opening_proof_and_descriptor_delivery_byte_length: u64,
+    pub(crate) root_terminal_body_byte_length: u64,
+    pub(crate) root_terminal_endorsement_count: u64,
+    pub(crate) root_terminal_endorsement_authorization_body_byte_length: u64,
+    pub(crate) root_terminal_endorsement_envelope_byte_length: u64,
+    pub(crate) root_terminal_certificate_byte_length: u64,
+    pub(crate) root_terminal_signature_verification_count: u64,
     pub(crate) ordered_mailbox_stream_count: u64,
     pub(crate) provisional_private_mailbox_wrapper_byte_length: u64,
     pub(crate) provisional_private_setup_delivery_byte_length: u64,
@@ -122,6 +134,17 @@ impl PseudorandomZeroSharingResourceModel {
         let recipient_inventory_body_byte_length_per_participant =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_INVENTORY_BODY_BYTE_LENGTH)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let root_terminal_body_byte_length =
+            u64::try_from(PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_BODY_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let root_terminal_endorsement_authorization_body_byte_length = u64::try_from(
+            PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_AUTHORIZATION_BODY_BYTE_LENGTH,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let root_terminal_endorsement_envelope_byte_length = u64::try_from(
+            PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_ROOT_TERMINAL_ENDORSEMENT_ENVELOPE_BYTE_LENGTH,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let field_element_byte_length = u64::try_from(BinaryFieldElement320::CANONICAL_BYTE_LENGTH)
             .map_err(|_| TallyPreparationError::IntegerConversion)?;
 
@@ -129,6 +152,15 @@ impl PseudorandomZeroSharingResourceModel {
         if geometry.active_fault_bound == 0 {
             return Err(TallyPreparationError::GeometryMismatch);
         }
+        let root_terminal_endorsement_count = geometry.participant_count;
+        let root_terminal_certificate_byte_length = u64::try_from(
+            PseudorandomZeroSharingSeedCatalogRootTerminalCertificate320::canonical_byte_length_for_participant_count(
+                input.participant_count,
+            )
+            .map_err(|_| TallyPreparationError::GeometryMismatch)?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let root_terminal_signature_verification_count = root_terminal_endorsement_count;
         let subset_seed_contribution_count = checked_multiply(
             geometry.authorized_subset_count,
             geometry.authorized_subset_size,
@@ -355,6 +387,12 @@ impl PseudorandomZeroSharingResourceModel {
             seed_delivery_descriptor_body_byte_length,
             private_seed_delivery_descriptor_byte_length,
             seed_opening_proof_and_descriptor_delivery_byte_length,
+            root_terminal_body_byte_length,
+            root_terminal_endorsement_count,
+            root_terminal_endorsement_authorization_body_byte_length,
+            root_terminal_endorsement_envelope_byte_length,
+            root_terminal_certificate_byte_length,
+            root_terminal_signature_verification_count,
             ordered_mailbox_stream_count,
             provisional_private_mailbox_wrapper_byte_length,
             provisional_private_setup_delivery_byte_length,
