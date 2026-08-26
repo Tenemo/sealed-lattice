@@ -2,8 +2,9 @@ use core::fmt;
 
 use fips204::{
     ml_dsa_65,
-    traits::{SerDes, Verifier},
+    traits::{SerDes, Signer, Verifier},
 };
+use zeroize::Zeroizing;
 
 use crate::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
@@ -115,6 +116,9 @@ pub(crate) enum PseudorandomZeroSharingSeedReceiptError320 {
     MalformedSigningVerificationKey,
     SignatureByteLength { expected: usize, actual: usize },
     InvalidRecipientSignature,
+    InvalidSignatureRandomness,
+    RecipientSigningKeyMismatch,
+    SignatureGenerationFailed,
     ArithmeticOverflow,
 }
 
@@ -164,6 +168,14 @@ impl fmt::Display for PseudorandomZeroSharingSeedReceiptError320 {
             ),
             Self::InvalidRecipientSignature => {
                 formatter.write_str("seed-receipt has an invalid recipient signature")
+            }
+            Self::InvalidSignatureRandomness => formatter
+                .write_str("seed-receipt signature randomness must be a nonzero 32-byte value"),
+            Self::RecipientSigningKeyMismatch => {
+                formatter.write_str("seed-receipt signing key does not match the roster recipient")
+            }
+            Self::SignatureGenerationFailed => {
+                formatter.write_str("seed-receipt signature generation failed")
             }
             Self::ArithmeticOverflow => formatter.write_str("seed-receipt arithmetic overflowed"),
         }
@@ -738,6 +750,58 @@ pub(crate) struct RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt
     receipt_envelope_identity: Hash512,
 }
 
+/// Exact receipt envelope produced from one typed complete authenticated local
+/// inventory and immediately checked by the positive receipt verifier.
+///
+/// This output retains the local inventory only so later custody code can bind
+/// the public receipt to the same verified local source. It has no all-recipient
+/// terminal, seed-combination, coin-opening, burn, or preparation-continuation
+/// authority.
+pub(crate) struct ProducedPseudorandomZeroSharingSeedRecipientReceipt320 {
+    roster_authenticated_receipt: RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+    receipt_envelope_bytes: Vec<u8>,
+}
+
+impl ProducedPseudorandomZeroSharingSeedRecipientReceipt320 {
+    pub(crate) const fn roster_authenticated_receipt(
+        &self,
+    ) -> &RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320 {
+        &self.roster_authenticated_receipt
+    }
+
+    pub(crate) fn receipt_envelope_bytes(&self) -> &[u8] {
+        &self.receipt_envelope_bytes
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+        Vec<u8>,
+    ) {
+        (
+            self.roster_authenticated_receipt,
+            self.receipt_envelope_bytes,
+        )
+    }
+}
+
+impl fmt::Debug for ProducedPseudorandomZeroSharingSeedRecipientReceipt320 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProducedPseudorandomZeroSharingSeedRecipientReceipt320")
+            .field(
+                "roster_authenticated_receipt",
+                &self.roster_authenticated_receipt,
+            )
+            .field(
+                "receipt_envelope_byte_length",
+                &self.receipt_envelope_bytes.len(),
+            )
+            .finish()
+    }
+}
+
 impl RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320 {
     pub(crate) const fn recipient_inventory(
         &self,
@@ -804,6 +868,58 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
             receipt_envelope_identity: roster_signed_receipt.receipt_envelope_identity(),
         },
     )
+}
+
+pub(crate) fn produce_pseudorandom_zero_sharing_seed_recipient_receipt_320(
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    roster: &Roster,
+    recipient_inventory: AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320,
+    recipient_signing_key: &ml_dsa_65::PrivateKey,
+    signature_randomness: [u8; 32],
+) -> Result<
+    ProducedPseudorandomZeroSharingSeedRecipientReceipt320,
+    PseudorandomZeroSharingSeedReceiptError320,
+> {
+    validate_roster_for_terminal(root_terminal, roster)?;
+    let receipt_body =
+        PseudorandomZeroSharingSeedRecipientReceiptBody320::new(&recipient_inventory)?;
+    if receipt_body.root_terminal_identity != root_terminal.identity()? {
+        return Err(receipt_object_mismatch("root-terminal identity"));
+    }
+    let recipient_entry = roster
+        .entries
+        .get(usize::from(receipt_body.recipient_position))
+        .filter(|entry| entry.roster_position == receipt_body.recipient_position)
+        .ok_or(PseudorandomZeroSharingSeedReceiptError320::RosterMismatch)?;
+    if recipient_signing_key.get_public_key().into_bytes()
+        != recipient_entry.signing_verification_key
+    {
+        return Err(PseudorandomZeroSharingSeedReceiptError320::RecipientSigningKeyMismatch);
+    }
+    let signature_randomness = Zeroizing::new(signature_randomness);
+    if signature_randomness.iter().all(|byte| *byte == 0) {
+        return Err(PseudorandomZeroSharingSeedReceiptError320::InvalidSignatureRandomness);
+    }
+    let signature = recipient_signing_key
+        .try_sign_with_seed(
+            &signature_randomness,
+            &receipt_body.canonical_bytes()?,
+            PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
+        )
+        .map_err(|_| PseudorandomZeroSharingSeedReceiptError320::SignatureGenerationFailed)?;
+    let receipt_envelope_bytes =
+        PseudorandomZeroSharingSignedSeedRecipientReceiptEnvelope320::new(receipt_body, signature)
+            .canonical_bytes()?;
+    let roster_authenticated_receipt = verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
+        root_terminal,
+        roster,
+        recipient_inventory,
+        &receipt_envelope_bytes,
+    )?;
+    Ok(ProducedPseudorandomZeroSharingSeedRecipientReceipt320 {
+        roster_authenticated_receipt,
+        receipt_envelope_bytes,
+    })
 }
 
 fn validate_roster_for_terminal(
