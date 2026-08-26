@@ -20,10 +20,10 @@ use super::{
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_SECRET_LEAF_DOMAIN,
+        PseudorandomZeroSharingSubsetMasterScope320,
         PseudorandomZeroSharingSubsetSeedCommitment320,
         PseudorandomZeroSharingSubsetSeedCoordinate320,
-        PseudorandomZeroSharingSubsetSeedOpening320, PseudorandomZeroSharingSubsetSeedScope320,
-        combine_commitment_matched_pseudorandom_zero_sharing_subset_master_320,
+        PseudorandomZeroSharingSubsetSeedOpening320,
         create_pseudorandom_zero_sharing_subset_seed_contribution_320,
         verify_pseudorandom_zero_sharing_subset_seed_contribution_320,
     },
@@ -31,37 +31,27 @@ use super::{
 };
 
 #[test]
-fn every_completion_subset_member_roundtrips_and_combines_to_the_independent_xor() {
+fn every_completion_subset_member_roundtrips_with_a_contributor_specific_catalog_identity() {
     let context = completion_context(11);
     let parameter_identity = Hash512::from_bytes([17_u8; 64]);
-    let catalog_identity = Hash512::from_bytes([23_u8; 64]);
     let subsets = ReplicatedRandomSharingSubset::iter(FOUNDATION_PROFILE.participant_count)
         .unwrap()
         .collect::<Vec<_>>();
     assert_eq!(subsets.len(), 120);
 
     for subset in subsets {
-        let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
-            parameter_identity,
-            context,
-            catalog_identity,
-            subset,
-        )
-        .unwrap();
-        let mut expected_master =
-            [0_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH];
-        let mut matched_contributions = Vec::new();
+        let master_scope =
+            PseudorandomZeroSharingSubsetMasterScope320::new(parameter_identity, context, subset)
+                .unwrap();
         for contributor_position in subset.member_positions() {
-            let coordinate =
-                PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, contributor_position)
-                    .unwrap();
+            let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(
+                master_scope,
+                deterministic_catalog_identity(contributor_position),
+                contributor_position,
+            )
+            .unwrap();
             let contribution = deterministic_contribution(subset, contributor_position);
             let commitment_salt = deterministic_salt(subset, contributor_position);
-            for (master_byte, contribution_byte) in
-                expected_master.iter_mut().zip(contribution.iter())
-            {
-                *master_byte ^= contribution_byte;
-            }
             let (commitment, opening) =
                 create_pseudorandom_zero_sharing_subset_seed_contribution_320(
                     coordinate,
@@ -91,24 +81,14 @@ fn every_completion_subset_member_roundtrips_and_combines_to_the_independent_xor
                     .unwrap(),
                 opening
             );
-            matched_contributions.push(
-                verify_pseudorandom_zero_sharing_subset_seed_contribution_320(
-                    coordinate,
-                    &commitment_bytes,
-                    &opening_bytes,
-                )
-                .unwrap(),
-            );
+            let matched = verify_pseudorandom_zero_sharing_subset_seed_contribution_320(
+                coordinate,
+                &commitment_bytes,
+                &opening_bytes,
+            )
+            .unwrap();
+            assert_eq!(matched.coordinate(), coordinate);
         }
-
-        matched_contributions.reverse();
-        let master = combine_commitment_matched_pseudorandom_zero_sharing_subset_master_320(
-            scope,
-            matched_contributions,
-        )
-        .unwrap();
-        assert_eq!(master.scope(), scope);
-        assert_eq!(master.as_bytes(), &expected_master);
     }
 }
 
@@ -116,14 +96,16 @@ fn every_completion_subset_member_roundtrips_and_combines_to_the_independent_xor
 fn salted_leaf_digest_matches_independent_canonical_shake_framing() {
     let context = completion_context(29);
     let subset = completion_subset(&[1, 4, 8]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+    let master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
         Hash512::from_bytes([31_u8; 64]),
         context,
-        Hash512::from_bytes([37_u8; 64]),
         subset,
     )
     .unwrap();
-    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, 3).unwrap();
+    let catalog_identity = Hash512::from_bytes([37_u8; 64]);
+    let coordinate =
+        PseudorandomZeroSharingSubsetSeedCoordinate320::new(master_scope, catalog_identity, 3)
+            .unwrap();
     let contribution = deterministic_contribution(subset, 3);
     let commitment_salt = deterministic_salt(subset, 3);
     let (commitment, _) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
@@ -145,10 +127,10 @@ fn salted_leaf_digest_matches_independent_canonical_shake_framing() {
         vec![
             CanonicalItem::nonempty_ascii(PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_SECRET_LEAF_DOMAIN)
                 .unwrap(),
-            CanonicalItem::hash512(scope.parameter_identity().into_bytes()),
-            CanonicalItem::hash512(scope.preparation_context_identity().into_bytes()),
+            CanonicalItem::hash512(master_scope.parameter_identity().into_bytes()),
+            CanonicalItem::hash512(master_scope.preparation_context_identity().into_bytes()),
             CanonicalItem::unsigned16(0),
-            CanonicalItem::hash512(scope.seed_catalog_identity().into_bytes()),
+            CanonicalItem::hash512(catalog_identity.into_bytes()),
             CanonicalItem::unsigned16(subset.participant_count()),
             CanonicalItem::unsigned32(subset.excluded_position_mask()),
             CanonicalItem::unsigned16(3),
@@ -173,70 +155,85 @@ fn every_public_coordinate_and_secret_dimension_changes_the_leaf_digest() {
     let alternate_subset = completion_subset(&[2, 6, 9]);
     let parameter_identity = Hash512::from_bytes([47_u8; 64]);
     let catalog_identity = Hash512::from_bytes([53_u8; 64]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
-        parameter_identity,
-        context,
-        catalog_identity,
-        subset,
-    )
-    .unwrap();
+    let master_scope =
+        PseudorandomZeroSharingSubsetMasterScope320::new(parameter_identity, context, subset)
+            .unwrap();
     let contribution = [59_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH];
     let commitment_salt =
         [61_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH];
-    let baseline = commitment_digest(scope, 0, contribution, commitment_salt);
+    let baseline = commitment_digest(
+        master_scope,
+        catalog_identity,
+        0,
+        contribution,
+        commitment_salt,
+    );
 
     let variants = [
         commitment_digest(
-            PseudorandomZeroSharingSubsetSeedScope320::new(
+            PseudorandomZeroSharingSubsetMasterScope320::new(
                 Hash512::from_bytes([67_u8; 64]),
                 context,
-                catalog_identity,
                 subset,
             )
             .unwrap(),
+            catalog_identity,
             0,
             contribution,
             commitment_salt,
         ),
         commitment_digest(
-            PseudorandomZeroSharingSubsetSeedScope320::new(
+            PseudorandomZeroSharingSubsetMasterScope320::new(
                 parameter_identity,
                 alternate_context,
-                catalog_identity,
                 subset,
             )
             .unwrap(),
+            catalog_identity,
             0,
             contribution,
             commitment_salt,
         ),
         commitment_digest(
-            PseudorandomZeroSharingSubsetSeedScope320::new(
-                parameter_identity,
-                context,
-                Hash512::from_bytes([71_u8; 64]),
-                subset,
-            )
-            .unwrap(),
+            master_scope,
+            Hash512::from_bytes([71_u8; 64]),
             0,
             contribution,
             commitment_salt,
         ),
         commitment_digest(
-            PseudorandomZeroSharingSubsetSeedScope320::new(
+            PseudorandomZeroSharingSubsetMasterScope320::new(
                 parameter_identity,
                 context,
-                catalog_identity,
                 alternate_subset,
             )
             .unwrap(),
+            catalog_identity,
             0,
             contribution,
             commitment_salt,
         ),
-        commitment_digest(scope, 1, contribution, commitment_salt),
-        commitment_digest(scope, 0, changed_first_byte(contribution), commitment_salt),
-        commitment_digest(scope, 0, contribution, changed_first_byte(commitment_salt)),
+        commitment_digest(
+            master_scope,
+            catalog_identity,
+            1,
+            contribution,
+            commitment_salt,
+        ),
+        commitment_digest(
+            master_scope,
+            catalog_identity,
+            0,
+            changed_first_byte(contribution),
+            commitment_salt,
+        ),
+        commitment_digest(
+            master_scope,
+            catalog_identity,
+            0,
+            contribution,
+            changed_first_byte(commitment_salt),
+        ),
     ];
 
     for variant in variants {
@@ -248,16 +245,19 @@ fn every_public_coordinate_and_secret_dimension_changes_the_leaf_digest() {
 fn positive_match_refuses_wrong_coordinates_digests_salts_and_contributions() {
     let context = completion_context(73);
     let subset = completion_subset(&[3, 6, 9]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+    let master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
         Hash512::from_bytes([79_u8; 64]),
         context,
-        Hash512::from_bytes([83_u8; 64]),
         subset,
     )
     .unwrap();
-    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, 0).unwrap();
+    let catalog_identity = Hash512::from_bytes([83_u8; 64]);
+    let coordinate =
+        PseudorandomZeroSharingSubsetSeedCoordinate320::new(master_scope, catalog_identity, 0)
+            .unwrap();
     let alternate_coordinate =
-        PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, 1).unwrap();
+        PseudorandomZeroSharingSubsetSeedCoordinate320::new(master_scope, catalog_identity, 1)
+            .unwrap();
     let (commitment, opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         coordinate,
         [89_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
@@ -337,14 +337,18 @@ fn positive_match_refuses_wrong_coordinates_digests_salts_and_contributions() {
 fn decoders_refuse_wrong_headers_types_lengths_counts_and_trailing_bytes() {
     let context = completion_context(109);
     let subset = completion_subset(&[1, 5, 8]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+    let master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
         Hash512::from_bytes([113_u8; 64]),
         context,
-        Hash512::from_bytes([127_u8; 64]),
         subset,
     )
     .unwrap();
-    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, 0).unwrap();
+    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(
+        master_scope,
+        Hash512::from_bytes([127_u8; 64]),
+        0,
+    )
+    .unwrap();
     let (commitment, opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         coordinate,
         [131_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
@@ -446,14 +450,18 @@ fn decoders_refuse_wrong_headers_types_lengths_counts_and_trailing_bytes() {
 fn every_truncated_commitment_and_opening_prefix_is_refused() {
     let context = completion_context(139);
     let subset = completion_subset(&[2, 4, 7]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+    let master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
         Hash512::from_bytes([149_u8; 64]),
         context,
-        Hash512::from_bytes([151_u8; 64]),
         subset,
     )
     .unwrap();
-    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, 0).unwrap();
+    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(
+        master_scope,
+        Hash512::from_bytes([151_u8; 64]),
+        0,
+    )
+    .unwrap();
     let (commitment, opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         coordinate,
         [157_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
@@ -482,15 +490,14 @@ fn every_truncated_commitment_and_opening_prefix_is_refused() {
 }
 
 #[test]
-fn scope_and_coordinate_construction_refuse_wrong_rosters_and_nonmembers() {
+fn master_scope_and_coordinate_construction_refuse_wrong_rosters_and_nonmembers() {
     let context = completion_context(167);
     let different_roster_subset =
         ReplicatedRandomSharingSubset::from_excluded_positions(7, &[1, 5]).unwrap();
     assert_eq!(
-        PseudorandomZeroSharingSubsetSeedScope320::new(
+        PseudorandomZeroSharingSubsetMasterScope320::new(
             Hash512::from_bytes([173_u8; 64]),
             context,
-            Hash512::from_bytes([179_u8; 64]),
             different_roster_subset,
         ),
         Err(
@@ -502,17 +509,18 @@ fn scope_and_coordinate_construction_refuse_wrong_rosters_and_nonmembers() {
     );
 
     let subset = completion_subset(&[0, 3, 9]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+    let master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
         Hash512::from_bytes([181_u8; 64]),
         context,
-        Hash512::from_bytes([191_u8; 64]),
         subset,
     )
     .unwrap();
+    let catalog_identity = Hash512::from_bytes([191_u8; 64]);
     for invalid_contributor_position in [0, 3, 9, FOUNDATION_PROFILE.participant_count] {
         assert_eq!(
             PseudorandomZeroSharingSubsetSeedCoordinate320::new(
-                scope,
+                master_scope,
+                catalog_identity,
                 invalid_contributor_position,
             ),
             Err(
@@ -525,75 +533,19 @@ fn scope_and_coordinate_construction_refuse_wrong_rosters_and_nonmembers() {
 }
 
 #[test]
-fn combination_refuses_missing_duplicate_and_wrong_scope_contributions() {
-    let context = completion_context(193);
-    let subset = completion_subset(&[1, 4, 8]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
-        Hash512::from_bytes([197_u8; 64]),
-        context,
-        Hash512::from_bytes([199_u8; 64]),
-        subset,
-    )
-    .unwrap();
-
-    let mut missing = matched_contributions(scope);
-    missing.pop();
-    assert!(matches!(
-        combine_commitment_matched_pseudorandom_zero_sharing_subset_master_320(scope, missing),
-        Err(
-            TallyPreparationError::PseudorandomZeroSharingSubsetSeedInventoryCountMismatch {
-                expected: 7,
-                actual: 6,
-            }
-        )
-    ));
-
-    let member_positions = subset.member_positions();
-    let repeated_position = member_positions[0];
-    let mut duplicate = matched_contributions(scope);
-    duplicate.pop();
-    duplicate.push(matched_contribution(scope, repeated_position));
-    assert!(matches!(
-        combine_commitment_matched_pseudorandom_zero_sharing_subset_master_320(scope, duplicate),
-        Err(
-            TallyPreparationError::PseudorandomZeroSharingSubsetSeedDuplicateContributor {
-                contributor_position,
-            }
-        ) if contributor_position == repeated_position
-    ));
-
-    let alternate_scope = PseudorandomZeroSharingSubsetSeedScope320::new(
-        scope.parameter_identity(),
-        context,
-        Hash512::from_bytes([211_u8; 64]),
-        subset,
-    )
-    .unwrap();
-    let mut wrong_scope = matched_contributions(scope);
-    wrong_scope.pop();
-    wrong_scope.push(matched_contribution(
-        alternate_scope,
-        *member_positions.last().unwrap(),
-    ));
-    assert_eq!(
-        combine_commitment_matched_pseudorandom_zero_sharing_subset_master_320(scope, wrong_scope,)
-            .unwrap_err(),
-        TallyPreparationError::PseudorandomZeroSharingSubsetSeedCoordinateMismatch
-    );
-}
-
-#[test]
 fn zero_secret_values_are_valid_encodings_and_debug_output_redacts_them() {
     let context = completion_context(223);
     let subset = completion_subset(&[2, 6, 9]);
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+    let master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
         Hash512::from_bytes([227_u8; 64]),
         context,
-        Hash512::from_bytes([229_u8; 64]),
         subset,
     )
     .unwrap();
-    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, 0).unwrap();
+    let catalog_identity = Hash512::from_bytes([229_u8; 64]);
+    let coordinate =
+        PseudorandomZeroSharingSubsetSeedCoordinate320::new(master_scope, catalog_identity, 0)
+            .unwrap();
     let (commitment, opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         coordinate,
         [0_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
@@ -609,36 +561,6 @@ fn zero_secret_values_are_valid_encodings_and_debug_output_redacts_them() {
 
     assert!(format!("{opening:?}").contains("[redacted]"));
     assert!(format!("{matched:?}").contains("[redacted]"));
-    let master = combine_commitment_matched_pseudorandom_zero_sharing_subset_master_320(
-        scope,
-        subset
-            .member_positions()
-            .into_iter()
-            .map(|contributor_position| {
-                let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(
-                    scope,
-                    contributor_position,
-                )
-                .unwrap();
-                let (commitment, opening) =
-                    create_pseudorandom_zero_sharing_subset_seed_contribution_320(
-                        coordinate,
-                        [0_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
-                        [0_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH],
-                    )
-                    .unwrap();
-                verify_pseudorandom_zero_sharing_subset_seed_contribution_320(
-                    coordinate,
-                    &commitment.canonical_bytes().unwrap(),
-                    &opening.canonical_bytes().unwrap(),
-                )
-                .unwrap()
-            })
-            .collect(),
-    )
-    .unwrap();
-    assert_eq!(master.as_bytes(), &[0_u8; 40]);
-    assert!(format!("{master:?}").contains("[redacted]"));
 }
 
 fn completion_subset(excluded_positions: &[u16]) -> ReplicatedRandomSharingSubset {
@@ -673,14 +595,25 @@ fn deterministic_salt(
     })
 }
 
+fn deterministic_catalog_identity(contributor_position: u16) -> Hash512 {
+    let mut bytes = [23_u8; Hash512::BYTE_LENGTH];
+    bytes[..2].copy_from_slice(&contributor_position.to_le_bytes());
+    Hash512::from_bytes(bytes)
+}
+
 fn commitment_digest(
-    scope: PseudorandomZeroSharingSubsetSeedScope320,
+    master_scope: PseudorandomZeroSharingSubsetMasterScope320,
+    seed_catalog_identity: Hash512,
     contributor_position: u16,
     contribution: [u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
     commitment_salt: [u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH],
 ) -> Hash512 {
-    let coordinate =
-        PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, contributor_position).unwrap();
+    let coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(
+        master_scope,
+        seed_catalog_identity,
+        contributor_position,
+    )
+    .unwrap();
     create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         coordinate,
         contribution,
@@ -716,42 +649,6 @@ fn assert_object_mismatch<T: core::fmt::Debug>(
             field,
         }) if field == expected_field
     ));
-}
-
-fn matched_contributions(
-    scope: PseudorandomZeroSharingSubsetSeedScope320,
-) -> Vec<
-    super::pseudorandom_zero_sharing_subset_seed_320::CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320,
->{
-    scope
-        .subset()
-        .member_positions()
-        .into_iter()
-        .map(|contributor_position| matched_contribution(scope, contributor_position))
-        .collect()
-}
-
-fn matched_contribution(
-    scope: PseudorandomZeroSharingSubsetSeedScope320,
-    contributor_position: u16,
-) -> super::pseudorandom_zero_sharing_subset_seed_320::CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320
-{
-    let coordinate =
-        PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, contributor_position).unwrap();
-    let contribution = deterministic_contribution(scope.subset(), contributor_position);
-    let commitment_salt = deterministic_salt(scope.subset(), contributor_position);
-    let (commitment, opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
-        coordinate,
-        contribution,
-        commitment_salt,
-    )
-    .unwrap();
-    verify_pseudorandom_zero_sharing_subset_seed_contribution_320(
-        coordinate,
-        &commitment.canonical_bytes().unwrap(),
-        &opening.canonical_bytes().unwrap(),
-    )
-    .unwrap()
 }
 
 fn completion_context(attempt_byte: u8) -> TallyPreparationContext {

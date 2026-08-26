@@ -29,7 +29,6 @@ use super::{
         PseudorandomZeroSharingPairSeedContributionCoordinate320,
         PseudorandomZeroSharingPairSeedOpening320,
         SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH, SeedCatalogSecretLeafError320,
-        combine_commitment_matched_pseudorandom_zero_sharing_pair_master_320,
         create_collective_coin_source_320,
         create_pseudorandom_zero_sharing_pair_seed_contribution_320,
         verify_collective_coin_source_320,
@@ -455,129 +454,6 @@ fn positive_match_refuses_wrong_coordinates_digests_salts_and_secrets() {
 }
 
 #[test]
-fn pair_master_requires_exact_lower_then_upper_inventory_and_matches_xor() {
-    let context = preparation_context(FOUNDATION_PROFILE.participant_count, 0xa1);
-    let parameter_identity = deterministic_hash(0xa3, 0);
-    let lower_layout =
-        PseudorandomZeroSharingSeedCatalogLayout320::derive(parameter_identity, context, 2)
-            .unwrap();
-    let upper_layout =
-        PseudorandomZeroSharingSeedCatalogLayout320::derive(parameter_identity, context, 7)
-            .unwrap();
-    let lower_coordinate =
-        PseudorandomZeroSharingPairSeedContributionCoordinate320::from_catalog_layout(
-            lower_layout,
-            7,
-        )
-        .unwrap();
-    let upper_coordinate =
-        PseudorandomZeroSharingPairSeedContributionCoordinate320::from_catalog_layout(
-            upper_layout,
-            2,
-        )
-        .unwrap();
-    assert_eq!(lower_coordinate.scope(), upper_coordinate.scope());
-    assert_ne!(
-        lower_coordinate.seed_catalog_identity(),
-        upper_coordinate.seed_catalog_identity()
-    );
-    let lower_contribution = [0xa5; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH];
-    let upper_contribution = deterministic_bytes::<
-        PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH,
-    >(0xa7, 2, 7);
-    let expected_master = core::array::from_fn(|byte_position| {
-        lower_contribution[byte_position] ^ upper_contribution[byte_position]
-    });
-    let master = combine_commitment_matched_pseudorandom_zero_sharing_pair_master_320(
-        lower_coordinate.scope(),
-        vec![
-            matched_pair_contribution(lower_coordinate, lower_contribution, 0xa9),
-            matched_pair_contribution(upper_coordinate, upper_contribution, 0xab),
-        ],
-    )
-    .unwrap();
-    assert_eq!(master.scope(), lower_coordinate.scope());
-    assert_eq!(master.as_bytes(), &expected_master);
-
-    let missing = vec![matched_pair_contribution(
-        lower_coordinate,
-        lower_contribution,
-        0xad,
-    )];
-    assert_eq!(
-        combine_commitment_matched_pseudorandom_zero_sharing_pair_master_320(
-            lower_coordinate.scope(),
-            missing,
-        )
-        .unwrap_err(),
-        SeedCatalogSecretLeafError320::PairContributionCountMismatch {
-            expected: 2,
-            actual: 1,
-        }
-    );
-    let reversed = vec![
-        matched_pair_contribution(upper_coordinate, upper_contribution, 0xaf),
-        matched_pair_contribution(lower_coordinate, lower_contribution, 0xb1),
-    ];
-    assert!(matches!(
-        combine_commitment_matched_pseudorandom_zero_sharing_pair_master_320(
-            lower_coordinate.scope(),
-            reversed,
-        ),
-        Err(
-            SeedCatalogSecretLeafError320::PairContributorOrderMismatch {
-                contribution_index: 0,
-                expected_contributor_position: 2,
-                actual_contributor_position: 7,
-            }
-        )
-    ));
-    let duplicate = vec![
-        matched_pair_contribution(lower_coordinate, lower_contribution, 0xb3),
-        matched_pair_contribution(lower_coordinate, upper_contribution, 0xb5),
-    ];
-    assert!(matches!(
-        combine_commitment_matched_pseudorandom_zero_sharing_pair_master_320(
-            lower_coordinate.scope(),
-            duplicate,
-        ),
-        Err(
-            SeedCatalogSecretLeafError320::PairContributorOrderMismatch {
-                contribution_index: 1,
-                expected_contributor_position: 7,
-                actual_contributor_position: 2,
-            }
-        )
-    ));
-
-    let alternate_context = preparation_context(FOUNDATION_PROFILE.participant_count, 0xb7);
-    let alternate_layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
-        parameter_identity,
-        alternate_context,
-        7,
-    )
-    .unwrap();
-    let alternate_coordinate =
-        PseudorandomZeroSharingPairSeedContributionCoordinate320::from_catalog_layout(
-            alternate_layout,
-            2,
-        )
-        .unwrap();
-    let wrong_scope = vec![
-        matched_pair_contribution(lower_coordinate, lower_contribution, 0xb9),
-        matched_pair_contribution(alternate_coordinate, upper_contribution, 0xbb),
-    ];
-    assert_eq!(
-        combine_commitment_matched_pseudorandom_zero_sharing_pair_master_320(
-            lower_coordinate.scope(),
-            wrong_scope,
-        )
-        .unwrap_err(),
-        SeedCatalogSecretLeafError320::PairCoordinateMismatch
-    );
-}
-
-#[test]
 fn pair_and_coin_catalog_adapters_bind_exact_coordinates_digests_and_paths() {
     let context = preparation_context(FOUNDATION_PROFILE.participant_count, 0xc1);
     let parameter_identity = deterministic_hash(0xc3, 0);
@@ -893,26 +769,6 @@ fn zero_secret_values_are_valid_and_debug_output_redacts_them() {
     );
     assert!(format!("{coin_opening:?}").contains("[redacted]"));
     assert!(format!("{matched_coin:?}").contains("[redacted]"));
-}
-
-fn matched_pair_contribution(
-    coordinate: PseudorandomZeroSharingPairSeedContributionCoordinate320,
-    contribution: [u8; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH],
-    salt_marker: u8,
-) -> super::pseudorandom_zero_sharing_pair_and_coin_seed_320::CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320
-{
-    let (commitment, opening) = create_pseudorandom_zero_sharing_pair_seed_contribution_320(
-        coordinate,
-        contribution,
-        [salt_marker; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH],
-    )
-    .unwrap();
-    verify_pseudorandom_zero_sharing_pair_seed_contribution_320(
-        coordinate,
-        &commitment.canonical_bytes().unwrap(),
-        &opening.canonical_bytes().unwrap(),
-    )
-    .unwrap()
 }
 
 fn pair_digest(

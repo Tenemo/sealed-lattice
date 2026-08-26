@@ -10,6 +10,7 @@ use crate::foundation::{
 
 use super::{
     TallyPreparationContext, TallyPreparationError, binary_field_320::BinaryFieldElement320,
+    pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSubsetMaster320,
     replicated_random_sharing::ReplicatedRandomSharingSubset,
 };
 
@@ -166,16 +167,26 @@ impl fmt::Debug for PseudorandomZeroSharingFieldChunk320 {
 }
 
 pub(crate) fn generate_pseudorandom_zero_sharing_field_chunk_320(
-    subset_master: &[u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
+    subset_master: &LocallyJoinedPseudorandomZeroSharingSubsetMaster320,
     coordinate: PseudorandomZeroSharingFieldStreamCoordinate320,
     chunk_index: u64,
 ) -> Result<PseudorandomZeroSharingFieldChunk320, TallyPreparationError> {
+    let master_scope = subset_master.scope();
+    if master_scope.parameter_identity() != coordinate.parameter_identity
+        || master_scope.preparation_context_identity() != coordinate.preparation_context_identity
+        || master_scope.subset() != coordinate.subset
+    {
+        return Err(TallyPreparationError::PseudorandomZeroSharingFieldStreamMasterScopeMismatch);
+    }
     let geometry = derive_field_chunk_geometry(coordinate.total_field_count, chunk_index)?;
     let query_bytes = coordinate.canonical_query_bytes(chunk_index)?;
     let output_byte_length = usize::try_from(geometry.output_byte_length)
         .map_err(|_| TallyPreparationError::IntegerConversion)?;
-    let bytes =
-        expand_pseudorandom_field_kmacxof256(subset_master, &query_bytes, output_byte_length);
+    let bytes = expand_pseudorandom_field_kmacxof256(
+        subset_master.as_bytes(),
+        &query_bytes,
+        output_byte_length,
+    );
     Ok(PseudorandomZeroSharingFieldChunk320 {
         first_field_index: geometry.first_field_index,
         field_count: geometry.field_count,
@@ -183,7 +194,7 @@ pub(crate) fn generate_pseudorandom_zero_sharing_field_chunk_320(
     })
 }
 
-pub(crate) fn expand_pseudorandom_field_kmacxof256(
+fn expand_pseudorandom_field_kmacxof256(
     key: &[u8],
     message: &[u8],
     output_byte_length: usize,
@@ -193,6 +204,15 @@ pub(crate) fn expand_pseudorandom_field_kmacxof256(
     let mut output = Zeroizing::new(vec![0_u8; output_byte_length]);
     kmac.into_xof().squeeze(&mut output);
     output
+}
+
+#[cfg(test)]
+pub(super) fn expand_pseudorandom_field_kmacxof256_for_test(
+    key: &[u8],
+    message: &[u8],
+    output_byte_length: usize,
+) -> Zeroizing<Vec<u8>> {
+    expand_pseudorandom_field_kmacxof256(key, message, output_byte_length)
 }
 
 pub(crate) fn pseudorandom_zero_sharing_field_chunk_count(

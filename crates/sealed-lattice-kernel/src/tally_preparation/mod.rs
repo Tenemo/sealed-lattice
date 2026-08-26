@@ -29,6 +29,7 @@ mod fixed_roster_linear_mpc_communication_floor;
 mod garbled_resource_model;
 mod garbling;
 mod garbling_alternative_resource_model;
+#[cfg(test)]
 mod geometry;
 mod label_encoding;
 mod malicious_mpc_communication_floor;
@@ -48,10 +49,13 @@ mod pseudorandom_zero_sharing_seed_catalog_state_320;
 mod pseudorandom_zero_sharing_seed_catalog_state_output_320;
 mod pseudorandom_zero_sharing_seed_delivery_320;
 mod pseudorandom_zero_sharing_seed_mailbox_320;
+mod pseudorandom_zero_sharing_seed_master_join_320;
 mod pseudorandom_zero_sharing_seed_receipt_320;
 mod pseudorandom_zero_sharing_seed_receipt_terminal_320;
 mod pseudorandom_zero_sharing_subset_seed_320;
+#[cfg(test)]
 mod random_state;
+#[cfg(test)]
 mod random_tape;
 mod replicated_beaver_opening;
 mod replicated_beaver_opening_record;
@@ -145,6 +149,8 @@ mod pseudorandom_zero_sharing_seed_delivery_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_mailbox_320_tests;
 #[cfg(test)]
+mod pseudorandom_zero_sharing_seed_master_join_320_tests;
+#[cfg(test)]
 mod pseudorandom_zero_sharing_seed_receipt_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_receipt_terminal_320_tests;
@@ -188,11 +194,13 @@ pub(crate) use binary_field::BinaryFieldElement256;
 #[cfg(feature = "preparation-field-measurement")]
 pub(crate) use binary_field_320::measure_binary_field_320_multiplications;
 pub(crate) use context::TallyPreparationContext;
+#[cfg(test)]
 pub(crate) use geometry::TallyPreparationGeometry;
 #[cfg(test)]
 pub(crate) use random_state::parse_tally_preparation_random_state;
 #[cfg(test)]
 pub(crate) use random_tape::{ExplicitJointRandomTape, SeededJointRandomTape};
+#[cfg(test)]
 pub(crate) use random_tape::{
     SEEDED_RANDOM_TAPE_BLOCK_BYTE_LENGTH, TallyPreparationRandomTapeSource,
 };
@@ -286,6 +294,7 @@ pub(crate) enum TallyPreparationError {
         position_within_chunk: u64,
         field_count: u64,
     },
+    PseudorandomZeroSharingFieldStreamMasterScopeMismatch,
     PseudorandomZeroSharingSubsetSeedSubsetParticipantCountMismatch {
         subset_participant_count: u16,
         context_participant_count: u16,
@@ -299,12 +308,10 @@ pub(crate) enum TallyPreparationError {
     PseudorandomZeroSharingSubsetSeedCoordinateMismatch,
     PseudorandomZeroSharingSubsetSeedCommitmentMismatch,
     PseudorandomZeroSharingSubsetSeedCommitmentHashFailure,
-    PseudorandomZeroSharingSubsetSeedInventoryCountMismatch {
-        expected: usize,
-        actual: usize,
-    },
-    PseudorandomZeroSharingSubsetSeedDuplicateContributor {
-        contributor_position: u16,
+    PseudorandomZeroSharingSubsetSeedContributorOrderMismatch {
+        contribution_index: usize,
+        expected_contributor_position: u16,
+        actual_contributor_position: u16,
     },
     PseudorandomZeroSharingSeedCatalogContributorPositionOutOfRange {
         contributor_position: u16,
@@ -756,6 +763,9 @@ impl fmt::Display for TallyPreparationError {
                 formatter,
                 "pseudorandom zero-sharing field position {position_within_chunk} is outside chunk field count {field_count}"
             ),
+            Self::PseudorandomZeroSharingFieldStreamMasterScopeMismatch => formatter.write_str(
+                "pseudorandom zero-sharing field stream master does not match its public scope",
+            ),
             Self::PseudorandomZeroSharingSubsetSeedSubsetParticipantCountMismatch {
                 subset_participant_count,
                 context_participant_count,
@@ -782,17 +792,13 @@ impl fmt::Display for TallyPreparationError {
             Self::PseudorandomZeroSharingSubsetSeedCommitmentHashFailure => formatter.write_str(
                 "pseudorandom zero-sharing subset-seed commitment hash framing failed",
             ),
-            Self::PseudorandomZeroSharingSubsetSeedInventoryCountMismatch { expected, actual } => {
-                write!(
-                    formatter,
-                    "pseudorandom zero-sharing subset-seed inventory has {actual} contributions; expected {expected}"
-                )
-            }
-            Self::PseudorandomZeroSharingSubsetSeedDuplicateContributor {
-                contributor_position,
+            Self::PseudorandomZeroSharingSubsetSeedContributorOrderMismatch {
+                contribution_index,
+                expected_contributor_position,
+                actual_contributor_position,
             } => write!(
                 formatter,
-                "pseudorandom zero-sharing subset-seed inventory repeats contributor {contributor_position}"
+                "pseudorandom zero-sharing subset-seed contribution {contribution_index} is from contributor {actual_contributor_position}; expected contributor {expected_contributor_position}"
             ),
             Self::PseudorandomZeroSharingSeedCatalogContributorPositionOutOfRange {
                 contributor_position,

@@ -713,7 +713,7 @@ fn receipt_terminal_domains_and_lengths_are_exact_and_profile_derived() {
     }
 }
 
-fn verified_receipt_inventory(
+pub(super) fn verified_receipt_inventory(
     fixture: &SeedMailboxTestFixture320,
     receipt_envelopes: &[Vec<u8>],
 ) -> VerifiedPseudorandomZeroSharingSeedRecipientReceiptInventory320 {
@@ -762,7 +762,20 @@ fn signed_receipt_envelopes(
         .collect()
 }
 
-fn signed_receipt_envelopes_from_authenticated_deliveries(
+pub(super) fn signed_receipt_envelopes_with_inventory_marker_for_test(
+    fixture: &SeedMailboxTestFixture320,
+    inventory_identity_marker: u8,
+    signature_seed_marker: u8,
+) -> Vec<Vec<u8>> {
+    signed_receipt_envelopes(
+        fixture,
+        inventory_identity_marker,
+        signature_seed_marker,
+        PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
+    )
+}
+
+pub(super) fn signed_receipt_envelopes_from_authenticated_deliveries(
     encapsulation_marker: u8,
     first_signature_seed_marker: u8,
     alternate_signature_seed_marker: u8,
@@ -903,7 +916,7 @@ fn signed_receipt_envelope(
     .unwrap()
 }
 
-fn signed_terminal_certificate(
+pub(super) fn signed_terminal_certificate(
     receipt_inventory: &VerifiedPseudorandomZeroSharingSeedRecipientReceiptInventory320,
     signing_keys: &[ml_dsa_65::PrivateKey],
     signature_seed_marker: u8,

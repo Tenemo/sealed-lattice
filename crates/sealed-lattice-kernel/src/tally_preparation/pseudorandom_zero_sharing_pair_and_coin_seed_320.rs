@@ -106,10 +106,6 @@ pub(crate) enum SeedCatalogSecretLeafError320 {
     CommitmentHashFailure {
         leaf_domain: &'static str,
     },
-    PairContributionCountMismatch {
-        expected: usize,
-        actual: usize,
-    },
     PairContributorOrderMismatch {
         contribution_index: usize,
         expected_contributor_position: u16,
@@ -152,10 +148,6 @@ impl fmt::Display for SeedCatalogSecretLeafError320 {
             Self::CommitmentHashFailure { leaf_domain } => {
                 write!(formatter, "secret-leaf hash framing failed for {leaf_domain}")
             }
-            Self::PairContributionCountMismatch { expected, actual } => write!(
-                formatter,
-                "pair-seed inventory has {actual} contributions; expected {expected}"
-            ),
             Self::PairContributorOrderMismatch {
                 contribution_index,
                 expected_contributor_position,
@@ -316,6 +308,17 @@ impl PseudorandomZeroSharingPairSeedContributionCoordinate320 {
             CanonicalItem::unsigned16(self.scope.upper_roster_position),
             CanonicalItem::unsigned16(self.contributor_position),
         ]
+    }
+}
+
+#[cfg(test)]
+pub(super) const fn pair_seed_coordinate_with_catalog_identity_for_test(
+    coordinate: PseudorandomZeroSharingPairSeedContributionCoordinate320,
+    seed_catalog_identity: Hash512,
+) -> PseudorandomZeroSharingPairSeedContributionCoordinate320 {
+    PseudorandomZeroSharingPairSeedContributionCoordinate320 {
+        seed_catalog_identity,
+        ..coordinate
     }
 }
 
@@ -655,6 +658,19 @@ impl CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320 {
     ) -> PseudorandomZeroSharingPairSeedContributionCoordinate320 {
         self.coordinate
     }
+
+    pub(super) fn into_parts(
+        mut self,
+    ) -> (
+        PseudorandomZeroSharingPairSeedContributionCoordinate320,
+        [u8; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH],
+    ) {
+        let contribution = core::mem::replace(
+            &mut self.contribution,
+            [0_u8; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH],
+        );
+        (self.coordinate, contribution)
+    }
 }
 
 impl fmt::Debug for CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320 {
@@ -673,35 +689,6 @@ impl Drop for CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320 {
     }
 }
 
-pub(crate) struct CommitmentMatchedPseudorandomZeroSharingPairMaster320 {
-    scope: PseudorandomZeroSharingPairSeedScope320,
-    bytes: [u8; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH],
-}
-
-impl CommitmentMatchedPseudorandomZeroSharingPairMaster320 {
-    pub(crate) const fn scope(&self) -> PseudorandomZeroSharingPairSeedScope320 {
-        self.scope
-    }
-
-    pub(crate) const fn as_bytes(
-        &self,
-    ) -> &[u8; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH] {
-        &self.bytes
-    }
-}
-
-impl fmt::Debug for CommitmentMatchedPseudorandomZeroSharingPairMaster320 {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("CommitmentMatchedPseudorandomZeroSharingPairMaster320([redacted])")
-    }
-}
-
-impl Drop for CommitmentMatchedPseudorandomZeroSharingPairMaster320 {
-    fn drop(&mut self) {
-        self.bytes.zeroize();
-    }
-}
-
 pub(crate) struct CommitmentMatchedCollectiveCoinSource320 {
     coordinate: CollectiveCoinSourceCoordinate320,
     source: [u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH],
@@ -714,6 +701,17 @@ impl CommitmentMatchedCollectiveCoinSource320 {
 
     pub(crate) const fn as_bytes(&self) -> &[u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH] {
         &self.source
+    }
+
+    pub(super) fn into_parts(
+        mut self,
+    ) -> (
+        CollectiveCoinSourceCoordinate320,
+        [u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH],
+    ) {
+        let source =
+            core::mem::replace(&mut self.source, [0_u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH]);
+        (self.coordinate, source)
     }
 }
 
@@ -800,60 +798,6 @@ pub(crate) fn verify_pseudorandom_zero_sharing_pair_seed_contribution_320(
             contribution: opening.contribution,
         },
     )
-}
-
-/// XORs exactly the lower then upper endpoint contribution.
-///
-/// Commitment matching alone is not source authentication. The result cannot
-/// authorize a later transition until catalog, state, delivery, and receipt
-/// provenance all pass.
-pub(crate) fn combine_commitment_matched_pseudorandom_zero_sharing_pair_master_320(
-    expected_scope: PseudorandomZeroSharingPairSeedScope320,
-    contributions: Vec<CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320>,
-) -> Result<CommitmentMatchedPseudorandomZeroSharingPairMaster320, SeedCatalogSecretLeafError320> {
-    let expected_contributors = [
-        expected_scope.lower_roster_position,
-        expected_scope.upper_roster_position,
-    ];
-    if contributions.len() != expected_contributors.len() {
-        return Err(
-            SeedCatalogSecretLeafError320::PairContributionCountMismatch {
-                expected: expected_contributors.len(),
-                actual: contributions.len(),
-            },
-        );
-    }
-    let mut master =
-        Zeroizing::new([0_u8; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH]);
-    for (contribution_index, (matched_contribution, expected_contributor_position)) in contributions
-        .into_iter()
-        .zip(expected_contributors)
-        .enumerate()
-    {
-        if matched_contribution.coordinate.scope != expected_scope {
-            return Err(SeedCatalogSecretLeafError320::PairCoordinateMismatch);
-        }
-        let actual_contributor_position = matched_contribution.coordinate.contributor_position;
-        if actual_contributor_position != expected_contributor_position {
-            return Err(
-                SeedCatalogSecretLeafError320::PairContributorOrderMismatch {
-                    contribution_index,
-                    expected_contributor_position,
-                    actual_contributor_position,
-                },
-            );
-        }
-        for (master_byte, contribution_byte) in master
-            .iter_mut()
-            .zip(matched_contribution.contribution.iter())
-        {
-            *master_byte ^= contribution_byte;
-        }
-    }
-    Ok(CommitmentMatchedPseudorandomZeroSharingPairMaster320 {
-        scope: expected_scope,
-        bytes: *master,
-    })
 }
 
 /// Creates one candidate collective-coin source from caller-supplied bytes.

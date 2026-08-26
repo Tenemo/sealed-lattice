@@ -12,7 +12,8 @@ use super::{
     TallyPreparationContext, TallyPreparationError,
     pseudorandom_zero_sharing_subset_seed_320::{
         CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320,
-        PseudorandomZeroSharingSubsetSeedCoordinate320, PseudorandomZeroSharingSubsetSeedScope320,
+        PseudorandomZeroSharingSubsetMasterScope320,
+        PseudorandomZeroSharingSubsetSeedCoordinate320,
         verify_pseudorandom_zero_sharing_subset_seed_opening_320,
     },
     replicated_random_sharing::{
@@ -329,13 +330,16 @@ impl PseudorandomZeroSharingSeedCatalogLayout320 {
         self.validate_coordinate(PseudorandomZeroSharingSeedCatalogCoordinate320::Subset(
             subset,
         ))?;
-        let scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+        let master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
             self.parameter_identity,
             self.preparation_context,
-            self.identity,
             subset,
         )?;
-        PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, self.contributor_position)
+        PseudorandomZeroSharingSubsetSeedCoordinate320::new(
+            master_scope,
+            self.identity,
+            self.contributor_position,
+        )
     }
 
     pub(crate) fn leaf_ordinal(

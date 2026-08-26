@@ -15,11 +15,14 @@ use super::{
     pseudorandom_zero_sharing_field_stream_320::{
         PSEUDORANDOM_FIELD_STREAM_CUSTOMIZATION,
         PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH,
-        PseudorandomZeroSharingFieldStreamCoordinate320, expand_pseudorandom_field_kmacxof256,
+        PseudorandomZeroSharingFieldStreamCoordinate320,
+        expand_pseudorandom_field_kmacxof256_for_test,
         generate_pseudorandom_zero_sharing_field_chunk_320,
         pseudorandom_zero_sharing_field_chunk_count,
         pseudorandom_zero_sharing_field_elements_per_chunk,
     },
+    pseudorandom_zero_sharing_seed_master_join_320::locally_joined_subset_master_for_test,
+    pseudorandom_zero_sharing_subset_seed_320::PseudorandomZeroSharingSubsetMasterScope320,
     replicated_random_sharing::ReplicatedRandomSharingSubset,
 };
 
@@ -46,7 +49,7 @@ fn candidate_kmacxof256_matches_an_external_known_answer() {
         |position| position as u8,
     );
     let message = (0xa0_u8..=0xdf).collect::<Vec<_>>();
-    let actual = expand_pseudorandom_field_kmacxof256(&key, &message, 80);
+    let actual = expand_pseudorandom_field_kmacxof256_for_test(&key, &message, 80);
     let expected = decode_hex(concat!(
         "3beccf62e360825db560ff335f86557832807160846ee303e02cc080179da478f",
         "fa6eab412513de62a7c15ad2b5571b3e499c299a0899a2e5b8753fcc104f1ecf",
@@ -64,7 +67,7 @@ fn candidate_kmacxof256_matches_independent_sp800_185_framing_and_fragmented_squ
     let message = (0_u8..=193)
         .map(|value| value.wrapping_mul(29).wrapping_add(7))
         .collect::<Vec<_>>();
-    let actual = expand_pseudorandom_field_kmacxof256(&key, &message, 173);
+    let actual = expand_pseudorandom_field_kmacxof256_for_test(&key, &message, 173);
     let expected = independently_expand_kmacxof256(&key, &message, 173, &[1, 16, 73, 83]);
 
     assert_eq!(actual.as_slice(), expected);
@@ -121,8 +124,9 @@ fn generated_chunk_matches_independent_kmacxof_and_field_mapping() {
         &[2, 5, 9],
     )
     .unwrap();
+    let parameter_identity = Hash512::from_bytes([43_u8; 64]);
     let coordinate = PseudorandomZeroSharingFieldStreamCoordinate320::new(
-        Hash512::from_bytes([43_u8; 64]),
+        parameter_identity,
         context,
         Hash512::from_bytes([47_u8; 64]),
         subset,
@@ -130,11 +134,13 @@ fn generated_chunk_matches_independent_kmacxof_and_field_mapping() {
         19,
     )
     .unwrap();
-    let subset_master =
+    let subset_master_bytes =
         core::array::from_fn(|position| 0x61_u8.wrapping_add((position as u8).wrapping_mul(11)));
     let query = coordinate.canonical_query_bytes(0).unwrap();
     let expected =
-        independently_expand_kmacxof256(&subset_master, &query, 19 * 40, &[17, 211, 532]);
+        independently_expand_kmacxof256(&subset_master_bytes, &query, 19 * 40, &[17, 211, 532]);
+    let subset_master =
+        joined_subset_master(parameter_identity, context, subset, subset_master_bytes);
     let chunk =
         generate_pseudorandom_zero_sharing_field_chunk_320(&subset_master, coordinate, 0).unwrap();
 
@@ -161,8 +167,9 @@ fn completion_stream_uses_two_restartable_one_megabyte_bounded_chunks() {
         &[3, 6, 9],
     )
     .unwrap();
+    let parameter_identity = Hash512::from_bytes([59_u8; 64]);
     let coordinate = PseudorandomZeroSharingFieldStreamCoordinate320::new(
-        Hash512::from_bytes([59_u8; 64]),
+        parameter_identity,
         context,
         Hash512::from_bytes([61_u8; 64]),
         subset,
@@ -170,7 +177,12 @@ fn completion_stream_uses_two_restartable_one_megabyte_bounded_chunks() {
         COMPLETION_ZERO_SHARING_COUNT,
     )
     .unwrap();
-    let subset_master = [67_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH];
+    let subset_master = joined_subset_master(
+        parameter_identity,
+        context,
+        subset,
+        [67_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
+    );
 
     assert_eq!(
         pseudorandom_zero_sharing_field_elements_per_chunk().unwrap(),
@@ -411,6 +423,12 @@ fn malformed_context_basis_length_chunk_and_position_are_refused() {
         1,
     )
     .unwrap();
+    let subset_master = joined_subset_master(
+        parameter_identity,
+        context,
+        completion_subset,
+        [131_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
+    );
     assert!(matches!(
         coordinate.canonical_query_bytes(1),
         Err(
@@ -421,13 +439,20 @@ fn malformed_context_basis_length_chunk_and_position_are_refused() {
         )
     ));
     assert!(matches!(
-        generate_pseudorandom_zero_sharing_field_chunk_320(
-            &[131_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
-            coordinate,
-            1,
-        ),
+        generate_pseudorandom_zero_sharing_field_chunk_320(&subset_master, coordinate, 1,),
         Err(TallyPreparationError::PseudorandomZeroSharingFieldStreamChunkOutOfRange { .. })
     ));
+    let wrong_master = joined_subset_master(
+        Hash512::from_bytes([137_u8; 64]),
+        context,
+        completion_subset,
+        [139_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
+    );
+    assert_eq!(
+        generate_pseudorandom_zero_sharing_field_chunk_320(&wrong_master, coordinate, 0)
+            .unwrap_err(),
+        TallyPreparationError::PseudorandomZeroSharingFieldStreamMasterScopeMismatch
+    );
     assert!(matches!(
         pseudorandom_zero_sharing_field_chunk_count(0),
         Err(TallyPreparationError::PseudorandomZeroSharingFieldCountZero)
@@ -442,8 +467,9 @@ fn chunk_debug_output_redacts_generated_bytes() {
         &[0, 2, 7],
     )
     .unwrap();
+    let parameter_identity = Hash512::from_bytes([139_u8; 64]);
     let coordinate = PseudorandomZeroSharingFieldStreamCoordinate320::new(
-        Hash512::from_bytes([139_u8; 64]),
+        parameter_identity,
         context,
         Hash512::from_bytes([149_u8; 64]),
         subset,
@@ -451,16 +477,30 @@ fn chunk_debug_output_redacts_generated_bytes() {
         2,
     )
     .unwrap();
-    let chunk = generate_pseudorandom_zero_sharing_field_chunk_320(
-        &[151_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
-        coordinate,
-        0,
-    )
-    .unwrap();
+    let subset_master = joined_subset_master(
+        parameter_identity,
+        context,
+        subset,
+        [151_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
+    );
+    let chunk =
+        generate_pseudorandom_zero_sharing_field_chunk_320(&subset_master, coordinate, 0).unwrap();
     let debug_output = format!("{chunk:?}");
 
     assert!(debug_output.contains("[redacted]"));
     assert!(!debug_output.contains(&format!("{:02x?}", chunk.bytes())));
+}
+
+fn joined_subset_master(
+    parameter_identity: Hash512,
+    context: TallyPreparationContext,
+    subset: ReplicatedRandomSharingSubset,
+    bytes: [u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
+) -> super::pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSubsetMaster320{
+    let scope =
+        PseudorandomZeroSharingSubsetMasterScope320::new(parameter_identity, context, subset)
+            .unwrap();
+    locally_joined_subset_master_for_test(scope, bytes)
 }
 
 fn independently_expand_kmacxof256(

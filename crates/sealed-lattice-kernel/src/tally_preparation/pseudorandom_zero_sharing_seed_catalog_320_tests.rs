@@ -27,7 +27,8 @@ use super::{
     pseudorandom_zero_sharing_subset_seed_320::{
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH,
-        PseudorandomZeroSharingSubsetSeedCoordinate320, PseudorandomZeroSharingSubsetSeedScope320,
+        PseudorandomZeroSharingSubsetMasterScope320,
+        PseudorandomZeroSharingSubsetSeedCoordinate320,
         create_pseudorandom_zero_sharing_subset_seed_contribution_320,
     },
 };
@@ -227,15 +228,18 @@ fn subset_opening_adapter_binds_the_catalog_identity_coordinate_digest_and_path(
     assert_eq!(included.commitment_digest(), commitment.digest());
 
     let other_layout = completion_layout(2, 0x62);
-    let wrong_scope = PseudorandomZeroSharingSubsetSeedScope320::new(
+    let wrong_master_scope = PseudorandomZeroSharingSubsetMasterScope320::new(
         other_layout.parameter_identity(),
         other_layout.preparation_context(),
-        other_layout.identity(),
         subset,
     )
     .unwrap();
-    let wrong_coordinate =
-        PseudorandomZeroSharingSubsetSeedCoordinate320::new(wrong_scope, 2).unwrap();
+    let wrong_coordinate = PseudorandomZeroSharingSubsetSeedCoordinate320::new(
+        wrong_master_scope,
+        other_layout.identity(),
+        2,
+    )
+    .unwrap();
     let (_, wrong_opening) = create_pseudorandom_zero_sharing_subset_seed_contribution_320(
         wrong_coordinate,
         [0x73; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],

@@ -110,9 +110,9 @@ impl OwnedRootAuthorizationPackage320 {
     }
 }
 
-struct SeedCatalogFixture320 {
-    tree: PseudorandomZeroSharingSeedCatalogTree320,
-    opening_bytes: Box<[Zeroizing<Vec<u8>>]>,
+pub(super) struct SeedCatalogFixture320 {
+    pub(super) tree: PseudorandomZeroSharingSeedCatalogTree320,
+    pub(super) opening_bytes: Box<[Zeroizing<Vec<u8>>]>,
 }
 
 struct OwnedSeedDeliveryEntry320 {
@@ -135,6 +135,14 @@ pub(super) fn seed_mailbox_test_fixture_320(
     sender_position: u16,
     recipient_position: u16,
 ) -> SeedMailboxTestFixture320 {
+    seed_mailbox_test_fixture_with_parameter_marker_320(sender_position, recipient_position, 0x1d)
+}
+
+pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
+    sender_position: u16,
+    recipient_position: u16,
+    parameter_identity_marker: u8,
+) -> SeedMailboxTestFixture320 {
     let participant_count = FOUNDATION_PROFILE.participant_count;
     assert!(sender_position < participant_count);
     assert!(recipient_position < participant_count);
@@ -142,7 +150,7 @@ pub(super) fn seed_mailbox_test_fixture_320(
     let (roster, signing_keys, mailbox_decapsulation_keys) =
         roster_signing_and_mailbox_keys(participant_count, 0x19);
     let preparation_context = build_preparation_context(&roster, 0x1b);
-    let parameter_identity = deterministic_hash(0x1d, 0);
+    let parameter_identity = deterministic_hash(parameter_identity_marker, 0);
     let catalog_fixtures = (0..participant_count)
         .map(|contributor_position| {
             let layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
@@ -1128,7 +1136,7 @@ fn ordered_seed_deliveries_require_the_roster_root_terminal_before_mailbox_autho
     ));
 }
 
-fn seed_catalog_fixture(
+pub(super) fn seed_catalog_fixture(
     layout: PseudorandomZeroSharingSeedCatalogLayout320,
     marker: u8,
 ) -> SeedCatalogFixture320 {

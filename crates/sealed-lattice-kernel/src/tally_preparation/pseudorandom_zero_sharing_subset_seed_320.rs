@@ -9,13 +9,12 @@ use crate::foundation::{
 };
 
 use super::{
-    TallyPreparationContext, TallyPreparationError,
-    pseudorandom_zero_sharing_field_stream_320::PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH,
+    TallyPreparationContext, TallyPreparationError, binary_field_320::BinaryFieldElement320,
     replicated_random_sharing::ReplicatedRandomSharingSubset,
 };
 
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH: usize =
-    PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH;
+    BinaryFieldElement320::CANONICAL_BYTE_LENGTH;
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH: usize = 64;
 
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_SECRET_LEAF_DOMAIN: &str =
@@ -55,22 +54,17 @@ pub(crate) const PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGT
         + PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH;
 
 /// Public scope shared by every contribution to one subset master.
-///
-/// The catalog identity is a caller-supplied candidate identity until the
-/// emitted catalog compiler exists. This scope carries no source authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PseudorandomZeroSharingSubsetSeedScope320 {
+pub(crate) struct PseudorandomZeroSharingSubsetMasterScope320 {
     parameter_identity: Hash512,
     preparation_context_identity: Hash512,
-    seed_catalog_identity: Hash512,
     subset: ReplicatedRandomSharingSubset,
 }
 
-impl PseudorandomZeroSharingSubsetSeedScope320 {
+impl PseudorandomZeroSharingSubsetMasterScope320 {
     pub(crate) fn new(
         parameter_identity: Hash512,
         preparation_context: TallyPreparationContext,
-        seed_catalog_identity: Hash512,
         subset: ReplicatedRandomSharingSubset,
     ) -> Result<Self, TallyPreparationError> {
         if subset.participant_count() != preparation_context.participant_count() {
@@ -84,7 +78,6 @@ impl PseudorandomZeroSharingSubsetSeedScope320 {
         Ok(Self {
             parameter_identity,
             preparation_context_identity: preparation_context.identity(),
-            seed_catalog_identity,
             subset,
         })
     }
@@ -97,10 +90,6 @@ impl PseudorandomZeroSharingSubsetSeedScope320 {
         self.preparation_context_identity
     }
 
-    pub(crate) const fn seed_catalog_identity(self) -> Hash512 {
-        self.seed_catalog_identity
-    }
-
     pub(crate) const fn subset(self) -> ReplicatedRandomSharingSubset {
         self.subset
     }
@@ -108,7 +97,6 @@ impl PseudorandomZeroSharingSubsetSeedScope320 {
     fn from_decoded_components(
         parameter_identity: Hash512,
         preparation_context_identity: Hash512,
-        seed_catalog_identity: Hash512,
         participant_count: u16,
         excluded_position_mask: u32,
     ) -> Result<Self, TallyPreparationError> {
@@ -142,36 +130,32 @@ impl PseudorandomZeroSharingSubsetSeedScope320 {
         Ok(Self {
             parameter_identity,
             preparation_context_identity,
-            seed_catalog_identity,
             subset,
         })
     }
-
-    fn canonical_items(self) -> Vec<CanonicalItem> {
-        vec![
-            CanonicalItem::hash512(self.parameter_identity.into_bytes()),
-            CanonicalItem::hash512(self.preparation_context_identity.into_bytes()),
-            CanonicalItem::unsigned16(PREPARATION_ATTEMPT_ORDINAL),
-            CanonicalItem::hash512(self.seed_catalog_identity.into_bytes()),
-            CanonicalItem::unsigned16(self.subset.participant_count()),
-            CanonicalItem::unsigned32(self.subset.excluded_position_mask()),
-        ]
-    }
 }
 
+/// Contributor-specific coordinate of one salted subset contribution leaf.
+///
+/// The catalog identity belongs to this leaf, not to the shared master scope.
+/// Keeping those identities separate permits contributions from distinct
+/// participant catalogs to join only when their parameter, preparation, and
+/// subset scope agrees. This coordinate carries no source authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PseudorandomZeroSharingSubsetSeedCoordinate320 {
-    scope: PseudorandomZeroSharingSubsetSeedScope320,
+    master_scope: PseudorandomZeroSharingSubsetMasterScope320,
+    seed_catalog_identity: Hash512,
     contributor_position: u16,
 }
 
 impl PseudorandomZeroSharingSubsetSeedCoordinate320 {
     pub(crate) fn new(
-        scope: PseudorandomZeroSharingSubsetSeedScope320,
+        master_scope: PseudorandomZeroSharingSubsetMasterScope320,
+        seed_catalog_identity: Hash512,
         contributor_position: u16,
     ) -> Result<Self, TallyPreparationError> {
-        if contributor_position >= scope.subset.participant_count()
-            || !scope.subset.contains(contributor_position)?
+        if contributor_position >= master_scope.subset.participant_count()
+            || !master_scope.subset.contains(contributor_position)?
         {
             return Err(
                 TallyPreparationError::PseudorandomZeroSharingSubsetSeedContributorNotMember {
@@ -180,15 +164,34 @@ impl PseudorandomZeroSharingSubsetSeedCoordinate320 {
             );
         }
         Ok(Self {
-            scope,
+            master_scope,
+            seed_catalog_identity,
             contributor_position,
         })
     }
 
+    pub(crate) const fn master_scope(self) -> PseudorandomZeroSharingSubsetMasterScope320 {
+        self.master_scope
+    }
+
+    pub(crate) const fn seed_catalog_identity(self) -> Hash512 {
+        self.seed_catalog_identity
+    }
+
+    pub(crate) const fn contributor_position(self) -> u16 {
+        self.contributor_position
+    }
+
     fn canonical_items(self) -> Vec<CanonicalItem> {
-        let mut items = self.scope.canonical_items();
-        items.push(CanonicalItem::unsigned16(self.contributor_position));
-        items
+        vec![
+            CanonicalItem::hash512(self.master_scope.parameter_identity.into_bytes()),
+            CanonicalItem::hash512(self.master_scope.preparation_context_identity.into_bytes()),
+            CanonicalItem::unsigned16(PREPARATION_ATTEMPT_ORDINAL),
+            CanonicalItem::hash512(self.seed_catalog_identity.into_bytes()),
+            CanonicalItem::unsigned16(self.master_scope.subset.participant_count()),
+            CanonicalItem::unsigned32(self.master_scope.subset.excluded_position_mask()),
+            CanonicalItem::unsigned16(self.contributor_position),
+        ]
     }
 }
 
@@ -331,38 +334,28 @@ impl fmt::Debug for CommitmentMatchedPseudorandomZeroSharingSubsetSeedContributi
     }
 }
 
+impl CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320 {
+    pub(super) const fn coordinate(&self) -> PseudorandomZeroSharingSubsetSeedCoordinate320 {
+        self.coordinate
+    }
+
+    pub(super) fn into_parts(
+        mut self,
+    ) -> (
+        PseudorandomZeroSharingSubsetSeedCoordinate320,
+        [u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
+    ) {
+        let contribution = core::mem::replace(
+            &mut self.contribution,
+            [0_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
+        );
+        (self.coordinate, contribution)
+    }
+}
+
 impl Drop for CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320 {
     fn drop(&mut self) {
         self.contribution.zeroize();
-    }
-}
-
-pub(crate) struct CommitmentMatchedPseudorandomZeroSharingSubsetMaster320 {
-    scope: PseudorandomZeroSharingSubsetSeedScope320,
-    bytes: [u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
-}
-
-impl CommitmentMatchedPseudorandomZeroSharingSubsetMaster320 {
-    pub(crate) const fn scope(&self) -> PseudorandomZeroSharingSubsetSeedScope320 {
-        self.scope
-    }
-
-    pub(crate) const fn as_bytes(
-        &self,
-    ) -> &[u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH] {
-        &self.bytes
-    }
-}
-
-impl fmt::Debug for CommitmentMatchedPseudorandomZeroSharingSubsetMaster320 {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("CommitmentMatchedPseudorandomZeroSharingSubsetMaster320([redacted])")
-    }
-}
-
-impl Drop for CommitmentMatchedPseudorandomZeroSharingSubsetMaster320 {
-    fn drop(&mut self) {
-        self.bytes.zeroize();
     }
 }
 
@@ -457,71 +450,6 @@ pub(crate) fn verify_pseudorandom_zero_sharing_subset_seed_opening_320(
     ))
 }
 
-/// Combines one commitment-matched contribution from every subset member.
-///
-/// Commitment matching alone is not source authentication. The returned
-/// master must not be used as a protocol continuation capability until every
-/// contribution also has catalog, signature, delivery, receipt, and state
-/// provenance.
-pub(crate) fn combine_commitment_matched_pseudorandom_zero_sharing_subset_master_320(
-    expected_scope: PseudorandomZeroSharingSubsetSeedScope320,
-    contributions: Vec<CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320>,
-) -> Result<CommitmentMatchedPseudorandomZeroSharingSubsetMaster320, TallyPreparationError> {
-    let expected_contributors = expected_scope.subset.member_positions();
-    if contributions.len() != expected_contributors.len() {
-        return Err(
-            TallyPreparationError::PseudorandomZeroSharingSubsetSeedInventoryCountMismatch {
-                expected: expected_contributors.len(),
-                actual: contributions.len(),
-            },
-        );
-    }
-
-    let mut seen_contributor_mask = 0_u32;
-    let mut master = Zeroizing::new([0_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH]);
-    for matched_contribution in contributions {
-        let coordinate = matched_contribution.coordinate;
-        if coordinate.scope != expected_scope {
-            return Err(TallyPreparationError::PseudorandomZeroSharingSubsetSeedCoordinateMismatch);
-        }
-        let contributor_bit = 1_u32
-            .checked_shl(u32::from(coordinate.contributor_position))
-            .ok_or(TallyPreparationError::ArithmeticOverflow)?;
-        if seen_contributor_mask & contributor_bit != 0 {
-            return Err(
-                TallyPreparationError::PseudorandomZeroSharingSubsetSeedDuplicateContributor {
-                    contributor_position: coordinate.contributor_position,
-                },
-            );
-        }
-        seen_contributor_mask |= contributor_bit;
-        for (master_byte, contribution_byte) in master
-            .iter_mut()
-            .zip(matched_contribution.contribution.iter())
-        {
-            *master_byte ^= contribution_byte;
-        }
-    }
-
-    let expected_contributor_mask =
-        expected_contributors
-            .into_iter()
-            .try_fold(0_u32, |mask, contributor_position| {
-                let contributor_bit = 1_u32
-                    .checked_shl(u32::from(contributor_position))
-                    .ok_or(TallyPreparationError::ArithmeticOverflow)?;
-                Ok::<_, TallyPreparationError>(mask | contributor_bit)
-            })?;
-    if seen_contributor_mask != expected_contributor_mask {
-        return Err(TallyPreparationError::PseudorandomZeroSharingSubsetSeedCoordinateMismatch);
-    }
-
-    Ok(CommitmentMatchedPseudorandomZeroSharingSubsetMaster320 {
-        scope: expected_scope,
-        bytes: *master,
-    })
-}
-
 fn derive_subset_seed_commitment_digest(
     coordinate: PseudorandomZeroSharingSubsetSeedCoordinate320,
     commitment_salt: &[u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH],
@@ -572,14 +500,17 @@ fn read_coordinate(
     let participant_count = read_u16(&items[4], "participant count")?;
     let excluded_position_mask = read_u32(&items[5], "excluded-position mask")?;
     let contributor_position = read_u16(&items[6], "contributor position")?;
-    let scope = PseudorandomZeroSharingSubsetSeedScope320::from_decoded_components(
+    let master_scope = PseudorandomZeroSharingSubsetMasterScope320::from_decoded_components(
         parameter_identity,
         preparation_context_identity,
-        seed_catalog_identity,
         participant_count,
         excluded_position_mask,
     )?;
-    PseudorandomZeroSharingSubsetSeedCoordinate320::new(scope, contributor_position)
+    PseudorandomZeroSharingSubsetSeedCoordinate320::new(
+        master_scope,
+        seed_catalog_identity,
+        contributor_position,
+    )
 }
 
 fn require_object_header(

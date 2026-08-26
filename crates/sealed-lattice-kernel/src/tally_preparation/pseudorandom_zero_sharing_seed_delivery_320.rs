@@ -489,6 +489,12 @@ impl RootInventoryMatchedSubsetSeedDeliveryEntry320 {
     ) -> &CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320 {
         &self.contribution
     }
+
+    pub(super) fn into_contribution(
+        self,
+    ) -> CommitmentMatchedPseudorandomZeroSharingSubsetSeedContribution320 {
+        self.contribution
+    }
 }
 
 impl fmt::Debug for RootInventoryMatchedSubsetSeedDeliveryEntry320 {
@@ -534,6 +540,15 @@ impl RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320 {
 
     pub(crate) fn identity(&self) -> Result<Hash512, PseudorandomZeroSharingSeedDeliveryError320> {
         self.descriptor.identity()
+    }
+
+    pub(super) fn into_contributions(
+        self,
+    ) -> (
+        Box<[RootInventoryMatchedSubsetSeedDeliveryEntry320]>,
+        CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320,
+    ) {
+        (self.subset_entries, self.pair_contribution)
     }
 }
 
