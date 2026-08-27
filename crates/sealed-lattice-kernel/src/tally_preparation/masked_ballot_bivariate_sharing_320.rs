@@ -1,4 +1,5 @@
 use core::fmt;
+use zeroize::Zeroize;
 
 use crate::{foundation::derive_foundation_roster_parameters, tally_circuit::CompiledTallyCircuit};
 
@@ -175,10 +176,26 @@ impl From<MaskedBallotBundleError320> for MaskedBallotBivariateSharingError320 {
 /// The upper-triangular coefficients other than `(0, 0)` are independently
 /// sampled by the caller. This scalar candidate authenticates no randomness,
 /// root, author, holder, receipt, or state transition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct MaskedBallotSymmetricBivariatePolynomial320 {
     participant_count: u16,
     coefficient_matrix: Vec<Vec<BinaryFieldElement320>>,
+}
+
+impl fmt::Debug for MaskedBallotSymmetricBivariatePolynomial320 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MaskedBallotSymmetricBivariatePolynomial320")
+            .field("participant_count", &self.participant_count)
+            .field("coefficient_matrix", &"[redacted]")
+            .finish()
+    }
+}
+
+impl Drop for MaskedBallotSymmetricBivariatePolynomial320 {
+    fn drop(&mut self) {
+        self.coefficient_matrix.zeroize();
+    }
 }
 
 impl MaskedBallotSymmetricBivariatePolynomial320 {
@@ -350,15 +367,33 @@ impl MaskedBallotSymmetricBivariatePolynomial320 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MaskedBallotBivariateCrosspoint320 {
     peer_roster_position: u16,
     peer_evaluation_point: BinaryFieldElement320,
     value: BinaryFieldElement320,
 }
 
+impl fmt::Debug for MaskedBallotBivariateCrosspoint320 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MaskedBallotBivariateCrosspoint320")
+            .field("peer_roster_position", &self.peer_roster_position)
+            .field("peer_evaluation_point", &self.peer_evaluation_point)
+            .field("value", &"[redacted]")
+            .finish()
+    }
+}
+
+impl Zeroize for MaskedBallotBivariateCrosspoint320 {
+    fn zeroize(&mut self) {
+        self.peer_roster_position.zeroize();
+        self.peer_evaluation_point.zeroize();
+        self.value.zeroize();
+    }
+}
+
 impl MaskedBallotBivariateCrosspoint320 {
-    #[cfg(test)]
     pub(crate) fn from_parts(
         peer_roster_position: u16,
         peer_evaluation_point: BinaryFieldElement320,
@@ -391,13 +426,36 @@ impl MaskedBallotBivariateCrosspoint320 {
 /// crosspoint for every other roster position. A future source verifier must
 /// establish that every value is the exact independently salted opening under
 /// one author-bound root before constructing this type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct MaskedBallotBivariateRow320 {
     participant_count: u16,
     roster_position: u16,
     evaluation_point: BinaryFieldElement320,
     secret_axis_value: BinaryFieldElement320,
     crosspoints: Vec<MaskedBallotBivariateCrosspoint320>,
+}
+
+impl fmt::Debug for MaskedBallotBivariateRow320 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MaskedBallotBivariateRow320")
+            .field("participant_count", &self.participant_count)
+            .field("roster_position", &self.roster_position)
+            .field("evaluation_point", &self.evaluation_point)
+            .field("secret_axis_value", &"[redacted]")
+            .field("crosspoint_count", &self.crosspoints.len())
+            .finish()
+    }
+}
+
+impl Drop for MaskedBallotBivariateRow320 {
+    fn drop(&mut self) {
+        self.participant_count.zeroize();
+        self.roster_position.zeroize();
+        self.evaluation_point.zeroize();
+        self.secret_axis_value.zeroize();
+        self.crosspoints.zeroize();
+    }
 }
 
 impl MaskedBallotBivariateRow320 {
@@ -508,6 +566,19 @@ impl MaskedBallotBivariateRow320 {
                 }),
         );
         points
+    }
+
+    pub(crate) fn is_locally_degree_bounded(&self, reconstruction_threshold: usize) -> bool {
+        let points = self.interpolation_points();
+        if reconstruction_threshold == 0 || reconstruction_threshold > points.len() {
+            return false;
+        }
+        let Ok(polynomial) = interpolate_polynomial(&points[..reconstruction_threshold]) else {
+            return false;
+        };
+        points
+            .iter()
+            .all(|point| polynomial.evaluate(point.evaluation_point) == point.value)
     }
 }
 
@@ -657,7 +728,8 @@ impl MaskedBallotBivariateReleaseDecoder320 {
             .iter()
             .enumerate()
             .filter_map(|(position, row)| {
-                self.row_is_locally_degree_bounded(row).then_some(position)
+                row.is_locally_degree_bounded(self.reconstruction_threshold)
+                    .then_some(position)
             })
             .collect::<Vec<_>>();
         if locally_valid_row_positions.len() >= self.minimum_consistent_row_count {
@@ -755,17 +827,6 @@ impl MaskedBallotBivariateReleaseDecoder320 {
             }
         }
         Ok(())
-    }
-
-    fn row_is_locally_degree_bounded(&self, row: &MaskedBallotBivariateRow320) -> bool {
-        let points = row.interpolation_points();
-        let Ok(polynomial) = interpolate_polynomial(&points[..self.reconstruction_threshold])
-        else {
-            return false;
-        };
-        points
-            .iter()
-            .all(|point| polynomial.evaluate(point.evaluation_point) == point.value)
     }
 }
 
