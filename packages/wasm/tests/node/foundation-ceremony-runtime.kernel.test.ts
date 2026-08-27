@@ -133,6 +133,10 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
             },
             {
                 kind: 'function',
+                name: 'sealed_lattice_validate_joined_seed_master_restoration_320_with_length',
+            },
+            {
+                kind: 'function',
                 name: 'sealed_lattice_seed_catalog_source_320_with_length',
             },
             {
@@ -660,6 +664,7 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
             expect(
                 joinedKernelModule.isProductionJoinedSeedMasterCustodyKernel({
                     joinAndEncode: () => new Uint8Array(),
+                    validateRestoration: () => undefined,
                     validateRetained: () => undefined,
                 }),
             ).toBe(false);
@@ -670,6 +675,11 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
             );
             expect(() =>
                 kernel.validateRetained(malformedRequest),
+            ).toThrowError(
+                expect.objectContaining({ code: 'MalformedRequest' }),
+            );
+            expect(() =>
+                kernel.validateRestoration(malformedRequest),
             ).toThrowError(
                 expect.objectContaining({ code: 'MalformedRequest' }),
             );

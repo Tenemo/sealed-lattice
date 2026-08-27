@@ -50,6 +50,7 @@ export class JoinedSeedMasterKernelError extends Error {
 export type ProductionJoinedSeedMasterCustodyKernel = Readonly<{
     readonly [joinedSeedMasterCustodyKernelBrand]: true;
     joinAndEncode(requestBytes: Uint8Array): Uint8Array;
+    validateRestoration(recordBytes: Uint8Array): void;
     validateRetained(recordBytes: Uint8Array): void;
 }>;
 
@@ -200,6 +201,24 @@ const runValidation = (
     }
 };
 
+const runRestorationValidation = (
+    runtime: TranscriptCoreKernelCommandRuntime,
+    recordBytes: Uint8Array,
+): void => {
+    if (!isUint8Array(recordBytes)) {
+        throw new TypeError(
+            'Joined seed-master restoration validation requires exact record bytes.',
+        );
+    }
+    const responseBytes =
+        runtime.executeJoinedSeedMasterRestorationValidation(recordBytes);
+    try {
+        parseValidationResponse(responseBytes);
+    } finally {
+        responseBytes.fill(0);
+    }
+};
+
 export const isProductionJoinedSeedMasterCustodyKernel = (
     value: unknown,
 ): value is ProductionJoinedSeedMasterCustodyKernel =>
@@ -225,6 +244,8 @@ export const openProductionJoinedSeedMasterCustodyKernel = async (
         [joinedSeedMasterCustodyKernelBrand]: true as const,
         joinAndEncode: (requestBytes: Uint8Array): Uint8Array =>
             runJoin(runtime, requestBytes),
+        validateRestoration: (recordBytes: Uint8Array): void =>
+            runRestorationValidation(runtime, recordBytes),
         validateRetained: (recordBytes: Uint8Array): void =>
             runValidation(runtime, recordBytes),
     });

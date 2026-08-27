@@ -22,6 +22,7 @@ use super::{
     pseudorandom_zero_sharing_seed_delivery_320::PseudorandomZeroSharingSeedDeliveryLayout320,
     pseudorandom_zero_sharing_seed_master_custody_320::{
         join_and_encode_for_test, restore_pseudorandom_zero_sharing_joined_seed_masters_320,
+        run_pseudorandom_zero_sharing_joined_seed_master_restoration_validation_320,
         run_pseudorandom_zero_sharing_joined_seed_master_validation_320,
         run_pseudorandom_zero_sharing_seed_master_join_custody_320,
     },
@@ -145,6 +146,9 @@ fn completion_custody_boundary_reverifies_exact_predecessors_and_terminals() {
     let validation_response =
         run_pseudorandom_zero_sharing_joined_seed_master_validation_320(&joined_record);
     assert_eq!(validation_response.as_slice(), b"SLJR\x01\x00\x02");
+    let restoration_response =
+        run_pseudorandom_zero_sharing_joined_seed_master_restoration_validation_320(&joined_record);
+    assert_eq!(restoration_response.as_slice(), b"SLJR\x01\x00\x02");
 
     let restored =
         restore_pseudorandom_zero_sharing_joined_seed_masters_320(&joined_record).unwrap();
@@ -196,6 +200,12 @@ fn completion_custody_boundary_reverifies_exact_predecessors_and_terminals() {
     wrong_joined_provenance[payload_offset + 100] ^= 1;
     assert_failure_code(
         &run_pseudorandom_zero_sharing_joined_seed_master_validation_320(&wrong_joined_provenance),
+        7,
+    );
+    assert_failure_code(
+        &run_pseudorandom_zero_sharing_joined_seed_master_restoration_validation_320(
+            &wrong_joined_provenance,
+        ),
         7,
     );
     assert!(

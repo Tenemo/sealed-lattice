@@ -1817,6 +1817,22 @@ pub(crate) fn run_pseudorandom_zero_sharing_joined_seed_master_validation_320(
     }
 }
 
+/// Revalidates one exact authenticated joined-custody plaintext and restores
+/// its typed local masters solely to establish that a state owner may hand the
+/// same bytes to a later Rust operation. The restored secrets are immediately
+/// dropped and this response grants no continuation or coin-opening power.
+pub(crate) fn run_pseudorandom_zero_sharing_joined_seed_master_restoration_validation_320(
+    record_bytes: &[u8],
+) -> Zeroizing<Vec<u8>> {
+    match restore_pseudorandom_zero_sharing_joined_seed_masters_320(record_bytes) {
+        Ok(restored_masters) => {
+            drop(restored_masters);
+            encode_validation_response()
+        }
+        Err(error) => encode_failure_response(error),
+    }
+}
+
 fn encode_join_response(payload: &[u8]) -> Zeroizing<Vec<u8>> {
     let Ok(payload_byte_length) = u32::try_from(payload.len()) else {
         return encode_failure_response(

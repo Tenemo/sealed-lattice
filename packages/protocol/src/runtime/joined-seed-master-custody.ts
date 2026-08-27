@@ -144,6 +144,55 @@ type OpenedJoinedSeedMasterRecord = Readonly<{
     sealedBytes: Uint8Array;
 }>;
 
+const joinedSeedMasterRestorationAuthorizationBrand: unique symbol = Symbol(
+    'joined-seed-master-restoration-authorization',
+);
+
+/**
+ * One-shot authority to read one recency-anchored joined record into a later
+ * Rust operation. It exposes no retained bytes and is not a preparation,
+ * coin-opening, burn, or continuation capability.
+ */
+export type JoinedSeedMasterRestorationAuthorization = Readonly<{
+    readonly [joinedSeedMasterRestorationAuthorizationBrand]: true;
+}>;
+
+/**
+ * Exact authenticated predecessor bytes for a Rust consumer. That consumer
+ * must positively reverify the complete record and erase these bytes after
+ * use; this object alone authorizes no cryptographic transition.
+ */
+export type ConsumedJoinedSeedMasterRestorationAuthorization = Readonly<{
+    context: JoinedSeedMasterCustodyContext;
+    recordBytes: Uint8Array;
+}>;
+
+const joinedSeedMasterRestorationAuthorizationReaders = new WeakMap<
+    object,
+    () => Promise<ConsumedJoinedSeedMasterRestorationAuthorization>
+>();
+
+export const consumeJoinedSeedMasterRestorationAuthorization = async (
+    authorization: JoinedSeedMasterRestorationAuthorization,
+): Promise<ConsumedJoinedSeedMasterRestorationAuthorization> => {
+    if (typeof authorization !== 'object' || authorization === null) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Joined seed-master restoration authorization must be an opaque state-owner capability.',
+        );
+    }
+    const read =
+        joinedSeedMasterRestorationAuthorizationReaders.get(authorization);
+    if (read === undefined) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidState',
+            'Joined seed-master restoration authorization is invalid or has already been consumed.',
+        );
+    }
+    joinedSeedMasterRestorationAuthorizationReaders.delete(authorization);
+    return read();
+};
+
 type SourcePredecessorState =
     | CompletedSeedCatalogSourceCustodyForMasterJoin
     | 'incomplete'
@@ -1468,6 +1517,16 @@ export class JoinedSeedMasterCustody {
         });
     }
 
+    public authorizeRustRestoration(): JoinedSeedMasterRestorationAuthorization {
+        const authorization = Object.freeze({
+            [joinedSeedMasterRestorationAuthorizationBrand]: true as const,
+        });
+        joinedSeedMasterRestorationAuthorizationReaders.set(authorization, () =>
+            this.#schedule(() => this.#readForRustRestoration()),
+        );
+        return authorization;
+    }
+
     #schedule<Result>(operation: () => Promise<Result>): Promise<Result> {
         const scheduled = this.#operationTail.then(operation);
         this.#operationTail = scheduled.then(
@@ -1662,6 +1721,45 @@ export class JoinedSeedMasterCustody {
         });
     }
 
+    async #readForRustRestoration(): Promise<ConsumedJoinedSeedMasterRestorationAuthorization> {
+        const snapshot = await this.#readStorageSnapshot();
+        let context: JoinedSeedMasterCustodyContext | undefined;
+        let recordBytes: Uint8Array | undefined;
+        try {
+            if (snapshot.joined === undefined) {
+                if (snapshot.authentication === 'burned') {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'InvalidState',
+                        'Joined seed-master restoration cannot read a durably burned recipient action.',
+                    );
+                }
+                if (snapshot.authentication?.kind === 'joined') {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'Conflict',
+                        'Seed-recipient action state records a joined transition without joined custody.',
+                    );
+                }
+                throw new AuthenticatedRuntimeRecordError(
+                    'MissingRecord',
+                    'Joined seed-master restoration is pending retained joined custody.',
+                );
+            }
+            this.#requireRawPredecessorsErased(snapshot);
+            context = copyContext(snapshot.joined.record.context);
+            recordBytes = this.#encodeAndValidateRestoration(
+                snapshot.joined.record,
+            );
+            const consumed = Object.freeze({ context, recordBytes });
+            context = undefined;
+            recordBytes = undefined;
+            return consumed;
+        } finally {
+            destroyContext(context);
+            recordBytes?.fill(0);
+            destroyStorageSnapshot(snapshot);
+        }
+    }
+
     #produce(input: {
         receipt: CompletedSeedRecipientReceiptCustodyForMasterJoin;
         source: CompletedSeedCatalogSourceCustodyForMasterJoin;
@@ -1702,6 +1800,11 @@ export class JoinedSeedMasterCustody {
     }
 
     #validate(record: JoinedSeedMasterRecord): void {
+        const recordBytes = this.#encodeAndValidate(record);
+        recordBytes.fill(0);
+    }
+
+    #encodeAndValidate(record: JoinedSeedMasterRecord): Uint8Array {
         const recordBytes = encodeRecord(record);
         let validationFailed = false;
         let validationFailure: unknown;
@@ -1719,8 +1822,29 @@ export class JoinedSeedMasterCustody {
                     validationFailure,
                 );
             }
-        } finally {
+            return recordBytes;
+        } catch (error) {
             recordBytes.fill(0);
+            throw error;
+        }
+    }
+
+    #encodeAndValidateRestoration(record: JoinedSeedMasterRecord): Uint8Array {
+        const recordBytes = encodeRecord(record);
+        try {
+            try {
+                this.#kernel.validateRestoration(recordBytes);
+            } catch (error) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'AuthenticationFailed',
+                    'Joined seed-master custody failed typed restoration validation.',
+                    error,
+                );
+            }
+            return recordBytes;
+        } catch (error) {
+            recordBytes.fill(0);
+            throw error;
         }
     }
 

@@ -189,6 +189,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         length: number,
         outputLengthPointer: number,
     ) => number;
+    sealed_lattice_validate_joined_seed_master_restoration_320_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_validate_joined_seed_masters_320_with_length?: (
         pointer: number,
         length: number,

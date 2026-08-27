@@ -408,6 +408,9 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
     readonly executeJoinedSeedMasterJoin: (
         requestBytes: Uint8Array,
     ) => Uint8Array;
+    readonly executeJoinedSeedMasterRestorationValidation: (
+        recordBytes: Uint8Array,
+    ) => Uint8Array;
     readonly executeJoinedSeedMasterValidation: (
         recordBytes: Uint8Array,
     ) => Uint8Array;
@@ -572,6 +575,7 @@ type NumberExportName =
     | 'sealed_lattice_seed_recipient_receipt_320_with_length'
     | 'sealed_lattice_seed_receipt_terminal_endorsement_320_with_length'
     | 'sealed_lattice_transcript_core_command_with_length'
+    | 'sealed_lattice_validate_joined_seed_master_restoration_320_with_length'
     | 'sealed_lattice_validate_joined_seed_masters_320_with_length';
 
 const resolveNumberExport = <ExportName extends NumberExportName>(
@@ -903,6 +907,10 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_validate_joined_seed_masters_320_with_length',
     );
+    const validateJoinedSeedMasterRestorationWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_validate_joined_seed_master_restoration_320_with_length',
+    );
     let kernelOperationInProgress = false;
     const runExclusive = <Result>(
         operationName: string,
@@ -958,6 +966,20 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
                 validateJoinedSeedMastersWithLength,
                 recordBytes,
                 'joined seed-master validation',
+            ),
+        );
+    const executeJoinedSeedMasterRestorationValidation = (
+        recordBytes: Uint8Array,
+    ): Uint8Array =>
+        runExclusive('joined seed-master restoration validation', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                validateJoinedSeedMasterRestorationWithLength,
+                recordBytes,
+                'joined seed-master restoration validation',
             ),
         );
     const executeSeedCatalogSource = (requestBytes: Uint8Array): Uint8Array =>
@@ -1018,6 +1040,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         deallocate,
         executeCommand,
         executeJoinedSeedMasterJoin,
+        executeJoinedSeedMasterRestorationValidation,
         executeJoinedSeedMasterValidation,
         executeSeedCatalogSource,
         executeSeedMailboxSender,

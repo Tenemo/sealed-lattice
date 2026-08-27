@@ -29,9 +29,12 @@ import {
 import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import {
     JoinedSeedMasterCustody,
+    consumeJoinedSeedMasterRestorationAuthorization,
     deriveJoinedSeedMasterCustodyRecordByteLengths,
+    type ConsumedJoinedSeedMasterRestorationAuthorization,
     type JoinedSeedMasterCustodyContext,
     type JoinedSeedMasterCustodyLimits,
+    type JoinedSeedMasterRestorationAuthorization,
 } from '#packages/protocol/src/runtime/joined-seed-master-custody';
 import {
     SeedCatalogSourceCustody,
@@ -643,8 +646,10 @@ const expectedJoinedPayload = (
 
 class DeterministicJoinedKernel {
     readonly #context: JoinedSeedMasterCustodyContext;
+    public failNextRestorationValidationCount = 0;
     public failNextValidationCount = 0;
     public joinCallCount = 0;
+    public restorationValidationCallCount = 0;
     public validationCallCount = 0;
 
     public constructor(joinedContext: JoinedSeedMasterCustodyContext) {
@@ -687,6 +692,19 @@ class DeterministicJoinedKernel {
             this.failNextValidationCount -= 1;
             throw new Error('Injected retained-state validation failure.');
         }
+        this.validateRetainedRecordBytes(recordBytes);
+    }
+
+    public validateRestoration(recordBytes: Uint8Array): void {
+        this.restorationValidationCallCount += 1;
+        if (this.failNextRestorationValidationCount > 0) {
+            this.failNextRestorationValidationCount -= 1;
+            throw new Error('Injected typed-restoration validation failure.');
+        }
+        this.validateRetainedRecordBytes(recordBytes);
+    }
+
+    private validateRetainedRecordBytes(recordBytes: Uint8Array): void {
         if (
             !bytesEqual(
                 recordBytes.subarray(0, 4),
@@ -872,6 +890,17 @@ const transitionInput = (
         verificationContextBytes: verificationContextBytes(joinedContext),
     });
 
+const destroyConsumedRestoration = (
+    consumed: ConsumedJoinedSeedMasterRestorationAuthorization,
+): void => {
+    consumed.recordBytes.fill(0);
+    for (const value of Object.values(consumed.context)) {
+        if (value instanceof Uint8Array) {
+            value.fill(0);
+        }
+    }
+};
+
 const assertJoinedActionAndRawPredecessorCleanup = async (
     fixture: CustodyFixture,
 ): Promise<void> => {
@@ -1054,6 +1083,106 @@ describe('joined seed-master custody', () => {
         expect(resumed).toEqual(retained);
         expect(fixture.kernel.joinCallCount).toBe(1);
         expect(fixture.kernel.validationCallCount).toBe(3);
+    });
+
+    it('issues one-shot Rust restoration authorization only from reverified retained custody', async () => {
+        const fixture = await createFixture();
+        await fixture.custody.retainJoinedMasters(
+            transitionInput(fixture.context),
+        );
+        expect(fixture.kernel.validationCallCount).toBe(2);
+        expect(fixture.kernel.restorationValidationCallCount).toBe(0);
+
+        const authorization = fixture.custody.authorizeRustRestoration();
+        expect(Object.keys(authorization)).toEqual([]);
+        expect('recordBytes' in authorization).toBe(false);
+        const consumed =
+            await consumeJoinedSeedMasterRestorationAuthorization(
+                authorization,
+            );
+        try {
+            expect(fixture.kernel.validationCallCount).toBe(2);
+            expect(fixture.kernel.restorationValidationCallCount).toBe(1);
+            expect(consumed.recordBytes.subarray(0, 4)).toEqual(
+                Uint8Array.of(0x53, 0x4c, 0x4a, 0x4d),
+            );
+            expect(
+                containsBytes(
+                    consumed.recordBytes,
+                    expectedJoinedPayload(fixture.context),
+                ),
+            ).toBe(true);
+            expect(consumed.context).toEqual(fixture.context);
+
+            const reopened = await reopen(fixture);
+            const coldAuthorization = reopened.authorizeRustRestoration();
+            const coldConsumed =
+                await consumeJoinedSeedMasterRestorationAuthorization(
+                    coldAuthorization,
+                );
+            try {
+                expect(fixture.kernel.validationCallCount).toBe(2);
+                expect(fixture.kernel.restorationValidationCallCount).toBe(2);
+                expect(coldConsumed.recordBytes).toEqual(consumed.recordBytes);
+            } finally {
+                destroyConsumedRestoration(coldConsumed);
+            }
+        } finally {
+            destroyConsumedRestoration(consumed);
+        }
+
+        await expect(
+            consumeJoinedSeedMasterRestorationAuthorization(authorization),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(
+            consumeJoinedSeedMasterRestorationAuthorization(
+                Object.freeze({}) as JoinedSeedMasterRestorationAuthorization,
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+    });
+
+    it('consumes a failed restoration authorization without inventing joined custody', async () => {
+        const fixture = await createFixture({ retainPredecessors: false });
+        const authorization = fixture.custody.authorizeRustRestoration();
+        await expect(
+            consumeJoinedSeedMasterRestorationAuthorization(authorization),
+        ).rejects.toMatchObject({ code: 'MissingRecord' });
+        await expect(
+            consumeJoinedSeedMasterRestorationAuthorization(authorization),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(fixture.kernel.validationCallCount).toBe(0);
+        expect(fixture.kernel.restorationValidationCallCount).toBe(0);
+    });
+
+    it('consumes a refused typed restoration without damaging retained custody', async () => {
+        const fixture = await createFixture();
+        await fixture.custody.retainJoinedMasters(
+            transitionInput(fixture.context),
+        );
+        fixture.kernel.failNextRestorationValidationCount = 1;
+        const refusedAuthorization = fixture.custody.authorizeRustRestoration();
+        await expect(
+            consumeJoinedSeedMasterRestorationAuthorization(
+                refusedAuthorization,
+            ),
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
+        await expect(
+            consumeJoinedSeedMasterRestorationAuthorization(
+                refusedAuthorization,
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+
+        const acceptedAuthorization =
+            fixture.custody.authorizeRustRestoration();
+        const consumed = await consumeJoinedSeedMasterRestorationAuthorization(
+            acceptedAuthorization,
+        );
+        try {
+            expect(consumed.context).toEqual(fixture.context);
+            expect(fixture.kernel.restorationValidationCallCount).toBe(2);
+        } finally {
+            destroyConsumedRestoration(consumed);
+        }
     });
 
     it('keeps missing predecessor data pending without invoking the join', async () => {
