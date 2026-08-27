@@ -10,6 +10,8 @@ mod direct_evaluator;
 mod interpreter;
 mod output_rekeyed;
 
+pub(crate) use output_rekeyed::OutputRekeyedTallyCircuit;
+
 #[cfg(test)]
 mod output_rekeyed_tests;
 #[cfg(test)]

@@ -17,6 +17,7 @@ mod authenticated_key_share_vector_local_check;
 mod authenticated_key_share_vector_local_check_resource_floor;
 mod authenticated_key_share_vector_manifest;
 mod authenticated_opening;
+mod batched_hidden_bit_check_320;
 mod binary_field;
 mod binary_field_320;
 mod binary_field_multiplication_circuit;
@@ -104,6 +105,8 @@ mod authenticated_key_share_vector_manifest_tests;
 mod authenticated_key_share_vector_tests;
 #[cfg(test)]
 mod authenticated_opening_tests;
+#[cfg(test)]
+mod batched_hidden_bit_check_320_tests;
 #[cfg(test)]
 mod binary_field_320_tests;
 #[cfg(test)]
