@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import type { ProductionSeedMailboxSenderStreamKernel } from '@sealed-lattice/wasm';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@sealed-lattice/wasm', () => ({
+    isProductionSeedMailboxSenderStreamKernel: () => true,
+    openProductionSeedMailboxSenderStreamKernel: () => {
+        throw new Error('The custody model test does not open a Wasm kernel.');
+    },
+}));
 
 import {
     createRuntimeRecordProtection,
@@ -8,6 +16,7 @@ import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/r
 import {
     SeedMailboxSenderStreamCustody,
     deriveSeedMailboxSenderStreamCustodyRecordByteLengths,
+    deriveSeedMailboxSenderStreamKernelByteLengths,
     type RetainSeedMailboxSenderStreamInput,
     type RetainedSeedMailboxSenderStreamCarrier,
     type SeedMailboxSenderStreamCustodyContext,
@@ -213,8 +222,7 @@ class DeterministicSeedMailboxKernel implements SeedMailboxSenderStreamKernel {
             input.carrier.manifestBytes[0] !== 0xa2 ||
             input.carrier.signatureEnvelopeBytes[0] !== 0xa3 ||
             input.carrier.encryptedChunks[0]?.[0] !== 0xc0 ||
-            input.carrier.encryptedChunks[1]?.[0] !== 0xc1 ||
-            input.sourcePayloadDigest.byteLength !== 64
+            input.carrier.encryptedChunks[1]?.[0] !== 0xc1
         ) {
             throw new Error('Seed-mailbox carrier failed the test validator.');
         }
@@ -284,7 +292,7 @@ const createFixture = async (input?: {
         cryptoProvider,
         custody: new SeedMailboxSenderStreamCustody({
             context,
-            kernel,
+            kernel: kernel as unknown as ProductionSeedMailboxSenderStreamKernel,
             limits: testLimits,
             protection,
             recencyCoordinator: coordinator,
@@ -318,7 +326,7 @@ const reopenCustody = async (
     });
     return new SeedMailboxSenderStreamCustody({
         context,
-        kernel,
+        kernel: kernel as unknown as ProductionSeedMailboxSenderStreamKernel,
         limits: testLimits,
         protection,
         recencyCoordinator: coordinator,
@@ -367,6 +375,136 @@ describe('seed-mailbox sender-stream custody', () => {
             reservationCiphertextByteLength: 63_339,
             reservationPlaintextByteLength: 63_285,
         });
+
+        const kernelDerived = deriveSeedMailboxSenderStreamKernelByteLengths({
+            canonicalDeliveryDescriptorByteLength: 328,
+            geometry: productionGeometry,
+            preparationContextByteLength: 338,
+            rootAuthorizationPackages: Array.from({ length: 10 }, () => ({
+                contributorSignatureEnvelopeByteLength: 3_723,
+                exactOutputCertificateByteLength: 25_545,
+                reservationCertificateByteLength: 25_515,
+                rootBodyByteLength: 522,
+            })),
+            rootTerminalCertificateByteLength: 36_230,
+            rosterByteLength: 31_660,
+            streamCount: 9,
+        });
+        const independentlyDerivedOpenRequestByteLength =
+            7 +
+            64 +
+            2 +
+            (4 + 338) +
+            (4 + 31_660) +
+            2 +
+            10 * (4 * 4 + 522 + 25_515 + 25_545 + 3_723) +
+            (4 + 36_230);
+        const independentlyDerivedPrepareRequestByteLength =
+            7 + 4 + (64 * 3 + 2 * 4) + (4 + 328) + 32 + (4 + 62_590);
+        const independentlyDerivedPrepareResponseByteLength =
+            7 + (4 + 1_655) + (4 + 215) + (4 + 309) + 2 + (4 + 62_606);
+        const independentlyDerivedCompleteRequestByteLength =
+            7 +
+            4 +
+            (64 * 3 + 2 * 4) +
+            (4 + 328) +
+            (4 + 1_655) +
+            (4 + 215) +
+            2 +
+            (4 + 62_606) +
+            3_309;
+        const independentlyDerivedCompleteResponseByteLength =
+            7 + (4 + 1_655) + (4 + 215) + (4 + 3_713) + 2 + (4 + 62_606);
+        const independentlyDerivedValidationRequestByteLength =
+            7 +
+            4 +
+            (64 * 3 + 2 * 4) +
+            (4 + 328) +
+            (5 * 4 + 2 + 4) +
+            (4 + 1_655) +
+            (4 + 215) +
+            (4 + 3_713) +
+            2 +
+            (4 + 62_606);
+        expect(kernelDerived).toEqual({
+            closeContextRequestByteLength: 11,
+            closeContextResponseByteLength: 7,
+            coldValidationCumulativeRequestByteLength:
+                independentlyDerivedOpenRequestByteLength +
+                9 * independentlyDerivedValidationRequestByteLength +
+                11,
+            coldValidationCumulativeResponseByteLength: 1_963 + 9 * 7 + 7,
+            coldValidationInvocationCount: 11,
+            completeCarrierRequestByteLengthPerStream:
+                independentlyDerivedCompleteRequestByteLength,
+            completeCarrierResponseByteLengthPerStream:
+                independentlyDerivedCompleteResponseByteLength,
+            maximumRequestByteLength: independentlyDerivedOpenRequestByteLength,
+            maximumResponseByteLength:
+                independentlyDerivedCompleteResponseByteLength,
+            openContextRequestByteLength:
+                independentlyDerivedOpenRequestByteLength,
+            openContextResponseByteLength: 1_963,
+            prepareCarrierRequestByteLengthPerStream:
+                independentlyDerivedPrepareRequestByteLength,
+            prepareCarrierResponseByteLengthPerStream:
+                independentlyDerivedPrepareResponseByteLength,
+            signatureBodyByteLengthPerStream: 309,
+            signatureContextByteLengthPerStream: 51,
+            signatureRandomnessByteLengthPerStream: 32,
+            signatureResponseByteLengthPerStream: 3_309,
+            signingVerificationKeyByteLengthPerStream: 1_952,
+            successfulCumulativeRequestByteLength:
+                independentlyDerivedOpenRequestByteLength +
+                9 *
+                    (independentlyDerivedPrepareRequestByteLength +
+                        independentlyDerivedCompleteRequestByteLength +
+                        independentlyDerivedValidationRequestByteLength) +
+                11,
+            successfulCumulativeResponseByteLength:
+                1_963 +
+                9 *
+                    (independentlyDerivedPrepareResponseByteLength +
+                        independentlyDerivedCompleteResponseByteLength +
+                        7) +
+                7,
+            successfulInvocationCount: 29,
+            validateCarrierRequestByteLengthPerStream:
+                independentlyDerivedValidationRequestByteLength,
+            validateCarrierResponseByteLengthPerStream: 7,
+        });
+        expect(kernelDerived).toMatchObject({
+            coldValidationCumulativeRequestByteLength: 1_240_520,
+            coldValidationCumulativeResponseByteLength: 2_033,
+            completeCarrierRequestByteLengthPerStream: 68_342,
+            completeCarrierResponseByteLengthPerStream: 68_214,
+            maximumRequestByteLength: 621_525,
+            maximumResponseByteLength: 68_214,
+            openContextRequestByteLength: 621_525,
+            prepareCarrierRequestByteLengthPerStream: 63_169,
+            prepareCarrierResponseByteLengthPerStream: 64_810,
+            successfulCumulativeRequestByteLength: 2_424_119,
+            successfulCumulativeResponseByteLength: 1_199_249,
+            validateCarrierRequestByteLengthPerStream: 68_776,
+        });
+        expect(() =>
+            deriveSeedMailboxSenderStreamKernelByteLengths({
+                canonicalDeliveryDescriptorByteLength: 328,
+                geometry: productionGeometry,
+                preparationContextByteLength: 338,
+                rootAuthorizationPackages: [
+                    {
+                        contributorSignatureEnvelopeByteLength: 3_723,
+                        exactOutputCertificateByteLength: 25_545,
+                        reservationCertificateByteLength: 25_515,
+                        rootBodyByteLength: 8 * 1024 * 1024,
+                    },
+                ],
+                rootTerminalCertificateByteLength: 36_230,
+                rosterByteLength: 31_660,
+                streamCount: 9,
+            }),
+        ).toThrowError(expect.objectContaining({ code: 'ResourceLimit' }));
     });
 
     it('samples internally, anchors both states, and replays only retained bytes', async () => {

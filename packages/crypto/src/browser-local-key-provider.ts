@@ -23,8 +23,12 @@ const mailboxSignatureContext = textEncoder.encode(
 const objectSignatureContext = textEncoder.encode(
     'sealed-lattice/object-signature/v1',
 );
+const seedMailboxManifestSignatureContext = textEncoder.encode(
+    'sealed-lattice/v1/preparation/seed-mailbox-manifest',
+);
 const signingHedgeByteLength = 32;
 const mailboxAttemptIdentifierByteLength = 32;
+const seedMailboxManifestSignatureBodyByteLength = 309;
 
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
@@ -92,6 +96,7 @@ export type BrowserLocalKeyProviderFailureCode =
     | 'Equivocation'
     | 'KeyMismatch'
     | 'MalformedKey'
+    | 'MalformedMessage'
     | 'MalformedRandomness'
     | 'UnsupportedProvider';
 
@@ -1157,6 +1162,111 @@ export const encapsulateResetSafeSetupMailbox = (input: {
     } finally {
         recipientEncapsulationKey.fill(0);
         sourceVerificationKey.fill(0);
+    }
+};
+
+/**
+ * Checks that one opaque browser-local signing capability owns the exact
+ * roster key selected by a positively verified sender-mailbox context.
+ */
+export const assertSeedMailboxSenderSigningCapabilityMatchesRosterKey =
+    (input: {
+        readonly signingCapability: BrowserLocalSigningCapability;
+        readonly senderSigningVerificationKey: Uint8Array;
+    }): void => {
+        const provider = requireSigningProvider(input.signingCapability);
+        const senderSigningVerificationKey = copyExactBytes(
+            input.senderSigningVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'senderSigningVerificationKey',
+        );
+        try {
+            if (
+                !bytesEqual(
+                    senderSigningVerificationKey,
+                    provider.signingVerificationKey!,
+                )
+            ) {
+                throw new BrowserLocalKeyProviderError(
+                    'KeyMismatch',
+                    'The seed-mailbox sender key does not match the frozen browser-local signing capability.',
+                );
+            }
+        } finally {
+            senderSigningVerificationKey.fill(0);
+        }
+    };
+
+/**
+ * Signs only the fixed-length canonical seed-mailbox manifest body under its
+ * fixed ML-DSA context. Rust reconstructs and positively verifies the final
+ * envelope before it can leave sender custody.
+ */
+export const signSeedMailboxManifestBody = (input: {
+    readonly signatureBodyBytes: Uint8Array;
+    readonly signatureRandomness: Uint8Array;
+    readonly signingCapability: BrowserLocalSigningCapability;
+    readonly senderSigningVerificationKey: Uint8Array;
+}): Uint8Array => {
+    const provider = requireSigningProvider(input.signingCapability);
+    let signatureBodyBytes: Uint8Array | undefined;
+    let signatureRandomness: Uint8Array | undefined;
+    let senderSigningVerificationKey: Uint8Array | undefined;
+    let signature: Uint8Array | undefined;
+    try {
+        signatureBodyBytes = copyExactBytes(
+            input.signatureBodyBytes,
+            seedMailboxManifestSignatureBodyByteLength,
+            'signatureBodyBytes',
+            'MalformedMessage',
+        );
+        signatureRandomness = copyExactBytes(
+            input.signatureRandomness,
+            signingHedgeByteLength,
+            'signatureRandomness',
+            'MalformedRandomness',
+        );
+        senderSigningVerificationKey = copyExactBytes(
+            input.senderSigningVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'senderSigningVerificationKey',
+        );
+        if (
+            !bytesEqual(
+                senderSigningVerificationKey,
+                provider.signingVerificationKey!,
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The seed-mailbox sender key does not match the frozen browser-local signing capability.',
+            );
+        }
+        signature = invokeSigningOperation(
+            provider,
+            signatureBodyBytes,
+            seedMailboxManifestSignatureContext,
+            signatureRandomness,
+        );
+        if (
+            !ml_dsa65.verify(
+                signature,
+                signatureBodyBytes,
+                senderSigningVerificationKey,
+                { context: seedMailboxManifestSignatureContext },
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The seed-mailbox manifest signature does not match the frozen roster key.',
+            );
+        }
+        return signature.slice();
+    } finally {
+        signatureBodyBytes?.fill(0);
+        signatureRandomness?.fill(0);
+        senderSigningVerificationKey?.fill(0);
+        signature?.fill(0);
     }
 };
 

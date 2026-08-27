@@ -13,6 +13,23 @@ export {
     openProductionSeedCatalogSourceCustodyKernel,
     SeedCatalogSourceKernelError,
 } from './seed-catalog-source-custody-kernel.js';
+export {
+    isProductionSeedMailboxSenderStreamKernel,
+    openProductionSeedMailboxSenderStreamKernel,
+    SeedMailboxSenderKernelError,
+} from './seed-mailbox-sender-stream-kernel.js';
+export type {
+    OpenProductionSeedMailboxSenderStreamKernelInput,
+    ProductionSeedMailboxSenderStreamKernel,
+    SeedMailboxSenderKernelErrorCode,
+    SeedMailboxSenderRootAuthorizationPackageBytes,
+    SeedMailboxSenderSigningOperations,
+    SeedMailboxSenderStreamCarrier,
+    SeedMailboxSenderStreamContext,
+    SeedMailboxSenderStreamGeometry,
+    SeedMailboxSenderStreamProductionInput,
+    SeedMailboxSenderStreamValidationInput,
+} from './seed-mailbox-sender-stream-kernel.js';
 export type {
     ProductionSeedCatalogSourceCustodyKernel,
     SeedCatalogSourceKernelErrorCode,

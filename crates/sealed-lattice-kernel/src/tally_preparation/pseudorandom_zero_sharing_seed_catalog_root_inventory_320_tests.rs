@@ -121,9 +121,13 @@ struct OwnedSeedDeliveryEntry320 {
 }
 
 pub(super) struct SeedMailboxTestFixture320 {
+    pub(super) parameter_identity: Hash512,
+    pub(super) preparation_context: TallyPreparationContext,
     pub(super) roster: Roster,
     pub(super) signing_keys: Vec<ml_dsa_65::PrivateKey>,
     pub(super) mailbox_decapsulation_keys: Vec<ml_kem_768::DecapsKey>,
+    pub(super) root_authorization_packages: Vec<OwnedRootAuthorizationPackage320>,
+    pub(super) root_terminal_certificate_bytes: Vec<u8>,
     pub(super) root_terminal: RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     pub(super) sender_position: u16,
     pub(super) recipient_position: u16,
@@ -184,10 +188,11 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
     .unwrap();
     let terminal_certificate =
         signed_root_terminal_certificate(&root_inventory, &signing_keys, 0x61);
+    let root_terminal_certificate_bytes = terminal_certificate.canonical_bytes().unwrap();
     let root_terminal = verify_pseudorandom_zero_sharing_seed_catalog_root_terminal_320(
         root_inventory,
         &roster,
-        &terminal_certificate.canonical_bytes().unwrap(),
+        &root_terminal_certificate_bytes,
     )
     .unwrap();
     let descriptor_bytes = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
@@ -212,9 +217,13 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
         payload_bytes.extend_from_slice(&entry.inclusion_proof_bytes);
     }
     SeedMailboxTestFixture320 {
+        parameter_identity,
+        preparation_context,
         roster,
         signing_keys,
         mailbox_decapsulation_keys,
+        root_authorization_packages: owned_packages,
+        root_terminal_certificate_bytes,
         root_terminal,
         sender_position,
         recipient_position,

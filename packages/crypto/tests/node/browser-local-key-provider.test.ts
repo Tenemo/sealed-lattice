@@ -5,6 +5,7 @@ import { replicatedKeyComponentOpeningMailboxPayloadType } from '@sealed-lattice
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+    assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
     BrowserLocalKeyProviderError,
     type BrowserLocalExternalKeyProviderInput,
     type BrowserLocalMailboxCapability,
@@ -12,6 +13,7 @@ import {
     decapsulateClosedMailboxCiphertext,
     encapsulateResetSafeSetupMailbox,
     openBrowserLocalExternalKeyProvider,
+    signSeedMailboxManifestBody,
     signResetSafeSetupMailboxEnvelope,
     signResetSafeSetupObject,
 } from '../../src/browser-local-key-provider.js';
@@ -29,6 +31,9 @@ const mailboxSignatureContext = textEncoder.encode(
 );
 const objectSignatureContext = textEncoder.encode(
     'sealed-lattice/object-signature/v1',
+);
+const seedMailboxManifestSignatureContext = textEncoder.encode(
+    'sealed-lattice/v1/preparation/seed-mailbox-manifest',
 );
 
 const createKeyMaterial = () => {
@@ -68,6 +73,84 @@ const expectProviderError = (
 };
 
 describe('browser-local external key provider', () => {
+    it('signs only an exact seed-mailbox manifest body under the roster key and fixed context', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
+        });
+        const signatureBodyBytes = new Uint8Array(309).fill(0x71);
+        const signatureRandomness = new Uint8Array(32).fill(0x83);
+        assertSeedMailboxSenderSigningCapabilityMatchesRosterKey({
+            senderSigningVerificationKey: signing.publicKey,
+            signingCapability: provider.signingCapability,
+        });
+        const firstSignature = signSeedMailboxManifestBody({
+            signatureBodyBytes,
+            signatureRandomness,
+            senderSigningVerificationKey: signing.publicKey,
+            signingCapability: provider.signingCapability,
+        });
+        const replayedSignature = signSeedMailboxManifestBody({
+            signatureBodyBytes,
+            signatureRandomness,
+            senderSigningVerificationKey: signing.publicKey,
+            signingCapability: provider.signingCapability,
+        });
+        expect(replayedSignature).toEqual(firstSignature);
+        expect(
+            ml_dsa65.verify(
+                firstSignature,
+                signatureBodyBytes,
+                signing.publicKey,
+                { context: seedMailboxManifestSignatureContext },
+            ),
+        ).toBe(true);
+
+        const alternateRandomness = signatureRandomness.slice();
+        alternateRandomness[31] ^= 1;
+        const alternateSignature = signSeedMailboxManifestBody({
+            signatureBodyBytes,
+            signatureRandomness: alternateRandomness,
+            senderSigningVerificationKey: signing.publicKey,
+            signingCapability: provider.signingCapability,
+        });
+        expect(alternateSignature).not.toEqual(firstSignature);
+
+        const alternateSigning = ml_dsa65.keygen(
+            new Uint8Array(ml_dsa65.lengths.seed!).fill(0x92),
+        );
+        expectProviderError(
+            () =>
+                signSeedMailboxManifestBody({
+                    signatureBodyBytes,
+                    signatureRandomness,
+                    senderSigningVerificationKey: alternateSigning.publicKey,
+                    signingCapability: provider.signingCapability,
+                }),
+            'KeyMismatch',
+        );
+        expectProviderError(
+            () =>
+                signSeedMailboxManifestBody({
+                    signatureBodyBytes: signatureBodyBytes.subarray(1),
+                    signatureRandomness,
+                    senderSigningVerificationKey: signing.publicKey,
+                    signingCapability: provider.signingCapability,
+                }),
+            'MalformedMessage',
+        );
+
+        signatureBodyBytes.fill(0);
+        signatureRandomness.fill(0);
+        alternateRandomness.fill(0);
+        firstSignature.fill(0);
+        replayedSignature.fill(0);
+        alternateSignature.fill(0);
+        alternateSigning.publicKey.fill(0);
+        alternateSigning.secretKey.fill(0);
+        provider.close();
+    });
+
     it('opens distinct opaque capabilities only after both roster key pairs pass self-tests', () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({

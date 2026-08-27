@@ -50,6 +50,7 @@ mod pseudorandom_zero_sharing_seed_catalog_state_320;
 mod pseudorandom_zero_sharing_seed_catalog_state_output_320;
 mod pseudorandom_zero_sharing_seed_delivery_320;
 mod pseudorandom_zero_sharing_seed_mailbox_320;
+pub(crate) mod pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320;
 pub(crate) mod pseudorandom_zero_sharing_seed_master_custody_320;
 mod pseudorandom_zero_sharing_seed_master_join_320;
 mod pseudorandom_zero_sharing_seed_receipt_320;
@@ -152,6 +153,8 @@ mod pseudorandom_zero_sharing_seed_catalog_state_output_320_tests;
 mod pseudorandom_zero_sharing_seed_delivery_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_mailbox_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_master_custody_320_tests;
 #[cfg(test)]

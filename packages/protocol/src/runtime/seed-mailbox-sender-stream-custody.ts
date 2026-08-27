@@ -1,8 +1,19 @@
 import { shake256 } from '@noble/hashes/sha3.js';
 import {
+    assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
+    signSeedMailboxManifestBody,
+    type BrowserLocalSigningCapability,
+} from '@sealed-lattice/crypto';
+import {
     configurableParticipantCountRange,
     foundationProfile,
 } from '@sealed-lattice/types';
+import {
+    isProductionSeedMailboxSenderStreamKernel,
+    openProductionSeedMailboxSenderStreamKernel,
+    type OpenProductionSeedMailboxSenderStreamKernelInput,
+    type ProductionSeedMailboxSenderStreamKernel,
+} from '@sealed-lattice/wasm';
 
 import {
     AuthenticatedRuntimeRecordError,
@@ -81,6 +92,8 @@ export type RetainedSeedMailboxSenderStreamCarrier = Readonly<{
 
 export type SeedMailboxSenderStreamProductionInput = Readonly<{
     canonicalDeliveryDescriptorBytes: Uint8Array;
+    context: SeedMailboxSenderStreamCustodyContext &
+        Readonly<{ recipientPosition: number }>;
     encapsulationRandomness: Uint8Array;
     signatureRandomness: Uint8Array;
     sourcePayloadBytes: Uint8Array;
@@ -92,7 +105,6 @@ export type SeedMailboxSenderStreamValidationInput = Readonly<{
     context: SeedMailboxSenderStreamCustodyContext &
         Readonly<{ recipientPosition: number }>;
     geometry: SeedMailboxSenderStreamGeometry;
-    sourcePayloadDigest: Uint8Array;
 }>;
 
 export type SeedMailboxSenderStreamKernel = Readonly<{
@@ -106,12 +118,94 @@ export type SeedMailboxSenderStreamKernel = Readonly<{
     ): Promise<void> | void;
 }>;
 
+type OpenBrowserLocalSeedMailboxSenderStreamKernelInput = Omit<
+    OpenProductionSeedMailboxSenderStreamKernelInput,
+    'signingOperations'
+> &
+    Readonly<{ signingCapability: BrowserLocalSigningCapability }>;
+
+/**
+ * Binds the fixed-purpose sender-manifest operations to an opaque browser-local
+ * signing capability. Rust still verifies the exact output under the
+ * terminal-selected roster key before any carrier can leave the adapter.
+ */
+export const openBrowserLocalSeedMailboxSenderStreamKernel = (
+    transcriptCoreKernelUrl: URL,
+    input: OpenBrowserLocalSeedMailboxSenderStreamKernelInput,
+): Promise<ProductionSeedMailboxSenderStreamKernel> => {
+    const signingCapability = input.signingCapability;
+    return openProductionSeedMailboxSenderStreamKernel(
+        transcriptCoreKernelUrl,
+        {
+            parameterIdentity: input.parameterIdentity,
+            preparationContextBytes: input.preparationContextBytes,
+            rootAuthorizationPackages: input.rootAuthorizationPackages,
+            rootTerminalCertificateBytes: input.rootTerminalCertificateBytes,
+            rosterBytes: input.rosterBytes,
+            senderPosition: input.senderPosition,
+            signingOperations: Object.freeze({
+                assertMatchesSenderVerificationKey: ({
+                    senderSigningVerificationKey,
+                }): void =>
+                    assertSeedMailboxSenderSigningCapabilityMatchesRosterKey({
+                        senderSigningVerificationKey,
+                        signingCapability,
+                    }),
+                signManifestBody: ({
+                    senderSigningVerificationKey,
+                    signatureBodyBytes,
+                    signatureRandomness,
+                }): Uint8Array =>
+                    signSeedMailboxManifestBody({
+                        senderSigningVerificationKey,
+                        signatureBodyBytes,
+                        signatureRandomness,
+                        signingCapability,
+                    }),
+            }),
+        },
+    );
+};
+
 type SeedMailboxSenderStreamCustodyRecordByteLengths = Readonly<{
     completedCiphertextByteLength: number;
     completedPlaintextByteLength: number;
     copyOnWriteCiphertextOverlapByteLength: number;
     reservationCiphertextByteLength: number;
     reservationPlaintextByteLength: number;
+}>;
+
+type SeedMailboxSenderRootAuthorizationPackageByteLengths = Readonly<{
+    contributorSignatureEnvelopeByteLength: number;
+    exactOutputCertificateByteLength: number;
+    reservationCertificateByteLength: number;
+    rootBodyByteLength: number;
+}>;
+
+type SeedMailboxSenderStreamKernelByteLengths = Readonly<{
+    closeContextRequestByteLength: number;
+    closeContextResponseByteLength: number;
+    coldValidationCumulativeRequestByteLength: number;
+    coldValidationCumulativeResponseByteLength: number;
+    coldValidationInvocationCount: number;
+    completeCarrierRequestByteLengthPerStream: number;
+    completeCarrierResponseByteLengthPerStream: number;
+    maximumRequestByteLength: number;
+    maximumResponseByteLength: number;
+    openContextRequestByteLength: number;
+    openContextResponseByteLength: number;
+    prepareCarrierRequestByteLengthPerStream: number;
+    prepareCarrierResponseByteLengthPerStream: number;
+    signatureBodyByteLengthPerStream: number;
+    signatureContextByteLengthPerStream: number;
+    signatureRandomnessByteLengthPerStream: number;
+    signatureResponseByteLengthPerStream: number;
+    signingVerificationKeyByteLengthPerStream: number;
+    successfulCumulativeRequestByteLength: number;
+    successfulCumulativeResponseByteLength: number;
+    successfulInvocationCount: number;
+    validateCarrierRequestByteLengthPerStream: number;
+    validateCarrierResponseByteLengthPerStream: number;
 }>;
 
 export type RetainSeedMailboxSenderStreamInput = Readonly<{
@@ -568,6 +662,330 @@ export const deriveSeedMailboxSenderStreamCustodyRecordByteLengths = (input: {
         ),
         reservationCiphertextByteLength,
         reservationPlaintextByteLength,
+    });
+};
+
+export const deriveSeedMailboxSenderStreamKernelByteLengths = (input: {
+    canonicalDeliveryDescriptorByteLength: number;
+    geometry: SeedMailboxSenderStreamGeometry;
+    preparationContextByteLength: number;
+    rootAuthorizationPackages: readonly SeedMailboxSenderRootAuthorizationPackageByteLengths[];
+    rootTerminalCertificateByteLength: number;
+    rosterByteLength: number;
+    streamCount: number;
+}): SeedMailboxSenderStreamKernelByteLengths => {
+    const canonicalDeliveryDescriptorByteLength = requireSafeInteger(
+        snapshotDataProperty(
+            input,
+            'canonicalDeliveryDescriptorByteLength',
+            'input',
+        ),
+        1,
+        unsigned32Maximum,
+        'canonicalDeliveryDescriptorByteLength',
+    );
+    const preparationContextByteLength = requireSafeInteger(
+        snapshotDataProperty(input, 'preparationContextByteLength', 'input'),
+        1,
+        unsigned32Maximum,
+        'preparationContextByteLength',
+    );
+    const rosterByteLength = requireSafeInteger(
+        snapshotDataProperty(input, 'rosterByteLength', 'input'),
+        1,
+        unsigned32Maximum,
+        'rosterByteLength',
+    );
+    const rootTerminalCertificateByteLength = requireSafeInteger(
+        snapshotDataProperty(
+            input,
+            'rootTerminalCertificateByteLength',
+            'input',
+        ),
+        1,
+        unsigned32Maximum,
+        'rootTerminalCertificateByteLength',
+    );
+    const streamCount = requireSafeInteger(
+        snapshotDataProperty(input, 'streamCount', 'input'),
+        1,
+        unsigned16Maximum,
+        'streamCount',
+    );
+    const geometry = copyGeometry(
+        snapshotDataProperty(input, 'geometry', 'input'),
+    );
+    const rootAuthorizationPackagesValue = snapshotDataProperty(
+        input,
+        'rootAuthorizationPackages',
+        'input',
+    );
+    if (
+        !Array.isArray(rootAuthorizationPackagesValue) ||
+        rootAuthorizationPackagesValue.length === 0 ||
+        rootAuthorizationPackagesValue.length > unsigned16Maximum
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'rootAuthorizationPackages must be a bounded nonempty array.',
+        );
+    }
+    const readPackageByteLength = (
+        packageValue: unknown,
+        propertyName: keyof SeedMailboxSenderRootAuthorizationPackageByteLengths,
+        packageIndex: number,
+    ): number =>
+        requireSafeInteger(
+            snapshotDataProperty(
+                packageValue,
+                propertyName,
+                `rootAuthorizationPackages[${packageIndex}]`,
+            ),
+            1,
+            unsigned32Maximum,
+            `rootAuthorizationPackages[${packageIndex}].${propertyName}`,
+        );
+    const rootPackageCorpusByteLength = sumByteLengths(
+        rootAuthorizationPackagesValue.map((packageValue, packageIndex) =>
+            sumByteLengths(
+                [
+                    4,
+                    readPackageByteLength(
+                        packageValue,
+                        'rootBodyByteLength',
+                        packageIndex,
+                    ),
+                    4,
+                    readPackageByteLength(
+                        packageValue,
+                        'reservationCertificateByteLength',
+                        packageIndex,
+                    ),
+                    4,
+                    readPackageByteLength(
+                        packageValue,
+                        'exactOutputCertificateByteLength',
+                        packageIndex,
+                    ),
+                    4,
+                    readPackageByteLength(
+                        packageValue,
+                        'contributorSignatureEnvelopeByteLength',
+                        packageIndex,
+                    ),
+                ],
+                `Sender-mailbox root package ${packageIndex}`,
+            ),
+        ),
+        'Sender-mailbox root-package corpus',
+    );
+    const chunkCount = geometry.encryptedChunkByteLengths.length;
+    const chunkLengthTableByteLength = checkedMultiply(
+        chunkCount,
+        4,
+        'Sender-mailbox kernel chunk-length table',
+    );
+    const encryptedChunkCorpusByteLength = sumByteLengths(
+        geometry.encryptedChunkByteLengths,
+        'Sender-mailbox encrypted chunk corpus',
+    );
+    const openContextRequestByteLength = sumByteLengths(
+        [
+            7,
+            hashByteLength,
+            2,
+            4,
+            preparationContextByteLength,
+            4,
+            rosterByteLength,
+            2,
+            rootPackageCorpusByteLength,
+            4,
+            rootTerminalCertificateByteLength,
+        ],
+        'Sender-mailbox open-context request',
+    );
+    const openContextResponseByteLength = 7 + 4 + 1_952;
+    const prepareCarrierRequestByteLengthPerStream = sumByteLengths(
+        [
+            251,
+            canonicalDeliveryDescriptorByteLength,
+            geometry.sourcePayloadByteLength,
+        ],
+        'Sender-mailbox prepare-carrier request',
+    );
+    const prepareCarrierResponseByteLengthPerStream = sumByteLengths(
+        [
+            7 + 4 * 3 + 2,
+            geometry.headerByteLength,
+            geometry.manifestByteLength,
+            309,
+            chunkLengthTableByteLength,
+            encryptedChunkCorpusByteLength,
+        ],
+        'Sender-mailbox prepare-carrier response',
+    );
+    const completeCarrierRequestByteLengthPerStream = sumByteLengths(
+        [
+            211,
+            4,
+            canonicalDeliveryDescriptorByteLength,
+            4,
+            geometry.headerByteLength,
+            4,
+            geometry.manifestByteLength,
+            2,
+            chunkLengthTableByteLength,
+            encryptedChunkCorpusByteLength,
+            3_309,
+        ],
+        'Sender-mailbox complete-carrier request',
+    );
+    const completeCarrierResponseByteLengthPerStream = sumByteLengths(
+        [
+            7 + 4 * 3 + 2,
+            chunkLengthTableByteLength,
+            geometry.totalCarrierByteLength,
+        ],
+        'Sender-mailbox complete-carrier response',
+    );
+    const validateCarrierRequestByteLengthPerStream = sumByteLengths(
+        [
+            211,
+            4,
+            canonicalDeliveryDescriptorByteLength,
+            5 * 4 + 2,
+            chunkLengthTableByteLength,
+            4 * 3 + 2,
+            chunkLengthTableByteLength,
+            geometry.totalCarrierByteLength,
+        ],
+        'Sender-mailbox validate-carrier request',
+    );
+    const validateCarrierResponseByteLengthPerStream = 7;
+    const closeContextRequestByteLength = 11;
+    const closeContextResponseByteLength = 7;
+    const maximumRequestByteLength = Math.max(
+        openContextRequestByteLength,
+        prepareCarrierRequestByteLengthPerStream,
+        completeCarrierRequestByteLengthPerStream,
+        validateCarrierRequestByteLengthPerStream,
+        closeContextRequestByteLength,
+    );
+    const maximumResponseByteLength = Math.max(
+        openContextResponseByteLength,
+        prepareCarrierResponseByteLengthPerStream,
+        completeCarrierResponseByteLengthPerStream,
+        validateCarrierResponseByteLengthPerStream,
+        closeContextResponseByteLength,
+    );
+    if (
+        maximumRequestByteLength >
+            foundationProfile.maximumCopiedBufferByteLength ||
+        maximumResponseByteLength >
+            foundationProfile.maximumCopiedBufferByteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'ResourceLimit',
+            'Sender-mailbox kernel geometry exceeds the absolute copied-buffer bound.',
+        );
+    }
+    const successfulRequestByteLengthPerStream = sumByteLengths(
+        [
+            prepareCarrierRequestByteLengthPerStream,
+            completeCarrierRequestByteLengthPerStream,
+            validateCarrierRequestByteLengthPerStream,
+        ],
+        'Sender-mailbox successful requests per stream',
+    );
+    const successfulResponseByteLengthPerStream = sumByteLengths(
+        [
+            prepareCarrierResponseByteLengthPerStream,
+            completeCarrierResponseByteLengthPerStream,
+            validateCarrierResponseByteLengthPerStream,
+        ],
+        'Sender-mailbox successful responses per stream',
+    );
+    return Object.freeze({
+        closeContextRequestByteLength,
+        closeContextResponseByteLength,
+        coldValidationCumulativeRequestByteLength: sumByteLengths(
+            [
+                openContextRequestByteLength,
+                checkedMultiply(
+                    streamCount,
+                    validateCarrierRequestByteLengthPerStream,
+                    'Sender-mailbox cold-validation requests',
+                ),
+                closeContextRequestByteLength,
+            ],
+            'Sender-mailbox cold-validation cumulative request',
+        ),
+        coldValidationCumulativeResponseByteLength: sumByteLengths(
+            [
+                openContextResponseByteLength,
+                checkedMultiply(
+                    streamCount,
+                    validateCarrierResponseByteLengthPerStream,
+                    'Sender-mailbox cold-validation responses',
+                ),
+                closeContextResponseByteLength,
+            ],
+            'Sender-mailbox cold-validation cumulative response',
+        ),
+        coldValidationInvocationCount: checkedAdd(
+            streamCount,
+            2,
+            'Sender-mailbox cold-validation invocation count',
+        ),
+        completeCarrierRequestByteLengthPerStream,
+        completeCarrierResponseByteLengthPerStream,
+        maximumRequestByteLength,
+        maximumResponseByteLength,
+        openContextRequestByteLength,
+        openContextResponseByteLength,
+        prepareCarrierRequestByteLengthPerStream,
+        prepareCarrierResponseByteLengthPerStream,
+        signatureBodyByteLengthPerStream: 309,
+        signatureContextByteLengthPerStream: 51,
+        signatureRandomnessByteLengthPerStream: 32,
+        signatureResponseByteLengthPerStream: 3_309,
+        signingVerificationKeyByteLengthPerStream: 1_952,
+        successfulCumulativeRequestByteLength: sumByteLengths(
+            [
+                openContextRequestByteLength,
+                checkedMultiply(
+                    streamCount,
+                    successfulRequestByteLengthPerStream,
+                    'Sender-mailbox successful request corpus',
+                ),
+                closeContextRequestByteLength,
+            ],
+            'Sender-mailbox successful cumulative request',
+        ),
+        successfulCumulativeResponseByteLength: sumByteLengths(
+            [
+                openContextResponseByteLength,
+                checkedMultiply(
+                    streamCount,
+                    successfulResponseByteLengthPerStream,
+                    'Sender-mailbox successful response corpus',
+                ),
+                closeContextResponseByteLength,
+            ],
+            'Sender-mailbox successful cumulative response',
+        ),
+        successfulInvocationCount: checkedAdd(
+            checkedMultiply(
+                streamCount,
+                3,
+                'Sender-mailbox successful stream invocation count',
+            ),
+            2,
+            'Sender-mailbox successful invocation count',
+        ),
+        validateCarrierRequestByteLengthPerStream,
+        validateCarrierResponseByteLengthPerStream,
     });
 };
 
@@ -1309,18 +1727,15 @@ export class SeedMailboxSenderStreamCustody {
 
     public constructor(input: {
         context: SeedMailboxSenderStreamCustodyContext;
-        kernel: SeedMailboxSenderStreamKernel;
+        kernel: ProductionSeedMailboxSenderStreamKernel;
         limits: SeedMailboxSenderStreamCustodyLimits;
         protection: RuntimeRecordProtection;
         recencyCoordinator: AuthenticatedStorageRecencyCoordinator;
     }) {
-        if (
-            typeof input.kernel?.produce !== 'function' ||
-            typeof input.kernel?.validate !== 'function'
-        ) {
+        if (!isProductionSeedMailboxSenderStreamKernel(input.kernel)) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidConfiguration',
-                'Seed-mailbox sender custody requires a complete kernel boundary.',
+                'Seed-mailbox sender custody requires the integrity-pinned production kernel.',
             );
         }
         if (
@@ -1598,6 +2013,7 @@ export class SeedMailboxSenderStreamCustody {
             Object.freeze({
                 canonicalDeliveryDescriptorBytes:
                     reservation.coordinate.canonicalDeliveryDescriptorBytes.slice(),
+                context: copyValidationContext(reservation.coordinate),
                 encapsulationRandomness:
                     reservation.encapsulationRandomness.slice(),
                 signatureRandomness: reservation.signatureRandomness.slice(),
@@ -1623,6 +2039,9 @@ export class SeedMailboxSenderStreamCustody {
             return snapshotCarrier(produced, reservation.coordinate.geometry);
         } finally {
             productionInput.canonicalDeliveryDescriptorBytes.fill(0);
+            productionInput.context.parameterIdentity.fill(0);
+            productionInput.context.preparationContextIdentity.fill(0);
+            productionInput.context.rootTerminalIdentity.fill(0);
             productionInput.encapsulationRandomness.fill(0);
             productionInput.signatureRandomness.fill(0);
             productionInput.sourcePayloadBytes.fill(0);
@@ -1647,7 +2066,6 @@ export class SeedMailboxSenderStreamCustody {
                         ...coordinate.geometry.encryptedChunkByteLengths,
                     ]),
                 }),
-                sourcePayloadDigest: coordinate.sourcePayloadDigest.slice(),
             });
         let validationFailed = false;
         let validationFailure: unknown;
@@ -1671,7 +2089,6 @@ export class SeedMailboxSenderStreamCustody {
             validationContext.parameterIdentity.fill(0);
             validationContext.preparationContextIdentity.fill(0);
             validationContext.rootTerminalIdentity.fill(0);
-            validationInput.sourcePayloadDigest.fill(0);
         }
     }
 

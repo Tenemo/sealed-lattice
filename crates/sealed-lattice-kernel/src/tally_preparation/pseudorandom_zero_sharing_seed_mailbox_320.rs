@@ -423,7 +423,7 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
         .encode()?)
     }
 
-    fn from_canonical_bytes(
+    pub(crate) fn from_canonical_bytes(
         bytes: &[u8],
     ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
         let tuple = CanonicalTuple::decode(bytes, &mailbox_control_object_decode_limits())?;
@@ -468,6 +468,19 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
             PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_IDENTITY_DOMAIN,
             &[CanonicalItem::variable_bytes(self.canonical_bytes()?)?],
         )?)
+    }
+
+    pub(crate) fn encrypted_chunk_byte_lengths(
+        &self,
+    ) -> Result<Vec<usize>, PseudorandomZeroSharingSeedMailboxError320> {
+        let chunk_count = usize::try_from(self.chunk_count)
+            .map_err(|_| PseudorandomZeroSharingSeedMailboxError320::IntegerConversion)?;
+        (0..chunk_count)
+            .map(|chunk_index| {
+                self.chunk_geometry(chunk_index)
+                    .map(|geometry| geometry.carrier_byte_length)
+            })
+            .collect()
     }
 
     fn validate_internal_geometry(&self) -> Result<(), PseudorandomZeroSharingSeedMailboxError320> {
@@ -611,7 +624,7 @@ impl PseudorandomZeroSharingSeedMailboxManifestBody320 {
         .encode()?)
     }
 
-    fn from_canonical_bytes(
+    pub(crate) fn from_canonical_bytes(
         bytes: &[u8],
     ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
         let tuple = CanonicalTuple::decode(bytes, &mailbox_control_object_decode_limits())?;
@@ -640,7 +653,7 @@ impl PseudorandomZeroSharingSeedMailboxManifestBody320 {
         )?)
     }
 
-    fn require_header(
+    pub(crate) fn require_header(
         &self,
         header: &PseudorandomZeroSharingSeedMailboxHeaderBody320,
     ) -> Result<(), PseudorandomZeroSharingSeedMailboxError320> {
@@ -716,7 +729,7 @@ impl PseudorandomZeroSharingSeedMailboxSignatureBody320 {
         .encode()?)
     }
 
-    fn from_canonical_bytes(
+    pub(crate) fn from_canonical_bytes(
         expected: Self,
         bytes: &[u8],
     ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
@@ -795,7 +808,7 @@ impl PseudorandomZeroSharingSignedSeedMailboxManifestEnvelope320 {
         .encode()?)
     }
 
-    fn from_canonical_bytes(
+    pub(crate) fn from_canonical_bytes(
         expected_signature_body: PseudorandomZeroSharingSeedMailboxSignatureBody320,
         bytes: &[u8],
     ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
@@ -1281,6 +1294,87 @@ fn verify_sender_manifest_signature(
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_CONTEXT,
     ) {
         return Err(PseudorandomZeroSharingSeedMailboxError320::InvalidSenderSignature);
+    }
+    Ok(())
+}
+
+/// Positively verifies the public portion of one sender-produced carrier.
+///
+/// This check authenticates the sender, exact descriptor, manifest, chunk
+/// order, chunk lengths, and every encrypted byte. It deliberately does not
+/// decapsulate or claim that the ciphertext opens to a root-matched delivery;
+/// only the recipient verifier can establish that private result.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_pseudorandom_zero_sharing_seed_mailbox_sender_carrier_320(
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    roster: &Roster,
+    expected_sender_position: u16,
+    expected_recipient_position: u16,
+    expected_descriptor_bytes: &[u8],
+    header_bytes: &[u8],
+    manifest_bytes: &[u8],
+    signature_envelope_bytes: &[u8],
+    encrypted_chunks: &[&[u8]],
+) -> Result<(), PseudorandomZeroSharingSeedMailboxError320> {
+    validate_roster_for_terminal(root_terminal, roster)?;
+    require_expected_delivery_descriptor(
+        root_terminal,
+        expected_sender_position,
+        expected_recipient_position,
+        expected_descriptor_bytes,
+    )?;
+    let header =
+        PseudorandomZeroSharingSeedMailboxHeaderBody320::from_canonical_bytes(header_bytes)?;
+    let manifest =
+        PseudorandomZeroSharingSeedMailboxManifestBody320::from_canonical_bytes(manifest_bytes)?;
+    verify_sender_manifest_signature(
+        roster,
+        expected_sender_position,
+        &header,
+        &manifest,
+        signature_envelope_bytes,
+    )?;
+    require_header_matches_expected(
+        root_terminal,
+        roster,
+        expected_sender_position,
+        expected_recipient_position,
+        &header,
+    )?;
+    manifest.require_header(&header)?;
+    let expected_chunk_byte_lengths = header.encrypted_chunk_byte_lengths()?;
+    if encrypted_chunks.len() != expected_chunk_byte_lengths.len() {
+        return Err(PseudorandomZeroSharingSeedMailboxError320::ChunkCount {
+            expected: expected_chunk_byte_lengths.len(),
+            actual: encrypted_chunks.len(),
+        });
+    }
+    let header_identity = header.identity()?;
+    for (chunk_index, (encrypted_chunk, expected_byte_length)) in encrypted_chunks
+        .iter()
+        .zip(expected_chunk_byte_lengths)
+        .enumerate()
+    {
+        if encrypted_chunk.len() != expected_byte_length {
+            return Err(
+                PseudorandomZeroSharingSeedMailboxError320::ChunkByteLength {
+                    expected: expected_byte_length,
+                    actual: encrypted_chunk.len(),
+                },
+            );
+        }
+        let expected_digest = manifest.ordered_chunk_digests().get(chunk_index).ok_or(
+            PseudorandomZeroSharingSeedMailboxError320::ChunkOrder {
+                expected: manifest.ordered_chunk_digests().len(),
+                actual: chunk_index,
+            },
+        )?;
+        let actual_digest = hash_mailbox_chunk(header_identity, chunk_index, encrypted_chunk)?;
+        if !bool::from(actual_digest.as_bytes().ct_eq(expected_digest.as_bytes())) {
+            return Err(
+                PseudorandomZeroSharingSeedMailboxError320::ChunkDigestMismatch { chunk_index },
+            );
+        }
     }
     Ok(())
 }

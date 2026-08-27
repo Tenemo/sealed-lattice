@@ -412,6 +412,7 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
         recordBytes: Uint8Array,
     ) => Uint8Array;
     readonly executeSeedCatalogSource: (requestBytes: Uint8Array) => Uint8Array;
+    readonly executeSeedMailboxSender: (requestBytes: Uint8Array) => Uint8Array;
     readonly memory: WebAssembly.Memory;
     readonly runExclusive: <Result>(
         operationName: string,
@@ -561,6 +562,7 @@ type NumberExportName =
     | 'sealed_lattice_deallocate_secret'
     | 'sealed_lattice_join_seed_masters_320_with_length'
     | 'sealed_lattice_seed_catalog_source_320_with_length'
+    | 'sealed_lattice_seed_mailbox_sender_320_with_length'
     | 'sealed_lattice_transcript_core_command_with_length'
     | 'sealed_lattice_validate_joined_seed_masters_320_with_length';
 
@@ -873,6 +875,10 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_seed_catalog_source_320_with_length',
     );
+    const seedMailboxSenderWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_seed_mailbox_sender_320_with_length',
+    );
     const commandWithLength = resolveNumberExport(
         wasmExports,
         'sealed_lattice_transcript_core_command_with_length',
@@ -950,6 +956,18 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
                 'seed-catalog source',
             ),
         );
+    const executeSeedMailboxSender = (requestBytes: Uint8Array): Uint8Array =>
+        runExclusive('seed-mailbox sender', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                seedMailboxSenderWithLength,
+                requestBytes,
+                'seed-mailbox sender',
+            ),
+        );
 
     return {
         allocate,
@@ -958,6 +976,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         executeJoinedSeedMasterJoin,
         executeJoinedSeedMasterValidation,
         executeSeedCatalogSource,
+        executeSeedMailboxSender,
         memory,
         runExclusive,
         wasmExports,

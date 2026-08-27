@@ -135,6 +135,10 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                 kind: 'function',
                 name: 'sealed_lattice_seed_catalog_source_320_with_length',
             },
+            {
+                kind: 'function',
+                name: 'sealed_lattice_seed_mailbox_sender_320_with_length',
+            },
             { kind: 'global', name: '__data_end' },
             { kind: 'global', name: '__heap_base' },
         ]);
@@ -334,6 +338,69 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
             ).toThrowError(
                 expect.objectContaining({ code: 'DeliveryMismatch' }),
             );
+        } finally {
+            if (priorBinding === undefined) {
+                Reflect.deleteProperty(globalBindings, integrityBindingName);
+            } else {
+                Object.defineProperty(
+                    globalBindings,
+                    integrityBindingName,
+                    priorBinding,
+                );
+            }
+            vi.resetModules();
+        }
+    });
+
+    it('loads the sender-mailbox ABI only through an integrity-pinned adapter and preserves public-context refusal', async () => {
+        const expectedKernelSha256Hex = await currentKernelSha256Hex();
+        const integrityBindingName =
+            '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
+        const globalBindings = globalThis as Record<string, unknown>;
+        const priorBinding = Object.getOwnPropertyDescriptor(
+            globalBindings,
+            integrityBindingName,
+        );
+        try {
+            Object.defineProperty(globalBindings, integrityBindingName, {
+                configurable: true,
+                value: expectedKernelSha256Hex,
+            });
+            vi.resetModules();
+            const senderKernelModule =
+                await import('../../src/seed-mailbox-sender-stream-kernel.js');
+            expect(
+                senderKernelModule.isProductionSeedMailboxSenderStreamKernel({
+                    close: () => undefined,
+                    produce: () => undefined,
+                    validate: () => undefined,
+                }),
+            ).toBe(false);
+            const oneByte = Uint8Array.of(1);
+            await expect(
+                senderKernelModule.openProductionSeedMailboxSenderStreamKernel(
+                    kernelUrl,
+                    {
+                        parameterIdentity: new Uint8Array(64).fill(0x41),
+                        preparationContextBytes: oneByte,
+                        rootAuthorizationPackages: [
+                            {
+                                contributorSignatureEnvelopeBytes: oneByte,
+                                exactOutputCertificateBytes: oneByte,
+                                reservationCertificateBytes: oneByte,
+                                rootBodyBytes: oneByte,
+                            },
+                        ],
+                        rootTerminalCertificateBytes: oneByte,
+                        rosterBytes: oneByte,
+                        senderPosition: 0,
+                        signingOperations: {
+                            assertMatchesSenderVerificationKey: () => undefined,
+                            signManifestBody: () => new Uint8Array(3_309),
+                        },
+                    },
+                ),
+            ).rejects.toMatchObject({ code: 'PublicVerification' });
         } finally {
             if (priorBinding === undefined) {
                 Reflect.deleteProperty(globalBindings, integrityBindingName);

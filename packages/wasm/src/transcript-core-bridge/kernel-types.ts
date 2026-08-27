@@ -169,6 +169,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         length: number,
         outputLengthPointer: number,
     ) => number;
+    sealed_lattice_seed_mailbox_sender_320_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_transcript_core_command_with_length?: (
         pointer: number,
         length: number,
