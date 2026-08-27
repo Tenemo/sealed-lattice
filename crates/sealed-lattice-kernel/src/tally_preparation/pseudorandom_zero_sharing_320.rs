@@ -1,5 +1,11 @@
-use crate::{foundation::derive_foundation_roster_parameters, tally_circuit::CompiledTallyCircuit};
+use core::fmt;
+
+use crate::{
+    foundation::{FOUNDATION_PROFILE, derive_foundation_roster_parameters},
+    tally_circuit::CompiledTallyCircuit,
+};
 use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 use super::{
     TallyPreparationError,
@@ -751,6 +757,180 @@ pub(crate) struct CanonicalZeroSharingCodewordVerifier320 {
     basis_point_count: usize,
     constant_term_coefficients: Box<[BinaryFieldElement320]>,
     nonbasis_point_coefficients: Box<[Box<[BinaryFieldElement320]>]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CanonicalZeroSharingCodewordBlockVerifierError320 {
+    Preparation(TallyPreparationError),
+    EmptyBlock,
+    MisalignedByteLength {
+        byte_length: usize,
+        codeword_byte_length: usize,
+    },
+    CopiedBufferLimitExceeded {
+        byte_length: usize,
+        maximum_byte_length: usize,
+    },
+    ArithmeticOverflow,
+}
+
+impl fmt::Display for CanonicalZeroSharingCodewordBlockVerifierError320 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Preparation(error) => write!(formatter, "preparation error: {error}"),
+            Self::EmptyBlock => formatter.write_str("zero-codeword block must not be empty"),
+            Self::MisalignedByteLength {
+                byte_length,
+                codeword_byte_length,
+            } => write!(
+                formatter,
+                "zero-codeword block length {byte_length} is not a multiple of the {codeword_byte_length}-byte all-roster codeword"
+            ),
+            Self::CopiedBufferLimitExceeded {
+                byte_length,
+                maximum_byte_length,
+            } => write!(
+                formatter,
+                "zero-codeword block length {byte_length} exceeds copied-buffer limit {maximum_byte_length}"
+            ),
+            Self::ArithmeticOverflow => {
+                formatter.write_str("zero-codeword block arithmetic overflow")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CanonicalZeroSharingCodewordBlockVerifierError320 {}
+
+impl From<TallyPreparationError> for CanonicalZeroSharingCodewordBlockVerifierError320 {
+    fn from(error: TallyPreparationError) -> Self {
+        Self::Preparation(error)
+    }
+}
+
+/// Bounded decoder and algebraic checker for field-major all-roster openings.
+///
+/// Each row contains one canonical 40-byte field element per roster position.
+/// The checker consumes every row even after finding an invalid codeword. It
+/// authenticates no source, opening, state transition, or continuation and
+/// cannot mint a protocol capability.
+#[derive(Debug, Clone)]
+pub(crate) struct CanonicalZeroSharingCodewordBlockVerifier320 {
+    participant_count: u16,
+    codeword_byte_length: usize,
+    verifier: CanonicalZeroSharingCodewordVerifier320,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CanonicalZeroSharingCodewordBlockVerification320 {
+    pub(crate) codeword_count: u64,
+    pub(crate) is_valid: bool,
+}
+
+impl CanonicalZeroSharingCodewordBlockVerifier320 {
+    pub(crate) fn new(
+        participant_count: u16,
+    ) -> Result<Self, CanonicalZeroSharingCodewordBlockVerifierError320> {
+        let codeword_byte_length = usize::from(participant_count)
+            .checked_mul(BinaryFieldElement320::CANONICAL_BYTE_LENGTH)
+            .ok_or(CanonicalZeroSharingCodewordBlockVerifierError320::ArithmeticOverflow)?;
+        let verifier = CanonicalZeroSharingCodewordVerifier320::new(participant_count)?;
+        Ok(Self {
+            participant_count,
+            codeword_byte_length,
+            verifier,
+        })
+    }
+
+    pub(crate) const fn codeword_byte_length(&self) -> usize {
+        self.codeword_byte_length
+    }
+
+    pub(crate) fn maximum_codeword_count_per_block(&self) -> usize {
+        FOUNDATION_PROFILE.maximum_copied_buffer_byte_length / self.codeword_byte_length
+    }
+
+    pub(crate) fn field_multiplication_count_per_codeword(
+        &self,
+    ) -> Result<u64, CanonicalZeroSharingCodewordBlockVerifierError320> {
+        u64::try_from(self.verifier.basis_point_count)
+            .ok()
+            .and_then(|basis_point_count| {
+                basis_point_count.checked_mul(self.comparison_count_per_codeword())
+            })
+            .ok_or(CanonicalZeroSharingCodewordBlockVerifierError320::ArithmeticOverflow)
+    }
+
+    pub(crate) fn field_addition_count_per_codeword(
+        &self,
+    ) -> Result<u64, CanonicalZeroSharingCodewordBlockVerifierError320> {
+        u64::try_from(self.verifier.basis_point_count)
+            .ok()
+            .and_then(|basis_point_count| basis_point_count.checked_sub(1))
+            .and_then(|addition_count_per_interpolation| {
+                addition_count_per_interpolation.checked_mul(self.comparison_count_per_codeword())
+            })
+            .ok_or(CanonicalZeroSharingCodewordBlockVerifierError320::ArithmeticOverflow)
+    }
+
+    pub(crate) fn comparison_count_per_codeword(&self) -> u64 {
+        u64::from(self.participant_count)
+            - u64::try_from(self.verifier.basis_point_count)
+                .expect("the roster-sized basis point count must fit in u64")
+            + 1
+    }
+
+    pub(crate) fn verify_field_major_block(
+        &self,
+        bytes: &[u8],
+    ) -> Result<
+        CanonicalZeroSharingCodewordBlockVerification320,
+        CanonicalZeroSharingCodewordBlockVerifierError320,
+    > {
+        if bytes.is_empty() {
+            return Err(CanonicalZeroSharingCodewordBlockVerifierError320::EmptyBlock);
+        }
+        if bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
+            return Err(
+                CanonicalZeroSharingCodewordBlockVerifierError320::CopiedBufferLimitExceeded {
+                    byte_length: bytes.len(),
+                    maximum_byte_length: FOUNDATION_PROFILE.maximum_copied_buffer_byte_length,
+                },
+            );
+        }
+        if !bytes.len().is_multiple_of(self.codeword_byte_length) {
+            return Err(
+                CanonicalZeroSharingCodewordBlockVerifierError320::MisalignedByteLength {
+                    byte_length: bytes.len(),
+                    codeword_byte_length: self.codeword_byte_length,
+                },
+            );
+        }
+
+        let mut values = Zeroizing::new(vec![
+            BinaryFieldElement320::ZERO;
+            usize::from(self.participant_count)
+        ]);
+        let mut all_codewords_valid = true;
+        let mut codeword_count = 0_u64;
+        for codeword_bytes in bytes.chunks_exact(self.codeword_byte_length) {
+            for (value, field_bytes) in values
+                .iter_mut()
+                .zip(codeword_bytes.chunks_exact(BinaryFieldElement320::CANONICAL_BYTE_LENGTH))
+            {
+                *value = BinaryFieldElement320::from_canonical_bytes(field_bytes)?;
+            }
+            all_codewords_valid &= self.verifier.verify(&values)?;
+            codeword_count = codeword_count
+                .checked_add(1)
+                .ok_or(CanonicalZeroSharingCodewordBlockVerifierError320::ArithmeticOverflow)?;
+        }
+
+        Ok(CanonicalZeroSharingCodewordBlockVerification320 {
+            codeword_count,
+            is_valid: all_codewords_valid,
+        })
+    }
 }
 
 impl CanonicalZeroSharingCodewordVerifier320 {

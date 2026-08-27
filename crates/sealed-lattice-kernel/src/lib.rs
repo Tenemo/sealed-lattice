@@ -348,6 +348,73 @@ pub extern "C" fn sealed_lattice_open_zero_sharing_measurement_320() -> u32 {
     tally_preparation::pseudorandom_zero_sharing_measurement_320::open_completion_zero_sharing_measurement_320()
 }
 
+/// Opens one completion-scale diagnostic source cursor for the requested
+/// roster position. Every holder of one subset receives the same deterministic
+/// measurement master. The raw source fixture is absent from production.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_open_zero_sharing_codeword_source_measurement_320(
+    participant_position: u32,
+) -> u32 {
+    let Ok(participant_position) = u16::try_from(participant_position) else {
+        return tally_preparation::pseudorandom_zero_sharing_measurement_320::MEASUREMENT_ERROR;
+    };
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::open_completion_zero_sharing_codeword_source_measurement_320(participant_position)
+}
+
+/// Checks a nonempty field-major block of all-roster zero-codeword openings.
+/// Returns zero for a valid block, one for an algebraically invalid block, and
+/// `u32::MAX` for malformed or oversized input. This diagnostic-only export
+/// authenticates no source and cannot mint a protocol capability.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_verify_zero_sharing_codeword_block_320(
+    pointer: *const u8,
+    length: usize,
+) -> u32 {
+    let input = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::verify_completion_zero_sharing_codeword_block_320(input)
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_codeword_byte_length_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_codeword_byte_length_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_codeword_maximum_block_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_codeword_maximum_block_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_codeword_multiplication_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_codeword_multiplication_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_codeword_addition_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_codeword_addition_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_codeword_comparison_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_codeword_comparison_count_320()
+}
+
 /// Restores the deterministic diagnostic cursor from one authenticated inner
 /// checkpoint while no measurement cursor is open.
 ///
@@ -367,6 +434,34 @@ pub unsafe extern "C" fn sealed_lattice_restore_zero_sharing_measurement_320(
         unsafe { slice::from_raw_parts(pointer, length) }
     };
     tally_preparation::pseudorandom_zero_sharing_measurement_320::restore_completion_zero_sharing_measurement_320(checkpoint)
+}
+
+/// Restores one all-roster source diagnostic cursor from its authenticated
+/// inner checkpoint while no measurement cursor is open.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_restore_zero_sharing_codeword_source_measurement_320(
+    participant_position: u32,
+    pointer: *const u8,
+    length: usize,
+) -> u32 {
+    let Ok(participant_position) = u16::try_from(participant_position) else {
+        return tally_preparation::pseudorandom_zero_sharing_measurement_320::MEASUREMENT_ERROR;
+    };
+    let checkpoint = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::restore_completion_zero_sharing_codeword_source_measurement_320(
+        participant_position,
+        checkpoint,
+    )
 }
 
 /// Performs exactly one canonical subset-and-basis stream chunk.

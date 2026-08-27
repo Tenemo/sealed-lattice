@@ -40,12 +40,14 @@ const processingState = 1;
 const completedChunkReadyState = 2;
 const finishedState = 3;
 
+const unsignedStatus = (value: number): number => value >>> 0;
+
 type ParsedArguments = Readonly<{
     measurementId: string;
     outputFilePath: string;
 }>;
 
-type MeasurementExports = Readonly<{
+export type MeasurementExports = Readonly<{
     acknowledge: () => number;
     allocate: (byteLength: number) => number;
     basisPrecomputationCount: () => bigint;
@@ -53,6 +55,11 @@ type MeasurementExports = Readonly<{
     checkpoint: (outputLengthPointer: number) => number;
     checkpointTraffic: () => bigint;
     close: () => number;
+    codewordAdditionCount: () => bigint;
+    codewordByteLength: () => bigint;
+    codewordComparisonCount: () => bigint;
+    codewordMaximumBlockCount: () => bigint;
+    codewordMultiplicationCount: () => bigint;
     combinationAdditionCount: () => bigint;
     combinationMultiplicationCount: () => bigint;
     completedChunk: (outputLengthPointer: number) => number;
@@ -61,21 +68,29 @@ type MeasurementExports = Readonly<{
     fieldOutputCount: () => bigint;
     memory: WebAssembly.Memory;
     open: () => number;
+    openSource: (participantPosition: number) => number;
     outputChunkCount: () => bigint;
     restore: (pointer: number, byteLength: number) => number;
+    restoreSource: (
+        participantPosition: number,
+        pointer: number,
+        byteLength: number,
+    ) => number;
     state: () => number;
     step: () => number;
+    verifyCodewordBlock: (pointer: number, byteLength: number) => number;
     workCheckpointCount: () => bigint;
     zeroSharingCount: () => bigint;
 }>;
 
-type CursorExecution = Readonly<{
+export type CursorExecution = Readonly<{
     checkpointByteLengths: readonly number[];
     checkpointCopiedByteLength: number;
     checkpointDurationsMilliseconds: readonly number[];
     completedOutputByteLength: number;
     completedOutputDigests: readonly string[];
     completedOutputLengths: readonly number[];
+    completedOutputs?: readonly Uint8Array[];
     maximumLinearMemoryByteLength: number;
     stepDurationsMilliseconds: readonly number[];
     totalElapsedMilliseconds: number;
@@ -144,7 +159,7 @@ const resolveFunction = <FunctionType>(
     return candidate as unknown as FunctionType;
 };
 
-const resolveMeasurementExports = (
+export const resolveMeasurementExports = (
     exports: WebAssembly.Exports,
 ): MeasurementExports => {
     const memory = exports.memory;
@@ -179,6 +194,26 @@ const resolveMeasurementExports = (
             exports,
             'sealed_lattice_close_zero_sharing_measurement_320',
         ),
+        codewordAdditionCount: resolveFunction(
+            exports,
+            'sealed_lattice_zero_sharing_codeword_addition_count_320',
+        ),
+        codewordByteLength: resolveFunction(
+            exports,
+            'sealed_lattice_zero_sharing_codeword_byte_length_320',
+        ),
+        codewordComparisonCount: resolveFunction(
+            exports,
+            'sealed_lattice_zero_sharing_codeword_comparison_count_320',
+        ),
+        codewordMaximumBlockCount: resolveFunction(
+            exports,
+            'sealed_lattice_zero_sharing_codeword_maximum_block_count_320',
+        ),
+        codewordMultiplicationCount: resolveFunction(
+            exports,
+            'sealed_lattice_zero_sharing_codeword_multiplication_count_320',
+        ),
         combinationAdditionCount: resolveFunction(
             exports,
             'sealed_lattice_zero_sharing_measurement_combination_addition_count_320',
@@ -205,6 +240,10 @@ const resolveMeasurementExports = (
             exports,
             'sealed_lattice_open_zero_sharing_measurement_320',
         ),
+        openSource: resolveFunction(
+            exports,
+            'sealed_lattice_open_zero_sharing_codeword_source_measurement_320',
+        ),
         outputChunkCount: resolveFunction(
             exports,
             'sealed_lattice_zero_sharing_measurement_output_chunk_count_320',
@@ -213,6 +252,10 @@ const resolveMeasurementExports = (
             exports,
             'sealed_lattice_restore_zero_sharing_measurement_320',
         ),
+        restoreSource: resolveFunction(
+            exports,
+            'sealed_lattice_restore_zero_sharing_codeword_source_measurement_320',
+        ),
         state: resolveFunction(
             exports,
             'sealed_lattice_zero_sharing_measurement_state_320',
@@ -220,6 +263,10 @@ const resolveMeasurementExports = (
         step: resolveFunction(
             exports,
             'sealed_lattice_step_zero_sharing_measurement_320',
+        ),
+        verifyCodewordBlock: resolveFunction(
+            exports,
+            'sealed_lattice_verify_zero_sharing_codeword_block_320',
         ),
         workCheckpointCount: resolveFunction(
             exports,
@@ -233,7 +280,7 @@ const resolveMeasurementExports = (
     return Object.freeze(resolved);
 };
 
-const instantiateMeasurement = async (
+export const instantiateMeasurement = async (
     wasmBytes: Uint8Array,
 ): Promise<{
     readonly exportNames: readonly string[];
@@ -249,7 +296,7 @@ const instantiateMeasurement = async (
     });
 };
 
-const numberFromUnsigned64 = (value: bigint, field: string): number => {
+export const numberFromUnsigned64 = (value: bigint, field: string): number => {
     const converted = Number(value);
     if (!Number.isSafeInteger(converted) || converted < 0) {
         throw new Error(`${field} is not a nonnegative safe integer.`);
@@ -257,7 +304,7 @@ const numberFromUnsigned64 = (value: bigint, field: string): number => {
     return converted;
 };
 
-const requireEqual = (
+export const requireEqual = (
     actual: number,
     expected: number,
     field: string,
@@ -269,7 +316,7 @@ const requireEqual = (
     }
 };
 
-const copySecretOutput = (
+export const copySecretOutput = (
     exports: MeasurementExports,
     outputFunction: (outputLengthPointer: number) => number,
     outputLengthPointer: number,
@@ -318,17 +365,19 @@ const restoreCheckpoint = (
     }
 };
 
-const executeCursor = (input: {
+export const executeCursor = (input: {
     readonly captureCheckpointAtWorkStep?: number;
     readonly expectedOutputChunkByteLengths: readonly number[];
     readonly expectedWorkStepCount: number;
     readonly exports: MeasurementExports;
     readonly outputLengthPointer: number;
+    readonly retainCompletedOutputs?: boolean;
 }): CursorExecution & { readonly capturedCheckpoint?: Uint8Array } => {
     const checkpointByteLengths: number[] = [];
     const checkpointDurationsMilliseconds: number[] = [];
     const completedOutputDigests: string[] = [];
     const completedOutputLengths: number[] = [];
+    const completedOutputs: Uint8Array[] = [];
     const stepDurationsMilliseconds: number[] = [];
     let capturedCheckpoint: Uint8Array | undefined;
     let checkpointCopiedByteLength = 0;
@@ -344,7 +393,7 @@ const executeCursor = (input: {
             );
         }
         const stepStart = performance.now();
-        const stepResult = input.exports.step();
+        const stepResult = unsignedStatus(input.exports.step());
         const stepElapsed = performance.now() - stepStart;
         if (stepResult === measurementError) {
             throw new Error('The diagnostic zero-sharing step failed.');
@@ -400,8 +449,14 @@ const executeCursor = (input: {
             completedOutputDigests.push(
                 createHash('sha3-512').update(output).digest('hex'),
             );
-            output.fill(0);
-            const acknowledgeResult = input.exports.acknowledge();
+            if (input.retainCompletedOutputs === true) {
+                completedOutputs.push(output);
+            } else {
+                output.fill(0);
+            }
+            const acknowledgeResult = unsignedStatus(
+                input.exports.acknowledge(),
+            );
             if (acknowledgeResult === measurementError) {
                 throw new Error(
                     'The diagnostic output acknowledgement failed.',
@@ -431,6 +486,9 @@ const executeCursor = (input: {
         completedOutputByteLength,
         completedOutputDigests: Object.freeze(completedOutputDigests),
         completedOutputLengths: Object.freeze(completedOutputLengths),
+        ...(input.retainCompletedOutputs === true
+            ? { completedOutputs: Object.freeze(completedOutputs) }
+            : {}),
         maximumLinearMemoryByteLength,
         stepDurationsMilliseconds: Object.freeze(stepDurationsMilliseconds),
         totalElapsedMilliseconds: performance.now() - startTimeMilliseconds,
@@ -441,7 +499,7 @@ const executeCursor = (input: {
         : Object.freeze({ ...base, capturedCheckpoint });
 };
 
-const distribution = (values: readonly number[]) => {
+export const distribution = (values: readonly number[]) => {
     if (values.length === 0) {
         throw new Error('A timing distribution cannot be empty.');
     }

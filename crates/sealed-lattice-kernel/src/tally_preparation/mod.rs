@@ -44,6 +44,8 @@ mod pseudorandom_zero_sharing_320;
 mod pseudorandom_zero_sharing_field_stream_320;
 #[cfg(feature = "preparation-zero-sharing-measurement")]
 pub(crate) mod pseudorandom_zero_sharing_measurement_320;
+#[cfg(any(test, feature = "preparation-zero-sharing-measurement"))]
+mod pseudorandom_zero_sharing_measurement_fixture_320;
 mod pseudorandom_zero_sharing_pair_and_coin_seed_320;
 mod pseudorandom_zero_sharing_participant_cursor_320;
 mod pseudorandom_zero_sharing_seed_catalog_320;
@@ -144,6 +146,8 @@ mod preparation_holder_record_catalog_tests;
 mod preparation_multiplication_catalog_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_codeword_source_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_field_stream_320_tests;
 #[cfg(test)]

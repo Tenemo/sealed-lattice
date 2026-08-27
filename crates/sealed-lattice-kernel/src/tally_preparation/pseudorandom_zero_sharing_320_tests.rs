@@ -11,9 +11,11 @@ use super::{
         PreparationAttemptResourceFloorInput,
     },
     pseudorandom_zero_sharing_320::{
-        CanonicalZeroSharingCodewordVerifier320, PseudorandomZeroSharingResourceInput,
-        PseudorandomZeroSharingResourceModel, canonical_evaluation_point_320,
-        evaluate_pseudorandom_zero_sharing_subset_at_point,
+        CanonicalZeroSharingCodewordBlockVerification320,
+        CanonicalZeroSharingCodewordBlockVerifier320,
+        CanonicalZeroSharingCodewordBlockVerifierError320, CanonicalZeroSharingCodewordVerifier320,
+        PseudorandomZeroSharingResourceInput, PseudorandomZeroSharingResourceModel,
+        canonical_evaluation_point_320, evaluate_pseudorandom_zero_sharing_subset_at_point,
     },
     pseudorandom_zero_sharing_seed_catalog_320::PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_INCLUSION_PROOF_DOMAIN,
     pseudorandom_zero_sharing_seed_mailbox_320::{
@@ -181,6 +183,82 @@ fn zero_codeword_verifier_accepts_general_degree_six_polynomials_and_rejects_con
     assert_eq!(
         verifier.verify(&values[..values.len() - 1]),
         Err(TallyPreparationError::GeometryMismatch)
+    );
+}
+
+#[test]
+fn bounded_zero_codeword_blocks_check_every_field_and_reject_invalid_layouts() {
+    let participant_count = FOUNDATION_PROFILE.participant_count;
+    let verifier = CanonicalZeroSharingCodewordBlockVerifier320::new(participant_count).unwrap();
+    let codeword_count = 9_usize;
+    let mut valid_block = Vec::with_capacity(codeword_count * verifier.codeword_byte_length());
+    for codeword_position in 0..codeword_count {
+        let coefficient_offset = u16::try_from(codeword_position * 19).unwrap();
+        let coefficients = [
+            BinaryFieldElement320::ZERO,
+            field_element(17 + coefficient_offset),
+            field_element(29 + coefficient_offset),
+            field_element(43 + coefficient_offset),
+            field_element(61 + coefficient_offset),
+            field_element(83 + coefficient_offset),
+            field_element(107 + coefficient_offset),
+        ];
+        for roster_position in 0..participant_count {
+            let value = evaluate_polynomial(
+                &coefficients,
+                canonical_evaluation_point_320(participant_count, roster_position).unwrap(),
+            );
+            valid_block.extend_from_slice(&value.canonical_bytes());
+        }
+    }
+
+    assert_eq!(verifier.codeword_byte_length(), 400);
+    assert_eq!(verifier.maximum_codeword_count_per_block(), 20_971);
+    assert_eq!(verifier.field_multiplication_count_per_codeword(), Ok(28));
+    assert_eq!(verifier.field_addition_count_per_codeword(), Ok(24));
+    assert_eq!(verifier.comparison_count_per_codeword(), 4);
+    assert_eq!(
+        verifier.verify_field_major_block(&valid_block).unwrap(),
+        CanonicalZeroSharingCodewordBlockVerification320 {
+            codeword_count: u64::try_from(codeword_count).unwrap(),
+            is_valid: true,
+        }
+    );
+
+    for field_position in 0..codeword_count * usize::from(participant_count) {
+        let mut invalid_block = valid_block.clone();
+        invalid_block[field_position * BinaryFieldElement320::CANONICAL_BYTE_LENGTH] ^= 1;
+        assert!(
+            !verifier
+                .verify_field_major_block(&invalid_block)
+                .unwrap()
+                .is_valid,
+            "mutated field position {field_position}"
+        );
+    }
+
+    assert_eq!(
+        verifier.verify_field_major_block(&[]),
+        Err(CanonicalZeroSharingCodewordBlockVerifierError320::EmptyBlock)
+    );
+    assert_eq!(
+        verifier.verify_field_major_block(&valid_block[..valid_block.len() - 1]),
+        Err(
+            CanonicalZeroSharingCodewordBlockVerifierError320::MisalignedByteLength {
+                byte_length: valid_block.len() - 1,
+                codeword_byte_length: verifier.codeword_byte_length(),
+            }
+        )
+    );
+    let oversized_block = vec![0_u8; FOUNDATION_PROFILE.maximum_copied_buffer_byte_length + 1];
+    assert_eq!(
+        verifier.verify_field_major_block(&oversized_block),
+        Err(
+            CanonicalZeroSharingCodewordBlockVerifierError320::CopiedBufferLimitExceeded {
+                byte_length: oversized_block.len(),
+                maximum_byte_length: FOUNDATION_PROFILE.maximum_copied_buffer_byte_length,
+            }
+        )
     );
 }
 

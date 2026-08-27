@@ -11,7 +11,10 @@ use crate::{
 
 use super::{
     TallyPreparationContext,
-    pseudorandom_zero_sharing_320::PerBitPseudorandomZeroSharingWorkload320,
+    pseudorandom_zero_sharing_320::{
+        CanonicalZeroSharingCodewordBlockVerifier320, PerBitPseudorandomZeroSharingWorkload320,
+    },
+    pseudorandom_zero_sharing_measurement_fixture_320::derive_all_roster_zero_sharing_measurement_master_320,
     pseudorandom_zero_sharing_participant_cursor_320::{
         PseudorandomZeroSharingCursorResourceModel320, PseudorandomZeroSharingCursorState320,
         PseudorandomZeroSharingParticipantCursor320,
@@ -27,6 +30,7 @@ use super::{
 pub(crate) const MEASUREMENT_SUCCESS: u32 = 0;
 pub(crate) const MEASUREMENT_CHUNK_READY: u32 = 1;
 pub(crate) const MEASUREMENT_FINISHED: u32 = 1;
+pub(crate) const MEASUREMENT_CODEWORD_INVALID: u32 = 1;
 pub(crate) const MEASUREMENT_ERROR: u32 = u32::MAX;
 
 struct CompletionZeroSharingMeasurement320 {
@@ -77,6 +81,76 @@ pub(crate) fn open_completion_zero_sharing_measurement_320() -> u32 {
     })
 }
 
+/// Opens one participant source cursor whose deterministic subset masters are
+/// identical for every holder of the same subset. This diagnostic source is
+/// absent from the production package and establishes no seed custody.
+pub(crate) fn open_completion_zero_sharing_codeword_source_measurement_320(
+    participant_position: u16,
+) -> u32 {
+    COMPLETION_ZERO_SHARING_MEASUREMENT.with(|measurement| {
+        let mut measurement = measurement.borrow_mut();
+        if measurement.is_some() {
+            return MEASUREMENT_ERROR;
+        }
+        let Ok(fixture) = completion_codeword_measurement_fixture(participant_position) else {
+            return MEASUREMENT_ERROR;
+        };
+        let Ok(cursor) = PseudorandomZeroSharingParticipantCursor320::new(
+            fixture.parameter_identity,
+            fixture.preparation_context,
+            fixture.zero_sharing_catalog_identity,
+            fixture.participant_position,
+            fixture.total_field_count,
+            &fixture.masters,
+        ) else {
+            return MEASUREMENT_ERROR;
+        };
+        *measurement = Some(CompletionZeroSharingMeasurement320 {
+            masters: fixture.masters,
+            cursor,
+            resource_model: fixture.resource_model,
+        });
+        MEASUREMENT_SUCCESS
+    })
+}
+
+pub(crate) fn verify_completion_zero_sharing_codeword_block_320(bytes: &[u8]) -> u32 {
+    let Ok(verifier) =
+        CanonicalZeroSharingCodewordBlockVerifier320::new(FOUNDATION_PROFILE.participant_count)
+    else {
+        return MEASUREMENT_ERROR;
+    };
+    match verifier.verify_field_major_block(bytes) {
+        Ok(verification) if verification.is_valid => MEASUREMENT_SUCCESS,
+        Ok(_) => MEASUREMENT_CODEWORD_INVALID,
+        Err(_) => MEASUREMENT_ERROR,
+    }
+}
+
+pub(crate) fn completion_zero_sharing_codeword_byte_length_320() -> u64 {
+    codeword_verifier_resource_value(|verifier| u64::try_from(verifier.codeword_byte_length()).ok())
+}
+
+pub(crate) fn completion_zero_sharing_codeword_maximum_block_count_320() -> u64 {
+    codeword_verifier_resource_value(|verifier| {
+        u64::try_from(verifier.maximum_codeword_count_per_block()).ok()
+    })
+}
+
+pub(crate) fn completion_zero_sharing_codeword_multiplication_count_320() -> u64 {
+    codeword_verifier_resource_value(|verifier| {
+        verifier.field_multiplication_count_per_codeword().ok()
+    })
+}
+
+pub(crate) fn completion_zero_sharing_codeword_addition_count_320() -> u64 {
+    codeword_verifier_resource_value(|verifier| verifier.field_addition_count_per_codeword().ok())
+}
+
+pub(crate) fn completion_zero_sharing_codeword_comparison_count_320() -> u64 {
+    codeword_verifier_resource_value(|verifier| Some(verifier.comparison_count_per_codeword()))
+}
+
 pub(crate) fn restore_completion_zero_sharing_measurement_320(checkpoint_bytes: &[u8]) -> u32 {
     COMPLETION_ZERO_SHARING_MEASUREMENT.with(|measurement| {
         let mut measurement = measurement.borrow_mut();
@@ -84,6 +158,38 @@ pub(crate) fn restore_completion_zero_sharing_measurement_320(checkpoint_bytes: 
             return MEASUREMENT_ERROR;
         }
         let Ok(fixture) = completion_measurement_fixture() else {
+            return MEASUREMENT_ERROR;
+        };
+        let Ok(cursor) = PseudorandomZeroSharingParticipantCursor320::restore_from_checkpoint(
+            fixture.parameter_identity,
+            fixture.preparation_context,
+            fixture.zero_sharing_catalog_identity,
+            fixture.participant_position,
+            fixture.total_field_count,
+            &fixture.masters,
+            checkpoint_bytes,
+        ) else {
+            return MEASUREMENT_ERROR;
+        };
+        *measurement = Some(CompletionZeroSharingMeasurement320 {
+            masters: fixture.masters,
+            cursor,
+            resource_model: fixture.resource_model,
+        });
+        MEASUREMENT_SUCCESS
+    })
+}
+
+pub(crate) fn restore_completion_zero_sharing_codeword_source_measurement_320(
+    participant_position: u16,
+    checkpoint_bytes: &[u8],
+) -> u32 {
+    COMPLETION_ZERO_SHARING_MEASUREMENT.with(|measurement| {
+        let mut measurement = measurement.borrow_mut();
+        if measurement.is_some() {
+            return MEASUREMENT_ERROR;
+        }
+        let Ok(fixture) = completion_codeword_measurement_fixture(participant_position) else {
             return MEASUREMENT_ERROR;
         };
         let Ok(cursor) = PseudorandomZeroSharingParticipantCursor320::restore_from_checkpoint(
@@ -316,6 +422,17 @@ fn measurement_resource_value(
     })
 }
 
+fn codeword_verifier_resource_value(
+    select: impl FnOnce(&CanonicalZeroSharingCodewordBlockVerifier320) -> Option<u64>,
+) -> u64 {
+    let Ok(verifier) =
+        CanonicalZeroSharingCodewordBlockVerifier320::new(FOUNDATION_PROFILE.participant_count)
+    else {
+        return 0;
+    };
+    select(&verifier).unwrap_or(0)
+}
+
 fn completion_measurement_fixture()
 -> Result<CompletionZeroSharingMeasurementFixture320, super::TallyPreparationError> {
     let circuit = CompiledTallyCircuit::compile(TallyCircuitProfile::new(
@@ -371,6 +488,74 @@ fn completion_measurement_fixture()
         zero_sharing_catalog_identity,
         participant_position,
         total_field_count: workload.zero_sharing_count,
+        masters,
+        resource_model,
+    })
+}
+
+fn completion_codeword_measurement_fixture(
+    participant_position: u16,
+) -> Result<CompletionZeroSharingMeasurementFixture320, super::TallyPreparationError> {
+    codeword_measurement_fixture(participant_position, None)
+}
+
+fn codeword_measurement_fixture(
+    participant_position: u16,
+    requested_total_field_count: Option<u64>,
+) -> Result<CompletionZeroSharingMeasurementFixture320, super::TallyPreparationError> {
+    let circuit = CompiledTallyCircuit::compile(TallyCircuitProfile::new(
+        FOUNDATION_PROFILE.participant_count,
+        FOUNDATION_PROFILE.option_count,
+        FOUNDATION_PROFILE.option_count,
+    )?)?;
+    let total_field_count = match requested_total_field_count {
+        Some(total_field_count) => total_field_count,
+        None => PerBitPseudorandomZeroSharingWorkload320::derive(&circuit)?.zero_sharing_count,
+    };
+    let preparation_context = TallyPreparationContext::new(
+        Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]),
+        Hash512::from_bytes([0x43; Hash512::BYTE_LENGTH]),
+        [0x65; 32],
+        &circuit,
+    )?;
+    let parameter_identity = Hash512::from_bytes([0x87; Hash512::BYTE_LENGTH]);
+    let zero_sharing_catalog_identity = Hash512::from_bytes([0xa9; Hash512::BYTE_LENGTH]);
+    let resource_model = PseudorandomZeroSharingCursorResourceModel320::derive(
+        preparation_context.participant_count(),
+        participant_position,
+        total_field_count,
+    )
+    .map_err(|_| super::TallyPreparationError::GeometryMismatch)?;
+    let masters = ReplicatedRandomSharingSubset::iter(preparation_context.participant_count())?
+        .filter_map(|subset| match subset.contains(participant_position) {
+            Ok(true) => Some(Ok(subset)),
+            Ok(false) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .map(|subset| {
+            let subset = subset?;
+            let scope = PseudorandomZeroSharingSubsetMasterScope320::new(
+                parameter_identity,
+                preparation_context,
+                subset,
+            )?;
+            let bytes = derive_all_roster_zero_sharing_measurement_master_320(
+                parameter_identity,
+                preparation_context.identity(),
+                zero_sharing_catalog_identity,
+                subset.excluded_position_mask(),
+            );
+            Ok(locally_joined_subset_master_for_measurement(scope, bytes))
+        })
+        .collect::<Result<Vec<_>, super::TallyPreparationError>>()?
+        .into_boxed_slice();
+
+    Ok(CompletionZeroSharingMeasurementFixture320 {
+        parameter_identity,
+        preparation_context,
+        zero_sharing_catalog_identity,
+        participant_position,
+        total_field_count,
         masters,
         resource_model,
     })

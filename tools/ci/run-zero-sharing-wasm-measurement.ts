@@ -8,10 +8,20 @@ import {
     type ProcessMemoryGuard,
 } from './process-memory-guard.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
+import {
+    allRosterZeroSharingCodewordMeasurementId,
+    resolveZeroSharingCodewordWasmMeasurement,
+} from './zero-sharing-codeword-wasm-measurement-registry.js';
 import { resolveZeroSharingWasmMeasurement } from './zero-sharing-wasm-measurement-registry.js';
 
 const workerFilePath = fileURLToPath(
     new URL('./zero-sharing-wasm-measurement-worker.ts', import.meta.url),
+);
+const codewordWorkerFilePath = fileURLToPath(
+    new URL(
+        './zero-sharing-codeword-wasm-measurement-worker.ts',
+        import.meta.url,
+    ),
 );
 const usage =
     'Usage: run-zero-sharing-wasm-measurement.ts <registered measurement id>.';
@@ -50,7 +60,11 @@ export const parseZeroSharingWasmMeasurementArguments = (
             `Zero-sharing WebAssembly measurements require a nonempty identifier. ${usage}`,
         );
     }
-    resolveZeroSharingWasmMeasurement(measurementId);
+    if (measurementId === allRosterZeroSharingCodewordMeasurementId) {
+        resolveZeroSharingCodewordWasmMeasurement(measurementId);
+    } else {
+        resolveZeroSharingWasmMeasurement(measurementId);
+    }
     return { measurementId };
 };
 
@@ -67,7 +81,10 @@ const buildWorkerCommand = (
             args: [
                 '--import',
                 'tsx',
-                workerFilePath,
+                parsedArguments.measurementId ===
+                allRosterZeroSharingCodewordMeasurementId
+                    ? codewordWorkerFilePath
+                    : workerFilePath,
                 '--measurement',
                 parsedArguments.measurementId,
                 '--output',
