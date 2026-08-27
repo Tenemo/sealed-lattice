@@ -35,6 +35,7 @@ mod geometry;
 mod label_encoding;
 mod malicious_mpc_communication_floor;
 mod masked_ballot_bundle_320;
+mod masked_ballot_release_320;
 mod output_sharing;
 mod preparation_arithmetic_graph;
 mod preparation_attempt_resource_model;
@@ -136,6 +137,8 @@ mod label_encoding_tests;
 mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
 mod masked_ballot_bundle_320_tests;
+#[cfg(test)]
+mod masked_ballot_release_320_tests;
 #[cfg(test)]
 mod preparation_arithmetic_graph_tests;
 #[cfg(test)]

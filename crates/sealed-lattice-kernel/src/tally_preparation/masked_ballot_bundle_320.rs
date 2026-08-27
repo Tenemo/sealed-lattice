@@ -144,6 +144,30 @@ impl MaskedBallotBundle320 {
         })
     }
 
+    /// Decodes a reconstructed sharing constant through the same minimal
+    /// bundle language used by ballot production.
+    ///
+    /// A malicious sharing can reconstruct any field element. The unused
+    /// coefficients therefore have to be checked after interpolation rather
+    /// than discarded while converting the 40-byte field element to the
+    /// compiler-derived bundle width.
+    pub(crate) fn from_field_element(
+        circuit: &CompiledTallyCircuit,
+        field_element: BinaryFieldElement320,
+    ) -> Result<Self, MaskedBallotBundleError320> {
+        let input_bit_count = masked_ballot_bundle_input_bit_count(circuit)?;
+        let byte_length = canonical_byte_length(input_bit_count);
+        let field_bytes = field_element.canonical_bytes();
+        require_zero_padding(&field_bytes[..byte_length], input_bit_count)?;
+        if field_bytes[byte_length..].iter().any(|byte| *byte != 0) {
+            return Err(MaskedBallotBundleError320::NonzeroCanonicalPadding);
+        }
+        Ok(Self {
+            field_element,
+            input_bit_count,
+        })
+    }
+
     pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
         let byte_length = canonical_byte_length(self.input_bit_count);
         self.field_element.canonical_bytes()[..byte_length].to_vec()
