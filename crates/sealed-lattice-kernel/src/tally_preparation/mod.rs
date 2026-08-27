@@ -55,6 +55,7 @@ pub(crate) mod pseudorandom_zero_sharing_seed_master_custody_320;
 mod pseudorandom_zero_sharing_seed_master_join_320;
 mod pseudorandom_zero_sharing_seed_receipt_320;
 mod pseudorandom_zero_sharing_seed_receipt_terminal_320;
+pub(crate) mod pseudorandom_zero_sharing_seed_receipt_terminal_endorsement_kernel_320;
 mod pseudorandom_zero_sharing_subset_seed_320;
 #[cfg(test)]
 mod random_state;
@@ -163,6 +164,8 @@ mod pseudorandom_zero_sharing_seed_master_join_320_tests;
 mod pseudorandom_zero_sharing_seed_receipt_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_receipt_terminal_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_seed_receipt_terminal_endorsement_kernel_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_subset_seed_320_tests;
 #[cfg(test)]

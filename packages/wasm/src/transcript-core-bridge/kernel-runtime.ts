@@ -413,6 +413,9 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
     ) => Uint8Array;
     readonly executeSeedCatalogSource: (requestBytes: Uint8Array) => Uint8Array;
     readonly executeSeedMailboxSender: (requestBytes: Uint8Array) => Uint8Array;
+    readonly executeSeedReceiptTerminalEndorsement: (
+        requestBytes: Uint8Array,
+    ) => Uint8Array;
     readonly memory: WebAssembly.Memory;
     readonly runExclusive: <Result>(
         operationName: string,
@@ -563,6 +566,7 @@ type NumberExportName =
     | 'sealed_lattice_join_seed_masters_320_with_length'
     | 'sealed_lattice_seed_catalog_source_320_with_length'
     | 'sealed_lattice_seed_mailbox_sender_320_with_length'
+    | 'sealed_lattice_seed_receipt_terminal_endorsement_320_with_length'
     | 'sealed_lattice_transcript_core_command_with_length'
     | 'sealed_lattice_validate_joined_seed_masters_320_with_length';
 
@@ -879,6 +883,10 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_seed_mailbox_sender_320_with_length',
     );
+    const seedReceiptTerminalEndorsementWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_seed_receipt_terminal_endorsement_320_with_length',
+    );
     const commandWithLength = resolveNumberExport(
         wasmExports,
         'sealed_lattice_transcript_core_command_with_length',
@@ -968,6 +976,20 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
                 'seed-mailbox sender',
             ),
         );
+    const executeSeedReceiptTerminalEndorsement = (
+        requestBytes: Uint8Array,
+    ): Uint8Array =>
+        runExclusive('seed-receipt terminal endorsement', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                seedReceiptTerminalEndorsementWithLength,
+                requestBytes,
+                'seed-receipt terminal endorsement',
+            ),
+        );
 
     return {
         allocate,
@@ -977,6 +999,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         executeJoinedSeedMasterValidation,
         executeSeedCatalogSource,
         executeSeedMailboxSender,
+        executeSeedReceiptTerminalEndorsement,
         memory,
         runExclusive,
         wasmExports,

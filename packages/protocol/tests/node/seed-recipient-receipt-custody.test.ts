@@ -7,6 +7,7 @@ import {
 import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import {
     SeedRecipientReceiptCustody,
+    consumeSeedRecipientReceiptTerminalEndorsementAuthorization,
     deriveSeedRecipientReceiptCustodyRecordByteLengths,
     type PreparedSeedRecipientReceiptInventory,
     type SeedRecipientReceiptCustodyContext,
@@ -427,6 +428,54 @@ describe('seed-recipient receipt custody', () => {
         expect(replayed.receiptEnvelopeBytes).toEqual(expected);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
         expect(fixture.anchor.compareAndSetCallCount).toBe(3);
+    });
+
+    it('authorizes the terminal kernel only from one exact completed receipt record', async () => {
+        const fixture = await createFixture();
+        const prematureAuthorization =
+            fixture.custody.authorizeTerminalEndorsementKernel();
+        expect(Object.keys(prematureAuthorization)).toEqual([]);
+        await expect(
+            consumeSeedRecipientReceiptTerminalEndorsementAuthorization(
+                prematureAuthorization,
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+
+        const capability = fixture.kernel.issueCapability(0x4b);
+        await fixture.custody.retainForPublication({
+            authenticatedInventory: capability,
+        });
+        const authorization =
+            fixture.custody.authorizeTerminalEndorsementKernel();
+        const consumed =
+            await consumeSeedRecipientReceiptTerminalEndorsementAuthorization(
+                authorization,
+            );
+        expect(consumed.context).toEqual(fixture.context);
+        expect(consumed.recordBytes.subarray(0, 7)).toEqual(
+            Uint8Array.of(0x53, 0x4c, 0x52, 0x43, 1, 0, 2),
+        );
+        await expect(
+            consumeSeedRecipientReceiptTerminalEndorsementAuthorization(
+                authorization,
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        const repeatedAuthorization =
+            fixture.custody.authorizeTerminalEndorsementKernel();
+        const repeated =
+            await consumeSeedRecipientReceiptTerminalEndorsementAuthorization(
+                repeatedAuthorization,
+            );
+        expect(repeated.recordBytes).toEqual(consumed.recordBytes);
+        consumed.context.parameterIdentity.fill(0);
+        consumed.context.preparationContextIdentity.fill(0);
+        consumed.context.rootTerminalIdentity.fill(0);
+        consumed.recordBytes.fill(0);
+        repeated.context.parameterIdentity.fill(0);
+        repeated.context.preparationContextIdentity.fill(0);
+        repeated.context.rootTerminalIdentity.fill(0);
+        repeated.recordBytes.fill(0);
     });
 
     it('refuses an object the kernel did not issue before reserving state', async () => {

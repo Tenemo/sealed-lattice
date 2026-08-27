@@ -169,6 +169,34 @@ impl JoinedCustodyContext320 {
             participant_position: self.participant_position,
         }
     }
+
+    const fn receipt_custody_context(self) -> SeedRecipientReceiptCustodyContext320 {
+        SeedRecipientReceiptCustodyContext320 {
+            parameter_identity: self.parameter_identity,
+            preparation_context_identity: self.preparation_context_identity,
+            root_terminal_identity: self.root_terminal_identity,
+            preparation_attempt_ordinal: self.preparation_attempt_ordinal,
+            participant_count: self.participant_count,
+            recipient_position: self.participant_position,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SeedRecipientReceiptCustodyContext320 {
+    pub(super) parameter_identity: Hash512,
+    pub(super) preparation_context_identity: Hash512,
+    pub(super) root_terminal_identity: Hash512,
+    pub(super) preparation_attempt_ordinal: u16,
+    pub(super) participant_count: u16,
+    pub(super) recipient_position: u16,
+}
+
+pub(super) struct VerifiedSeedRecipientReceiptCustody320 {
+    pub(super) authenticated_inventory_identity: Hash512,
+    pub(super) receipt: super::pseudorandom_zero_sharing_seed_receipt_320::RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+    pub(super) receipt_body_identity: Hash512,
+    pub(super) receipt_envelope_identity: Hash512,
 }
 
 struct JoinRequest320<'a> {
@@ -1065,15 +1093,42 @@ fn require_delivery_source_entry(
     Ok(())
 }
 
-fn parse_and_verify_receipt_custody(
+fn parse_and_verify_receipt_custody_record(
     bytes: &[u8],
-    context: JoinedCustodyContext320,
+    context: SeedRecipientReceiptCustodyContext320,
     root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     roster: &Roster,
-) -> Result<
-    super::pseudorandom_zero_sharing_seed_receipt_320::RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
-    PseudorandomZeroSharingSeedMasterCustodyError320,
->{
+) -> Result<VerifiedSeedRecipientReceiptCustody320, PseudorandomZeroSharingSeedMasterCustodyError320>
+{
+    let root_inventory_body = root_terminal.root_inventory().body();
+    require_receipt_context_hash(
+        context.parameter_identity,
+        root_inventory_body.parameter_identity(),
+        "terminal parameter identity",
+    )?;
+    require_receipt_context_hash(
+        context.preparation_context_identity,
+        root_inventory_body.preparation_context_identity(),
+        "terminal preparation-context identity",
+    )?;
+    require_receipt_context_hash(
+        context.root_terminal_identity,
+        root_terminal.identity().map_err(|_| {
+            PseudorandomZeroSharingSeedMasterCustodyError320::ReceiptCustody(
+                "root-terminal identity",
+            )
+        })?,
+        "verified root-terminal identity",
+    )?;
+    require_receipt_coordinate(
+        context.preparation_attempt_ordinal == PREPARATION_ATTEMPT_ORDINAL,
+        "admitted preparation-attempt ordinal",
+    )?;
+    require_receipt_coordinate(
+        context.participant_count == root_inventory_body.participant_count()
+            && context.recipient_position < context.participant_count,
+        "terminal participant coordinates",
+    )?;
     let mut cursor = BoundedCursor::new(bytes)?;
     cursor.require_magic(RECEIPT_CUSTODY_RECORD_MAGIC, "receipt-custody magic")?;
     cursor.require_version("receipt-custody version")?;
@@ -1109,7 +1164,7 @@ fn parse_and_verify_receipt_custody(
         "participant count",
     )?;
     require_receipt_coordinate(
-        cursor.read_unsigned16("receipt recipient position")? == context.participant_position,
+        cursor.read_unsigned16("receipt recipient position")? == context.recipient_position,
         "recipient position",
     )?;
     let stored_authenticated_inventory_identity =
@@ -1140,7 +1195,7 @@ fn parse_and_verify_receipt_custody(
         "local seed-custody segment count",
     )?;
     let sender_positions = (0..context.participant_count)
-        .filter(|position| *position != context.participant_position)
+        .filter(|position| *position != context.recipient_position)
         .collect::<Vec<_>>();
     let mut segment_byte_lengths = Vec::with_capacity(expected_segment_count);
     for sender_position in &sender_positions {
@@ -1155,7 +1210,7 @@ fn parse_and_verify_receipt_custody(
             .layout();
         let expected_byte_length = PseudorandomZeroSharingSeedDeliveryLayout320::derive(
             sender_layout,
-            context.participant_position,
+            context.recipient_position,
         )
         .map_err(|_| {
             PseudorandomZeroSharingSeedMasterCustodyError320::ReceiptCustody(
@@ -1200,7 +1255,7 @@ fn parse_and_verify_receipt_custody(
 
     let root_matched_inventory = verify_retained_delivery_segments(
         root_terminal,
-        context.participant_position,
+        context.recipient_position,
         &sender_positions,
         &receipt_record.local_seed_custody_segments,
     )?;
@@ -1225,11 +1280,6 @@ fn parse_and_verify_receipt_custody(
         authenticated_inventory_identity,
         "stored authenticated-inventory identity",
     )?;
-    require_receipt_context_hash(
-        context.authenticated_recipient_inventory_identity,
-        authenticated_inventory_identity,
-        "joined authenticated-inventory identity",
-    )?;
     let expected_receipt_body =
         PseudorandomZeroSharingSeedRecipientReceiptBody320::new(&authenticated_inventory).map_err(
             |_| PseudorandomZeroSharingSeedMasterCustodyError320::ReceiptCustody("receipt body"),
@@ -1252,11 +1302,6 @@ fn parse_and_verify_receipt_custody(
         receipt_body_identity,
         "stored receipt-intent identity",
     )?;
-    require_receipt_context_hash(
-        context.receipt_body_identity,
-        receipt_body_identity,
-        "joined receipt-body identity",
-    )?;
     let receipt = verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
         root_terminal,
         roster,
@@ -1266,12 +1311,56 @@ fn parse_and_verify_receipt_custody(
     .map_err(|_| {
         PseudorandomZeroSharingSeedMasterCustodyError320::ReceiptCustody("receipt signature")
     })?;
+    let receipt_envelope_identity = receipt.receipt_envelope_identity();
+    Ok(VerifiedSeedRecipientReceiptCustody320 {
+        authenticated_inventory_identity,
+        receipt,
+        receipt_body_identity,
+        receipt_envelope_identity,
+    })
+}
+
+pub(super) fn verify_completed_seed_recipient_receipt_custody_320(
+    bytes: &[u8],
+    context: SeedRecipientReceiptCustodyContext320,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    roster: &Roster,
+) -> Result<VerifiedSeedRecipientReceiptCustody320, PseudorandomZeroSharingSeedMasterCustodyError320>
+{
+    parse_and_verify_receipt_custody_record(bytes, context, root_terminal, roster)
+}
+
+fn parse_and_verify_receipt_custody(
+    bytes: &[u8],
+    context: JoinedCustodyContext320,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    roster: &Roster,
+) -> Result<
+    super::pseudorandom_zero_sharing_seed_receipt_320::RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+    PseudorandomZeroSharingSeedMasterCustodyError320,
+>{
+    let verified = parse_and_verify_receipt_custody_record(
+        bytes,
+        context.receipt_custody_context(),
+        root_terminal,
+        roster,
+    )?;
+    require_receipt_context_hash(
+        context.authenticated_recipient_inventory_identity,
+        verified.authenticated_inventory_identity,
+        "joined authenticated-inventory identity",
+    )?;
+    require_receipt_context_hash(
+        context.receipt_body_identity,
+        verified.receipt_body_identity,
+        "joined receipt-body identity",
+    )?;
     require_receipt_context_hash(
         context.receipt_envelope_identity,
-        receipt.receipt_envelope_identity(),
-        "receipt-envelope identity",
+        verified.receipt_envelope_identity,
+        "joined receipt-envelope identity",
     )?;
-    Ok(receipt)
+    Ok(verified.receipt)
 }
 
 fn verify_retained_delivery_segments(

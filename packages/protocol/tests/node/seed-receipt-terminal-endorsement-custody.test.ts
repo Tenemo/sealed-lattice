@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import type { ProductionSeedReceiptTerminalEndorsementKernel } from '@sealed-lattice/wasm';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@sealed-lattice/wasm', () => ({
+    isProductionSeedReceiptTerminalEndorsementKernel: () => true,
+    openProductionSeedReceiptTerminalEndorsementKernel: () => {
+        throw new Error('Not used by this custody-state test.');
+    },
+}));
 
 import {
     createRuntimeRecordProtection,
@@ -8,6 +16,7 @@ import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/r
 import {
     SeedReceiptTerminalEndorsementCustody,
     deriveSeedReceiptTerminalEndorsementCustodyRecordByteLengths,
+    deriveSeedReceiptTerminalEndorsementKernelByteLengths,
     type PreparedSeedReceiptTerminalEndorsementInventory,
     type SeedReceiptTerminalEndorsementCustodyContext,
     type SeedReceiptTerminalEndorsementCustodyKernel,
@@ -68,18 +77,6 @@ const deterministicCryptoProvider = (): Crypto => {
         subtle: globalThis.crypto.subtle,
     } as Crypto;
 };
-
-class VerifiedReceiptInventoryCapability {
-    readonly #identity: number;
-
-    public constructor(identity: number) {
-        this.#identity = identity;
-    }
-
-    public identityForTest(): number {
-        return this.#identity;
-    }
-}
 
 type ProductionObservation = Readonly<{
     preparedInventory: PreparedSeedReceiptTerminalEndorsementInventory;
@@ -148,7 +145,7 @@ const deterministicEnvelope = (
     return envelope;
 };
 
-class DeterministicTerminalEndorsementKernel implements SeedReceiptTerminalEndorsementCustodyKernel<VerifiedReceiptInventoryCapability> {
+class DeterministicTerminalEndorsementKernel implements SeedReceiptTerminalEndorsementCustodyKernel {
     public afterProduce: (() => void) | undefined;
     public failNextPreparationCount = 0;
     public failNextProductionCount = 0;
@@ -158,33 +155,21 @@ class DeterministicTerminalEndorsementKernel implements SeedReceiptTerminalEndor
     public readonly productionObservations: ProductionObservation[] = [];
     public readonly validationObservations: SeedReceiptTerminalEndorsementValidationInput[] =
         [];
-    readonly #preparedByCapability = new WeakMap<
-        VerifiedReceiptInventoryCapability,
-        PreparedSeedReceiptTerminalEndorsementInventory
-    >();
-    #nextCapabilityIdentity = 1;
+    #preparedInventory: PreparedSeedReceiptTerminalEndorsementInventory;
 
-    public issueCapability(marker = 0x41): VerifiedReceiptInventoryCapability {
-        return this.issuePreparedCapability(preparedInventoryForMarker(marker));
+    public constructor(marker = 0x41) {
+        this.#preparedInventory = preparedInventoryForMarker(marker);
     }
 
-    public issuePreparedCapability(
+    public close(): void {}
+
+    public selectPreparedInventoryForTest(
         preparedInventory: PreparedSeedReceiptTerminalEndorsementInventory,
-    ): VerifiedReceiptInventoryCapability {
-        const capability = new VerifiedReceiptInventoryCapability(
-            this.#nextCapabilityIdentity,
-        );
-        this.#nextCapabilityIdentity += 1;
-        this.#preparedByCapability.set(
-            capability,
-            copyPreparedInventory(preparedInventory),
-        );
-        return capability;
+    ): void {
+        this.#preparedInventory = copyPreparedInventory(preparedInventory);
     }
 
-    public prepare(
-        verifiedReceiptInventory: VerifiedReceiptInventoryCapability,
-    ): PreparedSeedReceiptTerminalEndorsementInventory {
+    public prepare(): PreparedSeedReceiptTerminalEndorsementInventory {
         this.preparationCallCount += 1;
         if (this.failNextPreparationCount > 0) {
             this.failNextPreparationCount -= 1;
@@ -192,16 +177,7 @@ class DeterministicTerminalEndorsementKernel implements SeedReceiptTerminalEndor
                 'Injected terminal endorsement preparation failure.',
             );
         }
-        const prepared = this.#preparedByCapability.get(
-            verifiedReceiptInventory,
-        );
-        if (prepared === undefined) {
-            throw new Error('The test kernel did not issue this inventory.');
-        }
-        if (verifiedReceiptInventory.identityForTest() <= 0) {
-            throw new Error('The test inventory capability has no identity.');
-        }
-        return copyPreparedInventory(prepared);
+        return copyPreparedInventory(this.#preparedInventory);
     }
 
     public produce(
@@ -310,7 +286,7 @@ type CustodyFixture = Readonly<{
     coordinator: AuthenticatedStorageRecencyCoordinator;
     createIdentifier: (kind: 'lease' | 'transaction') => string;
     cryptoProvider: Crypto;
-    custody: SeedReceiptTerminalEndorsementCustody<VerifiedReceiptInventoryCapability>;
+    custody: SeedReceiptTerminalEndorsementCustody;
     kernel: DeterministicTerminalEndorsementKernel;
     namespace: string;
     protection: RuntimeRecordProtection;
@@ -355,7 +331,7 @@ const createFixture = async (input?: {
         cryptoProvider,
         custody: new SeedReceiptTerminalEndorsementCustody({
             context,
-            kernel,
+            kernel: kernel as unknown as ProductionSeedReceiptTerminalEndorsementKernel,
             limits: testLimits,
             protection,
             recencyCoordinator: coordinator,
@@ -371,9 +347,7 @@ const reopenCustody = async (
     fixture: CustodyFixture,
     kernel: DeterministicTerminalEndorsementKernel,
     context = fixture.context,
-): Promise<
-    SeedReceiptTerminalEndorsementCustody<VerifiedReceiptInventoryCapability>
-> => {
+): Promise<SeedReceiptTerminalEndorsementCustody> => {
     const reopened = await openRuntimeTestStore({
         adapter: fixture.adapter,
         createIdentifier: fixture.createIdentifier,
@@ -391,7 +365,7 @@ const reopenCustody = async (
     });
     return new SeedReceiptTerminalEndorsementCustody({
         context,
-        kernel,
+        kernel: kernel as unknown as ProductionSeedReceiptTerminalEndorsementKernel,
         limits: testLimits,
         protection,
         recencyCoordinator: coordinator,
@@ -443,13 +417,129 @@ describe('seed-receipt terminal endorsement custody', () => {
         });
     });
 
+    it('independently derives the exact completion terminal endorsement kernel traffic', () => {
+        const receiptEnvelopeByteLengths = Array.from(
+            { length: 10 },
+            () => 3_778,
+        );
+        const rootAuthorizationPackages = Array.from({ length: 10 }, () => ({
+            contributorSignatureEnvelopeByteLength: 3_723,
+            exactOutputCertificateByteLength: 25_545,
+            reservationCertificateByteLength: 25_515,
+            rootBodyByteLength: 522,
+        }));
+        const derived = deriveSeedReceiptTerminalEndorsementKernelByteLengths({
+            endorsementAuthorizationBodyByteLength: 174,
+            endorsementEnvelopeByteLength: 3_599,
+            preparationContextByteLength: 338,
+            receiptCustodyRecordByteLength: 569_411,
+            receiptEnvelopeByteLengths,
+            rootAuthorizationPackages,
+            rootTerminalCertificateByteLength: 36_230,
+            rosterByteLength: 31_660,
+            terminalBodyByteLength: 149,
+            verifiedReceiptInventoryBodyByteLength: 850,
+        });
+        const independentlyDerivedRootPackageByteLength =
+            4 + 522 + (4 + 25_515) + (4 + 25_545) + (4 + 3_723);
+        const independentlyDerivedBoundedReceiptCorpusByteLength =
+            10 * (4 + 3_778);
+        const independentlyDerivedPreparedInventoryByteLength =
+            4 +
+            174 +
+            (4 + 850) +
+            64 +
+            2 +
+            independentlyDerivedBoundedReceiptCorpusByteLength +
+            64 * 2 +
+            (4 + 149) +
+            64;
+        const independentlyDerivedOpenRequestByteLength =
+            7 +
+            64 +
+            2 +
+            (4 + 338) +
+            (4 + 31_660) +
+            2 +
+            10 * independentlyDerivedRootPackageByteLength +
+            (4 + 36_230) +
+            2 +
+            independentlyDerivedBoundedReceiptCorpusByteLength +
+            (64 * 3 + 2 * 3) +
+            (4 + 569_411);
+        const independentlyDerivedPreparedValidationRequestByteLength =
+            7 +
+            4 +
+            (64 * 3 + 2 * 3) +
+            independentlyDerivedPreparedInventoryByteLength +
+            1;
+        const independentlyDerivedCompletedValidationRequestByteLength =
+            independentlyDerivedPreparedValidationRequestByteLength + 4 + 3_599;
+        const independentlyDerivedCompletionRequestByteLength =
+            7 + 4 + independentlyDerivedPreparedInventoryByteLength + 3_309;
+        expect(derived).toEqual({
+            closeContextRequestByteLength: 11,
+            closeContextResponseByteLength: 7,
+            coldValidationCumulativeRequestByteLength:
+                independentlyDerivedOpenRequestByteLength +
+                independentlyDerivedCompletedValidationRequestByteLength +
+                11,
+            coldValidationCumulativeResponseByteLength: 1_963 + 7 + 7,
+            coldValidationInvocationCount: 3,
+            completeEndorsementRequestByteLength:
+                independentlyDerivedCompletionRequestByteLength,
+            completeEndorsementResponseByteLength: 7 + 4 + 3_599,
+            completedValidationRequestByteLength:
+                independentlyDerivedCompletedValidationRequestByteLength,
+            maximumRequestByteLength: independentlyDerivedOpenRequestByteLength,
+            maximumResponseByteLength:
+                7 + independentlyDerivedPreparedInventoryByteLength,
+            openContextRequestByteLength:
+                independentlyDerivedOpenRequestByteLength,
+            openContextResponseByteLength: 7 + 4 + 1_952,
+            prepareEndorsementRequestByteLength: 11,
+            prepareEndorsementResponseByteLength:
+                7 + independentlyDerivedPreparedInventoryByteLength,
+            preparedInventoryKernelByteLength:
+                independentlyDerivedPreparedInventoryByteLength,
+            preparedValidationRequestByteLength:
+                independentlyDerivedPreparedValidationRequestByteLength,
+            successfulCumulativeRequestByteLength:
+                independentlyDerivedOpenRequestByteLength +
+                11 +
+                independentlyDerivedPreparedValidationRequestByteLength +
+                independentlyDerivedCompletionRequestByteLength +
+                independentlyDerivedCompletedValidationRequestByteLength +
+                11,
+            successfulCumulativeResponseByteLength:
+                1_963 +
+                (7 + independentlyDerivedPreparedInventoryByteLength) +
+                7 +
+                (7 + 4 + 3_599) +
+                7 +
+                7,
+            successfulInvocationCount: 6,
+            validationResponseByteLength: 7,
+        });
+        expect(derived).toMatchObject({
+            coldValidationCumulativeRequestByteLength: 1_272_047,
+            completeEndorsementRequestByteLength: 42_583,
+            completedValidationRequestByteLength: 43_076,
+            maximumRequestByteLength: 1_228_960,
+            maximumResponseByteLength: 39_270,
+            openContextRequestByteLength: 1_228_960,
+            prepareEndorsementResponseByteLength: 39_270,
+            preparedInventoryKernelByteLength: 39_263,
+            preparedValidationRequestByteLength: 39_473,
+            successfulCumulativeRequestByteLength: 1_354_114,
+            successfulCumulativeResponseByteLength: 44_864,
+        });
+    });
+
     it('reserves typed local custody before signing and replays only retained bytes', async () => {
         const fixture = await createFixture();
-        const capability = fixture.kernel.issueCapability();
 
-        const first = await fixture.custody.retainForPublication({
-            verifiedReceiptInventory: capability,
-        });
+        const first = await fixture.custody.retainForPublication();
         expect(fixture.kernel.preparationCallCount).toBe(1);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
         const observation = fixture.kernel.productionObservations[0];
@@ -466,37 +556,30 @@ describe('seed-receipt terminal endorsement custody', () => {
 
         const expected = first.endorsementEnvelopeBytes.slice();
         first.endorsementEnvelopeBytes.fill(0);
-        const replayed = await fixture.custody.retainForPublication({
-            verifiedReceiptInventory: capability,
-        });
+        const replayed = await fixture.custody.retainForPublication();
         expect(replayed.endorsementEnvelopeBytes).toEqual(expected);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
         expect(fixture.anchor.compareAndSetCallCount).toBe(3);
     });
 
-    it('refuses an object the kernel did not issue before reserving state', async () => {
+    it('does not reserve state when the opaque kernel context rejects preparation', async () => {
         const fixture = await createFixture();
+        fixture.kernel.failNextPreparationCount = 1;
 
         await expect(
-            fixture.custody.retainForPublication({
-                verifiedReceiptInventory:
-                    new VerifiedReceiptInventoryCapability(99),
-            }),
+            fixture.custody.retainForPublication(),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
         expect(fixture.kernel.productionObservations).toHaveLength(0);
         expect(fixture.anchor.compareAndSetCallCount).toBe(0);
     });
 
     it('cold-resumes a reservation from retained custody with the same signing seed', async () => {
-        const kernel = new DeterministicTerminalEndorsementKernel();
+        const kernel = new DeterministicTerminalEndorsementKernel(0x51);
         kernel.failNextProductionCount = 1;
         const fixture = await createFixture({ kernel });
-        const capability = kernel.issueCapability(0x51);
 
         await expect(
-            fixture.custody.retainForPublication({
-                verifiedReceiptInventory: capability,
-            }),
+            fixture.custody.retainForPublication(),
         ).rejects.toMatchObject({ code: 'InvalidState' });
         const failedObservation = kernel.productionObservations[0];
 
@@ -529,12 +612,12 @@ describe('seed-receipt terminal endorsement custody', () => {
         const fixture = await createFixture();
         await fixture.coordinator.reconcile();
         fixture.anchor.failNextCompareAndSetCount = 1;
-        const capability = fixture.kernel.issueCapability(0x61);
+        fixture.kernel.selectPreparedInventoryForTest(
+            preparedInventoryForMarker(0x61),
+        );
 
         await expect(
-            fixture.custody.retainForPublication({
-                verifiedReceiptInventory: capability,
-            }),
+            fixture.custody.retainForPublication(),
         ).rejects.toMatchObject({ code: 'AnchorFailure' });
         expect(fixture.kernel.productionObservations).toHaveLength(0);
 
@@ -544,18 +627,15 @@ describe('seed-receipt terminal endorsement custody', () => {
     });
 
     it('withholds a locally completed terminal endorsement until its anchor is repaired', async () => {
-        const kernel = new DeterministicTerminalEndorsementKernel();
+        const kernel = new DeterministicTerminalEndorsementKernel(0x71);
         const fixture = await createFixture({ kernel });
-        const capability = kernel.issueCapability(0x71);
         kernel.afterProduce = () => {
             fixture.anchor.failNextCompareAndSetCount = 1;
             kernel.afterProduce = undefined;
         };
 
         await expect(
-            fixture.custody.retainForPublication({
-                verifiedReceiptInventory: capability,
-            }),
+            fixture.custody.retainForPublication(),
         ).rejects.toMatchObject({ code: 'AnchorFailure' });
         expect(kernel.productionObservations).toHaveLength(1);
 
@@ -567,11 +647,8 @@ describe('seed-receipt terminal endorsement custody', () => {
     it('keeps one slot across alternate receipt carriers, terminal bodies, retained receipts, and root terminals', async () => {
         const fixture = await createFixture();
         const prepared = preparedInventoryForMarker(0x81);
-        const firstCapability =
-            fixture.kernel.issuePreparedCapability(prepared);
-        await fixture.custody.retainForPublication({
-            verifiedReceiptInventory: firstCapability,
-        });
+        fixture.kernel.selectPreparedInventoryForTest(prepared);
+        await fixture.custody.retainForPublication();
 
         const alternateReceiptCarriers = copyPreparedInventory(prepared);
         alternateReceiptCarriers.orderedReceiptEnvelopeBytes[3]?.fill(0x82);
@@ -586,12 +663,15 @@ describe('seed-receipt terminal endorsement custody', () => {
             alternateTerminalBody,
             alternateRetainedLocalReceipt,
         ]) {
-            const alternativeCapability =
-                fixture.kernel.issuePreparedCapability(alternative);
+            const alternativeKernel =
+                new DeterministicTerminalEndorsementKernel();
+            alternativeKernel.selectPreparedInventoryForTest(alternative);
+            const alternativeCustody = await reopenCustody(
+                fixture,
+                alternativeKernel,
+            );
             await expect(
-                fixture.custody.retainForPublication({
-                    verifiedReceiptInventory: alternativeCapability,
-                }),
+                alternativeCustody.retainForPublication(),
             ).rejects.toMatchObject({ code: 'Conflict' });
         }
         expect(fixture.kernel.productionObservations).toHaveLength(1);
@@ -612,15 +692,12 @@ describe('seed-receipt terminal endorsement custody', () => {
     });
 
     it('retains one reservation across production and validation failures', async () => {
-        const kernel = new DeterministicTerminalEndorsementKernel();
+        const kernel = new DeterministicTerminalEndorsementKernel(0x91);
         kernel.failNextProductionCount = 1;
         const fixture = await createFixture({ kernel });
-        const capability = kernel.issueCapability(0x91);
 
         await expect(
-            fixture.custody.retainForPublication({
-                verifiedReceiptInventory: capability,
-            }),
+            fixture.custody.retainForPublication(),
         ).rejects.toMatchObject({ code: 'InvalidState' });
         const firstRandomness =
             kernel.productionObservations[0]?.signatureRandomness;
@@ -642,37 +719,23 @@ describe('seed-receipt terminal endorsement custody', () => {
 
     it('serializes duplicate terminal endorsement requests without endorsing twice', async () => {
         const fixture = await createFixture();
-        const capability = fixture.kernel.issueCapability(0xa1);
+        fixture.kernel.selectPreparedInventoryForTest(
+            preparedInventoryForMarker(0xa1),
+        );
 
         const [first, second] = await Promise.all([
-            fixture.custody.retainForPublication({
-                verifiedReceiptInventory: capability,
-            }),
-            fixture.custody.retainForPublication({
-                verifiedReceiptInventory: capability,
-            }),
+            fixture.custody.retainForPublication(),
+            fixture.custody.retainForPublication(),
         ]);
         expect(first).toEqual(second);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
     });
 
-    it('reports a missing durable terminal endorsement as pending and rejects accessor input', async () => {
+    it('reports a missing durable terminal endorsement as pending', async () => {
         const fixture = await createFixture();
         await expect(
             fixture.custody.resumeForPublication(),
         ).resolves.toBeUndefined();
-
-        const accessorInput = Object.create(null) as Record<string, unknown>;
-        Object.defineProperty(accessorInput, 'verifiedReceiptInventory', {
-            get: () => fixture.kernel.issueCapability(),
-        });
-        expect(() =>
-            fixture.custody.retainForPublication(
-                accessorInput as {
-                    verifiedReceiptInventory: VerifiedReceiptInventoryCapability;
-                },
-            ),
-        ).toThrowError(expect.objectContaining({ code: 'InvalidInput' }));
         expect(fixture.kernel.productionObservations).toHaveLength(0);
     });
 });

@@ -10,9 +10,11 @@ export type {
 export { deriveCanonicalObjectHash } from './hashes.js';
 export {
     assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
+    assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey,
     BrowserLocalKeyProviderError,
     openBrowserLocalExternalKeyProvider,
     signSeedMailboxManifestBody,
+    signSeedReceiptTerminalEndorsementBody,
     signResetSafeSetupObject,
 } from './browser-local-key-provider.js';
 export type {

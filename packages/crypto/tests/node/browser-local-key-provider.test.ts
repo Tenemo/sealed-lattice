@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
+    assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey,
     BrowserLocalKeyProviderError,
     type BrowserLocalExternalKeyProviderInput,
     type BrowserLocalMailboxCapability,
@@ -14,6 +15,7 @@ import {
     encapsulateResetSafeSetupMailbox,
     openBrowserLocalExternalKeyProvider,
     signSeedMailboxManifestBody,
+    signSeedReceiptTerminalEndorsementBody,
     signResetSafeSetupMailboxEnvelope,
     signResetSafeSetupObject,
 } from '../../src/browser-local-key-provider.js';
@@ -34,6 +36,9 @@ const objectSignatureContext = textEncoder.encode(
 );
 const seedMailboxManifestSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-mailbox-manifest',
+);
+const seedReceiptTerminalEndorsementSignatureContext = textEncoder.encode(
+    'sealed-lattice/v1/preparation/seed-recipient-receipt-terminal',
 );
 
 const createKeyMaterial = () => {
@@ -146,6 +151,67 @@ describe('browser-local external key provider', () => {
         firstSignature.fill(0);
         replayedSignature.fill(0);
         alternateSignature.fill(0);
+        alternateSigning.publicKey.fill(0);
+        alternateSigning.secretKey.fill(0);
+        provider.close();
+    });
+
+    it('signs only an exact receipt-terminal endorsement body under the roster key and fixed context', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
+        });
+        const endorsementAuthorizationBodyBytes = new Uint8Array(174).fill(
+            0x73,
+        );
+        const signatureRandomness = new Uint8Array(32).fill(0x85);
+        assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey({
+            endorserSigningVerificationKey: signing.publicKey,
+            signingCapability: provider.signingCapability,
+        });
+        const signature = signSeedReceiptTerminalEndorsementBody({
+            endorsementAuthorizationBodyBytes,
+            endorserSigningVerificationKey: signing.publicKey,
+            signatureRandomness,
+            signingCapability: provider.signingCapability,
+        });
+        expect(
+            ml_dsa65.verify(
+                signature,
+                endorsementAuthorizationBodyBytes,
+                signing.publicKey,
+                { context: seedReceiptTerminalEndorsementSignatureContext },
+            ),
+        ).toBe(true);
+
+        const alternateSigning = ml_dsa65.keygen(
+            new Uint8Array(ml_dsa65.lengths.seed!).fill(0x94),
+        );
+        expectProviderError(
+            () =>
+                signSeedReceiptTerminalEndorsementBody({
+                    endorsementAuthorizationBodyBytes,
+                    endorserSigningVerificationKey: alternateSigning.publicKey,
+                    signatureRandomness,
+                    signingCapability: provider.signingCapability,
+                }),
+            'KeyMismatch',
+        );
+        expectProviderError(
+            () =>
+                signSeedReceiptTerminalEndorsementBody({
+                    endorsementAuthorizationBodyBytes:
+                        endorsementAuthorizationBodyBytes.subarray(1),
+                    endorserSigningVerificationKey: signing.publicKey,
+                    signatureRandomness,
+                    signingCapability: provider.signingCapability,
+                }),
+            'MalformedMessage',
+        );
+
+        endorsementAuthorizationBodyBytes.fill(0);
+        signatureRandomness.fill(0);
+        signature.fill(0);
         alternateSigning.publicKey.fill(0);
         alternateSigning.secretKey.fill(0);
         provider.close();

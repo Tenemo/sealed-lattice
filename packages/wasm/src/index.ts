@@ -18,6 +18,23 @@ export {
     openProductionSeedMailboxSenderStreamKernel,
     SeedMailboxSenderKernelError,
 } from './seed-mailbox-sender-stream-kernel.js';
+export {
+    isProductionSeedReceiptTerminalEndorsementKernel,
+    openProductionSeedReceiptTerminalEndorsementKernel,
+    SeedReceiptTerminalEndorsementKernelError,
+} from './seed-receipt-terminal-endorsement-kernel.js';
+export type {
+    OpenProductionSeedReceiptTerminalEndorsementKernelInput,
+    PreparedSeedReceiptTerminalEndorsementInventory,
+    ProductionSeedReceiptTerminalEndorsementKernel,
+    SeedReceiptTerminalEndorsementContext,
+    SeedReceiptTerminalEndorsementKernelErrorCode,
+    SeedReceiptTerminalEndorsementProductionInput,
+    SeedReceiptTerminalEndorsementRootAuthorizationPackageBytes,
+    SeedReceiptTerminalEndorsementSigningOperations,
+    SeedReceiptTerminalEndorsementValidationInput,
+    SeedRecipientReceiptCustodyContext,
+} from './seed-receipt-terminal-endorsement-kernel.js';
 export type {
     OpenProductionSeedMailboxSenderStreamKernelInput,
     ProductionSeedMailboxSenderStreamKernel,

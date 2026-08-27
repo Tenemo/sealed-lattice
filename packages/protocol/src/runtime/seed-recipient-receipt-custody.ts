@@ -134,6 +134,55 @@ export type CompletedSeedRecipientReceiptCustodyForMasterJoin = Readonly<{
     sealedBytes: Uint8Array;
 }>;
 
+const seedRecipientReceiptTerminalEndorsementAuthorizationBrand: unique symbol =
+    Symbol('seed-recipient-receipt-terminal-endorsement-authorization');
+
+/**
+ * One-shot authority to read the already completed authenticated receipt
+ * record into the Rust receipt-terminal endorsement boundary. It exposes no
+ * receipt, inventory, or local seed-custody bytes.
+ */
+export type SeedRecipientReceiptTerminalEndorsementAuthorization = Readonly<{
+    readonly [seedRecipientReceiptTerminalEndorsementAuthorizationBrand]: true;
+}>;
+
+export type ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization =
+    Readonly<{
+        context: SeedRecipientReceiptCustodyContext;
+        recordBytes: Uint8Array;
+    }>;
+
+const seedRecipientReceiptTerminalEndorsementAuthorizationReaders = new WeakMap<
+    object,
+    () => Promise<ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization>
+>();
+
+export const consumeSeedRecipientReceiptTerminalEndorsementAuthorization =
+    async (
+        authorization: SeedRecipientReceiptTerminalEndorsementAuthorization,
+    ): Promise<ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization> => {
+        if (typeof authorization !== 'object' || authorization === null) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidInput',
+                'Seed-recipient receipt terminal-endorsement authorization must be an opaque object.',
+            );
+        }
+        const read =
+            seedRecipientReceiptTerminalEndorsementAuthorizationReaders.get(
+                authorization,
+            );
+        if (read === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidInput',
+                'Seed-recipient receipt terminal-endorsement authorization is invalid or has already been consumed.',
+            );
+        }
+        seedRecipientReceiptTerminalEndorsementAuthorizationReaders.delete(
+            authorization,
+        );
+        return read();
+    };
+
 export const snapshotSeedRecipientReceiptCustodyLimitsForMasterJoin = (
     value: unknown,
 ): SeedRecipientReceiptCustodyLimits => copyLimits(value);
@@ -1304,6 +1353,21 @@ export class SeedRecipientReceiptCustody<
         return this.#schedule(() => this.#resume());
     }
 
+    public authorizeTerminalEndorsementKernel(): SeedRecipientReceiptTerminalEndorsementAuthorization {
+        const authorization = Object.freeze({
+            [seedRecipientReceiptTerminalEndorsementAuthorizationBrand]:
+                true as const,
+        });
+        seedRecipientReceiptTerminalEndorsementAuthorizationReaders.set(
+            authorization,
+            () =>
+                this.#schedule(() =>
+                    this.#readCompletedRecordForTerminalEndorsement(),
+                ),
+        );
+        return authorization;
+    }
+
     #schedule<Result>(operation: () => Promise<Result>): Promise<Result> {
         const scheduled = this.#operationTail.then(operation);
         this.#operationTail = scheduled.then(
@@ -1311,6 +1375,39 @@ export class SeedRecipientReceiptCustody<
             () => undefined,
         );
         return scheduled;
+    }
+
+    async #readCompletedRecordForTerminalEndorsement(): Promise<ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization> {
+        const recordKey = logicalRecordKey(this.#context);
+        const opened = await this.#readOpenedRecord(recordKey);
+        if (opened === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidState',
+                'Seed-recipient receipt custody is not complete for terminal endorsement.',
+            );
+        }
+        let recordBytes: Uint8Array | undefined;
+        try {
+            if (opened.record.kind !== 'completed') {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidState',
+                    'Seed-recipient receipt custody has not retained a complete receipt carrier for terminal endorsement.',
+                );
+            }
+            await this.#validate(
+                opened.record.preparedInventory,
+                opened.record.receiptEnvelopeBytes,
+            );
+            recordBytes = encodeRecord(opened.record);
+            return Object.freeze({
+                context: copyValidationContext(opened.record.context),
+                recordBytes: recordBytes.slice(),
+            });
+        } finally {
+            recordBytes?.fill(0);
+            opened.sealedBytes.fill(0);
+            destroyRecord(opened.record);
+        }
     }
 
     async #prepareAndRetain(

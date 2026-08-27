@@ -26,9 +26,13 @@ const objectSignatureContext = textEncoder.encode(
 const seedMailboxManifestSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-mailbox-manifest',
 );
+const seedReceiptTerminalEndorsementSignatureContext = textEncoder.encode(
+    'sealed-lattice/v1/preparation/seed-recipient-receipt-terminal',
+);
 const signingHedgeByteLength = 32;
 const mailboxAttemptIdentifierByteLength = 32;
 const seedMailboxManifestSignatureBodyByteLength = 309;
+const seedReceiptTerminalEndorsementAuthorizationBodyByteLength = 174;
 
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
@@ -1266,6 +1270,111 @@ export const signSeedMailboxManifestBody = (input: {
         signatureBodyBytes?.fill(0);
         signatureRandomness?.fill(0);
         senderSigningVerificationKey?.fill(0);
+        signature?.fill(0);
+    }
+};
+
+/**
+ * Checks that one opaque browser-local signing capability owns the exact
+ * roster key selected by a positively verified receipt-terminal context.
+ */
+export const assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey =
+    (input: {
+        readonly endorserSigningVerificationKey: Uint8Array;
+        readonly signingCapability: BrowserLocalSigningCapability;
+    }): void => {
+        const provider = requireSigningProvider(input.signingCapability);
+        const endorserSigningVerificationKey = copyExactBytes(
+            input.endorserSigningVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'endorserSigningVerificationKey',
+        );
+        try {
+            if (
+                !bytesEqual(
+                    endorserSigningVerificationKey,
+                    provider.signingVerificationKey!,
+                )
+            ) {
+                throw new BrowserLocalKeyProviderError(
+                    'KeyMismatch',
+                    'The receipt-terminal endorser key does not match the frozen browser-local signing capability.',
+                );
+            }
+        } finally {
+            endorserSigningVerificationKey.fill(0);
+        }
+    };
+
+/**
+ * Signs only the fixed-length canonical receipt-terminal endorsement body
+ * under its fixed ML-DSA context. Rust reconstructs and positively verifies
+ * the final envelope before it can leave endorsement custody.
+ */
+export const signSeedReceiptTerminalEndorsementBody = (input: {
+    readonly endorsementAuthorizationBodyBytes: Uint8Array;
+    readonly endorserSigningVerificationKey: Uint8Array;
+    readonly signatureRandomness: Uint8Array;
+    readonly signingCapability: BrowserLocalSigningCapability;
+}): Uint8Array => {
+    const provider = requireSigningProvider(input.signingCapability);
+    let endorsementAuthorizationBodyBytes: Uint8Array | undefined;
+    let signatureRandomness: Uint8Array | undefined;
+    let endorserSigningVerificationKey: Uint8Array | undefined;
+    let signature: Uint8Array | undefined;
+    try {
+        endorsementAuthorizationBodyBytes = copyExactBytes(
+            input.endorsementAuthorizationBodyBytes,
+            seedReceiptTerminalEndorsementAuthorizationBodyByteLength,
+            'endorsementAuthorizationBodyBytes',
+            'MalformedMessage',
+        );
+        signatureRandomness = copyExactBytes(
+            input.signatureRandomness,
+            signingHedgeByteLength,
+            'signatureRandomness',
+            'MalformedRandomness',
+        );
+        endorserSigningVerificationKey = copyExactBytes(
+            input.endorserSigningVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'endorserSigningVerificationKey',
+        );
+        if (
+            !bytesEqual(
+                endorserSigningVerificationKey,
+                provider.signingVerificationKey!,
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The receipt-terminal endorser key does not match the frozen browser-local signing capability.',
+            );
+        }
+        signature = invokeSigningOperation(
+            provider,
+            endorsementAuthorizationBodyBytes,
+            seedReceiptTerminalEndorsementSignatureContext,
+            signatureRandomness,
+        );
+        if (
+            !ml_dsa65.verify(
+                signature,
+                endorsementAuthorizationBodyBytes,
+                endorserSigningVerificationKey,
+                { context: seedReceiptTerminalEndorsementSignatureContext },
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The receipt-terminal endorsement signature does not match the frozen roster key.',
+            );
+        }
+        return signature.slice();
+    } finally {
+        endorsementAuthorizationBodyBytes?.fill(0);
+        signatureRandomness?.fill(0);
+        endorserSigningVerificationKey?.fill(0);
         signature?.fill(0);
     }
 };

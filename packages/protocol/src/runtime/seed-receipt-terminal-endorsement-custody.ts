@@ -1,7 +1,18 @@
 import {
+    assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey,
+    signSeedReceiptTerminalEndorsementBody,
+    type BrowserLocalSigningCapability,
+} from '@sealed-lattice/crypto';
+import {
     configurableParticipantCountRange,
     foundationProfile,
 } from '@sealed-lattice/types';
+import {
+    isProductionSeedReceiptTerminalEndorsementKernel,
+    openProductionSeedReceiptTerminalEndorsementKernel,
+    type OpenProductionSeedReceiptTerminalEndorsementKernelInput,
+    type ProductionSeedReceiptTerminalEndorsementKernel,
+} from '@sealed-lattice/wasm';
 
 import {
     AuthenticatedRuntimeRecordError,
@@ -16,6 +27,11 @@ import {
     type RuntimeRecordProtection,
 } from './authenticated-runtime-record.js';
 import { AuthenticatedStorageRecencyCoordinator } from './authenticated-storage-recency.js';
+import {
+    consumeSeedRecipientReceiptTerminalEndorsementAuthorization,
+    type ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization,
+    type SeedRecipientReceiptTerminalEndorsementAuthorization,
+} from './seed-recipient-receipt-custody.js';
 import type {
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
@@ -27,6 +43,13 @@ const reservedRecordKind = 1;
 const completedRecordKind = 2;
 const hashByteLength = 64;
 const signatureRandomnessByteLength = 32;
+const kernelRequestHeaderByteLength = 7;
+const kernelResponseHeaderByteLength = 7;
+const kernelContextHandleByteLength = 4;
+const signingVerificationKeyByteLength = 1_952;
+const signatureByteLength = 3_309;
+const receiptCustodyKernelContextByteLength = hashByteLength * 3 + 2 * 3;
+const endorsementValidationContextByteLength = hashByteLength * 3 + 2 * 3;
 const unsigned16Maximum = 0xffff;
 const unsigned32Maximum = 0xffff_ffff;
 const endorsementCustodyOperationDomain =
@@ -72,12 +95,8 @@ export type SeedReceiptTerminalEndorsementValidationInput = Readonly<{
     endorsementEnvelopeBytes?: Uint8Array;
 }>;
 
-export type SeedReceiptTerminalEndorsementCustodyKernel<
-    VerifiedReceiptInventory extends object,
-> = Readonly<{
-    prepare(
-        verifiedReceiptInventory: VerifiedReceiptInventory,
-    ):
+export type SeedReceiptTerminalEndorsementCustodyKernel = Readonly<{
+    prepare():
         | Promise<PreparedSeedReceiptTerminalEndorsementInventory>
         | PreparedSeedReceiptTerminalEndorsementInventory;
     produce(
@@ -87,6 +106,112 @@ export type SeedReceiptTerminalEndorsementCustodyKernel<
         input: SeedReceiptTerminalEndorsementValidationInput,
     ): Promise<void> | void;
 }>;
+
+type OpenBrowserLocalSeedReceiptTerminalEndorsementKernelInput = Omit<
+    OpenProductionSeedReceiptTerminalEndorsementKernelInput,
+    'receiptCustodyContext' | 'receiptCustodyRecordBytes' | 'signingOperations'
+> &
+    Readonly<{
+        receiptCustodyAuthorization: SeedRecipientReceiptTerminalEndorsementAuthorization;
+        signingCapability: BrowserLocalSigningCapability;
+    }>;
+
+/**
+ * Binds the fixed-purpose terminal-endorsement operation to an opaque
+ * browser-local signing capability and a one-shot completed receipt-custody
+ * authorization. Rust positively verifies every predecessor and the final
+ * signature carrier.
+ */
+export const openBrowserLocalSeedReceiptTerminalEndorsementKernel = async (
+    transcriptCoreKernelUrl: URL,
+    input: OpenBrowserLocalSeedReceiptTerminalEndorsementKernelInput,
+): Promise<ProductionSeedReceiptTerminalEndorsementKernel> => {
+    const endorserPosition = input.endorserPosition;
+    const parameterIdentity = input.parameterIdentity.slice();
+    const preparationContextBytes = input.preparationContextBytes.slice();
+    const receiptEnvelopeBytes = input.receiptEnvelopeBytes.map((bytes) =>
+        bytes.slice(),
+    );
+    const rootAuthorizationPackages = input.rootAuthorizationPackages.map(
+        (rootPackage) =>
+            Object.freeze({
+                contributorSignatureEnvelopeBytes:
+                    rootPackage.contributorSignatureEnvelopeBytes.slice(),
+                exactOutputCertificateBytes:
+                    rootPackage.exactOutputCertificateBytes.slice(),
+                reservationCertificateBytes:
+                    rootPackage.reservationCertificateBytes.slice(),
+                rootBodyBytes: rootPackage.rootBodyBytes.slice(),
+            }),
+    );
+    const rootTerminalCertificateBytes =
+        input.rootTerminalCertificateBytes.slice();
+    const rosterBytes = input.rosterBytes.slice();
+    const signingCapability = input.signingCapability;
+    let consumedReceipt:
+        | ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization
+        | undefined;
+    try {
+        consumedReceipt =
+            await consumeSeedRecipientReceiptTerminalEndorsementAuthorization(
+                input.receiptCustodyAuthorization,
+            );
+        return await openProductionSeedReceiptTerminalEndorsementKernel(
+            transcriptCoreKernelUrl,
+            {
+                endorserPosition,
+                parameterIdentity,
+                preparationContextBytes,
+                receiptCustodyContext: consumedReceipt.context,
+                receiptCustodyRecordBytes: consumedReceipt.recordBytes,
+                receiptEnvelopeBytes,
+                rootAuthorizationPackages,
+                rootTerminalCertificateBytes,
+                rosterBytes,
+                signingOperations: Object.freeze({
+                    assertMatchesEndorserVerificationKey: ({
+                        endorserSigningVerificationKey,
+                    }): void =>
+                        assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey(
+                            {
+                                endorserSigningVerificationKey,
+                                signingCapability,
+                            },
+                        ),
+                    signEndorsementBody: ({
+                        endorsementAuthorizationBodyBytes,
+                        endorserSigningVerificationKey,
+                        signatureRandomness,
+                    }): Uint8Array =>
+                        signSeedReceiptTerminalEndorsementBody({
+                            endorsementAuthorizationBodyBytes,
+                            endorserSigningVerificationKey,
+                            signatureRandomness,
+                            signingCapability,
+                        }),
+                }),
+            },
+        );
+    } finally {
+        parameterIdentity.fill(0);
+        preparationContextBytes.fill(0);
+        receiptEnvelopeBytes.forEach((bytes) => bytes.fill(0));
+        rootAuthorizationPackages.forEach((rootPackage) => {
+            rootPackage.contributorSignatureEnvelopeBytes.fill(0);
+            rootPackage.exactOutputCertificateBytes.fill(0);
+            rootPackage.reservationCertificateBytes.fill(0);
+            rootPackage.rootBodyBytes.fill(0);
+        });
+        rootTerminalCertificateBytes.fill(0);
+        rosterBytes.fill(0);
+        if (consumedReceipt !== undefined) {
+            consumedReceipt.context.parameterIdentity.fill(0);
+            consumedReceipt.context.preparationContextIdentity.fill(0);
+            consumedReceipt.context.rootTerminalIdentity.fill(0);
+            consumedReceipt.recordBytes.fill(0);
+        }
+    }
+};
 
 /**
  * Exact public terminal-endorsement carrier retained for byte-identical
@@ -106,6 +231,37 @@ type SeedReceiptTerminalEndorsementCustodyRecordByteLengths = Readonly<{
     copyOnWriteCiphertextOverlapByteLength: number;
     reservationCiphertextByteLength: number;
     reservationPlaintextByteLength: number;
+}>;
+
+type SeedReceiptTerminalEndorsementRootAuthorizationPackageByteLengths =
+    Readonly<{
+        contributorSignatureEnvelopeByteLength: number;
+        exactOutputCertificateByteLength: number;
+        reservationCertificateByteLength: number;
+        rootBodyByteLength: number;
+    }>;
+
+type SeedReceiptTerminalEndorsementKernelByteLengths = Readonly<{
+    closeContextRequestByteLength: number;
+    closeContextResponseByteLength: number;
+    coldValidationCumulativeRequestByteLength: number;
+    coldValidationCumulativeResponseByteLength: number;
+    coldValidationInvocationCount: number;
+    completeEndorsementRequestByteLength: number;
+    completeEndorsementResponseByteLength: number;
+    completedValidationRequestByteLength: number;
+    maximumRequestByteLength: number;
+    maximumResponseByteLength: number;
+    openContextRequestByteLength: number;
+    openContextResponseByteLength: number;
+    prepareEndorsementRequestByteLength: number;
+    prepareEndorsementResponseByteLength: number;
+    preparedInventoryKernelByteLength: number;
+    preparedValidationRequestByteLength: number;
+    successfulCumulativeRequestByteLength: number;
+    successfulCumulativeResponseByteLength: number;
+    successfulInvocationCount: number;
+    validationResponseByteLength: number;
 }>;
 
 type ReservedSeedReceiptTerminalEndorsementRecord = Readonly<{
@@ -543,6 +699,316 @@ export const deriveSeedReceiptTerminalEndorsementCustodyRecordByteLengths =
             reservationPlaintextByteLength,
         });
     };
+
+export const deriveSeedReceiptTerminalEndorsementKernelByteLengths = (input: {
+    endorsementAuthorizationBodyByteLength: number;
+    endorsementEnvelopeByteLength: number;
+    preparationContextByteLength: number;
+    receiptCustodyRecordByteLength: number;
+    receiptEnvelopeByteLengths: readonly number[];
+    rootAuthorizationPackages: readonly SeedReceiptTerminalEndorsementRootAuthorizationPackageByteLengths[];
+    rootTerminalCertificateByteLength: number;
+    rosterByteLength: number;
+    terminalBodyByteLength: number;
+    verifiedReceiptInventoryBodyByteLength: number;
+}): SeedReceiptTerminalEndorsementKernelByteLengths => {
+    const readInputByteLength = (propertyName: string): number =>
+        requireSafeInteger(
+            snapshotDataProperty(input, propertyName, 'input'),
+            1,
+            unsigned32Maximum,
+            `input.${propertyName}`,
+        );
+    const endorsementAuthorizationBodyByteLength = readInputByteLength(
+        'endorsementAuthorizationBodyByteLength',
+    );
+    const endorsementEnvelopeByteLength = readInputByteLength(
+        'endorsementEnvelopeByteLength',
+    );
+    const preparationContextByteLength = readInputByteLength(
+        'preparationContextByteLength',
+    );
+    const receiptCustodyRecordByteLength = readInputByteLength(
+        'receiptCustodyRecordByteLength',
+    );
+    const rootTerminalCertificateByteLength = readInputByteLength(
+        'rootTerminalCertificateByteLength',
+    );
+    const rosterByteLength = readInputByteLength('rosterByteLength');
+    const terminalBodyByteLength = readInputByteLength(
+        'terminalBodyByteLength',
+    );
+    const verifiedReceiptInventoryBodyByteLength = readInputByteLength(
+        'verifiedReceiptInventoryBodyByteLength',
+    );
+    const receiptEnvelopeByteLengthsValue = snapshotDataProperty(
+        input,
+        'receiptEnvelopeByteLengths',
+        'input',
+    );
+    const rootAuthorizationPackagesValue = snapshotDataProperty(
+        input,
+        'rootAuthorizationPackages',
+        'input',
+    );
+    if (!Array.isArray(receiptEnvelopeByteLengthsValue)) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'input.receiptEnvelopeByteLengths must be an array.',
+        );
+    }
+    if (!Array.isArray(rootAuthorizationPackagesValue)) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'input.rootAuthorizationPackages must be an array.',
+        );
+    }
+    const receiptEnvelopeCount = requireSafeInteger(
+        snapshotDataProperty(
+            receiptEnvelopeByteLengthsValue,
+            'length',
+            'input.receiptEnvelopeByteLengths',
+        ),
+        1,
+        unsigned16Maximum,
+        'input.receiptEnvelopeByteLengths.length',
+    );
+    const rootPackageCount = requireSafeInteger(
+        snapshotDataProperty(
+            rootAuthorizationPackagesValue,
+            'length',
+            'input.rootAuthorizationPackages',
+        ),
+        1,
+        unsigned16Maximum,
+        'input.rootAuthorizationPackages.length',
+    );
+    if (rootPackageCount !== receiptEnvelopeCount) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Receipt-terminal endorsement kernel inventories must have the same nonzero participant count.',
+        );
+    }
+    const receiptEnvelopeByteLengths = Array.from(
+        { length: receiptEnvelopeCount },
+        (_unused, receiptIndex) =>
+            requireSafeInteger(
+                snapshotDataProperty(
+                    receiptEnvelopeByteLengthsValue,
+                    String(receiptIndex),
+                    'input.receiptEnvelopeByteLengths',
+                ),
+                1,
+                unsigned32Maximum,
+                `input.receiptEnvelopeByteLengths[${receiptIndex}]`,
+            ),
+    );
+    const rootAuthorizationPackageByteLengths = Array.from(
+        { length: rootPackageCount },
+        (_unused, packageIndex) => {
+            const packageValue = snapshotDataProperty(
+                rootAuthorizationPackagesValue,
+                String(packageIndex),
+                'input.rootAuthorizationPackages',
+            );
+            return sumByteLengths(
+                [
+                    'rootBodyByteLength',
+                    'reservationCertificateByteLength',
+                    'exactOutputCertificateByteLength',
+                    'contributorSignatureEnvelopeByteLength',
+                ].map((propertyName) =>
+                    checkedAdd(
+                        4,
+                        requireSafeInteger(
+                            snapshotDataProperty(
+                                packageValue,
+                                propertyName,
+                                `input.rootAuthorizationPackages[${packageIndex}]`,
+                            ),
+                            1,
+                            unsigned32Maximum,
+                            `input.rootAuthorizationPackages[${packageIndex}].${propertyName}`,
+                        ),
+                        `Receipt-terminal endorsement root package ${packageIndex}`,
+                    ),
+                ),
+                `Receipt-terminal endorsement root package ${packageIndex}`,
+            );
+        },
+    );
+    const boundedReceiptEnvelopeCorpusByteLength = sumByteLengths(
+        receiptEnvelopeByteLengths.map((byteLength) =>
+            checkedAdd(
+                4,
+                byteLength,
+                'Receipt-terminal endorsement bounded receipt envelope',
+            ),
+        ),
+        'Receipt-terminal endorsement bounded receipt-envelope corpus',
+    );
+    const preparedInventoryKernelByteLength = sumByteLengths(
+        [
+            4,
+            endorsementAuthorizationBodyByteLength,
+            4,
+            verifiedReceiptInventoryBodyByteLength,
+            hashByteLength,
+            2,
+            boundedReceiptEnvelopeCorpusByteLength,
+            hashByteLength * 2,
+            4,
+            terminalBodyByteLength,
+            hashByteLength,
+        ],
+        'Receipt-terminal endorsement prepared kernel inventory',
+    );
+    const openContextRequestByteLength = sumByteLengths(
+        [
+            kernelRequestHeaderByteLength,
+            hashByteLength,
+            2,
+            4,
+            preparationContextByteLength,
+            4,
+            rosterByteLength,
+            2,
+            sumByteLengths(
+                rootAuthorizationPackageByteLengths,
+                'Receipt-terminal endorsement root-package corpus',
+            ),
+            4,
+            rootTerminalCertificateByteLength,
+            2,
+            boundedReceiptEnvelopeCorpusByteLength,
+            receiptCustodyKernelContextByteLength,
+            4,
+            receiptCustodyRecordByteLength,
+        ],
+        'Receipt-terminal endorsement open request',
+    );
+    const openContextResponseByteLength = sumByteLengths(
+        [
+            kernelResponseHeaderByteLength,
+            kernelContextHandleByteLength,
+            signingVerificationKeyByteLength,
+        ],
+        'Receipt-terminal endorsement open response',
+    );
+    const prepareEndorsementRequestByteLength =
+        kernelRequestHeaderByteLength + kernelContextHandleByteLength;
+    const prepareEndorsementResponseByteLength = checkedAdd(
+        kernelResponseHeaderByteLength,
+        preparedInventoryKernelByteLength,
+        'Receipt-terminal endorsement prepare response',
+    );
+    const completeEndorsementRequestByteLength = sumByteLengths(
+        [
+            kernelRequestHeaderByteLength,
+            kernelContextHandleByteLength,
+            preparedInventoryKernelByteLength,
+            signatureByteLength,
+        ],
+        'Receipt-terminal endorsement completion request',
+    );
+    const completeEndorsementResponseByteLength = sumByteLengths(
+        [kernelResponseHeaderByteLength, 4, endorsementEnvelopeByteLength],
+        'Receipt-terminal endorsement completion response',
+    );
+    const preparedValidationRequestByteLength = sumByteLengths(
+        [
+            kernelRequestHeaderByteLength,
+            kernelContextHandleByteLength,
+            endorsementValidationContextByteLength,
+            preparedInventoryKernelByteLength,
+            1,
+        ],
+        'Receipt-terminal endorsement prepared validation request',
+    );
+    const completedValidationRequestByteLength = sumByteLengths(
+        [preparedValidationRequestByteLength, 4, endorsementEnvelopeByteLength],
+        'Receipt-terminal endorsement completed validation request',
+    );
+    const validationResponseByteLength = kernelResponseHeaderByteLength;
+    const closeContextRequestByteLength =
+        kernelRequestHeaderByteLength + kernelContextHandleByteLength;
+    const closeContextResponseByteLength = kernelResponseHeaderByteLength;
+    const successfulRequestByteLengths = [
+        openContextRequestByteLength,
+        prepareEndorsementRequestByteLength,
+        preparedValidationRequestByteLength,
+        completeEndorsementRequestByteLength,
+        completedValidationRequestByteLength,
+        closeContextRequestByteLength,
+    ];
+    const successfulResponseByteLengths = [
+        openContextResponseByteLength,
+        prepareEndorsementResponseByteLength,
+        validationResponseByteLength,
+        completeEndorsementResponseByteLength,
+        validationResponseByteLength,
+        closeContextResponseByteLength,
+    ];
+    const coldValidationRequestByteLengths = [
+        openContextRequestByteLength,
+        completedValidationRequestByteLength,
+        closeContextRequestByteLength,
+    ];
+    const coldValidationResponseByteLengths = [
+        openContextResponseByteLength,
+        validationResponseByteLength,
+        closeContextResponseByteLength,
+    ];
+    const maximumRequestByteLength = Math.max(...successfulRequestByteLengths);
+    const maximumResponseByteLength = Math.max(
+        ...successfulResponseByteLengths,
+    );
+    if (
+        maximumRequestByteLength >
+            foundationProfile.maximumCopiedBufferByteLength ||
+        maximumResponseByteLength >
+            foundationProfile.maximumCopiedBufferByteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'ResourceLimit',
+            'Receipt-terminal endorsement kernel traffic exceeds the absolute copied-buffer bound.',
+        );
+    }
+    return Object.freeze({
+        closeContextRequestByteLength,
+        closeContextResponseByteLength,
+        coldValidationCumulativeRequestByteLength: sumByteLengths(
+            coldValidationRequestByteLengths,
+            'Receipt-terminal endorsement cold-validation requests',
+        ),
+        coldValidationCumulativeResponseByteLength: sumByteLengths(
+            coldValidationResponseByteLengths,
+            'Receipt-terminal endorsement cold-validation responses',
+        ),
+        coldValidationInvocationCount: coldValidationRequestByteLengths.length,
+        completeEndorsementRequestByteLength,
+        completeEndorsementResponseByteLength,
+        completedValidationRequestByteLength,
+        maximumRequestByteLength,
+        maximumResponseByteLength,
+        openContextRequestByteLength,
+        openContextResponseByteLength,
+        prepareEndorsementRequestByteLength,
+        prepareEndorsementResponseByteLength,
+        preparedInventoryKernelByteLength,
+        preparedValidationRequestByteLength,
+        successfulCumulativeRequestByteLength: sumByteLengths(
+            successfulRequestByteLengths,
+            'Receipt-terminal endorsement successful requests',
+        ),
+        successfulCumulativeResponseByteLength: sumByteLengths(
+            successfulResponseByteLengths,
+            'Receipt-terminal endorsement successful responses',
+        ),
+        successfulInvocationCount: successfulRequestByteLengths.length,
+        validationResponseByteLength,
+    });
+};
 
 const copyPreparedInventory = (
     value: unknown,
@@ -1278,17 +1744,16 @@ const copyPublication = (
  * recency-anchored before signing. The complete endorsement envelope is then
  * atomically retained before publication.
  *
- * The kernel boundary must accept only its own complete verified-inventory
- * capability and must revalidate the retained-local receipt match. This class
- * accepts no caller-supplied terminal body, signature seed, or endorsement
- * carrier and constructs no protocol acceptance capability.
+ * The integrity-pinned kernel must have opened its opaque context from the
+ * completed authenticated local receipt and exact public receipt inventory.
+ * This class accepts no caller-supplied inventory capability, terminal body,
+ * signature seed, or endorsement carrier and constructs no protocol acceptance
+ * capability.
  */
-export class SeedReceiptTerminalEndorsementCustody<
-    VerifiedReceiptInventory extends object,
-> {
+export class SeedReceiptTerminalEndorsementCustody {
     readonly #context: SeedReceiptTerminalEndorsementCustodyContext;
     readonly #issuedRandomness = new Set<string>();
-    readonly #kernel: SeedReceiptTerminalEndorsementCustodyKernel<VerifiedReceiptInventory>;
+    readonly #kernel: SeedReceiptTerminalEndorsementCustodyKernel;
     readonly #limits: SeedReceiptTerminalEndorsementCustodyLimits;
     readonly #protection: RuntimeRecordProtection;
     readonly #recencyCoordinator: AuthenticatedStorageRecencyCoordinator;
@@ -1296,19 +1761,15 @@ export class SeedReceiptTerminalEndorsementCustody<
 
     public constructor(input: {
         context: SeedReceiptTerminalEndorsementCustodyContext;
-        kernel: SeedReceiptTerminalEndorsementCustodyKernel<VerifiedReceiptInventory>;
+        kernel: ProductionSeedReceiptTerminalEndorsementKernel;
         limits: SeedReceiptTerminalEndorsementCustodyLimits;
         protection: RuntimeRecordProtection;
         recencyCoordinator: AuthenticatedStorageRecencyCoordinator;
     }) {
-        if (
-            typeof input.kernel?.prepare !== 'function' ||
-            typeof input.kernel?.produce !== 'function' ||
-            typeof input.kernel?.validate !== 'function'
-        ) {
+        if (!isProductionSeedReceiptTerminalEndorsementKernel(input.kernel)) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidConfiguration',
-                'Seed-receipt terminal endorsement custody requires a complete kernel boundary.',
+                'Seed-receipt terminal endorsement custody requires an integrity-pinned production kernel.',
             );
         }
         if (
@@ -1333,29 +1794,8 @@ export class SeedReceiptTerminalEndorsementCustody<
         this.#recencyCoordinator = input.recencyCoordinator;
     }
 
-    public retainForPublication(input: {
-        verifiedReceiptInventory: VerifiedReceiptInventory;
-    }): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
-        const verifiedReceiptInventory = snapshotDataProperty(
-            input,
-            'verifiedReceiptInventory',
-            'input',
-        );
-        if (
-            verifiedReceiptInventory === null ||
-            (typeof verifiedReceiptInventory !== 'object' &&
-                typeof verifiedReceiptInventory !== 'function')
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'InvalidInput',
-                'input.verifiedReceiptInventory must be a kernel-owned object.',
-            );
-        }
-        return this.#schedule(() =>
-            this.#prepareAndRetain(
-                verifiedReceiptInventory as VerifiedReceiptInventory,
-            ),
-        );
+    public retainForPublication(): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
+        return this.#schedule(() => this.#prepareAndRetain());
     }
 
     public resumeForPublication(): Promise<
@@ -1373,9 +1813,7 @@ export class SeedReceiptTerminalEndorsementCustody<
         return scheduled;
     }
 
-    async #prepareAndRetain(
-        verifiedReceiptInventory: VerifiedReceiptInventory,
-    ): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
+    async #prepareAndRetain(): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
         let prepared:
             | PreparedSeedReceiptTerminalEndorsementInventory
             | undefined;
@@ -1384,9 +1822,7 @@ export class SeedReceiptTerminalEndorsementCustody<
             let preparationFailure: unknown;
             let preparedValue: unknown;
             try {
-                preparedValue = await this.#kernel.prepare(
-                    verifiedReceiptInventory,
-                );
+                preparedValue = await this.#kernel.prepare();
             } catch (error) {
                 preparationFailed = true;
                 preparationFailure = error;
@@ -1394,7 +1830,7 @@ export class SeedReceiptTerminalEndorsementCustody<
             if (preparationFailed) {
                 throw new AuthenticatedRuntimeRecordError(
                     'AuthenticationFailed',
-                    'Seed-receipt terminal endorsement preparation rejected the verified receipt-inventory capability.',
+                    'Seed-receipt terminal endorsement preparation rejected the opaque verified context.',
                     preparationFailure,
                 );
             }

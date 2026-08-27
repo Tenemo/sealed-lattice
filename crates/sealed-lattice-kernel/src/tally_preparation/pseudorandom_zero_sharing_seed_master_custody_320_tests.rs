@@ -475,7 +475,7 @@ pub(super) fn encode_source_custody_record(
     bytes
 }
 
-fn encode_receipt_custody_record(
+pub(super) fn encode_receipt_custody_record(
     owner_fixture: &SeedMailboxTestFixture320,
     retained_receipt: &super::pseudorandom_zero_sharing_seed_receipt_320::RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
     receipt_envelope_bytes: &[u8],

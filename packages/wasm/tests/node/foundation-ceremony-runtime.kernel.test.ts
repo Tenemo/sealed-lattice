@@ -139,6 +139,10 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                 kind: 'function',
                 name: 'sealed_lattice_seed_mailbox_sender_320_with_length',
             },
+            {
+                kind: 'function',
+                name: 'sealed_lattice_seed_receipt_terminal_endorsement_320_with_length',
+            },
             { kind: 'global', name: '__data_end' },
             { kind: 'global', name: '__heap_base' },
         ]);
@@ -418,6 +422,85 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                             ),
                         },
                         sourceCustodyRecordBytes: oneByte,
+                    },
+                ),
+            ).rejects.toMatchObject({ code: 'PublicVerification' });
+        } finally {
+            if (priorBinding === undefined) {
+                Reflect.deleteProperty(globalBindings, integrityBindingName);
+            } else {
+                Object.defineProperty(
+                    globalBindings,
+                    integrityBindingName,
+                    priorBinding,
+                );
+            }
+            vi.resetModules();
+        }
+    });
+
+    it('loads the receipt-terminal endorsement ABI only through an integrity-pinned adapter and preserves public-context refusal', async () => {
+        const expectedKernelSha256Hex = await currentKernelSha256Hex();
+        const integrityBindingName =
+            '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
+        const globalBindings = globalThis as Record<string, unknown>;
+        const priorBinding = Object.getOwnPropertyDescriptor(
+            globalBindings,
+            integrityBindingName,
+        );
+        try {
+            Object.defineProperty(globalBindings, integrityBindingName, {
+                configurable: true,
+                value: expectedKernelSha256Hex,
+            });
+            vi.resetModules();
+            const endorsementKernelModule =
+                await import('../../src/seed-receipt-terminal-endorsement-kernel.js');
+            expect(
+                endorsementKernelModule.isProductionSeedReceiptTerminalEndorsementKernel(
+                    {
+                        close: () => undefined,
+                        prepare: () => undefined,
+                        produce: () => undefined,
+                        validate: () => undefined,
+                    },
+                ),
+            ).toBe(false);
+            const oneByte = Uint8Array.of(1);
+            await expect(
+                endorsementKernelModule.openProductionSeedReceiptTerminalEndorsementKernel(
+                    kernelUrl,
+                    {
+                        endorserPosition: 0,
+                        parameterIdentity: new Uint8Array(64).fill(0x41),
+                        preparationContextBytes: oneByte,
+                        receiptCustodyContext: {
+                            parameterIdentity: new Uint8Array(64).fill(0x41),
+                            participantCount: 10,
+                            preparationAttemptOrdinal: 0,
+                            preparationContextIdentity: new Uint8Array(64).fill(
+                                0x42,
+                            ),
+                            recipientPosition: 0,
+                            rootTerminalIdentity: new Uint8Array(64).fill(0x43),
+                        },
+                        receiptCustodyRecordBytes: oneByte,
+                        receiptEnvelopeBytes: [oneByte],
+                        rootAuthorizationPackages: [
+                            {
+                                contributorSignatureEnvelopeBytes: oneByte,
+                                exactOutputCertificateBytes: oneByte,
+                                reservationCertificateBytes: oneByte,
+                                rootBodyBytes: oneByte,
+                            },
+                        ],
+                        rootTerminalCertificateBytes: oneByte,
+                        rosterBytes: oneByte,
+                        signingOperations: {
+                            assertMatchesEndorserVerificationKey: () =>
+                                undefined,
+                            signEndorsementBody: () => new Uint8Array(3_309),
+                        },
                     },
                 ),
             ).rejects.toMatchObject({ code: 'PublicVerification' });
