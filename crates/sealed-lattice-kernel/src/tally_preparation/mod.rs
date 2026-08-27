@@ -45,6 +45,7 @@ mod output_sharing;
 mod preparation_arithmetic_graph;
 mod preparation_attempt_resource_model;
 mod preparation_holder_record_catalog;
+mod preparation_kmac_call_census_320;
 mod preparation_multiplication_catalog;
 mod private_mailbox_kmac_256;
 mod pseudorandom_zero_sharing_320;
@@ -159,6 +160,8 @@ mod preparation_arithmetic_graph_tests;
 mod preparation_attempt_resource_model_tests;
 #[cfg(test)]
 mod preparation_holder_record_catalog_tests;
+#[cfg(test)]
+mod preparation_kmac_call_census_320_tests;
 #[cfg(test)]
 mod preparation_multiplication_catalog_tests;
 #[cfg(test)]

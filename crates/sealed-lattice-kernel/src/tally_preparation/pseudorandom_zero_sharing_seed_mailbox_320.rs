@@ -97,6 +97,13 @@ pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH:
         + Hash512::BYTE_LENGTH
         + ML_KEM_768_CIPHERTEXT_BYTE_LENGTH
         + 3 * size_of::<u64>();
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_ASSOCIATED_DATA_BYTE_LENGTH: usize =
+    CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+        + MAILBOX_CHUNK_ASSOCIATED_DATA_ITEM_COUNT * CANONICAL_ITEM_HEADER_BYTE_LENGTH
+        + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
+        + PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_ASSOCIATED_DATA_DOMAIN.len()
+        + Hash512::BYTE_LENGTH
+        + 4 * size_of::<u64>();
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_BODY_BYTE_LENGTH: usize =
     CANONICAL_TUPLE_HEADER_BYTE_LENGTH
         + MAILBOX_SIGNATURE_BODY_ITEM_COUNT * CANONICAL_ITEM_HEADER_BYTE_LENGTH
@@ -1611,7 +1618,7 @@ fn derive_chunk_associated_data(
     chunk_index: usize,
     chunk_geometry: PseudorandomZeroSharingSeedMailboxChunkGeometry320,
 ) -> Result<Vec<u8>, PseudorandomZeroSharingSeedMailboxError320> {
-    Ok(CanonicalTuple::new(
+    let associated_data = CanonicalTuple::new(
         CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
         CANONICAL_TUPLE_VERSION,
         vec![
@@ -1634,7 +1641,13 @@ fn derive_chunk_associated_data(
             ),
         ],
     )
-    .encode()?)
+    .encode()?;
+    if associated_data.len()
+        != PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_ASSOCIATED_DATA_BYTE_LENGTH
+    {
+        return Err(mailbox_object_mismatch("chunk associated-data byte length"));
+    }
+    Ok(associated_data)
 }
 
 fn derive_authenticated_encryption_key(

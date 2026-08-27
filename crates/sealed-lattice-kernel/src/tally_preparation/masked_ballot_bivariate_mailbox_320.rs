@@ -85,6 +85,13 @@ pub(crate) const MASKED_BALLOT_BIVARIATE_MAILBOX_HEADER_BODY_BYTE_LENGTH: usize 
         + 3 * size_of::<u16>()
         + MASKED_BALLOT_BIVARIATE_MAILBOX_ML_KEM_CIPHERTEXT_BYTE_LENGTH
         + 2 * size_of::<u64>();
+pub(crate) const MASKED_BALLOT_BIVARIATE_MAILBOX_ASSOCIATED_DATA_BYTE_LENGTH: usize =
+    CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+        + 6 * CANONICAL_ITEM_HEADER_BYTE_LENGTH
+        + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
+        + MASKED_BALLOT_BIVARIATE_MAILBOX_ASSOCIATED_DATA_DOMAIN.len()
+        + 3 * Hash512::BYTE_LENGTH
+        + 2 * size_of::<u64>();
 pub(crate) const MASKED_BALLOT_BIVARIATE_MAILBOX_SIGNATURE_ENVELOPE_BYTE_LENGTH: usize =
     CANONICAL_TUPLE_HEADER_BYTE_LENGTH
         + MAILBOX_SIGNATURE_ENVELOPE_ITEM_COUNT * CANONICAL_ITEM_HEADER_BYTE_LENGTH
@@ -1177,7 +1184,7 @@ fn derive_recipient_encapsulation_key_identity(
 fn derive_mailbox_associated_data(
     header: &MaskedBallotBivariateMailboxHeaderBody320,
 ) -> Result<Vec<u8>, MaskedBallotBivariateMailboxError320> {
-    Ok(CanonicalTuple::new(
+    let associated_data = CanonicalTuple::new(
         CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
         CANONICAL_TUPLE_VERSION,
         vec![
@@ -1189,7 +1196,11 @@ fn derive_mailbox_associated_data(
             CanonicalItem::unsigned64(header.carrier_byte_length),
         ],
     )
-    .encode()?)
+    .encode()?;
+    if associated_data.len() != MASKED_BALLOT_BIVARIATE_MAILBOX_ASSOCIATED_DATA_BYTE_LENGTH {
+        return Err(mailbox_object_mismatch("associated-data byte length"));
+    }
+    Ok(associated_data)
 }
 
 fn hash_mailbox_carrier(

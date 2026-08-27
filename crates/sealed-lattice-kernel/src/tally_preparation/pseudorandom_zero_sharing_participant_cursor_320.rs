@@ -31,12 +31,12 @@ use super::{
 
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_CURSOR_CHECKPOINT_DOMAIN: &[u8] =
     b"sealed-lattice/v1/preparation/pseudorandom-zero-sharing-cursor-checkpoint";
-const PSEUDORANDOM_ZERO_SHARING_CURSOR_CHECKPOINT_KEY_CUSTOMIZATION: &[u8] =
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_CURSOR_CHECKPOINT_KEY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/v1/preparation/pseudorandom-zero-sharing-checkpoint-key";
-const PSEUDORANDOM_ZERO_SHARING_CURSOR_CHECKPOINT_TAG_CUSTOMIZATION: &[u8] =
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_CURSOR_CHECKPOINT_TAG_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/v1/preparation/pseudorandom-zero-sharing-checkpoint-tag";
 const CHECKPOINT_VERSION: u64 = 1;
-const CHECKPOINT_AUTHENTICATION_TAG_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
+pub(crate) const CHECKPOINT_AUTHENTICATION_TAG_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 const CSHAKE256_RATE_BYTE_LENGTH: usize = 136;
 const ENCODED_CSHAKE256_RATE: [u8; 2] = [1, 136];
 const ENCODED_SUBSET_MASTER_BIT_LENGTH: [u8; 3] = [2, 1, 64];
@@ -347,6 +347,12 @@ impl PseudorandomZeroSharingCursorResourceModel320 {
 /// authenticated under a key derived from those exact masters, but remains
 /// secret inner custody: an external state owner must encrypt it, bind an
 /// authenticated head, reconcile rollback, and acknowledge durable output.
+/// The retained derivation keys KMAC with the first ordered subset master. A
+/// permitted corrupt holder can know that master, so this cursor is a measured
+/// comparison baseline and its checkpoint authentication cannot authorize a
+/// production continuation. The selected hidden-bit cursor requires a new
+/// derivation whose key retains an independently hidden master after the full
+/// permitted view is conditioned.
 pub(crate) struct PseudorandomZeroSharingParticipantCursor320 {
     parameter_identity: Hash512,
     preparation_context: TallyPreparationContext,

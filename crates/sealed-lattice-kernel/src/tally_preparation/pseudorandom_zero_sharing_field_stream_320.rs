@@ -29,6 +29,12 @@ const CSHAKE256_RATE_BYTE_LENGTH: usize = 136;
 const ENCODED_CSHAKE256_RATE: [u8; 2] = [1, 136];
 const ENCODED_SUBSET_MASTER_BIT_LENGTH: [u8; 3] = [2, 1, 64];
 const KMACXOF_UNBOUNDED_OUTPUT_LENGTH: [u8; 2] = [0, 1];
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_FIELD_STREAM_QUERY_BYTE_LENGTH: usize = 8
+    + 11 * 6
+    + 3 * Hash512::BYTE_LENGTH
+    + 4 * size_of::<u16>()
+    + size_of::<u32>()
+    + 3 * size_of::<u64>();
 
 /// Public coordinate for one independently reproducible KMACXOF256 field stream.
 ///
@@ -94,7 +100,7 @@ impl PseudorandomZeroSharingFieldStreamCoordinate320 {
         chunk_index: u64,
     ) -> Result<Vec<u8>, TallyPreparationError> {
         let geometry = derive_field_chunk_geometry(self.total_field_count, chunk_index)?;
-        Ok(CanonicalTuple::new(
+        let query_bytes = CanonicalTuple::new(
             CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
             CANONICAL_TUPLE_VERSION,
             vec![
@@ -111,7 +117,11 @@ impl PseudorandomZeroSharingFieldStreamCoordinate320 {
                 CanonicalItem::unsigned64(geometry.field_count),
             ],
         )
-        .encode()?)
+        .encode()?;
+        if query_bytes.len() != PSEUDORANDOM_ZERO_SHARING_FIELD_STREAM_QUERY_BYTE_LENGTH {
+            return Err(TallyPreparationError::GeometryMismatch);
+        }
+        Ok(query_bytes)
     }
 }
 
