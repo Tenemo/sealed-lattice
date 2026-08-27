@@ -37,6 +37,7 @@ mod malicious_mpc_communication_floor;
 mod masked_ballot_bivariate_commitment_320;
 mod masked_ballot_bivariate_mailbox_320;
 mod masked_ballot_bivariate_receipt_320;
+mod masked_ballot_bivariate_receipt_state_320;
 mod masked_ballot_bivariate_sharing_320;
 mod masked_ballot_bundle_320;
 mod masked_ballot_release_320;

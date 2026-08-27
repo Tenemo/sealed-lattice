@@ -22,9 +22,11 @@ use super::{
         AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
         MaskedBallotBivariateMailboxError320,
     },
+    masked_ballot_bivariate_receipt_state_320::VerifiedMaskedBallotBivariateReceiptStateOutput320,
 };
 
 const RECEIPT_BODY_ITEM_COUNT: usize = 7;
+const RECEIPT_AUTHORIZATION_BODY_ITEM_COUNT: usize = 3;
 const RECEIPT_ENVELOPE_ITEM_COUNT: usize = 3;
 const TERMINAL_BODY_ITEM_COUNT: usize = 6;
 const TERMINAL_CERTIFICATE_PREFIX_ITEM_COUNT: usize = 2;
@@ -41,6 +43,8 @@ pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_BODY_DOMAIN: &str =
     "sealed-lattice/v1/ballot/bivariate-private-row-receipt-body";
 pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_BODY_IDENTITY_DOMAIN: &str =
     "sealed-lattice/v1/ballot/bivariate-private-row-receipt-body-identity";
+pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_AUTHORIZATION_BODY_DOMAIN: &str =
+    "sealed-lattice/v1/ballot/bivariate-private-row-receipt-authorization-body";
 pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_ENVELOPE_DOMAIN: &str =
     "sealed-lattice/v1/ballot/bivariate-private-row-receipt-envelope";
 pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_ENVELOPE_IDENTITY_DOMAIN: &str =
@@ -63,13 +67,19 @@ pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_BODY_BYTE_LENGTH: usize =
         + MASKED_BALLOT_BIVARIATE_RECEIPT_BODY_DOMAIN.len()
         + 3 * Hash512::BYTE_LENGTH
         + 3 * size_of::<u16>();
+pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_AUTHORIZATION_BODY_BYTE_LENGTH: usize =
+    CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+        + RECEIPT_AUTHORIZATION_BODY_ITEM_COUNT * CANONICAL_ITEM_HEADER_BYTE_LENGTH
+        + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
+        + MASKED_BALLOT_BIVARIATE_RECEIPT_AUTHORIZATION_BODY_DOMAIN.len()
+        + 2 * Hash512::BYTE_LENGTH;
 pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_ENVELOPE_BYTE_LENGTH: usize =
     CANONICAL_TUPLE_HEADER_BYTE_LENGTH
         + RECEIPT_ENVELOPE_ITEM_COUNT * CANONICAL_ITEM_HEADER_BYTE_LENGTH
         + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
         + MASKED_BALLOT_BIVARIATE_RECEIPT_ENVELOPE_DOMAIN.len()
         + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
-        + MASKED_BALLOT_BIVARIATE_RECEIPT_BODY_BYTE_LENGTH
+        + MASKED_BALLOT_BIVARIATE_RECEIPT_AUTHORIZATION_BODY_BYTE_LENGTH
         + MASKED_BALLOT_ML_DSA_65_SIGNATURE_BYTE_LENGTH;
 pub(crate) const MASKED_BALLOT_BIVARIATE_RECEIPT_TERMINAL_BODY_BYTE_LENGTH: usize =
     CANONICAL_TUPLE_HEADER_BYTE_LENGTH
@@ -249,7 +259,7 @@ pub(crate) struct MaskedBallotBivariateReceiptBody320 {
 }
 
 impl MaskedBallotBivariateReceiptBody320 {
-    fn new(
+    pub(crate) fn new(
         authenticated_root: &AuthorAuthenticatedMaskedBallotBivariateCommitmentRoot320,
         authenticated_manifest: &AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
         holder_roster_position: u16,
@@ -295,45 +305,6 @@ impl MaskedBallotBivariateReceiptBody320 {
         .encode()?)
     }
 
-    fn from_canonical_bytes(
-        expected: Self,
-        bytes: &[u8],
-    ) -> Result<Self, MaskedBallotBivariateReceiptError320> {
-        let tuple = CanonicalTuple::decode(bytes, &receipt_control_object_decode_limits())?;
-        require_object_header(
-            &tuple,
-            MASKED_BALLOT_BIVARIATE_RECEIPT_BODY_DOMAIN,
-            RECEIPT_BODY_ITEM_COUNT,
-        )?;
-        require_hash(&tuple.items[1], expected.layout_identity, "layout identity")?;
-        require_hash(
-            &tuple.items[2],
-            expected.root_body_identity,
-            "root-body identity",
-        )?;
-        require_hash(
-            &tuple.items[3],
-            expected.manifest_identity,
-            "manifest identity",
-        )?;
-        require_u16(
-            &tuple.items[4],
-            expected.participant_count,
-            "participant count",
-        )?;
-        require_u16(
-            &tuple.items[5],
-            expected.author_roster_position,
-            "author roster position",
-        )?;
-        require_u16(
-            &tuple.items[6],
-            expected.holder_roster_position,
-            "holder roster position",
-        )?;
-        Ok(expected)
-    }
-
     pub(crate) fn identity(self) -> Result<Hash512, MaskedBallotBivariateReceiptError320> {
         Ok(hash_foundation_tuple_512(
             MASKED_BALLOT_BIVARIATE_RECEIPT_BODY_IDENTITY_DOMAIN,
@@ -342,19 +313,84 @@ impl MaskedBallotBivariateReceiptBody320 {
     }
 }
 
+/// Canonical holder-signature message after both state slots have passed.
+///
+/// The deterministic receipt body remains the semantic operation output. The
+/// detached exact-output certificate identity authorizes those bytes without
+/// becoming part of their identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MaskedBallotBivariateReceiptAuthorizationBody320 {
+    receipt_body_identity: Hash512,
+    exact_output_certificate_identity: Hash512,
+}
+
+impl MaskedBallotBivariateReceiptAuthorizationBody320 {
+    pub(crate) fn new(
+        verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
+    ) -> Result<Self, MaskedBallotBivariateReceiptError320> {
+        Ok(Self {
+            receipt_body_identity: verified_state_output.receipt_body().identity()?,
+            exact_output_certificate_identity: verified_state_output
+                .exact_output_certificate_identity(),
+        })
+    }
+
+    pub(crate) const fn exact_output_certificate_identity(self) -> Hash512 {
+        self.exact_output_certificate_identity
+    }
+
+    pub(crate) fn canonical_bytes(self) -> Result<Vec<u8>, MaskedBallotBivariateReceiptError320> {
+        Ok(CanonicalTuple::new(
+            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+            CANONICAL_TUPLE_VERSION,
+            vec![
+                CanonicalItem::nonempty_ascii(
+                    MASKED_BALLOT_BIVARIATE_RECEIPT_AUTHORIZATION_BODY_DOMAIN,
+                )?,
+                CanonicalItem::hash512(self.receipt_body_identity.into_bytes()),
+                CanonicalItem::hash512(self.exact_output_certificate_identity.into_bytes()),
+            ],
+        )
+        .encode()?)
+    }
+
+    fn from_canonical_bytes(
+        expected: Self,
+        bytes: &[u8],
+    ) -> Result<Self, MaskedBallotBivariateReceiptError320> {
+        let tuple = CanonicalTuple::decode(bytes, &receipt_control_object_decode_limits())?;
+        require_object_header(
+            &tuple,
+            MASKED_BALLOT_BIVARIATE_RECEIPT_AUTHORIZATION_BODY_DOMAIN,
+            RECEIPT_AUTHORIZATION_BODY_ITEM_COUNT,
+        )?;
+        require_hash(
+            &tuple.items[1],
+            expected.receipt_body_identity,
+            "receipt-body identity",
+        )?;
+        require_hash(
+            &tuple.items[2],
+            expected.exact_output_certificate_identity,
+            "exact-output-certificate identity",
+        )?;
+        Ok(expected)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct MaskedBallotBivariateReceiptEnvelope320 {
-    receipt_body: MaskedBallotBivariateReceiptBody320,
+    authorization_body: MaskedBallotBivariateReceiptAuthorizationBody320,
     signature: [u8; MASKED_BALLOT_ML_DSA_65_SIGNATURE_BYTE_LENGTH],
 }
 
 impl MaskedBallotBivariateReceiptEnvelope320 {
     pub(crate) const fn new(
-        receipt_body: MaskedBallotBivariateReceiptBody320,
+        authorization_body: MaskedBallotBivariateReceiptAuthorizationBody320,
         signature: [u8; MASKED_BALLOT_ML_DSA_65_SIGNATURE_BYTE_LENGTH],
     ) -> Self {
         Self {
-            receipt_body,
+            authorization_body,
             signature,
         }
     }
@@ -365,7 +401,7 @@ impl MaskedBallotBivariateReceiptEnvelope320 {
             CANONICAL_TUPLE_VERSION,
             vec![
                 CanonicalItem::nonempty_ascii(MASKED_BALLOT_BIVARIATE_RECEIPT_ENVELOPE_DOMAIN)?,
-                CanonicalItem::variable_bytes(self.receipt_body.canonical_bytes()?)?,
+                CanonicalItem::variable_bytes(self.authorization_body.canonical_bytes()?)?,
                 CanonicalItem::fixed_bytes(self.signature)?,
             ],
         )
@@ -373,7 +409,7 @@ impl MaskedBallotBivariateReceiptEnvelope320 {
     }
 
     fn from_canonical_bytes(
-        expected_receipt_body: MaskedBallotBivariateReceiptBody320,
+        expected_authorization_body: MaskedBallotBivariateReceiptAuthorizationBody320,
         bytes: &[u8],
     ) -> Result<Self, MaskedBallotBivariateReceiptError320> {
         let tuple = CanonicalTuple::decode(bytes, &receipt_control_object_decode_limits())?;
@@ -383,15 +419,16 @@ impl MaskedBallotBivariateReceiptEnvelope320 {
             RECEIPT_ENVELOPE_ITEM_COUNT,
         )?;
         if tuple.items[1].item_type() != CanonicalItemType::RawBytes {
-            return Err(receipt_object_mismatch("receipt body"));
+            return Err(receipt_object_mismatch("receipt authorization body"));
         }
-        let receipt_body = MaskedBallotBivariateReceiptBody320::from_canonical_bytes(
-            expected_receipt_body,
-            tuple.items[1].variable_value_bytes()?,
-        )?;
+        let authorization_body =
+            MaskedBallotBivariateReceiptAuthorizationBody320::from_canonical_bytes(
+                expected_authorization_body,
+                tuple.items[1].variable_value_bytes()?,
+            )?;
         let signature = read_signature(&tuple.items[2])?;
         Ok(Self {
-            receipt_body,
+            authorization_body,
             signature,
         })
     }
@@ -408,7 +445,7 @@ impl fmt::Debug for MaskedBallotBivariateReceiptEnvelope320 {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("MaskedBallotBivariateReceiptEnvelope320")
-            .field("receipt_body", &self.receipt_body)
+            .field("authorization_body", &self.authorization_body)
             .field("signature", &"[redacted]")
             .finish()
     }
@@ -421,6 +458,9 @@ impl fmt::Debug for MaskedBallotBivariateReceiptEnvelope320 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RosterSignedMaskedBallotBivariateReceipt320 {
     receipt_body: MaskedBallotBivariateReceiptBody320,
+    state_key_identity: Hash512,
+    reservation_certificate_identity: Hash512,
+    exact_output_certificate_identity: Hash512,
     receipt_envelope_identity: Hash512,
 }
 
@@ -429,27 +469,36 @@ impl RosterSignedMaskedBallotBivariateReceipt320 {
         self.receipt_body
     }
 
+    pub(crate) const fn state_key_identity(self) -> Hash512 {
+        self.state_key_identity
+    }
+
+    pub(crate) const fn reservation_certificate_identity(self) -> Hash512 {
+        self.reservation_certificate_identity
+    }
+
+    pub(crate) const fn exact_output_certificate_identity(self) -> Hash512 {
+        self.exact_output_certificate_identity
+    }
+
     pub(crate) const fn receipt_envelope_identity(self) -> Hash512 {
         self.receipt_envelope_identity
     }
 }
 
 pub(crate) fn verify_masked_ballot_bivariate_receipt_announcement_320(
-    authenticated_root: &AuthorAuthenticatedMaskedBallotBivariateCommitmentRoot320,
-    authenticated_manifest: &AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
+    verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
     roster: &Roster,
-    expected_holder_roster_position: u16,
     receipt_envelope_bytes: &[u8],
 ) -> Result<RosterSignedMaskedBallotBivariateReceipt320, MaskedBallotBivariateReceiptError320> {
-    let layout = authenticated_root.root_body().layout();
+    let layout = verified_state_output.layout();
     validate_roster_for_layout(layout, roster)?;
-    let expected_receipt_body = MaskedBallotBivariateReceiptBody320::new(
-        authenticated_root,
-        authenticated_manifest,
-        expected_holder_roster_position,
-    )?;
+    let expected_receipt_body = verified_state_output.receipt_body();
+    let expected_holder_roster_position = expected_receipt_body.holder_roster_position();
+    let expected_authorization_body =
+        MaskedBallotBivariateReceiptAuthorizationBody320::new(verified_state_output)?;
     let receipt_envelope = MaskedBallotBivariateReceiptEnvelope320::from_canonical_bytes(
-        expected_receipt_body,
+        expected_authorization_body,
         receipt_envelope_bytes,
     )?;
     let holder_entry = require_roster_holder(roster, layout, expected_holder_roster_position)?;
@@ -460,7 +509,7 @@ pub(crate) fn verify_masked_ballot_bivariate_receipt_announcement_320(
             },
         )?;
     if !verification_key.verify(
-        &expected_receipt_body.canonical_bytes()?,
+        &expected_authorization_body.canonical_bytes()?,
         &receipt_envelope.signature,
         MASKED_BALLOT_BIVARIATE_RECEIPT_SIGNATURE_CONTEXT,
     ) {
@@ -472,6 +521,10 @@ pub(crate) fn verify_masked_ballot_bivariate_receipt_announcement_320(
     }
     Ok(RosterSignedMaskedBallotBivariateReceipt320 {
         receipt_body: expected_receipt_body,
+        state_key_identity: verified_state_output.state_key_identity(),
+        reservation_certificate_identity: verified_state_output.reservation_certificate_identity(),
+        exact_output_certificate_identity: verified_state_output
+            .exact_output_certificate_identity(),
         receipt_envelope_identity: receipt_envelope.identity()?,
     })
 }
@@ -483,6 +536,9 @@ pub(crate) fn verify_masked_ballot_bivariate_receipt_announcement_320(
 pub(crate) struct AuthenticatedMaskedBallotBivariateReceipt320 {
     delivery: AuthenticatedMaskedBallotBivariateMailboxDelivery320,
     receipt_body: MaskedBallotBivariateReceiptBody320,
+    state_key_identity: Hash512,
+    reservation_certificate_identity: Hash512,
+    exact_output_certificate_identity: Hash512,
     receipt_envelope_identity: Hash512,
 }
 
@@ -493,6 +549,18 @@ impl AuthenticatedMaskedBallotBivariateReceipt320 {
 
     pub(crate) const fn receipt_body(&self) -> MaskedBallotBivariateReceiptBody320 {
         self.receipt_body
+    }
+
+    pub(crate) const fn state_key_identity(&self) -> Hash512 {
+        self.state_key_identity
+    }
+
+    pub(crate) const fn reservation_certificate_identity(&self) -> Hash512 {
+        self.reservation_certificate_identity
+    }
+
+    pub(crate) const fn exact_output_certificate_identity(&self) -> Hash512 {
+        self.exact_output_certificate_identity
     }
 
     pub(crate) const fn receipt_envelope_identity(&self) -> Hash512 {
@@ -506,6 +574,15 @@ impl fmt::Debug for AuthenticatedMaskedBallotBivariateReceipt320 {
             .debug_struct("AuthenticatedMaskedBallotBivariateReceipt320")
             .field("delivery", &"[redacted]")
             .field("receipt_body", &self.receipt_body)
+            .field("state_key_identity", &self.state_key_identity)
+            .field(
+                "reservation_certificate_identity",
+                &self.reservation_certificate_identity,
+            )
+            .field(
+                "exact_output_certificate_identity",
+                &self.exact_output_certificate_identity,
+            )
             .field("receipt_envelope_identity", &self.receipt_envelope_identity)
             .finish()
     }
@@ -546,38 +623,36 @@ impl fmt::Debug for ProducedMaskedBallotBivariateReceipt320 {
 }
 
 pub(crate) fn verify_masked_ballot_bivariate_receipt_320(
-    authenticated_root: &AuthorAuthenticatedMaskedBallotBivariateCommitmentRoot320,
-    authenticated_manifest: &AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
+    verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
     roster: &Roster,
     delivery: AuthenticatedMaskedBallotBivariateMailboxDelivery320,
     receipt_envelope_bytes: &[u8],
 ) -> Result<AuthenticatedMaskedBallotBivariateReceipt320, MaskedBallotBivariateReceiptError320> {
-    require_delivery_scope(authenticated_root, authenticated_manifest, &delivery)?;
-    let holder_roster_position = delivery.holder_roster_position();
+    require_state_output_matches_delivery(verified_state_output, &delivery)?;
     let roster_signed_receipt = verify_masked_ballot_bivariate_receipt_announcement_320(
-        authenticated_root,
-        authenticated_manifest,
+        verified_state_output,
         roster,
-        holder_roster_position,
         receipt_envelope_bytes,
     )?;
     Ok(AuthenticatedMaskedBallotBivariateReceipt320 {
         delivery,
         receipt_body: roster_signed_receipt.receipt_body,
+        state_key_identity: roster_signed_receipt.state_key_identity,
+        reservation_certificate_identity: roster_signed_receipt.reservation_certificate_identity,
+        exact_output_certificate_identity: roster_signed_receipt.exact_output_certificate_identity,
         receipt_envelope_identity: roster_signed_receipt.receipt_envelope_identity,
     })
 }
 
 pub(crate) fn produce_masked_ballot_bivariate_receipt_320(
-    authenticated_root: &AuthorAuthenticatedMaskedBallotBivariateCommitmentRoot320,
-    authenticated_manifest: &AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
+    verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
     roster: &Roster,
     delivery: AuthenticatedMaskedBallotBivariateMailboxDelivery320,
     holder_signing_key: &ml_dsa_65::PrivateKey,
     signature_randomness: [u8; 32],
 ) -> Result<ProducedMaskedBallotBivariateReceipt320, MaskedBallotBivariateReceiptError320> {
-    require_delivery_scope(authenticated_root, authenticated_manifest, &delivery)?;
-    let layout = authenticated_root.root_body().layout();
+    require_state_output_matches_delivery(verified_state_output, &delivery)?;
+    let layout = verified_state_output.layout();
     validate_roster_for_layout(layout, roster)?;
     let holder_roster_position = delivery.holder_roster_position();
     let holder_entry = require_roster_holder(roster, layout, holder_roster_position)?;
@@ -592,15 +667,12 @@ pub(crate) fn produce_masked_ballot_bivariate_receipt_320(
     if signature_randomness.iter().all(|byte| *byte == 0) {
         return Err(MaskedBallotBivariateReceiptError320::InvalidSignatureRandomness);
     }
-    let receipt_body = MaskedBallotBivariateReceiptBody320::new(
-        authenticated_root,
-        authenticated_manifest,
-        holder_roster_position,
-    )?;
+    let authorization_body =
+        MaskedBallotBivariateReceiptAuthorizationBody320::new(verified_state_output)?;
     let signature = holder_signing_key
         .try_sign_with_seed(
             &signature_randomness,
-            &receipt_body.canonical_bytes()?,
+            &authorization_body.canonical_bytes()?,
             MASKED_BALLOT_BIVARIATE_RECEIPT_SIGNATURE_CONTEXT,
         )
         .map_err(
@@ -609,10 +681,10 @@ pub(crate) fn produce_masked_ballot_bivariate_receipt_320(
             },
         )?;
     let receipt_envelope_bytes =
-        MaskedBallotBivariateReceiptEnvelope320::new(receipt_body, signature).canonical_bytes()?;
+        MaskedBallotBivariateReceiptEnvelope320::new(authorization_body, signature)
+            .canonical_bytes()?;
     let authenticated_receipt = verify_masked_ballot_bivariate_receipt_320(
-        authenticated_root,
-        authenticated_manifest,
+        verified_state_output,
         roster,
         delivery,
         &receipt_envelope_bytes,
@@ -826,17 +898,19 @@ impl fmt::Debug for MaskedBallotBivariateReceiptTerminalCertificate320 {
 
 /// Exact all-roster receipt terminal for one signed aggregate manifest.
 ///
-/// Every roster signature has passed, but corrupt holders can still attest to
-/// rows they did not verify. The all-roster requirement guarantees that every
-/// honest holder signed only after its own local positive check once the
-/// durable one-shot state owner exists. Until then this result is conditional
-/// custody evidence and grants no selected-set, release, or continuation
-/// authority.
+/// Every roster signature and both subject-excluding state certificates have
+/// passed. Corrupt holders can still attest to rows they did not verify, while
+/// honest local producers require positive delivery before signing. Durable
+/// witness locking and replay remain separate runtime obligations. This result
+/// grants no selected-set, release, or continuation authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AllRosterMaskedBallotBivariateReceiptTerminal320 {
     terminal_body: MaskedBallotBivariateReceiptTerminalBody320,
     terminal_body_identity: Hash512,
     receipt_body_identities: Box<[Hash512]>,
+    state_key_identities: Box<[Hash512]>,
+    reservation_certificate_identities: Box<[Hash512]>,
+    exact_output_certificate_identities: Box<[Hash512]>,
     receipt_envelope_identities: Box<[Hash512]>,
     certificate_identity: Hash512,
 }
@@ -852,6 +926,18 @@ impl AllRosterMaskedBallotBivariateReceiptTerminal320 {
 
     pub(crate) fn receipt_body_identities(&self) -> &[Hash512] {
         &self.receipt_body_identities
+    }
+
+    pub(crate) fn state_key_identities(&self) -> &[Hash512] {
+        &self.state_key_identities
+    }
+
+    pub(crate) fn reservation_certificate_identities(&self) -> &[Hash512] {
+        &self.reservation_certificate_identities
+    }
+
+    pub(crate) fn exact_output_certificate_identities(&self) -> &[Hash512] {
+        &self.exact_output_certificate_identities
     }
 
     pub(crate) fn receipt_envelope_identities(&self) -> &[Hash512] {
@@ -873,6 +959,9 @@ impl AllRosterMaskedBallotBivariateReceiptTerminal320 {
 pub(crate) struct JoinedMaskedBallotBivariateCustody320 {
     delivery: AuthenticatedMaskedBallotBivariateMailboxDelivery320,
     receipt_body_identity: Hash512,
+    state_key_identity: Hash512,
+    reservation_certificate_identity: Hash512,
+    exact_output_certificate_identity: Hash512,
     receipt_envelope_identity: Hash512,
     terminal_body_identity: Hash512,
     terminal_certificate_identity: Hash512,
@@ -891,6 +980,18 @@ impl JoinedMaskedBallotBivariateCustody320 {
         self.receipt_envelope_identity
     }
 
+    pub(crate) const fn state_key_identity(&self) -> Hash512 {
+        self.state_key_identity
+    }
+
+    pub(crate) const fn reservation_certificate_identity(&self) -> Hash512 {
+        self.reservation_certificate_identity
+    }
+
+    pub(crate) const fn exact_output_certificate_identity(&self) -> Hash512 {
+        self.exact_output_certificate_identity
+    }
+
     pub(crate) const fn terminal_body_identity(&self) -> Hash512 {
         self.terminal_body_identity
     }
@@ -906,6 +1007,15 @@ impl fmt::Debug for JoinedMaskedBallotBivariateCustody320 {
             .debug_struct("JoinedMaskedBallotBivariateCustody320")
             .field("delivery", &"[redacted]")
             .field("receipt_body_identity", &self.receipt_body_identity)
+            .field("state_key_identity", &self.state_key_identity)
+            .field(
+                "reservation_certificate_identity",
+                &self.reservation_certificate_identity,
+            )
+            .field(
+                "exact_output_certificate_identity",
+                &self.exact_output_certificate_identity,
+            )
             .field("receipt_envelope_identity", &self.receipt_envelope_identity)
             .field("terminal_body_identity", &self.terminal_body_identity)
             .field(
@@ -969,6 +1079,55 @@ pub(crate) fn join_masked_ballot_bivariate_custody_320(
             },
         );
     }
+    let expected_state_key_identity = receipt_terminal
+        .state_key_identities
+        .get(holder_index)
+        .ok_or(
+            MaskedBallotBivariateReceiptError320::LocalReceiptTerminalMismatch {
+                field: "state-key position",
+            },
+        )?;
+    if authenticated_receipt.state_key_identity != *expected_state_key_identity {
+        return Err(
+            MaskedBallotBivariateReceiptError320::LocalReceiptTerminalMismatch {
+                field: "state-key identity",
+            },
+        );
+    }
+    let expected_reservation_certificate_identity = receipt_terminal
+        .reservation_certificate_identities
+        .get(holder_index)
+        .ok_or(
+            MaskedBallotBivariateReceiptError320::LocalReceiptTerminalMismatch {
+                field: "reservation-certificate position",
+            },
+        )?;
+    if authenticated_receipt.reservation_certificate_identity
+        != *expected_reservation_certificate_identity
+    {
+        return Err(
+            MaskedBallotBivariateReceiptError320::LocalReceiptTerminalMismatch {
+                field: "reservation-certificate identity",
+            },
+        );
+    }
+    let expected_exact_output_certificate_identity = receipt_terminal
+        .exact_output_certificate_identities
+        .get(holder_index)
+        .ok_or(
+            MaskedBallotBivariateReceiptError320::LocalReceiptTerminalMismatch {
+                field: "exact-output-certificate position",
+            },
+        )?;
+    if authenticated_receipt.exact_output_certificate_identity
+        != *expected_exact_output_certificate_identity
+    {
+        return Err(
+            MaskedBallotBivariateReceiptError320::LocalReceiptTerminalMismatch {
+                field: "exact-output-certificate identity",
+            },
+        );
+    }
     let expected_receipt_envelope_identity = receipt_terminal
         .receipt_envelope_identities
         .get(holder_index)
@@ -987,17 +1146,38 @@ pub(crate) fn join_masked_ballot_bivariate_custody_320(
     Ok(JoinedMaskedBallotBivariateCustody320 {
         delivery: authenticated_receipt.delivery,
         receipt_body_identity,
+        state_key_identity: authenticated_receipt.state_key_identity,
+        reservation_certificate_identity: authenticated_receipt.reservation_certificate_identity,
+        exact_output_certificate_identity: authenticated_receipt.exact_output_certificate_identity,
         receipt_envelope_identity: authenticated_receipt.receipt_envelope_identity,
         terminal_body_identity: receipt_terminal.terminal_body_identity,
         terminal_certificate_identity: receipt_terminal.certificate_identity,
     })
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MaskedBallotBivariateReceiptAuthorizationPackage320<'a> {
+    verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
+    receipt_envelope_bytes: &'a [u8],
+}
+
+impl<'a> MaskedBallotBivariateReceiptAuthorizationPackage320<'a> {
+    pub(crate) const fn new(
+        verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
+        receipt_envelope_bytes: &'a [u8],
+    ) -> Self {
+        Self {
+            verified_state_output,
+            receipt_envelope_bytes,
+        }
+    }
+}
+
 pub(crate) fn compile_masked_ballot_bivariate_receipt_terminal_certificate_320(
     authenticated_root: &AuthorAuthenticatedMaskedBallotBivariateCommitmentRoot320,
     authenticated_manifest: &AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
     roster: &Roster,
-    receipt_envelope_bytes: &[&[u8]],
+    receipt_packages: &[MaskedBallotBivariateReceiptAuthorizationPackage320<'_>],
 ) -> Result<Vec<u8>, MaskedBallotBivariateReceiptError320> {
     let terminal_body = MaskedBallotBivariateReceiptTerminalBody320::new(
         authenticated_root,
@@ -1005,28 +1185,32 @@ pub(crate) fn compile_masked_ballot_bivariate_receipt_terminal_certificate_320(
     )?;
     validate_roster_for_layout(authenticated_root.root_body().layout(), roster)?;
     let expected_receipt_count = usize::from(terminal_body.participant_count);
-    if receipt_envelope_bytes.len() != expected_receipt_count {
+    if receipt_packages.len() != expected_receipt_count {
         return Err(MaskedBallotBivariateReceiptError320::ReceiptCount {
             expected: expected_receipt_count,
-            actual: receipt_envelope_bytes.len(),
+            actual: receipt_packages.len(),
         });
     }
-    for (holder_index, envelope_bytes) in receipt_envelope_bytes.iter().enumerate() {
+    for (holder_index, receipt_package) in receipt_packages.iter().enumerate() {
         let holder_roster_position = u16::try_from(holder_index)
             .map_err(|_| MaskedBallotBivariateReceiptError320::ArithmeticOverflow)?;
-        verify_masked_ballot_bivariate_receipt_announcement_320(
+        require_state_output_scope(
+            receipt_package.verified_state_output,
             authenticated_root,
             authenticated_manifest,
-            roster,
             holder_roster_position,
-            envelope_bytes,
+        )?;
+        verify_masked_ballot_bivariate_receipt_announcement_320(
+            receipt_package.verified_state_output,
+            roster,
+            receipt_package.receipt_envelope_bytes,
         )?;
     }
     MaskedBallotBivariateReceiptTerminalCertificate320::new(
         terminal_body,
-        receipt_envelope_bytes
+        receipt_packages
             .iter()
-            .map(|bytes| bytes.to_vec())
+            .map(|package| package.receipt_envelope_bytes.to_vec())
             .collect(),
     )?
     .canonical_bytes()
@@ -1036,6 +1220,7 @@ pub(crate) fn verify_masked_ballot_bivariate_receipt_terminal_320(
     authenticated_root: &AuthorAuthenticatedMaskedBallotBivariateCommitmentRoot320,
     authenticated_manifest: &AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
     roster: &Roster,
+    verified_state_outputs: &[VerifiedMaskedBallotBivariateReceiptStateOutput320],
     terminal_certificate_bytes: &[u8],
 ) -> Result<AllRosterMaskedBallotBivariateReceiptTerminal320, MaskedBallotBivariateReceiptError320>
 {
@@ -1044,12 +1229,24 @@ pub(crate) fn verify_masked_ballot_bivariate_receipt_terminal_320(
         authenticated_manifest,
     )?;
     validate_roster_for_layout(authenticated_root.root_body().layout(), roster)?;
+    let expected_receipt_count = usize::from(terminal_body.participant_count);
+    if verified_state_outputs.len() != expected_receipt_count {
+        return Err(MaskedBallotBivariateReceiptError320::ReceiptCount {
+            expected: expected_receipt_count,
+            actual: verified_state_outputs.len(),
+        });
+    }
     let terminal_certificate =
         MaskedBallotBivariateReceiptTerminalCertificate320::from_canonical_bytes(
             terminal_body,
             terminal_certificate_bytes,
         )?;
     let mut receipt_body_identities =
+        Vec::with_capacity(usize::from(terminal_body.participant_count));
+    let mut state_key_identities = Vec::with_capacity(usize::from(terminal_body.participant_count));
+    let mut reservation_certificate_identities =
+        Vec::with_capacity(usize::from(terminal_body.participant_count));
+    let mut exact_output_certificate_identities =
         Vec::with_capacity(usize::from(terminal_body.participant_count));
     let mut receipt_envelope_identities =
         Vec::with_capacity(usize::from(terminal_body.participant_count));
@@ -1060,14 +1257,22 @@ pub(crate) fn verify_masked_ballot_bivariate_receipt_terminal_320(
     {
         let holder_roster_position = u16::try_from(holder_index)
             .map_err(|_| MaskedBallotBivariateReceiptError320::ArithmeticOverflow)?;
-        let receipt = verify_masked_ballot_bivariate_receipt_announcement_320(
+        let verified_state_output = verified_state_outputs[holder_index];
+        require_state_output_scope(
+            verified_state_output,
             authenticated_root,
             authenticated_manifest,
-            roster,
             holder_roster_position,
+        )?;
+        let receipt = verify_masked_ballot_bivariate_receipt_announcement_320(
+            verified_state_output,
+            roster,
             envelope_bytes,
         )?;
         receipt_body_identities.push(receipt.receipt_body.identity()?);
+        state_key_identities.push(receipt.state_key_identity);
+        reservation_certificate_identities.push(receipt.reservation_certificate_identity);
+        exact_output_certificate_identities.push(receipt.exact_output_certificate_identity);
         receipt_envelope_identities.push(receipt.receipt_envelope_identity);
     }
     if terminal_certificate_bytes.len()
@@ -1081,6 +1286,9 @@ pub(crate) fn verify_masked_ballot_bivariate_receipt_terminal_320(
         terminal_body,
         terminal_body_identity: terminal_body.identity()?,
         receipt_body_identities: receipt_body_identities.into_boxed_slice(),
+        state_key_identities: state_key_identities.into_boxed_slice(),
+        reservation_certificate_identities: reservation_certificate_identities.into_boxed_slice(),
+        exact_output_certificate_identities: exact_output_certificate_identities.into_boxed_slice(),
         receipt_envelope_identities: receipt_envelope_identities.into_boxed_slice(),
         certificate_identity: terminal_certificate.identity()?,
     })
@@ -1101,20 +1309,40 @@ fn require_manifest_scope(
     Ok(())
 }
 
-fn require_delivery_scope(
+fn require_state_output_scope(
+    verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
     authenticated_root: &AuthorAuthenticatedMaskedBallotBivariateCommitmentRoot320,
     authenticated_manifest: &AuthorAuthenticatedMaskedBallotBivariateMailboxManifest320,
+    holder_roster_position: u16,
+) -> Result<(), MaskedBallotBivariateReceiptError320> {
+    let expected_receipt_body = MaskedBallotBivariateReceiptBody320::new(
+        authenticated_root,
+        authenticated_manifest,
+        holder_roster_position,
+    )?;
+    if verified_state_output.layout() != authenticated_root.root_body().layout()
+        || verified_state_output.receipt_body() != expected_receipt_body
+    {
+        return Err(receipt_object_mismatch("verified state-output scope"));
+    }
+    Ok(())
+}
+
+fn require_state_output_matches_delivery(
+    verified_state_output: VerifiedMaskedBallotBivariateReceiptStateOutput320,
     delivery: &AuthenticatedMaskedBallotBivariateMailboxDelivery320,
 ) -> Result<(), MaskedBallotBivariateReceiptError320> {
-    require_manifest_scope(authenticated_root, authenticated_manifest)?;
-    let layout = authenticated_root.root_body().layout();
+    let layout = verified_state_output.layout();
+    let receipt_body = verified_state_output.receipt_body();
     if delivery.layout_identity() != layout.identity()
-        || delivery.root_body_identity() != authenticated_root.root_body_identity()
-        || delivery.manifest_identity() != authenticated_manifest.manifest_identity()
-        || delivery.author_roster_position() != layout.author_roster_position()
-        || delivery.holder_roster_position() >= layout.participant_count()
+        || receipt_body.layout_identity != layout.identity()
+        || delivery.root_body_identity() != receipt_body.root_body_identity
+        || delivery.manifest_identity() != receipt_body.manifest_identity
+        || delivery.author_roster_position() != receipt_body.author_roster_position
+        || delivery.holder_roster_position() != receipt_body.holder_roster_position
+        || receipt_body.participant_count != layout.participant_count()
     {
-        return Err(receipt_object_mismatch("authenticated delivery scope"));
+        return Err(receipt_object_mismatch("state-authorized delivery scope"));
     }
     Ok(())
 }
