@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
+import { shake256 } from '@noble/hashes/sha3.js';
+import { foundationProfile } from '@sealed-lattice/types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { openFoundationCeremonyRuntime } from '../../src/foundation-ceremony-runtime.js';
@@ -28,6 +30,75 @@ const currentKernelSha256Hex = async (): Promise<string> =>
         )
         .digest('hex');
 
+const encodeVariableUnsignedInteger = (value: number): Uint8Array => {
+    const bytes: number[] = [];
+    let remaining = value;
+    do {
+        let byte = remaining & 0x7f;
+        remaining = Math.floor(remaining / 128);
+        if (remaining !== 0) {
+            byte |= 0x80;
+        }
+        bytes.push(byte);
+    } while (remaining !== 0);
+    return Uint8Array.from(bytes);
+};
+
+const concatenateBytes = (parts: readonly Uint8Array[]): Uint8Array => {
+    const byteLength = parts.reduce(
+        (total, part) => total + part.byteLength,
+        0,
+    );
+    const output = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const part of parts) {
+        output.set(part, offset);
+        offset += part.byteLength;
+    }
+    return output;
+};
+
+const frameBytes = (bytes: Uint8Array): Uint8Array =>
+    concatenateBytes([encodeVariableUnsignedInteger(bytes.byteLength), bytes]);
+
+const hashFramedParts = (
+    domain: string,
+    parts: readonly Uint8Array[],
+): Uint8Array => {
+    const textEncoder = new TextEncoder();
+    const preimage = concatenateBytes([
+        textEncoder.encode('sealed.vote/hash512'),
+        frameBytes(textEncoder.encode(domain)),
+        encodeVariableUnsignedInteger(parts.length),
+        ...parts.map(frameBytes),
+    ]);
+    try {
+        const hash = shake256.create({ dkLen: 64 });
+        hash.update(preimage);
+        return hash.digest();
+    } finally {
+        preimage.fill(0);
+    }
+};
+
+const completionPreparationContextBytes = (): Uint8Array => {
+    const textEncoder = new TextEncoder();
+    return concatenateBytes([
+        frameBytes(
+            textEncoder.encode('sealed-lattice/tally-preparation-context'),
+        ),
+        encodeVariableUnsignedInteger(1),
+        frameBytes(new Uint8Array(64).fill(0x91)),
+        frameBytes(new Uint8Array(64).fill(0x93)),
+        frameBytes(new Uint8Array(64).fill(0x95)),
+        frameBytes(new Uint8Array(64).fill(0x97)),
+        frameBytes(new Uint8Array(32).fill(0x51)),
+        encodeVariableUnsignedInteger(foundationProfile.participantCount),
+        encodeVariableUnsignedInteger(foundationProfile.optionCount),
+        encodeVariableUnsignedInteger(foundationProfile.optionCount),
+    ]);
+};
+
 const manifestInput = (optionCount: number) => ({
     displayTitle: 'Choose priorities',
     optionDefinitions: Array.from(
@@ -41,7 +112,7 @@ const manifestInput = (optionCount: number) => ({
 });
 
 describe('foundation ceremony runtime with the scalar WASM kernel', () => {
-    it('exports only the active command and joined-custody ABI with standard WASM globals', async () => {
+    it('exports only the active command and source-custody ABI with standard WASM globals', async () => {
         const module = await WebAssembly.compile(await readFile(kernelUrl));
         expect(WebAssembly.Module.exports(module)).toEqual([
             { kind: 'memory', name: 'memory' },
@@ -60,9 +131,221 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                 kind: 'function',
                 name: 'sealed_lattice_validate_joined_seed_masters_320_with_length',
             },
+            {
+                kind: 'function',
+                name: 'sealed_lattice_seed_catalog_source_320_with_length',
+            },
             { kind: 'global', name: '__data_end' },
             { kind: 'global', name: '__heap_base' },
         ]);
+    });
+
+    it('loads only an integrity-pinned source-custody kernel and preserves typed Rust refusals', async () => {
+        const expectedKernelSha256Hex = await currentKernelSha256Hex();
+        const integrityBindingName =
+            '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
+        const globalBindings = globalThis as Record<string, unknown>;
+        const priorBinding = Object.getOwnPropertyDescriptor(
+            globalBindings,
+            integrityBindingName,
+        );
+        try {
+            Object.defineProperty(globalBindings, integrityBindingName, {
+                configurable: true,
+                value: expectedKernelSha256Hex,
+            });
+            vi.resetModules();
+            const sourceKernelModule =
+                await import('../../src/seed-catalog-source-custody-kernel.js');
+            const malformedPreparationContext = Uint8Array.of(0x01);
+            const kernel =
+                await sourceKernelModule.openProductionSeedCatalogSourceCustodyKernel(
+                    kernelUrl,
+                    malformedPreparationContext,
+                );
+            expect(
+                sourceKernelModule.isProductionSeedCatalogSourceCustodyKernel(
+                    kernel,
+                ),
+            ).toBe(true);
+            expect(
+                sourceKernelModule.isProductionSeedCatalogSourceCustodyKernel({
+                    produceCatalog: () => undefined,
+                    produceDeliverySource: () => undefined,
+                    validateCatalog: () => undefined,
+                    validateDeliverySource: () => undefined,
+                }),
+            ).toBe(false);
+
+            const hash = new Uint8Array(64).fill(0x41);
+            const sourceInput = Object.freeze({
+                context: Object.freeze({
+                    actionContextIdentity: hash,
+                    catalogCompilerIdentity: hash,
+                    parameterIdentity: hash,
+                    participantCount: 2,
+                    participantPosition: 0,
+                    preparationAttemptOrdinal: 0,
+                    preparationContextIdentity: hash,
+                    rosterIdentity: hash,
+                    statePredecessorIdentity: hash,
+                }),
+                geometry: Object.freeze({
+                    commitmentSaltByteLength: 1,
+                    deliverySourcePayloadByteLengths: Object.freeze([1]),
+                    inclusionProofByteLength: 1,
+                    leafOpeningByteLengths: Object.freeze([1]),
+                    rootBodyByteLength: 1,
+                    sourceContributionByteLength: 1,
+                }),
+                sourceInventory: Object.freeze([
+                    Object.freeze({
+                        commitmentSalt: Uint8Array.of(0x43),
+                        sourceContribution: Uint8Array.of(0x42),
+                    }),
+                ]),
+            });
+            expect(() => kernel.produceCatalog(sourceInput)).toThrowError(
+                expect.objectContaining({ code: 'ContextMismatch' }),
+            );
+            expect(malformedPreparationContext).toEqual(Uint8Array.of(0x01));
+        } finally {
+            if (priorBinding === undefined) {
+                Reflect.deleteProperty(globalBindings, integrityBindingName);
+            } else {
+                Object.defineProperty(
+                    globalBindings,
+                    integrityBindingName,
+                    priorBinding,
+                );
+            }
+            vi.resetModules();
+        }
+    });
+
+    it('generates and revalidates the exact completion catalog and delivery through scalar WASM', async () => {
+        const expectedKernelSha256Hex = await currentKernelSha256Hex();
+        const integrityBindingName =
+            '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
+        const globalBindings = globalThis as Record<string, unknown>;
+        const priorBinding = Object.getOwnPropertyDescriptor(
+            globalBindings,
+            integrityBindingName,
+        );
+        try {
+            Object.defineProperty(globalBindings, integrityBindingName, {
+                configurable: true,
+                value: expectedKernelSha256Hex,
+            });
+            vi.resetModules();
+            const sourceKernelModule =
+                await import('../../src/seed-catalog-source-custody-kernel.js');
+            const preparationContextBytes = completionPreparationContextBytes();
+            const sourcePath = new URL(
+                '../../../../crates/sealed-lattice-kernel/src/tally_preparation/pseudorandom_zero_sharing_seed_catalog_320.rs',
+                import.meta.url,
+            );
+            const catalogCompilerIdentity = hashFramedParts(
+                'sealed-lattice/v1/preparation/seed-catalog-compiler-identity',
+                [
+                    new Uint8Array(await readFile(sourcePath)),
+                    Uint8Array.of(1, 0),
+                ],
+            );
+            const preparationContextIdentity = hashFramedParts(
+                'sealed-lattice/tally-preparation-context-identity/v1',
+                [preparationContextBytes],
+            );
+            const kernel =
+                await sourceKernelModule.openProductionSeedCatalogSourceCustodyKernel(
+                    kernelUrl,
+                    preparationContextBytes,
+                );
+            const sourceInput = Object.freeze({
+                context: Object.freeze({
+                    actionContextIdentity: new Uint8Array(64).fill(0x91),
+                    catalogCompilerIdentity,
+                    parameterIdentity: new Uint8Array(64).fill(0x61),
+                    participantCount: foundationProfile.participantCount,
+                    participantPosition: 3,
+                    preparationAttemptOrdinal: 0,
+                    preparationContextIdentity,
+                    rosterIdentity: new Uint8Array(64).fill(0x93),
+                    statePredecessorIdentity: new Uint8Array(64).fill(0xa5),
+                }),
+                geometry: Object.freeze({
+                    commitmentSaltByteLength: 64,
+                    deliverySourcePayloadByteLengths: Object.freeze(
+                        Array.from({ length: 9 }, () => 62_590),
+                    ),
+                    inclusionProofByteLength: 658,
+                    leafOpeningByteLengths: Object.freeze([
+                        ...Array.from({ length: 84 }, () => 440),
+                        ...Array.from({ length: 9 }, () => 444),
+                        428,
+                    ]),
+                    rootBodyByteLength: 522,
+                    sourceContributionByteLength: 40,
+                }),
+                sourceInventory: Object.freeze(
+                    Array.from({ length: 94 }, (_unused, leafOrdinal) =>
+                        Object.freeze({
+                            commitmentSalt: Uint8Array.from(
+                                { length: 64 },
+                                (_unusedByte, bytePosition) =>
+                                    (leafOrdinal * 29 + bytePosition + 1) &
+                                    0xff,
+                            ),
+                            sourceContribution: Uint8Array.from(
+                                { length: 40 },
+                                (_unusedByte, bytePosition) =>
+                                    (leafOrdinal * 17 + bytePosition) & 0xff,
+                            ),
+                        }),
+                    ),
+                ),
+            });
+            const catalog = kernel.produceCatalog(sourceInput);
+            expect(catalog.catalogIdentity).toHaveLength(64);
+            expect(catalog.rootBodyBytes).toHaveLength(522);
+            expect(catalog.entries).toHaveLength(94);
+            kernel.validateCatalog({ ...sourceInput, catalog });
+
+            const deliveryInput = {
+                ...sourceInput,
+                catalog,
+                recipientPosition: 7,
+            } as const;
+            const delivery = kernel.produceDeliverySource(deliveryInput);
+            expect(delivery.recipientPosition).toBe(7);
+            expect(delivery.sourcePayloadBytes).toBeInstanceOf(Uint8Array);
+            expect(delivery.sourcePayloadBytes).toHaveLength(62_590);
+            kernel.validateDeliverySource({
+                ...deliveryInput,
+                sourcePayloadBytes: delivery.sourcePayloadBytes,
+            });
+            const mutatedPayload = delivery.sourcePayloadBytes.slice();
+            mutatedPayload[mutatedPayload.length - 1] ^= 0x01;
+            expect(() =>
+                kernel.validateDeliverySource({
+                    ...deliveryInput,
+                    sourcePayloadBytes: mutatedPayload,
+                }),
+            ).toThrowError(
+                expect.objectContaining({ code: 'DeliveryMismatch' }),
+            );
+        } finally {
+            if (priorBinding === undefined) {
+                Reflect.deleteProperty(globalBindings, integrityBindingName);
+            } else {
+                Object.defineProperty(
+                    globalBindings,
+                    integrityBindingName,
+                    priorBinding,
+                );
+            }
+            vi.resetModules();
+        }
     });
 
     it('loads only an integrity-pinned joined-custody kernel and preserves typed Rust refusals', async () => {

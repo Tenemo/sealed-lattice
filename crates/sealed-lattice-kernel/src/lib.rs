@@ -167,6 +167,35 @@ pub unsafe extern "C" fn sealed_lattice_validate_joined_seed_masters_320_with_le
     leak_secret_bytes(output)
 }
 
+/// Generates or positively revalidates one exact retained seed-catalog source
+/// object through the scalar kernel. Returned bytes are inert local custody and
+/// create no publication, receipt, burn, coin-opening, or continuation power.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory. `output_length_pointer`
+/// must be null or identify one writable `usize` value in the same memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_seed_catalog_source_320_with_length(
+    pointer: *const u8,
+    length: usize,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let input = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    let output = tally_preparation::pseudorandom_zero_sharing_seed_catalog_source_kernel_320::run_pseudorandom_zero_sharing_seed_catalog_source_kernel_320(input);
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    leak_secret_bytes(output)
+}
+
 /// Runs an exact number of scalar candidate-field multiplications.
 ///
 /// This diagnostic-only export is absent from the production WebAssembly
@@ -187,6 +216,7 @@ mod tests {
     use super::{
         sealed_lattice_allocate, sealed_lattice_deallocate, sealed_lattice_deallocate_secret,
         sealed_lattice_join_seed_masters_320_with_length,
+        sealed_lattice_seed_catalog_source_320_with_length,
         sealed_lattice_transcript_core_command_with_length,
         sealed_lattice_validate_joined_seed_masters_320_with_length,
     };
@@ -234,16 +264,27 @@ mod tests {
             sealed_lattice_deallocate(empty_response, empty_response_length);
         }
 
-        for operation in [
-            sealed_lattice_join_seed_masters_320_with_length,
-            sealed_lattice_validate_joined_seed_masters_320_with_length,
+        for (operation, expected_header) in [
+            (
+                sealed_lattice_join_seed_masters_320_with_length
+                    as unsafe extern "C" fn(*const u8, usize, *mut usize) -> *mut u8,
+                &b"SLJR\x01\x00\x00"[..],
+            ),
+            (
+                sealed_lattice_seed_catalog_source_320_with_length,
+                &b"SLSR\x01\x00\x00"[..],
+            ),
+            (
+                sealed_lattice_validate_joined_seed_masters_320_with_length,
+                &b"SLJR\x01\x00\x00"[..],
+            ),
         ] {
             let mut refusal_length = 0_usize;
             let refusal = unsafe { operation(ptr::null(), 0, &mut refusal_length) };
             assert!(!refusal.is_null());
             assert_eq!(
                 unsafe { slice::from_raw_parts(refusal, refusal_length) }.get(..7),
-                Some(&b"SLJR\x01\x00\x00"[..])
+                Some(expected_header)
             );
             unsafe {
                 sealed_lattice_deallocate_secret(refusal, refusal_length);

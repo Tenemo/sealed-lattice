@@ -1,8 +1,12 @@
-import type { ProductionJoinedSeedMasterCustodyKernel } from '@sealed-lattice/wasm';
+import type {
+    ProductionJoinedSeedMasterCustodyKernel,
+    ProductionSeedCatalogSourceCustodyKernel,
+} from '@sealed-lattice/wasm';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@sealed-lattice/wasm', () => ({
     isProductionJoinedSeedMasterCustodyKernel: () => true,
+    isProductionSeedCatalogSourceCustodyKernel: () => true,
 }));
 
 import {
@@ -306,6 +310,7 @@ const deliveryBytes = (
 };
 
 class DeterministicSourceKernel implements SeedCatalogSourceCustodyKernel {
+    public readonly preparationContextByteLength = 338;
     public produceCatalog(
         input: SeedCatalogProductionInput,
     ): RetainedLocalSeedCatalog {
@@ -549,7 +554,7 @@ const createFixture = async (input?: {
         const sourceCustody = new SeedCatalogSourceCustody({
             context: sourceContext(joinedContext),
             geometry: sourceGeometry,
-            kernel: new DeterministicSourceKernel(),
+            kernel: new DeterministicSourceKernel() as unknown as ProductionSeedCatalogSourceCustodyKernel,
             limits: sourceLimits,
             protection,
             recencyCoordinator: coordinator,

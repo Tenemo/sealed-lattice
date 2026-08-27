@@ -164,6 +164,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         length: number,
         outputLengthPointer: number,
     ) => number;
+    sealed_lattice_seed_catalog_source_320_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_transcript_core_command_with_length?: (
         pointer: number,
         length: number,

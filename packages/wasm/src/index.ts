@@ -9,6 +9,15 @@ export type {
     ProductionJoinedSeedMasterCustodyKernel,
 } from './joined-seed-master-custody-kernel.js';
 export {
+    isProductionSeedCatalogSourceCustodyKernel,
+    openProductionSeedCatalogSourceCustodyKernel,
+    SeedCatalogSourceKernelError,
+} from './seed-catalog-source-custody-kernel.js';
+export type {
+    ProductionSeedCatalogSourceCustodyKernel,
+    SeedCatalogSourceKernelErrorCode,
+} from './seed-catalog-source-custody-kernel.js';
+export {
     normalizeTranscriptCoreKernelBytesForHash,
     TranscriptCoreKernelCommandError,
 } from './transcript-core-bridge.js';

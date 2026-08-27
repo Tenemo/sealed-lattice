@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import type { ProductionSeedCatalogSourceCustodyKernel } from '@sealed-lattice/wasm';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@sealed-lattice/wasm', () => ({
+    isProductionSeedCatalogSourceCustodyKernel: () => true,
+}));
 
 import {
     bytesEqual,
@@ -10,6 +15,7 @@ import {
 import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import {
     SeedCatalogSourceCustody,
+    deriveSeedCatalogSourceCustodyKernelByteLengths,
     deriveSeedCatalogSourceCustodyRecordByteLengths,
     type RetainedLocalSeedCatalog,
     type RetainedSeedCatalogDeliverySource,
@@ -219,6 +225,7 @@ const expectedDeliverySource = (
 };
 
 class DeterministicSeedCatalogKernel implements SeedCatalogSourceCustodyKernel {
+    public readonly preparationContextByteLength = 338;
     public afterCatalogProduction: (() => void) | undefined;
     public afterDeliveryProduction:
         | ((recipientPosition: number) => void)
@@ -384,7 +391,7 @@ const createFixture = async (input?: {
         custody: new SeedCatalogSourceCustody({
             context,
             geometry: smallGeometry,
-            kernel,
+            kernel: kernel as unknown as ProductionSeedCatalogSourceCustodyKernel,
             limits: testLimits,
             protection,
             recencyCoordinator: coordinator,
@@ -421,7 +428,7 @@ const reopenCustody = async (
     return new SeedCatalogSourceCustody({
         context,
         geometry,
-        kernel,
+        kernel: kernel as unknown as ProductionSeedCatalogSourceCustodyKernel,
         limits: testLimits,
         protection,
         recencyCoordinator: coordinator,
@@ -447,6 +454,10 @@ describe('seed-catalog source custody', () => {
         };
         const derived = deriveSeedCatalogSourceCustodyRecordByteLengths({
             geometry: completionGeometry,
+        });
+        const kernelDerived = deriveSeedCatalogSourceCustodyKernelByteLengths({
+            geometry: completionGeometry,
+            preparationContextByteLength: 338,
         });
 
         const independentlyDerivedHeaderByteLength =
@@ -530,6 +541,84 @@ describe('seed-catalog source custody', () => {
                 (total, byteLength) => total + byteLength,
                 0,
             ),
+        );
+        const independentlyDerivedCatalogProductionRequestByteLength =
+            independentlyDerivedReservationPlaintextByteLength + 4 + 338;
+        const independentlyDerivedCatalogValidationRequestByteLength =
+            independentlyDerivedCatalogProductionRequestByteLength +
+            independentlyDerivedRootProductionOutputByteLength;
+        const independentlyDerivedDeliveryProductionRequestByteLength =
+            independentlyDerivedCatalogValidationRequestByteLength + 2;
+        const independentlyDerivedDeliveryValidationRequestByteLength =
+            independentlyDerivedDeliveryProductionRequestByteLength + 62_590;
+        const independentlyDerivedDeliveryValidationInvocationCounts =
+            Array.from(
+                { length: 9 },
+                (_unused, deliveryIndex) => 10 - deliveryIndex,
+            );
+        expect(kernelDerived).toEqual({
+            catalogProductionRequestByteLength: 10_949,
+            catalogProductionResponseByteLength: 103_829,
+            catalogValidationRequestByteLength: 114_771,
+            coldValidationCumulativeRequestByteLength: 1_711_038,
+            coldValidationInvocationCount: 10,
+            deliveryProductionRequestByteLengths: Array.from(
+                { length: 9 },
+                () => 114_773,
+            ),
+            deliveryProductionResponseByteLengths: Array.from(
+                { length: 9 },
+                () => 62_599,
+            ),
+            deliveryValidationRequestByteLengths: Array.from(
+                { length: 9 },
+                () => 177_363,
+            ),
+            maximumKernelInputByteLength: 177_363,
+            maximumKernelResponseByteLength: 103_829,
+            successPathCumulativeRequestByteLength: 11_883_989,
+            successPathCumulativeResponseByteLength: 667_675,
+            successPathInvocationCount: 75,
+            validationResponseByteLength: 7,
+        });
+        expect(kernelDerived.catalogProductionRequestByteLength).toBe(
+            independentlyDerivedCatalogProductionRequestByteLength,
+        );
+        expect(kernelDerived.catalogValidationRequestByteLength).toBe(
+            independentlyDerivedCatalogValidationRequestByteLength,
+        );
+        expect(kernelDerived.deliveryProductionRequestByteLengths).toEqual(
+            Array.from(
+                { length: 9 },
+                () => independentlyDerivedDeliveryProductionRequestByteLength,
+            ),
+        );
+        expect(kernelDerived.deliveryValidationRequestByteLengths).toEqual(
+            Array.from(
+                { length: 9 },
+                () => independentlyDerivedDeliveryValidationRequestByteLength,
+            ),
+        );
+        expect(kernelDerived.successPathInvocationCount).toBe(
+            1 +
+                11 +
+                9 +
+                independentlyDerivedDeliveryValidationInvocationCounts.reduce(
+                    (total, count) => total + count,
+                    0,
+                ),
+        );
+        expect(kernelDerived.successPathCumulativeRequestByteLength).toBe(
+            independentlyDerivedCatalogProductionRequestByteLength +
+                11 * independentlyDerivedCatalogValidationRequestByteLength +
+                9 * independentlyDerivedDeliveryProductionRequestByteLength +
+                independentlyDerivedDeliveryValidationInvocationCounts.reduce(
+                    (total, invocationCount) =>
+                        total +
+                        invocationCount *
+                            independentlyDerivedDeliveryValidationRequestByteLength,
+                    0,
+                ),
         );
 
         for (const impossibleSecretGeometry of [

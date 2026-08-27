@@ -2,6 +2,10 @@ import {
     configurableParticipantCountRange,
     foundationProfile,
 } from '@sealed-lattice/types';
+import {
+    isProductionSeedCatalogSourceCustodyKernel,
+    type ProductionSeedCatalogSourceCustodyKernel,
+} from '@sealed-lattice/wasm';
 
 import {
     AuthenticatedRuntimeRecordError,
@@ -151,6 +155,23 @@ type SeedCatalogSourceCustodyRecordByteLengths = Readonly<{
     rootCheckpointCiphertextByteLength: number;
     rootCheckpointPlaintextByteLength: number;
     rootProductionOutputByteLength: number;
+}>;
+
+type SeedCatalogSourceCustodyKernelByteLengths = Readonly<{
+    catalogProductionRequestByteLength: number;
+    catalogProductionResponseByteLength: number;
+    catalogValidationRequestByteLength: number;
+    coldValidationCumulativeRequestByteLength: number;
+    coldValidationInvocationCount: number;
+    deliveryProductionRequestByteLengths: readonly number[];
+    deliveryProductionResponseByteLengths: readonly number[];
+    deliveryValidationRequestByteLengths: readonly number[];
+    maximumKernelInputByteLength: number;
+    maximumKernelResponseByteLength: number;
+    successPathCumulativeRequestByteLength: number;
+    successPathCumulativeResponseByteLength: number;
+    successPathInvocationCount: number;
+    validationResponseByteLength: number;
 }>;
 
 type ReservedSeedCatalogSourceRecord = Readonly<{
@@ -709,6 +730,169 @@ export const deriveSeedCatalogSourceCustodyRecordByteLengths = (input: {
         rootCheckpointCiphertextByteLength,
         rootCheckpointPlaintextByteLength,
         rootProductionOutputByteLength,
+    });
+};
+
+export const deriveSeedCatalogSourceCustodyKernelByteLengths = (input: {
+    geometry: SeedCatalogSourceCustodyGeometry;
+    preparationContextByteLength: number;
+}): SeedCatalogSourceCustodyKernelByteLengths => {
+    const preparationContextByteLength = requireSafeInteger(
+        snapshotDataProperty(input, 'preparationContextByteLength', 'input'),
+        1,
+        4096,
+        'input.preparationContextByteLength',
+    );
+    const geometry = copyGeometry(
+        snapshotDataProperty(input, 'geometry', 'input'),
+    );
+    const recordByteLengths = deriveSeedCatalogSourceCustodyRecordByteLengths({
+        geometry,
+    });
+    const requestContextOverheadByteLength = checkedAdd(
+        4,
+        preparationContextByteLength,
+        'Seed-catalog kernel preparation-context wrapper',
+    );
+    const catalogProductionRequestByteLength = checkedAdd(
+        recordByteLengths.reservationPlaintextByteLength,
+        requestContextOverheadByteLength,
+        'Seed-catalog production request',
+    );
+    const catalogValidationRequestByteLength = checkedAdd(
+        catalogProductionRequestByteLength,
+        recordByteLengths.rootProductionOutputByteLength,
+        'Seed-catalog validation request',
+    );
+    const deliveryProductionRequestByteLengths =
+        geometry.deliverySourcePayloadByteLengths.map(() =>
+            checkedAdd(
+                catalogValidationRequestByteLength,
+                2,
+                'Seed-catalog delivery production request',
+            ),
+        );
+    const deliveryValidationRequestByteLengths =
+        deliveryProductionRequestByteLengths.map(
+            (requestByteLength, deliveryIndex) =>
+                checkedAdd(
+                    requestByteLength,
+                    geometry.deliverySourcePayloadByteLengths[deliveryIndex] ??
+                        0,
+                    'Seed-catalog delivery validation request',
+                ),
+        );
+    const responseHeaderByteLength = 4 + 2 + 1;
+    const validationResponseByteLength = responseHeaderByteLength;
+    const catalogProductionResponseByteLength = checkedAdd(
+        responseHeaderByteLength,
+        recordByteLengths.rootProductionOutputByteLength,
+        'Seed-catalog production response',
+    );
+    const deliveryProductionResponseByteLengths =
+        geometry.deliverySourcePayloadByteLengths.map((payloadByteLength) =>
+            sumByteLengths(
+                [responseHeaderByteLength, 2, payloadByteLength],
+                'Seed-catalog delivery production response',
+            ),
+        );
+    const deliveryCount = geometry.deliverySourcePayloadByteLengths.length;
+    const catalogValidationInvocationCount = deliveryCount + 2;
+    const deliveryValidationInvocationCounts = Array.from(
+        { length: deliveryCount },
+        (_unused, deliveryIndex) => deliveryCount + 1 - deliveryIndex,
+    );
+    const deliveryValidationCumulativeRequestByteLength =
+        deliveryValidationRequestByteLengths.reduce(
+            (total, requestByteLength, deliveryIndex) =>
+                checkedAdd(
+                    total,
+                    checkedMultiply(
+                        requestByteLength,
+                        deliveryValidationInvocationCounts[deliveryIndex] ?? 0,
+                        'Seed-catalog repeated delivery validation requests',
+                    ),
+                    'Seed-catalog cumulative delivery validation requests',
+                ),
+            0,
+        );
+    const successPathInvocationCount =
+        1 +
+        catalogValidationInvocationCount +
+        deliveryCount +
+        deliveryValidationInvocationCounts.reduce(
+            (total, count) => total + count,
+            0,
+        );
+    const successPathCumulativeRequestByteLength = sumByteLengths(
+        [
+            catalogProductionRequestByteLength,
+            checkedMultiply(
+                catalogValidationRequestByteLength,
+                catalogValidationInvocationCount,
+                'Seed-catalog repeated catalog validation requests',
+            ),
+            sumByteLengths(
+                deliveryProductionRequestByteLengths,
+                'Seed-catalog cumulative delivery production requests',
+            ),
+            deliveryValidationCumulativeRequestByteLength,
+        ],
+        'Seed-catalog success-path kernel requests',
+    );
+    const successPathCumulativeResponseByteLength = sumByteLengths(
+        [
+            catalogProductionResponseByteLength,
+            sumByteLengths(
+                deliveryProductionResponseByteLengths,
+                'Seed-catalog cumulative delivery production responses',
+            ),
+            checkedMultiply(
+                validationResponseByteLength,
+                successPathInvocationCount - 1 - deliveryCount,
+                'Seed-catalog validation responses',
+            ),
+        ],
+        'Seed-catalog success-path kernel responses',
+    );
+    const coldValidationInvocationCount = 1 + deliveryCount;
+    const coldValidationCumulativeRequestByteLength = sumByteLengths(
+        [
+            catalogValidationRequestByteLength,
+            ...deliveryValidationRequestByteLengths,
+        ],
+        'Seed-catalog cold-validation kernel requests',
+    );
+    return Object.freeze({
+        catalogProductionRequestByteLength,
+        catalogProductionResponseByteLength,
+        catalogValidationRequestByteLength,
+        coldValidationCumulativeRequestByteLength,
+        coldValidationInvocationCount,
+        deliveryProductionRequestByteLengths: Object.freeze(
+            deliveryProductionRequestByteLengths,
+        ),
+        deliveryProductionResponseByteLengths: Object.freeze(
+            deliveryProductionResponseByteLengths,
+        ),
+        deliveryValidationRequestByteLengths: Object.freeze(
+            deliveryValidationRequestByteLengths,
+        ),
+        maximumKernelInputByteLength: Math.max(
+            catalogProductionRequestByteLength,
+            catalogValidationRequestByteLength,
+            ...deliveryProductionRequestByteLengths,
+            ...deliveryValidationRequestByteLengths,
+        ),
+        maximumKernelResponseByteLength: Math.max(
+            catalogProductionResponseByteLength,
+            ...deliveryProductionResponseByteLengths,
+            validationResponseByteLength,
+        ),
+        successPathCumulativeRequestByteLength,
+        successPathCumulativeResponseByteLength,
+        successPathInvocationCount,
+        validationResponseByteLength,
     });
 };
 
@@ -1884,14 +2068,14 @@ const recordsShareRetainedPrefix = (
  * checkpoints each canonical recipient plaintext. A cold replay resumes from
  * the authenticated prefix and never resamples a retained action.
  *
- * The injected kernel is a generation and validation boundary only. Returned
- * bytes remain inert and provide no protocol acceptance or continuation
- * capability.
+ * The integrity-pinned scalar kernel is a generation and validation boundary
+ * only. Returned bytes remain inert and provide no protocol acceptance or
+ * continuation capability.
  */
 export class SeedCatalogSourceCustody {
     readonly #context: SeedCatalogSourceCustodyContext;
     readonly #geometry: SeedCatalogSourceCustodyGeometry;
-    readonly #kernel: SeedCatalogSourceCustodyKernel;
+    readonly #kernel: ProductionSeedCatalogSourceCustodyKernel;
     readonly #limits: SeedCatalogSourceCustodyLimits;
     readonly #protection: RuntimeRecordProtection;
     readonly #recencyCoordinator: AuthenticatedStorageRecencyCoordinator;
@@ -1901,20 +2085,15 @@ export class SeedCatalogSourceCustody {
     public constructor(input: {
         context: SeedCatalogSourceCustodyContext;
         geometry: SeedCatalogSourceCustodyGeometry;
-        kernel: SeedCatalogSourceCustodyKernel;
+        kernel: ProductionSeedCatalogSourceCustodyKernel;
         limits: SeedCatalogSourceCustodyLimits;
         protection: RuntimeRecordProtection;
         recencyCoordinator: AuthenticatedStorageRecencyCoordinator;
     }) {
-        if (
-            typeof input.kernel?.produceCatalog !== 'function' ||
-            typeof input.kernel?.produceDeliverySource !== 'function' ||
-            typeof input.kernel?.validateCatalog !== 'function' ||
-            typeof input.kernel?.validateDeliverySource !== 'function'
-        ) {
+        if (!isProductionSeedCatalogSourceCustodyKernel(input.kernel)) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidConfiguration',
-                'Seed-catalog source custody requires a complete kernel boundary.',
+                'Seed-catalog source custody requires an integrity-pinned production kernel.',
             );
         }
         if (
@@ -1943,13 +2122,22 @@ export class SeedCatalogSourceCustody {
         const byteLengths = deriveSeedCatalogSourceCustodyRecordByteLengths({
             geometry: this.#geometry,
         });
+        const kernelByteLengths =
+            deriveSeedCatalogSourceCustodyKernelByteLengths({
+                geometry: this.#geometry,
+                preparationContextByteLength:
+                    input.kernel.preparationContextByteLength,
+            });
         if (
-            byteLengths.completedPlaintextByteLength >
-            foundationProfile.maximumCopiedBufferByteLength
+            Math.max(
+                byteLengths.completedPlaintextByteLength,
+                kernelByteLengths.maximumKernelInputByteLength,
+                kernelByteLengths.maximumKernelResponseByteLength,
+            ) > foundationProfile.maximumCopiedBufferByteLength
         ) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidConfiguration',
-                'Seed-catalog source custody geometry exceeds the absolute copied-buffer bound.',
+                'Seed-catalog source custody geometry or kernel operation exceeds the absolute copied-buffer bound.',
             );
         }
         this.#kernel = input.kernel;
@@ -2064,7 +2252,7 @@ export class SeedCatalogSourceCustody {
                 opened.record.deliverySourcePayloads.length <
                     this.#geometry.deliverySourcePayloadByteLengths.length
             ) {
-                await this.#validateRetainedRecord(opened.record);
+                this.#validateRetainedRecord(opened.record);
                 const advanced = await this.#retainNextDelivery({
                     record: opened.record,
                     sealedBytes: opened.sealedBytes,
@@ -2079,7 +2267,7 @@ export class SeedCatalogSourceCustody {
                     'Seed-catalog source custody did not reach a retained state.',
                 );
             }
-            await this.#validateRetainedRecord(opened.record);
+            this.#validateRetainedRecord(opened.record);
             return opened as OpenedSeedCatalogSourceRecord &
                 Readonly<{ record: RetainedSeedCatalogSourceRecord }>;
         } catch (error) {
@@ -2171,16 +2359,16 @@ export class SeedCatalogSourceCustody {
         }
     }
 
-    async #produceCatalog(
+    #produceCatalog(
         reservation: ReservedSeedCatalogSourceRecord,
-    ): Promise<RetainedLocalSeedCatalog> {
+    ): RetainedLocalSeedCatalog {
         const productionInput = createProductionInput(reservation);
         let productionFailed = false;
         let productionFailure: unknown;
         let produced: unknown;
         try {
             try {
-                produced = await this.#kernel.produceCatalog(productionInput);
+                produced = this.#kernel.produceCatalog(productionInput);
             } catch (error) {
                 productionFailed = true;
                 productionFailure = error;
@@ -2198,16 +2386,16 @@ export class SeedCatalogSourceCustody {
         }
     }
 
-    async #validateCatalogForRecord(
+    #validateCatalogForRecord(
         record: SeedCatalogSourceRecord,
         catalog: RetainedLocalSeedCatalog,
-    ): Promise<void> {
+    ): void {
         const validationInput = createCatalogValidationInput(record, catalog);
         let validationFailed = false;
         let validationFailure: unknown;
         try {
             try {
-                await this.#kernel.validateCatalog(validationInput);
+                this.#kernel.validateCatalog(validationInput);
             } catch (error) {
                 validationFailed = true;
                 validationFailure = error;
@@ -2228,9 +2416,9 @@ export class SeedCatalogSourceCustody {
         record: ReservedSeedCatalogSourceRecord;
         sealedBytes: Uint8Array;
     }): Promise<OpenedSeedCatalogSourceRecord> {
-        const catalog = await this.#produceCatalog(input.record);
+        const catalog = this.#produceCatalog(input.record);
         try {
-            await this.#validateCatalogForRecord(input.record, catalog);
+            this.#validateCatalogForRecord(input.record, catalog);
             const retainedRecord = createRetainedRecord({
                 catalog,
                 context: input.record.context,
@@ -2278,7 +2466,7 @@ export class SeedCatalogSourceCustody {
                                 'Concurrent seed-catalog production selected different retained bytes.',
                             );
                         }
-                        await this.#validateRetainedRecord(existing.record);
+                        this.#validateRetainedRecord(existing.record);
                         return existing;
                     } catch (conflictError) {
                         existing.sealedBytes.fill(0);
@@ -2294,10 +2482,10 @@ export class SeedCatalogSourceCustody {
         }
     }
 
-    async #produceDeliverySource(
+    #produceDeliverySource(
         record: RetainedSeedCatalogSourceRecord,
         deliveryIndex: number,
-    ): Promise<RetainedSeedCatalogDeliverySource> {
+    ): RetainedSeedCatalogDeliverySource {
         const recipientPosition = canonicalRecipientPositions(record.context)[
             deliveryIndex
         ];
@@ -2321,8 +2509,7 @@ export class SeedCatalogSourceCustody {
         let produced: unknown;
         try {
             try {
-                produced =
-                    await this.#kernel.produceDeliverySource(productionInput);
+                produced = this.#kernel.produceDeliverySource(productionInput);
             } catch (error) {
                 productionFailed = true;
                 productionFailure = error;
@@ -2344,11 +2531,11 @@ export class SeedCatalogSourceCustody {
         }
     }
 
-    async #validateDeliverySource(
+    #validateDeliverySource(
         record: RetainedSeedCatalogSourceRecord,
         deliveryIndex: number,
         sourcePayloadBytes: Uint8Array,
-    ): Promise<void> {
+    ): void {
         const recipientPosition = canonicalRecipientPositions(record.context)[
             deliveryIndex
         ];
@@ -2367,7 +2554,7 @@ export class SeedCatalogSourceCustody {
         let validationFailure: unknown;
         try {
             try {
-                await this.#kernel.validateDeliverySource(validationInput);
+                this.#kernel.validateDeliverySource(validationInput);
             } catch (error) {
                 validationFailed = true;
                 validationFailure = error;
@@ -2384,10 +2571,8 @@ export class SeedCatalogSourceCustody {
         }
     }
 
-    async #validateRetainedRecord(
-        record: RetainedSeedCatalogSourceRecord,
-    ): Promise<void> {
-        await this.#validateCatalogForRecord(record, record.catalog);
+    #validateRetainedRecord(record: RetainedSeedCatalogSourceRecord): void {
+        this.#validateCatalogForRecord(record, record.catalog);
         for (
             let deliveryIndex = 0;
             deliveryIndex < record.deliverySourcePayloads.length;
@@ -2401,7 +2586,7 @@ export class SeedCatalogSourceCustody {
                     'Seed-catalog source custody has a missing retained delivery prefix.',
                 );
             }
-            await this.#validateDeliverySource(
+            this.#validateDeliverySource(
                 record,
                 deliveryIndex,
                 sourcePayloadBytes,
@@ -2414,12 +2599,12 @@ export class SeedCatalogSourceCustody {
         sealedBytes: Uint8Array;
     }): Promise<OpenedSeedCatalogSourceRecord> {
         const deliveryIndex = input.record.deliverySourcePayloads.length;
-        const deliverySource = await this.#produceDeliverySource(
+        const deliverySource = this.#produceDeliverySource(
             input.record,
             deliveryIndex,
         );
         try {
-            await this.#validateDeliverySource(
+            this.#validateDeliverySource(
                 input.record,
                 deliveryIndex,
                 deliverySource.sourcePayloadBytes,
@@ -2479,7 +2664,7 @@ export class SeedCatalogSourceCustody {
                                 'Concurrent seed-catalog delivery production selected different retained bytes.',
                             );
                         }
-                        await this.#validateRetainedRecord(existing.record);
+                        this.#validateRetainedRecord(existing.record);
                         return existing;
                     } catch (conflictError) {
                         existing.sealedBytes.fill(0);

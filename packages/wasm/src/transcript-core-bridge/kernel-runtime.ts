@@ -38,7 +38,8 @@ export class TranscriptCoreKernelCommandError extends Error {
 const wasmPageByteLength = 65_536;
 const maximumTranscriptCoreCommandByteLength = 64 * 1024 * 1024;
 const maximumTranscriptCoreCommandResponseByteLength = 256 * 1024 * 1024;
-const maximumSeedMasterCustodyResponseByteLength = 16 * 1024;
+const maximumSecretKernelResponseByteLength =
+    foundationProfile.maximumCopiedBufferByteLength;
 const maximumTranscriptCoreCommandJsonContainerDepth = 64;
 const maximumTranscriptCoreKernelMemoryByteLength =
     foundationProfile.maximumWasmMemoryByteLength;
@@ -410,6 +411,7 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
     readonly executeJoinedSeedMasterValidation: (
         recordBytes: Uint8Array,
     ) => Uint8Array;
+    readonly executeSeedCatalogSource: (requestBytes: Uint8Array) => Uint8Array;
     readonly memory: WebAssembly.Memory;
     readonly runExclusive: <Result>(
         operationName: string,
@@ -558,6 +560,7 @@ type NumberExportName =
     | 'sealed_lattice_deallocate'
     | 'sealed_lattice_deallocate_secret'
     | 'sealed_lattice_join_seed_masters_320_with_length'
+    | 'sealed_lattice_seed_catalog_source_320_with_length'
     | 'sealed_lattice_transcript_core_command_with_length'
     | 'sealed_lattice_validate_joined_seed_masters_320_with_length';
 
@@ -799,7 +802,7 @@ const runSecretKernelOperation = (
             ) >>> 0;
         assertKernelMemoryWithinProfile(memory);
         outputLength = readKernelOutputLength(memory, outputLengthPointer);
-        if (outputLength > maximumSeedMasterCustodyResponseByteLength) {
+        if (outputLength > maximumSecretKernelResponseByteLength) {
             throw commandBoundaryError(
                 'MalformedLength',
                 `The ${operationName} response exceeds its absolute byte bound.`,
@@ -866,6 +869,10 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_join_seed_masters_320_with_length',
     );
+    const seedCatalogSourceWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_seed_catalog_source_320_with_length',
+    );
     const commandWithLength = resolveNumberExport(
         wasmExports,
         'sealed_lattice_transcript_core_command_with_length',
@@ -931,6 +938,18 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
                 'joined seed-master validation',
             ),
         );
+    const executeSeedCatalogSource = (requestBytes: Uint8Array): Uint8Array =>
+        runExclusive('seed-catalog source', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                seedCatalogSourceWithLength,
+                requestBytes,
+                'seed-catalog source',
+            ),
+        );
 
     return {
         allocate,
@@ -938,6 +957,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         executeCommand,
         executeJoinedSeedMasterJoin,
         executeJoinedSeedMasterValidation,
+        executeSeedCatalogSource,
         memory,
         runExclusive,
         wasmExports,
