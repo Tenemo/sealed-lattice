@@ -1,4 +1,7 @@
-use tiny_keccak::{Hasher, Kmac};
+use sha3::{
+    CShake256, CShake256Core,
+    digest::{ExtendableOutput, Update, XofReader},
+};
 use zeroize::Zeroizing;
 
 use super::{TallyPreparationContext, TallyPreparationError, TallyPreparationGeometry};
@@ -7,6 +10,10 @@ pub(crate) const SEEDED_RANDOM_TAPE_BLOCK_BYTE_LENGTH: usize = 64 * 1024;
 const SEEDED_RANDOM_TAPE_KEY_BYTE_LENGTH: usize = 32;
 const SEEDED_RANDOM_TAPE_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/tally-preparation-seeded-random-tape/v1";
+const CSHAKE256_RATE_BYTE_LENGTH: usize = 136;
+const ENCODED_CSHAKE256_RATE: [u8; 2] = [1, 136];
+const ENCODED_RANDOM_TAPE_KEY_BIT_LENGTH: [u8; 3] = [2, 1, 0];
+const SEEDED_RANDOM_TAPE_BLOCK_BIT_LENGTH: [u8; 4] = [8, 0, 0, 3];
 
 pub(crate) trait TallyPreparationRandomTapeSource {
     fn total_byte_length(&self) -> usize;
@@ -147,11 +154,25 @@ impl SeededJointRandomTape {
         let total_byte_length = u64::try_from(self.total_byte_length)
             .map_err(|_| TallyPreparationError::IntegerConversion)?;
         self.current_block.fill(0);
-        let mut kmac = Kmac::v256(self.joint_seed.as_ref(), SEEDED_RANDOM_TAPE_CUSTOMIZATION);
+        let mut padded_key = Zeroizing::new([0_u8; CSHAKE256_RATE_BYTE_LENGTH]);
+        let encoded_key_start = ENCODED_CSHAKE256_RATE.len();
+        let key_start = encoded_key_start + ENCODED_RANDOM_TAPE_KEY_BIT_LENGTH.len();
+        let key_end = key_start + self.joint_seed.len();
+        padded_key[..encoded_key_start].copy_from_slice(&ENCODED_CSHAKE256_RATE);
+        padded_key[encoded_key_start..key_start]
+            .copy_from_slice(&ENCODED_RANDOM_TAPE_KEY_BIT_LENGTH);
+        padded_key[key_start..key_end].copy_from_slice(self.joint_seed.as_ref());
+
+        let mut kmac = CShake256::from_core(CShake256Core::new_with_function_name(
+            b"KMAC",
+            SEEDED_RANDOM_TAPE_CUSTOMIZATION,
+        ));
+        kmac.update(padded_key.as_ref());
         update_framed(&mut kmac, &self.context_identity);
         update_framed(&mut kmac, &total_byte_length.to_le_bytes());
         update_framed(&mut kmac, &block_index.to_le_bytes());
-        kmac.finalize(self.current_block.as_mut());
+        kmac.update(&SEEDED_RANDOM_TAPE_BLOCK_BIT_LENGTH);
+        kmac.finalize_xof().read(self.current_block.as_mut());
         self.current_block_position = 0;
         Ok(())
     }
@@ -198,7 +219,7 @@ impl TallyPreparationRandomTapeSource for SeededJointRandomTape {
     }
 }
 
-fn update_framed(kmac: &mut Kmac, part: &[u8]) {
+fn update_framed(kmac: &mut CShake256, part: &[u8]) {
     kmac.update(&(part.len() as u64).to_le_bytes());
     kmac.update(part);
 }

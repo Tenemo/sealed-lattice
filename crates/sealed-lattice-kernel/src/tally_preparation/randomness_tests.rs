@@ -2,6 +2,7 @@ use crate::{
     foundation::Hash512,
     tally_circuit::{BooleanOperation, CompiledTallyCircuit, TallyCircuitProfile},
 };
+use tiny_keccak::{Hasher, Kmac};
 
 use super::{
     ExplicitJointRandomTape, SEEDED_RANDOM_TAPE_BLOCK_BYTE_LENGTH, SeededJointRandomTape,
@@ -221,6 +222,44 @@ fn seeded_model_replays_the_exact_explicit_tape_and_binds_every_context_field() 
 }
 
 #[test]
+fn seeded_model_block_matches_independent_kmac256_bytes() {
+    let circuit = small_circuit();
+    let geometry = TallyPreparationGeometry::derive(&circuit).unwrap();
+    let context = sample_context(&circuit, 0x2b, 0x63, 0xa1);
+    let participant_seeds = [[0x19_u8; 32], [0x35_u8; 32], [0x78_u8; 32], [0xc4_u8; 32]];
+    let mut source = SeededJointRandomTape::new(&participant_seeds, context, geometry).unwrap();
+    let mut actual_prefix = [0_u8; 257];
+    source.fill_exact(&mut actual_prefix).unwrap();
+
+    let mut joint_seed = [0_u8; 32];
+    for participant_seed in participant_seeds {
+        for (joint_byte, participant_byte) in joint_seed.iter_mut().zip(participant_seed) {
+            *joint_byte ^= participant_byte;
+        }
+    }
+    let total_byte_length = geometry
+        .direct_joint_random_tape_byte_length_usize()
+        .unwrap();
+    let mut independent_kmac = Kmac::v256(
+        &joint_seed,
+        b"sealed-lattice/tally-preparation-seeded-random-tape/v1",
+    );
+    independently_update_framed(&mut independent_kmac, context.identity().as_bytes());
+    independently_update_framed(
+        &mut independent_kmac,
+        &u64::try_from(total_byte_length).unwrap().to_le_bytes(),
+    );
+    independently_update_framed(&mut independent_kmac, &0_u64.to_le_bytes());
+    let mut expected_block = vec![0_u8; SEEDED_RANDOM_TAPE_BLOCK_BYTE_LENGTH];
+    independent_kmac.finalize(&mut expected_block);
+
+    assert_eq!(
+        actual_prefix.as_slice(),
+        &expected_block[..actual_prefix.len()]
+    );
+}
+
+#[test]
 fn tape_sources_enforce_exact_consumption_and_exhaustion() {
     let circuit = small_circuit();
     let geometry = TallyPreparationGeometry::derive(&circuit).unwrap();
@@ -275,4 +314,9 @@ fn sample_context(
         circuit,
     )
     .unwrap()
+}
+
+fn independently_update_framed(kmac: &mut Kmac, part: &[u8]) {
+    kmac.update(&u64::try_from(part.len()).unwrap().to_le_bytes());
+    kmac.update(part);
 }

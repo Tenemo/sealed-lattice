@@ -1,6 +1,9 @@
 use core::fmt;
 
-use tiny_keccak::{Hasher, IntoXof, Kmac, Xof};
+use sha3::{
+    CShake256, CShake256Core,
+    digest::{ExtendableOutput, Update, XofReader},
+};
 use zeroize::Zeroizing;
 
 use crate::foundation::{
@@ -22,6 +25,10 @@ pub(crate) const PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH: usize =
 const PREPARATION_ATTEMPT_ORDINAL: u16 = 0;
 const ZERO_SHARING_BASIS_STREAM_KIND_CODE: u16 = 1;
 const FIELD_ELEMENT_BYTE_LENGTH: u64 = BinaryFieldElement320::CANONICAL_BYTE_LENGTH as u64;
+const CSHAKE256_RATE_BYTE_LENGTH: usize = 136;
+const ENCODED_CSHAKE256_RATE: [u8; 2] = [1, 136];
+const ENCODED_SUBSET_MASTER_BIT_LENGTH: [u8; 3] = [2, 1, 64];
+const KMACXOF_UNBOUNDED_OUTPUT_LENGTH: [u8; 2] = [0, 1];
 
 /// Public coordinate for one independently reproducible KMACXOF256 field stream.
 ///
@@ -195,20 +202,33 @@ pub(crate) fn generate_pseudorandom_zero_sharing_field_chunk_320(
 }
 
 fn expand_pseudorandom_field_kmacxof256(
-    key: &[u8],
+    key: &[u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
     message: &[u8],
     output_byte_length: usize,
 ) -> Zeroizing<Vec<u8>> {
-    let mut kmac = Kmac::v256(key, PSEUDORANDOM_FIELD_STREAM_CUSTOMIZATION);
+    let mut padded_key = Zeroizing::new([0_u8; CSHAKE256_RATE_BYTE_LENGTH]);
+    let encoded_key_start = ENCODED_CSHAKE256_RATE.len();
+    let key_start = encoded_key_start + ENCODED_SUBSET_MASTER_BIT_LENGTH.len();
+    let key_end = key_start + key.len();
+    padded_key[..encoded_key_start].copy_from_slice(&ENCODED_CSHAKE256_RATE);
+    padded_key[encoded_key_start..key_start].copy_from_slice(&ENCODED_SUBSET_MASTER_BIT_LENGTH);
+    padded_key[key_start..key_end].copy_from_slice(key);
+
+    let mut kmac = CShake256::from_core(CShake256Core::new_with_function_name(
+        b"KMAC",
+        PSEUDORANDOM_FIELD_STREAM_CUSTOMIZATION,
+    ));
+    kmac.update(padded_key.as_ref());
     kmac.update(message);
+    kmac.update(&KMACXOF_UNBOUNDED_OUTPUT_LENGTH);
     let mut output = Zeroizing::new(vec![0_u8; output_byte_length]);
-    kmac.into_xof().squeeze(&mut output);
+    kmac.finalize_xof().read(output.as_mut());
     output
 }
 
 #[cfg(test)]
 pub(super) fn expand_pseudorandom_field_kmacxof256_for_test(
-    key: &[u8],
+    key: &[u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH],
     message: &[u8],
     output_byte_length: usize,
 ) -> Zeroizing<Vec<u8>> {

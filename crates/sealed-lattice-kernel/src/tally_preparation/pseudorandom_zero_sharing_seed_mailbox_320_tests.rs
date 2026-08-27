@@ -1,4 +1,5 @@
 use fips204::traits::Signer;
+use tiny_keccak::{Hasher, Kmac};
 use zeroize::Zeroizing;
 
 use super::{
@@ -34,11 +35,45 @@ use super::{
         PseudorandomZeroSharingSeedMailboxSignatureBody320,
         PseudorandomZeroSharingSeedMailboxVerifier320,
         PseudorandomZeroSharingSignedSeedMailboxManifestEnvelope320,
-        derive_mailbox_stream_geometry, hash_mailbox_chunk,
-        pseudorandom_zero_sharing_seed_mailbox_control_and_tag_byte_length,
+        derive_authenticated_encryption_key_for_test,
+        derive_authenticated_encryption_nonce_for_test, derive_mailbox_stream_geometry,
+        hash_mailbox_chunk, pseudorandom_zero_sharing_seed_mailbox_control_and_tag_byte_length,
         pseudorandom_zero_sharing_seed_mailbox_manifest_body_byte_length,
     },
 };
+
+#[test]
+fn mailbox_kmac_derivations_match_an_independent_implementation() {
+    let shared_secret = core::array::from_fn::<_, 32, _>(|position| {
+        0x31_u8.wrapping_add((position as u8).wrapping_mul(13))
+    });
+    let header_bytes = (0_u8..=197)
+        .map(|value| value.wrapping_mul(17).wrapping_add(9))
+        .collect::<Vec<_>>();
+    let actual_key = derive_authenticated_encryption_key_for_test(&shared_secret, &header_bytes);
+    let mut expected_key = Zeroizing::new([0_u8; 32]);
+    let mut key_derivation = Kmac::v256(
+        &shared_secret,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_LABEL,
+    );
+    key_derivation.update(&header_bytes);
+    key_derivation.finalize(expected_key.as_mut());
+    assert_eq!(actual_key.as_slice(), expected_key.as_slice());
+
+    let associated_data = (0_u8..=149)
+        .map(|value| value.wrapping_mul(29).wrapping_add(11))
+        .collect::<Vec<_>>();
+    let actual_nonce =
+        derive_authenticated_encryption_nonce_for_test(&actual_key, &associated_data);
+    let mut expected_nonce = Zeroizing::new([0_u8; 12]);
+    let mut nonce_derivation = Kmac::v256(
+        expected_key.as_ref(),
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_NONCE_DERIVATION_LABEL,
+    );
+    nonce_derivation.update(&associated_data);
+    nonce_derivation.finalize(expected_nonce.as_mut());
+    assert_eq!(actual_nonce.as_slice(), expected_nonce.as_slice());
+}
 
 pub(super) struct SealedMailboxTestStream320 {
     pub(super) header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
