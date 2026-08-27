@@ -228,6 +228,41 @@ pub unsafe extern "C" fn sealed_lattice_seed_mailbox_sender_320_with_length(
     leak_secret_bytes(output)
 }
 
+/// Opens one positively verified recipient-mailbox inventory, completes its
+/// browser-local decapsulation results, and produces or verifies the exact
+/// recipient receipt carrier through the scalar kernel.
+///
+/// Every sender signature and encrypted chunk digest is checked before the
+/// adapter returns the ML-KEM ciphertexts to the browser-local key owner. The
+/// returned prepared bytes are inert local custody and create no receipt
+/// terminal, burn, seed-combination, coin-opening, or preparation-continuation
+/// authority.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory. `output_length_pointer`
+/// must be null or identify one writable `usize` value in the same memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_seed_recipient_receipt_320_with_length(
+    pointer: *const u8,
+    length: usize,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let input = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    let output = tally_preparation::pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320::run_pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320(input);
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    leak_secret_bytes(output)
+}
+
 /// Opens, uses, or closes one positively verified receipt-terminal
 /// endorsement context and produces or verifies its exact scalar carrier.
 ///
@@ -284,6 +319,7 @@ mod tests {
         sealed_lattice_seed_catalog_source_320_with_length,
         sealed_lattice_seed_mailbox_sender_320_with_length,
         sealed_lattice_seed_receipt_terminal_endorsement_320_with_length,
+        sealed_lattice_seed_recipient_receipt_320_with_length,
         sealed_lattice_transcript_core_command_with_length,
         sealed_lattice_validate_joined_seed_masters_320_with_length,
     };
@@ -344,6 +380,10 @@ mod tests {
             (
                 sealed_lattice_seed_mailbox_sender_320_with_length,
                 &b"SLMR\x01\x00\x00"[..],
+            ),
+            (
+                sealed_lattice_seed_recipient_receipt_320_with_length,
+                &b"SLRR\x01\x00\x00"[..],
             ),
             (
                 sealed_lattice_seed_receipt_terminal_endorsement_320_with_length,

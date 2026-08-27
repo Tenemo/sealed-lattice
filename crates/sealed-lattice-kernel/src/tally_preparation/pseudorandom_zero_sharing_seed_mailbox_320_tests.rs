@@ -40,14 +40,14 @@ use super::{
     },
 };
 
-struct SealedMailboxTestStream320 {
-    header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
-    header_bytes: Vec<u8>,
-    manifest: PseudorandomZeroSharingSeedMailboxManifestBody320,
-    manifest_bytes: Vec<u8>,
-    signature_body: PseudorandomZeroSharingSeedMailboxSignatureBody320,
-    signature_envelope_bytes: Vec<u8>,
-    encrypted_chunks: Vec<Zeroizing<Vec<u8>>>,
+pub(super) struct SealedMailboxTestStream320 {
+    pub(super) header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
+    pub(super) header_bytes: Vec<u8>,
+    pub(super) manifest: PseudorandomZeroSharingSeedMailboxManifestBody320,
+    pub(super) manifest_bytes: Vec<u8>,
+    pub(super) signature_body: PseudorandomZeroSharingSeedMailboxSignatureBody320,
+    pub(super) signature_envelope_bytes: Vec<u8>,
+    pub(super) encrypted_chunks: Vec<Zeroizing<Vec<u8>>>,
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn signed_mailbox_stream_round_trips_through_kem_aead_and_root_verification() {
         fixture.descriptor_bytes
     );
     assert_eq!(authenticated_delivery.delivery().subset_entries().len(), 56);
-    let _ = authenticated_delivery.into_delivery();
+    let _ = authenticated_delivery.into_parts();
     assert!(format!("{:?}", sealed.header).contains("[redacted]"));
 }
 
@@ -564,7 +564,7 @@ fn mailbox_domains_and_kdf_labels_are_exact_and_pairwise_distinct() {
     );
 }
 
-fn seal_mailbox_stream(
+pub(super) fn seal_mailbox_stream(
     fixture: &SeedMailboxTestFixture320,
     recipient_position: u16,
     descriptor_bytes: &[u8],

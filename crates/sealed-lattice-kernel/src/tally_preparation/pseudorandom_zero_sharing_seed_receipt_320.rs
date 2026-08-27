@@ -373,6 +373,7 @@ impl PseudorandomZeroSharingAuthenticatedSeedRecipientInventoryBody320 {
 pub(crate) struct AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320 {
     body: PseudorandomZeroSharingAuthenticatedSeedRecipientInventoryBody320,
     root_matched_inventory: RootInventoryMatchedPseudorandomZeroSharingSeedRecipientInventory320,
+    local_seed_custody_segments: Box<[Zeroizing<Vec<u8>>]>,
 }
 
 impl AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320 {
@@ -386,6 +387,10 @@ impl AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320 {
         &self,
     ) -> &RootInventoryMatchedPseudorandomZeroSharingSeedRecipientInventory320 {
         &self.root_matched_inventory
+    }
+
+    pub(crate) fn local_seed_custody_segments(&self) -> &[Zeroizing<Vec<u8>>] {
+        &self.local_seed_custody_segments
     }
 
     pub(crate) fn into_root_matched_inventory(
@@ -421,13 +426,14 @@ pub(crate) fn verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inve
         .iter()
         .map(AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320::manifest_identity)
         .collect::<Vec<_>>();
+    let (deliveries, local_seed_custody_segments): (Vec<_>, Vec<_>) = authenticated_deliveries
+        .into_iter()
+        .map(AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320::into_parts)
+        .unzip();
     let root_matched_inventory = verify_pseudorandom_zero_sharing_seed_recipient_inventory_320(
         root_terminal,
         recipient_position,
-        authenticated_deliveries
-            .into_iter()
-            .map(AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320::into_delivery)
-            .collect(),
+        deliveries,
     )?;
     let semantic_body = root_matched_inventory.body();
     let body = PseudorandomZeroSharingAuthenticatedSeedRecipientInventoryBody320 {
@@ -458,6 +464,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inve
         AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320 {
             body,
             root_matched_inventory,
+            local_seed_custody_segments: local_seed_custody_segments.into_boxed_slice(),
         },
     )
 }
@@ -472,6 +479,7 @@ pub(crate) fn verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inve
 pub(crate) fn restore_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
     root_matched_inventory: RootInventoryMatchedPseudorandomZeroSharingSeedRecipientInventory320,
     retained_body_bytes: &[u8],
+    retained_delivery_segments: &[&[u8]],
 ) -> Result<
     AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320,
     PseudorandomZeroSharingSeedReceiptError320,
@@ -480,10 +488,23 @@ pub(crate) fn restore_pseudorandom_zero_sharing_authenticated_seed_recipient_inv
         &root_matched_inventory,
         retained_body_bytes,
     )?;
+    let expected_segment_count = usize::from(
+        body.participant_count
+            .checked_sub(1)
+            .ok_or(PseudorandomZeroSharingSeedReceiptError320::GeometryMismatch)?,
+    );
+    if retained_delivery_segments.len() != expected_segment_count {
+        return Err(PseudorandomZeroSharingSeedReceiptError320::GeometryMismatch);
+    }
     Ok(
         AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320 {
             body,
             root_matched_inventory,
+            local_seed_custody_segments: retained_delivery_segments
+                .iter()
+                .map(|segment| Zeroizing::new(segment.to_vec()))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
         },
     )
 }

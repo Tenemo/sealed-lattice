@@ -174,6 +174,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         length: number,
         outputLengthPointer: number,
     ) => number;
+    sealed_lattice_seed_recipient_receipt_320_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_seed_receipt_terminal_endorsement_320_with_length?: (
         pointer: number,
         length: number,

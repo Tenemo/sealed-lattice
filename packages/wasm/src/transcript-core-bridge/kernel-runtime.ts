@@ -413,6 +413,9 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
     ) => Uint8Array;
     readonly executeSeedCatalogSource: (requestBytes: Uint8Array) => Uint8Array;
     readonly executeSeedMailboxSender: (requestBytes: Uint8Array) => Uint8Array;
+    readonly executeSeedRecipientReceipt: (
+        requestBytes: Uint8Array,
+    ) => Uint8Array;
     readonly executeSeedReceiptTerminalEndorsement: (
         requestBytes: Uint8Array,
     ) => Uint8Array;
@@ -566,6 +569,7 @@ type NumberExportName =
     | 'sealed_lattice_join_seed_masters_320_with_length'
     | 'sealed_lattice_seed_catalog_source_320_with_length'
     | 'sealed_lattice_seed_mailbox_sender_320_with_length'
+    | 'sealed_lattice_seed_recipient_receipt_320_with_length'
     | 'sealed_lattice_seed_receipt_terminal_endorsement_320_with_length'
     | 'sealed_lattice_transcript_core_command_with_length'
     | 'sealed_lattice_validate_joined_seed_masters_320_with_length';
@@ -883,6 +887,10 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_seed_mailbox_sender_320_with_length',
     );
+    const seedRecipientReceiptWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_seed_recipient_receipt_320_with_length',
+    );
     const seedReceiptTerminalEndorsementWithLength = resolveNumberExport(
         wasmExports,
         'sealed_lattice_seed_receipt_terminal_endorsement_320_with_length',
@@ -976,6 +984,20 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
                 'seed-mailbox sender',
             ),
         );
+    const executeSeedRecipientReceipt = (
+        requestBytes: Uint8Array,
+    ): Uint8Array =>
+        runExclusive('seed-recipient receipt', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                seedRecipientReceiptWithLength,
+                requestBytes,
+                'seed-recipient receipt',
+            ),
+        );
     const executeSeedReceiptTerminalEndorsement = (
         requestBytes: Uint8Array,
     ): Uint8Array =>
@@ -999,6 +1021,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         executeJoinedSeedMasterValidation,
         executeSeedCatalogSource,
         executeSeedMailboxSender,
+        executeSeedRecipientReceipt,
         executeSeedReceiptTerminalEndorsement,
         memory,
         runExclusive,

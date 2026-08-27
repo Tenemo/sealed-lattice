@@ -19,6 +19,24 @@ export {
     SeedMailboxSenderKernelError,
 } from './seed-mailbox-sender-stream-kernel.js';
 export {
+    isProductionSeedRecipientReceiptKernel,
+    openProductionSeedRecipientReceiptKernel,
+    SeedRecipientReceiptKernelError,
+} from './seed-recipient-receipt-kernel.js';
+export type {
+    AuthenticatedSeedRecipientInventoryAuthorization,
+    OpenProductionSeedRecipientReceiptKernelInput,
+    PreparedSeedRecipientReceiptInventory,
+    ProductionSeedRecipientReceiptKernel,
+    SeedRecipientReceiptContext,
+    SeedRecipientReceiptKernelErrorCode,
+    SeedRecipientReceiptKeyOperations,
+    SeedRecipientReceiptMailboxCarrier,
+    SeedRecipientReceiptProductionInput,
+    SeedRecipientReceiptRootAuthorizationPackageBytes,
+    SeedRecipientReceiptValidationInput,
+} from './seed-recipient-receipt-kernel.js';
+export {
     isProductionSeedReceiptTerminalEndorsementKernel,
     openProductionSeedReceiptTerminalEndorsementKernel,
     SeedReceiptTerminalEndorsementKernelError,

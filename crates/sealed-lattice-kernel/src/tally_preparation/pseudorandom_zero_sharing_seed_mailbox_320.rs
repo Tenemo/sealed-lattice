@@ -997,6 +997,7 @@ pub(crate) struct AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320 {
     header_identity: Hash512,
     manifest_identity: Hash512,
     delivery: RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320,
+    retained_payload_bytes: Zeroizing<Vec<u8>>,
 }
 
 impl AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320 {
@@ -1014,10 +1015,13 @@ impl AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320 {
         &self.delivery
     }
 
-    pub(crate) fn into_delivery(
+    pub(crate) fn into_parts(
         self,
-    ) -> RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320 {
-        self.delivery
+    ) -> (
+        RootInventoryMatchedPseudorandomZeroSharingSeedDelivery320,
+        Zeroizing<Vec<u8>>,
+    ) {
+        (self.delivery, self.retained_payload_bytes)
     }
 }
 
@@ -1044,6 +1048,7 @@ pub(crate) struct PseudorandomZeroSharingSeedMailboxVerifier320 {
     authenticated_encryption_key: Zeroizing<[u8; 32]>,
     next_chunk_index: usize,
     plaintext_parser: PseudorandomZeroSharingSeedMailboxPlaintextParser320,
+    retained_payload_bytes: Zeroizing<Vec<u8>>,
 }
 
 impl PseudorandomZeroSharingSeedMailboxVerifier320 {
@@ -1092,14 +1097,86 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
             .try_decaps(&encapsulation_ciphertext)
             .map_err(|_| PseudorandomZeroSharingSeedMailboxError320::DecapsulationFailed)?;
         let shared_secret_bytes = Zeroizing::new(shared_secret.into_bytes());
+        Self::from_verified_control(
+            root_terminal,
+            expected_sender_position,
+            expected_recipient_position,
+            header,
+            manifest,
+            header_bytes,
+            &shared_secret_bytes,
+        )
+    }
+
+    /// Completes one already authenticated public carrier with the shared
+    /// secret returned by the browser-local recipient key owner.
+    ///
+    /// This crate-private route still repeats every public signature, roster,
+    /// endpoint, manifest, and root-terminal check before it accepts the
+    /// shared secret. The production adapter invokes it only after its earlier
+    /// public-carrier pass has completed for the entire ordered inventory.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_shared_secret(
+        root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+        roster: &Roster,
+        expected_sender_position: u16,
+        expected_recipient_position: u16,
+        header_bytes: &[u8],
+        manifest_bytes: &[u8],
+        signature_envelope_bytes: &[u8],
+        shared_secret_bytes: &[u8; 32],
+    ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
+        validate_roster_for_terminal(root_terminal, roster)?;
+        let header =
+            PseudorandomZeroSharingSeedMailboxHeaderBody320::from_canonical_bytes(header_bytes)?;
+        let manifest = PseudorandomZeroSharingSeedMailboxManifestBody320::from_canonical_bytes(
+            manifest_bytes,
+        )?;
+        verify_sender_manifest_signature(
+            roster,
+            expected_sender_position,
+            &header,
+            &manifest,
+            signature_envelope_bytes,
+        )?;
+        require_header_matches_expected(
+            root_terminal,
+            roster,
+            expected_sender_position,
+            expected_recipient_position,
+            &header,
+        )?;
+        manifest.require_header(&header)?;
+        Self::from_verified_control(
+            root_terminal,
+            expected_sender_position,
+            expected_recipient_position,
+            header,
+            manifest,
+            header_bytes,
+            shared_secret_bytes,
+        )
+    }
+
+    fn from_verified_control(
+        root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+        expected_sender_position: u16,
+        expected_recipient_position: u16,
+        header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
+        manifest: PseudorandomZeroSharingSeedMailboxManifestBody320,
+        header_bytes: &[u8],
+        shared_secret_bytes: &[u8; 32],
+    ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
         let authenticated_encryption_key =
-            derive_authenticated_encryption_key(&shared_secret_bytes, header_bytes);
+            derive_authenticated_encryption_key(shared_secret_bytes, header_bytes);
         let delivery_verifier = PseudorandomZeroSharingSeedDeliveryVerifier320::new(
             root_terminal,
             expected_sender_position,
             expected_recipient_position,
             &header.delivery_descriptor.canonical_bytes()?,
         )?;
+        let payload_byte_length = usize::try_from(header.delivery_descriptor.payload_byte_length())
+            .map_err(|_| PseudorandomZeroSharingSeedMailboxError320::ArithmeticOverflow)?;
         Ok(Self {
             header,
             manifest,
@@ -1108,6 +1185,7 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
             plaintext_parser: PseudorandomZeroSharingSeedMailboxPlaintextParser320::new(
                 delivery_verifier,
             ),
+            retained_payload_bytes: Zeroizing::new(Vec::with_capacity(payload_byte_length)),
         })
     }
 
@@ -1168,6 +1246,7 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
                 PseudorandomZeroSharingSeedMailboxError320::AuthenticatedDecryptionFailed
             })?;
         self.plaintext_parser.absorb(&plaintext)?;
+        self.retained_payload_bytes.extend_from_slice(&plaintext);
         self.next_chunk_index = self
             .next_chunk_index
             .checked_add(1)
@@ -1192,6 +1271,7 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
             header_identity: self.header.identity()?,
             manifest_identity: self.manifest.identity()?,
             delivery: self.plaintext_parser.finish()?,
+            retained_payload_bytes: self.retained_payload_bytes,
         })
     }
 }

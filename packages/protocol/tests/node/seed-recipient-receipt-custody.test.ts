@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import type { ProductionSeedRecipientReceiptKernel } from '@sealed-lattice/wasm';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@sealed-lattice/wasm', () => ({
+    isProductionSeedRecipientReceiptKernel: () => true,
+    openProductionSeedRecipientReceiptKernel: () => {
+        throw new Error('The custody model test does not open a Wasm kernel.');
+    },
+}));
 
 import {
     createRuntimeRecordProtection,
@@ -8,6 +16,7 @@ import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/r
 import {
     SeedRecipientReceiptCustody,
     consumeSeedRecipientReceiptTerminalEndorsementAuthorization,
+    deriveSeedRecipientReceiptKernelByteLengths,
     deriveSeedRecipientReceiptCustodyRecordByteLengths,
     type PreparedSeedRecipientReceiptInventory,
     type SeedRecipientReceiptCustodyContext,
@@ -313,13 +322,14 @@ const createFixture = async (input?: {
         coordinator,
         createIdentifier,
         cryptoProvider,
-        custody: new SeedRecipientReceiptCustody({
-            context,
-            kernel,
-            limits: testLimits,
-            protection,
-            recencyCoordinator: coordinator,
-        }),
+        custody:
+            new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
+                context,
+                kernel: kernel as unknown as ProductionSeedRecipientReceiptKernel,
+                limits: testLimits,
+                protection,
+                recencyCoordinator: coordinator,
+            }),
         kernel,
         namespace,
         protection,
@@ -347,9 +357,9 @@ const reopenCustody = async (
         maximumRecordSealingCount: 64,
         rootKey: fixture.rootKey,
     });
-    return new SeedRecipientReceiptCustody({
+    return new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
         context,
-        kernel,
+        kernel: kernel as unknown as ProductionSeedRecipientReceiptKernel,
         limits: testLimits,
         protection,
         recencyCoordinator: coordinator,
@@ -396,6 +406,140 @@ describe('seed-recipient receipt custody', () => {
             copyOnWriteCiphertextOverlapByteLength: 1_135_180,
             reservationCiphertextByteLength: 565_715,
             reservationPlaintextByteLength: 565_661,
+        });
+
+        const kernelDerived = deriveSeedRecipientReceiptKernelByteLengths({
+            authenticatedInventoryBodyByteLength: 1_566,
+            carriers: Array.from({ length: 9 }, () => ({
+                encryptedChunkByteLengths: [62_606],
+                headerByteLength: 1_655,
+                manifestByteLength: 215,
+                signatureEnvelopeByteLength: 3_713,
+            })),
+            localSeedCustodySegmentByteLengths: Array.from(
+                { length: 9 },
+                () => 62_590,
+            ),
+            preparationContextByteLength: 338,
+            receiptEnvelopeByteLength: 3_778,
+            receiptIntentByteLength: 374,
+            rootAuthorizationPackages: Array.from({ length: 10 }, () => ({
+                contributorSignatureEnvelopeByteLength: 3_723,
+                exactOutputCertificateByteLength: 25_545,
+                reservationCertificateByteLength: 25_515,
+                rootBodyByteLength: 522,
+            })),
+            rootTerminalCertificateByteLength: 36_230,
+            rosterByteLength: 31_660,
+        });
+        const independentlyDerivedRootCorpusByteLength =
+            10 * (4 * 4 + 522 + 25_515 + 25_545 + 3_723);
+        const independentlyDerivedCarrierCorpusByteLength =
+            9 * (2 + (4 + 1_655) + (4 + 215) + (4 + 3_713) + 2 + (4 + 62_606));
+        const independentlyDerivedPreparedInventoryByteLength =
+            4 + 1_566 + 64 + 2 + 9 * (4 + 62_590) + (4 + 374) + 64;
+        const independentlyDerivedOpenRequestByteLength =
+            7 +
+            64 +
+            2 +
+            (4 + 338) +
+            (4 + 31_660) +
+            2 +
+            independentlyDerivedRootCorpusByteLength +
+            (4 + 36_230) +
+            2 +
+            independentlyDerivedCarrierCorpusByteLength;
+        const independentlyDerivedOpenResponseByteLength =
+            7 + 4 + 1_952 + 1_184 + 2 + 9 * 1_088;
+        const independentlyDerivedAuthenticationRequestByteLength =
+            7 + 4 + 2 + 9 * 32;
+        const independentlyDerivedAuthenticationResponseByteLength =
+            7 + independentlyDerivedPreparedInventoryByteLength;
+        const independentlyDerivedCompleteRequestByteLength =
+            7 + 4 + independentlyDerivedPreparedInventoryByteLength + 3_309;
+        const independentlyDerivedCompleteResponseByteLength = 7 + 4 + 3_778;
+        const independentlyDerivedValidationRequestWithoutEnvelopeByteLength =
+            7 +
+            4 +
+            (64 * 3 + 2 * 3) +
+            independentlyDerivedPreparedInventoryByteLength +
+            1;
+        const independentlyDerivedValidationRequestWithEnvelopeByteLength =
+            independentlyDerivedValidationRequestWithoutEnvelopeByteLength +
+            4 +
+            3_778;
+        expect(kernelDerived).toEqual({
+            closeContextRequestByteLength: 11,
+            closeContextResponseByteLength: 7,
+            coldValidationCumulativeRequestByteLength:
+                independentlyDerivedOpenRequestByteLength +
+                independentlyDerivedAuthenticationRequestByteLength +
+                independentlyDerivedValidationRequestWithoutEnvelopeByteLength +
+                independentlyDerivedValidationRequestWithEnvelopeByteLength +
+                11,
+            coldValidationCumulativeResponseByteLength:
+                independentlyDerivedOpenResponseByteLength +
+                independentlyDerivedAuthenticationResponseByteLength +
+                7 +
+                7 +
+                7,
+            coldValidationInvocationCount: 5,
+            completeAuthenticationRequestByteLength:
+                independentlyDerivedAuthenticationRequestByteLength,
+            completeAuthenticationResponseByteLength:
+                independentlyDerivedAuthenticationResponseByteLength,
+            completeReceiptRequestByteLength:
+                independentlyDerivedCompleteRequestByteLength,
+            completeReceiptResponseByteLength:
+                independentlyDerivedCompleteResponseByteLength,
+            maximumRequestByteLength: independentlyDerivedOpenRequestByteLength,
+            maximumResponseByteLength:
+                independentlyDerivedAuthenticationResponseByteLength,
+            openContextRequestByteLength:
+                independentlyDerivedOpenRequestByteLength,
+            openContextResponseByteLength:
+                independentlyDerivedOpenResponseByteLength,
+            successfulCumulativeRequestByteLength:
+                independentlyDerivedOpenRequestByteLength +
+                independentlyDerivedAuthenticationRequestByteLength +
+                independentlyDerivedValidationRequestWithoutEnvelopeByteLength +
+                independentlyDerivedCompleteRequestByteLength +
+                independentlyDerivedValidationRequestWithEnvelopeByteLength +
+                11,
+            successfulCumulativeResponseByteLength:
+                independentlyDerivedOpenResponseByteLength +
+                independentlyDerivedAuthenticationResponseByteLength +
+                7 +
+                independentlyDerivedCompleteResponseByteLength +
+                7 +
+                7,
+            successfulInvocationCount: 6,
+            validationRequestByteLengthWithEnvelope:
+                independentlyDerivedValidationRequestWithEnvelopeByteLength,
+            validationRequestByteLengthWithoutEnvelope:
+                independentlyDerivedValidationRequestWithoutEnvelopeByteLength,
+            validationResponseByteLength: 7,
+        });
+        expect(kernelDerived).toEqual({
+            closeContextRequestByteLength: 11,
+            closeContextResponseByteLength: 7,
+            coldValidationCumulativeRequestByteLength: 2_370_770,
+            coldValidationCumulativeResponseByteLength: 578_393,
+            coldValidationInvocationCount: 5,
+            completeAuthenticationRequestByteLength: 301,
+            completeAuthenticationResponseByteLength: 565_431,
+            completeReceiptRequestByteLength: 568_744,
+            completeReceiptResponseByteLength: 3_789,
+            maximumRequestByteLength: 1_235_408,
+            maximumResponseByteLength: 565_431,
+            openContextRequestByteLength: 1_235_408,
+            openContextResponseByteLength: 12_941,
+            successfulCumulativeRequestByteLength: 2_939_514,
+            successfulCumulativeResponseByteLength: 582_182,
+            successfulInvocationCount: 6,
+            validationRequestByteLengthWithEnvelope: 569_416,
+            validationRequestByteLengthWithoutEnvelope: 565_634,
+            validationResponseByteLength: 7,
         });
     });
 

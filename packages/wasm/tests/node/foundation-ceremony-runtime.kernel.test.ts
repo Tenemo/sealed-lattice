@@ -141,6 +141,10 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
             },
             {
                 kind: 'function',
+                name: 'sealed_lattice_seed_recipient_receipt_320_with_length',
+            },
+            {
+                kind: 'function',
                 name: 'sealed_lattice_seed_receipt_terminal_endorsement_320_with_length',
             },
             { kind: 'global', name: '__data_end' },
@@ -422,6 +426,82 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                             ),
                         },
                         sourceCustodyRecordBytes: oneByte,
+                    },
+                ),
+            ).rejects.toMatchObject({ code: 'PublicVerification' });
+        } finally {
+            if (priorBinding === undefined) {
+                Reflect.deleteProperty(globalBindings, integrityBindingName);
+            } else {
+                Object.defineProperty(
+                    globalBindings,
+                    integrityBindingName,
+                    priorBinding,
+                );
+            }
+            vi.resetModules();
+        }
+    });
+
+    it('loads the recipient-receipt ABI only through an integrity-pinned adapter and preserves public-context refusal', async () => {
+        const expectedKernelSha256Hex = await currentKernelSha256Hex();
+        const integrityBindingName =
+            '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
+        const globalBindings = globalThis as Record<string, unknown>;
+        const priorBinding = Object.getOwnPropertyDescriptor(
+            globalBindings,
+            integrityBindingName,
+        );
+        try {
+            Object.defineProperty(globalBindings, integrityBindingName, {
+                configurable: true,
+                value: expectedKernelSha256Hex,
+            });
+            vi.resetModules();
+            const receiptKernelModule =
+                await import('../../src/seed-recipient-receipt-kernel.js');
+            expect(
+                receiptKernelModule.isProductionSeedRecipientReceiptKernel({
+                    authenticatedInventoryAuthorization: () => ({}),
+                    close: () => undefined,
+                    prepare: () => undefined,
+                    produce: () => undefined,
+                    validate: () => undefined,
+                }),
+            ).toBe(false);
+            const oneByte = Uint8Array.of(1);
+            await expect(
+                receiptKernelModule.openProductionSeedRecipientReceiptKernel(
+                    kernelUrl,
+                    {
+                        carriers: [
+                            {
+                                encryptedChunks: [oneByte],
+                                headerBytes: oneByte,
+                                manifestBytes: oneByte,
+                                senderPosition: 0,
+                                signatureEnvelopeBytes: oneByte,
+                            },
+                        ],
+                        keyOperations: {
+                            assertMatchesRecipientKeys: () => undefined,
+                            decapsulateMailboxCiphertext: () =>
+                                new Uint8Array(32),
+                            signReceiptBody: () => new Uint8Array(3_309),
+                        },
+                        parameterIdentity: new Uint8Array(64).fill(0x41),
+                        preparationContextBytes: oneByte,
+                        recipientPosition: 1,
+                        rootAuthorizationPackages: [
+                            {
+                                contributorSignatureEnvelopeBytes: oneByte,
+                                exactOutputCertificateBytes: oneByte,
+                                reservationCertificateBytes: oneByte,
+                                rootBodyBytes: oneByte,
+                            },
+                        ],
+                        rootTerminalCertificateBytes: oneByte,
+                        rosterBytes: oneByte,
                     },
                 ),
             ).rejects.toMatchObject({ code: 'PublicVerification' });

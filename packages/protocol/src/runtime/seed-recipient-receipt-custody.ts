@@ -1,7 +1,21 @@
 import {
+    assertSeedRecipientReceiptCapabilitiesMatchRosterKeys,
+    decapsulateSeedRecipientMailboxCiphertext,
+    signSeedRecipientReceiptBody,
+    type BrowserLocalMailboxCapability,
+    type BrowserLocalSigningCapability,
+} from '@sealed-lattice/crypto';
+import {
     configurableParticipantCountRange,
     foundationProfile,
 } from '@sealed-lattice/types';
+import {
+    isProductionSeedRecipientReceiptKernel,
+    openProductionSeedRecipientReceiptKernel,
+    type AuthenticatedSeedRecipientInventoryAuthorization,
+    type OpenProductionSeedRecipientReceiptKernelInput,
+    type ProductionSeedRecipientReceiptKernel,
+} from '@sealed-lattice/wasm';
 
 import {
     AuthenticatedRuntimeRecordError,
@@ -27,10 +41,22 @@ const reservedRecordKind = 1;
 const completedRecordKind = 2;
 const hashByteLength = 64;
 const signatureRandomnessByteLength = 32;
+const kernelRequestHeaderByteLength = 7;
+const kernelResponseHeaderByteLength = 7;
+const kernelContextHandleByteLength = 4;
+const signingVerificationKeyByteLength = 1_952;
+const mailboxEncapsulationKeyByteLength = 1_184;
+const encapsulationCiphertextByteLength = 1_088;
+const sharedSecretByteLength = 32;
+const signatureByteLength = 3_309;
+const receiptValidationContextByteLength = hashByteLength * 3 + 2 * 3;
 const unsigned16Maximum = 0xffff;
 const unsigned32Maximum = 0xffff_ffff;
 const receiptCustodyOperationDomain =
     'sealed-lattice/runtime/seed-recipient-receipt-record/v1';
+
+const isReadonlyArray = (value: unknown): value is readonly unknown[] =>
+    Array.isArray(value);
 
 export type SeedRecipientReceiptCustodyContext = Readonly<{
     parameterIdentity: Uint8Array;
@@ -82,6 +108,67 @@ export type SeedRecipientReceiptCustodyKernel<
     validate(input: SeedRecipientReceiptValidationInput): Promise<void> | void;
 }>;
 
+type OpenBrowserLocalSeedRecipientReceiptKernelInput = Omit<
+    OpenProductionSeedRecipientReceiptKernelInput,
+    'keyOperations'
+> &
+    Readonly<{
+        mailboxCapability: BrowserLocalMailboxCapability;
+        signingCapability: BrowserLocalSigningCapability;
+    }>;
+
+/**
+ * Binds the recipient boundary to one browser-worker-owned ML-KEM capability
+ * and the matching ML-DSA capability. Rust verifies all sender signatures and
+ * encrypted chunk digests before the fixed-purpose decapsulation calls, then
+ * root-matches every plaintext and verifies the final receipt signature.
+ */
+export const openBrowserLocalSeedRecipientReceiptKernel = async (
+    transcriptCoreKernelUrl: URL,
+    input: OpenBrowserLocalSeedRecipientReceiptKernelInput,
+): Promise<ProductionSeedRecipientReceiptKernel> =>
+    openProductionSeedRecipientReceiptKernel(transcriptCoreKernelUrl, {
+        carriers: input.carriers,
+        keyOperations: Object.freeze({
+            assertMatchesRecipientKeys: ({
+                mailboxEncapsulationKey,
+                recipientSigningVerificationKey,
+            }): void =>
+                assertSeedRecipientReceiptCapabilitiesMatchRosterKeys({
+                    mailboxCapability: input.mailboxCapability,
+                    mailboxEncapsulationKey,
+                    recipientSigningVerificationKey,
+                    signingCapability: input.signingCapability,
+                }),
+            decapsulateMailboxCiphertext: ({
+                ciphertext,
+                mailboxEncapsulationKey,
+            }): Uint8Array =>
+                decapsulateSeedRecipientMailboxCiphertext({
+                    ciphertext,
+                    mailboxCapability: input.mailboxCapability,
+                    mailboxEncapsulationKey,
+                }),
+            signReceiptBody: ({
+                receiptBodyBytes,
+                recipientSigningVerificationKey,
+                signatureRandomness,
+            }): Uint8Array =>
+                signSeedRecipientReceiptBody({
+                    receiptBodyBytes,
+                    recipientSigningVerificationKey,
+                    signatureRandomness,
+                    signingCapability: input.signingCapability,
+                }),
+        }),
+        parameterIdentity: input.parameterIdentity,
+        preparationContextBytes: input.preparationContextBytes,
+        recipientPosition: input.recipientPosition,
+        rootAuthorizationPackages: input.rootAuthorizationPackages,
+        rootTerminalCertificateBytes: input.rootTerminalCertificateBytes,
+        rosterBytes: input.rosterBytes,
+    });
+
 /**
  * Exact public receipt carrier retained for byte-identical publication replay.
  *
@@ -99,6 +186,42 @@ type SeedRecipientReceiptCustodyRecordByteLengths = Readonly<{
     copyOnWriteCiphertextOverlapByteLength: number;
     reservationCiphertextByteLength: number;
     reservationPlaintextByteLength: number;
+}>;
+
+type SeedRecipientReceiptKernelByteLengths = Readonly<{
+    closeContextRequestByteLength: number;
+    closeContextResponseByteLength: number;
+    coldValidationCumulativeRequestByteLength: number;
+    coldValidationCumulativeResponseByteLength: number;
+    coldValidationInvocationCount: number;
+    completeAuthenticationRequestByteLength: number;
+    completeAuthenticationResponseByteLength: number;
+    completeReceiptRequestByteLength: number;
+    completeReceiptResponseByteLength: number;
+    maximumRequestByteLength: number;
+    maximumResponseByteLength: number;
+    openContextRequestByteLength: number;
+    openContextResponseByteLength: number;
+    successfulCumulativeRequestByteLength: number;
+    successfulCumulativeResponseByteLength: number;
+    successfulInvocationCount: number;
+    validationRequestByteLengthWithEnvelope: number;
+    validationRequestByteLengthWithoutEnvelope: number;
+    validationResponseByteLength: number;
+}>;
+
+type SeedRecipientReceiptRootAuthorizationPackageByteLengths = Readonly<{
+    contributorSignatureEnvelopeByteLength: number;
+    exactOutputCertificateByteLength: number;
+    reservationCertificateByteLength: number;
+    rootBodyByteLength: number;
+}>;
+
+type SeedRecipientReceiptMailboxCarrierByteLengths = Readonly<{
+    encryptedChunkByteLengths: readonly number[];
+    headerByteLength: number;
+    manifestByteLength: number;
+    signatureEnvelopeByteLength: number;
 }>;
 
 type ReservedSeedRecipientReceiptRecord = Readonly<{
@@ -571,6 +694,408 @@ export const deriveSeedRecipientReceiptCustodyRecordByteLengths = (input: {
         ),
         reservationCiphertextByteLength,
         reservationPlaintextByteLength,
+    });
+};
+
+export const deriveSeedRecipientReceiptKernelByteLengths = (input: {
+    authenticatedInventoryBodyByteLength: number;
+    carriers: readonly SeedRecipientReceiptMailboxCarrierByteLengths[];
+    localSeedCustodySegmentByteLengths: readonly number[];
+    preparationContextByteLength: number;
+    receiptEnvelopeByteLength: number;
+    receiptIntentByteLength: number;
+    rootAuthorizationPackages: readonly SeedRecipientReceiptRootAuthorizationPackageByteLengths[];
+    rootTerminalCertificateByteLength: number;
+    rosterByteLength: number;
+}): SeedRecipientReceiptKernelByteLengths => {
+    const readByteLength = (propertyName: string): number =>
+        requireSafeInteger(
+            snapshotDataProperty(input, propertyName, 'input'),
+            1,
+            unsigned32Maximum,
+            `input.${propertyName}`,
+        );
+    const authenticatedInventoryBodyByteLength = readByteLength(
+        'authenticatedInventoryBodyByteLength',
+    );
+    const preparationContextByteLength = readByteLength(
+        'preparationContextByteLength',
+    );
+    const receiptEnvelopeByteLength = readByteLength(
+        'receiptEnvelopeByteLength',
+    );
+    const receiptIntentByteLength = readByteLength('receiptIntentByteLength');
+    const rootTerminalCertificateByteLength = readByteLength(
+        'rootTerminalCertificateByteLength',
+    );
+    const rosterByteLength = readByteLength('rosterByteLength');
+    const rootPackagesValue = snapshotDataProperty(
+        input,
+        'rootAuthorizationPackages',
+        'input',
+    );
+    const carriersValue = snapshotDataProperty(input, 'carriers', 'input');
+    const segmentByteLengthsValue = snapshotDataProperty(
+        input,
+        'localSeedCustodySegmentByteLengths',
+        'input',
+    );
+    if (
+        !isReadonlyArray(rootPackagesValue) ||
+        !isReadonlyArray(carriersValue) ||
+        !isReadonlyArray(segmentByteLengthsValue)
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Seed-recipient receipt kernel resource inputs must use arrays.',
+        );
+    }
+    const rootPackageCount = requireSafeInteger(
+        rootPackagesValue.length,
+        1,
+        unsigned16Maximum,
+        'input.rootAuthorizationPackages.length',
+    );
+    const carrierCount = requireSafeInteger(
+        carriersValue.length,
+        1,
+        unsigned16Maximum,
+        'input.carriers.length',
+    );
+    const segmentCount = requireSafeInteger(
+        segmentByteLengthsValue.length,
+        carrierCount,
+        carrierCount,
+        'input.localSeedCustodySegmentByteLengths.length',
+    );
+    const readNestedByteLength = (
+        value: unknown,
+        propertyName: string,
+        label: string,
+    ): number =>
+        requireSafeInteger(
+            snapshotDataProperty(value, propertyName, label),
+            1,
+            unsigned32Maximum,
+            `${label}.${propertyName}`,
+        );
+    const rootPackageByteLengths = Array.from(
+        { length: rootPackageCount },
+        (_unused, packageIndex) => {
+            const packageValue = rootPackagesValue[packageIndex];
+            const label = `input.rootAuthorizationPackages[${packageIndex}]`;
+            return Object.freeze({
+                contributorSignatureEnvelopeByteLength: readNestedByteLength(
+                    packageValue,
+                    'contributorSignatureEnvelopeByteLength',
+                    label,
+                ),
+                exactOutputCertificateByteLength: readNestedByteLength(
+                    packageValue,
+                    'exactOutputCertificateByteLength',
+                    label,
+                ),
+                reservationCertificateByteLength: readNestedByteLength(
+                    packageValue,
+                    'reservationCertificateByteLength',
+                    label,
+                ),
+                rootBodyByteLength: readNestedByteLength(
+                    packageValue,
+                    'rootBodyByteLength',
+                    label,
+                ),
+            });
+        },
+    );
+    const carrierByteLengths = Array.from(
+        { length: carrierCount },
+        (_unused, carrierIndex) => {
+            const carrierValue = carriersValue[carrierIndex];
+            const label = `input.carriers[${carrierIndex}]`;
+            const chunksValue = snapshotDataProperty(
+                carrierValue,
+                'encryptedChunkByteLengths',
+                label,
+            );
+            if (!isReadonlyArray(chunksValue)) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidInput',
+                    `${label}.encryptedChunkByteLengths must be an array.`,
+                );
+            }
+            const chunkCount = requireSafeInteger(
+                chunksValue.length,
+                1,
+                unsigned16Maximum,
+                `${label}.encryptedChunkByteLengths.length`,
+            );
+            return Object.freeze({
+                encryptedChunkByteLengths: Object.freeze(
+                    Array.from({ length: chunkCount }, (_entry, chunkIndex) =>
+                        requireSafeInteger(
+                            chunksValue[chunkIndex],
+                            1,
+                            unsigned32Maximum,
+                            `${label}.encryptedChunkByteLengths[${chunkIndex}]`,
+                        ),
+                    ),
+                ),
+                headerByteLength: readNestedByteLength(
+                    carrierValue,
+                    'headerByteLength',
+                    label,
+                ),
+                manifestByteLength: readNestedByteLength(
+                    carrierValue,
+                    'manifestByteLength',
+                    label,
+                ),
+                signatureEnvelopeByteLength: readNestedByteLength(
+                    carrierValue,
+                    'signatureEnvelopeByteLength',
+                    label,
+                ),
+            });
+        },
+    );
+    const segmentByteLengths = Array.from(
+        { length: segmentCount },
+        (_unused, segmentIndex) =>
+            requireSafeInteger(
+                segmentByteLengthsValue[segmentIndex],
+                1,
+                unsigned32Maximum,
+                `input.localSeedCustodySegmentByteLengths[${segmentIndex}]`,
+            ),
+    );
+    const boundedByteLength = (byteLength: number): number =>
+        checkedAdd(4, byteLength, 'Bounded receipt-kernel field');
+    const rootPackageCorpusByteLength = sumByteLengths(
+        rootPackageByteLengths.map((rootPackage) =>
+            sumByteLengths(
+                [
+                    boundedByteLength(rootPackage.rootBodyByteLength),
+                    boundedByteLength(
+                        rootPackage.reservationCertificateByteLength,
+                    ),
+                    boundedByteLength(
+                        rootPackage.exactOutputCertificateByteLength,
+                    ),
+                    boundedByteLength(
+                        rootPackage.contributorSignatureEnvelopeByteLength,
+                    ),
+                ],
+                'Receipt-kernel root package',
+            ),
+        ),
+        'Receipt-kernel root-package corpus',
+    );
+    const carrierCorpusByteLength = sumByteLengths(
+        carrierByteLengths.map((carrier) =>
+            sumByteLengths(
+                [
+                    2,
+                    boundedByteLength(carrier.headerByteLength),
+                    boundedByteLength(carrier.manifestByteLength),
+                    boundedByteLength(carrier.signatureEnvelopeByteLength),
+                    2,
+                    sumByteLengths(
+                        carrier.encryptedChunkByteLengths.map(
+                            boundedByteLength,
+                        ),
+                        'Receipt-kernel encrypted chunks',
+                    ),
+                ],
+                'Receipt-kernel carrier',
+            ),
+        ),
+        'Receipt-kernel carrier corpus',
+    );
+    const preparedInventoryByteLength = sumByteLengths(
+        [
+            boundedByteLength(authenticatedInventoryBodyByteLength),
+            hashByteLength,
+            2,
+            sumByteLengths(
+                segmentByteLengths.map(boundedByteLength),
+                'Receipt-kernel retained seed segments',
+            ),
+            boundedByteLength(receiptIntentByteLength),
+            hashByteLength,
+        ],
+        'Receipt-kernel prepared inventory',
+    );
+    const openContextRequestByteLength = sumByteLengths(
+        [
+            kernelRequestHeaderByteLength,
+            hashByteLength,
+            2,
+            boundedByteLength(preparationContextByteLength),
+            boundedByteLength(rosterByteLength),
+            2,
+            rootPackageCorpusByteLength,
+            boundedByteLength(rootTerminalCertificateByteLength),
+            2,
+            carrierCorpusByteLength,
+        ],
+        'Receipt-kernel open request',
+    );
+    const openContextResponseByteLength = sumByteLengths(
+        [
+            kernelResponseHeaderByteLength,
+            kernelContextHandleByteLength,
+            signingVerificationKeyByteLength,
+            mailboxEncapsulationKeyByteLength,
+            2,
+            checkedMultiply(
+                carrierCount,
+                encapsulationCiphertextByteLength,
+                'Receipt-kernel ciphertext inventory',
+            ),
+        ],
+        'Receipt-kernel open response',
+    );
+    const completeAuthenticationRequestByteLength = sumByteLengths(
+        [
+            kernelRequestHeaderByteLength,
+            kernelContextHandleByteLength,
+            2,
+            checkedMultiply(
+                carrierCount,
+                sharedSecretByteLength,
+                'Receipt-kernel shared-secret inventory',
+            ),
+        ],
+        'Receipt-kernel authentication request',
+    );
+    const completeAuthenticationResponseByteLength = checkedAdd(
+        kernelResponseHeaderByteLength,
+        preparedInventoryByteLength,
+        'Receipt-kernel authentication response',
+    );
+    const completeReceiptRequestByteLength = sumByteLengths(
+        [
+            kernelRequestHeaderByteLength,
+            kernelContextHandleByteLength,
+            preparedInventoryByteLength,
+            signatureByteLength,
+        ],
+        'Receipt-kernel complete-receipt request',
+    );
+    const completeReceiptResponseByteLength = sumByteLengths(
+        [kernelResponseHeaderByteLength, 4, receiptEnvelopeByteLength],
+        'Receipt-kernel complete-receipt response',
+    );
+    const validationRequestByteLengthWithoutEnvelope = sumByteLengths(
+        [
+            kernelRequestHeaderByteLength,
+            kernelContextHandleByteLength,
+            receiptValidationContextByteLength,
+            preparedInventoryByteLength,
+            1,
+        ],
+        'Receipt-kernel validation request without envelope',
+    );
+    const validationRequestByteLengthWithEnvelope = sumByteLengths(
+        [
+            validationRequestByteLengthWithoutEnvelope,
+            4,
+            receiptEnvelopeByteLength,
+        ],
+        'Receipt-kernel validation request with envelope',
+    );
+    const validationResponseByteLength = kernelResponseHeaderByteLength;
+    const closeContextRequestByteLength =
+        kernelRequestHeaderByteLength + kernelContextHandleByteLength;
+    const closeContextResponseByteLength = kernelResponseHeaderByteLength;
+    const successfulCumulativeRequestByteLength = sumByteLengths(
+        [
+            openContextRequestByteLength,
+            completeAuthenticationRequestByteLength,
+            validationRequestByteLengthWithoutEnvelope,
+            completeReceiptRequestByteLength,
+            validationRequestByteLengthWithEnvelope,
+            closeContextRequestByteLength,
+        ],
+        'Successful receipt-kernel request traffic',
+    );
+    const successfulCumulativeResponseByteLength = sumByteLengths(
+        [
+            openContextResponseByteLength,
+            completeAuthenticationResponseByteLength,
+            validationResponseByteLength,
+            completeReceiptResponseByteLength,
+            validationResponseByteLength,
+            closeContextResponseByteLength,
+        ],
+        'Successful receipt-kernel response traffic',
+    );
+    const coldValidationCumulativeRequestByteLength = sumByteLengths(
+        [
+            openContextRequestByteLength,
+            completeAuthenticationRequestByteLength,
+            validationRequestByteLengthWithoutEnvelope,
+            validationRequestByteLengthWithEnvelope,
+            closeContextRequestByteLength,
+        ],
+        'Cold receipt-kernel request traffic',
+    );
+    const coldValidationCumulativeResponseByteLength = sumByteLengths(
+        [
+            openContextResponseByteLength,
+            completeAuthenticationResponseByteLength,
+            validationResponseByteLength,
+            validationResponseByteLength,
+            closeContextResponseByteLength,
+        ],
+        'Cold receipt-kernel response traffic',
+    );
+    const maximumRequestByteLength = Math.max(
+        openContextRequestByteLength,
+        completeAuthenticationRequestByteLength,
+        completeReceiptRequestByteLength,
+        validationRequestByteLengthWithEnvelope,
+        closeContextRequestByteLength,
+    );
+    const maximumResponseByteLength = Math.max(
+        openContextResponseByteLength,
+        completeAuthenticationResponseByteLength,
+        completeReceiptResponseByteLength,
+        validationResponseByteLength,
+        closeContextResponseByteLength,
+    );
+    if (
+        maximumRequestByteLength >
+            foundationProfile.maximumCopiedBufferByteLength ||
+        maximumResponseByteLength >
+            foundationProfile.maximumCopiedBufferByteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'ResourceLimit',
+            'Seed-recipient receipt kernel traffic exceeds the absolute copied-buffer bound.',
+        );
+    }
+    return Object.freeze({
+        closeContextRequestByteLength,
+        closeContextResponseByteLength,
+        coldValidationCumulativeRequestByteLength,
+        coldValidationCumulativeResponseByteLength,
+        coldValidationInvocationCount: 5,
+        completeAuthenticationRequestByteLength,
+        completeAuthenticationResponseByteLength,
+        completeReceiptRequestByteLength,
+        completeReceiptResponseByteLength,
+        maximumRequestByteLength,
+        maximumResponseByteLength,
+        openContextRequestByteLength,
+        openContextResponseByteLength,
+        successfulCumulativeRequestByteLength,
+        successfulCumulativeResponseByteLength,
+        successfulInvocationCount: 6,
+        validationRequestByteLengthWithEnvelope,
+        validationRequestByteLengthWithoutEnvelope,
+        validationResponseByteLength,
     });
 };
 
@@ -1273,7 +1798,8 @@ const copyPublication = (
  * receipt carrier and constructs no protocol acceptance capability.
  */
 export class SeedRecipientReceiptCustody<
-    AuthenticatedInventory extends object,
+    AuthenticatedInventory extends object =
+        AuthenticatedSeedRecipientInventoryAuthorization,
 > {
     readonly #context: SeedRecipientReceiptCustodyContext;
     readonly #issuedRandomness = new Set<string>();
@@ -1285,19 +1811,15 @@ export class SeedRecipientReceiptCustody<
 
     public constructor(input: {
         context: SeedRecipientReceiptCustodyContext;
-        kernel: SeedRecipientReceiptCustodyKernel<AuthenticatedInventory>;
+        kernel: ProductionSeedRecipientReceiptKernel;
         limits: SeedRecipientReceiptCustodyLimits;
         protection: RuntimeRecordProtection;
         recencyCoordinator: AuthenticatedStorageRecencyCoordinator;
     }) {
-        if (
-            typeof input.kernel?.prepare !== 'function' ||
-            typeof input.kernel?.produce !== 'function' ||
-            typeof input.kernel?.validate !== 'function'
-        ) {
+        if (!isProductionSeedRecipientReceiptKernel(input.kernel)) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidConfiguration',
-                'Seed-recipient receipt custody requires a complete kernel boundary.',
+                'Seed-recipient receipt custody requires the integrity-pinned production kernel.',
             );
         }
         if (
@@ -1312,10 +1834,12 @@ export class SeedRecipientReceiptCustody<
             );
         }
         this.#context = copyContext(input.context);
+        const kernel =
+            input.kernel as unknown as SeedRecipientReceiptCustodyKernel<AuthenticatedInventory>;
         this.#kernel = Object.freeze({
-            prepare: input.kernel.prepare.bind(input.kernel),
-            produce: input.kernel.produce.bind(input.kernel),
-            validate: input.kernel.validate.bind(input.kernel),
+            prepare: kernel.prepare.bind(kernel),
+            produce: kernel.produce.bind(kernel),
+            validate: kernel.validate.bind(kernel),
         });
         this.#limits = copyLimits(input.limits);
         this.#protection = input.protection;

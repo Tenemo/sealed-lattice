@@ -29,10 +29,14 @@ const seedMailboxManifestSignatureContext = textEncoder.encode(
 const seedReceiptTerminalEndorsementSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-recipient-receipt-terminal',
 );
+const seedRecipientReceiptSignatureContext = textEncoder.encode(
+    'sealed-lattice/v1/preparation/seed-recipient-receipt',
+);
 const signingHedgeByteLength = 32;
 const mailboxAttemptIdentifierByteLength = 32;
 const seedMailboxManifestSignatureBodyByteLength = 309;
 const seedReceiptTerminalEndorsementAuthorizationBodyByteLength = 174;
+const seedRecipientReceiptBodyByteLength = 374;
 
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
@@ -955,6 +959,162 @@ export const decapsulateClosedMailboxCiphertext = (input: {
         }
     } finally {
         ciphertext.fill(0);
+    }
+};
+
+/**
+ * Checks that the two opaque browser-local capabilities own the exact signing
+ * and mailbox keys selected for one recipient by the verified Rust context.
+ */
+export const assertSeedRecipientReceiptCapabilitiesMatchRosterKeys = (input: {
+    readonly mailboxCapability: BrowserLocalMailboxCapability;
+    readonly mailboxEncapsulationKey: Uint8Array;
+    readonly recipientSigningVerificationKey: Uint8Array;
+    readonly signingCapability: BrowserLocalSigningCapability;
+}): void => {
+    const signingProvider = requireSigningProvider(input.signingCapability);
+    const mailboxProvider = requireMailboxProvider(input.mailboxCapability);
+    let mailboxEncapsulationKey: Uint8Array | undefined;
+    let recipientSigningVerificationKey: Uint8Array | undefined;
+    try {
+        mailboxEncapsulationKey = copyExactBytes(
+            input.mailboxEncapsulationKey,
+            mlKem768PublicKeyByteLength,
+            'mailboxEncapsulationKey',
+        );
+        recipientSigningVerificationKey = copyExactBytes(
+            input.recipientSigningVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'recipientSigningVerificationKey',
+        );
+        if (
+            signingProvider !== mailboxProvider ||
+            !bytesEqual(
+                recipientSigningVerificationKey,
+                signingProvider.signingVerificationKey!,
+            ) ||
+            !bytesEqual(
+                mailboxEncapsulationKey,
+                mailboxProvider.mailboxEncapsulationKey!,
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The seed-recipient receipt keys do not match one browser-local roster participant.',
+            );
+        }
+    } finally {
+        mailboxEncapsulationKey?.fill(0);
+        recipientSigningVerificationKey?.fill(0);
+    }
+};
+
+/**
+ * Decapsulates only one Rust-authenticated seed-mailbox ciphertext after
+ * repeating the exact roster mailbox-key match at the opaque key owner.
+ */
+export const decapsulateSeedRecipientMailboxCiphertext = (input: {
+    readonly ciphertext: Uint8Array;
+    readonly mailboxCapability: BrowserLocalMailboxCapability;
+    readonly mailboxEncapsulationKey: Uint8Array;
+}): Uint8Array => {
+    const provider = requireMailboxProvider(input.mailboxCapability);
+    const mailboxEncapsulationKey = copyExactBytes(
+        input.mailboxEncapsulationKey,
+        mlKem768PublicKeyByteLength,
+        'mailboxEncapsulationKey',
+    );
+    try {
+        if (
+            !bytesEqual(
+                mailboxEncapsulationKey,
+                provider.mailboxEncapsulationKey!,
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The seed-mailbox recipient key does not match the browser-local mailbox capability.',
+            );
+        }
+        return decapsulateClosedMailboxCiphertext({
+            capability: input.mailboxCapability,
+            ciphertext: input.ciphertext,
+        });
+    } finally {
+        mailboxEncapsulationKey.fill(0);
+    }
+};
+
+/**
+ * Signs only the exact fixed-length recipient receipt body under its fixed
+ * ML-DSA context. Rust reconstructs and positively verifies the envelope
+ * before it can leave local custody.
+ */
+export const signSeedRecipientReceiptBody = (input: {
+    readonly receiptBodyBytes: Uint8Array;
+    readonly recipientSigningVerificationKey: Uint8Array;
+    readonly signatureRandomness: Uint8Array;
+    readonly signingCapability: BrowserLocalSigningCapability;
+}): Uint8Array => {
+    const provider = requireSigningProvider(input.signingCapability);
+    let receiptBodyBytes: Uint8Array | undefined;
+    let recipientSigningVerificationKey: Uint8Array | undefined;
+    let signatureRandomness: Uint8Array | undefined;
+    let signature: Uint8Array | undefined;
+    try {
+        receiptBodyBytes = copyExactBytes(
+            input.receiptBodyBytes,
+            seedRecipientReceiptBodyByteLength,
+            'receiptBodyBytes',
+            'MalformedMessage',
+        );
+        recipientSigningVerificationKey = copyExactBytes(
+            input.recipientSigningVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'recipientSigningVerificationKey',
+        );
+        signatureRandomness = copyExactBytes(
+            input.signatureRandomness,
+            signingHedgeByteLength,
+            'signatureRandomness',
+            'MalformedRandomness',
+        );
+        if (
+            !bytesEqual(
+                recipientSigningVerificationKey,
+                provider.signingVerificationKey!,
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The seed-recipient receipt signing key does not match the browser-local capability.',
+            );
+        }
+        signature = invokeSigningOperation(
+            provider,
+            receiptBodyBytes,
+            seedRecipientReceiptSignatureContext,
+            signatureRandomness,
+        );
+        if (
+            !ml_dsa65.verify(
+                signature,
+                receiptBodyBytes,
+                recipientSigningVerificationKey,
+                { context: seedRecipientReceiptSignatureContext },
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The seed-recipient receipt signature does not match the frozen roster key.',
+            );
+        }
+        return signature.slice();
+    } finally {
+        receiptBodyBytes?.fill(0);
+        recipientSigningVerificationKey?.fill(0);
+        signatureRandomness?.fill(0);
+        signature?.fill(0);
     }
 };
 

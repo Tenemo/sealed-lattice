@@ -6,15 +6,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
+    assertSeedRecipientReceiptCapabilitiesMatchRosterKeys,
     assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey,
     BrowserLocalKeyProviderError,
     type BrowserLocalExternalKeyProviderInput,
     type BrowserLocalMailboxCapability,
     type BrowserLocalSigningCapability,
     decapsulateClosedMailboxCiphertext,
+    decapsulateSeedRecipientMailboxCiphertext,
     encapsulateResetSafeSetupMailbox,
     openBrowserLocalExternalKeyProvider,
     signSeedMailboxManifestBody,
+    signSeedRecipientReceiptBody,
     signSeedReceiptTerminalEndorsementBody,
     signResetSafeSetupMailboxEnvelope,
     signResetSafeSetupObject,
@@ -39,6 +42,9 @@ const seedMailboxManifestSignatureContext = textEncoder.encode(
 );
 const seedReceiptTerminalEndorsementSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-recipient-receipt-terminal',
+);
+const seedRecipientReceiptSignatureContext = textEncoder.encode(
+    'sealed-lattice/v1/preparation/seed-recipient-receipt',
 );
 
 const createKeyMaterial = () => {
@@ -214,6 +220,83 @@ describe('browser-local external key provider', () => {
         signature.fill(0);
         alternateSigning.publicKey.fill(0);
         alternateSigning.secretKey.fill(0);
+        provider.close();
+    });
+
+    it('binds seed-recipient decapsulation and receipt signing to one roster participant', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
+        });
+        assertSeedRecipientReceiptCapabilitiesMatchRosterKeys({
+            mailboxCapability: provider.mailboxCapability,
+            mailboxEncapsulationKey: mailbox.publicKey,
+            recipientSigningVerificationKey: signing.publicKey,
+            signingCapability: provider.signingCapability,
+        });
+
+        const encapsulationCoins = new Uint8Array(ml_kem768.lengths.msg!).fill(
+            0x64,
+        );
+        const encapsulation = ml_kem768.encapsulate(
+            mailbox.publicKey,
+            encapsulationCoins,
+        );
+        const recoveredSharedSecret = decapsulateSeedRecipientMailboxCiphertext(
+            {
+                ciphertext: encapsulation.cipherText,
+                mailboxCapability: provider.mailboxCapability,
+                mailboxEncapsulationKey: mailbox.publicKey,
+            },
+        );
+        expect(recoveredSharedSecret).toEqual(encapsulation.sharedSecret);
+
+        const receiptBodyBytes = new Uint8Array(374).fill(0x75);
+        const signatureRandomness = new Uint8Array(32).fill(0x86);
+        const signature = signSeedRecipientReceiptBody({
+            receiptBodyBytes,
+            recipientSigningVerificationKey: signing.publicKey,
+            signatureRandomness,
+            signingCapability: provider.signingCapability,
+        });
+        expect(
+            ml_dsa65.verify(signature, receiptBodyBytes, signing.publicKey, {
+                context: seedRecipientReceiptSignatureContext,
+            }),
+        ).toBe(true);
+
+        const otherMaterial = ml_kem768.keygen(
+            new Uint8Array(ml_kem768.lengths.seed!).fill(0x96),
+        );
+        expectProviderError(
+            () =>
+                decapsulateSeedRecipientMailboxCiphertext({
+                    ciphertext: encapsulation.cipherText,
+                    mailboxCapability: provider.mailboxCapability,
+                    mailboxEncapsulationKey: otherMaterial.publicKey,
+                }),
+            'KeyMismatch',
+        );
+        expectProviderError(
+            () =>
+                signSeedRecipientReceiptBody({
+                    receiptBodyBytes: receiptBodyBytes.subarray(1),
+                    recipientSigningVerificationKey: signing.publicKey,
+                    signatureRandomness,
+                    signingCapability: provider.signingCapability,
+                }),
+            'MalformedMessage',
+        );
+
+        encapsulationCoins.fill(0);
+        encapsulation.cipherText.fill(0);
+        encapsulation.sharedSecret.fill(0);
+        recoveredSharedSecret.fill(0);
+        receiptBodyBytes.fill(0);
+        signatureRandomness.fill(0);
+        signature.fill(0);
+        otherMaterial.publicKey.fill(0);
+        otherMaterial.secretKey.fill(0);
         provider.close();
     });
 

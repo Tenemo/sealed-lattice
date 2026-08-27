@@ -1,12 +1,14 @@
 import type {
     ProductionJoinedSeedMasterCustodyKernel,
     ProductionSeedCatalogSourceCustodyKernel,
+    ProductionSeedRecipientReceiptKernel,
 } from '@sealed-lattice/wasm';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@sealed-lattice/wasm', () => ({
     isProductionJoinedSeedMasterCustodyKernel: () => true,
     isProductionSeedCatalogSourceCustodyKernel: () => true,
+    isProductionSeedRecipientReceiptKernel: () => true,
 }));
 
 import {
@@ -568,13 +570,14 @@ const createFixture = async (input?: {
             entry.openingBytes.fill(0);
         });
 
-        const receiptCustody = new SeedRecipientReceiptCustody({
-            context: receiptContext(joinedContext),
-            kernel: new DeterministicReceiptKernel(),
-            limits: receiptLimits,
-            protection,
-            recencyCoordinator: coordinator,
-        });
+        const receiptCustody =
+            new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
+                context: receiptContext(joinedContext),
+                kernel: new DeterministicReceiptKernel() as unknown as ProductionSeedRecipientReceiptKernel,
+                limits: receiptLimits,
+                protection,
+                recencyCoordinator: coordinator,
+            });
         const publication = await receiptCustody.retainForPublication({
             authenticatedInventory: new AuthenticatedInventoryCapability(),
         });

@@ -1263,6 +1263,7 @@ fn parse_and_verify_receipt_custody_record(
         restore_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
             root_matched_inventory,
             receipt_record.authenticated_inventory_body_bytes,
+            &receipt_record.local_seed_custody_segments,
         )
         .map_err(|_| {
             PseudorandomZeroSharingSeedMasterCustodyError320::ReceiptCustody(
