@@ -27,6 +27,14 @@ import {
     type SeedCatalogSourceCustodyLimits,
 } from './seed-catalog-source-custody.js';
 import {
+    readSelectedSeedRecipientAuthenticationCustodyForMasterJoin,
+    snapshotSeedRecipientAuthenticationCustodyLimitsForMasterJoin,
+    stageSeedRecipientAuthenticationCustodyMasterJoinCompletion,
+    type JoinedSeedRecipientAuthenticationCustodyForMasterJoin,
+    type SeedRecipientAuthenticationCustodyLimits,
+    type SelectedSeedRecipientAuthenticationCustodyForMasterJoin,
+} from './seed-recipient-authentication-custody.js';
+import {
     readCompletedSeedRecipientReceiptCustodyForMasterJoin,
     snapshotSeedRecipientReceiptCustodyLimitsForMasterJoin,
     type CompletedSeedRecipientReceiptCustodyForMasterJoin,
@@ -102,6 +110,8 @@ type JoinedSeedMasterCustodyRecordByteLengths = Readonly<{
     logicallyReclaimedPredecessorCiphertextByteLength: number;
     maximumKernelInputByteLength: number;
     maximumColdRestartReadByteLength: number;
+    netCiphertextReclamationByteLength: number;
+    retainedSuccessorCiphertextByteLength: number;
 }>;
 
 /**
@@ -142,8 +152,14 @@ type ReceiptPredecessorState =
     | CompletedSeedRecipientReceiptCustodyForMasterJoin
     | 'incomplete'
     | undefined;
+type AuthenticationPredecessorState =
+    | JoinedSeedRecipientAuthenticationCustodyForMasterJoin
+    | SelectedSeedRecipientAuthenticationCustodyForMasterJoin
+    | 'burned'
+    | undefined;
 
 type JoinedSeedMasterStorageSnapshot = Readonly<{
+    authentication: AuthenticationPredecessorState;
     joined: OpenedJoinedSeedMasterRecord | undefined;
     receipt: ReceiptPredecessorState;
     source: SourcePredecessorState;
@@ -495,6 +511,8 @@ const deriveJoinedPlaintextByteLength = (input: {
     );
 
 export const deriveJoinedSeedMasterCustodyRecordByteLengths = (input: {
+    authenticationPredecessorCiphertextByteLength: number;
+    authenticationSuccessorCiphertextByteLength: number;
     joinedMasterPayloadByteLength: number;
     receiptPredecessorCiphertextByteLength: number;
     receiptTerminalCertificateByteLength: number;
@@ -516,10 +534,22 @@ export const deriveJoinedSeedMasterCustodyRecordByteLengths = (input: {
         input.receiptPredecessorCiphertextByteLength,
         'Receipt predecessor ciphertext byte length',
     );
+    const authenticationPredecessorCiphertextByteLength = requireByteLength(
+        input.authenticationPredecessorCiphertextByteLength,
+        'Authentication predecessor ciphertext byte length',
+    );
+    const authenticationSuccessorCiphertextByteLength = requireByteLength(
+        input.authenticationSuccessorCiphertextByteLength,
+        'Authentication successor ciphertext byte length',
+    );
     if (
+        authenticationPredecessorCiphertextByteLength <=
+            runtimeRecordEnvelopeOverheadByteLength ||
         sourcePredecessorCiphertextByteLength <=
             runtimeRecordEnvelopeOverheadByteLength ||
         receiptPredecessorCiphertextByteLength <=
+            runtimeRecordEnvelopeOverheadByteLength ||
+        authenticationSuccessorCiphertextByteLength <=
             runtimeRecordEnvelopeOverheadByteLength
     ) {
         throw new AuthenticatedRuntimeRecordError(
@@ -569,15 +599,32 @@ export const deriveJoinedSeedMasterCustodyRecordByteLengths = (input: {
         ),
         'Joined seed-master kernel response',
     );
-    const logicallyReclaimedPredecessorCiphertextByteLength = checkedAdd(
-        sourcePredecessorCiphertextByteLength,
-        receiptPredecessorCiphertextByteLength,
+    const logicallyReclaimedPredecessorCiphertextByteLength = sumByteLengths(
+        [
+            authenticationPredecessorCiphertextByteLength,
+            sourcePredecessorCiphertextByteLength,
+            receiptPredecessorCiphertextByteLength,
+        ],
         'Logically reclaimed joined-master predecessors',
     );
+    const retainedSuccessorCiphertextByteLength = checkedAdd(
+        authenticationSuccessorCiphertextByteLength,
+        joinedCiphertextByteLength,
+        'Joined seed-master retained successor ciphertexts',
+    );
+    if (
+        retainedSuccessorCiphertextByteLength >
+        logicallyReclaimedPredecessorCiphertextByteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'ResourceLimit',
+            'Joined seed-master retained successors exceed their replaced predecessors.',
+        );
+    }
     return Object.freeze({
         atomicTransitionCiphertextOverlapByteLength: checkedAdd(
             logicallyReclaimedPredecessorCiphertextByteLength,
-            joinedCiphertextByteLength,
+            retainedSuccessorCiphertextByteLength,
             'Joined seed-master atomic transition overlap',
         ),
         joinRequestByteLength,
@@ -592,7 +639,15 @@ export const deriveJoinedSeedMasterCustodyRecordByteLengths = (input: {
             joinRequestByteLength,
             joinedPlaintextByteLength,
         ),
-        maximumColdRestartReadByteLength: joinedCiphertextByteLength,
+        maximumColdRestartReadByteLength: checkedAdd(
+            authenticationSuccessorCiphertextByteLength,
+            joinedCiphertextByteLength,
+            'Joined seed-master cold-restart authenticated record reads',
+        ),
+        netCiphertextReclamationByteLength:
+            logicallyReclaimedPredecessorCiphertextByteLength -
+            retainedSuccessorCiphertextByteLength,
+        retainedSuccessorCiphertextByteLength,
     });
 };
 
@@ -1170,6 +1225,22 @@ const destroyReceiptPredecessor = (
     predecessor.sealedBytes.fill(0);
 };
 
+const destroyAuthenticationPredecessor = (
+    predecessor: AuthenticationPredecessorState,
+): void => {
+    if (predecessor === undefined || predecessor === 'burned') {
+        return;
+    }
+    if (predecessor.kind === 'joined') {
+        predecessor.receiptTerminalIdentity.fill(0);
+        return;
+    }
+    predecessor.context.parameterIdentity.fill(0);
+    predecessor.context.preparationContextIdentity.fill(0);
+    predecessor.context.rootTerminalIdentity.fill(0);
+    predecessor.sealedBytes.fill(0);
+};
+
 const destroyStorageSnapshot = (
     snapshot: JoinedSeedMasterStorageSnapshot | undefined,
 ): void => {
@@ -1180,6 +1251,7 @@ const destroyStorageSnapshot = (
         destroyRecord(snapshot.joined.record);
         snapshot.joined.sealedBytes.fill(0);
     }
+    destroyAuthenticationPredecessor(snapshot.authentication);
     destroyReceiptPredecessor(snapshot.receipt);
     destroySourcePredecessor(snapshot.source);
 };
@@ -1208,6 +1280,7 @@ const errorHasCode = (error: unknown, code: string): boolean =>
     (error as { code?: unknown }).code === code;
 
 const commitTransition = async (input: {
+    authentication: SelectedSeedRecipientAuthenticationCustodyForMasterJoin;
     joinedRecordKey: string;
     limits: JoinedSeedMasterCustodyLimits;
     protection: RuntimeRecordProtection;
@@ -1218,6 +1291,7 @@ const commitTransition = async (input: {
 }): Promise<Uint8Array> => {
     const plaintext = encodeRecord(input.record);
     let transaction: UntrustedStorageTransaction | undefined;
+    let stagedAuthenticationBytes: Uint8Array | undefined;
     let stagedSealedBytes: Uint8Array | undefined;
     try {
         transaction = await input.store.beginTransaction({
@@ -1231,6 +1305,14 @@ const commitTransition = async (input: {
             protection: input.protection,
             transaction,
         });
+        stagedAuthenticationBytes =
+            await stageSeedRecipientAuthenticationCustodyMasterJoinCompletion({
+                protection: input.protection,
+                receiptTerminalIdentity:
+                    input.record.context.receiptTerminalIdentity,
+                selection: input.authentication,
+                transaction,
+            });
         await transaction.stageDeletion(
             input.source.recordKey,
             input.source.sealedBytes,
@@ -1248,6 +1330,7 @@ const commitTransition = async (input: {
         throw await closeTransactionAfterFailure(transaction, error);
     } finally {
         plaintext.fill(0);
+        stagedAuthenticationBytes?.fill(0);
         stagedSealedBytes?.fill(0);
     }
 };
@@ -1265,8 +1348,9 @@ const copyRetention = (
 
 /**
  * Atomically replaces complete raw source and recipient custody with one
- * encrypted joined-master record after the kernel validates every exact
- * predecessor and terminal byte.
+ * encrypted joined-master record and replaces the authenticated action
+ * selection with its compact terminal marker after the kernel validates every
+ * exact predecessor and terminal byte.
  *
  * The integrity-pinned scalar Rust/WebAssembly kernel owns both predecessor
  * decoders, public-terminal verification, source correspondence, and the
@@ -1274,6 +1358,7 @@ const copyRetention = (
  * no secret bytes or preparation-continuation method.
  */
 export class JoinedSeedMasterCustody {
+    readonly #authenticationLimits: SeedRecipientAuthenticationCustodyLimits;
     readonly #context: JoinedSeedMasterCustodyContext;
     readonly #joinedRecordKey: string;
     readonly #kernel: ProductionJoinedSeedMasterCustodyKernel;
@@ -1287,6 +1372,7 @@ export class JoinedSeedMasterCustody {
     #operationTail: Promise<void> = Promise.resolve();
 
     public constructor(input: {
+        authenticationCustodyLimits: SeedRecipientAuthenticationCustodyLimits;
         context: JoinedSeedMasterCustodyContext;
         kernel: ProductionJoinedSeedMasterCustodyKernel;
         limits: JoinedSeedMasterCustodyLimits;
@@ -1313,6 +1399,10 @@ export class JoinedSeedMasterCustody {
             );
         }
         this.#context = copyContext(input.context);
+        this.#authenticationLimits =
+            snapshotSeedRecipientAuthenticationCustodyLimitsForMasterJoin(
+                input.authenticationCustodyLimits,
+            );
         this.#kernel = input.kernel;
         this.#limits = copyLimits(input.limits);
         this.#protection = input.protection;
@@ -1352,6 +1442,18 @@ export class JoinedSeedMasterCustody {
             const snapshot = await this.#readStorageSnapshot();
             try {
                 if (snapshot.joined === undefined) {
+                    if (snapshot.authentication === 'burned') {
+                        throw new AuthenticatedRuntimeRecordError(
+                            'InvalidState',
+                            'Joined seed-master custody cannot resume a durably burned recipient action.',
+                        );
+                    }
+                    if (snapshot.authentication?.kind === 'joined') {
+                        throw new AuthenticatedRuntimeRecordError(
+                            'Conflict',
+                            'Seed-recipient action state records a joined transition without joined custody.',
+                        );
+                    }
                     return undefined;
                 }
                 this.#requireRawPredecessorsErased(snapshot);
@@ -1394,7 +1496,21 @@ export class JoinedSeedMasterCustody {
             }
             const source = snapshot.source;
             const receipt = snapshot.receipt;
+            const authentication = snapshot.authentication;
+            if (authentication === 'burned') {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidState',
+                    'Joined seed-master custody cannot continue a durably burned recipient action.',
+                );
+            }
+            if (authentication?.kind === 'joined') {
+                throw new AuthenticatedRuntimeRecordError(
+                    'Conflict',
+                    'Seed-recipient action state records a joined transition without joined custody.',
+                );
+            }
             if (
+                authentication === undefined ||
                 source === undefined ||
                 source === 'incomplete' ||
                 receipt === undefined ||
@@ -1422,6 +1538,7 @@ export class JoinedSeedMasterCustody {
                     const committedSealedBytes =
                         await this.#recencyCoordinator.runMutation((store) =>
                             commitTransition({
+                                authentication,
                                 joinedRecordKey: this.#joinedRecordKey,
                                 limits: this.#limits,
                                 protection: this.#protection,
@@ -1448,6 +1565,18 @@ export class JoinedSeedMasterCustody {
         snapshot = await this.#readStorageSnapshot();
         try {
             if (snapshot.joined === undefined) {
+                if (snapshot.authentication === 'burned') {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'InvalidState',
+                        'Joined seed-master transition lost its selection to the durable action burn.',
+                    );
+                }
+                if (snapshot.authentication?.kind === 'joined') {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'Conflict',
+                        'Seed-recipient action state records a joined transition without joined custody.',
+                    );
+                }
                 throw new AuthenticatedRuntimeRecordError(
                     'Conflict',
                     'Joined seed-master transition did not retain its completed record.',
@@ -1470,11 +1599,21 @@ export class JoinedSeedMasterCustody {
 
     async #readStorageSnapshot(): Promise<JoinedSeedMasterStorageSnapshot> {
         return this.#recencyCoordinator.runRead(async (store) => {
+            let authentication: AuthenticationPredecessorState = undefined;
             let joined: OpenedJoinedSeedMasterRecord | undefined;
             let source: SourcePredecessorState = undefined;
             let receipt: ReceiptPredecessorState = undefined;
             let completed = false;
             try {
+                authentication =
+                    await readSelectedSeedRecipientAuthenticationCustodyForMasterJoin(
+                        {
+                            context: this.#receiptContext,
+                            limits: this.#authenticationLimits,
+                            protection: this.#protection,
+                            store,
+                        },
+                    );
                 joined = await readJoinedRecord({
                     context: this.#context,
                     limits: this.#limits,
@@ -1497,7 +1636,13 @@ export class JoinedSeedMasterCustody {
                             store,
                         },
                     );
-                const snapshot = Object.freeze({ joined, receipt, source });
+                const snapshot = Object.freeze({
+                    authentication,
+                    joined,
+                    receipt,
+                    source,
+                });
+                authentication = undefined;
                 joined = undefined;
                 receipt = undefined;
                 source = undefined;
@@ -1505,6 +1650,7 @@ export class JoinedSeedMasterCustody {
                 return snapshot;
             } finally {
                 if (!completed) {
+                    destroyAuthenticationPredecessor(authentication);
                     if (joined !== undefined) {
                         destroyRecord(joined.record);
                         joined.sealedBytes.fill(0);
@@ -1593,10 +1739,20 @@ export class JoinedSeedMasterCustody {
     #requireRawPredecessorsErased(
         snapshot: JoinedSeedMasterStorageSnapshot,
     ): void {
-        if (snapshot.source !== undefined || snapshot.receipt !== undefined) {
+        if (
+            snapshot.authentication === undefined ||
+            snapshot.authentication === 'burned' ||
+            snapshot.authentication.kind !== 'joined' ||
+            !bytesEqual(
+                snapshot.authentication.receiptTerminalIdentity,
+                this.#context.receiptTerminalIdentity,
+            ) ||
+            snapshot.source !== undefined ||
+            snapshot.receipt !== undefined
+        ) {
             throw new AuthenticatedRuntimeRecordError(
                 'Conflict',
-                'Joined seed-master custody retained raw predecessor state after completion.',
+                'Joined seed-master custody has mismatched action completion or retained raw predecessor state.',
             );
         }
     }

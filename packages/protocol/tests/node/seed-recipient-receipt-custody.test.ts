@@ -2,8 +2,17 @@ import type { ProductionSeedRecipientReceiptKernel } from '@sealed-lattice/wasm'
 import { describe, expect, it, vi } from 'vitest';
 
 const authenticationMocks = vi.hoisted(() => ({
+    actionStateGuard: Object.freeze({}),
+    assertSelected: vi.fn(() => Promise.resolve()),
+    assertUsesRecencyCoordinator: vi.fn(),
+    createActionStateGuard: vi.fn(),
     isAuthorized: vi.fn(() => true),
+    retainConflictBurn: vi.fn(() => Promise.resolve()),
 }));
+
+authenticationMocks.createActionStateGuard.mockReturnValue(
+    authenticationMocks.actionStateGuard,
+);
 
 vi.mock('@sealed-lattice/wasm', () => ({
     isProductionSeedRecipientReceiptKernel: () => true,
@@ -15,8 +24,15 @@ vi.mock('@sealed-lattice/wasm', () => ({
 vi.mock(
     '#packages/protocol/src/runtime/seed-recipient-authentication-custody',
     () => ({
+        assertSeedRecipientActionSelected: authenticationMocks.assertSelected,
+        assertSeedRecipientActionStateGuardUsesRecencyCoordinator:
+            authenticationMocks.assertUsesRecencyCoordinator,
+        createSeedRecipientActionStateGuard:
+            authenticationMocks.createActionStateGuard,
         isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody:
             authenticationMocks.isAuthorized,
+        retainConflictingSeedRecipientReceiptBurn:
+            authenticationMocks.retainConflictBurn,
     }),
 );
 
@@ -742,6 +758,7 @@ describe('seed-recipient receipt custody', () => {
     });
 
     it('keeps one slot across alternate delivery carriers and root terminals', async () => {
+        authenticationMocks.retainConflictBurn.mockClear();
         const fixture = await createFixture();
         const firstCapability = fixture.kernel.issueCapability(0x81);
         await fixture.custody.retainForPublication({
@@ -754,6 +771,7 @@ describe('seed-recipient receipt custody', () => {
                 authenticatedInventory: alternateCarrierCapability,
             }),
         ).rejects.toMatchObject({ code: 'Conflict' });
+        expect(authenticationMocks.retainConflictBurn).toHaveBeenCalledTimes(1);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
 
         const alternateContext = Object.freeze({
@@ -769,9 +787,11 @@ describe('seed-recipient receipt custody', () => {
         await expect(
             alternateCustody.resumeForPublication(),
         ).rejects.toMatchObject({ code: 'Conflict' });
+        expect(authenticationMocks.retainConflictBurn).toHaveBeenCalledTimes(2);
     });
 
     it('retains one reservation across production and validation failures', async () => {
+        authenticationMocks.retainConflictBurn.mockClear();
         const kernel = new DeterministicReceiptKernel();
         kernel.failNextProductionCount = 1;
         const fixture = await createFixture({ kernel });
@@ -798,6 +818,7 @@ describe('seed-recipient receipt custody', () => {
         expect(kernel.productionObservations[2]?.signatureRandomness).toEqual(
             firstRandomness,
         );
+        expect(authenticationMocks.retainConflictBurn).not.toHaveBeenCalled();
     });
 
     it('serializes duplicate receipt requests without signing twice', async () => {
@@ -814,6 +835,28 @@ describe('seed-recipient receipt custody', () => {
         ]);
         expect(first).toEqual(second);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
+    });
+
+    it('withholds a completed receipt from terminal endorsement after an action burn', async () => {
+        const fixture = await createFixture();
+        const capability = fixture.kernel.issueCapability(0xb1);
+        const publication = await fixture.custody.retainForPublication({
+            authenticatedInventory: capability,
+        });
+        publication.receiptEnvelopeBytes.fill(0);
+        const authorization =
+            fixture.custody.authorizeTerminalEndorsementKernel();
+        authenticationMocks.assertSelected.mockRejectedValueOnce(
+            Object.assign(new Error('Action burned.'), {
+                code: 'InvalidState',
+            }),
+        );
+
+        await expect(
+            consumeSeedRecipientReceiptTerminalEndorsementAuthorization(
+                authorization,
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
     });
 
     it('reports a missing durable receipt as pending and rejects accessor input', async () => {

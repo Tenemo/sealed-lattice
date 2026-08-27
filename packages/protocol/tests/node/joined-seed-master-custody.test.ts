@@ -1,23 +1,26 @@
 import type {
+    OpenProductionSeedRecipientReceiptKernelInput,
     ProductionJoinedSeedMasterCustodyKernel,
     ProductionSeedCatalogSourceCustodyKernel,
     ProductionSeedRecipientReceiptKernel,
+    ProductionSeedReceiptTerminalEndorsementKernel,
 } from '@sealed-lattice/wasm';
 import { describe, expect, it, vi } from 'vitest';
+
+const wasmMocks = vi.hoisted(() => ({
+    openRecipientKernel: vi.fn(),
+    openTerminalEndorsementKernel: vi.fn(),
+}));
 
 vi.mock('@sealed-lattice/wasm', () => ({
     isProductionJoinedSeedMasterCustodyKernel: () => true,
     isProductionSeedCatalogSourceCustodyKernel: () => true,
     isProductionSeedRecipientReceiptKernel: () => true,
+    isProductionSeedReceiptTerminalEndorsementKernel: () => true,
+    openProductionSeedRecipientReceiptKernel: wasmMocks.openRecipientKernel,
+    openProductionSeedReceiptTerminalEndorsementKernel:
+        wasmMocks.openTerminalEndorsementKernel,
 }));
-
-vi.mock(
-    '#packages/protocol/src/runtime/seed-recipient-authentication-custody',
-    () => ({
-        isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody: () =>
-            true,
-    }),
-);
 
 import {
     createRuntimeRecordProtection,
@@ -43,7 +46,24 @@ import {
     type SeedCatalogSourceCustodyLimits,
     type SeedCatalogValidationInput,
 } from '#packages/protocol/src/runtime/seed-catalog-source-custody';
-import type { SeedRecipientAuthenticationCustody } from '#packages/protocol/src/runtime/seed-recipient-authentication-custody';
+import {
+    SeedReceiptTerminalEndorsementCustody,
+    openBrowserLocalSeedReceiptTerminalEndorsementKernel,
+    type PreparedSeedReceiptTerminalEndorsementInventory,
+    type SeedReceiptTerminalEndorsementCustodyContext,
+    type SeedReceiptTerminalEndorsementCustodyKernel,
+    type SeedReceiptTerminalEndorsementCustodyLimits,
+    type SeedReceiptTerminalEndorsementProductionInput,
+    type SeedReceiptTerminalEndorsementValidationInput,
+} from '#packages/protocol/src/runtime/seed-receipt-terminal-endorsement-custody';
+import {
+    createSeedRecipientActionStateGuard,
+    openBrowserLocalSeedRecipientReceiptKernel,
+    readSelectedSeedRecipientAuthenticationCustodyForMasterJoin,
+    retainConflictingSeedRecipientReceiptBurn,
+    SeedRecipientAuthenticationCustody,
+    type SeedRecipientAuthenticationCustodyLimits,
+} from '#packages/protocol/src/runtime/seed-recipient-authentication-custody';
 import {
     SeedRecipientReceiptCustody,
     readCompletedSeedRecipientReceiptCustodyForMasterJoin,
@@ -81,6 +101,22 @@ const receiptLimits: SeedRecipientReceiptCustodyLimits = Object.freeze({
     maximumReceiptIntentByteLength: 256,
     transactionLifetimeMilliseconds: 1_000,
 });
+
+const authenticationLimits: SeedRecipientAuthenticationCustodyLimits =
+    Object.freeze({
+        maximumCanonicalOpenRequestByteLength: 256,
+        transactionLifetimeMilliseconds: 1_000,
+    });
+
+const terminalEndorsementLimits: SeedReceiptTerminalEndorsementCustodyLimits =
+    Object.freeze({
+        maximumEndorsementAuthorizationBodyByteLength: 256,
+        maximumVerifiedReceiptInventoryBodyByteLength: 256,
+        maximumReceiptEnvelopeByteLength: 256,
+        maximumEndorsementEnvelopeByteLength: 256,
+        maximumTerminalBodyByteLength: 256,
+        transactionLifetimeMilliseconds: 1_000,
+    });
 
 const joinedLimits: JoinedSeedMasterCustodyLimits = Object.freeze({
     maximumJoinedMasterPayloadByteLength: 2_048,
@@ -148,6 +184,81 @@ const receiptContext = (
         recipientPosition: joinedContext.participantPosition,
         rootTerminalIdentity: joinedContext.rootTerminalIdentity.slice(),
     });
+
+const retainAuthenticationSelection = async (input: {
+    authenticationCustody: SeedRecipientAuthenticationCustody;
+    joinedContext: JoinedSeedMasterCustodyContext;
+    kernel: DeterministicReceiptKernel;
+}): Promise<ProductionSeedRecipientReceiptKernel> => {
+    const verifiedContext = receiptContext(input.joinedContext);
+    wasmMocks.openRecipientKernel.mockImplementationOnce(
+        async (
+            _kernelUrl: URL,
+            kernelInput: OpenProductionSeedRecipientReceiptKernelInput,
+        ) => {
+            await kernelInput.stateOperations.retainVerifiedPublicSelection({
+                canonicalOpenRequestBytes: new Uint8Array(19).fill(0x71),
+                verifiedContext,
+            });
+            return input.kernel;
+        },
+    );
+    return openBrowserLocalSeedRecipientReceiptKernel(
+        new URL('https://example.invalid/kernel.wasm'),
+        {
+            authenticationCustody: input.authenticationCustody,
+            carriers: [],
+            mailboxCapability: Object.freeze({}) as never,
+            parameterIdentity: input.joinedContext.parameterIdentity,
+            preparationContextBytes:
+                input.joinedContext.preparationContextIdentity,
+            recipientPosition: input.joinedContext.participantPosition,
+            rootAuthorizationPackages: [],
+            rootTerminalCertificateBytes:
+                input.joinedContext.rootTerminalCertificateIdentity,
+            rosterBytes: input.joinedContext.rosterIdentity,
+            signingCapability: Object.freeze({}) as never,
+        },
+    );
+};
+
+const terminalEndorsementContext = (
+    joinedContext: JoinedSeedMasterCustodyContext,
+): SeedReceiptTerminalEndorsementCustodyContext =>
+    Object.freeze({
+        parameterIdentity: joinedContext.parameterIdentity.slice(),
+        participantCount: joinedContext.participantCount,
+        preparationAttemptOrdinal: joinedContext.preparationAttemptOrdinal,
+        preparationContextIdentity:
+            joinedContext.preparationContextIdentity.slice(),
+        endorserPosition: joinedContext.participantPosition,
+        rootTerminalIdentity: joinedContext.rootTerminalIdentity.slice(),
+    });
+
+const openTerminalEndorsementKernelForTest = async (input: {
+    joinedContext: JoinedSeedMasterCustodyContext;
+    kernel: DeterministicTerminalEndorsementKernel;
+    receiptCustody: SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>;
+}): Promise<ProductionSeedReceiptTerminalEndorsementKernel> => {
+    wasmMocks.openTerminalEndorsementKernel.mockResolvedValueOnce(input.kernel);
+    return openBrowserLocalSeedReceiptTerminalEndorsementKernel(
+        new URL('https://example.invalid/kernel.wasm'),
+        {
+            endorserPosition: input.joinedContext.participantPosition,
+            parameterIdentity: input.joinedContext.parameterIdentity,
+            preparationContextBytes:
+                input.joinedContext.preparationContextIdentity,
+            receiptCustodyAuthorization:
+                input.receiptCustody.authorizeTerminalEndorsementKernel(),
+            receiptEnvelopeBytes: [],
+            rootAuthorizationPackages: [],
+            rootTerminalCertificateBytes:
+                input.joinedContext.rootTerminalCertificateIdentity,
+            rosterBytes: input.joinedContext.rosterIdentity,
+            signingCapability: Object.freeze({}) as never,
+        },
+    );
+};
 
 const concatenate = (parts: readonly Uint8Array[]): Uint8Array => {
     const byteLength = parts.reduce(
@@ -358,7 +469,9 @@ class DeterministicSourceKernel implements SeedCatalogSourceCustodyKernel {
 
 class AuthenticatedInventoryCapability {}
 
-const preparedReceiptInventory = (): PreparedSeedRecipientReceiptInventory =>
+const preparedReceiptInventory = (
+    receiptIntentMarker = 0x85,
+): PreparedSeedRecipientReceiptInventory =>
     Object.freeze({
         authenticatedInventoryBodyBytes: new Uint8Array(31).fill(0x81),
         authenticatedInventoryIdentity: hashFilledWith(0x12),
@@ -367,7 +480,7 @@ const preparedReceiptInventory = (): PreparedSeedRecipientReceiptInventory =>
             new Uint8Array(19).fill(0x83),
             new Uint8Array(23).fill(0x84),
         ]),
-        receiptIntentBytes: new Uint8Array(29).fill(0x85),
+        receiptIntentBytes: new Uint8Array(29).fill(receiptIntentMarker),
         receiptIntentIdentity: hashFilledWith(0x86),
     });
 
@@ -382,10 +495,16 @@ const receiptEnvelope = (
 };
 
 class DeterministicReceiptKernel implements SeedRecipientReceiptCustodyKernel<AuthenticatedInventoryCapability> {
+    readonly #receiptIntentMarker: number;
+
+    public constructor(receiptIntentMarker = 0x85) {
+        this.#receiptIntentMarker = receiptIntentMarker;
+    }
+
     public prepare(
         _authenticatedInventory: AuthenticatedInventoryCapability,
     ): PreparedSeedRecipientReceiptInventory {
-        return preparedReceiptInventory();
+        return preparedReceiptInventory(this.#receiptIntentMarker);
     }
 
     public produce(input: SeedRecipientReceiptProductionInput): Uint8Array {
@@ -393,7 +512,7 @@ class DeterministicReceiptKernel implements SeedRecipientReceiptCustodyKernel<Au
     }
 
     public validate(input: SeedRecipientReceiptValidationInput): void {
-        const expected = preparedReceiptInventory();
+        const expected = preparedReceiptInventory(this.#receiptIntentMarker);
         if (
             !bytesEqual(
                 input.preparedInventory.authenticatedInventoryBodyBytes,
@@ -419,6 +538,84 @@ class DeterministicReceiptKernel implements SeedRecipientReceiptCustodyKernel<Au
         ) {
             throw new Error(
                 'The test receipt envelope failed independent validation.',
+            );
+        }
+    }
+}
+
+const preparedTerminalEndorsementInventory = (
+    joinedContext: JoinedSeedMasterCustodyContext,
+    terminalMarker: number,
+): PreparedSeedReceiptTerminalEndorsementInventory =>
+    Object.freeze({
+        endorsementAuthorizationBodyBytes: new Uint8Array(17).fill(0xa1),
+        verifiedReceiptInventoryBodyBytes: new Uint8Array(19).fill(0xa2),
+        verifiedReceiptInventoryIdentity: hashFilledWith(0xa3),
+        orderedReceiptEnvelopeBytes: Object.freeze(
+            Array.from(
+                { length: joinedContext.participantCount },
+                (_unused, participantPosition) =>
+                    new Uint8Array(23).fill(0xa4 + participantPosition),
+            ),
+        ),
+        retainedLocalReceiptBodyIdentity:
+            joinedContext.receiptBodyIdentity.slice(),
+        retainedLocalReceiptEnvelopeIdentity:
+            joinedContext.receiptEnvelopeIdentity.slice(),
+        terminalBodyBytes: new Uint8Array(29).fill(terminalMarker),
+        terminalBodyIdentity: hashFilledWith(terminalMarker),
+    });
+
+class DeterministicTerminalEndorsementKernel implements SeedReceiptTerminalEndorsementCustodyKernel {
+    readonly #joinedContext: JoinedSeedMasterCustodyContext;
+    readonly #terminalMarker: number;
+
+    public constructor(
+        joinedContext: JoinedSeedMasterCustodyContext,
+        terminalMarker: number,
+    ) {
+        this.#joinedContext = joinedContext;
+        this.#terminalMarker = terminalMarker;
+    }
+
+    public prepare(): PreparedSeedReceiptTerminalEndorsementInventory {
+        return preparedTerminalEndorsementInventory(
+            this.#joinedContext,
+            this.#terminalMarker,
+        );
+    }
+
+    public produce(
+        input: SeedReceiptTerminalEndorsementProductionInput,
+    ): Uint8Array {
+        const envelope = new Uint8Array(37).fill(this.#terminalMarker);
+        envelope[0] = input.signatureRandomness[0] ?? 0;
+        return envelope;
+    }
+
+    public validate(
+        input: SeedReceiptTerminalEndorsementValidationInput,
+    ): void {
+        const expected = preparedTerminalEndorsementInventory(
+            this.#joinedContext,
+            this.#terminalMarker,
+        );
+        if (
+            !bytesEqual(
+                input.preparedInventory.terminalBodyBytes,
+                expected.terminalBodyBytes,
+            ) ||
+            !bytesEqual(
+                input.preparedInventory.terminalBodyIdentity,
+                expected.terminalBodyIdentity,
+            ) ||
+            input.preparedInventory.orderedReceiptEnvelopeBytes.length !==
+                this.#joinedContext.participantCount ||
+            (input.endorsementEnvelopeBytes !== undefined &&
+                input.endorsementEnvelopeBytes.byteLength !== 37)
+        ) {
+            throw new Error(
+                'The test terminal endorsement failed independent validation.',
             );
         }
     }
@@ -527,6 +724,7 @@ const createIdentifierFactory = (): ((
 type CustodyFixture = Readonly<{
     adapter: InMemoryRuntimeStorageAdapter;
     anchor: InMemoryAuthenticatedStorageRecencyAnchor;
+    authenticationCustody: SeedRecipientAuthenticationCustody;
     context: JoinedSeedMasterCustodyContext;
     coordinator: AuthenticatedStorageRecencyCoordinator;
     createIdentifier: (kind: 'lease' | 'transaction') => string;
@@ -561,6 +759,12 @@ const createFixture = async (input?: {
         rootKey,
     });
     const joinedContext = context();
+    const authenticationCustody = new SeedRecipientAuthenticationCustody({
+        context: receiptContext(joinedContext),
+        limits: authenticationLimits,
+        protection,
+        recencyCoordinator: coordinator,
+    });
     if (input?.retainPredecessors !== false) {
         const sourceCustody = new SeedCatalogSourceCustody({
             context: sourceContext(joinedContext),
@@ -579,13 +783,17 @@ const createFixture = async (input?: {
             entry.openingBytes.fill(0);
         });
 
+        const receiptKernel = new DeterministicReceiptKernel();
+        const productionReceiptKernel = await retainAuthenticationSelection({
+            authenticationCustody,
+            joinedContext,
+            kernel: receiptKernel,
+        });
         const receiptCustody =
             new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
-                authenticationCustody: Object.freeze(
-                    {},
-                ) as SeedRecipientAuthenticationCustody,
+                authenticationCustody,
                 context: receiptContext(joinedContext),
-                kernel: new DeterministicReceiptKernel() as unknown as ProductionSeedRecipientReceiptKernel,
+                kernel: productionReceiptKernel,
                 limits: receiptLimits,
                 protection,
                 recencyCoordinator: coordinator,
@@ -599,11 +807,13 @@ const createFixture = async (input?: {
     return Object.freeze({
         adapter: opened.adapter,
         anchor,
+        authenticationCustody,
         context: joinedContext,
         coordinator,
         createIdentifier,
         cryptoProvider,
         custody: new JoinedSeedMasterCustody({
+            authenticationCustodyLimits: authenticationLimits,
             context: joinedContext,
             kernel: kernel as unknown as ProductionJoinedSeedMasterCustodyKernel,
             limits: joinedLimits,
@@ -638,6 +848,7 @@ const reopen = async (
         rootKey: fixture.rootKey,
     });
     return new JoinedSeedMasterCustody({
+        authenticationCustodyLimits: authenticationLimits,
         context: fixture.context,
         kernel: fixture.kernel as unknown as ProductionJoinedSeedMasterCustodyKernel,
         limits: joinedLimits,
@@ -661,10 +872,31 @@ const transitionInput = (
         verificationContextBytes: verificationContextBytes(joinedContext),
     });
 
-const assertRawPredecessorsAbsent = async (
+const assertJoinedActionAndRawPredecessorCleanup = async (
     fixture: CustodyFixture,
 ): Promise<void> => {
     await fixture.coordinator.runRead(async (store) => {
+        const authentication =
+            await readSelectedSeedRecipientAuthenticationCustodyForMasterJoin({
+                context: receiptContext(fixture.context),
+                limits: authenticationLimits,
+                protection: fixture.protection,
+                store,
+            });
+        expect(authentication).toMatchObject({
+            kind: 'joined',
+            receiptTerminalIdentity: hashFilledWith(0x19),
+        });
+        if (typeof authentication === 'object') {
+            if (authentication.kind === 'joined') {
+                authentication.receiptTerminalIdentity.fill(0);
+            } else {
+                authentication.context.parameterIdentity.fill(0);
+                authentication.context.preparationContextIdentity.fill(0);
+                authentication.context.rootTerminalIdentity.fill(0);
+                authentication.sealedBytes.fill(0);
+            }
+        }
         expect(
             await readCompletedSeedCatalogSourceCustodyForMasterJoin({
                 context: sourceContext(fixture.context),
@@ -687,6 +919,8 @@ const assertRawPredecessorsAbsent = async (
 describe('joined seed-master custody', () => {
     it('independently derives the exact joined record and atomic predecessor overlap', () => {
         const derived = deriveJoinedSeedMasterCustodyRecordByteLengths({
+            authenticationPredecessorCiphertextByteLength: 1_235_671,
+            authenticationSuccessorCiphertextByteLength: 323,
             joinedMasterPayloadByteLength: 4_894,
             receiptPredecessorCiphertextByteLength: 569_465,
             receiptTerminalCertificateByteLength: 36_340,
@@ -704,7 +938,8 @@ describe('joined seed-master custody', () => {
             623_110;
         const independentJoinedCiphertextByteLength =
             independentJoinedPlaintextByteLength + 54;
-        const independentPredecessorCiphertextByteLength = 677_795 + 569_465;
+        const independentPredecessorCiphertextByteLength =
+            1_235_671 + 677_795 + 569_465;
         const independentJoinRequestByteLength =
             4 +
             2 +
@@ -721,7 +956,8 @@ describe('joined seed-master custody', () => {
         expect(derived).toEqual({
             atomicTransitionCiphertextOverlapByteLength:
                 independentPredecessorCiphertextByteLength +
-                independentJoinedCiphertextByteLength,
+                independentJoinedCiphertextByteLength +
+                323,
             joinRequestByteLength: independentJoinRequestByteLength,
             joinResponseByteLength: independentJoinResponseByteLength,
             joinedCiphertextByteLength: independentJoinedCiphertextByteLength,
@@ -733,19 +969,29 @@ describe('joined seed-master custody', () => {
                 independentPredecessorCiphertextByteLength,
             maximumKernelInputByteLength: independentJoinRequestByteLength,
             maximumColdRestartReadByteLength:
-                independentJoinedCiphertextByteLength,
+                independentJoinedCiphertextByteLength + 323,
+            netCiphertextReclamationByteLength:
+                independentPredecessorCiphertextByteLength -
+                independentJoinedCiphertextByteLength -
+                323,
+            retainedSuccessorCiphertextByteLength:
+                independentJoinedCiphertextByteLength + 323,
         });
         expect(derived.joinedPlaintextByteLength).toBe(701_434);
         expect(derived.joinedCiphertextByteLength).toBe(701_488);
         expect(derived.joinRequestByteLength).toBe(1_943_696);
         expect(derived.joinResponseByteLength).toBe(4_905);
+        expect(derived.netCiphertextReclamationByteLength).toBe(1_781_120);
+        expect(derived.retainedSuccessorCiphertextByteLength).toBe(701_811);
         expect(derived.atomicTransitionCiphertextOverlapByteLength).toBe(
-            1_948_748,
+            3_184_742,
         );
     });
 
     it('refuses an empty predecessor plaintext and an oversized exact kernel request', () => {
         const commonInput = {
+            authenticationPredecessorCiphertextByteLength: 1_235_671,
+            authenticationSuccessorCiphertextByteLength: 323,
             joinedMasterPayloadByteLength: 4_894,
             receiptPredecessorCiphertextByteLength: 569_465,
             receiptTerminalCertificateByteLength: 36_340,
@@ -769,6 +1015,11 @@ describe('joined seed-master custody', () => {
 
     it('atomically replaces actual completed predecessor records and resumes without exposing masters', async () => {
         const fixture = await createFixture();
+        const actionStateGuard = createSeedRecipientActionStateGuard({
+            authenticationCustody: fixture.authenticationCustody,
+            context: receiptContext(fixture.context),
+            recencyCoordinator: fixture.coordinator,
+        });
         const mutationCountBeforeJoin = fixture.adapter.atomicMutationCount;
         const retained = await fixture.custody.retainJoinedMasters(
             transitionInput(fixture.context),
@@ -784,7 +1035,20 @@ describe('joined seed-master custody', () => {
         expect('joinedMasterPayloadBytes' in retained).toBe(false);
         expect(fixture.kernel.joinCallCount).toBe(1);
         expect(fixture.kernel.validationCallCount).toBe(2);
-        await assertRawPredecessorsAbsent(fixture);
+        await assertJoinedActionAndRawPredecessorCleanup(fixture);
+        await expect(fixture.authenticationCustody.readStatus()).resolves.toBe(
+            'joined',
+        );
+        await expect(
+            retainAuthenticationSelection({
+                authenticationCustody: fixture.authenticationCustody,
+                joinedContext: fixture.context,
+                kernel: new DeterministicReceiptKernel(),
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(
+            retainConflictingSeedRecipientReceiptBurn(actionStateGuard),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
 
         const resumed = await fixture.custody.resumeRetained();
         expect(resumed).toEqual(retained);
@@ -803,7 +1067,129 @@ describe('joined seed-master custody', () => {
         expect(await fixture.custody.resumeRetained()).toBeUndefined();
     });
 
-    it('preserves both predecessors when retained-state validation fails', async () => {
+    it('burns a conflicting durable receipt before joined-master continuation', async () => {
+        const fixture = await createFixture();
+        const alternateKernel = new DeterministicReceiptKernel(0x96);
+        const productionAlternateKernel = await retainAuthenticationSelection({
+            authenticationCustody: fixture.authenticationCustody,
+            joinedContext: fixture.context,
+            kernel: alternateKernel,
+        });
+        const alternateReceiptCustody =
+            new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
+                authenticationCustody: fixture.authenticationCustody,
+                context: receiptContext(fixture.context),
+                kernel: productionAlternateKernel,
+                limits: receiptLimits,
+                protection: fixture.protection,
+                recencyCoordinator: fixture.coordinator,
+            });
+
+        await expect(
+            alternateReceiptCustody.retainForPublication({
+                authenticatedInventory: new AuthenticatedInventoryCapability(),
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+        await expect(fixture.authenticationCustody.readStatus()).resolves.toBe(
+            'burned',
+        );
+        await expect(
+            fixture.custody.retainJoinedMasters(
+                transitionInput(fixture.context),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(fixture.kernel.joinCallCount).toBe(0);
+    });
+
+    it('burns a conflicting durable terminal endorsement before joined-master continuation', async () => {
+        const fixture = await createFixture();
+        const receiptKernel = new DeterministicReceiptKernel();
+        const productionReceiptKernel = await retainAuthenticationSelection({
+            authenticationCustody: fixture.authenticationCustody,
+            joinedContext: fixture.context,
+            kernel: receiptKernel,
+        });
+        const receiptCustody =
+            new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
+                authenticationCustody: fixture.authenticationCustody,
+                context: receiptContext(fixture.context),
+                kernel: productionReceiptKernel,
+                limits: receiptLimits,
+                protection: fixture.protection,
+                recencyCoordinator: fixture.coordinator,
+            });
+        const selectedTerminalKernel =
+            new DeterministicTerminalEndorsementKernel(fixture.context, 0xb1);
+        const selectedProductionKernel =
+            await openTerminalEndorsementKernelForTest({
+                joinedContext: fixture.context,
+                kernel: selectedTerminalKernel,
+                receiptCustody,
+            });
+        const selectedTerminalCustody =
+            new SeedReceiptTerminalEndorsementCustody({
+                context: terminalEndorsementContext(fixture.context),
+                kernel: selectedProductionKernel,
+                limits: terminalEndorsementLimits,
+                protection: fixture.protection,
+                recencyCoordinator: fixture.coordinator,
+            });
+        const publication =
+            await selectedTerminalCustody.retainForPublication();
+        publication.endorsementEnvelopeBytes.fill(0);
+
+        const alternateTerminalKernel =
+            new DeterministicTerminalEndorsementKernel(fixture.context, 0xb2);
+        const alternateProductionKernel =
+            await openTerminalEndorsementKernelForTest({
+                joinedContext: fixture.context,
+                kernel: alternateTerminalKernel,
+                receiptCustody,
+            });
+        const alternateTerminalCustody =
+            new SeedReceiptTerminalEndorsementCustody({
+                context: terminalEndorsementContext(fixture.context),
+                kernel: alternateProductionKernel,
+                limits: terminalEndorsementLimits,
+                protection: fixture.protection,
+                recencyCoordinator: fixture.coordinator,
+            });
+
+        await expect(
+            alternateTerminalCustody.retainForPublication(),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+        await expect(fixture.authenticationCustody.readStatus()).resolves.toBe(
+            'burned',
+        );
+        await expect(
+            fixture.custody.retainJoinedMasters(
+                transitionInput(fixture.context),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(fixture.kernel.joinCallCount).toBe(0);
+    });
+
+    it('refuses a durably burned recipient action before joining or resuming', async () => {
+        const fixture = await createFixture();
+        const guard = createSeedRecipientActionStateGuard({
+            authenticationCustody: fixture.authenticationCustody,
+            context: receiptContext(fixture.context),
+            recencyCoordinator: fixture.coordinator,
+        });
+        await retainConflictingSeedRecipientReceiptBurn(guard);
+
+        await expect(
+            fixture.custody.retainJoinedMasters(
+                transitionInput(fixture.context),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(fixture.custody.resumeRetained()).rejects.toMatchObject({
+            code: 'InvalidState',
+        });
+        expect(fixture.kernel.joinCallCount).toBe(0);
+    });
+
+    it('preserves every predecessor when retained-state validation fails', async () => {
         const fixture = await createFixture();
         fixture.kernel.failNextValidationCount = 1;
         await expect(
@@ -815,6 +1201,15 @@ describe('joined seed-master custody', () => {
         expect(await fixture.custody.resumeRetained()).toBeUndefined();
 
         await fixture.coordinator.runRead(async (store) => {
+            const authentication =
+                await readSelectedSeedRecipientAuthenticationCustodyForMasterJoin(
+                    {
+                        context: receiptContext(fixture.context),
+                        limits: authenticationLimits,
+                        protection: fixture.protection,
+                        store,
+                    },
+                );
             const source =
                 await readCompletedSeedCatalogSourceCustodyForMasterJoin({
                     context: sourceContext(fixture.context),
@@ -829,8 +1224,19 @@ describe('joined seed-master custody', () => {
                     protection: fixture.protection,
                     store,
                 });
+            expect(authentication).toBeTypeOf('object');
             expect(source).toBeTypeOf('object');
             expect(receipt).toBeTypeOf('object');
+            if (typeof authentication === 'object') {
+                if (authentication.kind === 'selected') {
+                    authentication.context.parameterIdentity.fill(0);
+                    authentication.context.preparationContextIdentity.fill(0);
+                    authentication.context.rootTerminalIdentity.fill(0);
+                    authentication.sealedBytes.fill(0);
+                } else {
+                    authentication.receiptTerminalIdentity.fill(0);
+                }
+            }
             if (typeof source === 'object') {
                 source.recordBytes.fill(0);
                 source.sealedBytes.fill(0);
@@ -857,7 +1263,7 @@ describe('joined seed-master custody', () => {
             }),
         ).rejects.toMatchObject({ code: 'Conflict' });
         expect(fixture.kernel.joinCallCount).toBe(1);
-        await assertRawPredecessorsAbsent(fixture);
+        await assertJoinedActionAndRawPredecessorCleanup(fixture);
     });
 
     it('cold-resumes an atomically committed transition after external-anchor interruption', async () => {

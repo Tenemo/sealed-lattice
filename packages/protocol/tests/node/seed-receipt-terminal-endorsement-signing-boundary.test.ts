@@ -23,6 +23,13 @@ vi.mock('@sealed-lattice/wasm', () => ({
     openProductionSeedReceiptTerminalEndorsementKernel: mocks.openKernel,
 }));
 
+vi.mock('../../src/runtime/seed-recipient-authentication-custody.js', () => ({
+    assertSeedRecipientActionSelected: vi.fn(),
+    assertSeedRecipientActionStateGuardMatchesContext: vi.fn(),
+    assertSeedRecipientActionStateGuardUsesRecencyCoordinator: vi.fn(),
+    retainConflictingSeedReceiptTerminalEndorsementBurn: vi.fn(),
+}));
+
 vi.mock('../../src/runtime/seed-recipient-receipt-custody.js', () => ({
     consumeSeedRecipientReceiptTerminalEndorsementAuthorization:
         mocks.consumeReceiptAuthorization,
@@ -62,7 +69,9 @@ it('binds the fixed terminal-endorsement operation to completed receipt custody 
     });
     const receiptRecordBytes = new Uint8Array(73).fill(0xb1);
     const receiptCustodyAuthorization = Object.freeze({});
+    const actionStateGuard = Object.freeze({});
     mocks.consumeReceiptAuthorization.mockResolvedValue({
+        actionStateGuard,
         context: receiptContext,
         recordBytes: receiptRecordBytes,
     });

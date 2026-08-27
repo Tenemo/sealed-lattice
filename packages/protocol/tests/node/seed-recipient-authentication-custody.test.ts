@@ -28,8 +28,12 @@ import {
 } from '#packages/protocol/src/runtime/authenticated-runtime-record';
 import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import {
+    assertSeedRecipientActionSelected,
+    createSeedRecipientActionStateGuard,
     deriveSeedRecipientAuthenticationCustodyByteLengths,
     openBrowserLocalSeedRecipientReceiptKernel,
+    retainConflictingSeedReceiptTerminalEndorsementBurn,
+    retainConflictingSeedRecipientReceiptBurn,
     SeedRecipientAuthenticationCustody,
     type SeedRecipientAuthenticationCustodyLimits,
     type SeedRecipientReceiptCustodyContext,
@@ -270,6 +274,8 @@ describe('seed-recipient authentication custody', () => {
             independentlyDerivedPrefixByteLength + 1_235_408;
         const independentlyDerivedBurnedPlaintextByteLength =
             independentlyDerivedSelectedPlaintextByteLength + 1;
+        const independentlyDerivedJoinedPlaintextByteLength =
+            4 + 2 + 1 + 64 * 3 + 2 * 3 + 64;
         expect(derived).toEqual({
             burnedCiphertextByteLength:
                 independentlyDerivedBurnedPlaintextByteLength + 54,
@@ -279,6 +285,10 @@ describe('seed-recipient authentication custody', () => {
                 independentlyDerivedSelectedPlaintextByteLength +
                 independentlyDerivedBurnedPlaintextByteLength +
                 54 * 2,
+            joinedCiphertextByteLength:
+                independentlyDerivedJoinedPlaintextByteLength + 54,
+            joinedPlaintextByteLength:
+                independentlyDerivedJoinedPlaintextByteLength,
             selectedCiphertextByteLength:
                 independentlyDerivedSelectedPlaintextByteLength + 54,
             selectedPlaintextByteLength:
@@ -288,6 +298,8 @@ describe('seed-recipient authentication custody', () => {
             burnedCiphertextByteLength: 1_235_672,
             burnedPlaintextByteLength: 1_235_618,
             burnTransitionCiphertextOverlapByteLength: 2_471_343,
+            joinedCiphertextByteLength: 323,
+            joinedPlaintextByteLength: 269,
             selectedCiphertextByteLength: 1_235_671,
             selectedPlaintextByteLength: 1_235_617,
         });
@@ -340,6 +352,91 @@ describe('seed-recipient authentication custody', () => {
                 openInput(reopened, 0x61),
             ),
         ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(reopened.readStatus()).resolves.toBe('burned');
+    });
+
+    it('retains canonical downstream receipt and terminal-endorsement burns', async () => {
+        const burnOperations = [
+            retainConflictingSeedRecipientReceiptBurn,
+            retainConflictingSeedReceiptTerminalEndorsementBurn,
+        ] as const;
+        for (const [operationIndex, retainBurn] of burnOperations.entries()) {
+            const fixture = await createFixture();
+            installSelectedOpen();
+            await openBrowserLocalSeedRecipientReceiptKernel(
+                new URL('https://example.invalid/kernel.wasm'),
+                openInput(fixture.custody, 0xa1 + operationIndex),
+            );
+            const guard = createSeedRecipientActionStateGuard({
+                authenticationCustody: fixture.custody,
+                context: fixture.context,
+                recencyCoordinator: fixture.coordinator,
+            });
+
+            await expect(
+                assertSeedRecipientActionSelected(guard),
+            ).resolves.toBeUndefined();
+            await expect(retainBurn(guard)).resolves.toBeUndefined();
+            await expect(
+                assertSeedRecipientActionSelected(guard),
+            ).rejects.toMatchObject({ code: 'InvalidState' });
+
+            const reopened = await reopenCustody(fixture);
+            await expect(reopened.readStatus()).resolves.toBe('burned');
+        }
+    });
+
+    it('rejects forged or cross-coordinator action-state guards', async () => {
+        const fixture = await createFixture();
+        const otherFixture = await createFixture();
+
+        expect(() =>
+            createSeedRecipientActionStateGuard({
+                authenticationCustody: fixture.custody,
+                context: fixture.context,
+                recencyCoordinator: otherFixture.coordinator,
+            }),
+        ).toThrowError(
+            expect.objectContaining({ code: 'InvalidConfiguration' }),
+        );
+        expect(() =>
+            createSeedRecipientActionStateGuard({
+                authenticationCustody: fixture.custody,
+                context: Object.freeze({
+                    ...fixture.context,
+                    rootTerminalIdentity: hashFilledWith(0x34),
+                }),
+                recencyCoordinator: fixture.coordinator,
+            }),
+        ).toThrowError(
+            expect.objectContaining({ code: 'InvalidConfiguration' }),
+        );
+        expect(() =>
+            assertSeedRecipientActionSelected(Object.freeze({}) as never),
+        ).toThrowError(
+            expect.objectContaining({ code: 'InvalidConfiguration' }),
+        );
+    });
+
+    it('repairs an interrupted downstream receipt burn before continuation', async () => {
+        const fixture = await createFixture();
+        installSelectedOpen();
+        await openBrowserLocalSeedRecipientReceiptKernel(
+            new URL('https://example.invalid/kernel.wasm'),
+            openInput(fixture.custody, 0xb1),
+        );
+        const guard = createSeedRecipientActionStateGuard({
+            authenticationCustody: fixture.custody,
+            context: fixture.context,
+            recencyCoordinator: fixture.coordinator,
+        });
+        fixture.anchor.failNextCompareAndSetCount = 1;
+
+        await expect(
+            retainConflictingSeedRecipientReceiptBurn(guard),
+        ).rejects.toMatchObject({ code: 'AnchorFailure' });
+
+        const reopened = await reopenCustody(fixture);
         await expect(reopened.readStatus()).resolves.toBe('burned');
     });
 

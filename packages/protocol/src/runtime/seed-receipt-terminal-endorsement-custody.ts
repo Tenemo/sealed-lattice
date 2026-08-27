@@ -28,6 +28,13 @@ import {
 } from './authenticated-runtime-record.js';
 import { AuthenticatedStorageRecencyCoordinator } from './authenticated-storage-recency.js';
 import {
+    assertSeedRecipientActionSelected,
+    assertSeedRecipientActionStateGuardMatchesContext,
+    assertSeedRecipientActionStateGuardUsesRecencyCoordinator,
+    retainConflictingSeedReceiptTerminalEndorsementBurn,
+    type SeedRecipientActionStateGuard,
+} from './seed-recipient-authentication-custody.js';
+import {
     consumeSeedRecipientReceiptTerminalEndorsementAuthorization,
     type ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization,
     type SeedRecipientReceiptTerminalEndorsementAuthorization,
@@ -54,6 +61,10 @@ const unsigned16Maximum = 0xffff;
 const unsigned32Maximum = 0xffff_ffff;
 const endorsementCustodyOperationDomain =
     'sealed-lattice/runtime/seed-receipt-terminal-endorsement-record/v1';
+const actionStateGuardByProductionKernel = new WeakMap<
+    object,
+    SeedRecipientActionStateGuard
+>();
 
 export type SeedReceiptTerminalEndorsementCustodyContext = Readonly<{
     parameterIdentity: Uint8Array;
@@ -156,7 +167,7 @@ export const openBrowserLocalSeedReceiptTerminalEndorsementKernel = async (
             await consumeSeedRecipientReceiptTerminalEndorsementAuthorization(
                 input.receiptCustodyAuthorization,
             );
-        return await openProductionSeedReceiptTerminalEndorsementKernel(
+        const kernel = await openProductionSeedReceiptTerminalEndorsementKernel(
             transcriptCoreKernelUrl,
             {
                 endorserPosition,
@@ -192,6 +203,17 @@ export const openBrowserLocalSeedReceiptTerminalEndorsementKernel = async (
                 }),
             },
         );
+        if (actionStateGuardByProductionKernel.has(kernel)) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidState',
+                'Receipt-terminal endorsement kernel identity was already bound to an action.',
+            );
+        }
+        actionStateGuardByProductionKernel.set(
+            kernel,
+            consumedReceipt.actionStateGuard,
+        );
+        return kernel;
     } finally {
         parameterIdentity.fill(0);
         preparationContextBytes.fill(0);
@@ -1751,6 +1773,7 @@ const copyPublication = (
  * capability.
  */
 export class SeedReceiptTerminalEndorsementCustody {
+    readonly #actionStateGuard: SeedRecipientActionStateGuard;
     readonly #context: SeedReceiptTerminalEndorsementCustodyContext;
     readonly #issuedRandomness = new Set<string>();
     readonly #kernel: SeedReceiptTerminalEndorsementCustodyKernel;
@@ -1792,6 +1815,33 @@ export class SeedReceiptTerminalEndorsementCustody {
         this.#limits = copyLimits(input.limits);
         this.#protection = input.protection;
         this.#recencyCoordinator = input.recencyCoordinator;
+        const actionStateGuard = actionStateGuardByProductionKernel.get(
+            input.kernel,
+        );
+        if (actionStateGuard === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidConfiguration',
+                'Receipt-terminal endorsement custody requires a kernel opened through completed local receipt custody.',
+            );
+        }
+        assertSeedRecipientActionStateGuardUsesRecencyCoordinator(
+            actionStateGuard,
+            this.#recencyCoordinator,
+        );
+        assertSeedRecipientActionStateGuardMatchesContext(
+            actionStateGuard,
+            Object.freeze({
+                parameterIdentity: this.#context.parameterIdentity,
+                participantCount: this.#context.participantCount,
+                preparationAttemptOrdinal:
+                    this.#context.preparationAttemptOrdinal,
+                preparationContextIdentity:
+                    this.#context.preparationContextIdentity,
+                recipientPosition: this.#context.endorserPosition,
+                rootTerminalIdentity: this.#context.rootTerminalIdentity,
+            }),
+        );
+        this.#actionStateGuard = actionStateGuard;
     }
 
     public retainForPublication(): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
@@ -1814,6 +1864,7 @@ export class SeedReceiptTerminalEndorsementCustody {
     }
 
     async #prepareAndRetain(): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
+        await assertSeedRecipientActionSelected(this.#actionStateGuard);
         let prepared:
             | PreparedSeedReceiptTerminalEndorsementInventory
             | undefined;
@@ -1854,6 +1905,7 @@ export class SeedReceiptTerminalEndorsementCustody {
     async #resume(): Promise<
         RetainedSeedReceiptTerminalEndorsementPublication | undefined
     > {
+        await assertSeedRecipientActionSelected(this.#actionStateGuard);
         const recordKey = logicalRecordKey(this.#context);
         const opened = await this.#readOpenedRecord(recordKey);
         if (opened === undefined) {
@@ -1868,7 +1920,8 @@ export class SeedReceiptTerminalEndorsementCustody {
         expectedPrepared?: PreparedSeedReceiptTerminalEndorsementInventory,
     ): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
         try {
-            this.#requireMatchingRecord(opened.record, expectedPrepared);
+            await assertSeedRecipientActionSelected(this.#actionStateGuard);
+            await this.#requireMatchingRecord(opened.record, expectedPrepared);
             if (expectedPrepared === undefined) {
                 await this.#validate(opened.record.preparedInventory);
             }
@@ -1877,7 +1930,9 @@ export class SeedReceiptTerminalEndorsementCustody {
                     opened.record.preparedInventory,
                     opened.record.endorsementEnvelopeBytes,
                 );
-                return copyPublication(opened.record.endorsementEnvelopeBytes);
+                return this.#returnPublicationIfActionSelected(
+                    copyPublication(opened.record.endorsementEnvelopeBytes),
+                );
             }
             const endorsementEnvelopeBytes = await this.#produce(opened.record);
             try {
@@ -1885,13 +1940,16 @@ export class SeedReceiptTerminalEndorsementCustody {
                     opened.record.preparedInventory,
                     endorsementEnvelopeBytes,
                 );
-                return await this.#completeReservation({
+                const publication = await this.#completeReservation({
                     expectedPrepared,
                     endorsementEnvelopeBytes,
                     recordKey,
                     reservation: opened.record,
                     sealedReservationBytes: opened.sealedBytes,
                 });
+                return await this.#returnPublicationIfActionSelected(
+                    publication,
+                );
             } finally {
                 endorsementEnvelopeBytes.fill(0);
             }
@@ -1901,10 +1959,10 @@ export class SeedReceiptTerminalEndorsementCustody {
         }
     }
 
-    #requireMatchingRecord(
+    async #requireMatchingRecord(
         record: SeedReceiptTerminalEndorsementRecord,
         expectedPrepared?: PreparedSeedReceiptTerminalEndorsementInventory,
-    ): void {
+    ): Promise<void> {
         if (
             !contextsEqual(record.context, this.#context) ||
             (expectedPrepared !== undefined &&
@@ -1913,11 +1971,43 @@ export class SeedReceiptTerminalEndorsementCustody {
                     expectedPrepared,
                 ))
         ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'Conflict',
+            await this.#burnDurableTerminalEndorsementConflict(
                 'The seed-receipt terminal endorsement slot is durably bound to a different receipt inventory, retained local receipt, or terminal body.',
             );
         }
+    }
+
+    async #returnPublicationIfActionSelected(
+        publication: RetainedSeedReceiptTerminalEndorsementPublication,
+    ): Promise<RetainedSeedReceiptTerminalEndorsementPublication> {
+        try {
+            await assertSeedRecipientActionSelected(this.#actionStateGuard);
+            return publication;
+        } catch (error) {
+            publication.endorsementEnvelopeBytes.fill(0);
+            throw error;
+        }
+    }
+
+    async #burnDurableTerminalEndorsementConflict(
+        message: string,
+    ): Promise<never> {
+        const conflict = new AuthenticatedRuntimeRecordError(
+            'Conflict',
+            message,
+        );
+        try {
+            await retainConflictingSeedReceiptTerminalEndorsementBurn(
+                this.#actionStateGuard,
+            );
+        } catch (burnFailure) {
+            throw new AuthenticatedRuntimeRecordError(
+                'CleanupFailed',
+                'Seed-receipt terminal endorsement custody found a durable conflict but could not retain the action burn.',
+                [conflict, burnFailure],
+            );
+        }
+        throw conflict;
     }
 
     async #readOpenedRecord(
@@ -1972,7 +2062,10 @@ export class SeedReceiptTerminalEndorsementCustody {
                     if (existing === undefined) {
                         throw error;
                     }
-                    this.#requireMatchingRecord(existing.record, prepared);
+                    await this.#requireMatchingRecord(
+                        existing.record,
+                        prepared,
+                    );
                     return existing;
                 }
                 return Object.freeze({
@@ -2126,19 +2219,22 @@ export class SeedReceiptTerminalEndorsementCustody {
                     throw error;
                 }
                 try {
-                    this.#requireMatchingRecord(
+                    await this.#requireMatchingRecord(
                         existing.record,
                         input.reservation.preparedInventory,
                     );
+                    if (existing.record.kind !== 'completed') {
+                        return await this.#burnDurableTerminalEndorsementConflict(
+                            'Concurrent seed-receipt terminal endorsement completion did not retain a completed carrier.',
+                        );
+                    }
                     if (
-                        existing.record.kind !== 'completed' ||
                         !bytesEqual(
                             existing.record.endorsementEnvelopeBytes,
                             input.endorsementEnvelopeBytes,
                         )
                     ) {
-                        throw new AuthenticatedRuntimeRecordError(
-                            'Conflict',
+                        return await this.#burnDurableTerminalEndorsementConflict(
                             'Concurrent seed-receipt terminal endorsement completion selected different carrier bytes.',
                         );
                     }

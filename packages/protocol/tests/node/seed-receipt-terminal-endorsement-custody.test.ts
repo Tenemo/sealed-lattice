@@ -1,12 +1,40 @@
 import type { ProductionSeedReceiptTerminalEndorsementKernel } from '@sealed-lattice/wasm';
 import { describe, expect, it, vi } from 'vitest';
 
+const actionStateMocks = vi.hoisted(() => ({
+    actionStateGuard: Object.freeze({}),
+    assertSelected: vi.fn(() => Promise.resolve()),
+    assertUsesRecencyCoordinator: vi.fn(),
+    consumeReceiptAuthorization: vi.fn(),
+    openKernel: vi.fn(),
+    retainConflictBurn: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock('@sealed-lattice/wasm', () => ({
     isProductionSeedReceiptTerminalEndorsementKernel: () => true,
-    openProductionSeedReceiptTerminalEndorsementKernel: () => {
-        throw new Error('Not used by this custody-state test.');
-    },
+    openProductionSeedReceiptTerminalEndorsementKernel:
+        actionStateMocks.openKernel,
 }));
+
+vi.mock(
+    '#packages/protocol/src/runtime/seed-recipient-authentication-custody',
+    () => ({
+        assertSeedRecipientActionSelected: actionStateMocks.assertSelected,
+        assertSeedRecipientActionStateGuardMatchesContext: vi.fn(),
+        assertSeedRecipientActionStateGuardUsesRecencyCoordinator:
+            actionStateMocks.assertUsesRecencyCoordinator,
+        retainConflictingSeedReceiptTerminalEndorsementBurn:
+            actionStateMocks.retainConflictBurn,
+    }),
+);
+
+vi.mock(
+    '#packages/protocol/src/runtime/seed-recipient-receipt-custody',
+    () => ({
+        consumeSeedRecipientReceiptTerminalEndorsementAuthorization:
+            actionStateMocks.consumeReceiptAuthorization,
+    }),
+);
 
 import {
     createRuntimeRecordProtection,
@@ -17,6 +45,7 @@ import {
     SeedReceiptTerminalEndorsementCustody,
     deriveSeedReceiptTerminalEndorsementCustodyRecordByteLengths,
     deriveSeedReceiptTerminalEndorsementKernelByteLengths,
+    openBrowserLocalSeedReceiptTerminalEndorsementKernel,
     type PreparedSeedReceiptTerminalEndorsementInventory,
     type SeedReceiptTerminalEndorsementCustodyContext,
     type SeedReceiptTerminalEndorsementCustodyKernel,
@@ -51,6 +80,42 @@ const defaultContext = (): SeedReceiptTerminalEndorsementCustodyContext =>
         endorserPosition: 2,
         rootTerminalIdentity: hashFilledWith(0x33),
     });
+
+const authorizeKernelForTest = async (
+    kernel: DeterministicTerminalEndorsementKernel,
+    context: SeedReceiptTerminalEndorsementCustodyContext,
+): Promise<ProductionSeedReceiptTerminalEndorsementKernel> => {
+    actionStateMocks.consumeReceiptAuthorization.mockResolvedValueOnce(
+        Object.freeze({
+            actionStateGuard: actionStateMocks.actionStateGuard,
+            context: Object.freeze({
+                parameterIdentity: context.parameterIdentity.slice(),
+                participantCount: context.participantCount,
+                preparationAttemptOrdinal: context.preparationAttemptOrdinal,
+                preparationContextIdentity:
+                    context.preparationContextIdentity.slice(),
+                recipientPosition: context.endorserPosition,
+                rootTerminalIdentity: context.rootTerminalIdentity.slice(),
+            }),
+            recordBytes: Uint8Array.of(0x71),
+        }),
+    );
+    actionStateMocks.openKernel.mockResolvedValueOnce(kernel);
+    return openBrowserLocalSeedReceiptTerminalEndorsementKernel(
+        new URL('https://example.invalid/kernel.wasm'),
+        {
+            endorserPosition: context.endorserPosition,
+            parameterIdentity: context.parameterIdentity,
+            preparationContextBytes: context.preparationContextIdentity,
+            receiptCustodyAuthorization: Object.freeze({}) as never,
+            receiptEnvelopeBytes: [],
+            rootAuthorizationPackages: [],
+            rootTerminalCertificateBytes: context.rootTerminalIdentity,
+            rosterBytes: Uint8Array.of(0x72),
+            signingCapability: Object.freeze({}) as never,
+        },
+    );
+};
 
 const deterministicCryptoProvider = (): Crypto => {
     let invocationCount = 0;
@@ -322,6 +387,7 @@ const createFixture = async (input?: {
     const context = input?.context ?? defaultContext();
     const kernel =
         input?.kernel ?? new DeterministicTerminalEndorsementKernel();
+    const productionKernel = await authorizeKernelForTest(kernel, context);
     return Object.freeze({
         adapter: opened.adapter,
         anchor,
@@ -331,7 +397,7 @@ const createFixture = async (input?: {
         cryptoProvider,
         custody: new SeedReceiptTerminalEndorsementCustody({
             context,
-            kernel: kernel as unknown as ProductionSeedReceiptTerminalEndorsementKernel,
+            kernel: productionKernel,
             limits: testLimits,
             protection,
             recencyCoordinator: coordinator,
@@ -363,9 +429,10 @@ const reopenCustody = async (
         maximumRecordSealingCount: 64,
         rootKey: fixture.rootKey,
     });
+    const productionKernel = await authorizeKernelForTest(kernel, context);
     return new SeedReceiptTerminalEndorsementCustody({
         context,
-        kernel: kernel as unknown as ProductionSeedReceiptTerminalEndorsementKernel,
+        kernel: productionKernel,
         limits: testLimits,
         protection,
         recencyCoordinator: coordinator,
@@ -645,6 +712,7 @@ describe('seed-receipt terminal endorsement custody', () => {
     });
 
     it('keeps one slot across alternate receipt carriers, terminal bodies, retained receipts, and root terminals', async () => {
+        actionStateMocks.retainConflictBurn.mockClear();
         const fixture = await createFixture();
         const prepared = preparedInventoryForMarker(0x81);
         fixture.kernel.selectPreparedInventoryForTest(prepared);
@@ -674,6 +742,7 @@ describe('seed-receipt terminal endorsement custody', () => {
                 alternativeCustody.retainForPublication(),
             ).rejects.toMatchObject({ code: 'Conflict' });
         }
+        expect(actionStateMocks.retainConflictBurn).toHaveBeenCalledTimes(3);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
 
         const alternateContext = Object.freeze({
@@ -689,9 +758,11 @@ describe('seed-receipt terminal endorsement custody', () => {
         await expect(
             alternateCustody.resumeForPublication(),
         ).rejects.toMatchObject({ code: 'Conflict' });
+        expect(actionStateMocks.retainConflictBurn).toHaveBeenCalledTimes(4);
     });
 
     it('retains one reservation across production and validation failures', async () => {
+        actionStateMocks.retainConflictBurn.mockClear();
         const kernel = new DeterministicTerminalEndorsementKernel(0x91);
         kernel.failNextProductionCount = 1;
         const fixture = await createFixture({ kernel });
@@ -715,6 +786,7 @@ describe('seed-receipt terminal endorsement custody', () => {
         expect(kernel.productionObservations[2]?.signatureRandomness).toEqual(
             firstRandomness,
         );
+        expect(actionStateMocks.retainConflictBurn).not.toHaveBeenCalled();
     });
 
     it('serializes duplicate terminal endorsement requests without endorsing twice', async () => {
@@ -729,6 +801,21 @@ describe('seed-receipt terminal endorsement custody', () => {
         ]);
         expect(first).toEqual(second);
         expect(fixture.kernel.productionObservations).toHaveLength(1);
+    });
+
+    it('withholds a completed terminal endorsement after an action burn', async () => {
+        const fixture = await createFixture();
+        const publication = await fixture.custody.retainForPublication();
+        publication.endorsementEnvelopeBytes.fill(0);
+        actionStateMocks.assertSelected.mockRejectedValueOnce(
+            Object.assign(new Error('Action burned.'), {
+                code: 'InvalidState',
+            }),
+        );
+
+        await expect(
+            fixture.custody.resumeForPublication(),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
     });
 
     it('reports a missing durable terminal endorsement as pending', async () => {

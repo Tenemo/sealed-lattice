@@ -22,7 +22,11 @@ import {
 } from './authenticated-runtime-record.js';
 import { AuthenticatedStorageRecencyCoordinator } from './authenticated-storage-recency.js';
 import {
+    assertSeedRecipientActionSelected,
+    createSeedRecipientActionStateGuard,
     isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody,
+    retainConflictingSeedRecipientReceiptBurn,
+    type SeedRecipientActionStateGuard,
     type SeedRecipientAuthenticationCustody,
     type SeedRecipientReceiptCustodyContext,
 } from './seed-recipient-authentication-custody.js';
@@ -199,6 +203,7 @@ export type SeedRecipientReceiptTerminalEndorsementAuthorization = Readonly<{
 
 export type ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization =
     Readonly<{
+        actionStateGuard: SeedRecipientActionStateGuard;
         context: SeedRecipientReceiptCustodyContext;
         recordBytes: Uint8Array;
     }>;
@@ -1730,6 +1735,7 @@ export class SeedRecipientReceiptCustody<
     AuthenticatedInventory extends object =
         AuthenticatedSeedRecipientInventoryAuthorization,
 > {
+    readonly #actionStateGuard: SeedRecipientActionStateGuard;
     readonly #context: SeedRecipientReceiptCustodyContext;
     readonly #issuedRandomness = new Set<string>();
     readonly #kernel: SeedRecipientReceiptCustodyKernel<AuthenticatedInventory>;
@@ -1785,6 +1791,11 @@ export class SeedRecipientReceiptCustody<
         this.#limits = copyLimits(input.limits);
         this.#protection = input.protection;
         this.#recencyCoordinator = input.recencyCoordinator;
+        this.#actionStateGuard = createSeedRecipientActionStateGuard({
+            authenticationCustody: input.authenticationCustody,
+            context: this.#context,
+            recencyCoordinator: this.#recencyCoordinator,
+        });
     }
 
     public retainForPublication(input: {
@@ -1843,6 +1854,7 @@ export class SeedRecipientReceiptCustody<
     }
 
     async #readCompletedRecordForTerminalEndorsement(): Promise<ConsumedSeedRecipientReceiptTerminalEndorsementAuthorization> {
+        await assertSeedRecipientActionSelected(this.#actionStateGuard);
         const recordKey = logicalRecordKey(this.#context);
         const opened = await this.#readOpenedRecord(recordKey);
         if (opened === undefined) {
@@ -1864,7 +1876,9 @@ export class SeedRecipientReceiptCustody<
                 opened.record.receiptEnvelopeBytes,
             );
             recordBytes = encodeRecord(opened.record);
+            await assertSeedRecipientActionSelected(this.#actionStateGuard);
             return Object.freeze({
+                actionStateGuard: this.#actionStateGuard,
                 context: copyValidationContext(opened.record.context),
                 recordBytes: recordBytes.slice(),
             });
@@ -1878,6 +1892,7 @@ export class SeedRecipientReceiptCustody<
     async #prepareAndRetain(
         authenticatedInventory: AuthenticatedInventory,
     ): Promise<RetainedSeedRecipientReceiptPublication> {
+        await assertSeedRecipientActionSelected(this.#actionStateGuard);
         let prepared: PreparedSeedRecipientReceiptInventory | undefined;
         try {
             let preparationFailed = false;
@@ -1918,6 +1933,7 @@ export class SeedRecipientReceiptCustody<
     async #resume(): Promise<
         RetainedSeedRecipientReceiptPublication | undefined
     > {
+        await assertSeedRecipientActionSelected(this.#actionStateGuard);
         const recordKey = logicalRecordKey(this.#context);
         const opened = await this.#readOpenedRecord(recordKey);
         if (opened === undefined) {
@@ -1932,7 +1948,8 @@ export class SeedRecipientReceiptCustody<
         expectedPrepared?: PreparedSeedRecipientReceiptInventory,
     ): Promise<RetainedSeedRecipientReceiptPublication> {
         try {
-            this.#requireMatchingRecord(opened.record, expectedPrepared);
+            await assertSeedRecipientActionSelected(this.#actionStateGuard);
+            await this.#requireMatchingRecord(opened.record, expectedPrepared);
             if (expectedPrepared === undefined) {
                 await this.#validate(opened.record.preparedInventory);
             }
@@ -1941,7 +1958,9 @@ export class SeedRecipientReceiptCustody<
                     opened.record.preparedInventory,
                     opened.record.receiptEnvelopeBytes,
                 );
-                return copyPublication(opened.record.receiptEnvelopeBytes);
+                return this.#returnPublicationIfActionSelected(
+                    copyPublication(opened.record.receiptEnvelopeBytes),
+                );
             }
             const receiptEnvelopeBytes = await this.#produce(opened.record);
             try {
@@ -1949,13 +1968,16 @@ export class SeedRecipientReceiptCustody<
                     opened.record.preparedInventory,
                     receiptEnvelopeBytes,
                 );
-                return await this.#completeReservation({
+                const publication = await this.#completeReservation({
                     expectedPrepared,
                     receiptEnvelopeBytes,
                     recordKey,
                     reservation: opened.record,
                     sealedReservationBytes: opened.sealedBytes,
                 });
+                return await this.#returnPublicationIfActionSelected(
+                    publication,
+                );
             } finally {
                 receiptEnvelopeBytes.fill(0);
             }
@@ -1965,10 +1987,10 @@ export class SeedRecipientReceiptCustody<
         }
     }
 
-    #requireMatchingRecord(
+    async #requireMatchingRecord(
         record: SeedRecipientReceiptRecord,
         expectedPrepared?: PreparedSeedRecipientReceiptInventory,
-    ): void {
+    ): Promise<void> {
         if (
             !contextsEqual(record.context, this.#context) ||
             (expectedPrepared !== undefined &&
@@ -1977,11 +1999,41 @@ export class SeedRecipientReceiptCustody<
                     expectedPrepared,
                 ))
         ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'Conflict',
+            await this.#burnDurableReceiptConflict(
                 'The seed-recipient receipt slot is durably bound to a different authenticated inventory or terminal.',
             );
         }
+    }
+
+    async #returnPublicationIfActionSelected(
+        publication: RetainedSeedRecipientReceiptPublication,
+    ): Promise<RetainedSeedRecipientReceiptPublication> {
+        try {
+            await assertSeedRecipientActionSelected(this.#actionStateGuard);
+            return publication;
+        } catch (error) {
+            publication.receiptEnvelopeBytes.fill(0);
+            throw error;
+        }
+    }
+
+    async #burnDurableReceiptConflict(message: string): Promise<never> {
+        const conflict = new AuthenticatedRuntimeRecordError(
+            'Conflict',
+            message,
+        );
+        try {
+            await retainConflictingSeedRecipientReceiptBurn(
+                this.#actionStateGuard,
+            );
+        } catch (burnFailure) {
+            throw new AuthenticatedRuntimeRecordError(
+                'CleanupFailed',
+                'Seed-recipient receipt custody found a durable conflict but could not retain the action burn.',
+                [conflict, burnFailure],
+            );
+        }
+        throw conflict;
     }
 
     async #readOpenedRecord(
@@ -2036,7 +2088,10 @@ export class SeedRecipientReceiptCustody<
                     if (existing === undefined) {
                         throw error;
                     }
-                    this.#requireMatchingRecord(existing.record, prepared);
+                    await this.#requireMatchingRecord(
+                        existing.record,
+                        prepared,
+                    );
                     return existing;
                 }
                 return Object.freeze({
@@ -2184,19 +2239,22 @@ export class SeedRecipientReceiptCustody<
                     throw error;
                 }
                 try {
-                    this.#requireMatchingRecord(
+                    await this.#requireMatchingRecord(
                         existing.record,
                         input.reservation.preparedInventory,
                     );
+                    if (existing.record.kind !== 'completed') {
+                        return await this.#burnDurableReceiptConflict(
+                            'Concurrent seed-recipient receipt completion did not retain a completed carrier.',
+                        );
+                    }
                     if (
-                        existing.record.kind !== 'completed' ||
                         !bytesEqual(
                             existing.record.receiptEnvelopeBytes,
                             input.receiptEnvelopeBytes,
                         )
                     ) {
-                        throw new AuthenticatedRuntimeRecordError(
-                            'Conflict',
+                        return await this.#burnDurableReceiptConflict(
                             'Concurrent seed-recipient receipt completion selected different carrier bytes.',
                         );
                     }
