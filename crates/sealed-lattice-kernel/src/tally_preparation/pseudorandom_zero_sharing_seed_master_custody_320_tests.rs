@@ -21,7 +21,8 @@ use super::{
     },
     pseudorandom_zero_sharing_seed_delivery_320::PseudorandomZeroSharingSeedDeliveryLayout320,
     pseudorandom_zero_sharing_seed_master_custody_320::{
-        join_and_encode_for_test, run_pseudorandom_zero_sharing_joined_seed_master_validation_320,
+        join_and_encode_for_test, restore_pseudorandom_zero_sharing_joined_seed_masters_320,
+        run_pseudorandom_zero_sharing_joined_seed_master_validation_320,
         run_pseudorandom_zero_sharing_seed_master_join_custody_320,
     },
     pseudorandom_zero_sharing_seed_receipt_terminal_320::{
@@ -145,12 +146,61 @@ fn completion_custody_boundary_reverifies_exact_predecessors_and_terminals() {
         run_pseudorandom_zero_sharing_joined_seed_master_validation_320(&joined_record);
     assert_eq!(validation_response.as_slice(), b"SLJR\x01\x00\x02");
 
+    let restored =
+        restore_pseudorandom_zero_sharing_joined_seed_masters_320(&joined_record).unwrap();
+    assert_eq!(restored.parameter_identity(), fixture.parameter_identity);
+    assert_eq!(
+        restored.preparation_context().identity(),
+        fixture.preparation_context_identity
+    );
+    assert_eq!(
+        restored.root_terminal_identity(),
+        fixture.root_terminal_identity
+    );
+    assert_eq!(
+        restored.root_terminal_certificate_identity(),
+        fixture.root_terminal_certificate_identity
+    );
+    assert_eq!(
+        restored.receipt_terminal_identity(),
+        fixture.receipt_terminal_identity
+    );
+    assert_eq!(
+        restored.receipt_terminal_certificate_identity(),
+        fixture.receipt_terminal_certificate_identity
+    );
+    assert_eq!(
+        restored.authenticated_recipient_inventory_identity(),
+        fixture.authenticated_inventory_identity
+    );
+    assert_eq!(
+        restored.receipt_body_identity(),
+        fixture.receipt_body_identity
+    );
+    assert_eq!(
+        restored.receipt_envelope_identity(),
+        fixture.receipt_envelope_identity
+    );
+    assert_eq!(restored.participant_position(), PARTICIPANT_POSITION);
+    assert_eq!(restored.subset_masters().len(), 84);
+    assert_eq!(restored.pair_masters().len(), 9);
+    assert_eq!(restored.retained_secret_byte_length().unwrap(), 3_760);
+    assert_eq!(
+        restored.custody_payload_bytes().unwrap().as_slice(),
+        joined_payload
+    );
+    assert!(!format!("{restored:?}").contains(&"21".repeat(40)));
+
     let mut wrong_joined_provenance = joined_record.to_vec();
     let payload_offset = wrong_joined_provenance.len() - joined_payload.len();
     wrong_joined_provenance[payload_offset + 100] ^= 1;
     assert_failure_code(
         &run_pseudorandom_zero_sharing_joined_seed_master_validation_320(&wrong_joined_provenance),
         7,
+    );
+    assert!(
+        restore_pseudorandom_zero_sharing_joined_seed_masters_320(&wrong_joined_provenance)
+            .is_err()
     );
 }
 

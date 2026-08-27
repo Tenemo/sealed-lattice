@@ -26,6 +26,7 @@ use super::{
         PseudorandomZeroSharingSeedCatalogRootTerminalError320,
         RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     },
+    pseudorandom_zero_sharing_seed_master_custody_320::VerifiedJoinedSeedMasterCustody320,
     pseudorandom_zero_sharing_seed_receipt_320::{
         PseudorandomZeroSharingSeedReceiptError320,
         RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
@@ -613,6 +614,154 @@ impl fmt::Debug for LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
             .field("secret_material", &"[redacted]")
             .finish()
     }
+}
+
+/// Reconstructs the existing typed master inventory from a capability minted
+/// only by the positive joined-custody verifier.
+///
+/// All fallible layout and scope work completes while the complete moved
+/// secret inventory remains inside one zeroizing owner. Each fixed-size master
+/// is copied only after those checks pass and is immediately placed in its
+/// zeroizing typed owner.
+pub(super) fn restore_pseudorandom_zero_sharing_seed_masters_from_verified_custody_320(
+    verified_custody: VerifiedJoinedSeedMasterCustody320,
+) -> Result<
+    LocallyJoinedPseudorandomZeroSharingSeedMasters320,
+    PseudorandomZeroSharingSeedMasterJoinError320,
+> {
+    let parameter_identity = verified_custody.parameter_identity();
+    let preparation_context = verified_custody.preparation_context();
+    let participant_position = verified_custody.participant_position();
+    let root_terminal_identity = verified_custody.root_terminal_identity();
+    let root_terminal_certificate_identity = verified_custody.root_terminal_certificate_identity();
+    let receipt_terminal_identity = verified_custody.receipt_terminal_identity();
+    let receipt_terminal_certificate_identity =
+        verified_custody.receipt_terminal_certificate_identity();
+    let authenticated_recipient_inventory_identity =
+        verified_custody.authenticated_recipient_inventory_identity();
+    let receipt_body_identity = verified_custody.receipt_body_identity();
+    let receipt_envelope_identity = verified_custody.receipt_envelope_identity();
+    let layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
+        parameter_identity,
+        preparation_context,
+        participant_position,
+    )
+    .map_err(
+        |error| PseudorandomZeroSharingSeedMasterJoinError320::Preparation {
+            phase: "restored seed-master catalog layout",
+            error,
+        },
+    )?;
+    let expected_subsets = layout
+        .coordinates()
+        .map_err(
+            |error| PseudorandomZeroSharingSeedMasterJoinError320::Preparation {
+                phase: "restored subset coordinate derivation",
+                error,
+            },
+        )?
+        .filter_map(|coordinate| match coordinate {
+            PseudorandomZeroSharingSeedCatalogCoordinate320::Subset(subset) => Some(subset),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let subset_scopes = expected_subsets
+        .into_iter()
+        .map(|subset| {
+            PseudorandomZeroSharingSubsetMasterScope320::new(
+                parameter_identity,
+                preparation_context,
+                subset,
+            )
+            .map_err(|error| {
+                PseudorandomZeroSharingSeedMasterJoinError320::Preparation {
+                    phase: "restored subset master scope",
+                    error,
+                }
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let pair_scopes = (0..layout.participant_count())
+        .filter(|counterpart_position| *counterpart_position != participant_position)
+        .map(|counterpart_position| {
+            super::pseudorandom_zero_sharing_pair_and_coin_seed_320::PseudorandomZeroSharingPairSeedContributionCoordinate320::from_catalog_layout(
+                layout,
+                counterpart_position,
+            )
+            .map(|coordinate| coordinate.scope())
+            .map_err(|error| PseudorandomZeroSharingSeedMasterJoinError320::SecretLeaf {
+                phase: "restored pair master scope",
+                error,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_secret_byte_length = subset_scopes
+        .len()
+        .checked_mul(PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH)
+        .and_then(|byte_length| {
+            pair_scopes
+                .len()
+                .checked_mul(PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH)
+                .and_then(|pair_byte_length| byte_length.checked_add(pair_byte_length))
+        })
+        .and_then(|byte_length| byte_length.checked_add(COLLECTIVE_COIN_SOURCE_BYTE_LENGTH))
+        .ok_or(PseudorandomZeroSharingSeedMasterJoinError320::ArithmeticOverflow)?;
+    let retained_secret_bytes = verified_custody.into_retained_secret_bytes();
+    require_count(
+        "restored joined secret bytes",
+        expected_secret_byte_length,
+        retained_secret_bytes.len(),
+    )?;
+
+    let mut byte_offset = 0_usize;
+    let mut subset_masters = Vec::with_capacity(subset_scopes.len());
+    for scope in subset_scopes {
+        let byte_end = byte_offset + PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH;
+        let mut master_bytes =
+            Zeroizing::new([0_u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH]);
+        master_bytes.copy_from_slice(&retained_secret_bytes[byte_offset..byte_end]);
+        subset_masters.push(LocallyJoinedPseudorandomZeroSharingSubsetMaster320 {
+            scope,
+            bytes: *master_bytes,
+        });
+        byte_offset = byte_end;
+    }
+    let mut pair_masters = Vec::with_capacity(pair_scopes.len());
+    for scope in pair_scopes {
+        let byte_end = byte_offset + PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH;
+        let mut master_bytes =
+            Zeroizing::new([0_u8; PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH]);
+        master_bytes.copy_from_slice(&retained_secret_bytes[byte_offset..byte_end]);
+        pair_masters.push(LocallyJoinedPseudorandomZeroSharingPairMaster320 {
+            scope,
+            bytes: *master_bytes,
+        });
+        byte_offset = byte_end;
+    }
+    let coin_byte_end = byte_offset + COLLECTIVE_COIN_SOURCE_BYTE_LENGTH;
+    let mut collective_coin_source_bytes =
+        Zeroizing::new([0_u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH]);
+    collective_coin_source_bytes
+        .copy_from_slice(&retained_secret_bytes[byte_offset..coin_byte_end]);
+    debug_assert_eq!(coin_byte_end, retained_secret_bytes.len());
+
+    Ok(LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
+        parameter_identity,
+        preparation_context,
+        root_terminal_identity,
+        root_terminal_certificate_identity,
+        receipt_terminal_identity,
+        receipt_terminal_certificate_identity,
+        authenticated_recipient_inventory_identity,
+        receipt_body_identity,
+        receipt_envelope_identity,
+        participant_position,
+        subset_masters: subset_masters.into_boxed_slice(),
+        pair_masters: pair_masters.into_boxed_slice(),
+        collective_coin_source: LocallyJoinedCollectiveCoinSource320 {
+            bytes: *collective_coin_source_bytes,
+        },
+    })
 }
 
 /// Consumes the participant's exact local and remote authenticated seed

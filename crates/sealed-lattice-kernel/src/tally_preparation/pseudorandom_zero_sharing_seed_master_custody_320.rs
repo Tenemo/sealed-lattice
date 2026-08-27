@@ -37,9 +37,11 @@ use super::{
         verify_pseudorandom_zero_sharing_seed_recipient_inventory_320,
     },
     pseudorandom_zero_sharing_seed_master_join_320::{
+        LocallyJoinedPseudorandomZeroSharingSeedMasters320,
         PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN,
         PseudorandomZeroSharingLocalSeedCatalogEntryBytes320,
         join_pseudorandom_zero_sharing_seed_masters_320,
+        restore_pseudorandom_zero_sharing_seed_masters_from_verified_custody_320,
         verify_pseudorandom_zero_sharing_local_seed_catalog_320,
     },
     pseudorandom_zero_sharing_seed_receipt_320::{
@@ -140,6 +142,90 @@ struct JoinedCustodyContext320 {
     preparation_attempt_ordinal: u16,
     participant_count: u16,
     participant_position: u16,
+}
+
+/// Exact joined custody after its local envelope has been opened by the state
+/// owner and Rust has reverified every retained public carrier and canonical
+/// payload field.
+///
+/// The constructor is private to this verifier. The capability remains local
+/// and secret-bearing; it does not authorize a coin opening, burn transition,
+/// public acceptance, or preparation continuation.
+pub(super) struct VerifiedJoinedSeedMasterCustody320 {
+    parameter_identity: Hash512,
+    preparation_context: TallyPreparationContext,
+    root_terminal_identity: Hash512,
+    root_terminal_certificate_identity: Hash512,
+    receipt_terminal_identity: Hash512,
+    receipt_terminal_certificate_identity: Hash512,
+    authenticated_recipient_inventory_identity: Hash512,
+    receipt_body_identity: Hash512,
+    receipt_envelope_identity: Hash512,
+    participant_position: u16,
+    retained_secret_bytes: Zeroizing<Vec<u8>>,
+}
+
+impl VerifiedJoinedSeedMasterCustody320 {
+    pub(super) const fn parameter_identity(&self) -> Hash512 {
+        self.parameter_identity
+    }
+
+    pub(super) const fn preparation_context(&self) -> TallyPreparationContext {
+        self.preparation_context
+    }
+
+    pub(super) const fn root_terminal_identity(&self) -> Hash512 {
+        self.root_terminal_identity
+    }
+
+    pub(super) const fn root_terminal_certificate_identity(&self) -> Hash512 {
+        self.root_terminal_certificate_identity
+    }
+
+    pub(super) const fn receipt_terminal_identity(&self) -> Hash512 {
+        self.receipt_terminal_identity
+    }
+
+    pub(super) const fn receipt_terminal_certificate_identity(&self) -> Hash512 {
+        self.receipt_terminal_certificate_identity
+    }
+
+    pub(super) const fn authenticated_recipient_inventory_identity(&self) -> Hash512 {
+        self.authenticated_recipient_inventory_identity
+    }
+
+    pub(super) const fn receipt_body_identity(&self) -> Hash512 {
+        self.receipt_body_identity
+    }
+
+    pub(super) const fn receipt_envelope_identity(&self) -> Hash512 {
+        self.receipt_envelope_identity
+    }
+
+    pub(super) const fn participant_position(&self) -> u16 {
+        self.participant_position
+    }
+
+    pub(super) fn into_retained_secret_bytes(self) -> Zeroizing<Vec<u8>> {
+        self.retained_secret_bytes
+    }
+}
+
+impl fmt::Debug for VerifiedJoinedSeedMasterCustody320 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VerifiedJoinedSeedMasterCustody320")
+            .field("parameter_identity", &self.parameter_identity)
+            .field(
+                "preparation_context_identity",
+                &self.preparation_context.identity(),
+            )
+            .field("root_terminal_identity", &self.root_terminal_identity)
+            .field("receipt_terminal_identity", &self.receipt_terminal_identity)
+            .field("participant_position", &self.participant_position)
+            .field("retained_secret_bytes", &"[redacted]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1465,7 +1551,11 @@ fn join_and_encode(
     let payload = joined.custody_payload_bytes().map_err(|_| {
         PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload("payload encoding")
     })?;
-    validate_joined_payload(&payload, request.context, preparation_context)?;
+    drop(verify_joined_payload(
+        &payload,
+        request.context,
+        preparation_context,
+    )?);
     Ok(payload)
 }
 
@@ -1478,7 +1568,7 @@ pub(super) fn join_and_encode_for_test(
 
 fn parse_joined_record_and_validate(
     record_bytes: &[u8],
-) -> Result<(), PseudorandomZeroSharingSeedMasterCustodyError320> {
+) -> Result<VerifiedJoinedSeedMasterCustody320, PseudorandomZeroSharingSeedMasterCustodyError320> {
     let mut cursor = BoundedCursor::new(record_bytes)?;
     cursor.require_magic(JOINED_CUSTODY_RECORD_MAGIC, "joined-record magic")?;
     cursor.require_version("joined-record version")?;
@@ -1527,14 +1617,14 @@ fn parse_joined_record_and_validate(
     let verification = parse_verification_context(verification_context_bytes)?;
     let (_receipt_terminal, _roster, preparation_context) =
         verify_public_context(&synthetic_request, verification)?;
-    validate_joined_payload(joined_payload_bytes, context, preparation_context)
+    verify_joined_payload(joined_payload_bytes, context, preparation_context)
 }
 
-fn validate_joined_payload(
+fn verify_joined_payload(
     payload_bytes: &[u8],
     context: JoinedCustodyContext320,
     preparation_context: TallyPreparationContext,
-) -> Result<(), PseudorandomZeroSharingSeedMasterCustodyError320> {
+) -> Result<VerifiedJoinedSeedMasterCustody320, PseudorandomZeroSharingSeedMasterCustodyError320> {
     let limits = CanonicalDecodeLimits {
         maximum_tuple_byte_length: 16 * 1024,
         maximum_item_count: 32,
@@ -1652,24 +1742,52 @@ fn validate_joined_payload(
                 "joined secret byte length",
             ),
         )?;
-    if tuple.items[16].item_type() != CanonicalItemType::RawBytes
-        || tuple.items[16]
-            .variable_value_bytes()
-            .map_err(|_| {
-                PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload(
-                    "joined secret bytes",
-                )
-            })?
-            .len()
-            != expected_secret_byte_length
-    {
+    if tuple.items[16].item_type() != CanonicalItemType::RawBytes {
+        return Err(
+            PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload("joined secret bytes"),
+        );
+    }
+    let retained_secret_bytes = tuple.items[16].variable_value_bytes().map_err(|_| {
+        PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload("joined secret bytes")
+    })?;
+    if retained_secret_bytes.len() != expected_secret_byte_length {
         return Err(
             PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload(
                 "joined secret byte length",
             ),
         );
     }
-    Ok(())
+    Ok(VerifiedJoinedSeedMasterCustody320 {
+        parameter_identity: context.parameter_identity,
+        preparation_context,
+        root_terminal_identity: context.root_terminal_identity,
+        root_terminal_certificate_identity: context.root_terminal_certificate_identity,
+        receipt_terminal_identity: context.receipt_terminal_identity,
+        receipt_terminal_certificate_identity: context.receipt_terminal_certificate_identity,
+        authenticated_recipient_inventory_identity: context
+            .authenticated_recipient_inventory_identity,
+        receipt_body_identity: context.receipt_body_identity,
+        receipt_envelope_identity: context.receipt_envelope_identity,
+        participant_position: context.participant_position,
+        retained_secret_bytes: Zeroizing::new(retained_secret_bytes.to_vec()),
+    })
+}
+
+/// Restores typed local masters only after the state owner has authenticated
+/// the joined envelope and this boundary has positively reverified its exact
+/// public terminals and canonical secret inventory. The result remains local
+/// and grants no burn, coin-opening, public-acceptance, or continuation power.
+pub(super) fn restore_pseudorandom_zero_sharing_joined_seed_masters_320(
+    record_bytes: &[u8],
+) -> Result<
+    LocallyJoinedPseudorandomZeroSharingSeedMasters320,
+    PseudorandomZeroSharingSeedMasterCustodyError320,
+> {
+    let verified_custody = parse_joined_record_and_validate(record_bytes)?;
+    restore_pseudorandom_zero_sharing_seed_masters_from_verified_custody_320(verified_custody)
+        .map_err(|_| {
+            PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload("typed restoration")
+        })
 }
 
 /// Executes the source-authorized local/global join and returns a stable binary
@@ -1691,7 +1809,10 @@ pub(crate) fn run_pseudorandom_zero_sharing_joined_seed_master_validation_320(
     record_bytes: &[u8],
 ) -> Zeroizing<Vec<u8>> {
     match parse_joined_record_and_validate(record_bytes) {
-        Ok(()) => encode_validation_response(),
+        Ok(verified_custody) => {
+            drop(verified_custody);
+            encode_validation_response()
+        }
         Err(error) => encode_failure_response(error),
     }
 }
