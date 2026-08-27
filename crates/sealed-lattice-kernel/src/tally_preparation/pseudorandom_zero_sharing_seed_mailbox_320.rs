@@ -12,10 +12,6 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes as SignatureSerDes, Verifier},
 };
-use sha3::{
-    CShake256, CShake256Core,
-    digest::{ExtendableOutput, Update, XofReader},
-};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
@@ -26,6 +22,7 @@ use crate::foundation::{
 };
 
 use super::{
+    private_mailbox_kmac_256::{derive_private_mailbox_key_256, derive_private_mailbox_nonce_96},
     pseudorandom_zero_sharing_seed_catalog_root_terminal_320::{
         PseudorandomZeroSharingSeedCatalogRootTerminalError320,
         RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
@@ -50,11 +47,6 @@ const CANONICAL_TUPLE_HEADER_BYTE_LENGTH: usize = 8;
 const CANONICAL_ITEM_HEADER_BYTE_LENGTH: usize = 6;
 const CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH: usize = 4;
 const CANONICAL_HOMOGENEOUS_LIST_HEADER_BYTE_LENGTH: usize = 6;
-const CSHAKE256_RATE_BYTE_LENGTH: usize = 136;
-const ENCODED_CSHAKE256_RATE: [u8; 2] = [1, 136];
-const ENCODED_MAILBOX_KEY_BIT_LENGTH: [u8; 3] = [2, 1, 0];
-const KMAC256_OUTPUT_BIT_LENGTH: [u8; 3] = [1, 0, 2];
-const KMAC96_OUTPUT_BIT_LENGTH: [u8; 2] = [96, 1];
 const MAXIMUM_MAILBOX_CONTROL_OBJECT_BYTE_LENGTH: usize = 512 * 1024;
 const MAXIMUM_MAILBOX_CONTROL_OBJECT_ITEM_BYTE_LENGTH: usize = 384 * 1024;
 const MAXIMUM_MAILBOX_CONTROL_OBJECT_CUMULATIVE_BYTE_LENGTH: usize = 2 * 1024 * 1024;
@@ -1649,30 +1641,22 @@ fn derive_authenticated_encryption_key(
     shared_secret: &[u8; 32],
     header_bytes: &[u8],
 ) -> Zeroizing<[u8; 32]> {
-    let mut key = Zeroizing::new([0_u8; 32]);
-    derive_mailbox_kmac256(
+    derive_private_mailbox_key_256(
         shared_secret,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_LABEL,
         header_bytes,
-        &KMAC256_OUTPUT_BIT_LENGTH,
-        key.as_mut(),
-    );
-    key
+    )
 }
 
 fn derive_authenticated_encryption_nonce(
     authenticated_encryption_key: &[u8; 32],
     associated_data: &[u8],
 ) -> Zeroizing<[u8; 12]> {
-    let mut nonce = Zeroizing::new([0_u8; 12]);
-    derive_mailbox_kmac256(
+    derive_private_mailbox_nonce_96(
         authenticated_encryption_key,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_NONCE_DERIVATION_LABEL,
         associated_data,
-        &KMAC96_OUTPUT_BIT_LENGTH,
-        nonce.as_mut(),
-    );
-    nonce
+    )
 }
 
 #[cfg(test)]
@@ -1689,31 +1673,6 @@ pub(super) fn derive_authenticated_encryption_nonce_for_test(
     associated_data: &[u8],
 ) -> Zeroizing<[u8; 12]> {
     derive_authenticated_encryption_nonce(authenticated_encryption_key, associated_data)
-}
-
-fn derive_mailbox_kmac256(
-    key: &[u8; 32],
-    customization: &[u8],
-    message: &[u8],
-    right_encoded_output_bit_length: &[u8],
-    output: &mut [u8],
-) {
-    let mut padded_key = Zeroizing::new([0_u8; CSHAKE256_RATE_BYTE_LENGTH]);
-    let encoded_key_start = ENCODED_CSHAKE256_RATE.len();
-    let key_start = encoded_key_start + ENCODED_MAILBOX_KEY_BIT_LENGTH.len();
-    let key_end = key_start + key.len();
-    padded_key[..encoded_key_start].copy_from_slice(&ENCODED_CSHAKE256_RATE);
-    padded_key[encoded_key_start..key_start].copy_from_slice(&ENCODED_MAILBOX_KEY_BIT_LENGTH);
-    padded_key[key_start..key_end].copy_from_slice(key);
-
-    let mut derivation = CShake256::from_core(CShake256Core::new_with_function_name(
-        b"KMAC",
-        customization,
-    ));
-    derivation.update(padded_key.as_ref());
-    derivation.update(message);
-    derivation.update(right_encoded_output_bit_length);
-    derivation.finalize_xof().read(output);
 }
 
 pub(crate) fn hash_mailbox_chunk(

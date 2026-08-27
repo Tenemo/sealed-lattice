@@ -37,6 +37,9 @@ const MAXIMUM_SIGNATURE_ENVELOPE_BYTE_LENGTH: usize = 8 * 1024;
 const MAXIMUM_SIGNATURE_ENVELOPE_ITEM_BYTE_LENGTH: usize = 4 * 1024;
 const MAXIMUM_PRIVATE_ROW_BODY_BYTE_LENGTH: usize = 8 * 1024;
 const MAXIMUM_PRIVATE_ROW_BODY_ITEM_BYTE_LENGTH: usize = 4 * 1024;
+const CANONICAL_TUPLE_HEADER_BYTE_LENGTH: usize = 8;
+const CANONICAL_ITEM_HEADER_BYTE_LENGTH: usize = 6;
+const CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH: usize = 4;
 
 pub(crate) const MASKED_BALLOT_BIVARIATE_COMMITMENT_SALT_BYTE_LENGTH: usize = 64;
 pub(crate) const MASKED_BALLOT_BIVARIATE_COMMITMENT_LAYOUT_IDENTITY_DOMAIN: &str =
@@ -54,6 +57,31 @@ pub(crate) const MASKED_BALLOT_BIVARIATE_COMMITMENT_SIGNATURE_ENVELOPE_DOMAIN: &
 pub(crate) const MASKED_BALLOT_BIVARIATE_PRIVATE_ROW_BODY_DOMAIN: &str =
     "sealed-lattice/v1/ballot/bivariate-private-row-body";
 pub(crate) const MASKED_BALLOT_ML_DSA_65_SIGNATURE_BYTE_LENGTH: usize = 3_309;
+
+pub(crate) fn masked_ballot_bivariate_private_row_body_byte_length(
+    participant_count: u16,
+) -> Result<usize, MaskedBallotBivariateCommitmentError320> {
+    if crate::foundation::derive_foundation_roster_parameters(participant_count).is_none() {
+        return Err(MaskedBallotBivariateCommitmentError320::UnsupportedRoster {
+            participant_count,
+        });
+    }
+    let payload_byte_length = private_row_payload_byte_length(participant_count)?;
+    CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+        .checked_add(
+            PRIVATE_ROW_BODY_ITEM_COUNT
+                .checked_mul(CANONICAL_ITEM_HEADER_BYTE_LENGTH)
+                .ok_or(MaskedBallotBivariateCommitmentError320::ArithmeticOverflow)?,
+        )
+        .and_then(|length| length.checked_add(CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH))
+        .and_then(|length| {
+            length.checked_add(MASKED_BALLOT_BIVARIATE_PRIVATE_ROW_BODY_DOMAIN.len())
+        })
+        .and_then(|length| length.checked_add(2 * Hash512::BYTE_LENGTH))
+        .and_then(|length| length.checked_add(4 * size_of::<u16>()))
+        .and_then(|length| length.checked_add(payload_byte_length))
+        .ok_or(MaskedBallotBivariateCommitmentError320::ArithmeticOverflow)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MaskedBallotBivariateCommitmentError320 {

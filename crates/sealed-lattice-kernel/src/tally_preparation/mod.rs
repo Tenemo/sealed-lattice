@@ -35,6 +35,8 @@ mod geometry;
 mod label_encoding;
 mod malicious_mpc_communication_floor;
 mod masked_ballot_bivariate_commitment_320;
+mod masked_ballot_bivariate_mailbox_320;
+mod masked_ballot_bivariate_receipt_320;
 mod masked_ballot_bivariate_sharing_320;
 mod masked_ballot_bundle_320;
 mod masked_ballot_release_320;
@@ -43,6 +45,7 @@ mod preparation_arithmetic_graph;
 mod preparation_attempt_resource_model;
 mod preparation_holder_record_catalog;
 mod preparation_multiplication_catalog;
+mod private_mailbox_kmac_256;
 mod pseudorandom_zero_sharing_320;
 mod pseudorandom_zero_sharing_field_stream_320;
 #[cfg(feature = "preparation-zero-sharing-measurement")]
@@ -139,6 +142,10 @@ mod label_encoding_tests;
 mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
 mod masked_ballot_bivariate_commitment_320_tests;
+#[cfg(test)]
+mod masked_ballot_bivariate_mailbox_320_tests;
+#[cfg(test)]
+mod masked_ballot_bivariate_receipt_320_tests;
 #[cfg(test)]
 mod masked_ballot_bivariate_sharing_320_tests;
 #[cfg(test)]
