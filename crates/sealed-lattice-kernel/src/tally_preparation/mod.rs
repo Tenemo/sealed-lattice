@@ -23,6 +23,9 @@ mod binary_field_320;
 mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
 mod binary_ring_packed_mpc_evaluation_floor;
+mod collective_coin_source_bivariate_commitment_320;
+mod collective_coin_source_bivariate_mailbox_320;
+mod collective_coin_source_bivariate_sharing_320;
 mod context;
 mod degree_three_opening_decoder;
 mod fixed_roster_beaver_mpc_resource_floor;
@@ -126,6 +129,12 @@ mod binary_field_multiplication_circuit_tests;
 mod binary_linear_circuit_tests;
 #[cfg(test)]
 mod binary_ring_packed_mpc_evaluation_floor_tests;
+#[cfg(test)]
+mod collective_coin_source_bivariate_commitment_320_tests;
+#[cfg(test)]
+mod collective_coin_source_bivariate_mailbox_320_tests;
+#[cfg(test)]
+mod collective_coin_source_bivariate_sharing_320_tests;
 #[cfg(test)]
 mod degree_three_opening_decoder_tests;
 #[cfg(test)]

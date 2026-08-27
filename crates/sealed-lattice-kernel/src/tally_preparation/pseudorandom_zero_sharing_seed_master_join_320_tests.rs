@@ -29,6 +29,7 @@ use super::{
         seed_mailbox_test_fixture_320, seed_mailbox_test_fixture_with_parameter_marker_320,
     },
     pseudorandom_zero_sharing_seed_master_join_320::{
+        LocallyJoinedPseudorandomZeroSharingSeedMasters320,
         PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN,
         PseudorandomZeroSharingLocalSeedCatalogEntryBytes320,
         PseudorandomZeroSharingSeedMasterJoinError320, combine_pair_master_for_test,
@@ -69,6 +70,39 @@ impl OwnedLocalSeedCatalogEntry320 {
             &self.inclusion_proof_bytes,
         )
     }
+}
+
+pub(super) fn completion_joined_seed_masters_for_test()
+-> LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
+    completion_joined_seed_masters_and_fixture_for_test().0
+}
+
+pub(super) fn completion_joined_seed_masters_and_fixture_for_test() -> (
+    LocallyJoinedPseudorandomZeroSharingSeedMasters320,
+    SeedMailboxTestFixture320,
+) {
+    let participant_position = 0;
+    let (
+        fixture,
+        retained_local_receipt,
+        receipt_terminal,
+        _,
+        _local_catalog_fixture,
+        local_entries,
+    ) = completion_join_fixture(participant_position);
+    let local_catalog = verify_pseudorandom_zero_sharing_local_seed_catalog_320(
+        &fixture.root_terminal,
+        participant_position,
+        &borrowed_entries(&local_entries),
+    )
+    .unwrap();
+    let joined_seed_masters = join_pseudorandom_zero_sharing_seed_masters_320(
+        local_catalog,
+        retained_local_receipt,
+        receipt_terminal,
+    )
+    .unwrap();
+    (joined_seed_masters, fixture)
 }
 
 #[test]
