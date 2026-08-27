@@ -357,6 +357,16 @@ pub(super) fn locally_joined_subset_master_for_test(
     LocallyJoinedPseudorandomZeroSharingSubsetMaster320 { scope, bytes }
 }
 
+/// Constructs deterministic diagnostic custody only in the dedicated scalar
+/// measurement build. This raw route is absent from the production package.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+pub(super) fn locally_joined_subset_master_for_measurement(
+    scope: PseudorandomZeroSharingSubsetMasterScope320,
+    bytes: [u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
+) -> LocallyJoinedPseudorandomZeroSharingSubsetMaster320 {
+    LocallyJoinedPseudorandomZeroSharingSubsetMaster320 { scope, bytes }
+}
+
 /// One joined pair master with no raw constructor.
 pub(crate) struct LocallyJoinedPseudorandomZeroSharingPairMaster320 {
     scope: PseudorandomZeroSharingPairSeedScope320,

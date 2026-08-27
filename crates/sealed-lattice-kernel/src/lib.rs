@@ -309,6 +309,176 @@ pub extern "C" fn sealed_lattice_measure_binary_field_320_multiplications(
     tally_preparation::measure_binary_field_320_multiplications(multiplication_count, seed)
 }
 
+/// Opens the deterministic completion-scale zero-sharing diagnostic cursor.
+///
+/// This export and its raw diagnostic source fixture are absent from the
+/// production WebAssembly package.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_open_zero_sharing_measurement_320() -> u32 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::open_completion_zero_sharing_measurement_320()
+}
+
+/// Restores the deterministic diagnostic cursor from one authenticated inner
+/// checkpoint while no measurement cursor is open.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_restore_zero_sharing_measurement_320(
+    pointer: *const u8,
+    length: usize,
+) -> u32 {
+    let checkpoint = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::restore_completion_zero_sharing_measurement_320(checkpoint)
+}
+
+/// Performs exactly one canonical subset-and-basis stream chunk.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_step_zero_sharing_measurement_320() -> u32 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::step_completion_zero_sharing_measurement_320()
+}
+
+/// Copies the current authenticated secret checkpoint out of the diagnostic
+/// cursor. The caller must erase the returned allocation.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or identify one writable `usize`
+/// value in this WebAssembly module's linear memory.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_zero_sharing_measurement_checkpoint_320_with_length(
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let Some(output) = tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_checkpoint_320() else {
+        if !output_length_pointer.is_null() {
+            unsafe { output_length_pointer.write(0) };
+        }
+        return ptr::null_mut();
+    };
+    if !output_length_pointer.is_null() {
+        unsafe { output_length_pointer.write(output.len()) };
+    }
+    leak_secret_bytes(output)
+}
+
+/// Copies the current completed secret output chunk out of the diagnostic
+/// cursor. The caller must erase the returned allocation.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or identify one writable `usize`
+/// value in this WebAssembly module's linear memory.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_zero_sharing_measurement_completed_chunk_320_with_length(
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let Some(output) = tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_completed_chunk_320() else {
+        if !output_length_pointer.is_null() {
+            unsafe { output_length_pointer.write(0) };
+        }
+        return ptr::null_mut();
+    };
+    if !output_length_pointer.is_null() {
+        unsafe { output_length_pointer.write(output.len()) };
+    }
+    leak_secret_bytes(output)
+}
+
+/// Acknowledges that the current output chunk has been copied by the
+/// diagnostic worker. This is not a durable production acknowledgement.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_acknowledge_zero_sharing_measurement_chunk_320() -> u32 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::acknowledge_completion_zero_sharing_measurement_chunk_320()
+}
+
+/// Drops the diagnostic cursor and zeroizes its retained Rust-owned buffers.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_close_zero_sharing_measurement_320() -> u32 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::close_completion_zero_sharing_measurement_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_state_320() -> u32 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_state_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_zero_sharing_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_zero_sharing_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_basis_stream_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_basis_stream_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_output_chunk_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_output_chunk_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_work_checkpoint_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_work_checkpoint_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_field_output_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_field_output_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_basis_precomputation_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_basis_precomputation_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_combination_multiplication_count_320()
+-> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_combination_multiplication_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_combination_addition_count_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_combination_addition_count_320()
+}
+
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_zero_sharing_measurement_expected_checkpoint_traffic_320() -> u64 {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::completion_zero_sharing_measurement_expected_checkpoint_traffic_320()
+}
+
+/// Runs the same deterministic typed zero-sharing cursor under the native
+/// development target and returns its source-derived counts and output
+/// digests. This diagnostic surface is absent from the production package.
+#[cfg(feature = "preparation-zero-sharing-measurement")]
+pub fn run_completion_zero_sharing_native_measurement_json() -> Result<String, String> {
+    tally_preparation::pseudorandom_zero_sharing_measurement_320::run_completion_zero_sharing_native_measurement_json()
+}
+
 #[cfg(test)]
 mod tests {
     use core::{ptr, slice};

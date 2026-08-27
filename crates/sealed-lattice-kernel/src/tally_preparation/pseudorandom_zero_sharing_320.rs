@@ -1,4 +1,4 @@
-use crate::foundation::derive_foundation_roster_parameters;
+use crate::{foundation::derive_foundation_roster_parameters, tally_circuit::CompiledTallyCircuit};
 use subtle::ConstantTimeEq;
 
 use super::{
@@ -60,6 +60,74 @@ use super::{
 pub(crate) struct PseudorandomZeroSharingResourceInput {
     pub(crate) participant_count: u16,
     pub(crate) zero_sharing_count: u64,
+}
+
+/// Production-derived workload for the retained per-bit hidden-value route.
+///
+/// This compiler is deliberately separate from the optional batched
+/// hidden-value candidate. It derives every zero-sharing coordinate consumed
+/// by the currently retained arithmetic graph and grants no preparation or
+/// continuation authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PerBitPseudorandomZeroSharingWorkload320 {
+    pub(crate) independent_label_semantic_mask_count: u64,
+    pub(crate) output_mask_count: u64,
+    pub(crate) accepted_authorship_bit_count: u64,
+    pub(crate) hidden_value_count: u64,
+    pub(crate) hidden_value_product_count: u64,
+    pub(crate) conjunction_product_count: u64,
+    pub(crate) zero_sharing_count: u64,
+}
+
+impl PerBitPseudorandomZeroSharingWorkload320 {
+    pub(crate) fn derive(circuit: &CompiledTallyCircuit) -> Result<Self, TallyPreparationError> {
+        let geometry = circuit.geometry();
+        let independent_label_semantic_mask_count = u64::try_from(
+            geometry
+                .total_wire_count
+                .checked_sub(geometry.constant_operation_count)
+                .ok_or(TallyPreparationError::GeometryMismatch)?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let output_mask_count = u64::try_from(
+            geometry
+                .public_output_bit_count
+                .checked_add(geometry.private_result_bit_count)
+                .ok_or(TallyPreparationError::ArithmeticOverflow)?,
+        )
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let accepted_authorship_bit_count = u64::from(circuit.profile().participant_count());
+        let hidden_value_count = checked_sum(&[
+            independent_label_semantic_mask_count,
+            output_mask_count,
+            accepted_authorship_bit_count,
+        ])?;
+        let hidden_value_product_count = checked_multiply(hidden_value_count, 2)?;
+        let conjunction_product_count = u64::try_from(geometry.conjunction_gate_count)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let zero_sharing_count =
+            checked_add(hidden_value_product_count, conjunction_product_count)?;
+
+        Ok(Self {
+            independent_label_semantic_mask_count,
+            output_mask_count,
+            accepted_authorship_bit_count,
+            hidden_value_count,
+            hidden_value_product_count,
+            conjunction_product_count,
+            zero_sharing_count,
+        })
+    }
+
+    pub(crate) const fn resource_input(
+        self,
+        participant_count: u16,
+    ) -> PseudorandomZeroSharingResourceInput {
+        PseudorandomZeroSharingResourceInput {
+            participant_count,
+            zero_sharing_count: self.zero_sharing_count,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -770,6 +838,25 @@ pub(crate) fn evaluate_pseudorandom_zero_sharing_subset_at_point(
         return Err(TallyPreparationError::GeometryMismatch);
     }
 
+    let basis_values = pseudorandom_zero_sharing_basis_values_at_point(subset, evaluation_point)?;
+    let evaluated_value = pseudorandom_components
+        .iter()
+        .copied()
+        .zip(basis_values)
+        .fold(
+            BinaryFieldElement320::ZERO,
+            |sum, (component, basis_value)| sum.add(component.multiply(basis_value)),
+        );
+    Ok(evaluated_value)
+}
+
+/// Derives the public basis weights consumed by both direct evaluation and the
+/// bounded participant cursor. Keeping this as one algebraic owner prevents a
+/// measurement-only loop from drifting from the production evaluator.
+pub(crate) fn pseudorandom_zero_sharing_basis_values_at_point(
+    subset: ReplicatedRandomSharingSubset,
+    evaluation_point: BinaryFieldElement320,
+) -> Result<Vec<BinaryFieldElement320>, TallyPreparationError> {
     let mut current_basis_value = evaluation_point;
     for excluded_position in subset.excluded_positions() {
         current_basis_value = current_basis_value.multiply(evaluation_point.add(
@@ -777,14 +864,15 @@ pub(crate) fn evaluate_pseudorandom_zero_sharing_subset_at_point(
         ));
     }
 
-    let mut evaluated_value = BinaryFieldElement320::ZERO;
-    for (component_position, component) in pseudorandom_components.iter().copied().enumerate() {
-        evaluated_value = evaluated_value.add(component.multiply(current_basis_value));
-        if component_position + 1 < pseudorandom_components.len() {
+    let basis_value_count = usize::from(subset.active_fault_bound());
+    let mut basis_values = Vec::with_capacity(basis_value_count);
+    for basis_position in 0..basis_value_count {
+        basis_values.push(current_basis_value);
+        if basis_position + 1 < basis_value_count {
             current_basis_value = current_basis_value.multiply(evaluation_point);
         }
     }
-    Ok(evaluated_value)
+    Ok(basis_values)
 }
 
 pub(crate) fn canonical_evaluation_point_320(
