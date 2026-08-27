@@ -13,6 +13,7 @@ use super::{
         COLLECTIVE_COIN_SOURCE_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_OPENING_OBJECT_BYTE_LENGTH,
+        SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH,
     },
     pseudorandom_zero_sharing_seed_catalog_320::PseudorandomZeroSharingSeedCatalogInclusionProof320,
     pseudorandom_zero_sharing_seed_catalog_root_terminal_320::{
@@ -210,7 +211,7 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) receipt_terminal_signature_verification_count: u64,
     pub(crate) combined_subset_seed_custody_byte_length_per_participant: u64,
     pub(crate) combined_pair_seed_custody_byte_length_per_participant: u64,
-    pub(crate) collective_coin_source_custody_byte_length_per_participant: u64,
+    pub(crate) collective_coin_source_and_salt_custody_byte_length_per_participant: u64,
     pub(crate) retained_seed_custody_byte_length_per_participant: u64,
     pub(crate) subset_basis_stream_count_per_participant: u64,
     pub(crate) basis_weight_live_byte_length_per_participant: u64,
@@ -246,6 +247,9 @@ impl PseudorandomZeroSharingResourceModel {
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let collective_coin_source_byte_length = u64::try_from(COLLECTIVE_COIN_SOURCE_BYTE_LENGTH)
             .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        let secret_leaf_commitment_salt_byte_length =
+            u64::try_from(SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH)
+                .map_err(|_| TallyPreparationError::IntegerConversion)?;
         let subset_seed_opening_object_byte_length =
             u64::try_from(PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_OPENING_OBJECT_BYTE_LENGTH)
                 .map_err(|_| TallyPreparationError::IntegerConversion)?;
@@ -538,12 +542,14 @@ impl PseudorandomZeroSharingResourceModel {
             ordered_mailbox_stream_count_per_participant,
             pair_seed_master_byte_length,
         )?;
-        let collective_coin_source_custody_byte_length_per_participant =
-            collective_coin_source_byte_length;
+        let collective_coin_source_and_salt_custody_byte_length_per_participant = checked_add(
+            collective_coin_source_byte_length,
+            secret_leaf_commitment_salt_byte_length,
+        )?;
         let retained_seed_custody_byte_length_per_participant = checked_sum(&[
             combined_subset_seed_custody_byte_length_per_participant,
             combined_pair_seed_custody_byte_length_per_participant,
-            collective_coin_source_custody_byte_length_per_participant,
+            collective_coin_source_and_salt_custody_byte_length_per_participant,
         ])?;
         let subset_basis_stream_count_per_participant = checked_multiply(
             geometry.authorized_subset_count_per_participant,
@@ -711,7 +717,7 @@ impl PseudorandomZeroSharingResourceModel {
             receipt_terminal_signature_verification_count,
             combined_subset_seed_custody_byte_length_per_participant,
             combined_pair_seed_custody_byte_length_per_participant,
-            collective_coin_source_custody_byte_length_per_participant,
+            collective_coin_source_and_salt_custody_byte_length_per_participant,
             retained_seed_custody_byte_length_per_participant,
             subset_basis_stream_count_per_participant,
             basis_weight_live_byte_length_per_participant,

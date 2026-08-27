@@ -315,12 +315,12 @@ fn completion_resource_model_reproduces_setup_stream_and_codeword_work() {
         360
     );
     assert_eq!(
-        model.collective_coin_source_custody_byte_length_per_participant,
-        40
+        model.collective_coin_source_and_salt_custody_byte_length_per_participant,
+        104
     );
     assert_eq!(
         model.retained_seed_custody_byte_length_per_participant,
-        3_760
+        3_824
     );
     assert_eq!(model.subset_basis_stream_count_per_participant, 252);
     assert_eq!(model.basis_weight_live_byte_length_per_participant, 10_080);
@@ -878,7 +878,7 @@ fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts()
             model.retained_seed_custody_byte_length_per_participant,
             model.combined_subset_seed_custody_byte_length_per_participant
                 + model.combined_pair_seed_custody_byte_length_per_participant
-                + model.collective_coin_source_custody_byte_length_per_participant
+                + model.collective_coin_source_and_salt_custody_byte_length_per_participant
         );
         assert_eq!(
             model.field_output_count_per_participant,

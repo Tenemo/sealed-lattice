@@ -139,10 +139,10 @@ fn completion_custody_boundary_reverifies_exact_predecessors_and_terminals() {
     join_and_encode_for_test(&request_bytes).unwrap();
     let response = run_pseudorandom_zero_sharing_seed_master_join_custody_320(&request_bytes);
     let joined_payload = parse_join_response(&response).unwrap();
-    assert_eq!(joined_payload.len(), 4_894);
+    assert_eq!(joined_payload.len(), 4_958);
 
     let joined_record = fixture.joined_record_bytes(joined_payload);
-    assert_eq!(joined_record.len(), 701_434);
+    assert_eq!(joined_record.len(), 701_498);
     let validation_response =
         run_pseudorandom_zero_sharing_joined_seed_master_validation_320(&joined_record);
     assert_eq!(validation_response.as_slice(), b"SLJR\x01\x00\x02");
@@ -188,7 +188,31 @@ fn completion_custody_boundary_reverifies_exact_predecessors_and_terminals() {
     assert_eq!(restored.participant_position(), PARTICIPANT_POSITION);
     assert_eq!(restored.subset_masters().len(), 84);
     assert_eq!(restored.pair_masters().len(), 9);
-    assert_eq!(restored.retained_secret_byte_length().unwrap(), 3_760);
+    assert_eq!(restored.retained_secret_byte_length().unwrap(), 3_824);
+    let restored_layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
+        fixture.parameter_identity,
+        restored.preparation_context(),
+        PARTICIPANT_POSITION,
+    )
+    .unwrap();
+    let collective_coin_leaf_ordinal = restored_layout
+        .leaf_ordinal(PseudorandomZeroSharingSeedCatalogCoordinate320::CollectiveCoin)
+        .unwrap();
+    let catalog_marker = 0x21_u8.wrapping_add(PARTICIPANT_POSITION as u8);
+    assert_eq!(
+        restored.collective_coin_source().commitment_salt(),
+        &marked_bytes::<SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH>(
+            catalog_marker.wrapping_add(0x11),
+            collective_coin_leaf_ordinal,
+        )
+    );
+    assert_eq!(
+        restored.collective_coin_source().source(),
+        &marked_bytes::<COLLECTIVE_COIN_SOURCE_BYTE_LENGTH>(
+            catalog_marker.wrapping_add(0x51),
+            collective_coin_leaf_ordinal,
+        )
+    );
     assert_eq!(
         restored.custody_payload_bytes().unwrap().as_slice(),
         joined_payload

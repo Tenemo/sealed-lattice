@@ -950,7 +950,7 @@ describe('joined seed-master custody', () => {
         const derived = deriveJoinedSeedMasterCustodyRecordByteLengths({
             authenticationPredecessorCiphertextByteLength: 1_235_671,
             authenticationSuccessorCiphertextByteLength: 323,
-            joinedMasterPayloadByteLength: 4_894,
+            joinedMasterPayloadByteLength: 4_958,
             receiptPredecessorCiphertextByteLength: 569_465,
             receiptTerminalCertificateByteLength: 36_340,
             rootTerminalCertificateByteLength: 36_230,
@@ -961,7 +961,7 @@ describe('joined seed-master custody', () => {
             4 + 2 + 13 * 64 + 3 * 2 + 4 * 4;
         const independentJoinedPlaintextByteLength =
             independentFixedRecordByteLength +
-            4_894 +
+            4_958 +
             36_340 +
             36_230 +
             623_110;
@@ -980,7 +980,7 @@ describe('joined seed-master custody', () => {
             623_110 +
             36_230 +
             36_340;
-        const independentJoinResponseByteLength = 4 + 2 + 1 + 4 + 4_894;
+        const independentJoinResponseByteLength = 4 + 2 + 1 + 4 + 4_958;
 
         expect(derived).toEqual({
             atomicTransitionCiphertextOverlapByteLength:
@@ -1006,14 +1006,14 @@ describe('joined seed-master custody', () => {
             retainedSuccessorCiphertextByteLength:
                 independentJoinedCiphertextByteLength + 323,
         });
-        expect(derived.joinedPlaintextByteLength).toBe(701_434);
-        expect(derived.joinedCiphertextByteLength).toBe(701_488);
+        expect(derived.joinedPlaintextByteLength).toBe(701_498);
+        expect(derived.joinedCiphertextByteLength).toBe(701_552);
         expect(derived.joinRequestByteLength).toBe(1_943_696);
-        expect(derived.joinResponseByteLength).toBe(4_905);
-        expect(derived.netCiphertextReclamationByteLength).toBe(1_781_120);
-        expect(derived.retainedSuccessorCiphertextByteLength).toBe(701_811);
+        expect(derived.joinResponseByteLength).toBe(4_969);
+        expect(derived.netCiphertextReclamationByteLength).toBe(1_781_056);
+        expect(derived.retainedSuccessorCiphertextByteLength).toBe(701_875);
         expect(derived.atomicTransitionCiphertextOverlapByteLength).toBe(
-            3_184_742,
+            3_184_806,
         );
     });
 
@@ -1021,7 +1021,7 @@ describe('joined seed-master custody', () => {
         const commonInput = {
             authenticationPredecessorCiphertextByteLength: 1_235_671,
             authenticationSuccessorCiphertextByteLength: 323,
-            joinedMasterPayloadByteLength: 4_894,
+            joinedMasterPayloadByteLength: 4_958,
             receiptPredecessorCiphertextByteLength: 569_465,
             receiptTerminalCertificateByteLength: 36_340,
             rootTerminalCertificateByteLength: 36_230,

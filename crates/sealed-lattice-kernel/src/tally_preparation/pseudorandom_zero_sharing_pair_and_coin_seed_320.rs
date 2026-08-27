@@ -709,6 +709,7 @@ impl Drop for CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320 {
 
 pub(crate) struct CommitmentMatchedCollectiveCoinSource320 {
     coordinate: CollectiveCoinSourceCoordinate320,
+    commitment_salt: [u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH],
     source: [u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH],
 }
 
@@ -717,7 +718,13 @@ impl CommitmentMatchedCollectiveCoinSource320 {
         self.coordinate
     }
 
-    pub(crate) const fn as_bytes(&self) -> &[u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH] {
+    pub(crate) const fn commitment_salt(
+        &self,
+    ) -> &[u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH] {
+        &self.commitment_salt
+    }
+
+    pub(crate) const fn source(&self) -> &[u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH] {
         &self.source
     }
 
@@ -725,11 +732,16 @@ impl CommitmentMatchedCollectiveCoinSource320 {
         mut self,
     ) -> (
         CollectiveCoinSourceCoordinate320,
+        [u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH],
         [u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH],
     ) {
+        let commitment_salt = core::mem::replace(
+            &mut self.commitment_salt,
+            [0_u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH],
+        );
         let source =
             core::mem::replace(&mut self.source, [0_u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH]);
-        (self.coordinate, source)
+        (self.coordinate, commitment_salt, source)
     }
 }
 
@@ -738,6 +750,7 @@ impl fmt::Debug for CommitmentMatchedCollectiveCoinSource320 {
         formatter
             .debug_struct("CommitmentMatchedCollectiveCoinSource320")
             .field("coordinate", &self.coordinate)
+            .field("commitment_salt", &"[redacted]")
             .field("source", &"[redacted]")
             .finish()
     }
@@ -745,6 +758,7 @@ impl fmt::Debug for CommitmentMatchedCollectiveCoinSource320 {
 
 impl Drop for CommitmentMatchedCollectiveCoinSource320 {
     fn drop(&mut self) {
+        self.commitment_salt.zeroize();
         self.source.zeroize();
     }
 }
@@ -874,6 +888,7 @@ pub(crate) fn verify_collective_coin_source_320(
     }
     Ok(CommitmentMatchedCollectiveCoinSource320 {
         coordinate: opening.coordinate,
+        commitment_salt: opening.commitment_salt,
         source: opening.source,
     })
 }
@@ -962,6 +977,7 @@ pub(crate) fn verify_collective_coin_source_opening_catalog_inclusion_320(
         catalog_inclusion,
         CommitmentMatchedCollectiveCoinSource320 {
             coordinate: opening.coordinate,
+            commitment_salt: opening.commitment_salt,
             source: opening.source,
         },
     ))

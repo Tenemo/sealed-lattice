@@ -13,7 +13,8 @@ use super::{
         COLLECTIVE_COIN_SOURCE_BYTE_LENGTH, CommitmentMatchedCollectiveCoinSource320,
         CommitmentMatchedPseudorandomZeroSharingPairSeedContribution320,
         PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH,
-        PseudorandomZeroSharingPairSeedScope320, SeedCatalogSecretLeafError320,
+        PseudorandomZeroSharingPairSeedScope320,
+        SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH, SeedCatalogSecretLeafError320,
         verify_collective_coin_source_opening_catalog_inclusion_320,
         verify_pseudorandom_zero_sharing_pair_seed_opening_catalog_inclusion_320,
     },
@@ -398,14 +399,21 @@ impl Drop for LocallyJoinedPseudorandomZeroSharingPairMaster320 {
     }
 }
 
-/// The participant's own committed coin source retained unopened.
+/// The participant's own committed coin source and salt retained unopened.
 pub(crate) struct LocallyJoinedCollectiveCoinSource320 {
-    bytes: [u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH],
+    commitment_salt: [u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH],
+    source: [u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH],
 }
 
 impl LocallyJoinedCollectiveCoinSource320 {
-    pub(crate) const fn as_bytes(&self) -> &[u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH] {
-        &self.bytes
+    pub(crate) const fn commitment_salt(
+        &self,
+    ) -> &[u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH] {
+        &self.commitment_salt
+    }
+
+    pub(crate) const fn source(&self) -> &[u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH] {
+        &self.source
     }
 }
 
@@ -417,7 +425,8 @@ impl fmt::Debug for LocallyJoinedCollectiveCoinSource320 {
 
 impl Drop for LocallyJoinedCollectiveCoinSource320 {
     fn drop(&mut self) {
-        self.bytes.zeroize();
+        self.commitment_salt.zeroize();
+        self.source.zeroize();
     }
 }
 
@@ -427,7 +436,8 @@ impl Drop for LocallyJoinedCollectiveCoinSource320 {
 /// Construction consumes all raw in-memory contribution objects. The result
 /// deliberately has no durable-retention, coin-opening, burn, or preparation-
 /// continuation authority. A later state owner must durably retain these exact
-/// masters and the unopened coin source before deleting persistent raw custody.
+/// masters and the unopened coin source and salt before deleting persistent raw
+/// custody.
 pub(crate) struct LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
     parameter_identity: Hash512,
     preparation_context: TallyPreparationContext,
@@ -509,6 +519,9 @@ impl LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
                     .checked_mul(PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH)
                     .and_then(|pair_length| length.checked_add(pair_length))
             })
+            .and_then(|length| {
+                length.checked_add(SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH)
+            })
             .and_then(|length| length.checked_add(COLLECTIVE_COIN_SOURCE_BYTE_LENGTH))
             .ok_or(PseudorandomZeroSharingSeedMasterJoinError320::ArithmeticOverflow)
     }
@@ -535,7 +548,8 @@ impl LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
         for master in &self.pair_masters {
             retained_secret_bytes.extend_from_slice(master.as_bytes());
         }
-        retained_secret_bytes.extend_from_slice(self.collective_coin_source.as_bytes());
+        retained_secret_bytes.extend_from_slice(self.collective_coin_source.commitment_salt());
+        retained_secret_bytes.extend_from_slice(self.collective_coin_source.source());
 
         let tuple = Zeroizing::new(CanonicalTuple::new(
             CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
@@ -704,6 +718,9 @@ pub(super) fn restore_pseudorandom_zero_sharing_seed_masters_from_verified_custo
                 .checked_mul(PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH)
                 .and_then(|pair_byte_length| byte_length.checked_add(pair_byte_length))
         })
+        .and_then(|byte_length| {
+            byte_length.checked_add(SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH)
+        })
         .and_then(|byte_length| byte_length.checked_add(COLLECTIVE_COIN_SOURCE_BYTE_LENGTH))
         .ok_or(PseudorandomZeroSharingSeedMasterJoinError320::ArithmeticOverflow)?;
     let retained_secret_bytes = verified_custody.into_retained_secret_bytes();
@@ -738,11 +755,16 @@ pub(super) fn restore_pseudorandom_zero_sharing_seed_masters_from_verified_custo
         });
         byte_offset = byte_end;
     }
-    let coin_byte_end = byte_offset + COLLECTIVE_COIN_SOURCE_BYTE_LENGTH;
+    let coin_salt_byte_end = byte_offset + SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH;
+    let mut collective_coin_commitment_salt =
+        Zeroizing::new([0_u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH]);
+    collective_coin_commitment_salt
+        .copy_from_slice(&retained_secret_bytes[byte_offset..coin_salt_byte_end]);
+    let coin_byte_end = coin_salt_byte_end + COLLECTIVE_COIN_SOURCE_BYTE_LENGTH;
     let mut collective_coin_source_bytes =
         Zeroizing::new([0_u8; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH]);
     collective_coin_source_bytes
-        .copy_from_slice(&retained_secret_bytes[byte_offset..coin_byte_end]);
+        .copy_from_slice(&retained_secret_bytes[coin_salt_byte_end..coin_byte_end]);
     debug_assert_eq!(coin_byte_end, retained_secret_bytes.len());
 
     Ok(LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
@@ -759,7 +781,8 @@ pub(super) fn restore_pseudorandom_zero_sharing_seed_masters_from_verified_custo
         subset_masters: subset_masters.into_boxed_slice(),
         pair_masters: pair_masters.into_boxed_slice(),
         collective_coin_source: LocallyJoinedCollectiveCoinSource320 {
-            bytes: *collective_coin_source_bytes,
+            commitment_salt: *collective_coin_commitment_salt,
+            source: *collective_coin_source_bytes,
         },
     })
 }
@@ -979,7 +1002,9 @@ pub(crate) fn join_pseudorandom_zero_sharing_seed_masters_320(
         "joined pair contribution remainder",
     )?;
 
-    let (_, collective_coin_source_bytes) = local_catalog.collective_coin_source.into_parts();
+    let (_, collective_coin_commitment_salt, collective_coin_source_bytes) =
+        local_catalog.collective_coin_source.into_parts();
+    let collective_coin_commitment_salt = Zeroizing::new(collective_coin_commitment_salt);
     let collective_coin_source_bytes = Zeroizing::new(collective_coin_source_bytes);
     Ok(LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
         parameter_identity: local_catalog.layout.parameter_identity(),
@@ -995,7 +1020,8 @@ pub(crate) fn join_pseudorandom_zero_sharing_seed_masters_320(
         subset_masters: subset_masters.into_boxed_slice(),
         pair_masters: pair_masters.into_boxed_slice(),
         collective_coin_source: LocallyJoinedCollectiveCoinSource320 {
-            bytes: *collective_coin_source_bytes,
+            commitment_salt: *collective_coin_commitment_salt,
+            source: *collective_coin_source_bytes,
         },
     })
 }

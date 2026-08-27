@@ -1736,6 +1736,7 @@ fn verify_joined_payload(
                 .checked_mul(PSEUDORANDOM_ZERO_SHARING_PAIR_SEED_CONTRIBUTION_BYTE_LENGTH)
                 .and_then(|pair_length| length.checked_add(pair_length))
         })
+        .and_then(|length| length.checked_add(SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH))
         .and_then(|length| length.checked_add(COLLECTIVE_COIN_SOURCE_BYTE_LENGTH))
         .ok_or(
             PseudorandomZeroSharingSeedMasterCustodyError320::ResourceLimit(

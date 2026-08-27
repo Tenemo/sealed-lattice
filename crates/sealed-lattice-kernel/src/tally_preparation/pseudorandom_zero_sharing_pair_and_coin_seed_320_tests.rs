@@ -159,7 +159,8 @@ fn every_admitted_pair_endpoint_and_coin_source_has_exact_canonical_bytes() {
                 verify_collective_coin_source_320(coordinate, &commitment_bytes, &opening_bytes)
                     .unwrap();
             assert_eq!(matched.coordinate(), coordinate);
-            assert_eq!(matched.as_bytes(), &source);
+            assert_eq!(matched.commitment_salt(), &salt);
+            assert_eq!(matched.source(), &source);
         }
     }
 }
@@ -764,7 +765,11 @@ fn zero_secret_values_are_valid_and_debug_output_redacts_them() {
     )
     .unwrap();
     assert_eq!(
-        matched_coin.as_bytes(),
+        matched_coin.commitment_salt(),
+        &[0; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH]
+    );
+    assert_eq!(
+        matched_coin.source(),
         &[0; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH]
     );
     assert!(format!("{coin_opening:?}").contains("[redacted]"));

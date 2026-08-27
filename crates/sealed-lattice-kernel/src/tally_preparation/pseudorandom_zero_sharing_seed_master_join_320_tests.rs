@@ -72,7 +72,7 @@ impl OwnedLocalSeedCatalogEntry320 {
 }
 
 #[test]
-fn actual_authenticated_receipts_join_every_completion_master_and_unopened_coin_source() {
+fn actual_authenticated_receipts_join_every_completion_master_and_unopened_coin_source_and_salt() {
     let participant_position = 0;
     let (
         fixture,
@@ -136,10 +136,14 @@ fn actual_authenticated_receipts_join_every_completion_master_and_unopened_coin_
         );
     }
     assert_eq!(
-        joined.collective_coin_source().as_bytes(),
+        joined.collective_coin_source().source(),
         &independent_coin_source(layout)
     );
-    assert_eq!(joined.retained_secret_byte_length().unwrap(), 3_760);
+    assert_eq!(
+        joined.collective_coin_source().commitment_salt(),
+        &independent_coin_commitment_salt(layout)
+    );
+    assert_eq!(joined.retained_secret_byte_length().unwrap(), 3_824);
     assert_eq!(joined.participant_position(), participant_position);
     assert_eq!(joined.parameter_identity(), layout.parameter_identity());
     assert_eq!(joined.preparation_context(), layout.preparation_context());
@@ -250,8 +254,9 @@ fn actual_authenticated_receipts_join_every_completion_master_and_unopened_coin_
             counterpart_position,
         ));
     }
+    independently_joined_secret_bytes.extend_from_slice(&independent_coin_commitment_salt(layout));
     independently_joined_secret_bytes.extend_from_slice(&independent_coin_source(layout));
-    assert_eq!(independently_joined_secret_bytes.len(), 3_760);
+    assert_eq!(independently_joined_secret_bytes.len(), 3_824);
     assert_eq!(
         custody_tuple.items[16].item_type(),
         CanonicalItemType::RawBytes
@@ -1202,6 +1207,19 @@ fn independent_coin_source(
     let catalog_marker = 0x21_u8.wrapping_add(participant_layout.contributor_position() as u8);
     marked_bytes::<COLLECTIVE_COIN_SOURCE_BYTE_LENGTH>(
         catalog_marker.wrapping_add(0x51),
+        leaf_ordinal,
+    )
+}
+
+fn independent_coin_commitment_salt(
+    participant_layout: PseudorandomZeroSharingSeedCatalogLayout320,
+) -> [u8; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH] {
+    let leaf_ordinal = participant_layout
+        .leaf_ordinal(PseudorandomZeroSharingSeedCatalogCoordinate320::CollectiveCoin)
+        .unwrap();
+    let catalog_marker = 0x21_u8.wrapping_add(participant_layout.contributor_position() as u8);
+    marked_bytes::<SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH>(
+        catalog_marker.wrapping_add(0x11),
         leaf_ordinal,
     )
 }
