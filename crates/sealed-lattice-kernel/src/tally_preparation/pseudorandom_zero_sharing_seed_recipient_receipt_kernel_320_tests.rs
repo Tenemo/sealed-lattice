@@ -158,7 +158,37 @@ fn open_context(
     assert_status(&response, OPEN_CONTEXT_STATUS);
     let mut offset = RESPONSE_HEADER_BYTE_LENGTH;
     let handle = u32::from_le_bytes(response[offset..offset + 4].try_into().unwrap());
-    offset += 4 + 1_952 + 1_184;
+    offset += 4;
+    assert_eq!(
+        &response[offset..offset + Hash512::BYTE_LENGTH],
+        fixture.owner.parameter_identity.as_bytes()
+    );
+    offset += Hash512::BYTE_LENGTH;
+    assert_eq!(
+        &response[offset..offset + Hash512::BYTE_LENGTH],
+        fixture.owner.preparation_context.identity().as_bytes()
+    );
+    offset += Hash512::BYTE_LENGTH;
+    assert_eq!(
+        &response[offset..offset + Hash512::BYTE_LENGTH],
+        fixture.owner.root_terminal.identity().unwrap().as_bytes()
+    );
+    offset += Hash512::BYTE_LENGTH;
+    assert_eq!(
+        u16::from_le_bytes(response[offset..offset + 2].try_into().unwrap()),
+        0
+    );
+    offset += 2;
+    assert_eq!(
+        u16::from_le_bytes(response[offset..offset + 2].try_into().unwrap()),
+        FOUNDATION_PROFILE.participant_count
+    );
+    offset += 2;
+    assert_eq!(
+        u16::from_le_bytes(response[offset..offset + 2].try_into().unwrap()),
+        fixture.owner.recipient_position
+    );
+    offset += 2 + 1_952 + 1_184;
     let ciphertext_count = usize::from(u16::from_le_bytes(
         response[offset..offset + 2].try_into().unwrap(),
     ));

@@ -469,7 +469,21 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                     validate: () => undefined,
                 }),
             ).toBe(false);
+            expect(
+                receiptKernelModule.isAuthenticatedSeedRecipientReceiptInconsistency(
+                    new receiptKernelModule.SeedRecipientReceiptKernelError(
+                        'AuthenticatedInconsistency',
+                        'Caller-created imitation.',
+                    ),
+                ),
+            ).toBe(false);
             const oneByte = Uint8Array.of(1);
+            const retainAuthenticatedInconsistency = vi.fn(() =>
+                Promise.resolve(),
+            );
+            const retainVerifiedPublicSelection = vi.fn(() =>
+                Promise.resolve(),
+            );
             await expect(
                 receiptKernelModule.openProductionSeedRecipientReceiptKernel(
                     kernelUrl,
@@ -502,9 +516,15 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                         ],
                         rootTerminalCertificateBytes: oneByte,
                         rosterBytes: oneByte,
+                        stateOperations: {
+                            retainAuthenticatedInconsistency,
+                            retainVerifiedPublicSelection,
+                        },
                     },
                 ),
             ).rejects.toMatchObject({ code: 'PublicVerification' });
+            expect(retainAuthenticatedInconsistency).not.toHaveBeenCalled();
+            expect(retainVerifiedPublicSelection).not.toHaveBeenCalled();
         } finally {
             if (priorBinding === undefined) {
                 Reflect.deleteProperty(globalBindings, integrityBindingName);

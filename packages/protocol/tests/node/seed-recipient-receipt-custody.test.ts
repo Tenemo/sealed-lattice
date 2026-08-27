@@ -1,6 +1,10 @@
 import type { ProductionSeedRecipientReceiptKernel } from '@sealed-lattice/wasm';
 import { describe, expect, it, vi } from 'vitest';
 
+const authenticationMocks = vi.hoisted(() => ({
+    isAuthorized: vi.fn(() => true),
+}));
+
 vi.mock('@sealed-lattice/wasm', () => ({
     isProductionSeedRecipientReceiptKernel: () => true,
     openProductionSeedRecipientReceiptKernel: () => {
@@ -8,11 +12,20 @@ vi.mock('@sealed-lattice/wasm', () => ({
     },
 }));
 
+vi.mock(
+    '#packages/protocol/src/runtime/seed-recipient-authentication-custody',
+    () => ({
+        isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody:
+            authenticationMocks.isAuthorized,
+    }),
+);
+
 import {
     createRuntimeRecordProtection,
     type RuntimeRecordProtection,
 } from '#packages/protocol/src/runtime/authenticated-runtime-record';
 import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
+import type { SeedRecipientAuthenticationCustody } from '#packages/protocol/src/runtime/seed-recipient-authentication-custody';
 import {
     SeedRecipientReceiptCustody,
     consumeSeedRecipientReceiptTerminalEndorsementAuthorization,
@@ -324,6 +337,9 @@ const createFixture = async (input?: {
         cryptoProvider,
         custody:
             new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
+                authenticationCustody: Object.freeze(
+                    {},
+                ) as SeedRecipientAuthenticationCustody,
                 context,
                 kernel: kernel as unknown as ProductionSeedRecipientReceiptKernel,
                 limits: testLimits,
@@ -358,6 +374,9 @@ const reopenCustody = async (
         rootKey: fixture.rootKey,
     });
     return new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
+        authenticationCustody: Object.freeze(
+            {},
+        ) as SeedRecipientAuthenticationCustody,
         context,
         kernel: kernel as unknown as ProductionSeedRecipientReceiptKernel,
         limits: testLimits,
@@ -367,6 +386,15 @@ const reopenCustody = async (
 };
 
 describe('seed-recipient receipt custody', () => {
+    it('refuses a production kernel that bypassed durable authentication custody', async () => {
+        authenticationMocks.isAuthorized.mockReturnValueOnce(false);
+        await expect(createFixture()).rejects.toMatchObject({
+            code: 'InvalidConfiguration',
+            message:
+                'Seed-recipient receipt custody requires a kernel opened through its durable authentication owner.',
+        });
+    });
+
     it('independently accounts for the exact completion receipt records', () => {
         const derived = deriveSeedRecipientReceiptCustodyRecordByteLengths({
             authenticatedInventoryBodyByteLength: 1_566,
@@ -450,7 +478,7 @@ describe('seed-recipient receipt custody', () => {
             2 +
             independentlyDerivedCarrierCorpusByteLength;
         const independentlyDerivedOpenResponseByteLength =
-            7 + 4 + 1_952 + 1_184 + 2 + 9 * 1_088;
+            7 + 4 + 64 * 3 + 2 * 3 + 1_952 + 1_184 + 2 + 9 * 1_088;
         const independentlyDerivedAuthenticationRequestByteLength =
             7 + 4 + 2 + 9 * 32;
         const independentlyDerivedAuthenticationResponseByteLength =
@@ -524,7 +552,7 @@ describe('seed-recipient receipt custody', () => {
             closeContextRequestByteLength: 11,
             closeContextResponseByteLength: 7,
             coldValidationCumulativeRequestByteLength: 2_370_770,
-            coldValidationCumulativeResponseByteLength: 578_393,
+            coldValidationCumulativeResponseByteLength: 578_591,
             coldValidationInvocationCount: 5,
             completeAuthenticationRequestByteLength: 301,
             completeAuthenticationResponseByteLength: 565_431,
@@ -533,9 +561,9 @@ describe('seed-recipient receipt custody', () => {
             maximumRequestByteLength: 1_235_408,
             maximumResponseByteLength: 565_431,
             openContextRequestByteLength: 1_235_408,
-            openContextResponseByteLength: 12_941,
+            openContextResponseByteLength: 13_139,
             successfulCumulativeRequestByteLength: 2_939_514,
-            successfulCumulativeResponseByteLength: 582_182,
+            successfulCumulativeResponseByteLength: 582_380,
             successfulInvocationCount: 6,
             validationRequestByteLengthWithEnvelope: 569_416,
             validationRequestByteLengthWithoutEnvelope: 565_634,

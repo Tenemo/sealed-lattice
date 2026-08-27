@@ -1,19 +1,10 @@
 import {
-    assertSeedRecipientReceiptCapabilitiesMatchRosterKeys,
-    decapsulateSeedRecipientMailboxCiphertext,
-    signSeedRecipientReceiptBody,
-    type BrowserLocalMailboxCapability,
-    type BrowserLocalSigningCapability,
-} from '@sealed-lattice/crypto';
-import {
     configurableParticipantCountRange,
     foundationProfile,
 } from '@sealed-lattice/types';
 import {
     isProductionSeedRecipientReceiptKernel,
-    openProductionSeedRecipientReceiptKernel,
     type AuthenticatedSeedRecipientInventoryAuthorization,
-    type OpenProductionSeedRecipientReceiptKernelInput,
     type ProductionSeedRecipientReceiptKernel,
 } from '@sealed-lattice/wasm';
 
@@ -30,6 +21,11 @@ import {
     type RuntimeRecordProtection,
 } from './authenticated-runtime-record.js';
 import { AuthenticatedStorageRecencyCoordinator } from './authenticated-storage-recency.js';
+import {
+    isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody,
+    type SeedRecipientAuthenticationCustody,
+    type SeedRecipientReceiptCustodyContext,
+} from './seed-recipient-authentication-custody.js';
 import type {
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
@@ -58,14 +54,7 @@ const receiptCustodyOperationDomain =
 const isReadonlyArray = (value: unknown): value is readonly unknown[] =>
     Array.isArray(value);
 
-export type SeedRecipientReceiptCustodyContext = Readonly<{
-    parameterIdentity: Uint8Array;
-    participantCount: number;
-    preparationAttemptOrdinal: number;
-    preparationContextIdentity: Uint8Array;
-    recipientPosition: number;
-    rootTerminalIdentity: Uint8Array;
-}>;
+export type { SeedRecipientReceiptCustodyContext } from './seed-recipient-authentication-custody.js';
 
 export type SeedRecipientReceiptCustodyLimits = Readonly<{
     maximumAuthenticatedInventoryBodyByteLength: number;
@@ -107,67 +96,6 @@ export type SeedRecipientReceiptCustodyKernel<
     ): Promise<Uint8Array> | Uint8Array;
     validate(input: SeedRecipientReceiptValidationInput): Promise<void> | void;
 }>;
-
-type OpenBrowserLocalSeedRecipientReceiptKernelInput = Omit<
-    OpenProductionSeedRecipientReceiptKernelInput,
-    'keyOperations'
-> &
-    Readonly<{
-        mailboxCapability: BrowserLocalMailboxCapability;
-        signingCapability: BrowserLocalSigningCapability;
-    }>;
-
-/**
- * Binds the recipient boundary to one browser-worker-owned ML-KEM capability
- * and the matching ML-DSA capability. Rust verifies all sender signatures and
- * encrypted chunk digests before the fixed-purpose decapsulation calls, then
- * root-matches every plaintext and verifies the final receipt signature.
- */
-export const openBrowserLocalSeedRecipientReceiptKernel = async (
-    transcriptCoreKernelUrl: URL,
-    input: OpenBrowserLocalSeedRecipientReceiptKernelInput,
-): Promise<ProductionSeedRecipientReceiptKernel> =>
-    openProductionSeedRecipientReceiptKernel(transcriptCoreKernelUrl, {
-        carriers: input.carriers,
-        keyOperations: Object.freeze({
-            assertMatchesRecipientKeys: ({
-                mailboxEncapsulationKey,
-                recipientSigningVerificationKey,
-            }): void =>
-                assertSeedRecipientReceiptCapabilitiesMatchRosterKeys({
-                    mailboxCapability: input.mailboxCapability,
-                    mailboxEncapsulationKey,
-                    recipientSigningVerificationKey,
-                    signingCapability: input.signingCapability,
-                }),
-            decapsulateMailboxCiphertext: ({
-                ciphertext,
-                mailboxEncapsulationKey,
-            }): Uint8Array =>
-                decapsulateSeedRecipientMailboxCiphertext({
-                    ciphertext,
-                    mailboxCapability: input.mailboxCapability,
-                    mailboxEncapsulationKey,
-                }),
-            signReceiptBody: ({
-                receiptBodyBytes,
-                recipientSigningVerificationKey,
-                signatureRandomness,
-            }): Uint8Array =>
-                signSeedRecipientReceiptBody({
-                    receiptBodyBytes,
-                    recipientSigningVerificationKey,
-                    signatureRandomness,
-                    signingCapability: input.signingCapability,
-                }),
-        }),
-        parameterIdentity: input.parameterIdentity,
-        preparationContextBytes: input.preparationContextBytes,
-        recipientPosition: input.recipientPosition,
-        rootAuthorizationPackages: input.rootAuthorizationPackages,
-        rootTerminalCertificateBytes: input.rootTerminalCertificateBytes,
-        rosterBytes: input.rosterBytes,
-    });
 
 /**
  * Exact public receipt carrier retained for byte-identical publication replay.
@@ -945,6 +873,7 @@ export const deriveSeedRecipientReceiptKernelByteLengths = (input: {
         [
             kernelResponseHeaderByteLength,
             kernelContextHandleByteLength,
+            receiptValidationContextByteLength,
             signingVerificationKeyByteLength,
             mailboxEncapsulationKeyByteLength,
             2,
@@ -1810,6 +1739,7 @@ export class SeedRecipientReceiptCustody<
     #operationTail: Promise<void> = Promise.resolve();
 
     public constructor(input: {
+        authenticationCustody: SeedRecipientAuthenticationCustody;
         context: SeedRecipientReceiptCustodyContext;
         kernel: ProductionSeedRecipientReceiptKernel;
         limits: SeedRecipientReceiptCustodyLimits;
@@ -1820,6 +1750,17 @@ export class SeedRecipientReceiptCustody<
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidConfiguration',
                 'Seed-recipient receipt custody requires the integrity-pinned production kernel.',
+            );
+        }
+        if (
+            !isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody(
+                input.kernel,
+                input.authenticationCustody,
+            )
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidConfiguration',
+                'Seed-recipient receipt custody requires a kernel opened through its durable authentication owner.',
             );
         }
         if (

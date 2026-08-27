@@ -27,7 +27,13 @@ vi.mock('@sealed-lattice/wasm', () => ({
     openProductionSeedRecipientReceiptKernel: mocks.openKernel,
 }));
 
-import { openBrowserLocalSeedRecipientReceiptKernel } from '#packages/protocol/src/runtime/seed-recipient-receipt-custody';
+import type { RuntimeRecordProtection } from '#packages/protocol/src/runtime/authenticated-runtime-record';
+import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
+import {
+    openBrowserLocalSeedRecipientReceiptKernel,
+    SeedRecipientAuthenticationCustody,
+} from '#packages/protocol/src/runtime/seed-recipient-authentication-custody';
+import type { UntrustedStorageTransactionStore } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 
 beforeEach(() => {
     mocks.assertRecipientKeys.mockReset();
@@ -81,11 +87,34 @@ it('binds recipient decapsulation and receipt signing to one browser-local parti
     });
     const rootTerminalCertificateBytes = Uint8Array.of(0x27);
     const rosterBytes = Uint8Array.of(0x28);
+    const authenticationCustody = new SeedRecipientAuthenticationCustody({
+        context: Object.freeze({
+            parameterIdentity: parameterIdentity.slice(),
+            participantCount: 4,
+            preparationAttemptOrdinal: 0,
+            preparationContextIdentity: new Uint8Array(64).fill(0x29),
+            recipientPosition: 1,
+            rootTerminalIdentity: new Uint8Array(64).fill(0x2a),
+        }),
+        limits: Object.freeze({
+            maximumCanonicalOpenRequestByteLength: 1_024,
+            transactionLifetimeMilliseconds: 1_000,
+        }),
+        protection: Object.freeze({}) as RuntimeRecordProtection,
+        recencyCoordinator: new AuthenticatedStorageRecencyCoordinator({
+            anchor: Object.freeze({
+                compareAndSet: () => Promise.resolve(false),
+                read: () => Promise.resolve(undefined),
+            }),
+            store: Object.freeze({}) as UntrustedStorageTransactionStore,
+        }),
+    });
 
     await expect(
         openBrowserLocalSeedRecipientReceiptKernel(
             new URL('https://example.invalid/kernel.wasm'),
             {
+                authenticationCustody,
                 carriers: [carrier],
                 mailboxCapability,
                 parameterIdentity,
@@ -108,6 +137,12 @@ it('binds recipient decapsulation and receipt signing to one browser-local parti
         rootTerminalCertificateBytes,
         rosterBytes,
     });
+    expect(
+        typeof openedInput?.stateOperations.retainAuthenticatedInconsistency,
+    ).toBe('function');
+    expect(
+        typeof openedInput?.stateOperations.retainVerifiedPublicSelection,
+    ).toBe('function');
 
     const mailboxEncapsulationKey = new Uint8Array(1_184).fill(0x31);
     const recipientSigningVerificationKey = new Uint8Array(1_952).fill(0x32);

@@ -111,6 +111,20 @@ export type SeedRecipientReceiptKeyOperations = Readonly<{
 type SnapshottedSeedRecipientReceiptKeyOperations =
     SeedRecipientReceiptKeyOperations;
 
+export type SeedRecipientReceiptAuthenticationStateOperations = Readonly<{
+    retainAuthenticatedInconsistency(input: {
+        readonly canonicalOpenRequestBytes: Uint8Array;
+        readonly verifiedContext: SeedRecipientReceiptContext;
+    }): Promise<void>;
+    retainVerifiedPublicSelection(input: {
+        readonly canonicalOpenRequestBytes: Uint8Array;
+        readonly verifiedContext: SeedRecipientReceiptContext;
+    }): Promise<void>;
+}>;
+
+type SnapshottedSeedRecipientReceiptAuthenticationStateOperations =
+    SeedRecipientReceiptAuthenticationStateOperations;
+
 export type OpenProductionSeedRecipientReceiptKernelInput = Readonly<{
     carriers: readonly SeedRecipientReceiptMailboxCarrier[];
     keyOperations: SeedRecipientReceiptKeyOperations;
@@ -120,6 +134,7 @@ export type OpenProductionSeedRecipientReceiptKernelInput = Readonly<{
     rootAuthorizationPackages: readonly SeedRecipientReceiptRootAuthorizationPackageBytes[];
     rootTerminalCertificateBytes: Uint8Array;
     rosterBytes: Uint8Array;
+    stateOperations: SeedRecipientReceiptAuthenticationStateOperations;
 }>;
 
 export type SeedRecipientReceiptKernelErrorCode =
@@ -176,6 +191,7 @@ export type ProductionSeedRecipientReceiptKernel = Readonly<{
 
 const productionKernels = new WeakSet<object>();
 const authorizationKernels = new WeakMap<object, object>();
+const authenticatedKernelResponseErrors = new WeakSet<object>();
 
 const responseCodeByNumber = new Map<
     number,
@@ -258,6 +274,37 @@ const snapshotKeyOperations = (
         signReceiptBody: signReceiptBody.bind(
             value,
         ) as SeedRecipientReceiptKeyOperations['signReceiptBody'],
+    });
+};
+
+const snapshotAuthenticationStateOperations = (
+    value: unknown,
+): SnapshottedSeedRecipientReceiptAuthenticationStateOperations => {
+    const retainAuthenticatedInconsistency = snapshotDataProperty(
+        value,
+        'retainAuthenticatedInconsistency',
+        'Seed-recipient receipt authentication state operations',
+    );
+    const retainVerifiedPublicSelection = snapshotDataProperty(
+        value,
+        'retainVerifiedPublicSelection',
+        'Seed-recipient receipt authentication state operations',
+    );
+    if (
+        typeof retainAuthenticatedInconsistency !== 'function' ||
+        typeof retainVerifiedPublicSelection !== 'function'
+    ) {
+        throw new TypeError(
+            'Seed-recipient receipt authentication state operations must provide both durable transition methods.',
+        );
+    }
+    return Object.freeze({
+        retainAuthenticatedInconsistency: retainAuthenticatedInconsistency.bind(
+            value,
+        ) as SeedRecipientReceiptAuthenticationStateOperations['retainAuthenticatedInconsistency'],
+        retainVerifiedPublicSelection: retainVerifiedPublicSelection.bind(
+            value,
+        ) as SeedRecipientReceiptAuthenticationStateOperations['retainVerifiedPublicSelection'],
     });
 };
 
@@ -723,10 +770,12 @@ class ResponseCursor {
             if (code === undefined) {
                 throw malformedResponse('an unknown failure code');
             }
-            throw new SeedRecipientReceiptKernelError(
+            const failure = new SeedRecipientReceiptKernelError(
                 code,
                 `The seed-recipient receipt kernel refused the request with ${code}.`,
             );
+            authenticatedKernelResponseErrors.add(failure);
+            throw failure;
         }
         if (status !== expectedStatus) {
             throw malformedResponse('an unexpected success status');
@@ -795,10 +844,13 @@ const parseOpenResponse = (
     ciphertexts: readonly Uint8Array[];
     mailboxEncapsulationKey: Uint8Array;
     recipientSigningVerificationKey: Uint8Array;
+    verifiedContext: SeedRecipientReceiptContext;
 }> => {
     const expectedByteLength =
         responseHeaderByteLength +
         4 +
+        hashByteLength * 3 +
+        2 * 3 +
         signingVerificationKeyByteLength +
         mailboxEncapsulationKeyByteLength +
         2 +
@@ -814,6 +866,25 @@ const parseOpenResponse = (
     if (contextHandle === 0) {
         throw malformedResponse('a zero context handle');
     }
+    const verifiedContext = Object.freeze({
+        parameterIdentity: cursor.readExact(
+            hashByteLength,
+            'verified parameter identity',
+        ),
+        preparationContextIdentity: cursor.readExact(
+            hashByteLength,
+            'verified preparation-context identity',
+        ),
+        rootTerminalIdentity: cursor.readExact(
+            hashByteLength,
+            'verified root-terminal identity',
+        ),
+        preparationAttemptOrdinal: cursor.readUnsigned16(
+            'verified preparation-attempt ordinal',
+        ),
+        participantCount: cursor.readUnsigned16('verified participant count'),
+        recipientPosition: cursor.readUnsigned16('verified recipient position'),
+    });
     const recipientSigningVerificationKey = cursor.readExact(
         signingVerificationKeyByteLength,
         'recipient signing verification key',
@@ -840,6 +911,7 @@ const parseOpenResponse = (
         ciphertexts,
         mailboxEncapsulationKey,
         recipientSigningVerificationKey,
+        verifiedContext,
     });
 };
 
@@ -930,6 +1002,24 @@ const destroyPreparedInventory = (
     prepared.receiptIntentIdentity.fill(0);
 };
 
+const destroyContext = (context: SeedRecipientReceiptContext): void => {
+    context.parameterIdentity.fill(0);
+    context.preparationContextIdentity.fill(0);
+    context.rootTerminalIdentity.fill(0);
+};
+
+const copyContext = (
+    context: SeedRecipientReceiptContext,
+): SeedRecipientReceiptContext =>
+    Object.freeze({
+        parameterIdentity: context.parameterIdentity.slice(),
+        participantCount: context.participantCount,
+        preparationAttemptOrdinal: context.preparationAttemptOrdinal,
+        preparationContextIdentity: context.preparationContextIdentity.slice(),
+        recipientPosition: context.recipientPosition,
+        rootTerminalIdentity: context.rootTerminalIdentity.slice(),
+    });
+
 const copyPreparedInventory = (
     prepared: PreparedSeedRecipientReceiptInventory,
 ): PreparedSeedRecipientReceiptInventory =>
@@ -961,6 +1051,15 @@ export const isProductionSeedRecipientReceiptKernel = (
 ): value is ProductionSeedRecipientReceiptKernel =>
     typeof value === 'object' && value !== null && productionKernels.has(value);
 
+export const isAuthenticatedSeedRecipientReceiptInconsistency = (
+    value: unknown,
+): value is SeedRecipientReceiptKernelError =>
+    typeof value === 'object' &&
+    value !== null &&
+    authenticatedKernelResponseErrors.has(value) &&
+    (value as SeedRecipientReceiptKernelError).code ===
+        'AuthenticatedInconsistency';
+
 /**
  * Verifies the full public root context and every canonical sender carrier in
  * Rust before invoking the browser-local ML-KEM operations. Rust then decrypts
@@ -976,7 +1075,11 @@ export const openProductionSeedRecipientReceiptKernel = async (
         );
     }
     const keyOperations = snapshotKeyOperations(input.keyOperations);
-    const openContextRequestBytes = encodeOpenContextRequest(input);
+    const stateOperations = snapshotAuthenticationStateOperations(
+        input.stateOperations,
+    );
+    const canonicalOpenRequestBytes = encodeOpenContextRequest(input);
+    const expectedCarrierCount = input.carriers.length;
     let runtime: TranscriptCoreKernelCommandRuntime;
     try {
         runtime = await instantiateTranscriptCoreKernelCommandRuntime(
@@ -984,19 +1087,37 @@ export const openProductionSeedRecipientReceiptKernel = async (
             { expectedKernelSha256Hex: packagedKernelSha256Hex },
         );
     } catch (error) {
-        openContextRequestBytes.fill(0);
+        canonicalOpenRequestBytes.fill(0);
         throw error;
     }
-    const opened = executeRequest({
-        parse: (responseBytes) =>
-            parseOpenResponse(responseBytes, input.carriers.length),
-        requestBytes: openContextRequestBytes,
-        runtime,
-    });
+    let opened: ReturnType<typeof parseOpenResponse>;
+    try {
+        opened = executeRequest({
+            parse: (responseBytes) =>
+                parseOpenResponse(responseBytes, expectedCarrierCount),
+            requestBytes: canonicalOpenRequestBytes.slice(),
+            runtime,
+        });
+    } catch (error) {
+        canonicalOpenRequestBytes.fill(0);
+        throw error;
+    }
     let contextIsOpen = true;
     let preparedInventory: PreparedSeedRecipientReceiptInventory | undefined;
     const sharedSecrets: Uint8Array[] = [];
     try {
+        const retainedSelectionInput = Object.freeze({
+            canonicalOpenRequestBytes: canonicalOpenRequestBytes.slice(),
+            verifiedContext: copyContext(opened.verifiedContext),
+        });
+        try {
+            await stateOperations.retainVerifiedPublicSelection(
+                retainedSelectionInput,
+            );
+        } finally {
+            retainedSelectionInput.canonicalOpenRequestBytes.fill(0);
+            destroyContext(retainedSelectionInput.verifiedContext);
+        }
         keyOperations.assertMatchesRecipientKeys({
             mailboxEncapsulationKey: opened.mailboxEncapsulationKey,
             recipientSigningVerificationKey:
@@ -1014,15 +1135,40 @@ export const openProductionSeedRecipientReceiptKernel = async (
                 ),
             );
         }
-        preparedInventory = executeRequest({
-            parse: (responseBytes) =>
-                parsePreparedResponse(responseBytes, input.carriers.length),
-            requestBytes: encodeCompleteAuthenticationRequest(
-                opened.contextHandle,
-                sharedSecrets,
-            ),
-            runtime,
-        });
+        try {
+            preparedInventory = executeRequest({
+                parse: (responseBytes) =>
+                    parsePreparedResponse(responseBytes, expectedCarrierCount),
+                requestBytes: encodeCompleteAuthenticationRequest(
+                    opened.contextHandle,
+                    sharedSecrets,
+                ),
+                runtime,
+            });
+        } catch (error) {
+            if (isAuthenticatedSeedRecipientReceiptInconsistency(error)) {
+                const retainedBurnInput = Object.freeze({
+                    canonicalOpenRequestBytes:
+                        canonicalOpenRequestBytes.slice(),
+                    verifiedContext: copyContext(opened.verifiedContext),
+                });
+                try {
+                    await stateOperations.retainAuthenticatedInconsistency(
+                        retainedBurnInput,
+                    );
+                } catch (burnFailure) {
+                    throw new SeedRecipientReceiptKernelError(
+                        'ContextUnavailable',
+                        'The authenticated seed-delivery inconsistency could not be retained durably.',
+                        [error, burnFailure],
+                    );
+                } finally {
+                    retainedBurnInput.canonicalOpenRequestBytes.fill(0);
+                    destroyContext(retainedBurnInput.verifiedContext);
+                }
+            }
+            throw error;
+        }
     } catch (error) {
         try {
             closeContext(runtime, opened.contextHandle);
@@ -1036,8 +1182,10 @@ export const openProductionSeedRecipientReceiptKernel = async (
         }
         throw error;
     } finally {
+        canonicalOpenRequestBytes.fill(0);
         sharedSecrets.forEach((sharedSecret) => sharedSecret.fill(0));
         opened.ciphertexts.forEach((ciphertext) => ciphertext.fill(0));
+        destroyContext(opened.verifiedContext);
     }
     const authorizedPreparedInventory = preparedInventory;
     const requireOpen = (): void => {

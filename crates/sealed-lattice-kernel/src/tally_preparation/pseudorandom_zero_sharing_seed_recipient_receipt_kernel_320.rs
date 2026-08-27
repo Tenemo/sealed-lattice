@@ -934,6 +934,12 @@ fn encode_open_response(
         .ok_or(PseudorandomZeroSharingSeedRecipientReceiptKernelError320::ContextUnavailable)?;
     let mut bytes = response_header(OPEN_CONTEXT_STATUS);
     bytes.extend_from_slice(&handle.to_le_bytes());
+    bytes.extend_from_slice(context.parameter_identity.as_bytes());
+    bytes.extend_from_slice(context.preparation_context_identity.as_bytes());
+    bytes.extend_from_slice(context.root_terminal_identity.as_bytes());
+    append_unsigned16(&mut bytes, PREPARATION_ATTEMPT_ORDINAL);
+    append_unsigned16(&mut bytes, context.participant_count);
+    append_unsigned16(&mut bytes, context.recipient_position);
     bytes.extend_from_slice(&recipient_entry.signing_verification_key);
     bytes.extend_from_slice(&recipient_entry.mailbox_encapsulation_key);
     append_unsigned16(

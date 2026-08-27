@@ -19,6 +19,7 @@ export {
     SeedMailboxSenderKernelError,
 } from './seed-mailbox-sender-stream-kernel.js';
 export {
+    isAuthenticatedSeedRecipientReceiptInconsistency,
     isProductionSeedRecipientReceiptKernel,
     openProductionSeedRecipientReceiptKernel,
     SeedRecipientReceiptKernelError,
@@ -29,6 +30,7 @@ export type {
     PreparedSeedRecipientReceiptInventory,
     ProductionSeedRecipientReceiptKernel,
     SeedRecipientReceiptContext,
+    SeedRecipientReceiptAuthenticationStateOperations,
     SeedRecipientReceiptKernelErrorCode,
     SeedRecipientReceiptKeyOperations,
     SeedRecipientReceiptMailboxCarrier,

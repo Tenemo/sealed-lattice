@@ -11,6 +11,14 @@ vi.mock('@sealed-lattice/wasm', () => ({
     isProductionSeedRecipientReceiptKernel: () => true,
 }));
 
+vi.mock(
+    '#packages/protocol/src/runtime/seed-recipient-authentication-custody',
+    () => ({
+        isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody: () =>
+            true,
+    }),
+);
+
 import {
     createRuntimeRecordProtection,
     type RuntimeRecordProtection,
@@ -35,6 +43,7 @@ import {
     type SeedCatalogSourceCustodyLimits,
     type SeedCatalogValidationInput,
 } from '#packages/protocol/src/runtime/seed-catalog-source-custody';
+import type { SeedRecipientAuthenticationCustody } from '#packages/protocol/src/runtime/seed-recipient-authentication-custody';
 import {
     SeedRecipientReceiptCustody,
     readCompletedSeedRecipientReceiptCustodyForMasterJoin,
@@ -572,6 +581,9 @@ const createFixture = async (input?: {
 
         const receiptCustody =
             new SeedRecipientReceiptCustody<AuthenticatedInventoryCapability>({
+                authenticationCustody: Object.freeze(
+                    {},
+                ) as SeedRecipientAuthenticationCustody,
                 context: receiptContext(joinedContext),
                 kernel: new DeterministicReceiptKernel() as unknown as ProductionSeedRecipientReceiptKernel,
                 limits: receiptLimits,
