@@ -34,13 +34,13 @@ fn completion_catalog_and_stream_match_the_independent_shake_query() {
     let context = context_for_circuit(&circuit, 19);
     let catalog = ReplicatedRandomBitCatalog::derive(context, &circuit).unwrap();
     assert_eq!(catalog.participant_count(), 10);
-    assert_eq!(catalog.semantic_mask_bit_count(), 6_652);
+    assert_eq!(catalog.semantic_mask_bit_count(), 3_372);
     assert_eq!(
         catalog.additive_correlation_free_point_bit_count(),
-        1_951_920
+        1_066_320
     );
-    assert_eq!(catalog.total_bit_count(), 1_958_572);
-    assert_eq!(catalog.output_byte_length_per_key(), 244_822);
+    assert_eq!(catalog.total_bit_count(), 1_069_692);
+    assert_eq!(catalog.output_byte_length_per_key(), 133_712);
     assert_eq!(catalog.unused_high_bit_count(), 4);
     assert_eq!(replicated_random_bit_chunk_count(&catalog).unwrap(), 1);
 
@@ -49,7 +49,7 @@ fn completion_catalog_and_stream_match_the_independent_shake_query() {
     let chunk = generate_replicated_random_bit_chunk(&key, &catalog, 0).unwrap();
     assert_eq!(chunk.first_bit_index(), 0);
     assert_eq!(chunk.bit_count(), catalog.total_bit_count());
-    assert_eq!(chunk.byte_length(), 244_822);
+    assert_eq!(chunk.byte_length(), 133_712);
 
     let items = vec![
         CanonicalItem::fixed_bytes(key.as_bytes()).unwrap(),
@@ -77,7 +77,7 @@ fn completion_catalog_and_stream_match_the_independent_shake_query() {
     .unwrap();
     let mut hasher = Shake256::default();
     hasher.update(&preimage);
-    let mut expected_bytes = vec![0_u8; 244_822];
+    let mut expected_bytes = vec![0_u8; 133_712];
     hasher.finalize_xof().read(&mut expected_bytes);
     *expected_bytes.last_mut().unwrap() &= 0x0f;
     assert_eq!(chunk.bytes(), expected_bytes);
@@ -103,11 +103,11 @@ fn completion_catalog_assigns_every_logical_bit_one_round_trip_coordinate() {
         ReplicatedRandomBitCoordinate::SemanticMask { wire_index: 0 }
     );
     assert_eq!(
-        catalog.coordinate(1_229).unwrap(),
-        ReplicatedRandomBitCoordinate::SemanticMask { wire_index: 1_229 }
+        catalog.coordinate(409).unwrap(),
+        ReplicatedRandomBitCoordinate::SemanticMask { wire_index: 409 }
     );
     assert_eq!(
-        catalog.coordinate(6_652).unwrap(),
+        catalog.coordinate(3_372).unwrap(),
         ReplicatedRandomBitCoordinate::AdditiveCorrelationFreePoint {
             conjunction_ordinal: 0,
             input_value_code: 0,
@@ -116,9 +116,9 @@ fn completion_catalog_assigns_every_logical_bit_one_round_trip_coordinate() {
         }
     );
     assert_eq!(
-        catalog.coordinate(1_958_571).unwrap(),
+        catalog.coordinate(1_069_691).unwrap(),
         ReplicatedRandomBitCoordinate::AdditiveCorrelationFreePoint {
-            conjunction_ordinal: 5_421,
+            conjunction_ordinal: 2_961,
             input_value_code: 3,
             output_component_position: 9,
             free_garbling_contributor_position: 8,
@@ -133,14 +133,14 @@ fn completion_catalog_assigns_every_logical_bit_one_round_trip_coordinate() {
     assert_eq!(
         catalog.coordinate(catalog.total_bit_count()),
         Err(TallyPreparationError::ReplicatedRandomBitIndexOutOfRange {
-            bit_index: 1_958_572,
-            total_bit_count: 1_958_572,
+            bit_index: 1_069_692,
+            total_bit_count: 1_069_692,
         })
     );
     for malformed_coordinate in [
-        ReplicatedRandomBitCoordinate::SemanticMask { wire_index: 1_230 },
+        ReplicatedRandomBitCoordinate::SemanticMask { wire_index: 410 },
         ReplicatedRandomBitCoordinate::AdditiveCorrelationFreePoint {
-            conjunction_ordinal: 5_422,
+            conjunction_ordinal: 2_962,
             input_value_code: 0,
             output_component_position: 0,
             free_garbling_contributor_position: 1,

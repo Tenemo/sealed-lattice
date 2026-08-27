@@ -2,7 +2,7 @@
 
 This directory contains deterministic fixtures consumed by the repository's tests. Each consumer must rederive the vector's named application property from an independent implementation path where one exists.
 
-A passing vector proves only its named test property. No retained vector is an accepted protocol result, activation record, security certificate, production-authority capability, or supported-phone result.
+A passing vector proves only its named test property. No retained vector is an accepted protocol result, suite-activation record, security certificate, production-authority capability, or supported-phone result.
 
 ## Maintenance
 

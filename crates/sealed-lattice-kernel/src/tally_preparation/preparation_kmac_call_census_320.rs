@@ -4,12 +4,6 @@ use crate::foundation::Hash512;
 
 use super::{
     TallyPreparationError,
-    masked_ballot_bivariate_mailbox_320::{
-        MASKED_BALLOT_BIVARIATE_MAILBOX_ASSOCIATED_DATA_BYTE_LENGTH,
-        MASKED_BALLOT_BIVARIATE_MAILBOX_HEADER_BODY_BYTE_LENGTH,
-        MASKED_BALLOT_BIVARIATE_MAILBOX_KEY_DERIVATION_LABEL,
-        MASKED_BALLOT_BIVARIATE_MAILBOX_NONCE_DERIVATION_LABEL,
-    },
     pseudorandom_zero_sharing_320::{
         PseudorandomZeroSharingResourceInput, PseudorandomZeroSharingResourceModel,
     },
@@ -49,10 +43,6 @@ const CHECKPOINT_SUBSET_MASK_BYTE_LENGTH: u64 = 4;
 pub(crate) enum PreparationKmacCallCensusError320 {
     TallyPreparation(TallyPreparationError),
     Cursor(PseudorandomZeroSharingCursorError320),
-    MaskedBallotAuthorPackageCountOutOfRange {
-        package_count: u16,
-        participant_count: u16,
-    },
     ArithmeticOverflow,
     IntegerConversion,
 }
@@ -62,13 +52,6 @@ impl fmt::Display for PreparationKmacCallCensusError320 {
         match self {
             Self::TallyPreparation(error) => write!(formatter, "{error}"),
             Self::Cursor(error) => write!(formatter, "{error}"),
-            Self::MaskedBallotAuthorPackageCountOutOfRange {
-                package_count,
-                participant_count,
-            } => write!(
-                formatter,
-                "masked-ballot author package count {package_count} exceeds participant count {participant_count}"
-            ),
             Self::ArithmeticOverflow => formatter.write_str("KMAC call census arithmetic overflow"),
             Self::IntegerConversion => {
                 formatter.write_str("KMAC call census integer conversion failed")
@@ -226,12 +209,9 @@ pub(crate) struct VariableMessageKmacCallFamily320 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PreparationKmacCallCensus320 {
     pub(crate) participant_count: u64,
-    pub(crate) masked_ballot_author_package_count: u64,
     pub(crate) zero_sharing_count: u64,
     pub(crate) seed_mailbox_key_derivation: RepeatedKmacCallShape320,
     pub(crate) seed_mailbox_nonce_derivation: RepeatedKmacCallShape320,
-    pub(crate) masked_ballot_mailbox_key_derivation: RepeatedKmacCallShape320,
-    pub(crate) masked_ballot_mailbox_nonce_derivation: RepeatedKmacCallShape320,
     pub(crate) full_field_stream_output: RepeatedKmacCallShape320,
     pub(crate) final_field_stream_output: RepeatedKmacCallShape320,
     pub(crate) checkpoint_key_derivation: RepeatedKmacCallShape320,
@@ -244,19 +224,9 @@ pub(crate) struct PreparationKmacCallCensus320 {
 impl PreparationKmacCallCensus320 {
     pub(crate) fn derive(
         participant_count: u16,
-        masked_ballot_author_package_count: u16,
         zero_sharing_count: u64,
     ) -> Result<Self, PreparationKmacCallCensusError320> {
-        if masked_ballot_author_package_count > participant_count {
-            return Err(
-                PreparationKmacCallCensusError320::MaskedBallotAuthorPackageCountOutOfRange {
-                    package_count: masked_ballot_author_package_count,
-                    participant_count,
-                },
-            );
-        }
         let participant_count_u64 = u64::from(participant_count);
-        let masked_ballot_author_package_count_u64 = u64::from(masked_ballot_author_package_count);
         let sharing_geometry = ReplicatedRandomSharingGeometry::derive(participant_count)?;
         let source_model =
             PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
@@ -292,37 +262,6 @@ impl PreparationKmacCallCensus320 {
             semantic_call_count: seed_mailbox_nonce_semantic_call_count,
             successful_physical_call_count: checked_multiply(
                 seed_mailbox_nonce_semantic_call_count,
-                2,
-            )?,
-        };
-
-        let masked_ballot_mailbox_stream_count = checked_multiply(
-            masked_ballot_author_package_count_u64,
-            participant_count_u64,
-        )?;
-        let masked_ballot_mailbox_key_derivation = RepeatedKmacCallShape320 {
-            call: KmacCallShape320::fixed_output(
-                MASKED_BALLOT_BIVARIATE_MAILBOX_KEY_DERIVATION_LABEL,
-                PRIVATE_MAILBOX_KEY_BYTE_LENGTH,
-                usize_to_u64(MASKED_BALLOT_BIVARIATE_MAILBOX_HEADER_BODY_BYTE_LENGTH)?,
-                PRIVATE_MAILBOX_KEY_OUTPUT_BYTE_LENGTH,
-            )?,
-            semantic_call_count: masked_ballot_mailbox_stream_count,
-            successful_physical_call_count: checked_multiply(
-                masked_ballot_mailbox_stream_count,
-                2,
-            )?,
-        };
-        let masked_ballot_mailbox_nonce_derivation = RepeatedKmacCallShape320 {
-            call: KmacCallShape320::fixed_output(
-                MASKED_BALLOT_BIVARIATE_MAILBOX_NONCE_DERIVATION_LABEL,
-                PRIVATE_MAILBOX_KEY_BYTE_LENGTH,
-                usize_to_u64(MASKED_BALLOT_BIVARIATE_MAILBOX_ASSOCIATED_DATA_BYTE_LENGTH)?,
-                PRIVATE_MAILBOX_NONCE_OUTPUT_BYTE_LENGTH,
-            )?,
-            semantic_call_count: masked_ballot_mailbox_stream_count,
-            successful_physical_call_count: checked_multiply(
-                masked_ballot_mailbox_stream_count,
                 2,
             )?,
         };
@@ -449,8 +388,6 @@ impl PreparationKmacCallCensus320 {
         let semantic_call_count = checked_sum(&[
             seed_mailbox_key_derivation.semantic_call_count,
             seed_mailbox_nonce_derivation.semantic_call_count,
-            masked_ballot_mailbox_key_derivation.semantic_call_count,
-            masked_ballot_mailbox_nonce_derivation.semantic_call_count,
             full_field_stream_output.semantic_call_count,
             final_field_stream_output.semantic_call_count,
             checkpoint_key_derivation.semantic_call_count,
@@ -459,8 +396,6 @@ impl PreparationKmacCallCensus320 {
         let successful_physical_call_count = checked_sum(&[
             seed_mailbox_key_derivation.successful_physical_call_count,
             seed_mailbox_nonce_derivation.successful_physical_call_count,
-            masked_ballot_mailbox_key_derivation.successful_physical_call_count,
-            masked_ballot_mailbox_nonce_derivation.successful_physical_call_count,
             full_field_stream_output.successful_physical_call_count,
             final_field_stream_output.successful_physical_call_count,
             checkpoint_key_derivation.successful_physical_call_count,
@@ -469,12 +404,9 @@ impl PreparationKmacCallCensus320 {
 
         Ok(Self {
             participant_count: participant_count_u64,
-            masked_ballot_author_package_count: masked_ballot_author_package_count_u64,
             zero_sharing_count,
             seed_mailbox_key_derivation,
             seed_mailbox_nonce_derivation,
-            masked_ballot_mailbox_key_derivation,
-            masked_ballot_mailbox_nonce_derivation,
             full_field_stream_output,
             final_field_stream_output,
             checkpoint_key_derivation,

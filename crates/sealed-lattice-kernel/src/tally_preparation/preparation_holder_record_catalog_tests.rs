@@ -28,13 +28,13 @@ fn completion_catalog_streams_every_holder_record_in_source_order() {
     let catalog = PreparationHolderRecordCatalog::derive(context(0x51, &circuit), &circuit)
         .expect("completion holder-record catalog should derive");
 
-    assert_eq!(catalog.record_count(), 475_590);
-    assert_eq!(catalog.records().len(), 475_590);
-    assert_eq!(catalog.value_field_element_count(), 967_590);
-    assert_eq!(catalog.verification_key_field_element_count(), 1_443_180);
+    assert_eq!(catalog.record_count(), 204_990);
+    assert_eq!(catalog.records().len(), 204_990);
+    assert_eq!(catalog.value_field_element_count(), 368_990);
+    assert_eq!(catalog.verification_key_field_element_count(), 573_980);
     assert_eq!(catalog.record(0).unwrap().global_ordinal, 0);
-    assert_eq!(catalog.record_stream_byte_length(), 6_659_588);
-    assert_eq!(catalog.artifact_byte_length(), 6_659_930);
+    assert_eq!(catalog.record_stream_byte_length(), 3_010_588);
+    assert_eq!(catalog.artifact_byte_length(), 3_010_930);
 
     let mut records = catalog.records();
     let mut expected_ordinal = 0_u64;
@@ -146,7 +146,7 @@ fn completion_catalog_streams_every_holder_record_in_source_order() {
         class_counts[class_position(record.class())] += 1;
         materialized_artifact.extend(record.canonical_bytes());
     }
-    assert_eq!(class_counts, [12_300, 246_000, 216_880, 10, 400]);
+    assert_eq!(class_counts, [4_100, 82_000, 118_480, 10, 400]);
     assert_eq!(
         u64::try_from(materialized_artifact.len()).unwrap(),
         catalog.artifact_byte_length()
@@ -162,7 +162,7 @@ fn completion_catalog_streams_every_holder_record_in_source_order() {
     );
     assert_eq!(
         to_hex(catalog.identity().as_bytes()),
-        "2efc6a8747cd8fe2d26c1abc4b9406cb20a2f486f01c6eb2501b4690742797716dd5eed079d710ac27c00cdea4123fa9ce01bc187fbabbaf3dee9b54409ffcdd"
+        "da46c2672a1c63cc05f5321c6b44f38fb837e6ee16fcdccab788f865e8a2cdb92bcbb48a484e90b7dbaa44d6c0dd1f31d67cb63b5a77e735a8cc9e3363882e41"
     );
 }
 
@@ -177,7 +177,7 @@ fn completion_catalog_boundaries_bind_exact_sources_and_value_widths() {
 
     assert_eq!(
         inventory.record_class_counts(),
-        [12_300, 246_000, 216_880, 10, 400]
+        [4_100, 82_000, 118_480, 10, 400]
     );
     assert_eq!(
         inventory.record(0).unwrap(),
@@ -190,9 +190,9 @@ fn completion_catalog_boundaries_bind_exact_sources_and_value_widths() {
         }
     );
     assert_eq!(
-        inventory.record(12_300).unwrap(),
+        inventory.record(4_100).unwrap(),
         PreparationHolderRecord {
-            global_ordinal: 12_300,
+            global_ordinal: 4_100,
             coordinate: PreparationHolderRecordCoordinate::InputLabelBody {
                 input_wire: 0,
                 label_alternative: 0,
@@ -202,23 +202,20 @@ fn completion_catalog_boundaries_bind_exact_sources_and_value_widths() {
         }
     );
     assert_eq!(
-        inventory
-            .record(12_300)
-            .unwrap()
-            .value_field_element_count(),
+        inventory.record(4_100).unwrap().value_field_element_count(),
         3
     );
     assert_eq!(
         inventory
-            .record(12_300)
+            .record(4_100)
             .unwrap()
             .verification_key_field_element_count(),
         4
     );
     assert_eq!(
-        inventory.record(258_300).unwrap(),
+        inventory.record(86_100).unwrap(),
         PreparationHolderRecord {
-            global_ordinal: 258_300,
+            global_ordinal: 86_100,
             coordinate: PreparationHolderRecordCoordinate::ConjunctionRowBit {
                 conjunction_ordinal: 0,
                 circuit_operation_position: first_conjunction.0,
@@ -231,11 +228,11 @@ fn completion_catalog_boundaries_bind_exact_sources_and_value_widths() {
         }
     );
     assert_eq!(
-        inventory.record(475_179).unwrap(),
+        inventory.record(204_579).unwrap(),
         PreparationHolderRecord {
-            global_ordinal: 475_179,
+            global_ordinal: 204_579,
             coordinate: PreparationHolderRecordCoordinate::ConjunctionRowBit {
-                conjunction_ordinal: 5_421,
+                conjunction_ordinal: 2_961,
                 circuit_operation_position: final_conjunction.0,
                 output_wire: final_conjunction.1,
                 left_wire: final_conjunction.2,
@@ -246,7 +243,7 @@ fn completion_catalog_boundaries_bind_exact_sources_and_value_widths() {
         }
     );
     assert_eq!(
-        inventory.record(475_180).unwrap().coordinate,
+        inventory.record(204_580).unwrap().coordinate,
         PreparationHolderRecordCoordinate::OutputMask {
             output_position: 0,
             output_kind: PreparationHolderOutputKind::PublicNonempty,
@@ -255,11 +252,11 @@ fn completion_catalog_boundaries_bind_exact_sources_and_value_widths() {
         }
     );
     assert_eq!(
-        inventory.record(475_590),
+        inventory.record(204_990),
         Err(
             TallyPreparationError::PreparationHolderRecordIndexOutOfRange {
-                record_index: 475_590,
-                record_count: 475_590,
+                record_index: 204_990,
+                record_count: 204_990,
             }
         )
     );

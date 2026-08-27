@@ -27,53 +27,53 @@ fn completion_profile_reproduces_the_corrected_known_lower_bound() {
         GarbledTallyResourceLowerBound {
             participant_count: 10,
             reconstruction_threshold: 4,
-            input_bit_count: 1_230,
-            conjunction_gate_count: 5_422,
+            input_bit_count: 410,
+            conjunction_gate_count: 2_962,
             public_output_bit_count: 1,
             private_result_bit_count: 40,
-            fresh_label_wire_count: 6_652,
-            and_row_count: 21_688,
+            fresh_label_wire_count: 3_372,
+            and_row_count: 11_848,
             garbling_output_bit_length_per_call: 6_410,
             garbling_output_byte_length_per_call: 802,
             garbling_output_padding_bit_count_per_call: 6,
-            garbling_hash_call_count: 216_880,
-            evaluation_hash_call_count: 54_220,
-            garbling_share_byte_length_per_participant: 17_393_776,
-            all_garbling_share_byte_length: 173_937_760,
-            final_garbled_circuit_byte_length: 17_393_776,
-            label_commitment_count: 133_040,
-            label_commitment_byte_length: 8_514_560,
-            label_share_record_count: 246_000,
-            scalar_share_record_count: 229_590,
-            total_share_record_count: 475_590,
-            label_share_value_field_element_count: 738_000,
-            scalar_share_value_field_element_count: 229_590,
-            total_share_value_field_element_count: 967_590,
-            dkac_verification_key_field_element_count: 1_443_180,
-            dkac_tag_generation_field_multiplication_count: 967_590,
-            raw_label_share_storage_byte_length: 23_616_000,
-            raw_scalar_share_storage_byte_length: 7_346_880,
-            raw_share_storage_byte_length: 30_962_880,
-            dkac_commitment_byte_length: 30_437_760,
-            dkac_salt_byte_length: 45_656_640,
-            dkac_tag_byte_length: 15_218_880,
-            dkac_verification_key_byte_length: 46_181_760,
-            required_active_label_opening_record_count: 49_200,
-            required_scalar_opening_record_count: 26_772,
-            required_authenticated_opening_record_count: 75_972,
-            required_authenticated_opening_value_field_element_count: 174_372,
-            maximum_active_label_opening_record_count: 123_000,
-            maximum_scalar_opening_record_count: 66_930,
-            maximum_authenticated_opening_record_count: 189_930,
-            maximum_authenticated_opening_value_field_element_count: 435_930,
-            active_label_opening_upper_bound_byte_length: 11_020_800,
-            input_mask_opening_upper_bound_byte_length: 787_200,
-            active_row_opening_byte_length: 3_470_080,
+            garbling_hash_call_count: 118_480,
+            evaluation_hash_call_count: 29_620,
+            garbling_share_byte_length_per_participant: 9_502_096,
+            all_garbling_share_byte_length: 95_020_960,
+            final_garbled_circuit_byte_length: 9_502_096,
+            label_commitment_count: 67_440,
+            label_commitment_byte_length: 4_316_160,
+            label_share_record_count: 82_000,
+            scalar_share_record_count: 122_990,
+            total_share_record_count: 204_990,
+            label_share_value_field_element_count: 246_000,
+            scalar_share_value_field_element_count: 122_990,
+            total_share_value_field_element_count: 368_990,
+            dkac_verification_key_field_element_count: 573_980,
+            dkac_tag_generation_field_multiplication_count: 368_990,
+            raw_label_share_storage_byte_length: 7_872_000,
+            raw_scalar_share_storage_byte_length: 3_935_680,
+            raw_share_storage_byte_length: 11_807_680,
+            dkac_commitment_byte_length: 13_119_360,
+            dkac_salt_byte_length: 19_679_040,
+            dkac_tag_byte_length: 6_559_680,
+            dkac_verification_key_byte_length: 18_367_360,
+            required_active_label_opening_record_count: 16_400,
+            required_scalar_opening_record_count: 13_652,
+            required_authenticated_opening_record_count: 30_052,
+            required_authenticated_opening_value_field_element_count: 62_852,
+            maximum_active_label_opening_record_count: 41_000,
+            maximum_scalar_opening_record_count: 34_130,
+            maximum_authenticated_opening_record_count: 75_130,
+            maximum_authenticated_opening_value_field_element_count: 157_130,
+            active_label_opening_upper_bound_byte_length: 3_673_600,
+            input_mask_opening_upper_bound_byte_length: 262_400,
+            active_row_opening_byte_length: 1_895_680,
             private_result_release_opening_byte_length: 25_600,
             public_nonempty_mask_opening_byte_length: 640,
-            static_public_lower_bound_byte_length: 276_465_616,
-            online_public_lower_bound_byte_length: 15_304_320,
-            combined_known_public_lower_bound_byte_length: 291_769_936,
+            static_public_lower_bound_byte_length: 140_325_936,
+            online_public_lower_bound_byte_length: 5_857_920,
+            combined_known_public_lower_bound_byte_length: 146_183_856,
         }
     );
 }
@@ -82,8 +82,8 @@ fn completion_profile_reproduces_the_corrected_known_lower_bound() {
 fn independent_completion_inventory_rederives_every_composed_total() {
     let participant_count = 10_u64;
     let release_threshold = 4_u64;
-    let input_bit_count = 1_230_u64;
-    let conjunction_gate_count = 5_422_u64;
+    let input_bit_count = 410_u64;
+    let conjunction_gate_count = 2_962_u64;
     let output_bit_count = 41_u64;
     let private_result_bit_count = 40_u64;
     let fresh_label_wire_count = input_bit_count + conjunction_gate_count;
@@ -117,24 +117,24 @@ fn independent_completion_inventory_rederives_every_composed_total() {
         + private_result_bit_count * release_threshold * (32 + 32 + 96)
         + release_threshold * (32 + 32 + 96);
 
-    assert_eq!(raw_share_storage, 30_962_880);
-    assert_eq!(total_value_field_element_count, 967_590);
-    assert_eq!(verification_key_field_element_count, 1_443_180);
-    assert_eq!(required_label_opening_count, 49_200);
-    assert_eq!(required_scalar_opening_count, 26_772);
+    assert_eq!(raw_share_storage, 11_807_680);
+    assert_eq!(total_value_field_element_count, 368_990);
+    assert_eq!(verification_key_field_element_count, 573_980);
+    assert_eq!(required_label_opening_count, 16_400);
+    assert_eq!(required_scalar_opening_count, 13_652);
     assert_eq!(
         required_label_opening_count * 3 + required_scalar_opening_count,
-        174_372
+        62_852
     );
-    assert_eq!(maximum_label_opening_count, 123_000);
-    assert_eq!(maximum_scalar_opening_count, 66_930);
+    assert_eq!(maximum_label_opening_count, 41_000);
+    assert_eq!(maximum_scalar_opening_count, 34_130);
     assert_eq!(
         maximum_label_opening_count * 3 + maximum_scalar_opening_count,
-        435_930
+        157_130
     );
-    assert_eq!(static_public, 276_465_616);
-    assert_eq!(online_public, 15_304_320);
-    assert_eq!(static_public + online_public, 291_769_936);
+    assert_eq!(static_public, 140_325_936);
+    assert_eq!(online_public, 5_857_920);
+    assert_eq!(static_public + online_public, 146_183_856);
 }
 
 #[test]

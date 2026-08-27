@@ -51,25 +51,25 @@ fn completion_profile_reproduces_the_fixed_roster_accepted_path_floor() {
     assert_eq!(
         floor.shared_offset,
         FixedRosterLinearMpcCircuitFloor {
-            multiplication_count: 1_630_304,
-            segment_count: 407_576,
-            padded_multiplication_count: 1_630_304,
-            known_remote_field_element_count: 858_355_056,
-            known_remote_byte_length: 27_467_361_792,
-            minimum_maximum_participant_upload_byte_length: 2_746_736_180,
-            known_fault_detection_bit_length: 110_045_520,
+            multiplication_count: 730_764,
+            segment_count: 182_691,
+            padded_multiplication_count: 730_764,
+            known_remote_field_element_count: 384_747_246,
+            known_remote_byte_length: 12_311_911_872,
+            minimum_maximum_participant_upload_byte_length: 1_231_191_188,
+            known_fault_detection_bit_length: 49_326_570,
         }
     );
     assert_eq!(
         floor.independent_label,
         FixedRosterLinearMpcCircuitFloor {
-            multiplication_count: 2_720_923,
-            segment_count: 680_231,
-            padded_multiplication_count: 2_720_924,
-            known_remote_field_element_count: 1_432_566_486,
-            known_remote_byte_length: 45_842_127_552,
-            minimum_maximum_participant_upload_byte_length: 4_584_212_756,
-            known_fault_detection_bit_length: 183_662_370,
+            multiplication_count: 1_404_283,
+            segment_count: 351_071,
+            padded_multiplication_count: 1_404_284,
+            known_remote_field_element_count: 739_355_526,
+            known_remote_byte_length: 23_659_376_832,
+            minimum_maximum_participant_upload_byte_length: 2_365_937_684,
+            known_fault_detection_bit_length: 94_789_170,
         }
     );
 }

@@ -10,7 +10,6 @@ mod direct_evaluator;
 mod interpreter;
 mod output_rekeyed;
 
-pub(crate) use interpreter::encode_tally_ballot_attempt_input_bits;
 pub(crate) use output_rekeyed::OutputRekeyedTallyCircuit;
 
 #[cfg(test)]
@@ -31,11 +30,10 @@ use crate::{
 
 pub(crate) const TALLY_CIRCUIT_ARTIFACT_MAGIC: &[u8] = b"sealed-lattice/tally-circuit-artifact";
 pub(crate) const TALLY_CIRCUIT_COMPILER_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/tally-circuit-compiler-identity/v2";
+    "sealed-lattice/tally-circuit-compiler-identity/v3";
 pub(crate) const TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/tally-direct-evaluator-identity/v1";
-pub(crate) const TALLY_CIRCUIT_IDENTITY_DOMAIN: &str = "sealed-lattice/tally-circuit-identity/v2";
-pub(crate) const TALLY_BALLOT_ATTEMPT_COUNT: usize = 3;
+    "sealed-lattice/tally-direct-evaluator-identity/v2";
+pub(crate) const TALLY_CIRCUIT_IDENTITY_DOMAIN: &str = "sealed-lattice/tally-circuit-identity/v3";
 
 pub(crate) type WireIndex = u32;
 
@@ -126,9 +124,8 @@ impl BooleanOperation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TallyCircuitGeometry {
     pub(crate) input_bit_count: usize,
-    pub(crate) ballot_attempt_presence_input_bit_count: usize,
+    pub(crate) ballot_presence_input_bit_count: usize,
     pub(crate) private_score_input_bit_count: usize,
-    pub(crate) ballot_attempt_count: usize,
     pub(crate) score_bit_width: usize,
     pub(crate) aggregate_score_bit_width: usize,
     pub(crate) option_position_bit_width: usize,
@@ -151,8 +148,8 @@ pub(crate) struct CompiledTallyCircuit {
     profile: TallyCircuitProfile,
     geometry: TallyCircuitGeometry,
     operations: Vec<BooleanOperation>,
-    ballot_attempt_presence_wires: Vec<Vec<WireIndex>>,
-    ballot_attempt_score_wires: Vec<Vec<Vec<Vec<WireIndex>>>>,
+    ballot_presence_wires: Vec<WireIndex>,
+    ballot_score_wires: Vec<Vec<Vec<WireIndex>>>,
     nonempty_output_wire: WireIndex,
     ordered_option_position_wires: Vec<Vec<WireIndex>>,
 }
@@ -178,21 +175,16 @@ impl CompiledTallyCircuit {
         &self.operations
     }
 
-    pub(crate) fn ballot_attempt_presence_wires(&self) -> &[Vec<WireIndex>] {
-        &self.ballot_attempt_presence_wires
+    pub(crate) fn ballot_presence_wires(&self) -> &[WireIndex] {
+        &self.ballot_presence_wires
     }
 
-    pub(crate) fn ballot_attempt_score_wires(&self) -> &[Vec<Vec<Vec<WireIndex>>>] {
-        &self.ballot_attempt_score_wires
+    pub(crate) fn ballot_score_wires(&self) -> &[Vec<Vec<WireIndex>>] {
+        &self.ballot_score_wires
     }
 
     pub(crate) fn private_score_input_wires(&self) -> impl Iterator<Item = WireIndex> + '_ {
-        self.ballot_attempt_score_wires
-            .iter()
-            .flatten()
-            .flatten()
-            .flatten()
-            .copied()
+        self.ballot_score_wires.iter().flatten().flatten().copied()
     }
 
     pub(crate) const fn nonempty_output_wire(&self) -> WireIndex {
@@ -218,28 +210,28 @@ impl CompiledTallyCircuit {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TallyEvaluationInput {
-    participant_ballot_attempts: Vec<Vec<TallyBallotAttemptInput>>,
+    participant_ballots: Vec<TallyBallotInput>,
 }
 
 impl TallyEvaluationInput {
-    pub(crate) fn new(participant_ballot_attempts: Vec<Vec<TallyBallotAttemptInput>>) -> Self {
+    pub(crate) fn new(participant_ballots: Vec<TallyBallotInput>) -> Self {
         Self {
-            participant_ballot_attempts,
+            participant_ballots,
         }
     }
 
-    pub(crate) fn participant_ballot_attempts(&self) -> &[Vec<TallyBallotAttemptInput>] {
-        &self.participant_ballot_attempts
+    pub(crate) fn participant_ballots(&self) -> &[TallyBallotInput] {
+        &self.participant_ballots
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TallyBallotAttemptInput {
+pub(crate) struct TallyBallotInput {
     is_present: bool,
     score_encodings: Vec<u8>,
 }
 
-impl TallyBallotAttemptInput {
+impl TallyBallotInput {
     pub(crate) fn new(is_present: bool, score_encodings: Vec<u8>) -> Self {
         Self {
             is_present,
@@ -274,7 +266,7 @@ impl TallyEvaluationOutcome {
     /// Returns the only tally value that may advance toward release.
     ///
     /// Empty selection refuses without returning circuit output positions.
-    /// Candidate-attempt validity and retry position are never outputs.
+    /// Ballot validity is never an output.
     pub(crate) fn accepted_ordered_option_positions(&self) -> Option<&[u16]> {
         self.has_selected_ballot
             .then_some(self.ordered_option_positions.as_slice())
@@ -307,20 +299,13 @@ pub(crate) enum TallyCircuitError {
         participant_position: usize,
         participant_count: usize,
     },
-    InputBallotAttemptCountMismatch {
-        participant_position: usize,
-        expected: usize,
-        actual: usize,
-    },
     InputOptionCountMismatch {
         participant_position: usize,
-        attempt_position: usize,
         expected: usize,
         actual: usize,
     },
     ScoreEncodingOutOfRange {
         participant_position: usize,
-        attempt_position: usize,
         option_position: usize,
         score_encoding: u8,
     },
@@ -389,31 +374,21 @@ impl fmt::Display for TallyCircuitError {
                 formatter,
                 "participant input position {participant_position} is outside {participant_count} participants"
             ),
-            Self::InputBallotAttemptCountMismatch {
-                participant_position,
-                expected,
-                actual,
-            } => write!(
-                formatter,
-                "participant {participant_position} has {actual} ballot attempts; expected {expected}"
-            ),
             Self::InputOptionCountMismatch {
                 participant_position,
-                attempt_position,
                 expected,
                 actual,
             } => write!(
                 formatter,
-                "participant {participant_position}, ballot attempt {attempt_position} has {actual} score encodings; expected {expected}"
+                "participant {participant_position} has {actual} score encodings; expected {expected}"
             ),
             Self::ScoreEncodingOutOfRange {
                 participant_position,
-                attempt_position,
                 option_position,
                 score_encoding,
             } => write!(
                 formatter,
-                "score encoding {score_encoding} at participant {participant_position}, ballot attempt {attempt_position}, option {option_position} exceeds the circuit input width"
+                "score encoding {score_encoding} at participant {participant_position}, option {option_position} exceeds the circuit input width"
             ),
             Self::InputBitCountMismatch { expected, actual } => write!(
                 formatter,

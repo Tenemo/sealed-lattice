@@ -27,10 +27,10 @@ fn completion_catalog_streams_every_multiplication_in_dependency_order() {
     let catalog = PreparationMultiplicationCatalog::derive(context(0x33, &circuit), &circuit)
         .expect("completion catalog should derive");
 
-    assert_eq!(catalog.operation_count(), 1_630_304);
-    assert_eq!(catalog.operations().len(), 1_630_304);
-    assert_eq!(catalog.operation_stream_byte_length(), 23_284_290);
-    assert_eq!(catalog.artifact_byte_length(), 23_284_627);
+    assert_eq!(catalog.operation_count(), 730_764);
+    assert_eq!(catalog.operations().len(), 730_764);
+    assert_eq!(catalog.operation_stream_byte_length(), 10_423_410);
+    assert_eq!(catalog.artifact_byte_length(), 10_423_746);
 
     let mut family_counts = [0_u64; 7];
     let mut next_layer_positions = [0_u64; 2];
@@ -70,10 +70,10 @@ fn completion_catalog_streams_every_multiplication_in_dependency_order() {
         materialized_artifact.extend(operation.canonical_bytes());
     }
 
-    assert_eq!(next_layer_positions, [762_784, 867_520]);
+    assert_eq!(next_layer_positions, [256_844, 473_920]);
     assert_eq!(
         family_counts,
-        [6_652, 5_422, 738_000, 12_300, 410, 650_640, 216_880]
+        [3_372, 2_962, 246_000, 4_100, 410, 355_440, 118_480]
     );
     assert_eq!(
         materialized_artifact.len() as u64,
@@ -89,7 +89,7 @@ fn completion_catalog_streams_every_multiplication_in_dependency_order() {
     );
     assert_eq!(
         to_hex(catalog.identity().as_bytes()),
-        "7df404b46a4f86297300b3a16cfcd194ab0cf5b2d972226d9331ce003403f09c33018246cd5dfc2c94f926e753f589beb5329bf702458727ebed8f0d5522e818"
+        "e72a01560a991330664840b927b5e8597f10fd21e7c10fde8458e4a08600c845b38433bf287cbae6bbf29edaf5c3e8056c51e78be75bf7beabf7e63b8cc840da"
     );
 }
 
@@ -104,18 +104,18 @@ fn completion_catalog_boundaries_bind_exact_wires_rows_holders_and_outputs() {
         PreparationMultiplicationCoordinate::SemanticMaskBitness { wire_index: 0 }
     );
     assert!(matches!(
-        inventory.operation(6_651).unwrap().coordinate,
+        inventory.operation(3_371).unwrap().coordinate,
         PreparationMultiplicationCoordinate::SemanticMaskBitness { .. }
     ));
     assert!(matches!(
-        inventory.operation(6_652).unwrap().coordinate,
+        inventory.operation(3_372).unwrap().coordinate,
         PreparationMultiplicationCoordinate::ConjunctionMaskProduct {
             conjunction_ordinal: 0,
             ..
         }
     ));
     assert_eq!(
-        inventory.operation(12_074).unwrap().coordinate,
+        inventory.operation(6_334).unwrap().coordinate,
         PreparationMultiplicationCoordinate::LabelShareTagLimbProduct {
             input_wire: 0,
             label_alternative: 0,
@@ -125,14 +125,14 @@ fn completion_catalog_boundaries_bind_exact_wires_rows_holders_and_outputs() {
         }
     );
     assert_eq!(
-        inventory.operation(750_074).unwrap().coordinate,
+        inventory.operation(252_334).unwrap().coordinate,
         PreparationMultiplicationCoordinate::InputMaskShareTagProduct {
             input_wire: 0,
             holder_position: 0,
         }
     );
     assert_eq!(
-        inventory.operation(762_374).unwrap().coordinate,
+        inventory.operation(256_434).unwrap().coordinate,
         PreparationMultiplicationCoordinate::OutputMaskShareTagProduct {
             output_position: 0,
             output_kind: PreparationOutputKind::PublicNonempty,
@@ -141,7 +141,7 @@ fn completion_catalog_boundaries_bind_exact_wires_rows_holders_and_outputs() {
         }
     );
     assert_eq!(
-        inventory.operation(762_783).unwrap().coordinate,
+        inventory.operation(256_843).unwrap().coordinate,
         PreparationMultiplicationCoordinate::OutputMaskShareTagProduct {
             output_position: 40,
             output_kind: PreparationOutputKind::PrivateResult {
@@ -157,9 +157,9 @@ fn completion_catalog_boundaries_bind_exact_wires_rows_holders_and_outputs() {
         }
     );
     assert_eq!(
-        inventory.operation(762_784).unwrap(),
+        inventory.operation(256_844).unwrap(),
         super::preparation_multiplication_catalog::PreparationMultiplicationOperation {
-            global_ordinal: 762_784,
+            global_ordinal: 256_844,
             multiplicative_layer: 2,
             position_within_layer: 0,
             coordinate: PreparationMultiplicationCoordinate::RowOffsetLimbProduct {
@@ -167,30 +167,30 @@ fn completion_catalog_boundaries_bind_exact_wires_rows_holders_and_outputs() {
                 input_value_code: 0,
                 garbling_contributor_position: 0,
                 limb_position: 0,
-                conjunction_mask_product_ordinal: 6_652,
+                conjunction_mask_product_ordinal: 3_372,
             },
         }
     );
     assert_eq!(
-        inventory.operation(1_630_303).unwrap(),
+        inventory.operation(730_763).unwrap(),
         super::preparation_multiplication_catalog::PreparationMultiplicationOperation {
-            global_ordinal: 1_630_303,
+            global_ordinal: 730_763,
             multiplicative_layer: 2,
-            position_within_layer: 867_519,
+            position_within_layer: 473_919,
             coordinate: PreparationMultiplicationCoordinate::RowBitShareTagProduct {
-                conjunction_ordinal: 5_421,
+                conjunction_ordinal: 2_961,
                 input_value_code: 3,
                 holder_position: 9,
-                conjunction_mask_product_ordinal: 12_073,
+                conjunction_mask_product_ordinal: 6_333,
             },
         }
     );
     assert_eq!(
-        inventory.operation(1_630_304),
+        inventory.operation(730_764),
         Err(
             TallyPreparationError::PreparationMultiplicationIndexOutOfRange {
-                operation_index: 1_630_304,
-                operation_count: 1_630_304,
+                operation_index: 730_764,
+                operation_count: 730_764,
             }
         )
     );
@@ -318,7 +318,7 @@ fn conjunction_coordinate(
     conjunction_ordinal: u64,
 ) -> PreparationMultiplicationCoordinate {
     match catalog
-        .operation(6_652 + conjunction_ordinal)
+        .operation(3_372 + conjunction_ordinal)
         .expect("conjunction operation should exist")
         .coordinate
     {

@@ -6,22 +6,22 @@ Use synthetic data only. The project has not been independently audited, certifi
 
 ## Library boundary
 
-`sealed-lattice` owns cryptographic objects, positive protocol verification, and participant-side workflow. A separate host application owns identity vetting, enrollment, invitations, organizer workflow, interface copy, notifications, and visit cadence.
+`sealed-lattice` owns cryptographic objects, positive protocol verification, and participant-side workflow. A separate host application owns registration, invitations, organizer workflow, interface copy, notifications, and visit cadence. Participants verify one another before freezing the roster; real-world identity verification and Sybil resistance are outside the library.
 
-The host may designate an organizer from the frozen roster. That person remains an ordinary participant and eligible voter. The designation is not a protocol input and grants no special key, bypass, quorum weight, finality power, or release authority.
+The participant who starts the poll is the organizer and must belong to the frozen roster. That person remains an ordinary participant and eligible voter. The role is not a protocol input and grants no special key, bypass, quorum weight, finality power, or release authority.
 
 ## Intended ceremony
 
-1. The host supplies a poll definition and externally vetted public roster, and participants freeze one action context.
-2. Every roster participant contributes to malicious tally preparation and verifies the public transcript and private deliveries in their own browser.
+1. The host supplies a poll definition and registration workflow, and participants confirm and freeze the public roster and action context.
+2. Every roster participant contributes to malicious tally preparation and verifies the public transcript, private deliveries, and complete combined garbling in their own browser.
 3. Every participant signs exactly one declaration: submit one threshold-hidden ballot package or abstain. Silence leaves the action pending.
 4. A roster-complete declaration and package-availability inventory deterministically defines one selected ballot set. A roster quorum authorizes exactly that set; it cannot omit a declared available submission.
-5. Participants activate only the input-label alternative authorized for each declaration and verify the complete combined garbling.
-6. Each participant independently replays certified evaluation of the fixed tally circuit. An all-abstention set produces no target; otherwise the verifier derives one opaque masked result target.
-7. Available roster participants establish finality for that exact target.
+5. From that verified preparation, participants perform input activation for only the input-label alternative authorized by each declaration.
+6. Any participant may independently replay certified evaluation of the fixed tally circuit. If no selected ballot is usable, the verifier produces no target; otherwise it derives one opaque masked result target.
+7. A roster quorum whose members verified that evaluation establishes finality for the exact target.
 8. A valid reconstruction threshold releases only the target-bound result masks needed to decode the ordered result.
 
-The only poll result is the ordered list of selected option identifiers. Signed declarations, accepted submission authorship, and the absence of a result after all participants abstain are public protocol metadata. Individual scores, aggregates, margins, comparisons, ranks, result masks, and evaluator intermediates are not public outputs.
+The only poll result is the ordered list of selected option identifiers. Signed declarations, accepted ballot authorship, and whether any selected ballot is usable are public protocol metadata. Individual scores, aggregates, margins, comparisons, ranks, result masks, and evaluator intermediates are not public outputs.
 
 The protocol provides ballot secrecy, not voter anonymity. No phase requires simultaneous presence. If required participation is missing, the ceremony waits or remains unresolved; it never changes the roster, lowers a threshold, or uses a fallback construction.
 
@@ -42,10 +42,10 @@ Every required participant operation must retain a scalar-capable, single-worker
 
 ## Current status
 
-The complete ceremony is not implemented, cryptographically admitted, activated, or phone-qualified.
+The complete ceremony is not implemented, cryptographically admitted, suite-activated, or phone-qualified.
 
 - Canonical poll validation, context binding, typed refusals, deterministic tally semantics, scalar field and sharing primitives, authenticated storage foundations, and reproducible Rust/WebAssembly packaging exist.
-- Unactivated preparation work includes salted seed custody, authenticated private delivery, recipient inventories, joined typed masters, pseudorandom zero-sharing workloads, conditional hidden-bit checks, and direct ballot-sharing models. These are component and development results, not a malicious-preparation theorem or `VerifiedTallyPreparation`.
+- Unactivated preparation work includes scalar sharing, salted seed custody, authenticated private delivery, recipient inventories, pseudorandom zero-sharing workloads, conditional hidden-bit checks, and direct ballot-custody models. The degree-six zero-sharing source and ballot-custody verifier remain unresolved; these components are not a malicious-preparation theorem or `VerifiedTallyPreparation`.
 - The selected one-slot submit-or-abstain lifecycle, verifier-driven preparation-to-result chain, complete garbling proof, finality, and target-bound release are not connected end to end.
 - Focused scalar Node/WebAssembly results exist, but no matched browser ceremony, complete resource ledger, external-Chrome lifecycle result, or selected-phone result exists.
 - The public SDK exposes foundation operations only. Production dispatch accepts no cryptographic suite.

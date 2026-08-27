@@ -1,21 +1,21 @@
-use crate::foundation::{
-    FOUNDATION_PROFILE, Hash512, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
-    MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, derive_foundation_roster_parameters,
+use crate::{
+    foundation::{
+        FOUNDATION_PROFILE, Hash512, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+        MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, derive_foundation_roster_parameters,
+    },
+    tally_circuit::{CompiledTallyCircuit, TallyCircuitProfile},
 };
 
 use super::{
     TallyPreparationError,
     binary_field_320::BinaryFieldElement320,
-    preparation_attempt_resource_model::{
-        PreparationAttemptLimits, PreparationAttemptResourceFloor,
-        PreparationAttemptResourceFloorInput,
-    },
     pseudorandom_zero_sharing_320::{
         CanonicalZeroSharingCodewordBlockVerification320,
         CanonicalZeroSharingCodewordBlockVerifier320,
         CanonicalZeroSharingCodewordBlockVerifierError320, CanonicalZeroSharingCodewordVerifier320,
-        PseudorandomZeroSharingResourceInput, PseudorandomZeroSharingResourceModel,
-        canonical_evaluation_point_320, evaluate_pseudorandom_zero_sharing_subset_at_point,
+        PerBitPseudorandomZeroSharingWorkload320, PseudorandomZeroSharingResourceInput,
+        PseudorandomZeroSharingResourceModel, canonical_evaluation_point_320,
+        evaluate_pseudorandom_zero_sharing_subset_at_point,
     },
     pseudorandom_zero_sharing_seed_catalog_320::PSEUDORANDOM_ZERO_SHARING_SEED_CATALOG_INCLUSION_PROOF_DOMAIN,
     pseudorandom_zero_sharing_seed_mailbox_320::{
@@ -39,9 +39,6 @@ use super::{
     },
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
-
-const COMPLETION_ZERO_SHARING_COUNT: u64 = 33_346;
-const ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET: u64 = 2_147_483_648;
 
 #[test]
 fn every_completion_subset_basis_is_zero_at_the_origin_and_excluded_points() {
@@ -406,33 +403,33 @@ fn completion_resource_model_reproduces_setup_stream_and_codeword_work() {
         model.basis_precomputation_field_multiplication_count_per_participant,
         420
     );
-    assert_eq!(model.field_output_count_per_participant, 8_403_192);
-    assert_eq!(model.field_output_byte_length_per_participant, 336_127_680);
+    assert_eq!(model.field_output_count_per_participant, 4_769_352);
+    assert_eq!(model.field_output_byte_length_per_participant, 190_774_080);
     assert_eq!(model.full_chunk_field_count, 26_214);
     assert_eq!(model.full_chunk_payload_byte_length, 1_048_560);
-    assert_eq!(model.field_output_chunk_count_per_participant, 504);
-    assert_eq!(model.final_chunk_field_count, 7_132);
-    assert_eq!(model.final_chunk_payload_byte_length, 285_280);
+    assert_eq!(model.field_output_chunk_count_per_participant, 252);
+    assert_eq!(model.final_chunk_field_count, 18_926);
+    assert_eq!(model.final_chunk_payload_byte_length, 757_040);
     assert_eq!(
         model.stream_field_multiplication_count_per_participant,
-        8_403_192
+        4_769_352
     );
-    assert_eq!(model.stream_field_addition_count_per_participant, 8_369_846);
+    assert_eq!(model.stream_field_addition_count_per_participant, 4_750_426);
     assert_eq!(
         model.zero_codeword_check_field_multiplication_count_per_participant,
-        933_688
+        529_928
     );
     assert_eq!(
         model.zero_codeword_check_field_addition_count_per_participant,
-        800_304
+        454_224
     );
     assert_eq!(
         model.zero_codeword_check_comparison_count_per_participant,
-        133_384
+        75_704
     );
     assert_eq!(
         model.total_field_multiplication_floor_per_participant,
-        9_337_300
+        5_299_700
     );
 }
 
@@ -786,88 +783,6 @@ fn independent_completion_delivery_ledger_matches_every_production_subtotal() {
 }
 
 #[test]
-fn replacement_setup_preserves_one_attempt_headroom_but_three_attempts_fail() {
-    let model = completion_resource_model();
-    let superseded_private_delivery_byte_length = 1_620_152_640_u64;
-    let superseded_zero_slice_delivery_byte_length = 480_182_400_u64;
-    let superseded_zero_check_delivery_byte_length = 36_000_u64;
-    let replacement_private_delivery_byte_length = superseded_private_delivery_byte_length
-        - superseded_zero_slice_delivery_byte_length
-        - superseded_zero_check_delivery_byte_length
-        + model.authenticated_private_setup_delivery_byte_length;
-    assert_eq!(replacement_private_delivery_byte_length, 1_146_071_250);
-    let retained_public_byte_length_per_successful_attempt = 426_163_836
-        + model.root_terminal_certificate_byte_length
-        + model.retained_public_recipient_receipt_envelope_byte_length
-        + model.retained_public_receipt_terminal_certificate_byte_length;
-    let retained_public_byte_length_per_burned_attempt = model
-        .root_terminal_certificate_byte_length
-        + model.retained_public_recipient_receipt_envelope_byte_length
-        + model.retained_public_receipt_terminal_certificate_byte_length;
-
-    let selected_single_attempt_floor = PreparationAttemptResourceFloor::derive(
-        PreparationAttemptLimits::for_current_tally_circuit(1).unwrap(),
-        PreparationAttemptResourceFloorInput {
-            private_delivery_byte_length_per_fully_delivered_attempt:
-                replacement_private_delivery_byte_length,
-            retained_public_byte_length_per_burned_attempt,
-            retained_public_byte_length_per_successful_attempt,
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        selected_single_attempt_floor.maximum_reachable_upload_byte_length,
-        1_572_345_436
-    );
-    assert_eq!(
-        ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET
-            - selected_single_attempt_floor.maximum_reachable_upload_byte_length,
-        575_138_212
-    );
-    assert!(
-        !selected_single_attempt_floor
-            .exceeds_architecture_review_boundary(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET)
-            .unwrap()
-    );
-    let batched_hidden_bit_sensitivity =
-        selected_single_attempt_floor.maximum_reachable_upload_byte_length - 241_263_360;
-    assert_eq!(batched_hidden_bit_sensitivity, 1_331_082_076);
-    assert_eq!(
-        ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET - batched_hidden_bit_sensitivity,
-        816_401_572
-    );
-
-    let three_attempt_hostile_floor = PreparationAttemptResourceFloor::derive(
-        PreparationAttemptLimits::for_current_tally_circuit(3).unwrap(),
-        PreparationAttemptResourceFloorInput {
-            private_delivery_byte_length_per_fully_delivered_attempt:
-                replacement_private_delivery_byte_length,
-            retained_public_byte_length_per_burned_attempt,
-            retained_public_byte_length_per_successful_attempt,
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        three_attempt_hostile_floor.maximum_fully_delivered_private_byte_length,
-        3_438_213_750
-    );
-    assert_eq!(
-        three_attempt_hostile_floor.maximum_reachable_upload_byte_length,
-        3_864_708_636
-    );
-    assert_eq!(
-        three_attempt_hostile_floor
-            .excess_over_upload_target(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET),
-        1_717_224_988
-    );
-    assert!(
-        three_attempt_hostile_floor
-            .exceeds_architecture_review_boundary(ALL_PARTICIPANT_UPLOAD_PLANNING_TARGET)
-            .unwrap()
-    );
-}
-
-#[test]
 fn every_positive_fault_geometry_uses_formula_derived_subset_and_stream_counts() {
     for participant_count in
         MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
@@ -999,10 +914,19 @@ fn invalid_or_overflowing_resource_shapes_and_algebra_inputs_are_rejected() {
 }
 
 fn completion_resource_model() -> PseudorandomZeroSharingResourceModel {
-    PseudorandomZeroSharingResourceModel::derive(PseudorandomZeroSharingResourceInput {
-        participant_count: FOUNDATION_PROFILE.participant_count,
-        zero_sharing_count: COMPLETION_ZERO_SHARING_COUNT,
-    })
+    let circuit = CompiledTallyCircuit::compile(
+        TallyCircuitProfile::new(
+            FOUNDATION_PROFILE.participant_count,
+            FOUNDATION_PROFILE.option_count,
+            FOUNDATION_PROFILE.option_count,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let workload = PerBitPseudorandomZeroSharingWorkload320::derive(&circuit).unwrap();
+    PseudorandomZeroSharingResourceModel::derive(
+        workload.resource_input(FOUNDATION_PROFILE.participant_count),
+    )
     .unwrap()
 }
 

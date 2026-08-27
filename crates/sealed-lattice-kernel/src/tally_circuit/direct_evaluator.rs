@@ -1,8 +1,8 @@
 use crate::hashing::hash_framed_parts_512;
 
 use super::{
-    TALLY_BALLOT_ATTEMPT_COUNT, TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN, TallyCircuitError,
-    TallyCircuitProfile, TallyEvaluationInput, TallyEvaluationOutcome, bit_width_for_maximum_value,
+    TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN, TallyCircuitError, TallyCircuitProfile,
+    TallyEvaluationInput, TallyEvaluationOutcome, bit_width_for_maximum_value,
     foundation_score_bounds,
 };
 
@@ -15,9 +15,6 @@ pub(crate) fn tally_direct_evaluator_identity() -> Result<[u8; 64], TallyCircuit
         TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN,
         &[
             TALLY_DIRECT_EVALUATOR_SOURCE,
-            &u64::try_from(TALLY_BALLOT_ATTEMPT_COUNT)
-                .map_err(|_| TallyCircuitError::ArithmeticOverflow)?
-                .to_le_bytes(),
             &minimum_score.to_le_bytes(),
             &maximum_score.to_le_bytes(),
         ],
@@ -33,12 +30,12 @@ pub(crate) fn evaluate_tally_directly(
     let participant_count = usize::from(profile.participant_count());
     let option_count = usize::from(profile.option_count());
     let top_count = usize::from(profile.top_count());
-    let participant_ballot_attempts = input.participant_ballot_attempts();
+    let participant_ballots = input.participant_ballots();
 
-    if participant_ballot_attempts.len() != participant_count {
+    if participant_ballots.len() != participant_count {
         return Err(TallyCircuitError::InputParticipantCountMismatch {
             expected: participant_count,
-            actual: participant_ballot_attempts.len(),
+            actual: participant_ballots.len(),
         });
     }
 
@@ -47,53 +44,39 @@ pub(crate) fn evaluate_tally_directly(
     let mut aggregate_scores = vec![0_u32; option_count];
     let mut has_selected_ballot = false;
 
-    for (participant_position, ballot_attempts) in participant_ballot_attempts.iter().enumerate() {
-        if ballot_attempts.len() != TALLY_BALLOT_ATTEMPT_COUNT {
-            return Err(TallyCircuitError::InputBallotAttemptCountMismatch {
+    for (participant_position, ballot) in participant_ballots.iter().enumerate() {
+        if ballot.score_encodings().len() != option_count {
+            return Err(TallyCircuitError::InputOptionCountMismatch {
                 participant_position,
-                expected: TALLY_BALLOT_ATTEMPT_COUNT,
-                actual: ballot_attempts.len(),
+                expected: option_count,
+                actual: ballot.score_encodings().len(),
             });
         }
-        for (attempt_position, ballot_attempt) in ballot_attempts.iter().enumerate() {
-            if ballot_attempt.score_encodings().len() != option_count {
-                return Err(TallyCircuitError::InputOptionCountMismatch {
+        for (option_position, score_encoding) in
+            ballot.score_encodings().iter().copied().enumerate()
+        {
+            if usize::from(score_encoding) > maximum_score_encoding {
+                return Err(TallyCircuitError::ScoreEncodingOutOfRange {
                     participant_position,
-                    attempt_position,
-                    expected: option_count,
-                    actual: ballot_attempt.score_encodings().len(),
+                    option_position,
+                    score_encoding,
                 });
-            }
-            for (option_position, score_encoding) in
-                ballot_attempt.score_encodings().iter().copied().enumerate()
-            {
-                if usize::from(score_encoding) > maximum_score_encoding {
-                    return Err(TallyCircuitError::ScoreEncodingOutOfRange {
-                        participant_position,
-                        attempt_position,
-                        option_position,
-                        score_encoding,
-                    });
-                }
             }
         }
 
-        let selected_scores = ballot_attempts.iter().find_map(|ballot_attempt| {
-            (ballot_attempt.is_present()
-                && ballot_attempt
-                    .score_encodings()
-                    .iter()
-                    .copied()
-                    .all(|score_encoding| {
-                        (minimum_score..=maximum_score).contains(&u16::from(score_encoding))
-                    }))
-            .then_some(ballot_attempt.score_encodings())
-        });
-        if let Some(selected_scores) = selected_scores {
+        let is_selected = ballot.is_present()
+            && ballot
+                .score_encodings()
+                .iter()
+                .copied()
+                .all(|score_encoding| {
+                    (minimum_score..=maximum_score).contains(&u16::from(score_encoding))
+                });
+        if is_selected {
             has_selected_ballot = true;
             for (aggregate_score, score_encoding) in aggregate_scores
                 .iter_mut()
-                .zip(selected_scores.iter().copied())
+                .zip(ballot.score_encodings().iter().copied())
             {
                 *aggregate_score = aggregate_score
                     .checked_add(u32::from(score_encoding))

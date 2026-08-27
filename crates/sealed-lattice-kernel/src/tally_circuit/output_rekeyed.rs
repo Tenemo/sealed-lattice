@@ -36,11 +36,10 @@ pub(crate) struct OutputRekeyedTallyCircuitGeometry {
     pub(crate) total_wire_count: usize,
 }
 
-/// Unactivated output-rekey extension of the deterministic tally circuit.
+/// Output-rekey extension of the deterministic tally circuit.
 ///
-/// The core circuit remains available to superseded preparation experiments.
-/// This extension adds the candidate's accepted-ballot authorship outputs and
-/// one fresh independent-label boundary for every public and private output.
+/// This extension adds accepted-ballot authorship outputs and one fresh
+/// independent-label boundary for every public and private output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OutputRekeyedTallyCircuit {
     core_circuit: CompiledTallyCircuit,
@@ -237,19 +236,17 @@ pub(crate) fn evaluate_output_rekeyed_tally_directly(
     let core_outcome = evaluate_tally_directly(profile, input)?;
     let (minimum_score, maximum_score) = foundation_score_bounds()?;
     let accepted_ballot_authorship = input
-        .participant_ballot_attempts()
+        .participant_ballots()
         .iter()
-        .map(|ballot_attempts| {
-            ballot_attempts.iter().any(|ballot_attempt| {
-                ballot_attempt.is_present()
-                    && ballot_attempt
-                        .score_encodings()
-                        .iter()
-                        .copied()
-                        .all(|score_encoding| {
-                            (minimum_score..=maximum_score).contains(&u16::from(score_encoding))
-                        })
-            })
+        .map(|ballot| {
+            ballot.is_present()
+                && ballot
+                    .score_encodings()
+                    .iter()
+                    .copied()
+                    .all(|score_encoding| {
+                        (minimum_score..=maximum_score).contains(&u16::from(score_encoding))
+                    })
         })
         .collect::<Vec<_>>();
     let has_selected_ballot = accepted_ballot_authorship

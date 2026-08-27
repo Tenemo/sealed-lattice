@@ -22,7 +22,7 @@ use super::{
     },
 };
 
-const COMPLETION_VERIFICATION_KEY_FIELD_COUNT: u64 = 1_443_180;
+const COMPLETION_VERIFICATION_KEY_FIELD_COUNT: u64 = 573_980;
 
 #[test]
 fn threshold_four_manifest_binds_ordered_descriptors_and_round_trips() {

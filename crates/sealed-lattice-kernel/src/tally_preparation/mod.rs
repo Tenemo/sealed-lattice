@@ -23,9 +23,6 @@ mod binary_field_320;
 mod binary_field_multiplication_circuit;
 mod binary_linear_circuit;
 mod binary_ring_packed_mpc_evaluation_floor;
-mod collective_coin_source_bivariate_commitment_320;
-mod collective_coin_source_bivariate_mailbox_320;
-mod collective_coin_source_bivariate_sharing_320;
 mod context;
 mod degree_three_opening_decoder;
 mod fixed_roster_beaver_mpc_resource_floor;
@@ -37,16 +34,8 @@ mod garbling_alternative_resource_model;
 mod geometry;
 mod label_encoding;
 mod malicious_mpc_communication_floor;
-mod masked_ballot_bivariate_commitment_320;
-mod masked_ballot_bivariate_mailbox_320;
-mod masked_ballot_bivariate_receipt_320;
-mod masked_ballot_bivariate_receipt_state_320;
-mod masked_ballot_bivariate_sharing_320;
-mod masked_ballot_bundle_320;
-mod masked_ballot_release_320;
 mod output_sharing;
 mod preparation_arithmetic_graph;
-mod preparation_attempt_resource_model;
 mod preparation_holder_record_catalog;
 mod preparation_kmac_call_census_320;
 mod preparation_multiplication_catalog;
@@ -130,12 +119,6 @@ mod binary_linear_circuit_tests;
 #[cfg(test)]
 mod binary_ring_packed_mpc_evaluation_floor_tests;
 #[cfg(test)]
-mod collective_coin_source_bivariate_commitment_320_tests;
-#[cfg(test)]
-mod collective_coin_source_bivariate_mailbox_320_tests;
-#[cfg(test)]
-mod collective_coin_source_bivariate_sharing_320_tests;
-#[cfg(test)]
 mod degree_three_opening_decoder_tests;
 #[cfg(test)]
 mod fixed_roster_beaver_mpc_resource_floor_tests;
@@ -152,21 +135,7 @@ mod label_encoding_tests;
 #[cfg(test)]
 mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
-mod masked_ballot_bivariate_commitment_320_tests;
-#[cfg(test)]
-mod masked_ballot_bivariate_mailbox_320_tests;
-#[cfg(test)]
-mod masked_ballot_bivariate_receipt_320_tests;
-#[cfg(test)]
-mod masked_ballot_bivariate_sharing_320_tests;
-#[cfg(test)]
-mod masked_ballot_bundle_320_tests;
-#[cfg(test)]
-mod masked_ballot_release_320_tests;
-#[cfg(test)]
 mod preparation_arithmetic_graph_tests;
-#[cfg(test)]
-mod preparation_attempt_resource_model_tests;
 #[cfg(test)]
 mod preparation_holder_record_catalog_tests;
 #[cfg(test)]
@@ -635,8 +604,6 @@ pub(crate) enum TallyPreparationError {
     },
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
-    BallotAttemptCountZero,
-    MaximumPreparationAttemptCountZero,
     ArithmeticOverflow,
     WireIndexOutOfRange {
         wire_index: u32,
@@ -1298,12 +1265,6 @@ impl fmt::Display for TallyPreparationError {
             ),
             Self::GeometryMismatch => formatter
                 .write_str("tally preparation geometry does not match the compiled circuit"),
-            Self::BallotAttemptCountZero => {
-                formatter.write_str("ballot-attempt count must be positive")
-            }
-            Self::MaximumPreparationAttemptCountZero => {
-                formatter.write_str("maximum preparation-attempt count must be positive")
-            }
             Self::ArithmeticOverflow => {
                 formatter.write_str("tally preparation arithmetic overflow")
             }

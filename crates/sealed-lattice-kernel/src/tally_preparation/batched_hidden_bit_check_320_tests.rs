@@ -35,8 +35,8 @@ fn completion_catalog_compiles_every_nonconstant_wire_and_exact_zero_source() {
     .unwrap();
 
     assert_eq!(catalog.profile(), circuit.profile());
-    assert_eq!(catalog.hidden_bit_count(), 13_962);
-    assert_eq!(catalog.batch_count(), 4);
+    assert_eq!(catalog.hidden_bit_count(), 7_982);
+    assert_eq!(catalog.batch_count(), 2);
     assert_eq!(
         catalog
             .batches()
@@ -47,22 +47,17 @@ fn completion_catalog_compiles_every_nonconstant_wire_and_exact_zero_source() {
                 batch.zero_sharing_ordinal,
             ))
             .collect::<Vec<_>>(),
-        vec![
-            (0, 0, 4_096, 0),
-            (1, 4_096, 4_096, 1),
-            (2, 8_192, 4_096, 2),
-            (3, 12_288, 1_674, 3),
-        ]
+        vec![(0, 0, 4_096, 0), (1, 4_096, 3_886, 1),]
     );
-    assert_eq!(catalog.conjunction_product_count(), 5_422);
-    assert_eq!(catalog.zero_sharing_count(), 5_426);
-    assert_eq!(catalog.soundness_union_numerator(), 13_958);
+    assert_eq!(catalog.conjunction_product_count(), 2_962);
+    assert_eq!(catalog.zero_sharing_count(), 2_964);
+    assert_eq!(catalog.soundness_union_numerator(), 7_980);
     assert_eq!(catalog.soundness_field_bit_length(), 320);
 
     let hidden_bits = catalog.hidden_bits().collect::<Vec<_>>();
     assert_eq!(catalog.hidden_bit(0).unwrap(), hidden_bits[0]);
     assert_eq!(hidden_bits.first().unwrap().hidden_bit_ordinal, 0);
-    assert_eq!(hidden_bits.last().unwrap().hidden_bit_ordinal, 13_961);
+    assert_eq!(hidden_bits.last().unwrap().hidden_bit_ordinal, 7_981);
     assert_eq!(
         hidden_bits
             .iter()
@@ -103,12 +98,12 @@ fn completion_catalog_compiles_every_nonconstant_wire_and_exact_zero_source() {
     );
 
     let zero_sharings = catalog.zero_sharings().collect::<Vec<_>>();
-    assert_eq!(zero_sharings.len(), 5_426);
-    assert!(zero_sharings[..4].iter().all(|entry| matches!(
+    assert_eq!(zero_sharings.len(), 2_964);
+    assert!(zero_sharings[..2].iter().all(|entry| matches!(
         entry.coordinate,
         BatchedHiddenBitZeroSharingCoordinate320::BatchMask { .. }
     )));
-    assert!(zero_sharings[4..].iter().all(|entry| matches!(
+    assert!(zero_sharings[2..].iter().all(|entry| matches!(
         entry.coordinate,
         BatchedHiddenBitZeroSharingCoordinate320::ConjunctionProductMask { .. }
     )));
@@ -123,23 +118,23 @@ fn completion_catalog_compiles_every_nonconstant_wire_and_exact_zero_source() {
     assert_eq!(
         catalog.hidden_bit(catalog.hidden_bit_count()),
         Err(BatchedHiddenBitCheckError320::HiddenBitOrdinalOutOfRange {
-            hidden_bit_ordinal: 13_962,
-            hidden_bit_count: 13_962,
+            hidden_bit_ordinal: 7_982,
+            hidden_bit_count: 7_982,
         })
     );
     assert_eq!(
         catalog.batch(catalog.batch_count()),
         Err(BatchedHiddenBitCheckError320::BatchOrdinalOutOfRange {
-            batch_ordinal: 4,
-            batch_count: 4,
+            batch_ordinal: 2,
+            batch_count: 2,
         })
     );
     assert_eq!(
         catalog.zero_sharing(catalog.zero_sharing_count()),
         Err(
             BatchedHiddenBitCheckError320::ZeroSharingOrdinalOutOfRange {
-                zero_sharing_ordinal: 5_426,
-                zero_sharing_count: 5_426,
+                zero_sharing_ordinal: 2_964,
+                zero_sharing_count: 2_964,
             }
         )
     );
@@ -186,51 +181,51 @@ fn resource_compiler_compares_bounded_single_batch_and_per_bit_routes() {
     .unwrap();
     let resources = BatchedHiddenBitCheckResourceModel320::derive(&catalog, &circuit, 7).unwrap();
 
-    assert_eq!(resources.hidden_bit_count, 13_962);
-    assert_eq!(resources.batch_count, 4);
+    assert_eq!(resources.hidden_bit_count, 7_982);
+    assert_eq!(resources.batch_count, 2);
     assert_eq!(resources.maximum_batch_size, 4_096);
-    assert_eq!(resources.final_batch_size, 1_674);
-    assert_eq!(resources.conjunction_product_count, 5_422);
-    assert_eq!(resources.zero_sharing_count, 5_426);
-    assert_eq!(resources.hidden_bit_square_count_per_participant, 13_962);
+    assert_eq!(resources.final_batch_size, 3_886);
+    assert_eq!(resources.conjunction_product_count, 2_962);
+    assert_eq!(resources.zero_sharing_count, 2_964);
+    assert_eq!(resources.hidden_bit_square_count_per_participant, 7_982);
     assert_eq!(
         resources.challenge_multiplication_count_per_participant,
-        13_958
+        7_980
     );
     assert_eq!(
         resources.batch_evaluation_multiplication_count_per_participant,
-        27_920
+        15_962
     );
     assert_eq!(
         resources.batch_evaluation_addition_count_per_participant,
-        27_924
+        15_964
     );
-    assert_eq!(resources.soundness_union_numerator, 13_958);
+    assert_eq!(resources.soundness_union_numerator, 7_980);
     assert_eq!(resources.soundness_field_bit_length, 320);
-    assert_eq!(resources.single_batch_zero_sharing_count, 5_423);
+    assert_eq!(resources.single_batch_zero_sharing_count, 2_963);
     assert_eq!(
         resources.single_batch_field_output_count_per_participant,
-        1_366_596
+        746_676
     );
     assert_eq!(
         resources.bounded_batch_additional_field_output_count_per_participant,
-        756
+        252
     );
-    assert_eq!(resources.per_bit_zero_sharing_count, 33_346);
-    assert_eq!(resources.zero_sharing_count_reduction, 27_920);
+    assert_eq!(resources.per_bit_zero_sharing_count, 18_926);
+    assert_eq!(resources.zero_sharing_count_reduction, 15_962);
     assert_eq!(
         resources.per_bit_field_output_count_per_participant,
-        8_403_192
+        4_769_352
     );
     assert_eq!(
         resources.field_output_count_reduction_per_participant,
-        7_035_840
+        4_022_424
     );
     assert_eq!(
         resources.field_output_byte_length_reduction_per_participant,
-        281_433_600
+        160_896_960
     );
-    assert_eq!(resources.selected_cursor.field_output_count, 1_367_352);
+    assert_eq!(resources.selected_cursor.field_output_count, 746_928);
     assert_eq!(resources.selected_cursor.output_chunk_count, 1);
     assert_eq!(resources.selected_cursor.work_checkpoint_count, 252);
 }

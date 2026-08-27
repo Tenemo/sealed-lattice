@@ -22,11 +22,11 @@ use super::{
     },
 };
 
-const COMPLETION_VERIFICATION_KEY_FIELD_COUNT: u64 = 1_443_180;
-const COMPLETION_SHARE_VECTOR_PAYLOAD_BYTE_LENGTH: u64 = 46_181_760;
-const COMPLETION_SHARE_VECTOR_CHUNK_COUNT: u64 = 45;
-const COMPLETION_FINAL_CHUNK_PAYLOAD_BYTE_LENGTH: u64 = 44_416;
-const COMPLETION_DESCRIPTOR_BYTE_LENGTH: u64 = 3_261;
+const COMPLETION_VERIFICATION_KEY_FIELD_COUNT: u64 = 573_980;
+const COMPLETION_SHARE_VECTOR_PAYLOAD_BYTE_LENGTH: u64 = 18_367_360;
+const COMPLETION_SHARE_VECTOR_CHUNK_COUNT: u64 = 18;
+const COMPLETION_FINAL_CHUNK_PAYLOAD_BYTE_LENGTH: u64 = 541_568;
+const COMPLETION_DESCRIPTOR_BYTE_LENGTH: u64 = 1_506;
 
 #[test]
 fn completion_descriptor_streams_exact_payload_geometry_and_hash_matched_fields() {
@@ -111,7 +111,7 @@ fn completion_descriptor_streams_exact_payload_geometry_and_hash_matched_fields(
             COMPLETION_SHARE_VECTOR_CHUNK_COUNT - 1,
         )
         .unwrap(),
-        44_822
+        541_974
     );
     let four_hashes = [[0_u8; 64]; 4];
     let two_unsigned16_values = [[0_u8; 2]; 2];
@@ -151,18 +151,18 @@ fn completion_descriptor_streams_exact_payload_geometry_and_hash_matched_fields(
     let final_chunk = descriptor
         .verify_payload_chunk(COMPLETION_SHARE_VECTOR_CHUNK_COUNT - 1, &final_payload)
         .unwrap();
-    assert_eq!(final_chunk.first_field_index(), 1_441_792);
-    assert_eq!(final_chunk.field_count(), 1_388);
+    assert_eq!(final_chunk.first_field_index(), 557_056);
+    assert_eq!(final_chunk.field_count(), 16_924);
     assert_eq!(
-        final_chunk.field_value(1_387).unwrap(),
+        final_chunk.field_value(16_923).unwrap(),
         BinaryFieldElement256::from_canonical_bytes(&[0x64; 32]).unwrap()
     );
     assert_eq!(
-        final_chunk.field_value(1_388),
+        final_chunk.field_value(16_924),
         Err(
             TallyPreparationError::AuthenticatedKeyShareVectorFieldPositionOutOfRange {
-                position_within_chunk: 1_388,
-                field_count: 1_388,
+                position_within_chunk: 16_924,
+                field_count: 16_924,
             }
         )
     );

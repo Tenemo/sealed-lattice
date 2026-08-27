@@ -26,34 +26,34 @@ fn completion_resource_model_matches_exact_production_geometry() {
             chunk_count_per_key_stream: 1,
             chunked_xof_invocation_count_per_participant: 84,
             total_chunked_xof_invocation_count: 840,
-            semantic_mask_bit_count_per_key: 6_652,
-            additive_correlation_free_point_bit_count_per_key: 1_951_920,
-            component_bit_count_per_key: 1_958_572,
-            unique_component_bit_count: 235_028_640,
-            component_bit_count_per_participant: 164_520_048,
-            total_locally_generated_component_bit_count: 1_645_200_480,
-            emitted_byte_length_per_key: 244_822,
-            unique_emitted_byte_length: 29_378_640,
-            emitted_byte_length_per_participant: 20_565_048,
-            total_locally_emitted_byte_length: 205_650_480,
+            semantic_mask_bit_count_per_key: 3_372,
+            additive_correlation_free_point_bit_count_per_key: 1_066_320,
+            component_bit_count_per_key: 1_069_692,
+            unique_component_bit_count: 128_363_040,
+            component_bit_count_per_participant: 89_854_128,
+            total_locally_generated_component_bit_count: 898_541_280,
+            emitted_byte_length_per_key: 133_712,
+            unique_emitted_byte_length: 16_045_440,
+            emitted_byte_length_per_participant: 11_231_808,
+            total_locally_emitted_byte_length: 112_318_080,
             unused_high_bit_count_per_key: 4,
-            catalog_canonical_byte_length: 13_305,
-            catalog_identity_preimage_byte_length: 13_384,
-            catalog_identity_fixed_keccak_f1600_permutation_count_per_participant: 99,
-            total_catalog_identity_fixed_keccak_f1600_permutation_count: 990,
+            catalog_canonical_byte_length: 6_745,
+            catalog_identity_preimage_byte_length: 6_824,
+            catalog_identity_fixed_keccak_f1600_permutation_count_per_participant: 51,
+            total_catalog_identity_fixed_keccak_f1600_permutation_count: 510,
             minimum_absorbed_query_byte_length_per_participant: 38_353,
             maximum_absorbed_query_byte_length_per_participant: 38_368,
             total_absorbed_query_byte_length: 383_635,
-            minimum_fixed_keccak_f1600_permutation_count_per_participant: 151_536,
-            maximum_fixed_keccak_f1600_permutation_count_per_participant: 151_536,
-            total_fixed_keccak_f1600_permutation_count: 1_515_360,
-            minimum_combined_fixed_keccak_f1600_permutation_count_per_participant: 151_635,
-            maximum_combined_fixed_keccak_f1600_permutation_count_per_participant: 151_635,
-            total_combined_fixed_keccak_f1600_permutation_count: 1_516_350,
+            minimum_fixed_keccak_f1600_permutation_count_per_participant: 82_908,
+            maximum_fixed_keccak_f1600_permutation_count_per_participant: 82_908,
+            total_fixed_keccak_f1600_permutation_count: 829_080,
+            minimum_combined_fixed_keccak_f1600_permutation_count_per_participant: 82_959,
+            maximum_combined_fixed_keccak_f1600_permutation_count_per_participant: 82_959,
+            total_combined_fixed_keccak_f1600_permutation_count: 829_590,
             maximum_single_query_byte_length: 457,
-            maximum_single_output_byte_length: 244_822,
-            maximum_fixed_keccak_f1600_permutation_count_per_chunk: 1_804,
-            maximum_chunk_boundary_recomputation_byte_length: 244_822,
+            maximum_single_output_byte_length: 133_712,
+            maximum_fixed_keccak_f1600_permutation_count_per_chunk: 987,
+            maximum_chunk_boundary_recomputation_byte_length: 133_712,
         }
     );
 }
@@ -145,7 +145,27 @@ fn independently_derive_completion_resource_model(
 ) -> IndependentCompletionResourceModel {
     let participant_count = 10_u64;
     let active_fault_bound = 3_u64;
-    let component_bit_count_per_key = 1_958_572_u64;
+    let semantic_mask_wire_indices = (0..circuit.geometry().input_bit_count)
+        .chain(circuit.operations().iter().enumerate().filter_map(
+            |(operation_position, operation)| {
+                matches!(operation, BooleanOperation::Conjunction { .. })
+                    .then_some(circuit.geometry().input_bit_count + operation_position)
+            },
+        ))
+        .map(|wire_index| u64::try_from(wire_index).unwrap())
+        .collect::<Vec<_>>();
+    let conjunction_gate_count = u64::try_from(
+        circuit
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, BooleanOperation::Conjunction { .. }))
+            .count(),
+    )
+    .unwrap();
+    let additive_correlation_free_point_bit_count =
+        conjunction_gate_count * 4 * participant_count * (participant_count - 1);
+    let component_bit_count_per_key = u64::try_from(semantic_mask_wire_indices.len()).unwrap()
+        + additive_correlation_free_point_bit_count;
     let output_byte_length_per_key = independent_ceiling_divide(component_bit_count_per_key, 8);
     let output_rate_block_count = independent_ceiling_divide(output_byte_length_per_key, 136);
     let mut unique_key_count = 0_u64;
@@ -175,16 +195,7 @@ fn independently_derive_completion_resource_model(
     let key_count_per_participant = uniform(&key_count_by_participant);
     let complete_absorbed_blocks_per_participant =
         uniform(&complete_absorbed_blocks_by_participant);
-    let semantic_mask_wire_indices = (0..circuit.geometry().input_bit_count)
-        .chain(circuit.operations().iter().enumerate().filter_map(
-            |(operation_position, operation)| {
-                matches!(operation, BooleanOperation::Conjunction { .. })
-                    .then_some(circuit.geometry().input_bit_count + operation_position)
-            },
-        ))
-        .map(|wire_index| u64::try_from(wire_index).unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(semantic_mask_wire_indices.len(), 6_652);
+    assert_eq!(semantic_mask_wire_indices.len(), 3_372);
     let catalog_canonical_byte_length =
         framed_length(u64::try_from(REPLICATED_RANDOM_BIT_CATALOG_MAGIC.len()).unwrap())
             + varuint_length(1)
@@ -203,7 +214,7 @@ fn independently_derive_completion_resource_model(
             + varuint_length(4)
             + varuint_length(participant_count)
             + varuint_length(participant_count - 1)
-            + varuint_length(1_951_920)
+            + varuint_length(additive_correlation_free_point_bit_count)
             + varuint_length(component_bit_count_per_key);
     let catalog_identity_preimage_byte_length = u64::try_from(HASH512_PREIMAGE_PREFIX.len())
         .unwrap()

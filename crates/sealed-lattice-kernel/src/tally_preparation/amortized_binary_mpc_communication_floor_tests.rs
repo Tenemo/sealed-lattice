@@ -37,31 +37,31 @@ fn completion_profile_reproduces_both_amortized_binary_mpc_floors() {
     assert_eq!(
         floor.shared_offset,
         AmortizedBinaryMpcCircuitCommunicationFloor {
-            binary_conjunction_count: 1_812_439_852,
-            packed_multiplication_count: 604_146_618,
-            public_reconstruction_batch_count: 151_036_655,
-            random_subspace_generation_batch_count: 30_207_331,
-            public_reconstruction_remote_field_element_count: 27_186_597_900,
-            random_subspace_generation_remote_field_element_count: 43_498_556_640,
-            known_remote_field_element_count: 70_685_154_540,
-            known_remote_bit_length: 353_425_772_700,
-            known_remote_byte_length: 44_178_221_588,
-            minimum_maximum_participant_upload_byte_length: 4_417_822_159,
+            binary_conjunction_count: 718_647_592,
+            packed_multiplication_count: 239_549_198,
+            public_reconstruction_batch_count: 59_887_300,
+            random_subspace_generation_batch_count: 11_977_460,
+            public_reconstruction_remote_field_element_count: 10_779_714_000,
+            random_subspace_generation_remote_field_element_count: 17_247_542_400,
+            known_remote_field_element_count: 28_027_256_400,
+            known_remote_bit_length: 140_136_282_000,
+            known_remote_byte_length: 17_517_035_250,
+            minimum_maximum_participant_upload_byte_length: 1_751_703_525,
         }
     );
     assert_eq!(
         floor.independent_label,
         AmortizedBinaryMpcCircuitCommunicationFloor {
-            binary_conjunction_count: 2_481_143_812,
-            packed_multiplication_count: 827_047_938,
-            public_reconstruction_batch_count: 206_761_985,
-            random_subspace_generation_batch_count: 41_352_397,
-            public_reconstruction_remote_field_element_count: 37_217_157_300,
-            random_subspace_generation_remote_field_element_count: 59_547_451_680,
-            known_remote_field_element_count: 96_764_608_980,
-            known_remote_bit_length: 483_823_044_900,
-            known_remote_byte_length: 60_477_880_613,
-            minimum_maximum_participant_upload_byte_length: 6_047_788_062,
+            binary_conjunction_count: 1_131_563_152,
+            packed_multiplication_count: 377_187_718,
+            public_reconstruction_batch_count: 94_296_930,
+            random_subspace_generation_batch_count: 18_859_386,
+            public_reconstruction_remote_field_element_count: 16_973_447_400,
+            random_subspace_generation_remote_field_element_count: 27_157_515_840,
+            known_remote_field_element_count: 44_130_963_240,
+            known_remote_bit_length: 220_654_816_200,
+            known_remote_byte_length: 27_581_852_025,
+            minimum_maximum_participant_upload_byte_length: 2_758_185_203,
         }
     );
 }

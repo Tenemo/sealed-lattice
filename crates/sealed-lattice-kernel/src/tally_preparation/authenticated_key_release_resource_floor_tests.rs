@@ -4,7 +4,7 @@ use crate::{
         MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_OPTION_COUNT,
         MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, derive_foundation_roster_parameters,
     },
-    tally_circuit::{CompiledTallyCircuit, TallyCircuitProfile},
+    tally_circuit::{BooleanOperation, CompiledTallyCircuit, TallyCircuitProfile},
 };
 
 use super::{
@@ -26,36 +26,36 @@ fn completion_key_release_floor_corrects_the_reconstructed_key_undercount() {
         AuthenticatedKeyReleaseResourceFloor {
             participant_count: 10,
             reconstruction_threshold: 4,
-            holder_record_count: 475_590,
-            verification_key_field_element_count: 1_443_180,
-            reconstructed_key_byte_length: 46_181_760,
-            share_vector_byte_length_per_sender: 46_181_760,
-            share_vector_chunk_count_per_sender: 45,
-            final_share_vector_chunk_byte_length: 44_416,
-            share_vector_descriptor_byte_length_per_sender: 3_261,
-            payload_chunk_hash_invocation_count_per_sender: 45,
-            payload_chunk_hash_absorbed_byte_length_per_sender: 46_200_030,
-            payload_chunk_hash_output_byte_length_per_sender: 2_880,
-            payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender: 339_746,
+            holder_record_count: 204_990,
+            verification_key_field_element_count: 573_980,
+            reconstructed_key_byte_length: 18_367_360,
+            share_vector_byte_length_per_sender: 18_367_360,
+            share_vector_chunk_count_per_sender: 18,
+            final_share_vector_chunk_byte_length: 541_568,
+            share_vector_descriptor_byte_length_per_sender: 1_506,
+            payload_chunk_hash_invocation_count_per_sender: 18,
+            payload_chunk_hash_absorbed_byte_length_per_sender: 18_374_668,
+            payload_chunk_hash_output_byte_length_per_sender: 1_152,
+            payload_chunk_hash_fixed_keccak_f1600_permutation_count_per_sender: 135_124,
             maximum_payload_chunk_hash_fixed_keccak_f1600_permutation_count: 7_714,
             quorum_checked_share_sender_count: 4,
-            quorum_checked_share_payload_byte_length: 184_727_040,
-            quorum_checked_share_descriptor_byte_length: 13_044,
-            quorum_checked_share_payload_and_descriptor_byte_length: 184_740_084,
+            quorum_checked_share_payload_byte_length: 73_469_440,
+            quorum_checked_share_descriptor_byte_length: 6_024,
+            quorum_checked_share_payload_and_descriptor_byte_length: 73_475_464,
             quorum_checked_share_manifest_byte_length: 651,
             acknowledgement_body_byte_length_per_participant: 130,
             all_roster_acknowledgement_body_byte_length: 1_300,
-            quorum_checked_share_control_byte_length: 14_995,
-            quorum_checked_share_payload_and_control_byte_length: 184_742_035,
-            quorum_checked_additional_byte_length: 138_560_275,
+            quorum_checked_share_control_byte_length: 7_975,
+            quorum_checked_share_payload_and_control_byte_length: 73_477_415,
+            quorum_checked_additional_byte_length: 55_110_055,
             all_roster_share_sender_count: 10,
-            all_roster_share_payload_byte_length: 461_817_600,
-            all_roster_share_descriptor_byte_length: 32_610,
-            all_roster_share_payload_and_descriptor_byte_length: 461_850_210,
+            all_roster_share_payload_byte_length: 183_673_600,
+            all_roster_share_descriptor_byte_length: 15_060,
+            all_roster_share_payload_and_descriptor_byte_length: 183_688_660,
             all_roster_share_manifest_byte_length: 1_056,
-            all_roster_share_control_byte_length: 33_666,
-            all_roster_share_payload_and_control_byte_length: 461_851_266,
-            all_roster_additional_byte_length: 415_669_506,
+            all_roster_share_control_byte_length: 16_116,
+            all_roster_share_payload_and_control_byte_length: 183_689_716,
+            all_roster_additional_byte_length: 165_322_356,
         }
     );
 }
@@ -67,10 +67,26 @@ fn independent_completion_derivation_matches_the_production_floor() {
     let model =
         AuthenticatedKeyReleaseResourceFloor::derive(context(0x64, &circuit), &circuit).unwrap();
 
-    let label_record_count = 1_230_u64 * 2 * 10 * 10;
-    let scalar_record_count = 1_230_u64 * 10 + 5_422 * 4 * 10 + 41 * 10;
+    let participant_count = u64::from(circuit.profile().participant_count());
+    let input_bit_count = u64::try_from(circuit.geometry().input_bit_count).unwrap();
+    let conjunction_gate_count = u64::try_from(
+        circuit
+            .operations()
+            .iter()
+            .filter(|operation| matches!(operation, BooleanOperation::Conjunction { .. }))
+            .count(),
+    )
+    .unwrap();
+    let output_mask_count = u64::try_from(
+        circuit.geometry().public_output_bit_count + circuit.geometry().private_result_bit_count,
+    )
+    .unwrap();
+    let label_record_count = input_bit_count * 2 * participant_count * participant_count;
+    let scalar_record_count = input_bit_count * participant_count
+        + conjunction_gate_count * 4 * participant_count
+        + output_mask_count * participant_count;
     let independent_key_field_element_count = label_record_count * 4 + scalar_record_count * 2;
-    assert_eq!(independent_key_field_element_count, 1_443_180);
+    assert_eq!(independent_key_field_element_count, 573_980);
     assert_eq!(
         independent_key_field_element_count,
         resources.dkac_verification_key_field_element_count

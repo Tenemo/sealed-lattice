@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::{
-    TALLY_BALLOT_ATTEMPT_COUNT, TallyBallotAttemptInput, TallyCircuitProfile, TallyEvaluationInput,
+    TallyBallotInput, TallyCircuitProfile, TallyEvaluationInput,
     output_rekeyed::{
         OutputRekeyedTallyCircuit, evaluate_output_rekeyed_tally_circuit,
         evaluate_output_rekeyed_tally_directly,
@@ -13,15 +13,15 @@ fn completion_profile_has_exact_authorship_nonempty_ranking_and_rekey_geometry()
     let circuit = OutputRekeyedTallyCircuit::compile(profile(10, 10, 10)).unwrap();
     let geometry = circuit.geometry();
 
-    assert_eq!(geometry.input_bit_count, 1_230);
-    assert_eq!(geometry.conjunction_gate_count, 5_422);
-    assert_eq!(geometry.exclusive_or_gate_count, 6_283);
-    assert_eq!(geometry.negation_gate_count, 976);
+    assert_eq!(geometry.input_bit_count, 410);
+    assert_eq!(geometry.conjunction_gate_count, 2_962);
+    assert_eq!(geometry.exclusive_or_gate_count, 3_803);
+    assert_eq!(geometry.negation_gate_count, 756);
     assert_eq!(geometry.output_rekey_operation_count, 51);
-    assert_eq!(geometry.active_gate_count, 12_732);
+    assert_eq!(geometry.active_gate_count, 7_572);
     assert_eq!(geometry.public_output_bit_count, 11);
     assert_eq!(geometry.private_result_bit_count, 40);
-    assert_eq!(geometry.total_wire_count, 13_964);
+    assert_eq!(geometry.total_wire_count, 7_984);
 
     let operations = circuit.output_rekey_operations();
     let expected_first_output_wire = circuit.core_circuit().geometry().total_wire_count;
@@ -97,25 +97,13 @@ fn every_completion_result_length_has_derived_output_rekey_geometry() {
 }
 
 #[test]
-fn accepted_ballot_authorship_uses_first_valid_retry_semantics() {
+fn accepted_ballot_authorship_requires_one_present_valid_ballot() {
     let selected_profile = profile(10, 3, 3);
     let mut input = empty_election_input(10, 3);
-    input.participant_ballot_attempts[0] = vec![
-        ballot_attempt(true, vec![15, 1, 1]),
-        ballot_attempt(true, vec![10, 9, 1]),
-        ballot_attempt(true, vec![1, 10, 10]),
-    ];
-    input.participant_ballot_attempts[1] = vec![
-        ballot_attempt(true, vec![0, 1, 1]),
-        ballot_attempt(true, vec![1, 11, 1]),
-        ballot_attempt(false, vec![10, 10, 10]),
-    ];
-    input.participant_ballot_attempts[2] = vec![
-        ballot_attempt(false, vec![10, 10, 10]),
-        ballot_attempt(true, vec![3, 4, 5]),
-        ballot_attempt(false, vec![0, 0, 0]),
-    ];
-    input.participant_ballot_attempts[9][2] = ballot_attempt(true, vec![1, 1, 10]);
+    input.participant_ballots[0] = ballot(true, vec![10, 9, 1]);
+    input.participant_ballots[1] = ballot(true, vec![0, 1, 1]);
+    input.participant_ballots[2] = ballot(false, vec![3, 4, 5]);
+    input.participant_ballots[9] = ballot(true, vec![1, 1, 10]);
 
     let circuit = OutputRekeyedTallyCircuit::compile(selected_profile).unwrap();
     let interpreted = evaluate_output_rekeyed_tally_circuit(&circuit, &input).unwrap();
@@ -125,14 +113,14 @@ fn accepted_ballot_authorship_uses_first_valid_retry_semantics() {
     assert_eq!(
         interpreted.accepted_ballot_authorship(),
         [
-            true, false, true, false, false, false, false, false, false, true
+            true, false, false, false, false, false, false, false, false, true
         ]
     );
     assert!(interpreted.has_selected_ballot());
-    assert_eq!(interpreted.ordered_option_positions(), [2, 0, 1]);
+    assert_eq!(interpreted.ordered_option_positions(), [0, 2, 1]);
     assert_eq!(
         interpreted.accepted_ordered_option_positions(),
-        Some([2_u16, 0, 1].as_slice())
+        Some([0_u16, 2, 1].as_slice())
     );
 }
 
@@ -152,14 +140,14 @@ fn all_absent_authorship_mints_no_accepted_result() {
 }
 
 #[test]
-fn rekeyed_interpreter_matches_independent_semantics_across_profiles_and_hostile_scores() {
+fn rekeyed_interpreter_matches_independent_semantics_across_hostile_inputs() {
     let mut generator = DeterministicGenerator::new(0x8cb9_2baa_d4f1_c643);
     for participant_count in [3_u16, 6, 10] {
         for option_count in [2_u16, 5, 10] {
             for top_count in [1_u16, option_count] {
                 let selected_profile = profile(participant_count, option_count, top_count);
                 let circuit = OutputRekeyedTallyCircuit::compile(selected_profile).unwrap();
-                for _case_position in 0..80 {
+                for _case_position in 0..160 {
                     let input = random_election_input(
                         usize::from(participant_count),
                         usize::from(option_count),
@@ -179,18 +167,14 @@ fn profile(participant_count: u16, option_count: u16, top_count: u16) -> TallyCi
     TallyCircuitProfile::new(participant_count, option_count, top_count).unwrap()
 }
 
-fn ballot_attempt(is_present: bool, score_encodings: Vec<u8>) -> TallyBallotAttemptInput {
-    TallyBallotAttemptInput::new(is_present, score_encodings)
+fn ballot(is_present: bool, score_encodings: Vec<u8>) -> TallyBallotInput {
+    TallyBallotInput::new(is_present, score_encodings)
 }
 
 fn empty_election_input(participant_count: usize, option_count: usize) -> TallyEvaluationInput {
     TallyEvaluationInput::new(
         (0..participant_count)
-            .map(|_| {
-                (0..TALLY_BALLOT_ATTEMPT_COUNT)
-                    .map(|_| ballot_attempt(false, vec![0; option_count]))
-                    .collect()
-            })
+            .map(|_| ballot(false, vec![0; option_count]))
             .collect(),
     )
 }
@@ -203,15 +187,11 @@ fn random_election_input(
     TallyEvaluationInput::new(
         (0..participant_count)
             .map(|_| {
-                (0..TALLY_BALLOT_ATTEMPT_COUNT)
-                    .map(|_| {
-                        let is_present = generator.next_bool();
-                        let score_encodings = (0..option_count)
-                            .map(|_| generator.next_bounded(16) as u8)
-                            .collect();
-                        ballot_attempt(is_present, score_encodings)
-                    })
-                    .collect()
+                let is_present = generator.next_bool();
+                let score_encodings = (0..option_count)
+                    .map(|_| generator.next_bounded(16) as u8)
+                    .collect();
+                ballot(is_present, score_encodings)
             })
             .collect(),
     )

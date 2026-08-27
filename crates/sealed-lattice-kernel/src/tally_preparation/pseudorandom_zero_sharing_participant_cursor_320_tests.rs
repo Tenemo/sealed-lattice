@@ -36,13 +36,13 @@ fn completion_graph_derives_the_retained_per_bit_zero_sharing_workload() {
     let circuit = completion_circuit();
     let workload = PerBitPseudorandomZeroSharingWorkload320::derive(&circuit).unwrap();
 
-    assert_eq!(workload.independent_label_semantic_mask_count, 13_911);
+    assert_eq!(workload.independent_label_semantic_mask_count, 7_931);
     assert_eq!(workload.output_mask_count, 41);
     assert_eq!(workload.accepted_authorship_bit_count, 10);
-    assert_eq!(workload.hidden_value_count, 13_962);
-    assert_eq!(workload.hidden_value_product_count, 27_924);
-    assert_eq!(workload.conjunction_product_count, 5_422);
-    assert_eq!(workload.zero_sharing_count, 33_346);
+    assert_eq!(workload.hidden_value_count, 7_982);
+    assert_eq!(workload.hidden_value_product_count, 15_964);
+    assert_eq!(workload.conjunction_product_count, 2_962);
+    assert_eq!(workload.zero_sharing_count, 18_926);
     assert_eq!(
         workload
             .resource_input(FOUNDATION_PROFILE.participant_count)
@@ -65,36 +65,33 @@ fn completion_cursor_resource_model_derives_exact_work_and_checkpoint_counts() {
     assert_eq!(model.authorized_subset_count_per_participant, 84);
     assert_eq!(model.basis_position_count_per_subset, 3);
     assert_eq!(model.basis_stream_count, 252);
-    assert_eq!(model.zero_sharing_count, 33_346);
-    assert_eq!(model.field_output_count, 8_403_192);
-    assert_eq!(model.output_chunk_count, 2);
-    assert_eq!(model.work_checkpoint_count, 504);
-    assert_eq!(model.field_stream_kmacxof256_query_count, 504);
+    assert_eq!(model.zero_sharing_count, 18_926);
+    assert_eq!(model.field_output_count, 4_769_352);
+    assert_eq!(model.output_chunk_count, 1);
+    assert_eq!(model.work_checkpoint_count, 252);
+    assert_eq!(model.field_stream_kmacxof256_query_count, 252);
     assert_eq!(model.checkpoint_key_derivation_kmac256_count, 1);
-    assert_eq!(model.checkpoint_tag_generation_kmac256_count, 504);
+    assert_eq!(model.checkpoint_tag_generation_kmac256_count, 252);
     assert_eq!(
         model.cold_restore_checkpoint_tag_verification_kmac256_count,
         1
     );
     assert_eq!(model.basis_precomputation_field_multiplication_count, 420);
-    assert_eq!(model.combination_field_multiplication_count, 8_403_192);
-    assert_eq!(model.combination_field_addition_count, 8_369_846);
+    assert_eq!(model.combination_field_multiplication_count, 4_769_352);
+    assert_eq!(model.combination_field_addition_count, 4_750_426);
     assert_eq!(model.full_chunk_field_count, 26_214);
-    assert_eq!(model.final_chunk_field_count, 7_132);
+    assert_eq!(model.final_chunk_field_count, 18_926);
     assert_eq!(model.full_chunk_payload_byte_length, 1_048_560);
-    assert_eq!(model.final_chunk_payload_byte_length, 285_280);
-    assert_eq!(model.minimum_completed_step_checkpoint_byte_length, 285_625);
-    assert_eq!(
-        model.maximum_completed_step_checkpoint_byte_length,
-        1_048_906
-    );
+    assert_eq!(model.final_chunk_payload_byte_length, 757_040);
+    assert_eq!(model.minimum_completed_step_checkpoint_byte_length, 757_385);
+    assert_eq!(model.maximum_completed_step_checkpoint_byte_length, 757_386);
     assert_eq!(
         model.cumulative_completed_step_checkpoint_byte_length,
-        336_301_810
+        190_861_145
     );
     assert_eq!(
         model.cumulative_checkpoint_authenticated_body_byte_length,
-        336_269_554
+        190_845_017
     );
     assert!(
         model.maximum_completed_step_checkpoint_byte_length

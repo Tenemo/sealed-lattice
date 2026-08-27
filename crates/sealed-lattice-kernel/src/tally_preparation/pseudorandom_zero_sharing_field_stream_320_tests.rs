@@ -12,6 +12,7 @@ use crate::{
 
 use super::{
     TallyPreparationContext, TallyPreparationError,
+    pseudorandom_zero_sharing_320::PerBitPseudorandomZeroSharingWorkload320,
     pseudorandom_zero_sharing_field_stream_320::{
         PSEUDORANDOM_FIELD_STREAM_CUSTOMIZATION,
         PSEUDORANDOM_ZERO_SHARING_SUBSET_MASTER_BYTE_LENGTH,
@@ -25,8 +26,6 @@ use super::{
     pseudorandom_zero_sharing_subset_seed_320::PseudorandomZeroSharingSubsetMasterScope320,
     replicated_random_sharing::ReplicatedRandomSharingSubset,
 };
-
-const COMPLETION_ZERO_SHARING_COUNT: u64 = 33_346;
 
 #[test]
 fn tiny_keccak_kmac256_matches_the_published_nist_sample() {
@@ -75,6 +74,7 @@ fn candidate_kmacxof256_matches_independent_sp800_185_framing_and_fragmented_squ
 
 #[test]
 fn canonical_query_binds_the_complete_public_stream_coordinate() {
+    let zero_sharing_count = completion_zero_sharing_count();
     let context = completion_context(11);
     let subset = ReplicatedRandomSharingSubset::from_excluded_positions(
         FOUNDATION_PROFILE.participant_count,
@@ -89,7 +89,7 @@ fn canonical_query_binds_the_complete_public_stream_coordinate() {
         catalog_identity,
         subset,
         2,
-        COMPLETION_ZERO_SHARING_COUNT,
+        zero_sharing_count,
     )
     .unwrap();
 
@@ -105,15 +105,15 @@ fn canonical_query_binds_the_complete_public_stream_coordinate() {
             CanonicalItem::unsigned32(subset.excluded_position_mask()),
             CanonicalItem::hash512(catalog_identity.into_bytes()),
             CanonicalItem::unsigned16(2),
-            CanonicalItem::unsigned64(COMPLETION_ZERO_SHARING_COUNT),
-            CanonicalItem::unsigned64(1),
-            CanonicalItem::unsigned64(7_132),
+            CanonicalItem::unsigned64(zero_sharing_count),
+            CanonicalItem::unsigned64(0),
+            CanonicalItem::unsigned64(zero_sharing_count),
         ],
     )
     .encode()
     .unwrap();
 
-    assert_eq!(coordinate.canonical_query_bytes(1).unwrap(), expected);
+    assert_eq!(coordinate.canonical_query_bytes(0).unwrap(), expected);
 }
 
 #[test]
@@ -160,7 +160,8 @@ fn generated_chunk_matches_independent_kmacxof_and_field_mapping() {
 }
 
 #[test]
-fn completion_stream_uses_two_restartable_one_megabyte_bounded_chunks() {
+fn completion_stream_uses_one_restartable_bounded_chunk() {
+    let zero_sharing_count = completion_zero_sharing_count();
     let context = completion_context(53);
     let subset = ReplicatedRandomSharingSubset::from_excluded_positions(
         FOUNDATION_PROFILE.participant_count,
@@ -174,7 +175,7 @@ fn completion_stream_uses_two_restartable_one_megabyte_bounded_chunks() {
         Hash512::from_bytes([61_u8; 64]),
         subset,
         0,
-        COMPLETION_ZERO_SHARING_COUNT,
+        zero_sharing_count,
     )
     .unwrap();
     let subset_master = joined_subset_master(
@@ -188,31 +189,30 @@ fn completion_stream_uses_two_restartable_one_megabyte_bounded_chunks() {
         pseudorandom_zero_sharing_field_elements_per_chunk().unwrap(),
         26_214
     );
-    assert_eq!(coordinate.chunk_count().unwrap(), 2);
+    assert_eq!(coordinate.chunk_count().unwrap(), 1);
     assert_eq!(
-        pseudorandom_zero_sharing_field_chunk_count(COMPLETION_ZERO_SHARING_COUNT).unwrap(),
-        2
+        pseudorandom_zero_sharing_field_chunk_count(zero_sharing_count).unwrap(),
+        1
     );
 
-    let first_chunk =
+    let completion_chunk =
         generate_pseudorandom_zero_sharing_field_chunk_320(&subset_master, coordinate, 0).unwrap();
-    assert_eq!(first_chunk.first_field_index(), 0);
-    assert_eq!(first_chunk.field_count(), 26_214);
-    assert_eq!(first_chunk.byte_length(), 1_048_560);
-
-    let final_chunk =
-        generate_pseudorandom_zero_sharing_field_chunk_320(&subset_master, coordinate, 1).unwrap();
-    assert_eq!(final_chunk.first_field_index(), 26_214);
-    assert_eq!(final_chunk.field_count(), 7_132);
-    assert_eq!(final_chunk.byte_length(), 285_280);
+    assert_eq!(completion_chunk.first_field_index(), 0);
+    assert_eq!(completion_chunk.field_count(), 18_926);
+    assert_eq!(completion_chunk.byte_length(), 757_040);
     assert!(matches!(
-        final_chunk.field_element(7_132),
+        completion_chunk.field_element(zero_sharing_count),
         Err(TallyPreparationError::PseudorandomZeroSharingFieldStreamPositionOutOfRange { .. })
+    ));
+    assert!(matches!(
+        generate_pseudorandom_zero_sharing_field_chunk_320(&subset_master, coordinate, 1),
+        Err(TallyPreparationError::PseudorandomZeroSharingFieldStreamChunkOutOfRange { .. })
     ));
 }
 
 #[test]
-fn completion_participant_has_exactly_504_unique_subset_basis_chunk_queries() {
+fn completion_participant_has_exactly_252_unique_subset_basis_chunk_queries() {
+    let zero_sharing_count = completion_zero_sharing_count();
     let context = completion_context(71);
     let parameter_identity = Hash512::from_bytes([73_u8; 64]);
     let catalog_identity = Hash512::from_bytes([79_u8; 64]);
@@ -231,17 +231,17 @@ fn completion_participant_has_exactly_504_unique_subset_basis_chunk_queries() {
                 catalog_identity,
                 subset,
                 basis_position,
-                COMPLETION_ZERO_SHARING_COUNT,
+                zero_sharing_count,
             )
             .unwrap();
-            assert_eq!(coordinate.chunk_count().unwrap(), 2);
-            for chunk_index in 0..2 {
+            assert_eq!(coordinate.chunk_count().unwrap(), 1);
+            for chunk_index in 0..coordinate.chunk_count().unwrap() {
                 assert!(queries.insert(coordinate.canonical_query_bytes(chunk_index).unwrap()));
             }
         }
     }
 
-    assert_eq!(queries.len(), 504);
+    assert_eq!(queries.len(), 252);
 }
 
 #[test]
@@ -588,6 +588,21 @@ fn completion_context(attempt_byte: u8) -> TallyPreparationContext {
         &circuit,
     )
     .unwrap()
+}
+
+fn completion_zero_sharing_count() -> u64 {
+    let circuit = CompiledTallyCircuit::compile(
+        TallyCircuitProfile::new(
+            FOUNDATION_PROFILE.participant_count,
+            FOUNDATION_PROFILE.option_count,
+            FOUNDATION_PROFILE.option_count,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    PerBitPseudorandomZeroSharingWorkload320::derive(&circuit)
+        .unwrap()
+        .zero_sharing_count
 }
 
 fn decode_hex(hex: &str) -> Vec<u8> {

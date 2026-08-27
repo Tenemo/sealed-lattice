@@ -16,37 +16,37 @@ fn completion_geometry_is_derived_from_the_emitted_full_ranking_circuit() {
     let geometry = TallyPreparationGeometry::derive(&circuit).unwrap();
 
     assert_eq!(geometry.participant_count, 10);
-    assert_eq!(geometry.wire_count, 13_913);
-    assert_eq!(geometry.packed_wire_mask_byte_length, 1_740);
-    assert_eq!(geometry.label_key_count, 278_260);
-    assert_eq!(geometry.label_key_byte_length, 8_904_320);
-    assert_eq!(geometry.score_input_wire_count, 1_200);
+    assert_eq!(geometry.wire_count, 7_933);
+    assert_eq!(geometry.packed_wire_mask_byte_length, 992);
+    assert_eq!(geometry.label_key_count, 158_660);
+    assert_eq!(geometry.label_key_byte_length, 5_077_120);
+    assert_eq!(geometry.score_input_wire_count, 400);
     assert_eq!(geometry.result_output_wire_count, 40);
-    assert_eq!(geometry.shared_mask_count, 1_240);
-    assert_eq!(geometry.sharing_random_coefficient_count, 3_720);
-    assert_eq!(geometry.sharing_random_coefficient_byte_length, 119_040);
-    assert_eq!(geometry.label_opening_leaf_count, 278_260);
+    assert_eq!(geometry.shared_mask_count, 440);
+    assert_eq!(geometry.sharing_random_coefficient_count, 1_320);
+    assert_eq!(geometry.sharing_random_coefficient_byte_length, 42_240);
+    assert_eq!(geometry.label_opening_leaf_count, 158_660);
     assert_eq!(geometry.present_owner_mask_bundle_leaf_count, 10);
     assert_eq!(geometry.absence_share_bundle_leaf_count, 100);
     assert_eq!(geometry.result_share_bundle_leaf_count, 10);
     assert_eq!(geometry.private_wire_mask_bundle_leaf_count, 1);
-    assert_eq!(geometry.secret_leaf_salt_count, 278_381);
-    assert_eq!(geometry.secret_leaf_salt_byte_length, 13_362_288);
-    assert_eq!(geometry.direct_joint_random_tape_byte_length, 22_387_388);
+    assert_eq!(geometry.secret_leaf_salt_count, 158_781);
+    assert_eq!(geometry.secret_leaf_salt_byte_length, 7_621_488);
+    assert_eq!(geometry.direct_joint_random_tape_byte_length, 12_741_840);
     assert_eq!(
         geometry.all_party_explicit_tape_input_byte_length,
-        223_873_880
+        127_418_400
     );
-    assert_eq!(geometry.seeded_expansion_kmac_call_count, 342);
-    assert_eq!(geometry.binary_gate_row_count, 46_820);
-    assert_eq!(geometry.unary_gate_row_count, 1_952);
-    assert_eq!(geometry.garbled_gate_row_count, 48_772);
+    assert_eq!(geometry.seeded_expansion_kmac_call_count, 195);
+    assert_eq!(geometry.binary_gate_row_count, 27_060);
+    assert_eq!(geometry.unary_gate_row_count, 1_512);
+    assert_eq!(geometry.garbled_gate_row_count, 28_572);
     assert_eq!(geometry.constant_activation_count, 2);
-    assert_eq!(geometry.correlation_key_contribution_count, 4_877_200);
-    assert_eq!(geometry.correlation_selector_contribution_count, 487_720);
-    assert_eq!(geometry.correlation_contribution_byte_length, 156_558_120);
-    assert_eq!(geometry.garbling_kmac_call_count, 4_877_200);
-    assert_eq!(geometry.public_garbled_table_byte_length, 15_656_454);
+    assert_eq!(geometry.correlation_key_contribution_count, 2_857_200);
+    assert_eq!(geometry.correlation_selector_contribution_count, 285_720);
+    assert_eq!(geometry.correlation_contribution_byte_length, 91_716_120);
+    assert_eq!(geometry.garbling_kmac_call_count, 2_857_200);
+    assert_eq!(geometry.public_garbled_table_byte_length, 9_172_254);
 }
 
 #[test]

@@ -7,7 +7,7 @@ This private package owns domain-separated cryptographic wrappers used by the se
 - Derive protocol hashes and canonical private-envelope bindings.
 - Hold browser-local key capabilities without exporting raw private keys.
 - Seal and open authenticated private-mailbox records through closed, domain-separated operations.
-- Keep cryptographic randomness under the participant worker's canonical action and attempt authority.
+- Keep cryptographic randomness bound to the participant worker's canonical action and byte-identical resumption authority.
 
 ## Boundaries
 

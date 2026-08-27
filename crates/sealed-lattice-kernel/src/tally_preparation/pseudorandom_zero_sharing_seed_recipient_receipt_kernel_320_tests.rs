@@ -377,6 +377,7 @@ fn recipient_receipt_kernel_refuses_reordering_and_consumes_failed_authenticatio
     secrets[3][0] ^= 0x80;
     let refused = complete_authentication(handle, &secrets);
     assert_eq!(failure_code(&refused), 5);
-    let retry = complete_authentication(handle, &shared_secrets(&fixture, &ciphertexts));
-    assert_eq!(failure_code(&retry), 7);
+    let repeated_completion =
+        complete_authentication(handle, &shared_secrets(&fixture, &ciphertexts));
+    assert_eq!(failure_code(&repeated_completion), 7);
 }

@@ -57,7 +57,7 @@ const checkpointByteLength = (input: {
 const deriveCompletionZeroSharingMeasurement = () => {
     const participantCount = foundationProfile.participantCount;
     const activeFaultBound = foundationProfile.activeFaultBound;
-    const independentLabelSemanticMaskCount = 13_911;
+    const independentLabelSemanticMaskCount = 7_931;
     const outputMaskCount = 41;
     const acceptedAuthorshipBitCount = participantCount;
     const hiddenValueCount =
@@ -65,7 +65,7 @@ const deriveCompletionZeroSharingMeasurement = () => {
         outputMaskCount +
         acceptedAuthorshipBitCount;
     const hiddenValueProductCount = 2 * hiddenValueCount;
-    const conjunctionProductCount = 5_422;
+    const conjunctionProductCount = 2_962;
     const zeroSharingCount = hiddenValueProductCount + conjunctionProductCount;
     const authorizedSubsetCountPerParticipant = binomialCoefficient(
         participantCount - 1,

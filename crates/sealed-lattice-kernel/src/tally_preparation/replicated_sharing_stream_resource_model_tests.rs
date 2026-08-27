@@ -27,19 +27,19 @@ fn completion_profile_reproduces_the_exact_chunked_stream_census() {
             shake256_rate_byte_length: 136,
             independent_authentication: ReplicatedSharingFieldStreamScheduleModel {
                 field_stream_count_per_participant: 504,
-                naive_per_field_xof_invocation_count_per_participant: 821_673_216,
-                chunked_xof_invocation_count_per_participant: 25_200,
-                total_chunked_xof_invocation_count: 252_000,
-                field_output_count_per_participant: 821_673_216,
-                field_output_byte_length_per_participant: 26_293_542_912,
-                total_field_output_byte_length: 262_935_429_120,
-                minimum_absorbed_query_byte_length_per_participant: 9_275_700,
-                maximum_absorbed_query_byte_length_per_participant: 9_280_200,
-                total_absorbed_query_byte_length: 92_788_500,
-                complete_absorbed_rate_block_count_per_participant: 50_400,
-                output_rate_block_count_per_participant: 193_357_080,
-                fixed_keccak_f1600_permutation_count_per_participant: 193_407_480,
-                total_fixed_keccak_f1600_permutation_count: 1_934_074_800,
+                naive_per_field_xof_invocation_count_per_participant: 368_305_056,
+                chunked_xof_invocation_count_per_participant: 11_592,
+                total_chunked_xof_invocation_count: 115_920,
+                field_output_count_per_participant: 368_305_056,
+                field_output_byte_length_per_participant: 11_785_761_792,
+                total_field_output_byte_length: 117_857_617_920,
+                minimum_absorbed_query_byte_length_per_participant: 4_266_822,
+                maximum_absorbed_query_byte_length_per_participant: 4_268_892,
+                total_absorbed_query_byte_length: 42_682_710,
+                complete_absorbed_rate_block_count_per_participant: 23_184,
+                output_rate_block_count_per_participant: 86_669_856,
+                fixed_keccak_f1600_permutation_count_per_participant: 86_693_040,
+                total_fixed_keccak_f1600_permutation_count: 866_930_400,
                 maximum_single_query_byte_length: 369,
                 maximum_single_output_byte_length: 1_048_576,
                 maximum_fixed_keccak_f1600_permutation_count_per_chunk: 7_713,
@@ -47,19 +47,19 @@ fn completion_profile_reproduces_the_exact_chunked_stream_census() {
             },
             common_coefficient_authentication: ReplicatedSharingFieldStreamScheduleModel {
                 field_stream_count_per_participant: 1_008,
-                naive_per_field_xof_invocation_count_per_participant: 740_399_016,
-                chunked_xof_invocation_count_per_participant: 23_268,
-                total_chunked_xof_invocation_count: 232_680,
-                field_output_count_per_participant: 740_399_016,
-                field_output_byte_length_per_participant: 23_692_768_512,
-                total_field_output_byte_length: 236_927_685_120,
-                minimum_absorbed_query_byte_length_per_participant: 8_565_781,
-                maximum_absorbed_query_byte_length_per_participant: 8_569_936,
-                total_absorbed_query_byte_length: 85_686_895,
-                complete_absorbed_rate_block_count_per_participant: 46_536,
-                output_rate_block_count_per_participant: 174_231_624,
-                fixed_keccak_f1600_permutation_count_per_participant: 174_278_160,
-                total_fixed_keccak_f1600_permutation_count: 1_742_781_600,
+                naive_per_field_xof_invocation_count_per_participant: 337_313_256,
+                chunked_xof_invocation_count_per_participant: 11_172,
+                total_chunked_xof_invocation_count: 111_720,
+                field_output_count_per_participant: 337_313_256,
+                field_output_byte_length_per_participant: 10_794_024_192,
+                total_field_output_byte_length: 107_940_241_920,
+                minimum_absorbed_query_byte_length_per_participant: 4_112_689,
+                maximum_absorbed_query_byte_length_per_participant: 4_114_684,
+                total_absorbed_query_byte_length: 41_140_855,
+                complete_absorbed_rate_block_count_per_participant: 22_344,
+                output_rate_block_count_per_participant: 79_376_892,
+                fixed_keccak_f1600_permutation_count_per_participant: 79_399_236,
+                total_fixed_keccak_f1600_permutation_count: 793_992_360,
                 maximum_single_query_byte_length: 369,
                 maximum_single_output_byte_length: 1_048_576,
                 maximum_fixed_keccak_f1600_permutation_count_per_chunk: 7_713,
@@ -151,9 +151,9 @@ fn independently_derive_completion_schedule_inputs() -> IndependentCompletionSch
     let shake256_rate_byte_length = 136_u64;
     let field_element_byte_length = 32_u64;
     let configured_chunk_byte_length = 1_048_576_u64;
-    let independent_field_count = 1_630_304_u64;
-    let ordinary_field_count = 662_714_u64;
-    let authentication_field_count = 967_590_u64;
+    let independent_field_count = 730_764_u64;
+    let ordinary_field_count = 361_774_u64;
+    let authentication_field_count = 368_990_u64;
     let common_coefficient_field_count = 40_u64;
     let independent_chunk_count = independent_ceiling_divide(
         independent_field_count * field_element_byte_length,
@@ -178,7 +178,7 @@ fn independently_derive_completion_schedule_inputs() -> IndependentCompletionSch
             authentication_chunk_count,
             common_coefficient_chunk_count,
         ),
-        (50, 21, 30, 1)
+        (23, 12, 12, 1)
     );
     let independent_random_calls_per_subset = 3 * independent_chunk_count;
     let independent_zero_calls_per_subset = active_fault_bound * independent_chunk_count;

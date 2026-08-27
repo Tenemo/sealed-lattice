@@ -81,7 +81,7 @@ impl TallyPreparationGeometry {
         let score_input_wire_count = u64_from_usize(circuit.private_score_input_wires().count())?;
         if score_input_wire_count != u64_from_usize(circuit_geometry.private_score_input_bit_count)?
             || checked_add(
-                u64_from_usize(circuit_geometry.ballot_attempt_presence_input_bit_count)?,
+                u64_from_usize(circuit_geometry.ballot_presence_input_bit_count)?,
                 score_input_wire_count,
             )? != input_bit_count
         {
