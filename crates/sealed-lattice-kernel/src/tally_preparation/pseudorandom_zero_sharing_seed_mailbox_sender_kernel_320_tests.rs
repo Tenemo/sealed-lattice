@@ -4,7 +4,7 @@ use crate::foundation::{FOUNDATION_PROFILE, Hash512};
 
 use super::{
     pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::{
-        SeedMailboxTestFixture320, seed_mailbox_test_fixture_320,
+        SeedMailboxTestFixture320, seed_catalog_fixture, seed_mailbox_test_fixture_320,
     },
     pseudorandom_zero_sharing_seed_mailbox_320::{
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH,
@@ -18,6 +18,7 @@ use super::{
         response_signature_body_byte_length_for_test_320,
         run_pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320,
     },
+    pseudorandom_zero_sharing_seed_master_custody_320_tests::encode_source_custody_record,
 };
 
 const CODEC_VERSION: u16 = 1;
@@ -137,6 +138,45 @@ fn open_request(fixture: &SeedMailboxTestFixture320) -> Vec<u8> {
         append_bounded(&mut bytes, &package.contributor_signature_envelope_bytes);
     }
     append_bounded(&mut bytes, &fixture.root_terminal_certificate_bytes);
+    let source_layout = fixture
+        .root_terminal
+        .root_inventory()
+        .root_body(fixture.sender_position)
+        .unwrap()
+        .layout();
+    let source_catalog = seed_catalog_fixture(
+        source_layout,
+        0x21_u8.wrapping_add(fixture.sender_position as u8),
+    );
+    assert_eq!(
+        source_catalog.tree.root_body(),
+        fixture
+            .root_terminal
+            .root_inventory()
+            .root_body(fixture.sender_position)
+            .unwrap()
+    );
+    let state_predecessor_identity = Hash512::from_bytes([0xa7; Hash512::BYTE_LENGTH]);
+    for identity in [
+        fixture.parameter_identity,
+        fixture.roster.roster_hash().unwrap(),
+        fixture.preparation_context.action_context_hash(),
+        fixture.preparation_context.identity(),
+        source_layout.compiler_identity(),
+        state_predecessor_identity,
+    ] {
+        bytes.extend_from_slice(identity.as_bytes());
+    }
+    append_unsigned16(&mut bytes, 0);
+    append_unsigned16(&mut bytes, FOUNDATION_PROFILE.participant_count);
+    append_unsigned16(&mut bytes, fixture.sender_position);
+    let source_record = encode_source_custody_record(
+        fixture,
+        &source_catalog,
+        state_predecessor_identity,
+        fixture.sender_position,
+    );
+    append_bounded(&mut bytes, &source_record);
     bytes
 }
 
@@ -183,7 +223,6 @@ fn prepare_request(
     append_stream_context(&mut bytes, fixture, parameter_identity);
     append_bounded(&mut bytes, &fixture.descriptor_bytes);
     bytes.extend_from_slice(&encapsulation_randomness);
-    append_bounded(&mut bytes, &fixture.payload_bytes);
     bytes
 }
 
@@ -304,8 +343,10 @@ fn failure_code(response: &[u8]) -> u16 {
 fn completion_sender_context_produces_replays_and_verifies_exact_carrier() {
     clear_pseudorandom_zero_sharing_seed_mailbox_sender_contexts_for_test_320();
     let fixture = seed_mailbox_test_fixture_320(2, 7);
+    assert_eq!(open_request(&fixture).len(), 1_299_660);
     let handle = open_context(&fixture);
     let prepare_bytes = prepare_request(&fixture, handle, fixture.parameter_identity, [0x91; 32]);
+    assert_eq!(prepare_bytes.len(), 575);
     let first_prepared_response =
         run_pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320(&prepare_bytes);
     let second_prepared_response =
@@ -459,14 +500,65 @@ fn sender_kernel_refuses_malformed_or_alternate_public_contexts() {
         1
     );
     let mut wrong_terminal = open_request(&fixture);
-    let terminal_byte_position =
-        wrong_terminal.len() - fixture.root_terminal_certificate_bytes.len();
+    let terminal_byte_position = wrong_terminal
+        .windows(fixture.root_terminal_certificate_bytes.len())
+        .position(|window| window == fixture.root_terminal_certificate_bytes)
+        .unwrap();
     wrong_terminal[terminal_byte_position + 31] ^= 1;
     assert_eq!(
         failure_code(
             &run_pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320(&wrong_terminal)
         ),
         4
+    );
+    let mut wrong_source_record = open_request(&fixture);
+    let source_record_position = wrong_source_record
+        .windows(4)
+        .rposition(|window| window == b"SLCS")
+        .unwrap();
+    let source_record_byte_length = u32::from_le_bytes(
+        wrong_source_record[source_record_position - 4..source_record_position]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    wrong_source_record[source_record_position + source_record_byte_length - 1] ^= 1;
+    assert_eq!(
+        failure_code(
+            &run_pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320(&wrong_source_record)
+        ),
+        9
+    );
+    let mut wrong_source_context = open_request(&fixture);
+    let source_record_position = wrong_source_context
+        .windows(4)
+        .rposition(|window| window == b"SLCS")
+        .unwrap();
+    let source_context_position = source_record_position - 4 - (6 * Hash512::BYTE_LENGTH + 6);
+    wrong_source_context[source_context_position + 2 * Hash512::BYTE_LENGTH] ^= 1;
+    assert_eq!(
+        failure_code(
+            &run_pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320(&wrong_source_context)
+        ),
+        9
+    );
+    let mut jointly_wrong_action_context = open_request(&fixture);
+    let source_record_position = jointly_wrong_action_context
+        .windows(4)
+        .rposition(|window| window == b"SLCS")
+        .unwrap();
+    let source_context_position = source_record_position - 4 - (6 * Hash512::BYTE_LENGTH + 6);
+    let source_action_identity_position = source_context_position + 2 * Hash512::BYTE_LENGTH;
+    let record_action_identity_position =
+        source_record_position + 4 + 2 + 1 + 2 * Hash512::BYTE_LENGTH;
+    jointly_wrong_action_context[source_action_identity_position + 7] ^= 1;
+    jointly_wrong_action_context[record_action_identity_position + 7] ^= 1;
+    assert_eq!(
+        failure_code(
+            &run_pseudorandom_zero_sharing_seed_mailbox_sender_kernel_320(
+                &jointly_wrong_action_context
+            )
+        ),
+        9
     );
     let mut truncated = open_request(&fixture);
     truncated.pop();

@@ -24,6 +24,7 @@ export type {
     SeedMailboxSenderKernelErrorCode,
     SeedMailboxSenderRootAuthorizationPackageBytes,
     SeedMailboxSenderSigningOperations,
+    SeedMailboxSenderSourceCustodyContext,
     SeedMailboxSenderStreamCarrier,
     SeedMailboxSenderStreamContext,
     SeedMailboxSenderStreamGeometry,

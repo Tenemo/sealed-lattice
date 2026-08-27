@@ -67,7 +67,6 @@ const defaultContext = (): SeedMailboxSenderStreamCustodyContext =>
 
 const requestForRecipient = (
     recipientPosition: number,
-    sourceMarker = 0x51,
 ): RetainSeedMailboxSenderStreamInput =>
     Object.freeze({
         canonicalDeliveryDescriptorBytes: new Uint8Array(41).fill(
@@ -75,9 +74,6 @@ const requestForRecipient = (
         ),
         geometry: smallGeometry,
         recipientPosition,
-        sourcePayloadBytes: new Uint8Array(
-            smallGeometry.sourcePayloadByteLength,
-        ).fill(sourceMarker),
     });
 
 const deterministicCryptoProvider = (): Crypto => {
@@ -125,7 +121,6 @@ type ProductionObservation = Readonly<{
     canonicalDeliveryDescriptorBytes: Uint8Array;
     encapsulationRandomness: Uint8Array;
     signatureRandomness: Uint8Array;
-    sourcePayloadBytes: Uint8Array;
 }>;
 
 const deterministicCarrierPart = (
@@ -158,7 +153,6 @@ class DeterministicSeedMailboxKernel implements SeedMailboxSenderStreamKernel {
                     input.canonicalDeliveryDescriptorBytes.slice(),
                 encapsulationRandomness: input.encapsulationRandomness.slice(),
                 signatureRandomness: input.signatureRandomness.slice(),
-                sourcePayloadBytes: input.sourcePayloadBytes.slice(),
             }),
         );
         if (this.failNextProductionCount > 0) {
@@ -168,7 +162,6 @@ class DeterministicSeedMailboxKernel implements SeedMailboxSenderStreamKernel {
         const variableByte =
             (input.encapsulationRandomness[0] ?? 0) ^
             (input.signatureRandomness[0] ?? 0) ^
-            (input.sourcePayloadBytes[0] ?? 0) ^
             (input.canonicalDeliveryDescriptorBytes[0] ?? 0);
         const carrier: RetainedSeedMailboxSenderStreamCarrier = {
             encryptedChunks: smallGeometry.encryptedChunkByteLengths.map(
@@ -349,9 +342,9 @@ describe('seed-mailbox sender-stream custody', () => {
         });
 
         const independentlyDerivedCommonByteLength =
-            4 + 2 + 1 + 64 * 3 + 2 * 4 + 64 + 4 + 328 + 4 * 6 + 4;
+            4 + 2 + 1 + 64 * 3 + 2 * 4 + 4 + 328 + 4 * 6 + 4;
         const independentlyDerivedReservationPlaintextByteLength =
-            independentlyDerivedCommonByteLength + 62_590 + 32 * 2;
+            independentlyDerivedCommonByteLength + 32 * 2;
         const independentlyDerivedCompletedPlaintextByteLength =
             independentlyDerivedCommonByteLength + 68_189;
         expect(derived).toEqual({
@@ -369,11 +362,11 @@ describe('seed-mailbox sender-stream custody', () => {
                 independentlyDerivedReservationPlaintextByteLength,
         });
         expect(derived).toEqual({
-            completedCiphertextByteLength: 68_874,
-            completedPlaintextByteLength: 68_820,
-            copyOnWriteCiphertextOverlapByteLength: 132_213,
-            reservationCiphertextByteLength: 63_339,
-            reservationPlaintextByteLength: 63_285,
+            completedCiphertextByteLength: 68_810,
+            completedPlaintextByteLength: 68_756,
+            copyOnWriteCiphertextOverlapByteLength: 69_495,
+            reservationCiphertextByteLength: 685,
+            reservationPlaintextByteLength: 631,
         });
 
         const kernelDerived = deriveSeedMailboxSenderStreamKernelByteLengths({
@@ -388,6 +381,7 @@ describe('seed-mailbox sender-stream custody', () => {
             })),
             rootTerminalCertificateByteLength: 36_230,
             rosterByteLength: 31_660,
+            sourceCustodyRecordByteLength: 677_741,
             streamCount: 9,
         });
         const independentlyDerivedOpenRequestByteLength =
@@ -398,9 +392,11 @@ describe('seed-mailbox sender-stream custody', () => {
             (4 + 31_660) +
             2 +
             10 * (4 * 4 + 522 + 25_515 + 25_545 + 3_723) +
-            (4 + 36_230);
+            (4 + 36_230) +
+            (64 * 6 + 2 * 3) +
+            (4 + 677_741);
         const independentlyDerivedPrepareRequestByteLength =
-            7 + 4 + (64 * 3 + 2 * 4) + (4 + 328) + 32 + (4 + 62_590);
+            7 + 4 + (64 * 3 + 2 * 4) + (4 + 328) + 32;
         const independentlyDerivedPrepareResponseByteLength =
             7 + (4 + 1_655) + (4 + 215) + (4 + 309) + 2 + (4 + 62_606);
         const independentlyDerivedCompleteRequestByteLength =
@@ -474,16 +470,16 @@ describe('seed-mailbox sender-stream custody', () => {
             validateCarrierResponseByteLengthPerStream: 7,
         });
         expect(kernelDerived).toMatchObject({
-            coldValidationCumulativeRequestByteLength: 1_240_520,
+            coldValidationCumulativeRequestByteLength: 1_918_655,
             coldValidationCumulativeResponseByteLength: 2_033,
             completeCarrierRequestByteLengthPerStream: 68_342,
             completeCarrierResponseByteLengthPerStream: 68_214,
-            maximumRequestByteLength: 621_525,
+            maximumRequestByteLength: 1_299_660,
             maximumResponseByteLength: 68_214,
-            openContextRequestByteLength: 621_525,
-            prepareCarrierRequestByteLengthPerStream: 63_169,
+            openContextRequestByteLength: 1_299_660,
+            prepareCarrierRequestByteLengthPerStream: 575,
             prepareCarrierResponseByteLengthPerStream: 64_810,
-            successfulCumulativeRequestByteLength: 2_424_119,
+            successfulCumulativeRequestByteLength: 2_538_908,
             successfulCumulativeResponseByteLength: 1_199_249,
             validateCarrierRequestByteLengthPerStream: 68_776,
         });
@@ -502,6 +498,7 @@ describe('seed-mailbox sender-stream custody', () => {
                 ],
                 rootTerminalCertificateByteLength: 36_230,
                 rosterByteLength: 31_660,
+                sourceCustodyRecordByteLength: 677_741,
                 streamCount: 9,
             }),
         ).toThrowError(expect.objectContaining({ code: 'ResourceLimit' }));
@@ -540,7 +537,7 @@ describe('seed-mailbox sender-stream custody', () => {
         const kernel = new DeterministicSeedMailboxKernel();
         kernel.failNextProductionCount = 1;
         const fixture = await createFixture({ kernel });
-        const request = requestForRecipient(6, 0x52);
+        const request = requestForRecipient(6);
 
         await expect(
             fixture.custody.retainForPublication(request),
@@ -559,10 +556,6 @@ describe('seed-mailbox sender-stream custody', () => {
         expect(
             resumedKernel.productionObservations[0]?.signatureRandomness,
         ).toEqual(failedObservation?.signatureRandomness);
-        expect(
-            resumedKernel.productionObservations[0]?.sourcePayloadBytes,
-        ).toEqual(failedObservation?.sourcePayloadBytes);
-
         const replayKernel = new DeterministicSeedMailboxKernel();
         replayKernel.failNextProductionCount = 1;
         const replayCustody = await reopenCustody(fixture, replayKernel);
@@ -576,7 +569,7 @@ describe('seed-mailbox sender-stream custody', () => {
         const fixture = await createFixture();
         await fixture.coordinator.reconcile();
         fixture.anchor.failNextCompareAndSetCount = 1;
-        const request = requestForRecipient(5, 0x53);
+        const request = requestForRecipient(5);
 
         await expect(
             fixture.custody.retainForPublication(request),
@@ -592,7 +585,7 @@ describe('seed-mailbox sender-stream custody', () => {
     it('withholds a locally completed carrier until its anchor is repaired', async () => {
         const kernel = new DeterministicSeedMailboxKernel();
         const fixture = await createFixture({ kernel });
-        const request = requestForRecipient(4, 0x54);
+        const request = requestForRecipient(4);
         kernel.afterProduce = () => {
             fixture.anchor.failNextCompareAndSetCount = 1;
             kernel.afterProduce = undefined;
@@ -608,20 +601,11 @@ describe('seed-mailbox sender-stream custody', () => {
         expect(kernel.productionObservations).toHaveLength(1);
     });
 
-    it('keeps one stable slot across source, descriptor, and terminal alternatives', async () => {
+    it('keeps one stable slot across descriptor and terminal alternatives', async () => {
         const fixture = await createFixture();
-        const request = requestForRecipient(8, 0x55);
+        const request = requestForRecipient(8);
         await fixture.custody.retainForPublication(request);
 
-        await expect(
-            fixture.custody.retainForPublication({
-                ...request,
-                sourcePayloadBytes: request.sourcePayloadBytes.map(
-                    (byte, byteIndex) =>
-                        byteIndex % 7 === 0 ? byte ^ 0x01 : byte,
-                ),
-            }),
-        ).rejects.toMatchObject({ code: 'Conflict' });
         await expect(
             fixture.custody.retainForPublication({
                 ...request,
@@ -649,19 +633,18 @@ describe('seed-mailbox sender-stream custody', () => {
 
     it('persists the synchronous input snapshot and uses fresh randomness for another stream', async () => {
         const fixture = await createFixture();
-        const firstRequest = requestForRecipient(1, 0x56);
-        const expectedSource = firstRequest.sourcePayloadBytes.slice();
+        const firstRequest = requestForRecipient(1);
+        const expectedDescriptor =
+            firstRequest.canonicalDeliveryDescriptorBytes.slice();
         const firstPromise = fixture.custody.retainForPublication(firstRequest);
-        firstRequest.sourcePayloadBytes.fill(0xee);
         firstRequest.canonicalDeliveryDescriptorBytes.fill(0xef);
         await firstPromise;
         expect(
-            fixture.kernel.productionObservations[0]?.sourcePayloadBytes,
-        ).toEqual(expectedSource);
+            fixture.kernel.productionObservations[0]
+                ?.canonicalDeliveryDescriptorBytes,
+        ).toEqual(expectedDescriptor);
 
-        await fixture.custody.retainForPublication(
-            requestForRecipient(2, 0x57),
-        );
+        await fixture.custody.retainForPublication(requestForRecipient(2));
         expect(fixture.kernel.productionObservations).toHaveLength(2);
         expect(
             fixture.kernel.productionObservations[0]?.encapsulationRandomness,
@@ -679,7 +662,7 @@ describe('seed-mailbox sender-stream custody', () => {
         const kernel = new DeterministicSeedMailboxKernel();
         kernel.malformedNextCarrier = true;
         const fixture = await createFixture({ kernel });
-        const request = requestForRecipient(0, 0x58);
+        const request = requestForRecipient(0);
 
         await expect(
             fixture.custody.retainForPublication(request),
@@ -705,7 +688,7 @@ describe('seed-mailbox sender-stream custody', () => {
 
     it('serializes duplicate publication requests without producing twice', async () => {
         const fixture = await createFixture();
-        const request = requestForRecipient(9, 0x59);
+        const request = requestForRecipient(9);
 
         const [first, second] = await Promise.all([
             fixture.custody.retainForPublication(request),
@@ -721,7 +704,7 @@ describe('seed-mailbox sender-stream custody', () => {
         });
 
         await expect(
-            fixture.custody.retainForPublication(requestForRecipient(7, 0x5a)),
+            fixture.custody.retainForPublication(requestForRecipient(7)),
         ).rejects.toMatchObject({ code: 'EntropyFailure' });
         expect(fixture.kernel.productionObservations).toHaveLength(0);
         expect(fixture.anchor.compareAndSetCallCount).toBe(1);

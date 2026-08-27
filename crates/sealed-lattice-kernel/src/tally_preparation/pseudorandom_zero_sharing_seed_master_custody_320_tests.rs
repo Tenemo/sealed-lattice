@@ -16,8 +16,8 @@ use super::{
     },
     pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::{
         OwnedRootAuthorizationPackage320, SeedCatalogFixture320, SeedMailboxTestFixture320,
-        authorize_root_body, seed_catalog_fixture, seed_mailbox_test_fixture_320,
-        signed_root_terminal_certificate,
+        authorize_root_body, seed_catalog_fixture, seed_delivery_payload_bytes,
+        seed_mailbox_test_fixture_320, signed_root_terminal_certificate,
     },
     pseudorandom_zero_sharing_seed_delivery_320::PseudorandomZeroSharingSeedDeliveryLayout320,
     pseudorandom_zero_sharing_seed_master_custody_320::{
@@ -282,6 +282,7 @@ fn completion_custody_fixture() -> CompletionCustodyFixture320 {
         &owner_fixture,
         local_catalog_fixture,
         state_predecessor_identity,
+        PARTICIPANT_POSITION,
     );
     let receipt_custody_record_bytes =
         encode_receipt_custody_record(&owner_fixture, &retained_receipt, &receipt_envelopes[0]);
@@ -347,10 +348,11 @@ fn encode_verification_context(
     bytes
 }
 
-fn encode_source_custody_record(
+pub(super) fn encode_source_custody_record(
     owner_fixture: &SeedMailboxTestFixture320,
     catalog_fixture: &SeedCatalogFixture320,
     state_predecessor_identity: Hash512,
+    participant_position: u16,
 ) -> Zeroizing<Vec<u8>> {
     let root_body = catalog_fixture.tree.root_body();
     let layout = root_body.layout();
@@ -363,22 +365,18 @@ fn encode_source_custody_record(
         .unwrap();
     let root_body_bytes = root_body.canonical_bytes().unwrap();
     let recipient_positions = (0..layout.participant_count())
-        .filter(|position| *position != PARTICIPANT_POSITION)
+        .filter(|position| *position != participant_position)
         .collect::<Vec<_>>();
     let delivery_payloads = recipient_positions
         .iter()
         .map(|recipient_position| {
-            let fixture = seed_mailbox_test_fixture_320(PARTICIPANT_POSITION, *recipient_position);
-            assert_eq!(
-                fixture.root_terminal.identity().unwrap(),
-                owner_fixture.root_terminal.identity().unwrap()
-            );
+            let payload = seed_delivery_payload_bytes(catalog_fixture, *recipient_position);
             let expected_byte_length =
                 PseudorandomZeroSharingSeedDeliveryLayout320::derive(layout, *recipient_position)
                     .unwrap()
                     .payload_byte_length();
-            assert_eq!(fixture.payload_bytes.len(), expected_byte_length);
-            fixture.payload_bytes
+            assert_eq!(payload.len(), expected_byte_length);
+            payload
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -410,7 +408,7 @@ fn encode_source_custody_record(
     }
     append_unsigned16(&mut bytes, 0);
     append_unsigned16(&mut bytes, layout.participant_count());
-    append_unsigned16(&mut bytes, PARTICIPANT_POSITION);
+    append_unsigned16(&mut bytes, participant_position);
     append_unsigned32(&mut bytes, coordinates.len());
     append_unsigned32(
         &mut bytes,
@@ -429,7 +427,7 @@ fn encode_source_custody_record(
     for payload in &delivery_payloads {
         append_unsigned32(&mut bytes, payload.len());
     }
-    let catalog_marker = 0x21_u8;
+    let catalog_marker = 0x21_u8.wrapping_add(participant_position as u8);
     for (leaf_ordinal, coordinate) in coordinates.iter().enumerate() {
         let leaf_ordinal = leaf_ordinal as u64;
         let (contribution_marker, salt_marker) = match coordinate {

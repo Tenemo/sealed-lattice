@@ -209,6 +209,49 @@ export type CompletedSeedCatalogSourceCustodyForMasterJoin = Readonly<{
     sealedBytes: Uint8Array;
 }>;
 
+const seedCatalogSourceSenderAuthorizationBrand: unique symbol = Symbol(
+    'seed-catalog-source-sender-authorization',
+);
+
+/**
+ * One-shot authority to read the already completed authenticated source record
+ * into the Rust sender boundary. It exposes no source bytes and cannot be
+ * constructed from a JavaScript object with matching fields.
+ */
+export type SeedCatalogSourceSenderAuthorization = Readonly<{
+    readonly [seedCatalogSourceSenderAuthorizationBrand]: true;
+}>;
+
+export type ConsumedSeedCatalogSourceSenderAuthorization = Readonly<{
+    context: SeedCatalogSourceCustodyContext;
+    recordBytes: Uint8Array;
+}>;
+
+const seedCatalogSourceSenderAuthorizationReaders = new WeakMap<
+    object,
+    () => Promise<ConsumedSeedCatalogSourceSenderAuthorization>
+>();
+
+export const consumeSeedCatalogSourceSenderAuthorization = async (
+    authorization: SeedCatalogSourceSenderAuthorization,
+): Promise<ConsumedSeedCatalogSourceSenderAuthorization> => {
+    if (typeof authorization !== 'object' || authorization === null) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Seed-catalog sender authorization is not an opaque source-owner capability.',
+        );
+    }
+    const read = seedCatalogSourceSenderAuthorizationReaders.get(authorization);
+    if (read === undefined) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidState',
+            'Seed-catalog sender authorization is invalid or has already been consumed.',
+        );
+    }
+    seedCatalogSourceSenderAuthorizationReaders.delete(authorization);
+    return read();
+};
+
 export const snapshotSeedCatalogSourceCustodyLimitsForMasterJoin = (
     value: unknown,
 ): SeedCatalogSourceCustodyLimits => copyLimits(value);
@@ -2163,6 +2206,60 @@ export class SeedCatalogSourceCustody {
         return scheduled;
     }
 
+    public authorizeMailboxSenderKernel(): SeedCatalogSourceSenderAuthorization {
+        const authorization = Object.freeze({
+            [seedCatalogSourceSenderAuthorizationBrand]: true as const,
+        });
+        seedCatalogSourceSenderAuthorizationReaders.set(authorization, () => {
+            const scheduled = this.#operationTail.then(() =>
+                this.#readCompletedRecordForSender(),
+            );
+            this.#operationTail = scheduled.then(
+                () => undefined,
+                () => undefined,
+            );
+            return scheduled;
+        });
+        return authorization;
+    }
+
+    async #readCompletedRecordForSender(): Promise<ConsumedSeedCatalogSourceSenderAuthorization> {
+        const opened = await this.#readOpenedRecord();
+        if (opened === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidState',
+                'Seed-catalog sender authorization requires an existing completed source record.',
+            );
+        }
+        let context: SeedCatalogSourceCustodyContext | undefined;
+        let recordBytes: Uint8Array | undefined;
+        try {
+            this.#requireConfiguredRecord(opened.record);
+            if (
+                opened.record.kind !== 'retained' ||
+                opened.record.deliverySourcePayloads.length !==
+                    this.#geometry.deliverySourcePayloadByteLengths.length
+            ) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidState',
+                    'Seed-catalog sender authorization requires every canonical delivery source to be retained.',
+                );
+            }
+            this.#validateRetainedRecord(opened.record);
+            context = copyContextValue(opened.record.context);
+            recordBytes = encodeRecord(opened.record);
+            const consumed = Object.freeze({ context, recordBytes });
+            context = undefined;
+            recordBytes = undefined;
+            return consumed;
+        } finally {
+            destroyContext(context);
+            recordBytes?.fill(0);
+            opened.sealedBytes.fill(0);
+            destroyRecord(opened.record);
+        }
+    }
+
     public loadRetainedDeliverySource(input: {
         recipientPosition: number;
     }): Promise<RetainedSeedCatalogDeliverySource> {
@@ -2179,8 +2276,26 @@ export class SeedCatalogSourceCustody {
             );
         }
         const scheduled = this.#operationTail.then(async () => {
-            const opened = await this.#completeRecord();
+            const opened = await this.#readOpenedRecord();
+            if (opened === undefined) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidState',
+                    'A retained delivery source requires an existing completed source record.',
+                );
+            }
             try {
+                this.#requireConfiguredRecord(opened.record);
+                if (
+                    opened.record.kind !== 'retained' ||
+                    opened.record.deliverySourcePayloads.length !==
+                        this.#geometry.deliverySourcePayloadByteLengths.length
+                ) {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'InvalidState',
+                        'A retained delivery source is unavailable before every canonical delivery is durably complete.',
+                    );
+                }
+                this.#validateRetainedRecord(opened.record);
                 const deliveryIndex = canonicalRecipientPositions(
                     opened.record.context,
                 ).indexOf(recipientPosition);

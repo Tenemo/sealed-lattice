@@ -29,6 +29,10 @@ use super::{
         pseudorandom_zero_sharing_seed_mailbox_manifest_body_byte_length,
         verify_pseudorandom_zero_sharing_seed_mailbox_sender_carrier_320,
     },
+    pseudorandom_zero_sharing_seed_master_custody_320::{
+        SeedCatalogSourceCustodyContext320, VerifiedSeedCatalogDeliverySources320,
+        verify_and_retain_seed_catalog_delivery_sources_320,
+    },
 };
 
 const REQUEST_MAGIC: &[u8; 4] = b"SLMQ";
@@ -62,6 +66,7 @@ pub(crate) enum PseudorandomZeroSharingSeedMailboxSenderKernelError320 {
     CarrierMismatch(&'static str),
     ContextUnavailable,
     SignatureMismatch,
+    SourceCustody(&'static str),
 }
 
 impl PseudorandomZeroSharingSeedMailboxSenderKernelError320 {
@@ -75,6 +80,7 @@ impl PseudorandomZeroSharingSeedMailboxSenderKernelError320 {
             Self::CarrierMismatch(_) => 6,
             Self::ContextUnavailable => 7,
             Self::SignatureMismatch => 8,
+            Self::SourceCustody(_) => 9,
         }
     }
 }
@@ -122,6 +128,12 @@ impl fmt::Display for PseudorandomZeroSharingSeedMailboxSenderKernelError320 {
             Self::SignatureMismatch => {
                 formatter.write_str("seed-mailbox sender kernel signature is invalid")
             }
+            Self::SourceCustody(field) => {
+                write!(
+                    formatter,
+                    "seed-mailbox sender kernel source custody failed: {field}"
+                )
+            }
         }
     }
 }
@@ -129,6 +141,7 @@ impl fmt::Display for PseudorandomZeroSharingSeedMailboxSenderKernelError320 {
 impl std::error::Error for PseudorandomZeroSharingSeedMailboxSenderKernelError320 {}
 
 struct VerifiedSenderContext320 {
+    delivery_sources: VerifiedSeedCatalogDeliverySources320,
     parameter_identity: Hash512,
     preparation_context: TallyPreparationContext,
     roster: Roster,
@@ -173,6 +186,8 @@ struct OpenContextRequest320<'a> {
     roster_bytes: &'a [u8],
     root_packages: Vec<PseudorandomZeroSharingSeedCatalogRootAuthorizationPackageBytes320<'a>>,
     root_terminal_certificate_bytes: &'a [u8],
+    source_custody_context: SeedCatalogSourceCustodyContext320,
+    source_custody_record_bytes: &'a [u8],
 }
 
 struct PreparedCarrier320 {
@@ -337,6 +352,25 @@ impl<'a> BoundedCursor<'a> {
     }
 }
 
+fn read_source_custody_context(
+    cursor: &mut BoundedCursor<'_>,
+) -> Result<
+    SeedCatalogSourceCustodyContext320,
+    PseudorandomZeroSharingSeedMailboxSenderKernelError320,
+> {
+    Ok(SeedCatalogSourceCustodyContext320 {
+        parameter_identity: cursor.read_hash512("source parameter identity")?,
+        roster_identity: cursor.read_hash512("source roster identity")?,
+        action_context_identity: cursor.read_hash512("source action-context identity")?,
+        preparation_context_identity: cursor.read_hash512("source preparation-context identity")?,
+        catalog_compiler_identity: cursor.read_hash512("source catalog-compiler identity")?,
+        state_predecessor_identity: cursor.read_hash512("source state-predecessor identity")?,
+        preparation_attempt_ordinal: cursor.read_unsigned16("source preparation attempt")?,
+        participant_count: cursor.read_unsigned16("source participant count")?,
+        participant_position: cursor.read_unsigned16("source participant position")?,
+    })
+}
+
 fn parse_open_context_request<'a>(
     cursor: &mut BoundedCursor<'a>,
 ) -> Result<OpenContextRequest320<'a>, PseudorandomZeroSharingSeedMailboxSenderKernelError320> {
@@ -379,6 +413,9 @@ fn parse_open_context_request<'a>(
         MAXIMUM_CONTROL_OBJECT_BYTE_LENGTH,
         "root-terminal certificate",
     )?;
+    let source_custody_context = read_source_custody_context(cursor)?;
+    let source_custody_record_bytes =
+        cursor.read_bounded_bytes(MAXIMUM_COPIED_BUFFER_BYTE_LENGTH, "source-custody record")?;
     cursor.require_complete("open-context trailing bytes")?;
     Ok(OpenContextRequest320 {
         parameter_identity,
@@ -387,6 +424,8 @@ fn parse_open_context_request<'a>(
         roster_bytes,
         root_packages,
         root_terminal_certificate_bytes,
+        source_custody_context,
+        source_custody_record_bytes,
     })
 }
 
@@ -449,7 +488,34 @@ fn verify_open_context(
     .map_err(|_| {
         PseudorandomZeroSharingSeedMailboxSenderKernelError320::PublicVerification("root terminal")
     })?;
+    if request.source_custody_context.parameter_identity != request.parameter_identity
+        || request.source_custody_context.roster_identity != preparation_context.roster_hash()
+        || request.source_custody_context.preparation_context_identity
+            != preparation_context.identity()
+        || request.source_custody_context.preparation_attempt_ordinal != PREPARATION_ATTEMPT_ORDINAL
+        || request.source_custody_context.participant_count
+            != preparation_context.participant_count()
+        || request.source_custody_context.participant_position != request.sender_position
+    {
+        return Err(
+            PseudorandomZeroSharingSeedMailboxSenderKernelError320::ContextMismatch(
+                "source-custody context",
+            ),
+        );
+    }
+    let delivery_sources = verify_and_retain_seed_catalog_delivery_sources_320(
+        request.source_custody_record_bytes,
+        request.source_custody_context,
+        preparation_context,
+        &root_terminal,
+    )
+    .map_err(|_| {
+        PseudorandomZeroSharingSeedMailboxSenderKernelError320::SourceCustody(
+            "completed source record",
+        )
+    })?;
     Ok(VerifiedSenderContext320 {
+        delivery_sources,
         parameter_identity: request.parameter_identity,
         preparation_context,
         roster,
@@ -597,7 +663,6 @@ fn produce_prepared_carrier(
     stream: StreamContext320,
     descriptor_bytes: &[u8],
     encapsulation_randomness_bytes: &[u8],
-    source_payload_bytes: &[u8],
 ) -> Result<PreparedCarrier320, PseudorandomZeroSharingSeedMailboxSenderKernelError320> {
     require_stream_context(verified, stream)?;
     let encapsulation_randomness =
@@ -606,7 +671,14 @@ fn produce_prepared_carrier(
                 "encapsulation randomness",
             )
         })?);
-    let source_payload = Zeroizing::new(source_payload_bytes.to_vec());
+    let source_payload = verified
+        .delivery_sources
+        .payload_for_recipient(stream.recipient_position)
+        .ok_or(
+            PseudorandomZeroSharingSeedMailboxSenderKernelError320::SourceCustody(
+                "canonical recipient payload",
+            ),
+        )?;
     let mut sealer = PseudorandomZeroSharingSeedMailboxSealer320::new(
         &verified.root_terminal,
         &verified.roster,
@@ -985,8 +1057,6 @@ fn parse_request(
             let descriptor_bytes = cursor
                 .read_bounded_bytes(MAXIMUM_CONTROL_OBJECT_BYTE_LENGTH, "delivery descriptor")?;
             let encapsulation_randomness = cursor.read_exact(32, "encapsulation randomness")?;
-            let source_payload =
-                cursor.read_bounded_bytes(MAXIMUM_COPIED_BUFFER_BYTE_LENGTH, "source payload")?;
             cursor.require_complete("prepare-carrier trailing bytes")?;
             let prepared = with_verified_context(handle, |verified| {
                 produce_prepared_carrier(
@@ -994,7 +1064,6 @@ fn parse_request(
                     stream,
                     descriptor_bytes,
                     encapsulation_randomness,
-                    source_payload,
                 )
             })?;
             encode_prepared_carrier_response(&prepared)

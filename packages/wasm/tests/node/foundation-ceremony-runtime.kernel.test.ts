@@ -398,6 +398,26 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
                             assertMatchesSenderVerificationKey: () => undefined,
                             signManifestBody: () => new Uint8Array(3_309),
                         },
+                        sourceCustodyContext: {
+                            actionContextIdentity: new Uint8Array(64).fill(
+                                0x42,
+                            ),
+                            catalogCompilerIdentity: new Uint8Array(64).fill(
+                                0x43,
+                            ),
+                            parameterIdentity: new Uint8Array(64).fill(0x41),
+                            participantCount: 10,
+                            participantPosition: 0,
+                            preparationAttemptOrdinal: 0,
+                            preparationContextIdentity: new Uint8Array(64).fill(
+                                0x44,
+                            ),
+                            rosterIdentity: new Uint8Array(64).fill(0x45),
+                            statePredecessorIdentity: new Uint8Array(64).fill(
+                                0x46,
+                            ),
+                        },
+                        sourceCustodyRecordBytes: oneByte,
                     },
                 ),
             ).rejects.toMatchObject({ code: 'PublicVerification' });

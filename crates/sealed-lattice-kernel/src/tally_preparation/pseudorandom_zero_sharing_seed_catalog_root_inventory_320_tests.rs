@@ -203,19 +203,10 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
     .unwrap()
     .canonical_bytes()
     .unwrap();
-    let entries = seed_delivery_entries(
+    let payload_bytes = seed_delivery_payload_bytes(
         &catalog_fixtures[usize::from(sender_position)],
         recipient_position,
     );
-    let payload_byte_length = entries
-        .iter()
-        .map(|entry| entry.opening_bytes.len() + entry.inclusion_proof_bytes.len())
-        .sum();
-    let mut payload_bytes = Zeroizing::new(Vec::with_capacity(payload_byte_length));
-    for entry in entries {
-        payload_bytes.extend_from_slice(&entry.opening_bytes);
-        payload_bytes.extend_from_slice(&entry.inclusion_proof_bytes);
-    }
     SeedMailboxTestFixture320 {
         parameter_identity,
         preparation_context,
@@ -230,6 +221,23 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
         descriptor_bytes,
         payload_bytes,
     }
+}
+
+pub(super) fn seed_delivery_payload_bytes(
+    catalog_fixture: &SeedCatalogFixture320,
+    recipient_position: u16,
+) -> Zeroizing<Vec<u8>> {
+    let entries = seed_delivery_entries(catalog_fixture, recipient_position);
+    let payload_byte_length = entries
+        .iter()
+        .map(|entry| entry.opening_bytes.len() + entry.inclusion_proof_bytes.len())
+        .sum();
+    let mut payload_bytes = Zeroizing::new(Vec::with_capacity(payload_byte_length));
+    for entry in entries {
+        payload_bytes.extend_from_slice(&entry.opening_bytes);
+        payload_bytes.extend_from_slice(&entry.inclusion_proof_bytes);
+    }
+    payload_bytes
 }
 
 impl OwnedSeedDeliveryEntry320 {

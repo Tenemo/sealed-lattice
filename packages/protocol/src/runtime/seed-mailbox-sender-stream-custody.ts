@@ -1,4 +1,3 @@
-import { shake256 } from '@noble/hashes/sha3.js';
 import {
     assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
     signSeedMailboxManifestBody,
@@ -28,6 +27,11 @@ import {
     type RuntimeRecordProtection,
 } from './authenticated-runtime-record.js';
 import { AuthenticatedStorageRecencyCoordinator } from './authenticated-storage-recency.js';
+import {
+    consumeSeedCatalogSourceSenderAuthorization,
+    type ConsumedSeedCatalogSourceSenderAuthorization,
+    type SeedCatalogSourceSenderAuthorization,
+} from './seed-catalog-source-custody.js';
 import type {
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
@@ -41,11 +45,8 @@ const hashByteLength = 64;
 const randomnessByteLength = 32;
 const unsigned16Maximum = 0xffff;
 const unsigned32Maximum = 0xffff_ffff;
-const senderStreamSourceDigestDomain =
-    'sealed-lattice/runtime/seed-mailbox-sender-source-digest/v1';
 const seedMailboxSenderStreamCustodyOperationDomain =
     'sealed-lattice/runtime/seed-mailbox-sender-stream-record/v1';
-const textEncoder = new TextEncoder();
 
 export type SeedMailboxSenderStreamCustodyContext = Readonly<{
     parameterIdentity: Uint8Array;
@@ -96,7 +97,6 @@ export type SeedMailboxSenderStreamProductionInput = Readonly<{
         Readonly<{ recipientPosition: number }>;
     encapsulationRandomness: Uint8Array;
     signatureRandomness: Uint8Array;
-    sourcePayloadBytes: Uint8Array;
 }>;
 
 export type SeedMailboxSenderStreamValidationInput = Readonly<{
@@ -120,51 +120,105 @@ export type SeedMailboxSenderStreamKernel = Readonly<{
 
 type OpenBrowserLocalSeedMailboxSenderStreamKernelInput = Omit<
     OpenProductionSeedMailboxSenderStreamKernelInput,
-    'signingOperations'
+    'signingOperations' | 'sourceCustodyContext' | 'sourceCustodyRecordBytes'
 > &
-    Readonly<{ signingCapability: BrowserLocalSigningCapability }>;
+    Readonly<{
+        signingCapability: BrowserLocalSigningCapability;
+        sourceCustodyAuthorization: SeedCatalogSourceSenderAuthorization;
+    }>;
 
 /**
  * Binds the fixed-purpose sender-manifest operations to an opaque browser-local
  * signing capability. Rust still verifies the exact output under the
  * terminal-selected roster key before any carrier can leave the adapter.
  */
-export const openBrowserLocalSeedMailboxSenderStreamKernel = (
+export const openBrowserLocalSeedMailboxSenderStreamKernel = async (
     transcriptCoreKernelUrl: URL,
     input: OpenBrowserLocalSeedMailboxSenderStreamKernelInput,
 ): Promise<ProductionSeedMailboxSenderStreamKernel> => {
     const signingCapability = input.signingCapability;
-    return openProductionSeedMailboxSenderStreamKernel(
-        transcriptCoreKernelUrl,
-        {
-            parameterIdentity: input.parameterIdentity,
-            preparationContextBytes: input.preparationContextBytes,
-            rootAuthorizationPackages: input.rootAuthorizationPackages,
-            rootTerminalCertificateBytes: input.rootTerminalCertificateBytes,
-            rosterBytes: input.rosterBytes,
-            senderPosition: input.senderPosition,
-            signingOperations: Object.freeze({
-                assertMatchesSenderVerificationKey: ({
-                    senderSigningVerificationKey,
-                }): void =>
-                    assertSeedMailboxSenderSigningCapabilityMatchesRosterKey({
+    const parameterIdentity = input.parameterIdentity.slice();
+    const preparationContextBytes = input.preparationContextBytes.slice();
+    const rootAuthorizationPackages = input.rootAuthorizationPackages.map(
+        (rootPackage) =>
+            Object.freeze({
+                contributorSignatureEnvelopeBytes:
+                    rootPackage.contributorSignatureEnvelopeBytes.slice(),
+                exactOutputCertificateBytes:
+                    rootPackage.exactOutputCertificateBytes.slice(),
+                reservationCertificateBytes:
+                    rootPackage.reservationCertificateBytes.slice(),
+                rootBodyBytes: rootPackage.rootBodyBytes.slice(),
+            }),
+    );
+    const rootTerminalCertificateBytes =
+        input.rootTerminalCertificateBytes.slice();
+    const rosterBytes = input.rosterBytes.slice();
+    const senderPosition = input.senderPosition;
+    const sourceCustodyAuthorization = input.sourceCustodyAuthorization;
+    let consumedSource:
+        | ConsumedSeedCatalogSourceSenderAuthorization
+        | undefined;
+    try {
+        consumedSource = await consumeSeedCatalogSourceSenderAuthorization(
+            sourceCustodyAuthorization,
+        );
+        return await openProductionSeedMailboxSenderStreamKernel(
+            transcriptCoreKernelUrl,
+            {
+                parameterIdentity,
+                preparationContextBytes,
+                rootAuthorizationPackages,
+                rootTerminalCertificateBytes,
+                rosterBytes,
+                senderPosition,
+                signingOperations: Object.freeze({
+                    assertMatchesSenderVerificationKey: ({
                         senderSigningVerificationKey,
-                        signingCapability,
-                    }),
-                signManifestBody: ({
-                    senderSigningVerificationKey,
-                    signatureBodyBytes,
-                    signatureRandomness,
-                }): Uint8Array =>
-                    signSeedMailboxManifestBody({
+                    }): void =>
+                        assertSeedMailboxSenderSigningCapabilityMatchesRosterKey(
+                            {
+                                senderSigningVerificationKey,
+                                signingCapability,
+                            },
+                        ),
+                    signManifestBody: ({
                         senderSigningVerificationKey,
                         signatureBodyBytes,
                         signatureRandomness,
-                        signingCapability,
-                    }),
-            }),
-        },
-    );
+                    }): Uint8Array =>
+                        signSeedMailboxManifestBody({
+                            senderSigningVerificationKey,
+                            signatureBodyBytes,
+                            signatureRandomness,
+                            signingCapability,
+                        }),
+                }),
+                sourceCustodyContext: consumedSource.context,
+                sourceCustodyRecordBytes: consumedSource.recordBytes,
+            },
+        );
+    } finally {
+        parameterIdentity.fill(0);
+        preparationContextBytes.fill(0);
+        rootAuthorizationPackages.forEach((rootPackage) => {
+            rootPackage.contributorSignatureEnvelopeBytes.fill(0);
+            rootPackage.exactOutputCertificateBytes.fill(0);
+            rootPackage.reservationCertificateBytes.fill(0);
+            rootPackage.rootBodyBytes.fill(0);
+        });
+        rootTerminalCertificateBytes.fill(0);
+        rosterBytes.fill(0);
+        if (consumedSource !== undefined) {
+            consumedSource.context.actionContextIdentity.fill(0);
+            consumedSource.context.catalogCompilerIdentity.fill(0);
+            consumedSource.context.parameterIdentity.fill(0);
+            consumedSource.context.preparationContextIdentity.fill(0);
+            consumedSource.context.rosterIdentity.fill(0);
+            consumedSource.context.statePredecessorIdentity.fill(0);
+            consumedSource.recordBytes.fill(0);
+        }
+    }
 };
 
 type SeedMailboxSenderStreamCustodyRecordByteLengths = Readonly<{
@@ -212,7 +266,6 @@ export type RetainSeedMailboxSenderStreamInput = Readonly<{
     canonicalDeliveryDescriptorBytes: Uint8Array;
     geometry: SeedMailboxSenderStreamGeometry;
     recipientPosition: number;
-    sourcePayloadBytes: Uint8Array;
 }>;
 
 type SeedMailboxSenderStreamCoordinate = SeedMailboxSenderStreamCustodyContext &
@@ -220,7 +273,6 @@ type SeedMailboxSenderStreamCoordinate = SeedMailboxSenderStreamCustodyContext &
         canonicalDeliveryDescriptorBytes: Uint8Array;
         geometry: SeedMailboxSenderStreamGeometry;
         recipientPosition: number;
-        sourcePayloadDigest: Uint8Array;
     }>;
 
 type ReservedSeedMailboxSenderStreamRecord = Readonly<{
@@ -228,7 +280,6 @@ type ReservedSeedMailboxSenderStreamRecord = Readonly<{
     encapsulationRandomness: Uint8Array;
     kind: 'reserved';
     signatureRandomness: Uint8Array;
-    sourcePayloadBytes: Uint8Array;
 }>;
 
 type CompletedSeedMailboxSenderStreamRecord = Readonly<{
@@ -527,7 +578,7 @@ const maximumRecordPlaintextByteLengths = (
     return Object.freeze({
         completed: sumByteLengths(
             [
-                299,
+                235,
                 limits.maximumCanonicalDeliveryDescriptorByteLength,
                 maximumChunkLengthTableByteLength,
                 limits.maximumHeaderByteLength,
@@ -539,10 +590,9 @@ const maximumRecordPlaintextByteLengths = (
         ),
         reservation: sumByteLengths(
             [
-                363,
+                299,
                 limits.maximumCanonicalDeliveryDescriptorByteLength,
                 maximumChunkLengthTableByteLength,
-                limits.maximumSourcePayloadByteLength,
             ],
             'Maximum seed-mailbox reservation record',
         ),
@@ -626,16 +676,15 @@ export const deriveSeedMailboxSenderStreamCustodyRecordByteLengths = (input: {
     );
     const reservationPlaintextByteLength = sumByteLengths(
         [
-            363,
+            299,
             canonicalDeliveryDescriptorByteLength,
             chunkLengthTableByteLength,
-            geometry.sourcePayloadByteLength,
         ],
         'Seed-mailbox reservation record',
     );
     const completedPlaintextByteLength = sumByteLengths(
         [
-            299,
+            235,
             canonicalDeliveryDescriptorByteLength,
             chunkLengthTableByteLength,
             geometry.totalCarrierByteLength,
@@ -672,6 +721,7 @@ export const deriveSeedMailboxSenderStreamKernelByteLengths = (input: {
     rootAuthorizationPackages: readonly SeedMailboxSenderRootAuthorizationPackageByteLengths[];
     rootTerminalCertificateByteLength: number;
     rosterByteLength: number;
+    sourceCustodyRecordByteLength: number;
     streamCount: number;
 }): SeedMailboxSenderStreamKernelByteLengths => {
     const canonicalDeliveryDescriptorByteLength = requireSafeInteger(
@@ -705,6 +755,12 @@ export const deriveSeedMailboxSenderStreamKernelByteLengths = (input: {
         1,
         unsigned32Maximum,
         'rootTerminalCertificateByteLength',
+    );
+    const sourceCustodyRecordByteLength = requireSafeInteger(
+        snapshotDataProperty(input, 'sourceCustodyRecordByteLength', 'input'),
+        1,
+        foundationProfile.maximumCopiedBufferByteLength,
+        'sourceCustodyRecordByteLength',
     );
     const streamCount = requireSafeInteger(
         snapshotDataProperty(input, 'streamCount', 'input'),
@@ -802,16 +858,15 @@ export const deriveSeedMailboxSenderStreamKernelByteLengths = (input: {
             rootPackageCorpusByteLength,
             4,
             rootTerminalCertificateByteLength,
+            6 * hashByteLength + 3 * 2,
+            4,
+            sourceCustodyRecordByteLength,
         ],
         'Sender-mailbox open-context request',
     );
     const openContextResponseByteLength = 7 + 4 + 1_952;
     const prepareCarrierRequestByteLengthPerStream = sumByteLengths(
-        [
-            251,
-            canonicalDeliveryDescriptorByteLength,
-            geometry.sourcePayloadByteLength,
-        ],
+        [247, canonicalDeliveryDescriptorByteLength],
         'Sender-mailbox prepare-carrier request',
     );
     const prepareCarrierResponseByteLengthPerStream = sumByteLengths(
@@ -1025,7 +1080,6 @@ const copyCoordinate = (
         recipientPosition: coordinate.recipientPosition,
         rootTerminalIdentity: coordinate.rootTerminalIdentity.slice(),
         senderPosition: coordinate.senderPosition,
-        sourcePayloadDigest: coordinate.sourcePayloadDigest.slice(),
     });
 
 const destroyCoordinate = (
@@ -1035,7 +1089,6 @@ const destroyCoordinate = (
     coordinate?.parameterIdentity.fill(0);
     coordinate?.preparationContextIdentity.fill(0);
     coordinate?.rootTerminalIdentity.fill(0);
-    coordinate?.sourcePayloadDigest.fill(0);
 };
 
 const coordinateEquals = (
@@ -1052,7 +1105,6 @@ const coordinateEquals = (
         right.preparationContextIdentity,
     ) &&
     bytesEqual(left.rootTerminalIdentity, right.rootTerminalIdentity) &&
-    bytesEqual(left.sourcePayloadDigest, right.sourcePayloadDigest) &&
     bytesEqual(
         left.canonicalDeliveryDescriptorBytes,
         right.canonicalDeliveryDescriptorBytes,
@@ -1160,18 +1212,6 @@ const snapshotCarrier = (
     });
 };
 
-const deriveSourcePayloadDigest = (
-    sourcePayloadBytes: Uint8Array,
-): Uint8Array => {
-    const domainBytes = textEncoder.encode(senderStreamSourceDigestDomain);
-    const hasher = shake256.create({ dkLen: hashByteLength });
-    hasher.update(unsigned32LittleEndian(domainBytes.byteLength));
-    hasher.update(domainBytes);
-    hasher.update(unsigned32LittleEndian(sourcePayloadBytes.byteLength));
-    hasher.update(sourcePayloadBytes);
-    return Uint8Array.from(hasher.digest());
-};
-
 const logicalRecordKey = (
     context: SeedMailboxSenderStreamCustodyContext,
     recipientPosition: number,
@@ -1192,7 +1232,6 @@ const encodeCoordinateParts = (
     unsigned16LittleEndian(coordinate.participantCount),
     unsigned16LittleEndian(coordinate.senderPosition),
     unsigned16LittleEndian(coordinate.recipientPosition),
-    coordinate.sourcePayloadDigest,
     unsigned32LittleEndian(
         coordinate.canonicalDeliveryDescriptorBytes.byteLength,
     ),
@@ -1230,7 +1269,6 @@ const encodeRecord = (record: SeedMailboxSenderStreamRecord): Uint8Array => {
         return concatenateBytes(
             [
                 ...prefix,
-                record.sourcePayloadBytes,
                 record.encapsulationRandomness,
                 record.signatureRandomness,
             ],
@@ -1391,10 +1429,6 @@ const decodeRecord = (
     const participantCount = cursor.readUnsigned16('participant count');
     const senderPosition = cursor.readUnsigned16('sender position');
     const recipientPosition = cursor.readUnsigned16('recipient position');
-    const sourcePayloadDigest = cursor.readExact(
-        hashByteLength,
-        'source-payload digest',
-    );
     const canonicalDeliveryDescriptorByteLength = requireSafeInteger(
         cursor.readUnsigned32('delivery-descriptor byte length'),
         1,
@@ -1444,7 +1478,6 @@ const decodeRecord = (
         parameterIdentity.fill(0);
         preparationContextIdentity.fill(0);
         rootTerminalIdentity.fill(0);
-        sourcePayloadDigest.fill(0);
         canonicalDeliveryDescriptorBytes.fill(0);
         if (error instanceof AuthenticatedRuntimeRecordError) {
             throw new AuthenticatedRuntimeRecordError(
@@ -1465,7 +1498,6 @@ const decodeRecord = (
         recipientPosition,
         rootTerminalIdentity,
         senderPosition,
-        sourcePayloadDigest,
     });
     try {
         if (
@@ -1481,15 +1513,9 @@ const decodeRecord = (
             );
         }
         if (recordKind === reservedRecordKind) {
-            let sourcePayloadBytes: Uint8Array | undefined;
             let encapsulationRandomness: Uint8Array | undefined;
             let signatureRandomness: Uint8Array | undefined;
-            let recomputedSourcePayloadDigest: Uint8Array | undefined;
             try {
-                sourcePayloadBytes = cursor.readExact(
-                    geometry.sourcePayloadByteLength,
-                    'source payload',
-                );
                 encapsulationRandomness = cursor.readExact(
                     randomnessByteLength,
                     'encapsulation randomness',
@@ -1509,35 +1535,18 @@ const decodeRecord = (
                         'Seed-mailbox sender custody record has invalid or reused randomness.',
                     );
                 }
-                recomputedSourcePayloadDigest =
-                    deriveSourcePayloadDigest(sourcePayloadBytes);
-                if (
-                    !bytesEqual(
-                        sourcePayloadDigest,
-                        recomputedSourcePayloadDigest,
-                    )
-                ) {
-                    throw new AuthenticatedRuntimeRecordError(
-                        'AuthenticationFailed',
-                        'Seed-mailbox sender custody source payload has the wrong digest.',
-                    );
-                }
                 const record = Object.freeze({
                     coordinate,
                     encapsulationRandomness,
                     kind: 'reserved' as const,
                     signatureRandomness,
-                    sourcePayloadBytes,
                 });
-                sourcePayloadBytes = undefined;
                 encapsulationRandomness = undefined;
                 signatureRandomness = undefined;
                 return record;
             } finally {
-                sourcePayloadBytes?.fill(0);
                 encapsulationRandomness?.fill(0);
                 signatureRandomness?.fill(0);
-                recomputedSourcePayloadDigest?.fill(0);
             }
         }
         let headerBytes: Uint8Array | undefined;
@@ -1602,7 +1611,6 @@ const destroyRecord = (
     if (record.kind === 'reserved') {
         record.encapsulationRandomness.fill(0);
         record.signatureRandomness.fill(0);
-        record.sourcePayloadBytes.fill(0);
     } else {
         destroyCarrier(record.carrier);
     }
@@ -1769,13 +1777,11 @@ export class SeedMailboxSenderStreamCustody {
         );
         return scheduled.finally(() => {
             destroyCoordinate(request.coordinate);
-            request.sourcePayloadBytes.fill(0);
         });
     }
 
     #snapshotRequest(input: RetainSeedMailboxSenderStreamInput): {
         coordinate: SeedMailboxSenderStreamCoordinate;
-        sourcePayloadBytes: Uint8Array;
     } {
         const recipientPosition = requireSafeInteger(
             snapshotDataProperty(input, 'recipientPosition', 'input'),
@@ -1802,21 +1808,6 @@ export class SeedMailboxSenderStreamCustody {
             this.#limits.maximumCanonicalDeliveryDescriptorByteLength,
             'input.canonicalDeliveryDescriptorBytes',
         );
-        const sourcePayloadBytes = copyBoundedBytes(
-            snapshotDataProperty(input, 'sourcePayloadBytes', 'input'),
-            this.#limits.maximumSourcePayloadByteLength,
-            'input.sourcePayloadBytes',
-        );
-        if (
-            sourcePayloadBytes.byteLength !== geometry.sourcePayloadByteLength
-        ) {
-            canonicalDeliveryDescriptorBytes.fill(0);
-            sourcePayloadBytes.fill(0);
-            throw new AuthenticatedRuntimeRecordError(
-                'InvalidInput',
-                'Seed-mailbox source payload does not match the exact stream geometry.',
-            );
-        }
         const recordByteLengths =
             deriveSeedMailboxSenderStreamCustodyRecordByteLengths({
                 canonicalDeliveryDescriptorByteLength:
@@ -1830,14 +1821,11 @@ export class SeedMailboxSenderStreamCustody {
                 foundationProfile.maximumCopiedBufferByteLength
         ) {
             canonicalDeliveryDescriptorBytes.fill(0);
-            sourcePayloadBytes.fill(0);
             throw new AuthenticatedRuntimeRecordError(
                 'ResourceLimit',
                 'Seed-mailbox sender custody record exceeds the absolute copied-buffer bound.',
             );
         }
-        const sourcePayloadDigest =
-            deriveSourcePayloadDigest(sourcePayloadBytes);
         return {
             coordinate: Object.freeze({
                 canonicalDeliveryDescriptorBytes,
@@ -1852,15 +1840,12 @@ export class SeedMailboxSenderStreamCustody {
                 rootTerminalIdentity:
                     this.#context.rootTerminalIdentity.slice(),
                 senderPosition: this.#context.senderPosition,
-                sourcePayloadDigest,
             }),
-            sourcePayloadBytes,
         };
     }
 
     async #retainForPublication(request: {
         coordinate: SeedMailboxSenderStreamCoordinate;
-        sourcePayloadBytes: Uint8Array;
     }): Promise<RetainedSeedMailboxSenderStreamCarrier> {
         const recordKey = logicalRecordKey(
             this.#context,
@@ -1913,7 +1898,6 @@ export class SeedMailboxSenderStreamCustody {
         recordKey: string,
         request: {
             coordinate: SeedMailboxSenderStreamCoordinate;
-            sourcePayloadBytes: Uint8Array;
         },
     ): Promise<OpenedSeedMailboxSenderStreamRecord> {
         let encapsulationRandomness: Uint8Array | undefined;
@@ -1935,7 +1919,6 @@ export class SeedMailboxSenderStreamCustody {
                     encapsulationRandomness: encapsulationRandomness.slice(),
                     kind: 'reserved' as const,
                     signatureRandomness: signatureRandomness.slice(),
-                    sourcePayloadBytes: request.sourcePayloadBytes.slice(),
                 });
             try {
                 let sealedBytes: Uint8Array;
@@ -1970,8 +1953,6 @@ export class SeedMailboxSenderStreamCustody {
                         kind: 'reserved' as const,
                         signatureRandomness:
                             reservation.signatureRandomness.slice(),
-                        sourcePayloadBytes:
-                            reservation.sourcePayloadBytes.slice(),
                     }),
                     sealedBytes,
                 });
@@ -1988,17 +1969,9 @@ export class SeedMailboxSenderStreamCustody {
         record: SeedMailboxSenderStreamRecord,
         request: {
             coordinate: SeedMailboxSenderStreamCoordinate;
-            sourcePayloadBytes: Uint8Array;
         },
     ): void {
-        if (
-            !coordinateEquals(record.coordinate, request.coordinate) ||
-            (record.kind === 'reserved' &&
-                !bytesEqual(
-                    record.sourcePayloadBytes,
-                    request.sourcePayloadBytes,
-                ))
-        ) {
+        if (!coordinateEquals(record.coordinate, request.coordinate)) {
             throw new AuthenticatedRuntimeRecordError(
                 'Conflict',
                 'The seed-mailbox sender stream slot is durably bound to different bytes.',
@@ -2017,7 +1990,6 @@ export class SeedMailboxSenderStreamCustody {
                 encapsulationRandomness:
                     reservation.encapsulationRandomness.slice(),
                 signatureRandomness: reservation.signatureRandomness.slice(),
-                sourcePayloadBytes: reservation.sourcePayloadBytes.slice(),
             });
         let productionFailed = false;
         let productionFailure: unknown;
@@ -2044,7 +2016,6 @@ export class SeedMailboxSenderStreamCustody {
             productionInput.context.rootTerminalIdentity.fill(0);
             productionInput.encapsulationRandomness.fill(0);
             productionInput.signatureRandomness.fill(0);
-            productionInput.sourcePayloadBytes.fill(0);
         }
     }
 
@@ -2097,7 +2068,6 @@ export class SeedMailboxSenderStreamCustody {
         recordKey: string;
         request: {
             coordinate: SeedMailboxSenderStreamCoordinate;
-            sourcePayloadBytes: Uint8Array;
         };
         reservation: ReservedSeedMailboxSenderStreamRecord;
         sealedReservationBytes: Uint8Array;

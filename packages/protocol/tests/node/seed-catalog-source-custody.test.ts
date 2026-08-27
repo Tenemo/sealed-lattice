@@ -1,8 +1,24 @@
-import type { ProductionSeedCatalogSourceCustodyKernel } from '@sealed-lattice/wasm';
+import type { BrowserLocalSigningCapability } from '@sealed-lattice/crypto';
+import type {
+    OpenProductionSeedMailboxSenderStreamKernelInput,
+    ProductionSeedCatalogSourceCustodyKernel,
+    ProductionSeedMailboxSenderStreamKernel,
+} from '@sealed-lattice/wasm';
 import { describe, expect, it, vi } from 'vitest';
+
+const wasmMocks = vi.hoisted(() => ({
+    openSenderKernel: vi.fn(),
+}));
 
 vi.mock('@sealed-lattice/wasm', () => ({
     isProductionSeedCatalogSourceCustodyKernel: () => true,
+    isProductionSeedMailboxSenderStreamKernel: () => true,
+    openProductionSeedMailboxSenderStreamKernel: wasmMocks.openSenderKernel,
+}));
+
+vi.mock('@sealed-lattice/crypto', () => ({
+    assertSeedMailboxSenderSigningCapabilityMatchesRosterKey: () => undefined,
+    signSeedMailboxManifestBody: () => new Uint8Array(3_309),
 }));
 
 import {
@@ -15,6 +31,7 @@ import {
 import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import {
     SeedCatalogSourceCustody,
+    consumeSeedCatalogSourceSenderAuthorization,
     deriveSeedCatalogSourceCustodyKernelByteLengths,
     deriveSeedCatalogSourceCustodyRecordByteLengths,
     type RetainedLocalSeedCatalog,
@@ -29,6 +46,7 @@ import {
     type SeedCatalogSourceInventory,
     type SeedCatalogValidationInput,
 } from '#packages/protocol/src/runtime/seed-catalog-source-custody';
+import { openBrowserLocalSeedMailboxSenderStreamKernel } from '#packages/protocol/src/runtime/seed-mailbox-sender-stream-custody';
 import {
     InMemoryAuthenticatedStorageRecencyAnchor,
     generateRuntimeStorageRootKey,
@@ -682,6 +700,139 @@ describe('seed-catalog source custody', () => {
             sourcePayloadBytes: expectedDelivery,
         });
         expect(fixture.kernel.deliveryProductionObservations).toHaveLength(9);
+    });
+
+    it('issues only a one-shot opaque read of an existing completed source record', async () => {
+        const fixture = await createFixture();
+        const prematureAuthorization =
+            fixture.custody.authorizeMailboxSenderKernel();
+        await expect(
+            consumeSeedCatalogSourceSenderAuthorization(prematureAuthorization),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(
+            fixture.custody.loadRetainedDeliverySource({
+                recipientPosition: 7,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(fixture.kernel.catalogProductionInventories).toHaveLength(0);
+        expect(fixture.kernel.deliveryProductionObservations).toHaveLength(0);
+
+        await fixture.custody.retainCatalogBeforeRootPublication();
+        const catalogValidationCallCount =
+            fixture.kernel.catalogValidationCallCount;
+        const deliveryValidationCallCount =
+            fixture.kernel.deliveryValidationCallCount;
+        const authorization = fixture.custody.authorizeMailboxSenderKernel();
+        expect(Object.keys(authorization)).toEqual([]);
+        const consumed =
+            await consumeSeedCatalogSourceSenderAuthorization(authorization);
+        expect(consumed.context).toEqual(fixture.context);
+        expect(consumed.context).not.toBe(fixture.context);
+        expect(consumed.recordBytes).toHaveLength(
+            deriveSeedCatalogSourceCustodyRecordByteLengths({
+                geometry: smallGeometry,
+            }).completedPlaintextByteLength,
+        );
+        expect(fixture.kernel.catalogValidationCallCount).toBe(
+            catalogValidationCallCount + 1,
+        );
+        expect(fixture.kernel.deliveryValidationCallCount).toBe(
+            deliveryValidationCallCount + 9,
+        );
+        await expect(
+            consumeSeedCatalogSourceSenderAuthorization(authorization),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        await expect(
+            consumeSeedCatalogSourceSenderAuthorization({} as never),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+
+        consumed.recordBytes.fill(0);
+        const second = await consumeSeedCatalogSourceSenderAuthorization(
+            fixture.custody.authorizeMailboxSenderKernel(),
+        );
+        expect(second.recordBytes.some((byte) => byte !== 0)).toBe(true);
+        second.recordBytes.fill(0);
+    });
+
+    it('opens the sender adapter only from the source owner one-shot authorization', async () => {
+        wasmMocks.openSenderKernel.mockReset();
+        const fixture = await createFixture();
+        await fixture.custody.retainCatalogBeforeRootPublication();
+        const productionKernel = Object.freeze({
+            close: (): void => undefined,
+            produce: (): never => {
+                throw new Error(
+                    'The source-authorization test does not produce.',
+                );
+            },
+            validate: (): void => undefined,
+        }) as unknown as ProductionSeedMailboxSenderStreamKernel;
+        const expectedRecordByteLength =
+            deriveSeedCatalogSourceCustodyRecordByteLengths({
+                geometry: smallGeometry,
+            }).completedPlaintextByteLength;
+        let inspectedSourceRecord = false;
+        wasmMocks.openSenderKernel.mockImplementation(
+            (
+                _kernelUrl: URL,
+                input: OpenProductionSeedMailboxSenderStreamKernelInput,
+            ) => {
+                expect(input.sourceCustodyContext).toEqual(fixture.context);
+                expect(input.sourceCustodyRecordBytes).toHaveLength(
+                    expectedRecordByteLength,
+                );
+                expect(input.sourceCustodyRecordBytes.slice(0, 4)).toEqual(
+                    Uint8Array.of(0x53, 0x4c, 0x43, 0x53),
+                );
+                inspectedSourceRecord = true;
+                return Promise.resolve(productionKernel);
+            },
+        );
+        const oneByte = Uint8Array.of(1);
+        const commonInput = {
+            parameterIdentity: fixture.context.parameterIdentity,
+            preparationContextBytes: oneByte,
+            rootAuthorizationPackages: [
+                {
+                    contributorSignatureEnvelopeBytes: oneByte,
+                    exactOutputCertificateBytes: oneByte,
+                    reservationCertificateBytes: oneByte,
+                    rootBodyBytes: oneByte,
+                },
+            ],
+            rootTerminalCertificateBytes: oneByte,
+            rosterBytes: oneByte,
+            senderPosition: fixture.context.participantPosition,
+            signingCapability: Object.freeze(
+                {},
+            ) as BrowserLocalSigningCapability,
+        } as const;
+        const kernelUrl = new URL('https://example.invalid/kernel.wasm');
+
+        await expect(
+            openBrowserLocalSeedMailboxSenderStreamKernel(kernelUrl, {
+                ...commonInput,
+                sourceCustodyAuthorization: {} as never,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(wasmMocks.openSenderKernel).not.toHaveBeenCalled();
+
+        const authorization = fixture.custody.authorizeMailboxSenderKernel();
+        await expect(
+            openBrowserLocalSeedMailboxSenderStreamKernel(kernelUrl, {
+                ...commonInput,
+                sourceCustodyAuthorization: authorization,
+            }),
+        ).resolves.toBe(productionKernel);
+        expect(inspectedSourceRecord).toBe(true);
+        expect(wasmMocks.openSenderKernel).toHaveBeenCalledTimes(1);
+        await expect(
+            openBrowserLocalSeedMailboxSenderStreamKernel(kernelUrl, {
+                ...commonInput,
+                sourceCustodyAuthorization: authorization,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        expect(wasmMocks.openSenderKernel).toHaveBeenCalledTimes(1);
     });
 
     it('cold-resumes a canonical delivery prefix from the same retained sources', async () => {

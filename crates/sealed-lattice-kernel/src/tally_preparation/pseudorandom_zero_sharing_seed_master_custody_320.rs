@@ -142,6 +142,35 @@ struct JoinedCustodyContext320 {
     participant_position: u16,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct SeedCatalogSourceCustodyContext320 {
+    pub(super) parameter_identity: Hash512,
+    pub(super) roster_identity: Hash512,
+    pub(super) action_context_identity: Hash512,
+    pub(super) preparation_context_identity: Hash512,
+    pub(super) catalog_compiler_identity: Hash512,
+    pub(super) state_predecessor_identity: Hash512,
+    pub(super) preparation_attempt_ordinal: u16,
+    pub(super) participant_count: u16,
+    pub(super) participant_position: u16,
+}
+
+impl JoinedCustodyContext320 {
+    const fn source_custody_context(self) -> SeedCatalogSourceCustodyContext320 {
+        SeedCatalogSourceCustodyContext320 {
+            parameter_identity: self.parameter_identity,
+            roster_identity: self.roster_identity,
+            action_context_identity: self.action_context_identity,
+            preparation_context_identity: self.preparation_context_identity,
+            catalog_compiler_identity: self.catalog_compiler_identity,
+            state_predecessor_identity: self.state_predecessor_identity,
+            preparation_attempt_ordinal: self.preparation_attempt_ordinal,
+            participant_count: self.participant_count,
+            participant_position: self.participant_position,
+        }
+    }
+}
+
 struct JoinRequest320<'a> {
     context: JoinedCustodyContext320,
     source_custody_record_bytes: &'a [u8],
@@ -173,6 +202,27 @@ struct SourceCustodyRecord320<'a> {
     entries: Vec<LocalCatalogEntryBytes320<'a>>,
     delivery_source_payloads: Vec<&'a [u8]>,
     source_inventory: Vec<SourceLeafBytes320<'a>>,
+}
+
+struct ParsedSourceCustodyRecord320<'a> {
+    delivery_source_payloads: Vec<&'a [u8]>,
+    local_catalog: super::pseudorandom_zero_sharing_seed_master_join_320::RootTerminalMatchedPseudorandomZeroSharingLocalSeedCatalog320,
+    recipient_positions: Vec<u16>,
+}
+
+pub(super) struct VerifiedSeedCatalogDeliverySources320 {
+    payloads: Vec<Zeroizing<Vec<u8>>>,
+    recipient_positions: Vec<u16>,
+}
+
+impl VerifiedSeedCatalogDeliverySources320 {
+    pub(super) fn payload_for_recipient(&self, recipient_position: u16) -> Option<&[u8]> {
+        self.recipient_positions
+            .iter()
+            .position(|position| *position == recipient_position)
+            .and_then(|delivery_index| self.payloads.get(delivery_index))
+            .map(|payload| payload.as_slice())
+    }
 }
 
 struct ReceiptCustodyRecord320<'a> {
@@ -561,15 +611,12 @@ fn verify_public_context(
     Ok((receipt_terminal, verification.roster, preparation_context))
 }
 
-fn parse_and_verify_source_custody(
-    bytes: &[u8],
-    context: JoinedCustodyContext320,
+fn parse_and_verify_source_custody_record<'a>(
+    bytes: &'a [u8],
+    context: SeedCatalogSourceCustodyContext320,
     preparation_context: TallyPreparationContext,
     root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
-) -> Result<
-    super::pseudorandom_zero_sharing_seed_master_join_320::RootTerminalMatchedPseudorandomZeroSharingLocalSeedCatalog320,
-    PseudorandomZeroSharingSeedMasterCustodyError320,
->{
+) -> Result<ParsedSourceCustodyRecord320<'a>, PseudorandomZeroSharingSeedMasterCustodyError320> {
     let mut cursor = BoundedCursor::new(bytes)?;
     cursor.require_magic(SOURCE_CUSTODY_RECORD_MAGIC, "source-custody magic")?;
     cursor.require_version("source-custody version")?;
@@ -624,6 +671,31 @@ fn parse_and_verify_source_custody(
         "participant position",
     )?;
 
+    require_source_context_hash(
+        context.roster_identity,
+        preparation_context.roster_hash(),
+        "preparation roster identity",
+    )?;
+    require_source_context_hash(
+        context.action_context_identity,
+        preparation_context.action_context_hash(),
+        "preparation action-context identity",
+    )?;
+    require_source_context_hash(
+        context.preparation_context_identity,
+        preparation_context.identity(),
+        "preparation identity",
+    )?;
+    require_source_coordinate(
+        context.preparation_attempt_ordinal == PREPARATION_ATTEMPT_ORDINAL,
+        "admitted preparation-attempt ordinal",
+    )?;
+    require_source_coordinate(
+        context.participant_count == preparation_context.participant_count()
+            && context.participant_position < context.participant_count,
+        "preparation participant coordinates",
+    )?;
+
     let layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
         context.parameter_identity,
         preparation_context,
@@ -632,6 +704,11 @@ fn parse_and_verify_source_custody(
     .map_err(|_| {
         PseudorandomZeroSharingSeedMasterCustodyError320::SourceCustody("catalog layout")
     })?;
+    require_source_context_hash(
+        context.catalog_compiler_identity,
+        layout.compiler_identity(),
+        "derived catalog-compiler identity",
+    )?;
     let selected_root_body = root_terminal
         .root_inventory()
         .root_body(context.participant_position)
@@ -781,7 +858,7 @@ fn parse_and_verify_source_custody(
             )
         })
         .collect::<Vec<_>>();
-    verify_pseudorandom_zero_sharing_local_seed_catalog_320(
+    let local_catalog = verify_pseudorandom_zero_sharing_local_seed_catalog_320(
         root_terminal,
         context.participant_position,
         &local_entries,
@@ -790,6 +867,49 @@ fn parse_and_verify_source_custody(
         PseudorandomZeroSharingSeedMasterCustodyError320::SourceCustody(
             "local catalog verification",
         )
+    })?;
+    Ok(ParsedSourceCustodyRecord320 {
+        delivery_source_payloads: source_record.delivery_source_payloads,
+        local_catalog,
+        recipient_positions,
+    })
+}
+
+fn parse_and_verify_source_custody(
+    bytes: &[u8],
+    context: JoinedCustodyContext320,
+    preparation_context: TallyPreparationContext,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+) -> Result<
+    super::pseudorandom_zero_sharing_seed_master_join_320::RootTerminalMatchedPseudorandomZeroSharingLocalSeedCatalog320,
+    PseudorandomZeroSharingSeedMasterCustodyError320,
+>{
+    Ok(parse_and_verify_source_custody_record(
+        bytes,
+        context.source_custody_context(),
+        preparation_context,
+        root_terminal,
+    )?
+    .local_catalog)
+}
+
+pub(super) fn verify_and_retain_seed_catalog_delivery_sources_320(
+    bytes: &[u8],
+    context: SeedCatalogSourceCustodyContext320,
+    preparation_context: TallyPreparationContext,
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+) -> Result<VerifiedSeedCatalogDeliverySources320, PseudorandomZeroSharingSeedMasterCustodyError320>
+{
+    let parsed =
+        parse_and_verify_source_custody_record(bytes, context, preparation_context, root_terminal)?;
+    let payloads = parsed
+        .delivery_source_payloads
+        .into_iter()
+        .map(|payload| Zeroizing::new(payload.to_vec()))
+        .collect();
+    Ok(VerifiedSeedCatalogDeliverySources320 {
+        payloads,
+        recipient_positions: parsed.recipient_positions,
     })
 }
 

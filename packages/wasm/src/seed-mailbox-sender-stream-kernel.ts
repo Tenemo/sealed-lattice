@@ -67,12 +67,23 @@ export type SeedMailboxSenderStreamCarrier = Readonly<{
     signatureEnvelopeBytes: Uint8Array;
 }>;
 
+export type SeedMailboxSenderSourceCustodyContext = Readonly<{
+    actionContextIdentity: Uint8Array;
+    catalogCompilerIdentity: Uint8Array;
+    parameterIdentity: Uint8Array;
+    participantCount: number;
+    participantPosition: number;
+    preparationAttemptOrdinal: number;
+    preparationContextIdentity: Uint8Array;
+    rosterIdentity: Uint8Array;
+    statePredecessorIdentity: Uint8Array;
+}>;
+
 export type SeedMailboxSenderStreamProductionInput = Readonly<{
     canonicalDeliveryDescriptorBytes: Uint8Array;
     context: SeedMailboxSenderStreamContext;
     encapsulationRandomness: Uint8Array;
     signatureRandomness: Uint8Array;
-    sourcePayloadBytes: Uint8Array;
 }>;
 
 export type SeedMailboxSenderStreamValidationInput = Readonly<{
@@ -124,6 +135,8 @@ export type OpenProductionSeedMailboxSenderStreamKernelInput = Readonly<{
     rosterBytes: Uint8Array;
     senderPosition: number;
     signingOperations: SeedMailboxSenderSigningOperations;
+    sourceCustodyContext: SeedMailboxSenderSourceCustodyContext;
+    sourceCustodyRecordBytes: Uint8Array;
 }>;
 
 export type SeedMailboxSenderKernelErrorCode =
@@ -135,6 +148,7 @@ export type SeedMailboxSenderKernelErrorCode =
     | 'PublicVerification'
     | 'ResourceLimit'
     | 'SignatureMismatch'
+    | 'SourceCustody'
     | 'StreamProduction';
 
 export class SeedMailboxSenderKernelError extends Error {
@@ -181,6 +195,7 @@ const responseCodeByNumber = new Map<
     [6, 'CarrierMismatch'],
     [7, 'ContextUnavailable'],
     [8, 'SignatureMismatch'],
+    [9, 'SourceCustody'],
 ]);
 
 const malformedResponse = (detail: string): SeedMailboxSenderKernelError =>
@@ -384,6 +399,53 @@ const streamContextParts = (
     ),
 ];
 
+const sourceCustodyContextParts = (
+    context: SeedMailboxSenderSourceCustodyContext,
+): readonly Uint8Array[] => [
+    requireExactBytes(
+        context.parameterIdentity,
+        hashByteLength,
+        'Sender-mailbox source parameter identity',
+    ),
+    requireExactBytes(
+        context.rosterIdentity,
+        hashByteLength,
+        'Sender-mailbox source roster identity',
+    ),
+    requireExactBytes(
+        context.actionContextIdentity,
+        hashByteLength,
+        'Sender-mailbox source action-context identity',
+    ),
+    requireExactBytes(
+        context.preparationContextIdentity,
+        hashByteLength,
+        'Sender-mailbox source preparation-context identity',
+    ),
+    requireExactBytes(
+        context.catalogCompilerIdentity,
+        hashByteLength,
+        'Sender-mailbox source catalog-compiler identity',
+    ),
+    requireExactBytes(
+        context.statePredecessorIdentity,
+        hashByteLength,
+        'Sender-mailbox source state-predecessor identity',
+    ),
+    unsigned16LittleEndian(
+        context.preparationAttemptOrdinal,
+        'Sender-mailbox source preparation-attempt ordinal',
+    ),
+    unsigned16LittleEndian(
+        context.participantCount,
+        'Sender-mailbox source participant count',
+    ),
+    unsigned16LittleEndian(
+        context.participantPosition,
+        'Sender-mailbox source participant position',
+    ),
+];
+
 const encodeOpenContextRequest = (
     input: OpenProductionSeedMailboxSenderStreamKernelInput,
 ): Uint8Array => {
@@ -480,6 +542,11 @@ const encodeOpenContextRequest = (
             input.rootTerminalCertificateBytes,
             'Sender-mailbox root-terminal certificate',
         ),
+        ...sourceCustodyContextParts(input.sourceCustodyContext),
+        ...boundedBytesParts(
+            input.sourceCustodyRecordBytes,
+            'Sender-mailbox source-custody record',
+        ),
     );
     return concatenateRequestParts(parts);
 };
@@ -500,10 +567,6 @@ const encodePrepareRequest = (
             input.encapsulationRandomness,
             encapsulationRandomnessByteLength,
             'Sender-mailbox encapsulation randomness',
-        ),
-        ...boundedBytesParts(
-            input.sourcePayloadBytes,
-            'Sender-mailbox source payload',
         ),
     ]);
 
