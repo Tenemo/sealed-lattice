@@ -279,6 +279,91 @@ impl PseudorandomZeroSharingAuthenticatedSeedRecipientInventoryBody320 {
             &[CanonicalItem::variable_bytes(self.canonical_bytes()?)?],
         )?)
     }
+
+    fn from_retained_canonical_bytes(
+        root_matched_inventory: &RootInventoryMatchedPseudorandomZeroSharingSeedRecipientInventory320,
+        bytes: &[u8],
+    ) -> Result<Self, PseudorandomZeroSharingSeedReceiptError320> {
+        let semantic_body = root_matched_inventory.body();
+        let tuple = CanonicalTuple::decode(bytes, &receipt_control_object_decode_limits())?;
+        require_object_header(
+            &tuple,
+            PSEUDORANDOM_ZERO_SHARING_AUTHENTICATED_SEED_RECIPIENT_INVENTORY_DOMAIN,
+            AUTHENTICATED_RECIPIENT_INVENTORY_ITEM_COUNT,
+        )?;
+        require_hash512(
+            &tuple.items[1],
+            semantic_body.parameter_identity(),
+            "parameter identity",
+        )?;
+        require_hash512(
+            &tuple.items[2],
+            semantic_body.preparation_context_identity(),
+            "preparation context identity",
+        )?;
+        require_u16(
+            &tuple.items[3],
+            PREPARATION_ATTEMPT_ORDINAL,
+            "preparation attempt ordinal",
+        )?;
+        require_hash512(
+            &tuple.items[4],
+            semantic_body.root_terminal_identity(),
+            "root-terminal identity",
+        )?;
+        require_u16(
+            &tuple.items[5],
+            semantic_body.participant_count(),
+            "participant count",
+        )?;
+        require_u16(
+            &tuple.items[6],
+            semantic_body.recipient_position(),
+            "recipient position",
+        )?;
+        require_hash512(
+            &tuple.items[7],
+            semantic_body.identity()?,
+            "semantic recipient-inventory identity",
+        )?;
+        let expected_delivery_count = usize::from(
+            semantic_body
+                .participant_count()
+                .checked_sub(1)
+                .ok_or(PseudorandomZeroSharingSeedReceiptError320::GeometryMismatch)?,
+        );
+        let ordered_header_identities = read_hash512_list(
+            &tuple.items[8],
+            expected_delivery_count,
+            "header identities",
+        )?;
+        let ordered_manifest_identities = read_hash512_list(
+            &tuple.items[9],
+            expected_delivery_count,
+            "manifest identities",
+        )?;
+        let body = Self {
+            parameter_identity: semantic_body.parameter_identity(),
+            preparation_context_identity: semantic_body.preparation_context_identity(),
+            root_terminal_identity: semantic_body.root_terminal_identity(),
+            participant_count: semantic_body.participant_count(),
+            recipient_position: semantic_body.recipient_position(),
+            semantic_recipient_inventory_identity: semantic_body.identity()?,
+            ordered_header_identities,
+            ordered_manifest_identities,
+        };
+        if body.canonical_bytes()? != bytes
+            || body.canonical_bytes()?.len()
+                != pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_body_byte_length(
+                    body.participant_count,
+                )?
+        {
+            return Err(receipt_object_mismatch(
+                "retained authenticated recipient inventory",
+            ));
+        }
+        Ok(body)
+    }
 }
 
 /// Complete authenticated remote delivery inventory for one recipient.
@@ -369,6 +454,32 @@ pub(crate) fn verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inve
     {
         return Err(PseudorandomZeroSharingSeedReceiptError320::GeometryMismatch);
     }
+    Ok(
+        AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320 {
+            body,
+            root_matched_inventory,
+        },
+    )
+}
+
+/// Restores the typed local authenticated-inventory result from an exact
+/// retained body and freshly reverified root-matched delivery plaintexts.
+///
+/// The retained body contributes only the mailbox carrier identities that the
+/// recipient's signature already binds. This path does not reauthenticate an
+/// omitted mailbox carrier and therefore must only consume an authenticated
+/// completed receipt-custody record at the atomic join boundary.
+pub(crate) fn restore_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
+    root_matched_inventory: RootInventoryMatchedPseudorandomZeroSharingSeedRecipientInventory320,
+    retained_body_bytes: &[u8],
+) -> Result<
+    AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320,
+    PseudorandomZeroSharingSeedReceiptError320,
+> {
+    let body = PseudorandomZeroSharingAuthenticatedSeedRecipientInventoryBody320::from_retained_canonical_bytes(
+        &root_matched_inventory,
+        retained_body_bytes,
+    )?;
     Ok(
         AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320 {
             body,
@@ -1020,6 +1131,45 @@ fn read_u16(
         .try_into()
         .map_err(|_| receipt_object_mismatch(field))?;
     Ok(u16::from_le_bytes(bytes))
+}
+
+fn read_hash512_list(
+    item: &CanonicalItem,
+    expected_count: usize,
+    field: &'static str,
+) -> Result<Box<[Hash512]>, PseudorandomZeroSharingSeedReceiptError320> {
+    if item.item_type() != CanonicalItemType::HomogeneousList {
+        return Err(receipt_object_mismatch(field));
+    }
+    let bytes = item.canonical_bytes();
+    let expected_byte_length = expected_count
+        .checked_mul(Hash512::BYTE_LENGTH)
+        .and_then(|byte_length| byte_length.checked_add(6))
+        .ok_or(PseudorandomZeroSharingSeedReceiptError320::ArithmeticOverflow)?;
+    if bytes.len() != expected_byte_length
+        || bytes[..2] != CanonicalItemType::Hash512.canonical_code().to_le_bytes()
+    {
+        return Err(receipt_object_mismatch(field));
+    }
+    let encoded_count = u32::from_le_bytes(
+        bytes[2..6]
+            .try_into()
+            .map_err(|_| receipt_object_mismatch(field))?,
+    );
+    if usize::try_from(encoded_count).ok() != Some(expected_count) {
+        return Err(receipt_object_mismatch(field));
+    }
+    bytes[6..]
+        .chunks_exact(Hash512::BYTE_LENGTH)
+        .map(|identity_bytes| {
+            Ok(Hash512::from_bytes(
+                identity_bytes
+                    .try_into()
+                    .map_err(|_| receipt_object_mismatch(field))?,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Vec::into_boxed_slice)
 }
 
 fn receipt_object_mismatch(field: &'static str) -> PseudorandomZeroSharingSeedReceiptError320 {

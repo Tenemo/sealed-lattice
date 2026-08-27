@@ -155,7 +155,21 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_deallocate_secret?: (
+        pointer: number,
+        length: number,
+    ) => void;
+    sealed_lattice_join_seed_masters_320_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_transcript_core_command_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_validate_joined_seed_masters_320_with_length?: (
         pointer: number,
         length: number,
         outputLengthPointer: number,

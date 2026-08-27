@@ -1,5 +1,14 @@
 export * from './published-sdk.js';
 export {
+    isProductionJoinedSeedMasterCustodyKernel,
+    JoinedSeedMasterKernelError,
+    openProductionJoinedSeedMasterCustodyKernel,
+} from './joined-seed-master-custody-kernel.js';
+export type {
+    JoinedSeedMasterKernelErrorCode,
+    ProductionJoinedSeedMasterCustodyKernel,
+} from './joined-seed-master-custody-kernel.js';
+export {
     normalizeTranscriptCoreKernelBytesForHash,
     TranscriptCoreKernelCommandError,
 } from './transcript-core-bridge.js';

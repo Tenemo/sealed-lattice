@@ -38,6 +38,7 @@ export class TranscriptCoreKernelCommandError extends Error {
 const wasmPageByteLength = 65_536;
 const maximumTranscriptCoreCommandByteLength = 64 * 1024 * 1024;
 const maximumTranscriptCoreCommandResponseByteLength = 256 * 1024 * 1024;
+const maximumSeedMasterCustodyResponseByteLength = 16 * 1024;
 const maximumTranscriptCoreCommandJsonContainerDepth = 64;
 const maximumTranscriptCoreKernelMemoryByteLength =
     foundationProfile.maximumWasmMemoryByteLength;
@@ -403,6 +404,12 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
     readonly executeCommand: <Result>(
         request: TranscriptCoreKernelCommand,
     ) => Result;
+    readonly executeJoinedSeedMasterJoin: (
+        requestBytes: Uint8Array,
+    ) => Uint8Array;
+    readonly executeJoinedSeedMasterValidation: (
+        recordBytes: Uint8Array,
+    ) => Uint8Array;
     readonly memory: WebAssembly.Memory;
     readonly runExclusive: <Result>(
         operationName: string,
@@ -549,7 +556,10 @@ const requireKernelMemoryRange = (
 type NumberExportName =
     | 'sealed_lattice_allocate'
     | 'sealed_lattice_deallocate'
-    | 'sealed_lattice_transcript_core_command_with_length';
+    | 'sealed_lattice_deallocate_secret'
+    | 'sealed_lattice_join_seed_masters_320_with_length'
+    | 'sealed_lattice_transcript_core_command_with_length'
+    | 'sealed_lattice_validate_joined_seed_masters_320_with_length';
 
 const resolveNumberExport = <ExportName extends NumberExportName>(
     exports: TranscriptCoreKernelExports,
@@ -569,6 +579,7 @@ const resolveNumberExport = <ExportName extends NumberExportName>(
 const copyIntoKernelMemory = (
     memory: WebAssembly.Memory,
     allocate: (length: number) => number,
+    releaseAfterCopyFailure: (pointer: number, length: number) => void,
     input: Uint8Array,
 ): number => {
     assertKernelMemoryWithinProfile(memory);
@@ -577,31 +588,39 @@ const copyIntoKernelMemory = (
     }
 
     const pointer = allocate(input.length) >>> 0;
-    assertKernelMemoryWithinProfile(memory);
-    if (pointer === 0) {
-        throw new Error(
-            'The transcript-core kernel returned a null pointer for a non-empty allocation.',
-        );
-    }
-
-    const requiredByteLength = pointer + input.length;
-    if (requiredByteLength > maximumTranscriptCoreKernelMemoryByteLength) {
-        throw commandBoundaryError(
-            'MalformedLength',
-            'The transcript-core command allocation exceeds the absolute linear-memory safety bound.',
-        );
-    }
-    if (requiredByteLength > memory.buffer.byteLength) {
-        const missingByteLength = requiredByteLength - memory.buffer.byteLength;
-        const missingPageCount = Math.ceil(
-            missingByteLength / wasmPageByteLength,
-        );
-        memory.grow(missingPageCount);
+    try {
         assertKernelMemoryWithinProfile(memory);
-    }
-    new Uint8Array(memory.buffer).set(input, pointer);
+        if (pointer === 0) {
+            throw new Error(
+                'The transcript-core kernel returned a null pointer for a non-empty allocation.',
+            );
+        }
 
-    return pointer;
+        const requiredByteLength = pointer + input.length;
+        if (requiredByteLength > maximumTranscriptCoreKernelMemoryByteLength) {
+            throw commandBoundaryError(
+                'MalformedLength',
+                'The transcript-core command allocation exceeds the absolute linear-memory safety bound.',
+            );
+        }
+        if (requiredByteLength > memory.buffer.byteLength) {
+            const missingByteLength =
+                requiredByteLength - memory.buffer.byteLength;
+            const missingPageCount = Math.ceil(
+                missingByteLength / wasmPageByteLength,
+            );
+            memory.grow(missingPageCount);
+            assertKernelMemoryWithinProfile(memory);
+        }
+        new Uint8Array(memory.buffer).set(input, pointer);
+
+        return pointer;
+    } catch (error) {
+        if (pointer !== 0) {
+            releaseAfterCopyFailure(pointer, input.length);
+        }
+        throw error;
+    }
 };
 
 const copyFromKernelMemory = (
@@ -676,7 +695,12 @@ const runKernelCommand = <T>(
     let outputLength = 0;
 
     try {
-        inputPointer = copyIntoKernelMemory(memory, allocate, requestBytes);
+        inputPointer = copyIntoKernelMemory(
+            memory,
+            allocate,
+            deallocate,
+            requestBytes,
+        );
         outputLengthPointer = allocate(wasm32UsizeByteLength) >>> 0;
         assertKernelMemoryWithinProfile(memory);
         if (outputLengthPointer === 0) {
@@ -727,6 +751,88 @@ const runKernelCommand = <T>(
     }
 };
 
+const runSecretKernelOperation = (
+    memory: WebAssembly.Memory,
+    allocate: (length: number) => number,
+    deallocate: (pointer: number, length: number) => void,
+    deallocateSecret: (pointer: number, length: number) => void,
+    operationWithLength: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number,
+    inputBytes: Uint8Array,
+    operationName: string,
+): Uint8Array => {
+    if (
+        inputBytes.byteLength > foundationProfile.maximumCopiedBufferByteLength
+    ) {
+        throw commandBoundaryError(
+            'MalformedLength',
+            `The ${operationName} input exceeds the absolute copied-buffer bound.`,
+        );
+    }
+    let inputPointer = 0;
+    let outputPointer = 0;
+    let outputLengthPointer = 0;
+    let outputLength = 0;
+    try {
+        inputPointer = copyIntoKernelMemory(
+            memory,
+            allocate,
+            deallocateSecret,
+            inputBytes,
+        );
+        outputLengthPointer = allocate(wasm32UsizeByteLength) >>> 0;
+        assertKernelMemoryWithinProfile(memory);
+        if (outputLengthPointer === 0) {
+            throw new Error(
+                `The ${operationName} kernel returned a null output-length allocation.`,
+            );
+        }
+        new DataView(memory.buffer).setUint32(outputLengthPointer, 0, true);
+        outputPointer =
+            operationWithLength(
+                inputPointer,
+                inputBytes.byteLength,
+                outputLengthPointer,
+            ) >>> 0;
+        assertKernelMemoryWithinProfile(memory);
+        outputLength = readKernelOutputLength(memory, outputLengthPointer);
+        if (outputLength > maximumSeedMasterCustodyResponseByteLength) {
+            throw commandBoundaryError(
+                'MalformedLength',
+                `The ${operationName} response exceeds its absolute byte bound.`,
+            );
+        }
+        if (outputPointer !== 0 && outputPointer === inputPointer) {
+            throw new Error(
+                `The ${operationName} kernel aliased its secret input and output allocations.`,
+            );
+        }
+        return copyFromKernelMemory(
+            memory,
+            outputPointer,
+            outputLength,
+            operationName,
+        );
+    } finally {
+        if (outputPointer !== 0 && outputPointer !== inputPointer) {
+            deallocateSecret(outputPointer, outputLength);
+        }
+        if (inputPointer !== 0) {
+            deallocateSecret(inputPointer, inputBytes.byteLength);
+        }
+        if (
+            outputLengthPointer !== 0 &&
+            outputLengthPointer !== inputPointer &&
+            outputLengthPointer !== outputPointer
+        ) {
+            deallocate(outputLengthPointer, wasm32UsizeByteLength);
+        }
+    }
+};
+
 export const instantiateTranscriptCoreKernelCommandRuntime = async (
     transcriptCoreKernelUrl: URL,
     options: TranscriptCoreKernelLoaderOptions = {},
@@ -752,9 +858,21 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_deallocate',
     );
+    const deallocateSecret = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_deallocate_secret',
+    );
+    const joinSeedMastersWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_join_seed_masters_320_with_length',
+    );
     const commandWithLength = resolveNumberExport(
         wasmExports,
         'sealed_lattice_transcript_core_command_with_length',
+    );
+    const validateJoinedSeedMastersWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_validate_joined_seed_masters_320_with_length',
     );
     let kernelOperationInProgress = false;
     const runExclusive = <Result>(
@@ -785,11 +903,41 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
                 request,
             ),
         );
+    const executeJoinedSeedMasterJoin = (
+        requestBytes: Uint8Array,
+    ): Uint8Array =>
+        runExclusive('joined seed-master join', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                joinSeedMastersWithLength,
+                requestBytes,
+                'joined seed-master join',
+            ),
+        );
+    const executeJoinedSeedMasterValidation = (
+        recordBytes: Uint8Array,
+    ): Uint8Array =>
+        runExclusive('joined seed-master validation', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                validateJoinedSeedMastersWithLength,
+                recordBytes,
+                'joined seed-master validation',
+            ),
+        );
 
     return {
         allocate,
         deallocate,
         executeCommand,
+        executeJoinedSeedMasterJoin,
+        executeJoinedSeedMasterValidation,
         memory,
         runExclusive,
         wasmExports,

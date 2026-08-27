@@ -299,6 +299,15 @@ impl PseudorandomZeroSharingSubsetSeedOpening320 {
             contribution,
         })
     }
+
+    pub(crate) fn matches_retained_secret_material(
+        &self,
+        contribution: &[u8],
+        commitment_salt: &[u8],
+    ) -> bool {
+        bool::from(self.contribution.as_slice().ct_eq(contribution))
+            && bool::from(self.commitment_salt.as_slice().ct_eq(commitment_salt))
+    }
 }
 
 impl fmt::Debug for PseudorandomZeroSharingSubsetSeedOpening320 {

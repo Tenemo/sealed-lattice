@@ -2,6 +2,10 @@ import {
     configurableParticipantCountRange,
     foundationProfile,
 } from '@sealed-lattice/types';
+import {
+    isProductionJoinedSeedMasterCustodyKernel,
+    type ProductionJoinedSeedMasterCustodyKernel,
+} from '@sealed-lattice/wasm';
 
 import {
     AuthenticatedRuntimeRecordError,
@@ -35,6 +39,7 @@ import type {
 } from './untrusted-storage-transaction-store.js';
 
 const joinedCustodyRecordMagic = Uint8Array.of(0x53, 0x4c, 0x4a, 0x4d);
+const joinedCustodyJoinRequestMagic = Uint8Array.of(0x53, 0x4c, 0x4a, 0x51);
 const joinedCustodyRecordVersion = 1;
 const hashByteLength = 64;
 const preparationAttemptOrdinal = 0;
@@ -43,12 +48,21 @@ const joinedCustodyOperationDomain =
     'sealed-lattice/runtime/joined-seed-master-custody-record/v1';
 const joinedCustodyHashFieldCount = 13;
 const joinedCustodyVariableFieldCount = 4;
+const joinedCustodyJoinRequestVariableFieldCount = 5;
+const joinedCustodyContextByteLength =
+    joinedCustodyHashFieldCount * hashByteLength + 3 * 2;
 const joinedCustodyFixedPlaintextByteLength =
     joinedCustodyRecordMagic.byteLength +
     2 +
-    joinedCustodyHashFieldCount * hashByteLength +
-    3 * 2 +
+    joinedCustodyContextByteLength +
     joinedCustodyVariableFieldCount * 4;
+const joinedCustodyJoinRequestFixedByteLength =
+    joinedCustodyJoinRequestMagic.byteLength +
+    2 +
+    joinedCustodyContextByteLength +
+    joinedCustodyJoinRequestVariableFieldCount * 4;
+const joinedCustodyJoinResponseFixedByteLength = 4 + 2 + 1 + 4;
+const joinedCustodyValidationResponseByteLength = 4 + 2 + 1;
 
 export type JoinedSeedMasterCustodyContext = Readonly<{
     actionContextIdentity: Uint8Array;
@@ -77,37 +91,16 @@ export type JoinedSeedMasterCustodyLimits = Readonly<{
     transactionLifetimeMilliseconds: number;
 }>;
 
-export type JoinedSeedMasterCustodyKernelInput = Readonly<{
-    context: JoinedSeedMasterCustodyContext;
-    receiptCustodyRecordBytes: Uint8Array;
-    receiptTerminalCertificateBytes: Uint8Array;
-    rootTerminalCertificateBytes: Uint8Array;
-    sourceCustodyRecordBytes: Uint8Array;
-    verificationContextBytes: Uint8Array;
-}>;
-
-export type JoinedSeedMasterCustodyKernelValidationInput = Readonly<{
-    context: JoinedSeedMasterCustodyContext;
-    joinedMasterPayloadBytes: Uint8Array;
-    receiptTerminalCertificateBytes: Uint8Array;
-    rootTerminalCertificateBytes: Uint8Array;
-    verificationContextBytes: Uint8Array;
-}>;
-
-export type JoinedSeedMasterCustodyKernel = Readonly<{
-    joinAndEncode(
-        input: JoinedSeedMasterCustodyKernelInput,
-    ): Promise<Uint8Array> | Uint8Array;
-    validateRetained(
-        input: JoinedSeedMasterCustodyKernelValidationInput,
-    ): Promise<void> | void;
-}>;
-
 type JoinedSeedMasterCustodyRecordByteLengths = Readonly<{
     atomicTransitionCiphertextOverlapByteLength: number;
+    joinRequestByteLength: number;
+    joinResponseByteLength: number;
     joinedCiphertextByteLength: number;
     joinedPlaintextByteLength: number;
+    joinedValidationRequestByteLength: number;
+    joinedValidationResponseByteLength: number;
     logicallyReclaimedPredecessorCiphertextByteLength: number;
+    maximumKernelInputByteLength: number;
     maximumColdRestartReadByteLength: number;
 }>;
 
@@ -523,6 +516,59 @@ export const deriveJoinedSeedMasterCustodyRecordByteLengths = (input: {
         input.receiptPredecessorCiphertextByteLength,
         'Receipt predecessor ciphertext byte length',
     );
+    if (
+        sourcePredecessorCiphertextByteLength <=
+            runtimeRecordEnvelopeOverheadByteLength ||
+        receiptPredecessorCiphertextByteLength <=
+            runtimeRecordEnvelopeOverheadByteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Joined seed-master predecessors cannot contain an empty authenticated plaintext.',
+        );
+    }
+    const sourcePredecessorPlaintextByteLength =
+        sourcePredecessorCiphertextByteLength -
+        runtimeRecordEnvelopeOverheadByteLength;
+    const receiptPredecessorPlaintextByteLength =
+        receiptPredecessorCiphertextByteLength -
+        runtimeRecordEnvelopeOverheadByteLength;
+    const joinRequestByteLength = sumByteLengths(
+        [
+            joinedCustodyJoinRequestFixedByteLength,
+            sourcePredecessorPlaintextByteLength,
+            receiptPredecessorPlaintextByteLength,
+            requireByteLength(
+                input.verificationContextByteLength,
+                'Verification-context byte length',
+            ),
+            requireByteLength(
+                input.rootTerminalCertificateByteLength,
+                'Root-terminal certificate byte length',
+            ),
+            requireByteLength(
+                input.receiptTerminalCertificateByteLength,
+                'Receipt-terminal certificate byte length',
+            ),
+        ],
+        'Joined seed-master kernel request',
+    );
+    if (
+        joinRequestByteLength > foundationProfile.maximumCopiedBufferByteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'ResourceLimit',
+            'Joined seed-master kernel request exceeds the absolute copied-buffer bound.',
+        );
+    }
+    const joinResponseByteLength = checkedAdd(
+        joinedCustodyJoinResponseFixedByteLength,
+        requireByteLength(
+            input.joinedMasterPayloadByteLength,
+            'Joined master payload byte length',
+        ),
+        'Joined seed-master kernel response',
+    );
     const logicallyReclaimedPredecessorCiphertextByteLength = checkedAdd(
         sourcePredecessorCiphertextByteLength,
         receiptPredecessorCiphertextByteLength,
@@ -534,9 +580,18 @@ export const deriveJoinedSeedMasterCustodyRecordByteLengths = (input: {
             joinedCiphertextByteLength,
             'Joined seed-master atomic transition overlap',
         ),
+        joinRequestByteLength,
+        joinResponseByteLength,
         joinedCiphertextByteLength,
         joinedPlaintextByteLength,
+        joinedValidationRequestByteLength: joinedPlaintextByteLength,
+        joinedValidationResponseByteLength:
+            joinedCustodyValidationResponseByteLength,
         logicallyReclaimedPredecessorCiphertextByteLength,
+        maximumKernelInputByteLength: Math.max(
+            joinRequestByteLength,
+            joinedPlaintextByteLength,
+        ),
         maximumColdRestartReadByteLength: joinedCiphertextByteLength,
     });
 };
@@ -579,6 +634,29 @@ const concatenateBytes = (
     }
     return output;
 };
+
+const encodeContext = (context: JoinedSeedMasterCustodyContext): Uint8Array =>
+    concatenateBytes(
+        [
+            context.parameterIdentity,
+            context.rosterIdentity,
+            context.actionContextIdentity,
+            context.preparationContextIdentity,
+            context.catalogCompilerIdentity,
+            context.statePredecessorIdentity,
+            context.rootTerminalIdentity,
+            context.rootTerminalCertificateIdentity,
+            context.receiptTerminalIdentity,
+            context.receiptTerminalCertificateIdentity,
+            context.authenticatedRecipientInventoryIdentity,
+            context.receiptBodyIdentity,
+            context.receiptEnvelopeIdentity,
+            unsigned16LittleEndian(context.preparationAttemptOrdinal),
+            unsigned16LittleEndian(context.participantCount),
+            unsigned16LittleEndian(context.participantPosition),
+        ],
+        joinedCustodyContextByteLength,
+    );
 
 const copyTransitionInput = (
     value: unknown,
@@ -681,41 +759,89 @@ const encodeRecord = (record: JoinedSeedMasterRecord): Uint8Array => {
         verificationContextByteLength:
             record.verificationContextBytes.byteLength,
     });
-    return concatenateBytes(
-        [
-            joinedCustodyRecordMagic,
-            unsigned16LittleEndian(joinedCustodyRecordVersion),
-            record.context.parameterIdentity,
-            record.context.rosterIdentity,
-            record.context.actionContextIdentity,
-            record.context.preparationContextIdentity,
-            record.context.catalogCompilerIdentity,
-            record.context.statePredecessorIdentity,
-            record.context.rootTerminalIdentity,
-            record.context.rootTerminalCertificateIdentity,
-            record.context.receiptTerminalIdentity,
-            record.context.receiptTerminalCertificateIdentity,
-            record.context.authenticatedRecipientInventoryIdentity,
-            record.context.receiptBodyIdentity,
-            record.context.receiptEnvelopeIdentity,
-            unsigned16LittleEndian(record.context.preparationAttemptOrdinal),
-            unsigned16LittleEndian(record.context.participantCount),
-            unsigned16LittleEndian(record.context.participantPosition),
-            unsigned32LittleEndian(record.verificationContextBytes.byteLength),
-            unsigned32LittleEndian(
-                record.rootTerminalCertificateBytes.byteLength,
+    const contextBytes = encodeContext(record.context);
+    try {
+        return concatenateBytes(
+            [
+                joinedCustodyRecordMagic,
+                unsigned16LittleEndian(joinedCustodyRecordVersion),
+                contextBytes,
+                unsigned32LittleEndian(
+                    record.verificationContextBytes.byteLength,
+                ),
+                unsigned32LittleEndian(
+                    record.rootTerminalCertificateBytes.byteLength,
+                ),
+                unsigned32LittleEndian(
+                    record.receiptTerminalCertificateBytes.byteLength,
+                ),
+                unsigned32LittleEndian(
+                    record.joinedMasterPayloadBytes.byteLength,
+                ),
+                record.verificationContextBytes,
+                record.rootTerminalCertificateBytes,
+                record.receiptTerminalCertificateBytes,
+                record.joinedMasterPayloadBytes,
+            ],
+            joinedPlaintextByteLength,
+        );
+    } finally {
+        contextBytes.fill(0);
+    }
+};
+
+const encodeJoinRequest = (input: {
+    context: JoinedSeedMasterCustodyContext;
+    receiptCustodyRecordBytes: Uint8Array;
+    sourceCustodyRecordBytes: Uint8Array;
+    transitionInput: JoinedSeedMasterTransitionInput;
+}): Uint8Array => {
+    const variableFields = [
+        input.sourceCustodyRecordBytes,
+        input.receiptCustodyRecordBytes,
+        input.transitionInput.verificationContextBytes,
+        input.transitionInput.rootTerminalCertificateBytes,
+        input.transitionInput.receiptTerminalCertificateBytes,
+    ] as const;
+    const variableFieldByteLength = variableFields.reduce(
+        (total, fieldBytes, fieldPosition) =>
+            checkedAdd(
+                total,
+                requireByteLength(
+                    fieldBytes.byteLength,
+                    `Joined seed-master request field ${fieldPosition} byte length`,
+                ),
+                'Joined seed-master request',
             ),
-            unsigned32LittleEndian(
-                record.receiptTerminalCertificateBytes.byteLength,
-            ),
-            unsigned32LittleEndian(record.joinedMasterPayloadBytes.byteLength),
-            record.verificationContextBytes,
-            record.rootTerminalCertificateBytes,
-            record.receiptTerminalCertificateBytes,
-            record.joinedMasterPayloadBytes,
-        ],
-        joinedPlaintextByteLength,
+        0,
     );
+    const requestByteLength = sumByteLengths(
+        [joinedCustodyJoinRequestFixedByteLength, variableFieldByteLength],
+        'Joined seed-master request',
+    );
+    if (requestByteLength > foundationProfile.maximumCopiedBufferByteLength) {
+        throw new AuthenticatedRuntimeRecordError(
+            'ResourceLimit',
+            'Joined seed-master request exceeds the absolute copied-buffer bound.',
+        );
+    }
+    const contextBytes = encodeContext(input.context);
+    try {
+        return concatenateBytes(
+            [
+                joinedCustodyJoinRequestMagic,
+                unsigned16LittleEndian(joinedCustodyRecordVersion),
+                contextBytes,
+                ...variableFields.flatMap((fieldBytes) => [
+                    unsigned32LittleEndian(fieldBytes.byteLength),
+                    fieldBytes,
+                ]),
+            ],
+            requestByteLength,
+        );
+    } finally {
+        contextBytes.fill(0);
+    }
 };
 
 class BoundedRecordCursor {
@@ -1058,68 +1184,6 @@ const destroyStorageSnapshot = (
     destroySourcePredecessor(snapshot.source);
 };
 
-const createKernelInput = (input: {
-    context: JoinedSeedMasterCustodyContext;
-    receipt: CompletedSeedRecipientReceiptCustodyForMasterJoin;
-    source: CompletedSeedCatalogSourceCustodyForMasterJoin;
-    transitionInput: JoinedSeedMasterTransitionInput;
-}): JoinedSeedMasterCustodyKernelInput =>
-    Object.freeze({
-        context: copyContextValue(input.context),
-        receiptCustodyRecordBytes: input.receipt.recordBytes.slice(),
-        receiptTerminalCertificateBytes:
-            input.transitionInput.receiptTerminalCertificateBytes.slice(),
-        rootTerminalCertificateBytes:
-            input.transitionInput.rootTerminalCertificateBytes.slice(),
-        sourceCustodyRecordBytes: input.source.recordBytes.slice(),
-        verificationContextBytes:
-            input.transitionInput.verificationContextBytes.slice(),
-    });
-
-const destroyKernelInput = (
-    input: JoinedSeedMasterCustodyKernelInput | undefined,
-): void => {
-    if (input === undefined) {
-        return;
-    }
-    destroyContext(input.context);
-    input.receiptCustodyRecordBytes.fill(0);
-    input.receiptTerminalCertificateBytes.fill(0);
-    input.rootTerminalCertificateBytes.fill(0);
-    input.sourceCustodyRecordBytes.fill(0);
-    input.verificationContextBytes.fill(0);
-};
-
-const createKernelValidationInput = (
-    record: JoinedSeedMasterRecord,
-): JoinedSeedMasterCustodyKernelValidationInput =>
-    Object.freeze({
-        context: copyContextValue(record.context),
-        joinedMasterPayloadBytes: record.joinedMasterPayloadBytes.slice(),
-        receiptTerminalCertificateBytes:
-            record.receiptTerminalCertificateBytes.slice(),
-        rootTerminalCertificateBytes:
-            record.rootTerminalCertificateBytes.slice(),
-        verificationContextBytes: record.verificationContextBytes.slice(),
-    });
-
-const destroyKernelValidationInput = (
-    input: JoinedSeedMasterCustodyKernelValidationInput | undefined,
-): void => {
-    if (input === undefined) {
-        return;
-    }
-    destroyContext(input.context);
-    input.joinedMasterPayloadBytes.fill(0);
-    input.receiptTerminalCertificateBytes.fill(0);
-    input.rootTerminalCertificateBytes.fill(0);
-    input.verificationContextBytes.fill(0);
-};
-
-const isUint8Array = (value: unknown): value is Uint8Array =>
-    ArrayBuffer.isView(value) &&
-    Object.prototype.toString.call(value) === '[object Uint8Array]';
-
 const closeTransactionAfterFailure = async (
     transaction: UntrustedStorageTransaction,
     operationFailure: unknown,
@@ -1204,15 +1268,15 @@ const copyRetention = (
  * encrypted joined-master record after the kernel validates every exact
  * predecessor and terminal byte.
  *
- * The injected kernel is still a model boundary until the production scalar
- * Rust/WebAssembly adapter owns both record decoders and the positive join.
- * This owner returns only inert retention metadata and exposes no secret bytes
- * or preparation-continuation method.
+ * The integrity-pinned scalar Rust/WebAssembly kernel owns both predecessor
+ * decoders, public-terminal verification, source correspondence, and the
+ * positive join. This owner returns only inert retention metadata and exposes
+ * no secret bytes or preparation-continuation method.
  */
 export class JoinedSeedMasterCustody {
     readonly #context: JoinedSeedMasterCustodyContext;
     readonly #joinedRecordKey: string;
-    readonly #kernel: JoinedSeedMasterCustodyKernel;
+    readonly #kernel: ProductionJoinedSeedMasterCustodyKernel;
     readonly #limits: JoinedSeedMasterCustodyLimits;
     readonly #protection: RuntimeRecordProtection;
     readonly #receiptContext: SeedRecipientReceiptCustodyContext;
@@ -1224,20 +1288,17 @@ export class JoinedSeedMasterCustody {
 
     public constructor(input: {
         context: JoinedSeedMasterCustodyContext;
-        kernel: JoinedSeedMasterCustodyKernel;
+        kernel: ProductionJoinedSeedMasterCustodyKernel;
         limits: JoinedSeedMasterCustodyLimits;
         protection: RuntimeRecordProtection;
         receiptCustodyLimits: SeedRecipientReceiptCustodyLimits;
         recencyCoordinator: AuthenticatedStorageRecencyCoordinator;
         sourceCustodyLimits: SeedCatalogSourceCustodyLimits;
     }) {
-        if (
-            typeof input.kernel?.joinAndEncode !== 'function' ||
-            typeof input.kernel?.validateRetained !== 'function'
-        ) {
+        if (!isProductionJoinedSeedMasterCustodyKernel(input.kernel)) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidConfiguration',
-                'Joined seed-master custody requires a complete kernel boundary.',
+                'Joined seed-master custody requires an integrity-pinned production kernel.',
             );
         }
         if (
@@ -1252,10 +1313,7 @@ export class JoinedSeedMasterCustody {
             );
         }
         this.#context = copyContext(input.context);
-        this.#kernel = Object.freeze({
-            joinAndEncode: input.kernel.joinAndEncode.bind(input.kernel),
-            validateRetained: input.kernel.validateRetained.bind(input.kernel),
-        });
+        this.#kernel = input.kernel;
         this.#limits = copyLimits(input.limits);
         this.#protection = input.protection;
         this.#receiptContext = createReceiptContext(this.#context);
@@ -1297,7 +1355,7 @@ export class JoinedSeedMasterCustody {
                     return undefined;
                 }
                 this.#requireRawPredecessorsErased(snapshot);
-                await this.#validate(snapshot.joined.record);
+                this.#validate(snapshot.joined.record);
                 return copyRetention(
                     snapshot.joined.record,
                     snapshot.joined.sealedBytes.byteLength,
@@ -1328,7 +1386,7 @@ export class JoinedSeedMasterCustody {
                     snapshot.joined.record,
                     transitionInput,
                 );
-                await this.#validate(snapshot.joined.record);
+                this.#validate(snapshot.joined.record);
                 return copyRetention(
                     snapshot.joined.record,
                     snapshot.joined.sealedBytes.byteLength,
@@ -1347,7 +1405,7 @@ export class JoinedSeedMasterCustody {
                     'Joined seed-master custody is pending complete source and recipient predecessors.',
                 );
             }
-            const joinedMasterPayloadBytes = await this.#produce({
+            const joinedMasterPayloadBytes = this.#produce({
                 receipt,
                 source,
                 transitionInput,
@@ -1359,7 +1417,7 @@ export class JoinedSeedMasterCustody {
                     joinedMasterPayloadBytes,
                     transitionInput,
                 });
-                await this.#validate(record);
+                this.#validate(record);
                 try {
                     const committedSealedBytes =
                         await this.#recencyCoordinator.runMutation((store) =>
@@ -1400,7 +1458,7 @@ export class JoinedSeedMasterCustody {
                 snapshot.joined.record,
                 transitionInput,
             );
-            await this.#validate(snapshot.joined.record);
+            this.#validate(snapshot.joined.record);
             return copyRetention(
                 snapshot.joined.record,
                 snapshot.joined.sealedBytes.byteLength,
@@ -1458,21 +1516,23 @@ export class JoinedSeedMasterCustody {
         });
     }
 
-    async #produce(input: {
+    #produce(input: {
         receipt: CompletedSeedRecipientReceiptCustodyForMasterJoin;
         source: CompletedSeedCatalogSourceCustodyForMasterJoin;
         transitionInput: JoinedSeedMasterTransitionInput;
-    }): Promise<Uint8Array> {
-        const kernelInput = createKernelInput({
+    }): Uint8Array {
+        const requestBytes = encodeJoinRequest({
             context: this.#context,
-            ...input,
+            receiptCustodyRecordBytes: input.receipt.recordBytes,
+            sourceCustodyRecordBytes: input.source.recordBytes,
+            transitionInput: input.transitionInput,
         });
-        let produced: unknown;
+        let produced: Uint8Array | undefined;
         let productionFailed = false;
         let productionFailure: unknown;
         try {
             try {
-                produced = await this.#kernel.joinAndEncode(kernelInput);
+                produced = this.#kernel.joinAndEncode(requestBytes);
             } catch (error) {
                 productionFailed = true;
                 productionFailure = error;
@@ -1490,20 +1550,18 @@ export class JoinedSeedMasterCustody {
                 'joinedMasterPayloadBytes',
             );
         } finally {
-            if (isUint8Array(produced)) {
-                produced.fill(0);
-            }
-            destroyKernelInput(kernelInput);
+            produced?.fill(0);
+            requestBytes.fill(0);
         }
     }
 
-    async #validate(record: JoinedSeedMasterRecord): Promise<void> {
-        const validationInput = createKernelValidationInput(record);
+    #validate(record: JoinedSeedMasterRecord): void {
+        const recordBytes = encodeRecord(record);
         let validationFailed = false;
         let validationFailure: unknown;
         try {
             try {
-                await this.#kernel.validateRetained(validationInput);
+                this.#kernel.validateRetained(recordBytes);
             } catch (error) {
                 validationFailed = true;
                 validationFailure = error;
@@ -1516,7 +1574,7 @@ export class JoinedSeedMasterCustody {
                 );
             }
         } finally {
-            destroyKernelValidationInput(validationInput);
+            recordBytes.fill(0);
         }
     }
 

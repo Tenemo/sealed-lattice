@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import type { ProductionJoinedSeedMasterCustodyKernel } from '@sealed-lattice/wasm';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@sealed-lattice/wasm', () => ({
+    isProductionJoinedSeedMasterCustodyKernel: () => true,
+}));
 
 import {
     createRuntimeRecordProtection,
@@ -9,9 +14,6 @@ import {
     JoinedSeedMasterCustody,
     deriveJoinedSeedMasterCustodyRecordByteLengths,
     type JoinedSeedMasterCustodyContext,
-    type JoinedSeedMasterCustodyKernel,
-    type JoinedSeedMasterCustodyKernelInput,
-    type JoinedSeedMasterCustodyKernelValidationInput,
     type JoinedSeedMasterCustodyLimits,
 } from '#packages/protocol/src/runtime/joined-seed-master-custody';
 import {
@@ -426,76 +428,69 @@ const expectedJoinedPayload = (
         ),
     ]);
 
-class DeterministicJoinedKernel implements JoinedSeedMasterCustodyKernel {
+class DeterministicJoinedKernel {
+    readonly #context: JoinedSeedMasterCustodyContext;
     public failNextValidationCount = 0;
     public joinCallCount = 0;
     public validationCallCount = 0;
 
-    public joinAndEncode(
-        input: JoinedSeedMasterCustodyKernelInput,
-    ): Uint8Array {
+    public constructor(joinedContext: JoinedSeedMasterCustodyContext) {
+        this.#context = joinedContext;
+    }
+
+    public joinAndEncode(requestBytes: Uint8Array): Uint8Array {
         this.joinCallCount += 1;
         if (
             !bytesEqual(
-                input.sourceCustodyRecordBytes.subarray(0, 4),
+                requestBytes.subarray(0, 4),
+                Uint8Array.of(0x53, 0x4c, 0x4a, 0x51),
+            ) ||
+            !containsBytes(
+                requestBytes,
                 Uint8Array.of(0x53, 0x4c, 0x43, 0x53),
             ) ||
-            !bytesEqual(
-                input.receiptCustodyRecordBytes.subarray(0, 4),
+            !containsBytes(
+                requestBytes,
                 Uint8Array.of(0x53, 0x4c, 0x52, 0x43),
             ) ||
             !containsBytes(
-                input.sourceCustodyRecordBytes,
-                input.context.catalogCompilerIdentity,
+                requestBytes,
+                this.#context.catalogCompilerIdentity,
             ) ||
             !containsBytes(
-                input.receiptCustodyRecordBytes,
-                input.context.authenticatedRecipientInventoryIdentity,
+                requestBytes,
+                this.#context.authenticatedRecipientInventoryIdentity,
             )
         ) {
             throw new Error('The test join received a wrong predecessor.');
         }
-        this.requirePublicInputs(input);
-        return expectedJoinedPayload(input.context);
+        this.requirePublicInputs(requestBytes);
+        return expectedJoinedPayload(this.#context);
     }
 
-    public validateRetained(
-        input: JoinedSeedMasterCustodyKernelValidationInput,
-    ): void {
+    public validateRetained(recordBytes: Uint8Array): void {
         this.validationCallCount += 1;
         if (this.failNextValidationCount > 0) {
             this.failNextValidationCount -= 1;
             throw new Error('Injected retained-state validation failure.');
         }
-        this.requirePublicInputs(input);
         if (
             !bytesEqual(
-                input.joinedMasterPayloadBytes,
-                expectedJoinedPayload(input.context),
-            )
+                recordBytes.subarray(0, 4),
+                Uint8Array.of(0x53, 0x4c, 0x4a, 0x4d),
+            ) ||
+            !containsBytes(recordBytes, expectedJoinedPayload(this.#context))
         ) {
             throw new Error('The test joined payload is noncanonical.');
         }
+        this.requirePublicInputs(recordBytes);
     }
 
-    private requirePublicInputs(
-        input:
-            | JoinedSeedMasterCustodyKernelInput
-            | JoinedSeedMasterCustodyKernelValidationInput,
-    ): void {
+    private requirePublicInputs(recordBytes: Uint8Array): void {
         if (
-            !bytesEqual(
-                input.rootTerminalCertificateBytes,
-                rootTerminalBytes(input.context),
-            ) ||
-            !bytesEqual(
-                input.receiptTerminalCertificateBytes,
-                receiptTerminalBytes(input.context),
-            ) ||
-            !bytesEqual(
-                input.verificationContextBytes,
-                verificationContextBytes(input.context),
-            )
+            !containsBytes(recordBytes, rootTerminalBytes(this.#context)) ||
+            !containsBytes(recordBytes, receiptTerminalBytes(this.#context)) ||
+            !containsBytes(recordBytes, verificationContextBytes(this.#context))
         ) {
             throw new Error('The test join received a mixed terminal view.');
         }
@@ -580,7 +575,7 @@ const createFixture = async (input?: {
         });
         publication.receiptEnvelopeBytes.fill(0);
     }
-    const kernel = new DeterministicJoinedKernel();
+    const kernel = new DeterministicJoinedKernel(joinedContext);
     return Object.freeze({
         adapter: opened.adapter,
         anchor,
@@ -590,7 +585,7 @@ const createFixture = async (input?: {
         cryptoProvider,
         custody: new JoinedSeedMasterCustody({
             context: joinedContext,
-            kernel,
+            kernel: kernel as unknown as ProductionJoinedSeedMasterCustodyKernel,
             limits: joinedLimits,
             protection,
             receiptCustodyLimits: receiptLimits,
@@ -624,7 +619,7 @@ const reopen = async (
     });
     return new JoinedSeedMasterCustody({
         context: fixture.context,
-        kernel: fixture.kernel,
+        kernel: fixture.kernel as unknown as ProductionJoinedSeedMasterCustodyKernel,
         limits: joinedLimits,
         protection,
         receiptCustodyLimits: receiptLimits,
@@ -672,37 +667,84 @@ const assertRawPredecessorsAbsent = async (
 describe('joined seed-master custody', () => {
     it('independently derives the exact joined record and atomic predecessor overlap', () => {
         const derived = deriveJoinedSeedMasterCustodyRecordByteLengths({
-            joinedMasterPayloadByteLength: 4_926,
+            joinedMasterPayloadByteLength: 4_894,
             receiptPredecessorCiphertextByteLength: 569_465,
             receiptTerminalCertificateByteLength: 36_340,
             rootTerminalCertificateByteLength: 36_230,
             sourcePredecessorCiphertextByteLength: 677_795,
-            verificationContextByteLength: 370,
+            verificationContextByteLength: 623_110,
         });
         const independentFixedRecordByteLength =
             4 + 2 + 13 * 64 + 3 * 2 + 4 * 4;
         const independentJoinedPlaintextByteLength =
-            independentFixedRecordByteLength + 4_926 + 36_340 + 36_230 + 370;
+            independentFixedRecordByteLength +
+            4_894 +
+            36_340 +
+            36_230 +
+            623_110;
         const independentJoinedCiphertextByteLength =
             independentJoinedPlaintextByteLength + 54;
         const independentPredecessorCiphertextByteLength = 677_795 + 569_465;
+        const independentJoinRequestByteLength =
+            4 +
+            2 +
+            13 * 64 +
+            3 * 2 +
+            5 * 4 +
+            (677_795 - 54) +
+            (569_465 - 54) +
+            623_110 +
+            36_230 +
+            36_340;
+        const independentJoinResponseByteLength = 4 + 2 + 1 + 4 + 4_894;
 
         expect(derived).toEqual({
             atomicTransitionCiphertextOverlapByteLength:
                 independentPredecessorCiphertextByteLength +
                 independentJoinedCiphertextByteLength,
+            joinRequestByteLength: independentJoinRequestByteLength,
+            joinResponseByteLength: independentJoinResponseByteLength,
             joinedCiphertextByteLength: independentJoinedCiphertextByteLength,
             joinedPlaintextByteLength: independentJoinedPlaintextByteLength,
+            joinedValidationRequestByteLength:
+                independentJoinedPlaintextByteLength,
+            joinedValidationResponseByteLength: 7,
             logicallyReclaimedPredecessorCiphertextByteLength:
                 independentPredecessorCiphertextByteLength,
+            maximumKernelInputByteLength: independentJoinRequestByteLength,
             maximumColdRestartReadByteLength:
                 independentJoinedCiphertextByteLength,
         });
-        expect(derived.joinedPlaintextByteLength).toBe(78_726);
-        expect(derived.joinedCiphertextByteLength).toBe(78_780);
+        expect(derived.joinedPlaintextByteLength).toBe(701_434);
+        expect(derived.joinedCiphertextByteLength).toBe(701_488);
+        expect(derived.joinRequestByteLength).toBe(1_943_696);
+        expect(derived.joinResponseByteLength).toBe(4_905);
         expect(derived.atomicTransitionCiphertextOverlapByteLength).toBe(
-            1_326_040,
+            1_948_748,
         );
+    });
+
+    it('refuses an empty predecessor plaintext and an oversized exact kernel request', () => {
+        const commonInput = {
+            joinedMasterPayloadByteLength: 4_894,
+            receiptPredecessorCiphertextByteLength: 569_465,
+            receiptTerminalCertificateByteLength: 36_340,
+            rootTerminalCertificateByteLength: 36_230,
+            sourcePredecessorCiphertextByteLength: 677_795,
+            verificationContextByteLength: 623_110,
+        };
+        expect(() =>
+            deriveJoinedSeedMasterCustodyRecordByteLengths({
+                ...commonInput,
+                sourcePredecessorCiphertextByteLength: 54,
+            }),
+        ).toThrow('cannot contain an empty authenticated plaintext');
+        expect(() =>
+            deriveJoinedSeedMasterCustodyRecordByteLengths({
+                ...commonInput,
+                verificationContextByteLength: 8 * 1024 * 1024,
+            }),
+        ).toThrow('absolute copied-buffer bound');
     });
 
     it('atomically replaces actual completed predecessor records and resumes without exposing masters', async () => {

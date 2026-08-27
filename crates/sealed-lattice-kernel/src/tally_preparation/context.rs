@@ -1,8 +1,8 @@
 use crate::{
-    encoding::{append_bytes, append_varuint},
+    encoding::{CanonicalReader, append_bytes, append_varuint},
     foundation::Hash512,
     hashing::hash_framed_parts_512,
-    tally_circuit::CompiledTallyCircuit,
+    tally_circuit::{CompiledTallyCircuit, TallyCircuitProfile},
 };
 
 use super::TallyPreparationError;
@@ -49,6 +49,10 @@ impl TallyPreparationContext {
         self.participant_count
     }
 
+    pub(crate) const fn action_context_hash(self) -> Hash512 {
+        self.action_context_hash
+    }
+
     pub(crate) const fn roster_hash(self) -> Hash512 {
         self.roster_hash
     }
@@ -83,10 +87,80 @@ impl TallyPreparationContext {
         bytes
     }
 
+    /// Decodes one exact preparation context without granting preparation
+    /// authority. The caller must still verify every object that binds this
+    /// context and the selected circuit identity.
+    pub(crate) fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, TallyPreparationError> {
+        let mut reader = CanonicalReader::new(bytes);
+        let magic_byte_length = usize::try_from(reader.read_varuint()?)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        if magic_byte_length != TALLY_PREPARATION_CONTEXT_MAGIC.len()
+            || reader.read_exact(magic_byte_length)? != TALLY_PREPARATION_CONTEXT_MAGIC
+        {
+            return Err(TallyPreparationError::PreparationContextEncodingMismatch);
+        }
+        if reader.read_varuint()? != TALLY_PREPARATION_CONTEXT_VERSION {
+            return Err(TallyPreparationError::PreparationContextEncodingMismatch);
+        }
+        let action_context_hash = read_hash512(&mut reader)?;
+        let roster_hash = read_hash512(&mut reader)?;
+        let circuit_identity = read_hash512(&mut reader)?;
+        let compiler_identity = read_hash512(&mut reader)?;
+        let attempt_identifier_byte_length = usize::try_from(reader.read_varuint()?)
+            .map_err(|_| TallyPreparationError::IntegerConversion)?;
+        if attempt_identifier_byte_length != 32 {
+            return Err(TallyPreparationError::PreparationContextEncodingMismatch);
+        }
+        let attempt_identifier = reader
+            .read_exact(attempt_identifier_byte_length)?
+            .try_into()
+            .map_err(|_| TallyPreparationError::PreparationContextEncodingMismatch)?;
+        let participant_count = read_unsigned16(&mut reader)?;
+        let option_count = read_unsigned16(&mut reader)?;
+        let top_count = read_unsigned16(&mut reader)?;
+        if !reader.is_finished()
+            || TallyCircuitProfile::new(participant_count, option_count, top_count).is_err()
+        {
+            return Err(TallyPreparationError::PreparationContextEncodingMismatch);
+        }
+        let context = Self {
+            action_context_hash,
+            roster_hash,
+            circuit_identity,
+            compiler_identity,
+            attempt_identifier,
+            participant_count,
+            option_count,
+            top_count,
+        };
+        if context.canonical_bytes() != bytes {
+            return Err(TallyPreparationError::PreparationContextEncodingMismatch);
+        }
+        Ok(context)
+    }
+
     pub(crate) fn identity(self) -> Hash512 {
         Hash512::from_bytes(hash_framed_parts_512(
             TALLY_PREPARATION_CONTEXT_IDENTITY_DOMAIN,
             &[&self.canonical_bytes()],
         ))
     }
+}
+
+fn read_hash512(reader: &mut CanonicalReader<'_>) -> Result<Hash512, TallyPreparationError> {
+    let byte_length = usize::try_from(reader.read_varuint()?)
+        .map_err(|_| TallyPreparationError::IntegerConversion)?;
+    if byte_length != Hash512::BYTE_LENGTH {
+        return Err(TallyPreparationError::PreparationContextEncodingMismatch);
+    }
+    Ok(Hash512::from_bytes(
+        reader
+            .read_exact(byte_length)?
+            .try_into()
+            .map_err(|_| TallyPreparationError::PreparationContextEncodingMismatch)?,
+    ))
+}
+
+fn read_unsigned16(reader: &mut CanonicalReader<'_>) -> Result<u16, TallyPreparationError> {
+    u16::try_from(reader.read_varuint()?).map_err(|_| TallyPreparationError::IntegerConversion)
 }

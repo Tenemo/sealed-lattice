@@ -49,6 +49,7 @@ mod pseudorandom_zero_sharing_seed_catalog_state_320;
 mod pseudorandom_zero_sharing_seed_catalog_state_output_320;
 mod pseudorandom_zero_sharing_seed_delivery_320;
 mod pseudorandom_zero_sharing_seed_mailbox_320;
+pub(crate) mod pseudorandom_zero_sharing_seed_master_custody_320;
 mod pseudorandom_zero_sharing_seed_master_join_320;
 mod pseudorandom_zero_sharing_seed_receipt_320;
 mod pseudorandom_zero_sharing_seed_receipt_terminal_320;
@@ -148,6 +149,8 @@ mod pseudorandom_zero_sharing_seed_catalog_state_output_320_tests;
 mod pseudorandom_zero_sharing_seed_delivery_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_mailbox_320_tests;
+#[cfg(test)]
+mod pseudorandom_zero_sharing_seed_master_custody_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_seed_master_join_320_tests;
 #[cfg(test)]
@@ -448,6 +451,7 @@ pub(crate) enum TallyPreparationError {
     },
     TrailingLabelShareArtifactBytes,
     PreparationContextCircuitMismatch,
+    PreparationContextEncodingMismatch,
     PreparationMultiplicationIndexOutOfRange {
         operation_index: u64,
         operation_count: u64,
@@ -1020,6 +1024,8 @@ impl fmt::Display for TallyPreparationError {
             }
             Self::PreparationContextCircuitMismatch => formatter
                 .write_str("preparation context does not match the compiled tally circuit"),
+            Self::PreparationContextEncodingMismatch => formatter
+                .write_str("preparation context encoding is malformed or noncanonical"),
             Self::PreparationMultiplicationIndexOutOfRange {
                 operation_index,
                 operation_count,

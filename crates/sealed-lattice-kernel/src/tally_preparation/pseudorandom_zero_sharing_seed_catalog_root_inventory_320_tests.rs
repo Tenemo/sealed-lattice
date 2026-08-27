@@ -92,11 +92,11 @@ use super::{
 const COMPLETION_ROOT_INVENTORY_BODY_BYTE_LENGTH: usize = 931;
 
 #[derive(Clone)]
-struct OwnedRootAuthorizationPackage320 {
-    root_body_bytes: Vec<u8>,
-    reservation_certificate_bytes: Vec<u8>,
-    exact_output_certificate_bytes: Vec<u8>,
-    contributor_signature_envelope_bytes: Vec<u8>,
+pub(super) struct OwnedRootAuthorizationPackage320 {
+    pub(super) root_body_bytes: Vec<u8>,
+    pub(super) reservation_certificate_bytes: Vec<u8>,
+    pub(super) exact_output_certificate_bytes: Vec<u8>,
+    pub(super) contributor_signature_envelope_bytes: Vec<u8>,
 }
 
 impl OwnedRootAuthorizationPackage320 {
@@ -1297,7 +1297,7 @@ fn marked_bytes<const BYTE_LENGTH: usize>(marker: u8, ordinal: u64) -> [u8; BYTE
     bytes
 }
 
-fn signed_root_terminal_certificate(
+pub(super) fn signed_root_terminal_certificate(
     root_inventory: &VerifiedPseudorandomZeroSharingSeedCatalogRootInventory320,
     signing_keys: &[ml_dsa_65::PrivateKey],
     signature_seed_marker: u8,
@@ -1391,7 +1391,7 @@ fn root_authorization_package(
     )
 }
 
-fn authorize_root_body(
+pub(super) fn authorize_root_body(
     root_body: PseudorandomZeroSharingSeedCatalogRootBody320,
     roster: &Roster,
     signing_keys: &[ml_dsa_65::PrivateKey],

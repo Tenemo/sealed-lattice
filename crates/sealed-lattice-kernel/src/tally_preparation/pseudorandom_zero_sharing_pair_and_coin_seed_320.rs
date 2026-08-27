@@ -503,6 +503,15 @@ impl PseudorandomZeroSharingPairSeedOpening320 {
             )?,
         })
     }
+
+    pub(crate) fn matches_retained_secret_material(
+        &self,
+        contribution: &[u8],
+        commitment_salt: &[u8],
+    ) -> bool {
+        bool::from(self.contribution.as_slice().ct_eq(contribution))
+            && bool::from(self.commitment_salt.as_slice().ct_eq(commitment_salt))
+    }
 }
 
 impl fmt::Debug for PseudorandomZeroSharingPairSeedOpening320 {
@@ -626,6 +635,15 @@ impl CollectiveCoinSourceOpening320 {
                 "coin source",
             )?,
         })
+    }
+
+    pub(crate) fn matches_retained_secret_material(
+        &self,
+        source: &[u8],
+        commitment_salt: &[u8],
+    ) -> bool {
+        bool::from(self.source.as_slice().ct_eq(source))
+            && bool::from(self.commitment_salt.as_slice().ct_eq(commitment_salt))
     }
 }
 
