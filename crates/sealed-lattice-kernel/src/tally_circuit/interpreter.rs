@@ -81,7 +81,6 @@ pub(super) fn encode_tally_input_bits(
     input: &TallyEvaluationInput,
 ) -> Result<Vec<bool>, TallyCircuitError> {
     let participant_count = usize::from(circuit.profile().participant_count());
-    let option_count = usize::from(circuit.profile().option_count());
     let participant_ballot_attempts = input.participant_ballot_attempts();
     if participant_ballot_attempts.len() != participant_count {
         return Err(TallyCircuitError::InputParticipantCountMismatch {
@@ -90,41 +89,80 @@ pub(super) fn encode_tally_input_bits(
         });
     }
 
-    let score_bit_width = circuit.geometry().score_bit_width;
-    let maximum_score_encoding = (1_usize << score_bit_width) - 1;
     let mut input_bits = Vec::with_capacity(circuit.geometry().input_bit_count);
     for (participant_position, ballot_attempts) in participant_ballot_attempts.iter().enumerate() {
-        if ballot_attempts.len() != TALLY_BALLOT_ATTEMPT_COUNT {
-            return Err(TallyCircuitError::InputBallotAttemptCountMismatch {
+        input_bits.extend(encode_tally_ballot_attempt_input_bits(
+            circuit,
+            participant_position,
+            ballot_attempts,
+        )?);
+    }
+    Ok(input_bits)
+}
+
+/// Encodes one participant's fixed ballot attempts in the compiler's input
+/// order: attempt, presence, option, then little-endian score bit.
+///
+/// This is the single encoding owner shared by whole-circuit evaluation and
+/// the unactivated masked-ballot bundle candidate.
+pub(crate) fn encode_tally_ballot_attempt_input_bits(
+    circuit: &CompiledTallyCircuit,
+    participant_position: usize,
+    ballot_attempts: &[super::TallyBallotAttemptInput],
+) -> Result<Vec<bool>, TallyCircuitError> {
+    if participant_position >= usize::from(circuit.profile().participant_count()) {
+        return Err(TallyCircuitError::InputParticipantPositionOutOfRange {
+            participant_position,
+            participant_count: usize::from(circuit.profile().participant_count()),
+        });
+    }
+    if ballot_attempts.len() != TALLY_BALLOT_ATTEMPT_COUNT {
+        return Err(TallyCircuitError::InputBallotAttemptCountMismatch {
+            participant_position,
+            expected: TALLY_BALLOT_ATTEMPT_COUNT,
+            actual: ballot_attempts.len(),
+        });
+    }
+
+    let option_count = usize::from(circuit.profile().option_count());
+    let score_bit_width = circuit.geometry().score_bit_width;
+    let maximum_score_encoding = (1_usize << score_bit_width) - 1;
+    let input_bit_count = ballot_attempts
+        .len()
+        .checked_mul(
+            1_usize
+                .checked_add(
+                    option_count
+                        .checked_mul(score_bit_width)
+                        .ok_or(TallyCircuitError::ArithmeticOverflow)?,
+                )
+                .ok_or(TallyCircuitError::ArithmeticOverflow)?,
+        )
+        .ok_or(TallyCircuitError::ArithmeticOverflow)?;
+    let mut input_bits = Vec::with_capacity(input_bit_count);
+    for (attempt_position, ballot_attempt) in ballot_attempts.iter().enumerate() {
+        if ballot_attempt.score_encodings().len() != option_count {
+            return Err(TallyCircuitError::InputOptionCountMismatch {
                 participant_position,
-                expected: TALLY_BALLOT_ATTEMPT_COUNT,
-                actual: ballot_attempts.len(),
+                attempt_position,
+                expected: option_count,
+                actual: ballot_attempt.score_encodings().len(),
             });
         }
-        for (attempt_position, ballot_attempt) in ballot_attempts.iter().enumerate() {
-            if ballot_attempt.score_encodings().len() != option_count {
-                return Err(TallyCircuitError::InputOptionCountMismatch {
+        input_bits.push(ballot_attempt.is_present());
+        for (option_position, score_encoding) in
+            ballot_attempt.score_encodings().iter().copied().enumerate()
+        {
+            if usize::from(score_encoding) > maximum_score_encoding {
+                return Err(TallyCircuitError::ScoreEncodingOutOfRange {
                     participant_position,
                     attempt_position,
-                    expected: option_count,
-                    actual: ballot_attempt.score_encodings().len(),
+                    option_position,
+                    score_encoding,
                 });
             }
-            input_bits.push(ballot_attempt.is_present());
-            for (option_position, score_encoding) in
-                ballot_attempt.score_encodings().iter().copied().enumerate()
-            {
-                if usize::from(score_encoding) > maximum_score_encoding {
-                    return Err(TallyCircuitError::ScoreEncodingOutOfRange {
-                        participant_position,
-                        attempt_position,
-                        option_position,
-                        score_encoding,
-                    });
-                }
-                for bit_position in 0..score_bit_width {
-                    input_bits.push(((usize::from(score_encoding) >> bit_position) & 1) == 1);
-                }
+            for bit_position in 0..score_bit_width {
+                input_bits.push(((usize::from(score_encoding) >> bit_position) & 1) == 1);
             }
         }
     }

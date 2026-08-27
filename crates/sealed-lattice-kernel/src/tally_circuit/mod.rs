@@ -10,6 +10,7 @@ mod direct_evaluator;
 mod interpreter;
 mod output_rekeyed;
 
+pub(crate) use interpreter::encode_tally_ballot_attempt_input_bits;
 pub(crate) use output_rekeyed::OutputRekeyedTallyCircuit;
 
 #[cfg(test)]
@@ -302,6 +303,10 @@ pub(crate) enum TallyCircuitError {
         expected: usize,
         actual: usize,
     },
+    InputParticipantPositionOutOfRange {
+        participant_position: usize,
+        participant_count: usize,
+    },
     InputBallotAttemptCountMismatch {
         participant_position: usize,
         expected: usize,
@@ -376,6 +381,13 @@ impl fmt::Display for TallyCircuitError {
             Self::InputParticipantCountMismatch { expected, actual } => write!(
                 formatter,
                 "expected {expected} participant inputs, received {actual}"
+            ),
+            Self::InputParticipantPositionOutOfRange {
+                participant_position,
+                participant_count,
+            } => write!(
+                formatter,
+                "participant input position {participant_position} is outside {participant_count} participants"
             ),
             Self::InputBallotAttemptCountMismatch {
                 participant_position,
