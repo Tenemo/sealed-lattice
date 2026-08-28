@@ -13,11 +13,11 @@ The participant who starts the poll is the organizer and must belong to the froz
 ## Intended ceremony
 
 1. The host supplies a poll definition and registration workflow, and participants confirm and freeze the public roster and action context.
-2. Every roster participant contributes to malicious tally preparation and verifies the public transcript, private deliveries, and complete combined garbling in their own browser.
+2. Every roster participant contributes to malicious tally preparation and verifies the public transcript, private deliveries, and selected garbling-preprocessing terminal in their own browser.
 3. Every participant signs exactly one declaration: submit one threshold-hidden ballot package or abstain. Silence leaves the action pending.
 4. A roster-complete declaration and package-availability inventory deterministically defines one selected ballot set. A roster quorum authorizes exactly that set; it cannot omit a declared available submission.
 5. From that verified preparation, participants perform input activation for only the input-label alternative authorized by each declaration.
-6. Any participant may independently replay certified evaluation of the fixed tally circuit. If no selected ballot is usable, the verifier produces no target; otherwise it derives one opaque masked result target.
+6. Any participant may independently replay certified evaluation of the fixed tally circuit, reconstruct the garbling when required by the selected theorem, and positively verify every selected row. A row error produces no accepting evaluation. If no selected ballot is usable, the verifier produces no target; otherwise it derives one opaque masked result target.
 7. A roster quorum whose members verified that evaluation establishes finality for the exact target.
 8. A valid reconstruction threshold releases only the target-bound result masks needed to decode the ordered result.
 
@@ -45,8 +45,8 @@ Every required participant operation must retain a scalar-capable, single-worker
 The complete ceremony is not implemented, cryptographically admitted, suite-activated, or phone-qualified.
 
 - Canonical poll validation, context binding, typed refusals, deterministic tally semantics, scalar field and sharing primitives, authenticated storage foundations, and reproducible Rust/WebAssembly packaging exist.
-- Unactivated preparation work includes scalar sharing, salted seed custody, authenticated private delivery, recipient inventories, pseudorandom zero-sharing workloads, conditional hidden-bit checks, and direct ballot-custody models. The degree-six zero-sharing source and ballot-custody verifier remain unresolved; these components are not a malicious-preparation theorem or `VerifiedTallyPreparation`.
-- The selected one-slot submit-or-abstain lifecycle, verifier-driven preparation-to-result chain, finality, and target-bound release are not connected end to end. Both reviewed adaptive-garbling compositions fail the required malicious base-generation premise, so no combined-garbling implementation is currently eligible to mint verified preparation.
+- Conditional independent-label preparation work includes scalar sharing, salted seed custody, authenticated private delivery, recipient inventories, pseudorandom zero-sharing workloads, hidden-bit checks, and direct ballot-custody models. These components are not a malicious-preparation theorem or `VerifiedTallyPreparation`, and construction-specific field-MPC work may be removed if another garbling route is selected.
+- The selected one-slot submit-or-abstain lifecycle, verifier-driven preparation-to-result chain, finality, and target-bound release are not connected end to end. Both reviewed independent-label garbling compositions fail the required malicious base-generation premise. HSS/BOSS-style BMR is a research candidate only; no garbling route is selected or implemented.
 - Focused scalar Node/WebAssembly results exist, but no matched browser ceremony, complete resource ledger, external-Chrome lifecycle result, or selected-phone result exists.
 - The public SDK exposes foundation operations only. Production dispatch accepts no cryptographic suite.
 
