@@ -204,8 +204,8 @@ pub(crate) struct VariableMessageKmacCallFamily320 {
 /// every holder that locally expands a shared subset stream. One cold cursor
 /// restore repeats the participant's checkpoint-key derivation and the tag
 /// computation for the retained checkpoint; it adds no new semantic query.
-/// The census excludes test-only random tapes and any not-yet-emitted pair,
-/// collective-challenge, or selected hidden-bit protocol calls.
+/// The census excludes any not-yet-emitted pair, collective-challenge, or
+/// selected hidden-bit protocol calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PreparationKmacCallCensus320 {
     pub(crate) participant_count: u64,

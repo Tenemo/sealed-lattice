@@ -1,9 +1,5 @@
 //! Canonical foundation data shared by the active protocol and candidate code.
 
-/// Maximum adversarial random-oracle query count used by candidate reduction
-/// ledgers until an activated suite supplies a stricter exact bound.
-pub(crate) const DECLARED_ADVERSARIAL_QUERY_BUDGET: u128 = (1_u128 << 80) - 1;
-
 #[cfg_attr(
     not(test),
     expect(
@@ -36,8 +32,6 @@ pub use ceremony::{
     BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy, CeremonyContext, MANIFEST_SCHEMA_IDENTIFIER,
     Manifest, OPTION_DEFINITION_SCHEMA_IDENTIFIER, OptionDefinition,
 };
-#[cfg(test)]
-pub(crate) use hash::canonical_foundation_tuple_hash_preimage;
 pub use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use hash::{StreamingFoundationTupleHash512, xof_foundation_tuple};
 pub use participant_identity::{

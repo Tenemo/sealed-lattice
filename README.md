@@ -46,7 +46,7 @@ The complete ceremony is not implemented, cryptographically admitted, suite-acti
 
 - Canonical poll validation, context binding, typed refusals, deterministic tally semantics, scalar field and sharing primitives, authenticated storage foundations, and reproducible Rust/WebAssembly packaging exist.
 - Unactivated preparation work includes scalar sharing, salted seed custody, authenticated private delivery, recipient inventories, pseudorandom zero-sharing workloads, conditional hidden-bit checks, and direct ballot-custody models. The degree-six zero-sharing source and ballot-custody verifier remain unresolved; these components are not a malicious-preparation theorem or `VerifiedTallyPreparation`.
-- The selected one-slot submit-or-abstain lifecycle, verifier-driven preparation-to-result chain, complete garbling proof, finality, and target-bound release are not connected end to end.
+- The selected one-slot submit-or-abstain lifecycle, verifier-driven preparation-to-result chain, finality, and target-bound release are not connected end to end. Both reviewed adaptive-garbling compositions fail the required malicious base-generation premise, so no combined-garbling implementation is currently eligible to mint verified preparation.
 - Focused scalar Node/WebAssembly results exist, but no matched browser ceremony, complete resource ledger, external-Chrome lifecycle result, or selected-phone result exists.
 - The public SDK exposes foundation operations only. Production dispatch accepts no cryptographic suite.
 

@@ -5,8 +5,6 @@
 //! It does not select a preparation protocol, mint a capability, or activate a
 //! suite.
 
-mod adaptive_oracle_repair;
-mod amortized_binary_mpc_communication_floor;
 mod authenticated_key_release;
 mod authenticated_key_release_resource_floor;
 mod authenticated_key_share_vector;
@@ -20,20 +18,12 @@ mod authenticated_opening;
 mod batched_hidden_bit_check_320;
 mod binary_field;
 mod binary_field_320;
-mod binary_field_multiplication_circuit;
-mod binary_linear_circuit;
-mod binary_ring_packed_mpc_evaluation_floor;
 mod context;
 mod degree_three_opening_decoder;
 mod fixed_roster_beaver_mpc_resource_floor;
-mod fixed_roster_linear_mpc_communication_floor;
 mod garbled_resource_model;
-mod garbling;
 mod garbling_alternative_resource_model;
-#[cfg(test)]
-mod geometry;
 mod label_encoding;
-mod malicious_mpc_communication_floor;
 mod output_sharing;
 mod preparation_arithmetic_graph;
 mod preparation_holder_record_catalog;
@@ -65,10 +55,6 @@ mod pseudorandom_zero_sharing_seed_receipt_terminal_320;
 pub(crate) mod pseudorandom_zero_sharing_seed_receipt_terminal_endorsement_kernel_320;
 pub(crate) mod pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320;
 mod pseudorandom_zero_sharing_subset_seed_320;
-#[cfg(test)]
-mod random_state;
-#[cfg(test)]
-mod random_tape;
 mod replicated_beaver_opening;
 mod replicated_beaver_opening_record;
 mod replicated_beaver_simulator;
@@ -82,12 +68,7 @@ mod replicated_random_sharing;
 mod replicated_sharing_field_stream;
 mod replicated_sharing_simulator_basis;
 mod replicated_sharing_stream_resource_model;
-mod tower_field_multiplication_circuit;
 
-#[cfg(test)]
-mod adaptive_oracle_repair_tests;
-#[cfg(test)]
-mod amortized_binary_mpc_communication_floor_tests;
 #[cfg(test)]
 mod authenticated_key_release_resource_floor_tests;
 #[cfg(test)]
@@ -113,27 +94,15 @@ mod batched_hidden_bit_check_320_tests;
 #[cfg(test)]
 mod binary_field_320_tests;
 #[cfg(test)]
-mod binary_field_multiplication_circuit_tests;
-#[cfg(test)]
-mod binary_linear_circuit_tests;
-#[cfg(test)]
-mod binary_ring_packed_mpc_evaluation_floor_tests;
-#[cfg(test)]
 mod degree_three_opening_decoder_tests;
 #[cfg(test)]
 mod fixed_roster_beaver_mpc_resource_floor_tests;
-#[cfg(test)]
-mod fixed_roster_linear_mpc_communication_floor_tests;
 #[cfg(test)]
 mod garbled_resource_model_tests;
 #[cfg(test)]
 mod garbling_alternative_resource_model_tests;
 #[cfg(test)]
-mod garbling_tests;
-#[cfg(test)]
 mod label_encoding_tests;
-#[cfg(test)]
-mod malicious_mpc_communication_floor_tests;
 #[cfg(test)]
 mod preparation_arithmetic_graph_tests;
 #[cfg(test)]
@@ -185,8 +154,6 @@ mod pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320_tests;
 #[cfg(test)]
 mod pseudorandom_zero_sharing_subset_seed_320_tests;
 #[cfg(test)]
-mod randomness_tests;
-#[cfg(test)]
 mod replicated_beaver_opening_record_tests;
 #[cfg(test)]
 mod replicated_beaver_opening_tests;
@@ -210,9 +177,6 @@ mod replicated_sharing_simulator_basis_tests;
 mod replicated_sharing_stream_resource_model_tests;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tower_field_multiplication_circuit_tests;
-
 use core::fmt;
 
 use crate::tally_circuit::TallyCircuitError;
@@ -222,16 +186,6 @@ pub(crate) use binary_field::BinaryFieldElement256;
 #[cfg(feature = "preparation-field-measurement")]
 pub(crate) use binary_field_320::measure_binary_field_320_multiplications;
 pub(crate) use context::TallyPreparationContext;
-#[cfg(test)]
-pub(crate) use geometry::TallyPreparationGeometry;
-#[cfg(test)]
-pub(crate) use random_state::parse_tally_preparation_random_state;
-#[cfg(test)]
-pub(crate) use random_tape::{ExplicitJointRandomTape, SeededJointRandomTape};
-#[cfg(test)]
-pub(crate) use random_tape::{
-    SEEDED_RANDOM_TAPE_BLOCK_BYTE_LENGTH, TallyPreparationRandomTapeSource,
-};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TallyPreparationError {
@@ -243,10 +197,6 @@ pub(crate) enum TallyPreparationError {
     AuthenticatedShareVerificationKeyLimbCountMismatch {
         expected: usize,
         actual: usize,
-    },
-    SubmittedParticipantCountOutOfRange {
-        submitted_participant_count: u64,
-        participant_count: u64,
     },
     AuthenticatedShareCommitmentByteLength {
         expected: usize,
@@ -385,27 +335,6 @@ pub(crate) enum TallyPreparationError {
         component_position: usize,
         value: u8,
     },
-    AffineLabelPointBitMismatch,
-    AffineLabelCommitmentsEqual {
-        component_position: usize,
-    },
-    GarblingContributorPositionOutOfRange {
-        contributor_position: u16,
-        participant_count: u16,
-    },
-    GarblingInputPointBitMismatch {
-        component_position: u16,
-        input_side: &'static str,
-    },
-    GarblingOutputBasePointBitNonzero,
-    GarblingLabelCommitmentMembershipMismatch {
-        component_position: usize,
-    },
-    GarblingComponentPointBitMismatch {
-        component_position: usize,
-    },
-    GarblingAuthenticatedRowValueNotBit,
-    GarblingAuthenticatedRowBitMismatch,
     FieldElementByteLength {
         expected: usize,
         actual: usize,
@@ -605,32 +534,6 @@ pub(crate) enum TallyPreparationError {
     NonCanonicalPreparationSourceEncoding,
     GeometryMismatch,
     ArithmeticOverflow,
-    WireIndexOutOfRange {
-        wire_index: u32,
-        wire_count: usize,
-    },
-    RandomTapeParticipantCountMismatch {
-        expected: usize,
-        actual: usize,
-    },
-    RandomTapeByteLengthMismatch {
-        participant_position: usize,
-        expected: usize,
-        actual: usize,
-    },
-    RandomSeedCountMismatch {
-        expected: usize,
-        actual: usize,
-    },
-    RandomSourceByteLengthMismatch {
-        expected: usize,
-        actual: usize,
-    },
-    RandomTapeExhausted,
-    RandomTapeNotFullyConsumed {
-        expected: usize,
-        consumed: usize,
-    },
     IntegerConversion,
     TallyCircuit(TallyCircuitError),
     CanonicalEncoding(CanonicalError),
@@ -656,13 +559,6 @@ impl fmt::Display for TallyPreparationError {
                     "authenticated share verification key has {actual} coefficients; expected {expected}"
                 )
             }
-            Self::SubmittedParticipantCountOutOfRange {
-                submitted_participant_count,
-                participant_count,
-            } => write!(
-                formatter,
-                "received candidate packages from {submitted_participant_count} participants for a roster of {participant_count}"
-            ),
             Self::AuthenticatedShareCommitmentByteLength { expected, actual } => write!(
                 formatter,
                 "authenticated share commitment has {actual} bytes; expected {expected}"
@@ -903,43 +799,6 @@ impl fmt::Display for TallyPreparationError {
             } => write!(
                 formatter,
                 "replicated random-bit component {component_position} has non-bit value {value}"
-            ),
-            Self::AffineLabelPointBitMismatch => formatter
-                .write_str("affine label alternatives must have canonical zero and one point bits"),
-            Self::AffineLabelCommitmentsEqual { component_position } => write!(
-                formatter,
-                "affine label commitments are equal at component {component_position}"
-            ),
-            Self::GarblingContributorPositionOutOfRange {
-                contributor_position,
-                participant_count,
-            } => write!(
-                formatter,
-                "garbling contributor position {contributor_position} is outside participant count {participant_count}"
-            ),
-            Self::GarblingInputPointBitMismatch {
-                component_position,
-                input_side,
-            } => write!(
-                formatter,
-                "garbling {input_side} input label at component {component_position} has the wrong point bit"
-            ),
-            Self::GarblingOutputBasePointBitNonzero => {
-                formatter.write_str("garbling output base label has a nonzero point bit")
-            }
-            Self::GarblingLabelCommitmentMembershipMismatch { component_position } => write!(
-                formatter,
-                "garbling output component {component_position} does not have exactly one matching affine label commitment"
-            ),
-            Self::GarblingComponentPointBitMismatch { component_position } => write!(
-                formatter,
-                "garbling output component {component_position} has an inconsistent point bit"
-            ),
-            Self::GarblingAuthenticatedRowValueNotBit => {
-                formatter.write_str("authenticated garbling row value is not a canonical bit")
-            }
-            Self::GarblingAuthenticatedRowBitMismatch => formatter.write_str(
-                "authenticated garbling row bit does not match the evaluated output point bit",
             ),
             Self::FieldElementByteLength { expected, actual } => write!(
                 formatter,
@@ -1268,40 +1127,6 @@ impl fmt::Display for TallyPreparationError {
             Self::ArithmeticOverflow => {
                 formatter.write_str("tally preparation arithmetic overflow")
             }
-            Self::WireIndexOutOfRange {
-                wire_index,
-                wire_count,
-            } => write!(
-                formatter,
-                "wire {wire_index} is outside the preparation wire count {wire_count}"
-            ),
-            Self::RandomTapeParticipantCountMismatch { expected, actual } => write!(
-                formatter,
-                "received {actual} explicit random tapes; expected {expected}"
-            ),
-            Self::RandomTapeByteLengthMismatch {
-                participant_position,
-                expected,
-                actual,
-            } => write!(
-                formatter,
-                "explicit random tape for participant {participant_position} has {actual} bytes; expected {expected}"
-            ),
-            Self::RandomSeedCountMismatch { expected, actual } => write!(
-                formatter,
-                "received {actual} random tape seeds; expected {expected}"
-            ),
-            Self::RandomSourceByteLengthMismatch { expected, actual } => write!(
-                formatter,
-                "random source exposes {actual} bytes; preparation geometry requires {expected}"
-            ),
-            Self::RandomTapeExhausted => {
-                formatter.write_str("random tape ended before the requested output")
-            }
-            Self::RandomTapeNotFullyConsumed { expected, consumed } => write!(
-                formatter,
-                "random tape consumed {consumed} of {expected} required bytes"
-            ),
             Self::IntegerConversion => {
                 formatter.write_str("tally preparation integer conversion failed")
             }

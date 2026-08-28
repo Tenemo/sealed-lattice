@@ -1,12 +1,12 @@
 use crate::{
-    foundation::{DECLARED_ADVERSARIAL_QUERY_BUDGET, Hash512, derive_foundation_roster_parameters},
-    tally_circuit::CompiledTallyCircuit,
+    foundation::{Hash512, derive_foundation_roster_parameters},
+    tally_circuit::{CompiledTallyCircuit, OutputRekeyedTallyCircuit},
 };
 
 use super::{
     BinaryFieldElement256, TallyPreparationError,
     authenticated_opening::AUTHENTICATED_SHARE_SALT_BYTE_LENGTH,
-    garbled_resource_model::GarbledTallyResourceLowerBound,
+    binary_field_320::BinaryFieldElement320,
     label_encoding::{
         LABEL_BODY_FIELD_LIMB_COUNT, LABEL_SHARE_VALUE_BYTE_LENGTH, WIRE_LABEL_BIT_LENGTH,
         garbling_output_byte_length,
@@ -15,79 +15,13 @@ use super::{
 
 const BINARY_GATE_ROW_COUNT: u64 = 4;
 const UNARY_GATE_ROW_COUNT: u64 = 2;
-const BITS_PER_BYTE: u64 = 8;
-const ACTIVE_LABEL_COMMITMENT_SALT_BIT_LENGTH: u64 = 640;
-const SHORT_LABEL_COMMITMENT_SALT_BIT_LENGTH: u64 = 256;
-const ADAPTIVE_REPROGRAMMING_COEFFICIENT: u128 = 4;
 const FIELD_ELEMENT_BYTE_LENGTH: u64 = BinaryFieldElement256::CANONICAL_BYTE_LENGTH as u64;
 const COMMITMENT_DIGEST_BYTE_LENGTH: u64 = Hash512::BYTE_LENGTH as u64;
-
-/// Lower-bound delta for independently salted affine-label commitments.
-///
-/// Salting only repairs the label-commitment auxiliary transcript. It does not
-/// hide garbling points and therefore does not replace the adaptive-oracle
-/// argument. The salt owner must retain both salts and reveal exactly the
-/// active one for each fresh label component; withholding leaves activation
-/// unresolved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SaltedLabelCommitmentRepairLowerBound {
-    pub(crate) label_commitment_count: u64,
-    pub(crate) active_label_salt_opening_count: u64,
-    pub(crate) selected_salt_bit_length: u64,
-    pub(crate) selected_salt_byte_length: u64,
-    pub(crate) private_salt_storage_byte_length: u64,
-    pub(crate) active_salt_opening_byte_length: u64,
-    pub(crate) combined_known_public_lower_bound_with_salts_byte_length: u64,
-    pub(crate) short_salt_bit_length: u64,
-    pub(crate) declared_adversarial_query_budget: u128,
-    pub(crate) conditional_advantage_numerator: u128,
-    pub(crate) short_salt_conditional_strict_power_of_two_bound_exponent: u64,
-    pub(crate) selected_salt_conditional_strict_power_of_two_bound_exponent: u64,
-}
-
-impl SaltedLabelCommitmentRepairLowerBound {
-    pub(crate) fn derive(circuit: &CompiledTallyCircuit) -> Result<Self, TallyPreparationError> {
-        let baseline = GarbledTallyResourceLowerBound::derive(circuit)?;
-        let selected_salt_byte_length = ACTIVE_LABEL_COMMITMENT_SALT_BIT_LENGTH
-            .checked_div(BITS_PER_BYTE)
-            .ok_or(TallyPreparationError::GeometryMismatch)?;
-        if checked_multiply(selected_salt_byte_length, BITS_PER_BYTE)?
-            != ACTIVE_LABEL_COMMITMENT_SALT_BIT_LENGTH
-        {
-            return Err(TallyPreparationError::GeometryMismatch);
-        }
-        let active_label_salt_opening_count =
-            checked_multiply(baseline.fresh_label_wire_count, baseline.participant_count)?;
-        let private_salt_storage_byte_length =
-            checked_multiply(baseline.label_commitment_count, selected_salt_byte_length)?;
-        let active_salt_opening_byte_length =
-            checked_multiply(active_label_salt_opening_count, selected_salt_byte_length)?;
-        let combined_known_public_lower_bound_with_salts_byte_length = checked_add(
-            baseline.combined_known_public_lower_bound_byte_length,
-            active_salt_opening_byte_length,
-        )?;
-        let short_salt_conditional_strict_power_of_two_bound_exponent =
-            conditional_strict_bound_exponent(SHORT_LABEL_COMMITMENT_SALT_BIT_LENGTH)?;
-        let selected_salt_conditional_strict_power_of_two_bound_exponent =
-            conditional_strict_bound_exponent(ACTIVE_LABEL_COMMITMENT_SALT_BIT_LENGTH)?;
-        let conditional_advantage_numerator = conditional_advantage_numerator()?;
-
-        Ok(Self {
-            label_commitment_count: baseline.label_commitment_count,
-            active_label_salt_opening_count,
-            selected_salt_bit_length: ACTIVE_LABEL_COMMITMENT_SALT_BIT_LENGTH,
-            selected_salt_byte_length,
-            private_salt_storage_byte_length,
-            active_salt_opening_byte_length,
-            combined_known_public_lower_bound_with_salts_byte_length,
-            short_salt_bit_length: SHORT_LABEL_COMMITMENT_SALT_BIT_LENGTH,
-            declared_adversarial_query_budget: DECLARED_ADVERSARIAL_QUERY_BUDGET,
-            conditional_advantage_numerator,
-            short_salt_conditional_strict_power_of_two_bound_exponent,
-            selected_salt_conditional_strict_power_of_two_bound_exponent,
-        })
-    }
-}
+const KECCAK_F_ROUND_COUNT: u64 = 24;
+const KECCAK_F_CHI_MULTIPLICATION_COUNT_PER_ROUND: u64 = 1_600;
+const CANONICAL_RAW_BYTE_PAYLOAD_LENGTH_PREFIX_BYTE_LENGTH: u64 = size_of::<u32>() as u64;
+const MAXIMUM_CANONICAL_TRANSPORT_STREAM_BYTE_LENGTH: u64 =
+    u32::MAX as u64 - CANONICAL_RAW_BYTE_PAYLOAD_LENGTH_PREFIX_BYTE_LENGTH;
 
 /// Exact known lower bound for the conservative independent-label baseline.
 ///
@@ -102,7 +36,9 @@ pub(crate) struct IndependentLabelGarblingResourceLowerBound {
     pub(crate) conjunction_gate_count: u64,
     pub(crate) exclusive_or_gate_count: u64,
     pub(crate) negation_gate_count: u64,
+    pub(crate) output_rekey_operation_count: u64,
     pub(crate) binary_gate_count: u64,
+    pub(crate) unary_gate_count: u64,
     pub(crate) evaluated_gate_count: u64,
     pub(crate) paid_gate_row_count: u64,
     pub(crate) constant_activation_vector_count: u64,
@@ -145,7 +81,8 @@ pub(crate) struct IndependentLabelGarblingResourceLowerBound {
 
 impl IndependentLabelGarblingResourceLowerBound {
     pub(crate) fn derive(circuit: &CompiledTallyCircuit) -> Result<Self, TallyPreparationError> {
-        let geometry = circuit.geometry();
+        let output_rekeyed_circuit = OutputRekeyedTallyCircuit::compile(circuit.profile())?;
+        let geometry = output_rekeyed_circuit.geometry();
         let participant_count = u64::from(circuit.profile().participant_count());
         let roster_parameters = derive_foundation_roster_parameters(
             circuit.profile().participant_count(),
@@ -158,13 +95,16 @@ impl IndependentLabelGarblingResourceLowerBound {
         let conjunction_gate_count = u64_from_usize(geometry.conjunction_gate_count)?;
         let exclusive_or_gate_count = u64_from_usize(geometry.exclusive_or_gate_count)?;
         let negation_gate_count = u64_from_usize(geometry.negation_gate_count)?;
+        let output_rekey_operation_count = u64_from_usize(geometry.output_rekey_operation_count)?;
         let binary_gate_count = checked_add(conjunction_gate_count, exclusive_or_gate_count)?;
-        let evaluated_gate_count = checked_add(binary_gate_count, negation_gate_count)?;
+        let unary_gate_count = checked_add(negation_gate_count, output_rekey_operation_count)?;
+        let evaluated_gate_count = checked_add(binary_gate_count, unary_gate_count)?;
         let paid_gate_row_count = checked_add(
             checked_multiply(binary_gate_count, BINARY_GATE_ROW_COUNT)?,
-            checked_multiply(negation_gate_count, UNARY_GATE_ROW_COUNT)?,
+            checked_multiply(unary_gate_count, UNARY_GATE_ROW_COUNT)?,
         )?;
-        let constant_activation_vector_count = u64_from_usize(geometry.constant_operation_count)?;
+        let constant_activation_vector_count =
+            u64_from_usize(circuit.geometry().constant_operation_count)?;
         let total_labeled_wire_count = u64_from_usize(geometry.total_wire_count)?;
         let public_output_bit_count = u64_from_usize(geometry.public_output_bit_count)?;
         let private_result_bit_count = u64_from_usize(geometry.private_result_bit_count)?;
@@ -313,7 +253,9 @@ impl IndependentLabelGarblingResourceLowerBound {
             conjunction_gate_count,
             exclusive_or_gate_count,
             negation_gate_count,
+            output_rekey_operation_count,
             binary_gate_count,
+            unary_gate_count,
             evaluated_gate_count,
             paid_gate_row_count,
             constant_activation_vector_count,
@@ -356,27 +298,66 @@ impl IndependentLabelGarblingResourceLowerBound {
     }
 }
 
-fn conditional_strict_bound_exponent(
-    hidden_entropy_bit_length: u64,
-) -> Result<u64, TallyPreparationError> {
-    if !hidden_entropy_bit_length.is_multiple_of(2) {
-        return Err(TallyPreparationError::GeometryMismatch);
-    }
-    let numerator = conditional_advantage_numerator()?;
-    let numerator_power_of_two_upper_bound = u64::from(
-        u128::BITS
-            .checked_sub(numerator.leading_zeros())
-            .ok_or(TallyPreparationError::GeometryMismatch)?,
-    );
-    (hidden_entropy_bit_length / 2)
-        .checked_sub(numerator_power_of_two_upper_bound)
-        .ok_or(TallyPreparationError::GeometryMismatch)
+/// Absolute transport screen for verifying the rejected component-contributed
+/// fixed-permutation garbling through the selected scalar field multiplication.
+///
+/// Each independently contributed garbling row invokes an extendable-output
+/// function and therefore contains at least one Keccak-f[1600] permutation.
+/// The nonlinear chi step has exactly 1,600 bit multiplications in each of 24
+/// rounds. Realizing each such multiplication with the selected detectable
+/// `GF(2^320)` degree-reduction relation requires every participant to publish
+/// at least one 40-byte field evaluation. The required one complete package per
+/// contributor puts those evaluations in one canonical stream, which is
+/// already above the absolute bound before any source, authentication,
+/// challenge, wrapper, checkpoint, or repair bytes are added.
+///
+/// This rejects that direct verification repair. It is not a lower bound for
+/// an unspecified proof system or a different statically secure base garbling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FullGarblingVerificationFieldMpcLowerBound {
+    pub(crate) garbling_generation_call_count: u64,
+    pub(crate) minimum_fixed_permutation_count: u64,
+    pub(crate) nonlinear_bit_multiplication_count_per_permutation: u64,
+    pub(crate) nonlinear_bit_multiplication_count: u64,
+    pub(crate) field_evaluation_byte_length: u64,
+    pub(crate) minimum_opening_upload_byte_length_per_participant: u64,
+    pub(crate) maximum_canonical_transport_stream_byte_length: u64,
+    pub(crate) violates_canonical_transport_stream_bound: bool,
 }
 
-fn conditional_advantage_numerator() -> Result<u128, TallyPreparationError> {
-    DECLARED_ADVERSARIAL_QUERY_BUDGET
-        .checked_mul(ADAPTIVE_REPROGRAMMING_COEFFICIENT)
-        .ok_or(TallyPreparationError::ArithmeticOverflow)
+impl FullGarblingVerificationFieldMpcLowerBound {
+    pub(crate) fn derive(circuit: &CompiledTallyCircuit) -> Result<Self, TallyPreparationError> {
+        let garbling = IndependentLabelGarblingResourceLowerBound::derive(circuit)?;
+        let nonlinear_bit_multiplication_count_per_permutation = checked_multiply(
+            KECCAK_F_ROUND_COUNT,
+            KECCAK_F_CHI_MULTIPLICATION_COUNT_PER_ROUND,
+        )?;
+        let minimum_fixed_permutation_count = garbling.garbling_generation_call_count;
+        let nonlinear_bit_multiplication_count = checked_multiply(
+            minimum_fixed_permutation_count,
+            nonlinear_bit_multiplication_count_per_permutation,
+        )?;
+        let field_evaluation_byte_length =
+            u64_from_usize(BinaryFieldElement320::CANONICAL_BYTE_LENGTH)?;
+        let minimum_opening_upload_byte_length_per_participant = checked_multiply(
+            nonlinear_bit_multiplication_count,
+            field_evaluation_byte_length,
+        )?;
+
+        Ok(Self {
+            garbling_generation_call_count: garbling.garbling_generation_call_count,
+            minimum_fixed_permutation_count,
+            nonlinear_bit_multiplication_count_per_permutation,
+            nonlinear_bit_multiplication_count,
+            field_evaluation_byte_length,
+            minimum_opening_upload_byte_length_per_participant,
+            maximum_canonical_transport_stream_byte_length:
+                MAXIMUM_CANONICAL_TRANSPORT_STREAM_BYTE_LENGTH,
+            violates_canonical_transport_stream_bound:
+                minimum_opening_upload_byte_length_per_participant
+                    > MAXIMUM_CANONICAL_TRANSPORT_STREAM_BYTE_LENGTH,
+        })
+    }
 }
 
 fn checked_add(left: u64, right: u64) -> Result<u64, TallyPreparationError> {
