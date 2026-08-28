@@ -13,6 +13,14 @@ pub(crate) mod hashing;
     not(test),
     expect(
         dead_code,
+        reason = "the unactivated pre-evaluation-finality verifier is not connected to the package surface"
+    )
+)]
+mod pre_evaluation_finality;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "the unactivated tally circuit is not connected to the package surface"
     )
 )]
