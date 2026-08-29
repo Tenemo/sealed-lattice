@@ -456,7 +456,7 @@ describe('seed-recipient receipt custody', () => {
             authenticatedInventoryBodyByteLength: 1_566,
             carriers: Array.from({ length: 9 }, () => ({
                 encryptedChunkByteLengths: [62_606],
-                headerByteLength: 1_655,
+                headerByteLength: 1_725,
                 manifestByteLength: 215,
                 signatureEnvelopeByteLength: 3_713,
             })),
@@ -479,7 +479,7 @@ describe('seed-recipient receipt custody', () => {
         const independentlyDerivedRootCorpusByteLength =
             10 * (4 * 4 + 522 + 25_515 + 25_545 + 3_723);
         const independentlyDerivedCarrierCorpusByteLength =
-            9 * (2 + (4 + 1_655) + (4 + 215) + (4 + 3_713) + 2 + (4 + 62_606));
+            9 * (2 + (4 + 1_725) + (4 + 215) + (4 + 3_713) + 2 + (4 + 62_606));
         const independentlyDerivedPreparedInventoryByteLength =
             4 + 1_566 + 64 + 2 + 9 * (4 + 62_590) + (4 + 374) + 64;
         const independentlyDerivedOpenRequestByteLength =
@@ -567,18 +567,18 @@ describe('seed-recipient receipt custody', () => {
         expect(kernelDerived).toEqual({
             closeContextRequestByteLength: 11,
             closeContextResponseByteLength: 7,
-            coldValidationCumulativeRequestByteLength: 2_370_770,
+            coldValidationCumulativeRequestByteLength: 2_371_400,
             coldValidationCumulativeResponseByteLength: 578_591,
             coldValidationInvocationCount: 5,
             completeAuthenticationRequestByteLength: 301,
             completeAuthenticationResponseByteLength: 565_431,
             completeReceiptRequestByteLength: 568_744,
             completeReceiptResponseByteLength: 3_789,
-            maximumRequestByteLength: 1_235_408,
+            maximumRequestByteLength: 1_236_038,
             maximumResponseByteLength: 565_431,
-            openContextRequestByteLength: 1_235_408,
+            openContextRequestByteLength: 1_236_038,
             openContextResponseByteLength: 13_139,
-            successfulCumulativeRequestByteLength: 2_939_514,
+            successfulCumulativeRequestByteLength: 2_940_144,
             successfulCumulativeResponseByteLength: 582_380,
             successfulInvocationCount: 6,
             validationRequestByteLengthWithEnvelope: 569_416,

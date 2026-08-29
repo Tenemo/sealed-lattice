@@ -20,7 +20,7 @@ use super::{
     },
     pseudorandom_zero_sharing_seed_mailbox_320::{
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_ASSOCIATED_DATA_BYTE_LENGTH,
-        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_LABEL,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_NONCE_DERIVATION_LABEL,
     },
@@ -241,7 +241,9 @@ impl PreparationKmacCallCensus320 {
             call: KmacCallShape320::fixed_output(
                 PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_LABEL,
                 PRIVATE_MAILBOX_KEY_BYTE_LENGTH,
-                usize_to_u64(PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH)?,
+                usize_to_u64(
+                    PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_BYTE_LENGTH,
+                )?,
                 PRIVATE_MAILBOX_KEY_OUTPUT_BYTE_LENGTH,
             )?,
             semantic_call_count: seed_mailbox_key_semantic_call_count,

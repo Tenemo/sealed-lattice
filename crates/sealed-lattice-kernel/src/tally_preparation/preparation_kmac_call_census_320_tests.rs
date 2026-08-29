@@ -34,7 +34,7 @@ fn completion_per_bit_census_counts_every_current_emitted_kmac_call() {
         super::preparation_kmac_call_census_320::KmacCallShape320 {
             customization_byte_length: 51,
             key_byte_length: 32,
-            message_byte_length: 1_655,
+            message_byte_length: 1_671,
             right_encoded_output_length_byte_length: 3,
             output_byte_length: 32,
             absorb_block_count: 15,

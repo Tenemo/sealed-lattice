@@ -11,12 +11,15 @@ use super::{
         AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320,
         ML_KEM_768_CIPHERTEXT_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_ALGORITHM_IDENTIFIER,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATED_INCONSISTENCY_IDENTITY_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATION_TAG_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_ASSOCIATED_DATA_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_DIGEST_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_IDENTITY_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_COMMITMENT_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_LABEL,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_MANIFEST_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_MANIFEST_IDENTITY_DOMAIN,
@@ -39,6 +42,7 @@ use super::{
         derive_authenticated_encryption_nonce_for_test, derive_mailbox_stream_geometry,
         hash_mailbox_chunk, pseudorandom_zero_sharing_seed_mailbox_control_and_tag_byte_length,
         pseudorandom_zero_sharing_seed_mailbox_manifest_body_byte_length,
+        verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320,
     },
 };
 
@@ -83,6 +87,7 @@ pub(super) struct SealedMailboxTestStream320 {
     pub(super) signature_body: PseudorandomZeroSharingSeedMailboxSignatureBody320,
     pub(super) signature_envelope_bytes: Vec<u8>,
     pub(super) encrypted_chunks: Vec<Zeroizing<Vec<u8>>>,
+    pub(super) authenticated_encryption_key: [u8; 32],
 }
 
 #[test]
@@ -124,6 +129,10 @@ fn signed_mailbox_stream_round_trips_through_kem_aead_and_root_verification() {
     );
     assert_eq!(sealed.header.encapsulation_ciphertext().len(), 1_088);
     let _ = sealed.header.recipient_encapsulation_key_identity();
+    assert_ne!(
+        sealed.header.authenticated_encryption_key_commitment(),
+        crate::foundation::Hash512::from_bytes([0; 64])
+    );
     assert_eq!(sealed.manifest.ordered_chunk_digests().len(), 1);
     assert_eq!(
         sealed.manifest.header_identity(),
@@ -143,7 +152,7 @@ fn signed_mailbox_stream_round_trips_through_kem_aead_and_root_verification() {
 
     assert_eq!(
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH,
-        1_655
+        1_725
     );
     assert_eq!(
         pseudorandom_zero_sharing_seed_mailbox_manifest_body_byte_length(1).unwrap(),
@@ -157,13 +166,13 @@ fn signed_mailbox_stream_round_trips_through_kem_aead_and_root_verification() {
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_SIGNATURE_ENVELOPE_BYTE_LENGTH,
         3_713
     );
-    assert_eq!(sealed.header_bytes.len(), 1_655);
+    assert_eq!(sealed.header_bytes.len(), 1_725);
     assert_eq!(sealed.manifest_bytes.len(), 215);
     assert_eq!(sealed.signature_body.canonical_bytes().unwrap().len(), 309);
     assert_eq!(sealed.signature_envelope_bytes.len(), 3_713);
     assert_eq!(
         pseudorandom_zero_sharing_seed_mailbox_control_and_tag_byte_length(1).unwrap(),
-        5_599
+        5_669
     );
 
     let mut verifier = PseudorandomZeroSharingSeedMailboxVerifier320::new(
@@ -321,6 +330,28 @@ fn mailbox_verifier_separates_unsigned_replacement_from_signed_malformed_carrier
         signed_invalid_tag_verifier.absorb_next_encrypted_chunk(&signed_invalid_tag_chunk),
         Err(PseudorandomZeroSharingSeedMailboxError320::AuthenticatedDecryptionFailed)
     ));
+    let invalid_tag_evidence =
+        verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
+            &fixture.root_terminal,
+            &fixture.roster,
+            fixture.sender_position,
+            fixture.recipient_position,
+            &fixture.descriptor_bytes,
+            &sealed.header_bytes,
+            &signed_invalid_tag_manifest.canonical_bytes().unwrap(),
+            &signed_invalid_tag_envelope,
+            &[signed_invalid_tag_chunk.as_slice()],
+            &sealed.authenticated_encryption_key,
+        )
+        .unwrap();
+    assert_eq!(
+        invalid_tag_evidence.sender_position(),
+        fixture.sender_position
+    );
+    assert_eq!(
+        invalid_tag_evidence.recipient_position(),
+        fixture.recipient_position
+    );
 
     assert!(matches!(
         PseudorandomZeroSharingSeedMailboxVerifier320::new(
@@ -513,6 +544,90 @@ fn signed_root_inconsistent_plaintext_and_wrong_endpoint_headers_refuse() {
         changed_verifier.absorb_next_encrypted_chunk(&changed.encrypted_chunks[0]),
         Err(PseudorandomZeroSharingSeedMailboxError320::Delivery(_))
     ));
+    let encrypted_chunk_references = changed
+        .encrypted_chunks
+        .iter()
+        .map(|chunk| chunk.as_slice())
+        .collect::<Vec<_>>();
+    let inconsistency =
+        verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
+            &fixture.root_terminal,
+            &fixture.roster,
+            fixture.sender_position,
+            fixture.recipient_position,
+            &fixture.descriptor_bytes,
+            &changed.header_bytes,
+            &changed.manifest_bytes,
+            &changed.signature_envelope_bytes,
+            &encrypted_chunk_references,
+            &changed.authenticated_encryption_key,
+        )
+        .unwrap();
+    assert_eq!(inconsistency.sender_position(), fixture.sender_position);
+    assert_eq!(
+        inconsistency.recipient_position(),
+        fixture.recipient_position
+    );
+    assert_eq!(
+        inconsistency.header_identity(),
+        changed.header.identity().unwrap()
+    );
+    assert_eq!(
+        inconsistency.manifest_identity(),
+        changed.manifest.identity().unwrap()
+    );
+    assert_ne!(
+        inconsistency.identity(),
+        crate::foundation::Hash512::from_bytes([0; 64])
+    );
+
+    let valid = seal_mailbox_stream(
+        &fixture,
+        fixture.recipient_position,
+        &fixture.descriptor_bytes,
+        &fixture.payload_bytes,
+        [0xb2; 32],
+        0xb4,
+    );
+    let valid_chunk_references = valid
+        .encrypted_chunks
+        .iter()
+        .map(|chunk| chunk.as_slice())
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
+            &fixture.root_terminal,
+            &fixture.roster,
+            fixture.sender_position,
+            fixture.recipient_position,
+            &fixture.descriptor_bytes,
+            &valid.header_bytes,
+            &valid.manifest_bytes,
+            &valid.signature_envelope_bytes,
+            &valid_chunk_references,
+            &valid.authenticated_encryption_key,
+        ),
+        Err(PseudorandomZeroSharingSeedMailboxError320::NoAuthenticatedInconsistency)
+    ));
+    let mut wrong_disclosed_key = changed.authenticated_encryption_key;
+    wrong_disclosed_key[0] ^= 1;
+    assert!(matches!(
+        verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
+            &fixture.root_terminal,
+            &fixture.roster,
+            fixture.sender_position,
+            fixture.recipient_position,
+            &fixture.descriptor_bytes,
+            &changed.header_bytes,
+            &changed.manifest_bytes,
+            &changed.signature_envelope_bytes,
+            &encrypted_chunk_references,
+            &wrong_disclosed_key,
+        ),
+        Err(
+            PseudorandomZeroSharingSeedMailboxError320::AuthenticatedEncryptionKeyCommitmentMismatch
+        )
+    ));
 
     let other_recipient_position = 8;
     let other_descriptor = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
@@ -575,6 +690,9 @@ fn mailbox_domains_and_kdf_labels_are_exact_and_pairwise_distinct() {
     let domains = [
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_IDENTITY_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATED_INCONSISTENCY_IDENTITY_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_DOMAIN,
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_COMMITMENT_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_RECIPIENT_KEY_IDENTITY_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_ASSOCIATED_DATA_DOMAIN,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_DIGEST_DOMAIN,
@@ -616,6 +734,7 @@ pub(super) fn seal_mailbox_stream(
         &encapsulation_randomness,
     )
     .unwrap();
+    let authenticated_encryption_key = sealer.authenticated_encryption_key_for_test();
     let header = sealer.header().clone();
     let header_bytes = header.canonical_bytes().unwrap();
     let encrypted_chunks = payload_bytes
@@ -636,6 +755,7 @@ pub(super) fn seal_mailbox_stream(
         signature_body,
         signature_envelope_bytes,
         encrypted_chunks,
+        authenticated_encryption_key,
     }
 }
 

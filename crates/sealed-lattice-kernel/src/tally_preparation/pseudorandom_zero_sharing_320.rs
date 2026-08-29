@@ -190,6 +190,8 @@ pub(crate) struct PseudorandomZeroSharingResourceModel {
     pub(crate) mailbox_sender_signature_verification_count: u64,
     pub(crate) mailbox_authenticated_encryption_count: u64,
     pub(crate) mailbox_authenticated_decryption_count: u64,
+    pub(crate) mailbox_authenticated_encryption_key_commitment_generation_count: u64,
+    pub(crate) mailbox_authenticated_encryption_key_commitment_verification_count: u64,
     pub(crate) mailbox_chunk_digest_generation_count: u64,
     pub(crate) mailbox_chunk_digest_verification_count: u64,
     pub(crate) mailbox_sender_key_derivation_count: u64,
@@ -524,6 +526,10 @@ impl PseudorandomZeroSharingResourceModel {
         let mailbox_sender_signature_verification_count = ordered_mailbox_stream_count;
         let mailbox_authenticated_encryption_count = mailbox_chunk_count;
         let mailbox_authenticated_decryption_count = mailbox_chunk_count;
+        let mailbox_authenticated_encryption_key_commitment_generation_count =
+            ordered_mailbox_stream_count;
+        let mailbox_authenticated_encryption_key_commitment_verification_count =
+            ordered_mailbox_stream_count;
         let mailbox_chunk_digest_generation_count = mailbox_chunk_count;
         let mailbox_chunk_digest_verification_count = mailbox_chunk_count;
         let mailbox_sender_key_derivation_count = ordered_mailbox_stream_count;
@@ -696,6 +702,8 @@ impl PseudorandomZeroSharingResourceModel {
             mailbox_sender_signature_verification_count,
             mailbox_authenticated_encryption_count,
             mailbox_authenticated_decryption_count,
+            mailbox_authenticated_encryption_key_commitment_generation_count,
+            mailbox_authenticated_encryption_key_commitment_verification_count,
             mailbox_chunk_digest_generation_count,
             mailbox_chunk_digest_verification_count,
             mailbox_sender_key_derivation_count,

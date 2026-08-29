@@ -10,7 +10,10 @@ use super::{
     pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::{
         SeedMailboxTestFixture320, seed_mailbox_test_fixture_320,
     },
-    pseudorandom_zero_sharing_seed_mailbox_320::ML_KEM_768_CIPHERTEXT_BYTE_LENGTH,
+    pseudorandom_zero_sharing_seed_mailbox_320::{
+        ML_KEM_768_CIPHERTEXT_BYTE_LENGTH,
+        verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320,
+    },
     pseudorandom_zero_sharing_seed_mailbox_320_tests::{
         SealedMailboxTestStream320, seal_mailbox_stream,
     },
@@ -38,6 +41,7 @@ const AUTHENTICATED_INVENTORY_STATUS: u8 = 2;
 const COMPLETE_RECEIPT_STATUS: u8 = 3;
 const VALIDATION_STATUS: u8 = 4;
 const CLOSED_CONTEXT_STATUS: u8 = 5;
+const AUTHENTICATED_INCONSISTENCY_STATUS: u8 = 6;
 const RESPONSE_HEADER_BYTE_LENGTH: usize = 7;
 
 struct RecipientReceiptKernelFixture320 {
@@ -376,8 +380,69 @@ fn recipient_receipt_kernel_refuses_reordering_and_consumes_failed_authenticatio
     assert_eq!(failure_code(&malformed_count), 1);
     secrets[3][0] ^= 0x80;
     let refused = complete_authentication(handle, &secrets);
-    assert_eq!(failure_code(&refused), 5);
+    assert_eq!(failure_code(&refused), 9);
     let repeated_completion =
         complete_authentication(handle, &shared_secrets(&fixture, &ciphertexts));
     assert_eq!(failure_code(&repeated_completion), 7);
+}
+
+#[test]
+fn recipient_receipt_kernel_discloses_only_publicly_verifiable_plaintext_inconsistency() {
+    clear_pseudorandom_zero_sharing_seed_recipient_receipt_contexts_for_test_320();
+    let mut fixture = fixture(5, 0x51);
+    let mut changed_payload = fixture.owner.payload_bytes.to_vec();
+    changed_payload[0] ^= 0x80;
+    fixture.streams[0] = seal_mailbox_stream(
+        &fixture.owner,
+        fixture.owner.recipient_position,
+        &fixture.owner.descriptor_bytes,
+        &changed_payload,
+        [0x91; 32],
+        0x93,
+    );
+    let (handle, ciphertexts) = open_context(&fixture);
+    let secrets = shared_secrets(&fixture, &ciphertexts);
+    let response = complete_authentication(handle, &secrets);
+    assert_status(&response, AUTHENTICATED_INCONSISTENCY_STATUS);
+    assert_eq!(
+        response.len(),
+        RESPONSE_HEADER_BYTE_LENGTH + 2 + 2 + 32 + 64
+    );
+    let mut offset = RESPONSE_HEADER_BYTE_LENGTH;
+    let sender_position = u16::from_le_bytes(response[offset..offset + 2].try_into().unwrap());
+    offset += 2;
+    let recipient_position = u16::from_le_bytes(response[offset..offset + 2].try_into().unwrap());
+    offset += 2;
+    let disclosed_key: [u8; 32] = response[offset..offset + 32].try_into().unwrap();
+    offset += 32;
+    let evidence_identity = Hash512::from_bytes(response[offset..offset + 64].try_into().unwrap());
+    offset += 64;
+    assert_eq!(offset, response.len());
+    assert_eq!(sender_position, fixture.owner.sender_position);
+    assert_eq!(recipient_position, fixture.owner.recipient_position);
+    assert_eq!(
+        disclosed_key,
+        fixture.streams[0].authenticated_encryption_key
+    );
+
+    let encrypted_chunk_references = fixture.streams[0]
+        .encrypted_chunks
+        .iter()
+        .map(|chunk| chunk.as_slice())
+        .collect::<Vec<_>>();
+    let verified = verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
+        &fixture.owner.root_terminal,
+        &fixture.owner.roster,
+        sender_position,
+        recipient_position,
+        &fixture.owner.descriptor_bytes,
+        &fixture.streams[0].header_bytes,
+        &fixture.streams[0].manifest_bytes,
+        &fixture.streams[0].signature_envelope_bytes,
+        &encrypted_chunk_references,
+        &disclosed_key,
+    )
+    .unwrap();
+    assert_eq!(verified.identity(), evidence_identity);
+    assert_eq!(failure_code(&complete_authentication(handle, &secrets)), 7);
 }

@@ -17,8 +17,10 @@ use super::{
     pseudorandom_zero_sharing_seed_catalog_signature_320::ML_DSA_65_SIGNATURE_BYTE_LENGTH,
     pseudorandom_zero_sharing_seed_delivery_320::derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320,
     pseudorandom_zero_sharing_seed_mailbox_320::{
-        ML_KEM_768_CIPHERTEXT_BYTE_LENGTH, PseudorandomZeroSharingSeedMailboxHeaderBody320,
+        ML_KEM_768_CIPHERTEXT_BYTE_LENGTH, PseudorandomZeroSharingSeedMailboxError320,
+        PseudorandomZeroSharingSeedMailboxHeaderBody320,
         PseudorandomZeroSharingSeedMailboxVerifier320,
+        verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320,
         verify_pseudorandom_zero_sharing_seed_mailbox_sender_carrier_320,
     },
     pseudorandom_zero_sharing_seed_receipt_320::{
@@ -46,6 +48,7 @@ const AUTHENTICATED_INVENTORY_STATUS: u8 = 2;
 const COMPLETE_RECEIPT_STATUS: u8 = 3;
 const VALIDATION_STATUS: u8 = 4;
 const CLOSED_CONTEXT_STATUS: u8 = 5;
+const AUTHENTICATED_INCONSISTENCY_STATUS: u8 = 6;
 const PREPARATION_ATTEMPT_ORDINAL: u16 = 0;
 const MAXIMUM_COPIED_BUFFER_BYTE_LENGTH: usize = 8 * 1024 * 1024;
 const MAXIMUM_CONTROL_OBJECT_BYTE_LENGTH: usize = 1024 * 1024;
@@ -63,6 +66,7 @@ pub(crate) enum PseudorandomZeroSharingSeedRecipientReceiptKernelError320 {
     PreparedMismatch(&'static str),
     ContextUnavailable,
     SignatureMismatch,
+    PrivateAuthenticationFailed,
 }
 
 impl PseudorandomZeroSharingSeedRecipientReceiptKernelError320 {
@@ -76,6 +80,7 @@ impl PseudorandomZeroSharingSeedRecipientReceiptKernelError320 {
             Self::PreparedMismatch(_) => 6,
             Self::ContextUnavailable => 7,
             Self::SignatureMismatch => 8,
+            Self::PrivateAuthenticationFailed => 9,
         }
     }
 }
@@ -113,6 +118,9 @@ impl fmt::Display for PseudorandomZeroSharingSeedRecipientReceiptKernelError320 
             Self::SignatureMismatch => {
                 formatter.write_str("seed-recipient receipt kernel signature is invalid")
             }
+            Self::PrivateAuthenticationFailed => formatter.write_str(
+                "seed-recipient receipt kernel cannot authenticate the signed private carrier",
+            ),
         }
     }
 }
@@ -138,6 +146,13 @@ struct VerifiedRecipientReceiptContext320 {
     pending_carriers: Option<Box<[OwnedMailboxCarrier320]>>,
     authenticated_inventory: Option<AuthenticatedPseudorandomZeroSharingSeedRecipientInventory320>,
     receipt_body: Option<PseudorandomZeroSharingSeedRecipientReceiptBody320>,
+}
+
+struct AuthenticatedInconsistencyDisclosure320 {
+    sender_position: u16,
+    recipient_position: u16,
+    authenticated_encryption_key: Zeroizing<[u8; 32]>,
+    evidence_identity: Hash512,
 }
 
 struct VerifiedRecipientReceiptContextRegistry320 {
@@ -662,7 +677,10 @@ fn close_verified_context(
 fn authenticate_inventory(
     context: &mut VerifiedRecipientReceiptContext320,
     shared_secrets: Vec<[u8; 32]>,
-) -> Result<(), PseudorandomZeroSharingSeedRecipientReceiptKernelError320> {
+) -> Result<
+    Option<AuthenticatedInconsistencyDisclosure320>,
+    PseudorandomZeroSharingSeedRecipientReceiptKernelError320,
+> {
     if context.authenticated_inventory.is_some() || context.receipt_body.is_some() {
         return Err(
             PseudorandomZeroSharingSeedRecipientReceiptKernelError320::ContextMismatch(
@@ -699,25 +717,91 @@ fn authenticate_inventory(
             &carrier.signature_envelope_bytes,
             &shared_secret,
         )
+        .map_err(|error| {
+            if matches!(
+                error,
+                PseudorandomZeroSharingSeedMailboxError320::AuthenticatedEncryptionKeyCommitmentMismatch
+            ) {
+                PseudorandomZeroSharingSeedRecipientReceiptKernelError320::PrivateAuthenticationFailed
+            } else {
+                PseudorandomZeroSharingSeedRecipientReceiptKernelError320::AuthenticatedInconsistency(
+                    "mailbox control",
+                )
+            }
+        })?;
+        let authenticated_encryption_key =
+            Zeroizing::new(verifier.authenticated_encryption_key_for_inconsistency());
+        let mut authenticated_delivery_failure = false;
+        for encrypted_chunk in &carrier.encrypted_chunks {
+            if verifier
+                .absorb_next_encrypted_chunk(encrypted_chunk)
+                .is_err()
+            {
+                authenticated_delivery_failure = true;
+                break;
+            }
+        }
+        let authenticated_delivery = if authenticated_delivery_failure {
+            None
+        } else {
+            verifier.finish().ok()
+        };
+        if let Some(authenticated_delivery) = authenticated_delivery {
+            authenticated_deliveries.push(authenticated_delivery);
+            continue;
+        }
+        let descriptor_bytes = derive_pseudorandom_zero_sharing_seed_delivery_descriptor_320(
+            &context.root_terminal,
+            carrier.sender_position,
+            context.recipient_position,
+        )
+        .and_then(|descriptor| descriptor.canonical_bytes())
         .map_err(|_| {
             PseudorandomZeroSharingSeedRecipientReceiptKernelError320::AuthenticatedInconsistency(
-                "mailbox control",
+                "mailbox disclosure descriptor",
             )
         })?;
-        for encrypted_chunk in &carrier.encrypted_chunks {
-            verifier
-                .absorb_next_encrypted_chunk(encrypted_chunk)
-                .map_err(|_| {
+        let encrypted_chunk_references = carrier
+            .encrypted_chunks
+            .iter()
+            .map(|chunk| chunk.as_slice())
+            .collect::<Vec<_>>();
+        match verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
+            &context.root_terminal,
+            &context.roster,
+            carrier.sender_position,
+            context.recipient_position,
+            &descriptor_bytes,
+            &carrier.header_bytes,
+            &carrier.manifest_bytes,
+            &carrier.signature_envelope_bytes,
+            &encrypted_chunk_references,
+            &authenticated_encryption_key,
+        ) {
+            Ok(evidence) => {
+                return Ok(Some(AuthenticatedInconsistencyDisclosure320 {
+                    sender_position: carrier.sender_position,
+                    recipient_position: context.recipient_position,
+                    authenticated_encryption_key,
+                    evidence_identity: evidence.identity(),
+                }));
+            }
+            Err(
+                PseudorandomZeroSharingSeedMailboxError320::AuthenticatedDecryptionFailed
+                | PseudorandomZeroSharingSeedMailboxError320::AuthenticatedEncryptionKeyCommitmentMismatch,
+            ) => {
+                return Err(
+                    PseudorandomZeroSharingSeedRecipientReceiptKernelError320::PrivateAuthenticationFailed,
+                );
+            }
+            Err(_) => {
+                return Err(
                     PseudorandomZeroSharingSeedRecipientReceiptKernelError320::AuthenticatedInconsistency(
-                        "mailbox plaintext",
-                    )
-                })?;
+                        "mailbox disclosure verification",
+                    ),
+                );
+            }
         }
-        authenticated_deliveries.push(verifier.finish().map_err(|_| {
-            PseudorandomZeroSharingSeedRecipientReceiptKernelError320::AuthenticatedInconsistency(
-                "mailbox completion",
-            )
-        })?);
     }
     let inventory = verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
         &context.root_terminal,
@@ -737,7 +821,7 @@ fn authenticate_inventory(
         })?;
     context.authenticated_inventory = Some(inventory);
     context.receipt_body = Some(receipt_body);
-    Ok(())
+    Ok(None)
 }
 
 fn require_matching_bytes(
@@ -1032,6 +1116,17 @@ fn encode_authenticated_inventory_response(
     Ok(bytes)
 }
 
+fn encode_authenticated_inconsistency_response(
+    disclosure: AuthenticatedInconsistencyDisclosure320,
+) -> Result<Zeroizing<Vec<u8>>, PseudorandomZeroSharingSeedRecipientReceiptKernelError320> {
+    let mut bytes = response_header(AUTHENTICATED_INCONSISTENCY_STATUS);
+    append_unsigned16(&mut bytes, disclosure.sender_position);
+    append_unsigned16(&mut bytes, disclosure.recipient_position);
+    bytes.extend_from_slice(disclosure.authenticated_encryption_key.as_ref());
+    bytes.extend_from_slice(disclosure.evidence_identity.as_bytes());
+    Ok(bytes)
+}
+
 fn encode_complete_receipt_response(
     receipt_envelope_bytes: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, PseudorandomZeroSharingSeedRecipientReceiptKernelError320> {
@@ -1092,8 +1187,10 @@ fn parse_request(
                 .collect::<Result<Vec<[u8; 32]>, _>>()?;
             cursor.require_complete("complete-authentication trailing bytes")?;
             with_verified_context_mut(handle, |context| {
-                authenticate_inventory(context, shared_secrets)?;
-                encode_authenticated_inventory_response(context)
+                match authenticate_inventory(context, shared_secrets)? {
+                    Some(disclosure) => encode_authenticated_inconsistency_response(disclosure),
+                    None => encode_authenticated_inventory_response(context),
+                }
             })
         }
         COMPLETE_RECEIPT_OPERATION => {

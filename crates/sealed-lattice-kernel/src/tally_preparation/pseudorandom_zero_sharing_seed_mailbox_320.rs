@@ -38,7 +38,8 @@ use super::{
 };
 
 const PREPARATION_ATTEMPT_ORDINAL: u16 = 0;
-const MAILBOX_HEADER_ITEM_COUNT: usize = 8;
+const MAILBOX_HEADER_ITEM_COUNT: usize = 9;
+const MAILBOX_KEY_DERIVATION_CONTEXT_ITEM_COUNT: usize = 8;
 const MAILBOX_MANIFEST_ITEM_COUNT: usize = 3;
 const MAILBOX_SIGNATURE_BODY_ITEM_COUNT: usize = 7;
 const MAILBOX_SIGNATURE_ENVELOPE_ITEM_COUNT: usize = 3;
@@ -59,6 +60,12 @@ pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_DOMAIN: &str =
     "sealed-lattice/v1/preparation/seed-mailbox-header";
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_IDENTITY_DOMAIN: &str =
     "sealed-lattice/v1/preparation/seed-mailbox-header-identity";
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_DOMAIN: &str =
+    "sealed-lattice/v1/preparation/seed-mailbox-key-derivation-context";
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_COMMITMENT_DOMAIN: &str =
+    "sealed-lattice/v1/preparation/seed-mailbox-key-commitment";
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATED_INCONSISTENCY_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/v1/preparation/seed-mailbox-authenticated-inconsistency-identity";
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_RECIPIENT_KEY_IDENTITY_DOMAIN: &str =
     "sealed-lattice/v1/preparation/seed-mailbox-recipient-key-identity";
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_CHUNK_ASSOCIATED_DATA_DOMAIN: &str =
@@ -90,6 +97,18 @@ pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_BODY_BYTE_LENGTH:
         + MAILBOX_HEADER_ITEM_COUNT * CANONICAL_ITEM_HEADER_BYTE_LENGTH
         + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
         + PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_DOMAIN.len()
+        + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
+        + PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_ALGORITHM_IDENTIFIER.len()
+        + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
+        + super::pseudorandom_zero_sharing_seed_delivery_320::PSEUDORANDOM_ZERO_SHARING_SEED_DELIVERY_DESCRIPTOR_BODY_BYTE_LENGTH
+        + 2 * Hash512::BYTE_LENGTH
+        + ML_KEM_768_CIPHERTEXT_BYTE_LENGTH
+        + 3 * size_of::<u64>();
+pub(crate) const PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_BYTE_LENGTH: usize =
+    CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+        + MAILBOX_KEY_DERIVATION_CONTEXT_ITEM_COUNT * CANONICAL_ITEM_HEADER_BYTE_LENGTH
+        + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
+        + PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_DOMAIN.len()
         + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
         + PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_ALGORITHM_IDENTIFIER.len()
         + CANONICAL_VARIABLE_VALUE_LENGTH_PREFIX_BYTE_LENGTH
@@ -205,6 +224,8 @@ pub(crate) enum PseudorandomZeroSharingSeedMailboxError320 {
     DecapsulationFailed,
     AuthenticatedEncryptionFailed,
     AuthenticatedDecryptionFailed,
+    AuthenticatedEncryptionKeyCommitmentMismatch,
+    NoAuthenticatedInconsistency,
     MalformedSigningVerificationKey,
     FixedByteLength {
         field: &'static str,
@@ -294,6 +315,11 @@ impl fmt::Display for PseudorandomZeroSharingSeedMailboxError320 {
             Self::AuthenticatedDecryptionFailed => {
                 formatter.write_str("seed-mailbox AES-256-GCM-SIV authentication failed")
             }
+            Self::AuthenticatedEncryptionKeyCommitmentMismatch => formatter
+                .write_str("seed-mailbox disclosed AEAD key does not match the signed commitment"),
+            Self::NoAuthenticatedInconsistency => formatter.write_str(
+                "seed-mailbox disclosed AEAD key authenticates a valid committed delivery",
+            ),
             Self::MalformedSigningVerificationKey => {
                 formatter.write_str("seed-mailbox roster contains a malformed ML-DSA-65 key")
             }
@@ -333,6 +359,7 @@ pub(crate) struct PseudorandomZeroSharingSeedMailboxHeaderBody320 {
     delivery_descriptor: PseudorandomZeroSharingSeedDeliveryDescriptorBody320,
     recipient_encapsulation_key_identity: Hash512,
     encapsulation_ciphertext: [u8; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH],
+    authenticated_encryption_key_commitment: Hash512,
     maximum_plaintext_chunk_byte_length: u64,
     chunk_count: u64,
     total_carrier_byte_length: u64,
@@ -346,6 +373,7 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
         recipient_position: u16,
         descriptor_bytes: &[u8],
         encapsulation_ciphertext: [u8; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH],
+        authenticated_encryption_key_commitment: Hash512,
     ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
         validate_roster_for_terminal(root_terminal, roster)?;
         let delivery_descriptor = require_expected_delivery_descriptor(
@@ -369,6 +397,7 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
             delivery_descriptor,
             recipient_encapsulation_key_identity,
             encapsulation_ciphertext,
+            authenticated_encryption_key_commitment,
             maximum_plaintext_chunk_byte_length: u64::try_from(
                 PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_MAXIMUM_PLAINTEXT_CHUNK_BYTE_LENGTH,
             )
@@ -392,6 +421,10 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
         &self,
     ) -> &[u8; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH] {
         &self.encapsulation_ciphertext
+    }
+
+    pub(crate) const fn authenticated_encryption_key_commitment(&self) -> Hash512 {
+        self.authenticated_encryption_key_commitment
     }
 
     pub(crate) const fn maximum_plaintext_chunk_byte_length(&self) -> u64 {
@@ -422,6 +455,7 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
                 CanonicalItem::variable_bytes(self.delivery_descriptor.canonical_bytes()?)?,
                 CanonicalItem::hash512(self.recipient_encapsulation_key_identity.into_bytes()),
                 CanonicalItem::fixed_bytes(self.encapsulation_ciphertext)?,
+                CanonicalItem::hash512(self.authenticated_encryption_key_commitment.into_bytes()),
                 CanonicalItem::unsigned64(self.maximum_plaintext_chunk_byte_length),
                 CanonicalItem::unsigned64(self.chunk_count),
                 CanonicalItem::unsigned64(self.total_carrier_byte_length),
@@ -459,12 +493,16 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
             delivery_descriptor,
             recipient_encapsulation_key_identity,
             encapsulation_ciphertext,
-            maximum_plaintext_chunk_byte_length: read_u64(
+            authenticated_encryption_key_commitment: read_hash512(
                 &tuple.items[5],
+                "authenticated-encryption key commitment",
+            )?,
+            maximum_plaintext_chunk_byte_length: read_u64(
+                &tuple.items[6],
                 "maximum plaintext chunk byte length",
             )?,
-            chunk_count: read_u64(&tuple.items[6], "chunk count")?,
-            total_carrier_byte_length: read_u64(&tuple.items[7], "total carrier byte length")?,
+            chunk_count: read_u64(&tuple.items[7], "chunk count")?,
+            total_carrier_byte_length: read_u64(&tuple.items[8], "total carrier byte length")?,
         };
         header.validate_internal_geometry()?;
         Ok(header)
@@ -475,6 +513,37 @@ impl PseudorandomZeroSharingSeedMailboxHeaderBody320 {
             PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_HEADER_IDENTITY_DOMAIN,
             &[CanonicalItem::variable_bytes(self.canonical_bytes()?)?],
         )?)
+    }
+
+    fn key_derivation_context_bytes(
+        &self,
+    ) -> Result<Vec<u8>, PseudorandomZeroSharingSeedMailboxError320> {
+        let bytes = CanonicalTuple::new(
+            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+            CANONICAL_TUPLE_VERSION,
+            vec![
+                CanonicalItem::nonempty_ascii(
+                    PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_DOMAIN,
+                )?,
+                CanonicalItem::nonempty_ascii(
+                    PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_ALGORITHM_IDENTIFIER,
+                )?,
+                CanonicalItem::variable_bytes(self.delivery_descriptor.canonical_bytes()?)?,
+                CanonicalItem::hash512(self.recipient_encapsulation_key_identity.into_bytes()),
+                CanonicalItem::fixed_bytes(self.encapsulation_ciphertext)?,
+                CanonicalItem::unsigned64(self.maximum_plaintext_chunk_byte_length),
+                CanonicalItem::unsigned64(self.chunk_count),
+                CanonicalItem::unsigned64(self.total_carrier_byte_length),
+            ],
+        )
+        .encode()?;
+        if bytes.len() != PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_CONTEXT_BYTE_LENGTH
+        {
+            return Err(mailbox_object_mismatch(
+                "key-derivation context byte length",
+            ));
+        }
+        Ok(bytes)
     }
 
     pub(crate) fn encrypted_chunk_byte_lengths(
@@ -885,16 +954,21 @@ impl PseudorandomZeroSharingSeedMailboxSealer320 {
         let (shared_secret, encapsulation_ciphertext) =
             encapsulation_key.encaps_from_seed(encapsulation_randomness);
         let shared_secret_bytes = Zeroizing::new(shared_secret.into_bytes());
-        let header = PseudorandomZeroSharingSeedMailboxHeaderBody320::new(
+        let mut header = PseudorandomZeroSharingSeedMailboxHeaderBody320::new(
             root_terminal,
             roster,
             sender_position,
             recipient_position,
             descriptor_bytes,
             encapsulation_ciphertext.into_bytes(),
+            Hash512::from_bytes([0; Hash512::BYTE_LENGTH]),
         )?;
-        let authenticated_encryption_key =
-            derive_authenticated_encryption_key(&shared_secret_bytes, &header.canonical_bytes()?);
+        let authenticated_encryption_key = derive_authenticated_encryption_key(
+            &shared_secret_bytes,
+            &header.key_derivation_context_bytes()?,
+        );
+        header.authenticated_encryption_key_commitment =
+            derive_authenticated_encryption_key_commitment(&authenticated_encryption_key)?;
         let expected_chunk_count = usize::try_from(header.chunk_count)
             .map_err(|_| PseudorandomZeroSharingSeedMailboxError320::IntegerConversion)?;
         Ok(Self {
@@ -907,6 +981,11 @@ impl PseudorandomZeroSharingSeedMailboxSealer320 {
 
     pub(crate) const fn header(&self) -> &PseudorandomZeroSharingSeedMailboxHeaderBody320 {
         &self.header
+    }
+
+    #[cfg(test)]
+    pub(crate) fn authenticated_encryption_key_for_test(&self) -> [u8; 32] {
+        *self.authenticated_encryption_key
     }
 
     pub(crate) fn seal_next_plaintext_chunk(
@@ -1110,7 +1189,6 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
             expected_recipient_position,
             header,
             manifest,
-            header_bytes,
             &shared_secret_bytes,
         )
     }
@@ -1160,7 +1238,6 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
             expected_recipient_position,
             header,
             manifest,
-            header_bytes,
             shared_secret_bytes,
         )
     }
@@ -1171,11 +1248,37 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
         expected_recipient_position: u16,
         header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
         manifest: PseudorandomZeroSharingSeedMailboxManifestBody320,
-        header_bytes: &[u8],
         shared_secret_bytes: &[u8; 32],
     ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
-        let authenticated_encryption_key =
-            derive_authenticated_encryption_key(shared_secret_bytes, header_bytes);
+        let authenticated_encryption_key = derive_authenticated_encryption_key(
+            shared_secret_bytes,
+            &header.key_derivation_context_bytes()?,
+        );
+        Self::from_verified_control_with_authenticated_encryption_key(
+            root_terminal,
+            expected_sender_position,
+            expected_recipient_position,
+            header,
+            manifest,
+            authenticated_encryption_key,
+        )
+    }
+
+    fn from_verified_control_with_authenticated_encryption_key(
+        root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+        expected_sender_position: u16,
+        expected_recipient_position: u16,
+        header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
+        manifest: PseudorandomZeroSharingSeedMailboxManifestBody320,
+        authenticated_encryption_key: Zeroizing<[u8; 32]>,
+    ) -> Result<Self, PseudorandomZeroSharingSeedMailboxError320> {
+        if derive_authenticated_encryption_key_commitment(&authenticated_encryption_key)?
+            != header.authenticated_encryption_key_commitment
+        {
+            return Err(
+                PseudorandomZeroSharingSeedMailboxError320::AuthenticatedEncryptionKeyCommitmentMismatch,
+            );
+        }
         let delivery_verifier = PseudorandomZeroSharingSeedDeliveryVerifier320::new(
             root_terminal,
             expected_sender_position,
@@ -1259,6 +1362,13 @@ impl PseudorandomZeroSharingSeedMailboxVerifier320 {
             .checked_add(1)
             .ok_or(PseudorandomZeroSharingSeedMailboxError320::ArithmeticOverflow)?;
         Ok(())
+    }
+
+    /// Copies the one-time stream key only so the recipient adapter can build
+    /// independently verifiable burn evidence after authenticated plaintext
+    /// correspondence has failed. Normal success paths must not publish it.
+    pub(crate) fn authenticated_encryption_key_for_inconsistency(&self) -> [u8; 32] {
+        *self.authenticated_encryption_key
     }
 
     pub(crate) fn finish(
@@ -1466,6 +1576,168 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_mailbox_sender_carrier_320(
     Ok(())
 }
 
+/// Publicly reproducible proof that one sender-authenticated mailbox opens
+/// under its committed one-time AEAD key but not to the committed seed
+/// delivery.
+///
+/// The disclosed key is scoped to this fresh KEM stream. Verification first
+/// rechecks the sender signature and every encrypted byte, then requires the
+/// key's signed 512-bit commitment, and accepts only if a signed ciphertext
+/// fails authentication under that key or if its authenticated plaintext fails
+/// the root-matched delivery verifier. A wrong key commitment, unsigned
+/// mutation, or valid delivery never mints this result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320 {
+    sender_position: u16,
+    recipient_position: u16,
+    header_identity: Hash512,
+    manifest_identity: Hash512,
+    evidence_identity: Hash512,
+}
+
+impl VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320 {
+    pub(crate) const fn sender_position(self) -> u16 {
+        self.sender_position
+    }
+
+    pub(crate) const fn recipient_position(self) -> u16 {
+        self.recipient_position
+    }
+
+    pub(crate) const fn header_identity(self) -> Hash512 {
+        self.header_identity
+    }
+
+    pub(crate) const fn manifest_identity(self) -> Hash512 {
+        self.manifest_identity
+    }
+
+    pub(crate) const fn identity(self) -> Hash512 {
+        self.evidence_identity
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    roster: &Roster,
+    expected_sender_position: u16,
+    expected_recipient_position: u16,
+    expected_descriptor_bytes: &[u8],
+    header_bytes: &[u8],
+    manifest_bytes: &[u8],
+    signature_envelope_bytes: &[u8],
+    encrypted_chunks: &[&[u8]],
+    disclosed_authenticated_encryption_key: &[u8; 32],
+) -> Result<
+    VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320,
+    PseudorandomZeroSharingSeedMailboxError320,
+> {
+    verify_pseudorandom_zero_sharing_seed_mailbox_sender_carrier_320(
+        root_terminal,
+        roster,
+        expected_sender_position,
+        expected_recipient_position,
+        expected_descriptor_bytes,
+        header_bytes,
+        manifest_bytes,
+        signature_envelope_bytes,
+        encrypted_chunks,
+    )?;
+    let header =
+        PseudorandomZeroSharingSeedMailboxHeaderBody320::from_canonical_bytes(header_bytes)?;
+    let manifest =
+        PseudorandomZeroSharingSeedMailboxManifestBody320::from_canonical_bytes(manifest_bytes)?;
+    let authenticated_encryption_key = Zeroizing::new(*disclosed_authenticated_encryption_key);
+    let mut verifier =
+        PseudorandomZeroSharingSeedMailboxVerifier320::from_verified_control_with_authenticated_encryption_key(
+            root_terminal,
+            expected_sender_position,
+            expected_recipient_position,
+            header.clone(),
+            manifest.clone(),
+            authenticated_encryption_key,
+        )?;
+    for encrypted_chunk in encrypted_chunks {
+        if let Err(error) = verifier.absorb_next_encrypted_chunk(encrypted_chunk) {
+            if is_authenticated_delivery_inconsistency(&error) {
+                return verified_authenticated_inconsistency(
+                    root_terminal,
+                    expected_sender_position,
+                    expected_recipient_position,
+                    &header,
+                    &manifest,
+                    disclosed_authenticated_encryption_key,
+                );
+            }
+            return Err(error);
+        }
+    }
+    match verifier.finish() {
+        Ok(_) => Err(PseudorandomZeroSharingSeedMailboxError320::NoAuthenticatedInconsistency),
+        Err(error) if is_authenticated_delivery_inconsistency(&error) => {
+            verified_authenticated_inconsistency(
+                root_terminal,
+                expected_sender_position,
+                expected_recipient_position,
+                &header,
+                &manifest,
+                disclosed_authenticated_encryption_key,
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn is_authenticated_delivery_inconsistency(
+    error: &PseudorandomZeroSharingSeedMailboxError320,
+) -> bool {
+    matches!(
+        error,
+        PseudorandomZeroSharingSeedMailboxError320::AuthenticatedDecryptionFailed
+            | PseudorandomZeroSharingSeedMailboxError320::Delivery(_)
+            | PseudorandomZeroSharingSeedMailboxError320::PlaintextEntryTruncated
+            | PseudorandomZeroSharingSeedMailboxError320::ObjectMismatch {
+                field: "plaintext entry count"
+            }
+    )
+}
+
+fn verified_authenticated_inconsistency(
+    root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    sender_position: u16,
+    recipient_position: u16,
+    header: &PseudorandomZeroSharingSeedMailboxHeaderBody320,
+    manifest: &PseudorandomZeroSharingSeedMailboxManifestBody320,
+    disclosed_authenticated_encryption_key: &[u8; 32],
+) -> Result<
+    VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320,
+    PseudorandomZeroSharingSeedMailboxError320,
+> {
+    let header_identity = header.identity()?;
+    let manifest_identity = manifest.identity()?;
+    let evidence_identity = hash_foundation_tuple_512(
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_AUTHENTICATED_INCONSISTENCY_IDENTITY_DOMAIN,
+        &[
+            CanonicalItem::hash512(root_terminal.identity()?.into_bytes()),
+            CanonicalItem::unsigned16(sender_position),
+            CanonicalItem::unsigned16(recipient_position),
+            CanonicalItem::hash512(header_identity.into_bytes()),
+            CanonicalItem::hash512(manifest_identity.into_bytes()),
+            CanonicalItem::fixed_bytes(disclosed_authenticated_encryption_key)?,
+        ],
+    )?;
+    Ok(
+        VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320 {
+            sender_position,
+            recipient_position,
+            header_identity,
+            manifest_identity,
+            evidence_identity,
+        },
+    )
+}
+
 fn require_header_matches_expected(
     root_terminal: &RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
     roster: &Roster,
@@ -1652,13 +1924,22 @@ fn derive_chunk_associated_data(
 
 fn derive_authenticated_encryption_key(
     shared_secret: &[u8; 32],
-    header_bytes: &[u8],
+    key_derivation_context_bytes: &[u8],
 ) -> Zeroizing<[u8; 32]> {
     derive_private_mailbox_key_256(
         shared_secret,
         PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_DERIVATION_LABEL,
-        header_bytes,
+        key_derivation_context_bytes,
     )
+}
+
+fn derive_authenticated_encryption_key_commitment(
+    authenticated_encryption_key: &[u8; 32],
+) -> Result<Hash512, PseudorandomZeroSharingSeedMailboxError320> {
+    Ok(hash_foundation_tuple_512(
+        PSEUDORANDOM_ZERO_SHARING_SEED_MAILBOX_KEY_COMMITMENT_DOMAIN,
+        &[CanonicalItem::fixed_bytes(authenticated_encryption_key)?],
+    )?)
 }
 
 fn derive_authenticated_encryption_nonce(
@@ -1675,9 +1956,9 @@ fn derive_authenticated_encryption_nonce(
 #[cfg(test)]
 pub(super) fn derive_authenticated_encryption_key_for_test(
     shared_secret: &[u8; 32],
-    header_bytes: &[u8],
+    key_derivation_context_bytes: &[u8],
 ) -> Zeroizing<[u8; 32]> {
-    derive_authenticated_encryption_key(shared_secret, header_bytes)
+    derive_authenticated_encryption_key(shared_secret, key_derivation_context_bytes)
 }
 
 #[cfg(test)]

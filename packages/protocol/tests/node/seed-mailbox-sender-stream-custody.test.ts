@@ -330,11 +330,11 @@ describe('seed-mailbox sender-stream custody', () => {
     it('independently accounts for the exact completion stream records', () => {
         const productionGeometry: SeedMailboxSenderStreamGeometry = {
             encryptedChunkByteLengths: [62_606],
-            headerByteLength: 1_655,
+            headerByteLength: 1_725,
             manifestByteLength: 215,
             signatureEnvelopeByteLength: 3_713,
             sourcePayloadByteLength: 62_590,
-            totalCarrierByteLength: 68_189,
+            totalCarrierByteLength: 68_259,
         };
         const derived = deriveSeedMailboxSenderStreamCustodyRecordByteLengths({
             canonicalDeliveryDescriptorByteLength: 328,
@@ -346,7 +346,7 @@ describe('seed-mailbox sender-stream custody', () => {
         const independentlyDerivedReservationPlaintextByteLength =
             independentlyDerivedCommonByteLength + 32 * 2;
         const independentlyDerivedCompletedPlaintextByteLength =
-            independentlyDerivedCommonByteLength + 68_189;
+            independentlyDerivedCommonByteLength + 68_259;
         expect(derived).toEqual({
             completedCiphertextByteLength:
                 independentlyDerivedCompletedPlaintextByteLength + 54,
@@ -362,9 +362,9 @@ describe('seed-mailbox sender-stream custody', () => {
                 independentlyDerivedReservationPlaintextByteLength,
         });
         expect(derived).toEqual({
-            completedCiphertextByteLength: 68_810,
-            completedPlaintextByteLength: 68_756,
-            copyOnWriteCiphertextOverlapByteLength: 69_495,
+            completedCiphertextByteLength: 68_880,
+            completedPlaintextByteLength: 68_826,
+            copyOnWriteCiphertextOverlapByteLength: 69_565,
             reservationCiphertextByteLength: 685,
             reservationPlaintextByteLength: 631,
         });
@@ -398,26 +398,26 @@ describe('seed-mailbox sender-stream custody', () => {
         const independentlyDerivedPrepareRequestByteLength =
             7 + 4 + (64 * 3 + 2 * 4) + (4 + 328) + 32;
         const independentlyDerivedPrepareResponseByteLength =
-            7 + (4 + 1_655) + (4 + 215) + (4 + 309) + 2 + (4 + 62_606);
+            7 + (4 + 1_725) + (4 + 215) + (4 + 309) + 2 + (4 + 62_606);
         const independentlyDerivedCompleteRequestByteLength =
             7 +
             4 +
             (64 * 3 + 2 * 4) +
             (4 + 328) +
-            (4 + 1_655) +
+            (4 + 1_725) +
             (4 + 215) +
             2 +
             (4 + 62_606) +
             3_309;
         const independentlyDerivedCompleteResponseByteLength =
-            7 + (4 + 1_655) + (4 + 215) + (4 + 3_713) + 2 + (4 + 62_606);
+            7 + (4 + 1_725) + (4 + 215) + (4 + 3_713) + 2 + (4 + 62_606);
         const independentlyDerivedValidationRequestByteLength =
             7 +
             4 +
             (64 * 3 + 2 * 4) +
             (4 + 328) +
             (5 * 4 + 2 + 4) +
-            (4 + 1_655) +
+            (4 + 1_725) +
             (4 + 215) +
             (4 + 3_713) +
             2 +
@@ -470,18 +470,18 @@ describe('seed-mailbox sender-stream custody', () => {
             validateCarrierResponseByteLengthPerStream: 7,
         });
         expect(kernelDerived).toMatchObject({
-            coldValidationCumulativeRequestByteLength: 1_918_655,
+            coldValidationCumulativeRequestByteLength: 1_919_285,
             coldValidationCumulativeResponseByteLength: 2_033,
-            completeCarrierRequestByteLengthPerStream: 68_342,
-            completeCarrierResponseByteLengthPerStream: 68_214,
+            completeCarrierRequestByteLengthPerStream: 68_412,
+            completeCarrierResponseByteLengthPerStream: 68_284,
             maximumRequestByteLength: 1_299_660,
-            maximumResponseByteLength: 68_214,
+            maximumResponseByteLength: 68_284,
             openContextRequestByteLength: 1_299_660,
             prepareCarrierRequestByteLengthPerStream: 575,
-            prepareCarrierResponseByteLengthPerStream: 64_810,
-            successfulCumulativeRequestByteLength: 2_538_908,
-            successfulCumulativeResponseByteLength: 1_199_249,
-            validateCarrierRequestByteLengthPerStream: 68_776,
+            prepareCarrierResponseByteLengthPerStream: 64_880,
+            successfulCumulativeRequestByteLength: 2_540_168,
+            successfulCumulativeResponseByteLength: 1_200_509,
+            validateCarrierRequestByteLengthPerStream: 68_846,
         });
         expect(() =>
             deriveSeedMailboxSenderStreamKernelByteLengths({
