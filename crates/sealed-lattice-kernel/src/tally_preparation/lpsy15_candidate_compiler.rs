@@ -12,6 +12,11 @@ use crate::{
 };
 
 use super::{
+    lpsy15_bmr_prf::{
+        LPSY15_BMR_PRF_CUSTOMIZATION, LPSY15_BMR_PRF_KEY_BYTE_LENGTH,
+        LPSY15_BMR_PRF_OUTPUT_BYTE_LENGTH, LPSY15_BMR_PRF_RIGHT_ENCODE_BYTE_LENGTH,
+        Lpsy15BmrPrfInput,
+    },
     pseudorandom_zero_sharing_seed_catalog_signature_320::ML_DSA_65_SIGNATURE_BYTE_LENGTH,
     pseudorandom_zero_sharing_seed_mailbox_320::{
         ML_KEM_768_CIPHERTEXT_BYTE_LENGTH,
@@ -34,9 +39,6 @@ const FIXED_FALSE_SOURCE_COUNT: u64 = 1;
 const PAPER_ROUND_RECONCILIATION_COUNT: u64 = 12;
 const COLLECTIVE_COIN_SALT_BYTE_LENGTH: usize = 64;
 const SHAKE256_RATE_BYTE_LENGTH: u64 = 136;
-const LPSY15_PRF_KEY_BYTE_LENGTH: u64 = SECURITY_BIT_LENGTH / 8;
-const LPSY15_PRF_OUTPUT_BYTE_LENGTH: u64 = SECURITY_BIT_LENGTH / 8;
-const LPSY15_PRF_RIGHT_ENCODE_BYTE_LENGTH: u64 = 3;
 const FIELD_WORK_BATCH_ELEMENT_COUNT: u64 = 4_096;
 const CHECKPOINT_ORDERED_SOURCE_DIGEST_COUNT: u64 = 5;
 // These are the exact current authenticated-checkpoint-store reservation
@@ -57,8 +59,6 @@ const TRANSCRIPT_STORAGE_OBJECT_KEY_BYTE_LENGTH: u64 = 256;
 // Transcript logical keys are the lowercase hexadecimal encoding of a
 // 32-byte record identity, independent of relay-provided names.
 const TRANSCRIPT_LOGICAL_RECORD_KEY_BYTE_LENGTH: u64 = 64;
-const LPSY15_PRF_CUSTOMIZATION: &[u8] = b"sealed-lattice/v1/lpsy15/bmr-prf";
-const LPSY15_PRF_MESSAGE_DOMAIN: &str = "sealed-lattice/v1/preparation/lpsy15-bmr-prf-input";
 const RANDOMNESS_XOF_MESSAGE_DOMAIN: &str =
     "sealed-lattice/v1/preparation/lpsy15-randomness-source";
 const CHECKPOINT_CURSOR_DOMAIN: &str = "sealed-lattice/v1/preparation/lpsy15-checkpoint-cursor";
@@ -1921,18 +1921,21 @@ fn lpsy15_prf_message_byte_length() -> Result<u64, Lpsy15CandidateCompilerError>
     // identity, preparation-attempt root, and complete predecessor root. The
     // remaining coordinates are gate, input side, output component, and PRF
     // branch. Key owner and alternative are bound by the selected 40-byte key.
-    canonical_tuple_byte_length(vec![
-        CanonicalItem::nonempty_ascii(LPSY15_PRF_MESSAGE_DOMAIN)?,
-        zero_hash_item(),
-        zero_hash_item(),
-        zero_hash_item(),
-        zero_hash_item(),
-        zero_hash_item(),
-        CanonicalItem::unsigned32(u32::MAX),
-        CanonicalItem::unsigned16(u16::MAX),
-        CanonicalItem::unsigned16(u16::MAX),
-        CanonicalItem::unsigned16(u16::MAX),
-    ])
+    u64_from_usize(
+        Lpsy15BmrPrfInput {
+            candidate_identity: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+            roster_root: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+            circuit_identity: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+            preparation_attempt_root: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+            complete_predecessor_root: Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH]),
+            gate_index: u32::MAX,
+            input_side: u16::MAX,
+            output_component: u16::MAX,
+            branch: u16::MAX,
+        }
+        .canonical_message_bytes()?
+        .len(),
+    )
 }
 
 fn lpsy15_prf_kmac_permutation_count(
@@ -1942,15 +1945,17 @@ fn lpsy15_prf_kmac_permutation_count(
     // bytepad occupy exactly one 136-byte absorb block under this fixed
     // language. The final message always consumes one padded block beyond its
     // complete rate blocks; the 40-byte output consumes one squeeze block.
-    if LPSY15_PRF_CUSTOMIZATION.len() > 100
-        || LPSY15_PRF_KEY_BYTE_LENGTH >= SHAKE256_RATE_BYTE_LENGTH
-        || LPSY15_PRF_OUTPUT_BYTE_LENGTH >= SHAKE256_RATE_BYTE_LENGTH
+    if LPSY15_BMR_PRF_CUSTOMIZATION.len() > 100
+        || u64_from_usize(LPSY15_BMR_PRF_KEY_BYTE_LENGTH)? >= SHAKE256_RATE_BYTE_LENGTH
+        || u64_from_usize(LPSY15_BMR_PRF_OUTPUT_BYTE_LENGTH)? >= SHAKE256_RATE_BYTE_LENGTH
     {
         return Err(Lpsy15CandidateCompilerError::ArithmeticOverflow);
     }
     let final_message_absorb_block_count = checked_add(
-        checked_add(message_byte_length, LPSY15_PRF_RIGHT_ENCODE_BYTE_LENGTH)?
-            / SHAKE256_RATE_BYTE_LENGTH,
+        checked_add(
+            message_byte_length,
+            u64_from_usize(LPSY15_BMR_PRF_RIGHT_ENCODE_BYTE_LENGTH)?,
+        )? / SHAKE256_RATE_BYTE_LENGTH,
         1,
     )?;
     checked_add(final_message_absorb_block_count, 2)

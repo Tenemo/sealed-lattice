@@ -611,6 +611,153 @@ pub fn run_completion_zero_sharing_native_measurement_json() -> Result<String, S
     tally_preparation::pseudorandom_zero_sharing_measurement_320::run_completion_zero_sharing_native_measurement_json()
 }
 
+/// Opens one feature-gated LPSY15 scalar kernel measurement cursor.
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_open_lpsy15_scalar_measurement(kind: u32) -> u32 {
+    tally_preparation::lpsy15_scalar_measurement::open_lpsy15_scalar_measurement(kind)
+}
+
+/// Restores one authenticated LPSY15 scalar measurement checkpoint into an
+/// otherwise empty diagnostic module instance.
+///
+/// # Safety
+///
+/// `pointer` must identify `length` readable bytes in this WebAssembly module.
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_restore_lpsy15_scalar_measurement(
+    kind: u32,
+    pointer: *const u8,
+    length: usize,
+) -> u32 {
+    if pointer.is_null() || length == 0 {
+        return tally_preparation::lpsy15_scalar_measurement::MEASUREMENT_ERROR;
+    }
+    let checkpoint = unsafe { slice::from_raw_parts(pointer, length) };
+    tally_preparation::lpsy15_scalar_measurement::restore_lpsy15_scalar_measurement(
+        kind, checkpoint,
+    )
+}
+
+/// Performs one compiler-sized scalar work batch.
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_step_lpsy15_scalar_measurement() -> u32 {
+    tally_preparation::lpsy15_scalar_measurement::step_lpsy15_scalar_measurement()
+}
+
+/// Copies the current authenticated diagnostic checkpoint out of Rust-owned
+/// state. The caller must erase the returned allocation.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or identify one writable `usize`.
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_lpsy15_scalar_measurement_checkpoint_with_length(
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let Some(output) =
+        tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_checkpoint()
+    else {
+        if !output_length_pointer.is_null() {
+            unsafe { output_length_pointer.write(0) };
+        }
+        return ptr::null_mut();
+    };
+    if !output_length_pointer.is_null() {
+        unsafe { output_length_pointer.write(output.len()) };
+    }
+    leak_secret_bytes(output)
+}
+
+/// Copies the current deterministic diagnostic state for native/Wasm parity.
+/// The caller must erase the returned allocation.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or identify one writable `usize`.
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_lpsy15_scalar_measurement_snapshot_with_length(
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let Some(output) =
+        tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_snapshot()
+    else {
+        if !output_length_pointer.is_null() {
+            unsafe { output_length_pointer.write(0) };
+        }
+        return ptr::null_mut();
+    };
+    if !output_length_pointer.is_null() {
+        unsafe { output_length_pointer.write(output.len()) };
+    }
+    leak_secret_bytes(output)
+}
+
+/// Drops and zeroizes the candidate-specific diagnostic cursor.
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_close_lpsy15_scalar_measurement() -> u32 {
+    tally_preparation::lpsy15_scalar_measurement::close_lpsy15_scalar_measurement()
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_state() -> u32 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_state()
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_completed_operation_count() -> u64 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_completed_operation_count()
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_total_operation_count() -> u64 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_total_operation_count()
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_total_field_addition_count() -> u64 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_total_field_addition_count()
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_work_batch_operation_count() -> u64 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_work_batch_operation_count()
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_field_scratch_byte_length() -> u64 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_field_scratch_byte_length()
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_prf_message_byte_length() -> u64 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_prf_message_byte_length(
+    )
+}
+
+#[cfg(feature = "lpsy15-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_lpsy15_scalar_measurement_prf_permutation_count_per_call() -> u64 {
+    tally_preparation::lpsy15_scalar_measurement::lpsy15_scalar_measurement_prf_permutation_count_per_call()
+}
+
+#[cfg(all(feature = "lpsy15-scalar-measurement", not(target_arch = "wasm32")))]
+pub fn run_lpsy15_scalar_native_measurement_json() -> Result<String, String> {
+    tally_preparation::lpsy15_scalar_measurement::run_lpsy15_scalar_native_measurement_json()
+}
+
 #[cfg(test)]
 mod tests {
     use core::{ptr, slice};
