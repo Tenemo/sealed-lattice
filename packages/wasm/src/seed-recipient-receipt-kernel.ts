@@ -18,6 +18,7 @@ const authenticatedInventoryStatus = 2;
 const completeReceiptStatus = 3;
 const validationStatus = 4;
 const closedContextStatus = 5;
+const authenticatedInconsistencyStatus = 6;
 const hashByteLength = 64;
 const sharedSecretByteLength = 32;
 const signatureRandomnessByteLength = 32;
@@ -113,7 +114,11 @@ type SnapshottedSeedRecipientReceiptKeyOperations =
 
 export type SeedRecipientReceiptAuthenticationStateOperations = Readonly<{
     retainAuthenticatedInconsistency(input: {
+        readonly disclosedAuthenticatedEncryptionKey: Uint8Array;
+        readonly evidenceIdentity: Uint8Array;
         readonly canonicalOpenRequestBytes: Uint8Array;
+        readonly recipientPosition: number;
+        readonly senderPosition: number;
         readonly verifiedContext: SeedRecipientReceiptContext;
     }): Promise<void>;
     retainVerifiedPublicSelection(input: {
@@ -192,6 +197,16 @@ export type ProductionSeedRecipientReceiptKernel = Readonly<{
 const productionKernels = new WeakSet<object>();
 const authorizationKernels = new WeakMap<object, object>();
 const authenticatedKernelResponseErrors = new WeakSet<object>();
+type AuthenticatedInconsistencyDisclosure = Readonly<{
+    disclosedAuthenticatedEncryptionKey: Uint8Array;
+    evidenceIdentity: Uint8Array;
+    recipientPosition: number;
+    senderPosition: number;
+}>;
+const authenticatedInconsistencyDisclosureByError = new WeakMap<
+    object,
+    AuthenticatedInconsistencyDisclosure
+>();
 
 const responseCodeByNumber = new Map<
     number,
@@ -919,6 +934,44 @@ const parsePreparedResponse = (
     responseBytes: Uint8Array,
     expectedSegmentCount: number,
 ): PreparedSeedRecipientReceiptInventory => {
+    if (
+        responseBytes.byteLength >= responseHeaderByteLength &&
+        responseBytes[responseHeaderByteLength - 1] ===
+            authenticatedInconsistencyStatus
+    ) {
+        const cursor = new ResponseCursor(
+            responseBytes,
+            authenticatedInconsistencyStatus,
+        );
+        const senderPosition = cursor.readUnsigned16('inconsistent sender');
+        const recipientPosition = cursor.readUnsigned16(
+            'inconsistency recipient',
+        );
+        const disclosedAuthenticatedEncryptionKey = cursor.readExact(
+            sharedSecretByteLength,
+            'disclosed authenticated-encryption key',
+        );
+        const evidenceIdentity = cursor.readExact(
+            hashByteLength,
+            'authenticated-inconsistency identity',
+        );
+        cursor.requireComplete();
+        const failure = new SeedRecipientReceiptKernelError(
+            'AuthenticatedInconsistency',
+            'The seed-recipient receipt kernel verified a sender-authenticated delivery inconsistency.',
+        );
+        authenticatedKernelResponseErrors.add(failure);
+        authenticatedInconsistencyDisclosureByError.set(
+            failure,
+            Object.freeze({
+                disclosedAuthenticatedEncryptionKey,
+                evidenceIdentity,
+                recipientPosition,
+                senderPosition,
+            }),
+        );
+        throw failure;
+    }
     const cursor = new ResponseCursor(
         responseBytes,
         authenticatedInventoryStatus,
@@ -1147,9 +1200,24 @@ export const openProductionSeedRecipientReceiptKernel = async (
             });
         } catch (error) {
             if (isAuthenticatedSeedRecipientReceiptInconsistency(error)) {
+                const disclosure =
+                    authenticatedInconsistencyDisclosureByError.get(error);
+                authenticatedInconsistencyDisclosureByError.delete(error);
+                if (disclosure === undefined) {
+                    throw new SeedRecipientReceiptKernelError(
+                        'ContextUnavailable',
+                        'The authenticated seed-delivery inconsistency omitted its verified disclosure.',
+                        error,
+                    );
+                }
                 const retainedBurnInput = Object.freeze({
                     canonicalOpenRequestBytes:
                         canonicalOpenRequestBytes.slice(),
+                    disclosedAuthenticatedEncryptionKey:
+                        disclosure.disclosedAuthenticatedEncryptionKey.slice(),
+                    evidenceIdentity: disclosure.evidenceIdentity.slice(),
+                    recipientPosition: disclosure.recipientPosition,
+                    senderPosition: disclosure.senderPosition,
                     verifiedContext: copyContext(opened.verifiedContext),
                 });
                 try {
@@ -1164,6 +1232,12 @@ export const openProductionSeedRecipientReceiptKernel = async (
                     );
                 } finally {
                     retainedBurnInput.canonicalOpenRequestBytes.fill(0);
+                    retainedBurnInput.disclosedAuthenticatedEncryptionKey.fill(
+                        0,
+                    );
+                    retainedBurnInput.evidenceIdentity.fill(0);
+                    disclosure.disclosedAuthenticatedEncryptionKey.fill(0);
+                    disclosure.evidenceIdentity.fill(0);
                     destroyContext(retainedBurnInput.verifiedContext);
                 }
             }

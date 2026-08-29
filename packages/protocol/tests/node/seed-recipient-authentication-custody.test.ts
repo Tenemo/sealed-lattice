@@ -29,6 +29,7 @@ import {
 import { AuthenticatedStorageRecencyCoordinator } from '#packages/protocol/src/runtime/authenticated-storage-recency';
 import {
     assertSeedRecipientActionSelected,
+    consumePreprocessingSourceStateAuthorization,
     createSeedRecipientActionStateGuard,
     deriveSeedRecipientAuthenticationCustodyByteLengths,
     openBrowserLocalSeedRecipientReceiptKernel,
@@ -249,6 +250,13 @@ const installSelectedOpen = (input?: {
                 await kernelInput.stateOperations.retainAuthenticatedInconsistency(
                     {
                         canonicalOpenRequestBytes,
+                        disclosedAuthenticatedEncryptionKey: new Uint8Array(
+                            32,
+                        ).fill(marker + 4),
+                        evidenceIdentity: new Uint8Array(64).fill(marker + 5),
+                        recipientPosition: verifiedContext.recipientPosition,
+                        senderPosition:
+                            verifiedContext.recipientPosition === 0 ? 1 : 0,
                         verifiedContext,
                     },
                 );
@@ -272,18 +280,34 @@ describe('seed-recipient authentication custody', () => {
             4 + 2 + 1 + 64 * 3 + 2 * 3 + 4;
         const independentlyDerivedSelectedPlaintextByteLength =
             independentlyDerivedPrefixByteLength + 1_235_408;
-        const independentlyDerivedBurnedPlaintextByteLength =
+        const independentlyDerivedConflictingIntentBurnedPlaintextByteLength =
             independentlyDerivedSelectedPlaintextByteLength + 1;
+        const independentlyDerivedAuthenticatedInconsistencyBurnedPlaintextByteLength =
+            independentlyDerivedConflictingIntentBurnedPlaintextByteLength +
+            2 +
+            2 +
+            32 +
+            64;
         const independentlyDerivedJoinedPlaintextByteLength =
             4 + 2 + 1 + 64 * 3 + 2 * 3 + 64;
         expect(derived).toEqual({
-            burnedCiphertextByteLength:
-                independentlyDerivedBurnedPlaintextByteLength + 54,
-            burnedPlaintextByteLength:
-                independentlyDerivedBurnedPlaintextByteLength,
-            burnTransitionCiphertextOverlapByteLength:
+            authenticatedInconsistencyBurnedCiphertextByteLength:
+                independentlyDerivedAuthenticatedInconsistencyBurnedPlaintextByteLength +
+                54,
+            authenticatedInconsistencyBurnedPlaintextByteLength:
+                independentlyDerivedAuthenticatedInconsistencyBurnedPlaintextByteLength,
+            authenticatedInconsistencyBurnTransitionCiphertextOverlapByteLength:
                 independentlyDerivedSelectedPlaintextByteLength +
-                independentlyDerivedBurnedPlaintextByteLength +
+                independentlyDerivedAuthenticatedInconsistencyBurnedPlaintextByteLength +
+                54 * 2,
+            conflictingIntentBurnedCiphertextByteLength:
+                independentlyDerivedConflictingIntentBurnedPlaintextByteLength +
+                54,
+            conflictingIntentBurnedPlaintextByteLength:
+                independentlyDerivedConflictingIntentBurnedPlaintextByteLength,
+            conflictingIntentBurnTransitionCiphertextOverlapByteLength:
+                independentlyDerivedSelectedPlaintextByteLength +
+                independentlyDerivedConflictingIntentBurnedPlaintextByteLength +
                 54 * 2,
             joinedCiphertextByteLength:
                 independentlyDerivedJoinedPlaintextByteLength + 54,
@@ -295,9 +319,12 @@ describe('seed-recipient authentication custody', () => {
                 independentlyDerivedSelectedPlaintextByteLength,
         });
         expect(derived).toEqual({
-            burnedCiphertextByteLength: 1_235_672,
-            burnedPlaintextByteLength: 1_235_618,
-            burnTransitionCiphertextOverlapByteLength: 2_471_343,
+            authenticatedInconsistencyBurnedCiphertextByteLength: 1_235_772,
+            authenticatedInconsistencyBurnedPlaintextByteLength: 1_235_718,
+            authenticatedInconsistencyBurnTransitionCiphertextOverlapByteLength: 2_471_443,
+            conflictingIntentBurnedCiphertextByteLength: 1_235_672,
+            conflictingIntentBurnedPlaintextByteLength: 1_235_618,
+            conflictingIntentBurnTransitionCiphertextOverlapByteLength: 2_471_343,
             joinedCiphertextByteLength: 323,
             joinedPlaintextByteLength: 269,
             selectedCiphertextByteLength: 1_235_671,
@@ -330,6 +357,23 @@ describe('seed-recipient authentication custody', () => {
                 openInput(reopened, 0x52),
             ),
         ).rejects.toMatchObject({ code: 'Conflict' });
+
+        const authorization = reopened.authorizePreprocessingSourceState();
+        const consumed =
+            await consumePreprocessingSourceStateAuthorization(authorization);
+        expect(consumed.context).toEqual(fixture.context);
+        expect(consumed.recordBytes.byteLength).toBe(
+            deriveSeedRecipientAuthenticationCustodyByteLengths({
+                canonicalOpenRequestByteLength: 23,
+            }).selectedPlaintextByteLength,
+        );
+        expect(
+            new DataView(consumed.recordBytes.buffer).getUint16(4, true),
+        ).toBe(2);
+        await expect(
+            consumePreprocessingSourceStateAuthorization(authorization),
+        ).rejects.toMatchObject({ code: 'InvalidState' });
+        consumed.recordBytes.fill(0);
     });
 
     it('durably burns an authenticated inconsistency and blocks same-action replay', async () => {
@@ -353,6 +397,33 @@ describe('seed-recipient authentication custody', () => {
             ),
         ).rejects.toMatchObject({ code: 'InvalidState' });
         await expect(reopened.readStatus()).resolves.toBe('burned');
+
+        const consumed = await consumePreprocessingSourceStateAuthorization(
+            reopened.authorizePreprocessingSourceState(),
+        );
+        const byteLengths = deriveSeedRecipientAuthenticationCustodyByteLengths(
+            {
+                canonicalOpenRequestByteLength: 23,
+            },
+        );
+        expect(consumed.recordBytes.byteLength).toBe(
+            byteLengths.authenticatedInconsistencyBurnedPlaintextByteLength,
+        );
+        const evidenceOffset =
+            byteLengths.conflictingIntentBurnedPlaintextByteLength;
+        const evidenceView = new DataView(
+            consumed.recordBytes.buffer,
+            consumed.recordBytes.byteOffset + evidenceOffset,
+        );
+        expect(evidenceView.getUint16(0, true)).toBe(0);
+        expect(evidenceView.getUint16(2, true)).toBe(2);
+        expect(
+            consumed.recordBytes.slice(evidenceOffset + 4, evidenceOffset + 36),
+        ).toEqual(new Uint8Array(32).fill(0x65));
+        expect(consumed.recordBytes.slice(evidenceOffset + 36)).toEqual(
+            new Uint8Array(64).fill(0x66),
+        );
+        consumed.recordBytes.fill(0);
     });
 
     it('retains canonical downstream receipt and terminal-endorsement burns', async () => {
@@ -383,6 +454,11 @@ describe('seed-recipient authentication custody', () => {
 
             const reopened = await reopenCustody(fixture);
             await expect(reopened.readStatus()).resolves.toBe('burned');
+            await expect(
+                consumePreprocessingSourceStateAuthorization(
+                    reopened.authorizePreprocessingSourceState(),
+                ),
+            ).rejects.toMatchObject({ code: 'InvalidState' });
         }
     });
 

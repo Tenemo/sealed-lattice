@@ -35,7 +35,7 @@ import type {
 } from './untrusted-storage-transaction-store.js';
 
 const authenticationRecordMagic = Uint8Array.of(0x53, 0x4c, 0x52, 0x41);
-const authenticationRecordVersion = 1;
+const authenticationRecordVersion = 2;
 const selectedRecordKind = 1;
 const burnedRecordKind = 2;
 const joinedRecordKind = 3;
@@ -46,7 +46,7 @@ const hashByteLength = 64;
 const unsigned16Maximum = 0xffff;
 const unsigned32Maximum = 0xffff_ffff;
 const authenticationRecordOperationDomain =
-    'sealed-lattice/runtime/seed-recipient-authentication-record/v1';
+    'sealed-lattice/runtime/seed-recipient-authentication-record/v2';
 
 export type SeedRecipientReceiptCustodyContext = SeedRecipientReceiptContext;
 
@@ -56,9 +56,12 @@ export type SeedRecipientAuthenticationCustodyLimits = Readonly<{
 }>;
 
 type SeedRecipientAuthenticationCustodyByteLengths = Readonly<{
-    burnedCiphertextByteLength: number;
-    burnedPlaintextByteLength: number;
-    burnTransitionCiphertextOverlapByteLength: number;
+    authenticatedInconsistencyBurnedCiphertextByteLength: number;
+    authenticatedInconsistencyBurnedPlaintextByteLength: number;
+    authenticatedInconsistencyBurnTransitionCiphertextOverlapByteLength: number;
+    conflictingIntentBurnedCiphertextByteLength: number;
+    conflictingIntentBurnedPlaintextByteLength: number;
+    conflictingIntentBurnTransitionCiphertextOverlapByteLength: number;
     joinedCiphertextByteLength: number;
     joinedPlaintextByteLength: number;
     selectedCiphertextByteLength: number;
@@ -72,10 +75,18 @@ type SelectedSeedRecipientAuthenticationRecord = Readonly<{
 }>;
 
 type BurnedSeedRecipientAuthenticationRecord = Readonly<{
+    authenticatedInconsistencyEvidence?: AuthenticatedInconsistencyEvidence;
     burnReason: SeedRecipientActionBurnReason;
     canonicalOpenRequestBytes: Uint8Array;
     context: SeedRecipientReceiptCustodyContext;
     kind: 'burned';
+}>;
+
+type AuthenticatedInconsistencyEvidence = Readonly<{
+    disclosedAuthenticatedEncryptionKey: Uint8Array;
+    evidenceIdentity: Uint8Array;
+    recipientPosition: number;
+    senderPosition: number;
 }>;
 
 type JoinedSeedRecipientAuthenticationRecord = Readonly<{
@@ -260,6 +271,46 @@ export const retainConflictingSeedReceiptTerminalEndorsementBurn = (
     requireActionStateOperations(
         guard,
     ).retainConflictingTerminalEndorsementBurn();
+
+const preprocessingSourceStateAuthorizationBrand: unique symbol = Symbol(
+    'preprocessing-source-state-authorization',
+);
+
+type PreprocessingSourceStateAuthorization = Readonly<{
+    readonly [preprocessingSourceStateAuthorizationBrand]: true;
+}>;
+
+type ConsumedPreprocessingSourceStateAuthorization = Readonly<{
+    actionStateGuard: SeedRecipientActionStateGuard;
+    context: SeedRecipientReceiptCustodyContext;
+    recordBytes: Uint8Array;
+}>;
+
+const preprocessingSourceStateAuthorizationReaders = new WeakMap<
+    object,
+    () => Promise<ConsumedPreprocessingSourceStateAuthorization>
+>();
+
+export const consumePreprocessingSourceStateAuthorization = async (
+    authorization: PreprocessingSourceStateAuthorization,
+): Promise<ConsumedPreprocessingSourceStateAuthorization> => {
+    if (typeof authorization !== 'object' || authorization === null) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Preprocessing-source state authorization must be an opaque state-owner capability.',
+        );
+    }
+    const read =
+        preprocessingSourceStateAuthorizationReaders.get(authorization);
+    if (read === undefined) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidState',
+            'Preprocessing-source state authorization is invalid or has already been consumed.',
+        );
+    }
+    preprocessingSourceStateAuthorizationReaders.delete(authorization);
+    return read();
+};
 
 export const isSeedRecipientReceiptKernelAuthorizedByAuthenticationCustody = (
     kernel: unknown,
@@ -506,17 +557,22 @@ export const deriveSeedRecipientAuthenticationCustodyByteLengths = (input: {
         hashByteLength,
         'Seed-recipient authentication joined record',
     );
-    const burnedPlaintextByteLength = checkedAdd(
+    const conflictingIntentBurnedPlaintextByteLength = checkedAdd(
         selectedPlaintextByteLength,
         1,
-        'Seed-recipient authentication burn record',
+        'Seed-recipient authentication conflicting-intent burn record',
+    );
+    const authenticatedInconsistencyBurnedPlaintextByteLength = checkedAdd(
+        conflictingIntentBurnedPlaintextByteLength,
+        2 + 2 + 32 + hashByteLength,
+        'Seed-recipient authentication inconsistency burn record',
     );
     if (
         selectedPlaintextByteLength >
             foundationProfile.maximumCopiedBufferByteLength ||
         joinedPlaintextByteLength >
             foundationProfile.maximumCopiedBufferByteLength ||
-        burnedPlaintextByteLength >
+        authenticatedInconsistencyBurnedPlaintextByteLength >
             foundationProfile.maximumCopiedBufferByteLength
     ) {
         throw new AuthenticatedRuntimeRecordError(
@@ -529,10 +585,15 @@ export const deriveSeedRecipientAuthenticationCustodyByteLengths = (input: {
         runtimeRecordEnvelopeOverheadByteLength,
         'Seed-recipient authentication selection ciphertext',
     );
-    const burnedCiphertextByteLength = checkedAdd(
-        burnedPlaintextByteLength,
+    const conflictingIntentBurnedCiphertextByteLength = checkedAdd(
+        conflictingIntentBurnedPlaintextByteLength,
         runtimeRecordEnvelopeOverheadByteLength,
-        'Seed-recipient authentication burn ciphertext',
+        'Seed-recipient authentication conflicting-intent burn ciphertext',
+    );
+    const authenticatedInconsistencyBurnedCiphertextByteLength = checkedAdd(
+        authenticatedInconsistencyBurnedPlaintextByteLength,
+        runtimeRecordEnvelopeOverheadByteLength,
+        'Seed-recipient authentication inconsistency burn ciphertext',
     );
     const joinedCiphertextByteLength = checkedAdd(
         joinedPlaintextByteLength,
@@ -540,12 +601,20 @@ export const deriveSeedRecipientAuthenticationCustodyByteLengths = (input: {
         'Seed-recipient authentication joined ciphertext',
     );
     return Object.freeze({
-        burnedCiphertextByteLength,
-        burnedPlaintextByteLength,
-        burnTransitionCiphertextOverlapByteLength: checkedAdd(
+        authenticatedInconsistencyBurnedCiphertextByteLength,
+        authenticatedInconsistencyBurnedPlaintextByteLength,
+        authenticatedInconsistencyBurnTransitionCiphertextOverlapByteLength:
+            checkedAdd(
+                selectedCiphertextByteLength,
+                authenticatedInconsistencyBurnedCiphertextByteLength,
+                'Seed-recipient authentication inconsistency burn transition overlap',
+            ),
+        conflictingIntentBurnedCiphertextByteLength,
+        conflictingIntentBurnedPlaintextByteLength,
+        conflictingIntentBurnTransitionCiphertextOverlapByteLength: checkedAdd(
             selectedCiphertextByteLength,
-            burnedCiphertextByteLength,
-            'Seed-recipient authentication burn transition overlap',
+            conflictingIntentBurnedCiphertextByteLength,
+            'Seed-recipient authentication conflicting-intent burn transition overlap',
         ),
         joinedCiphertextByteLength,
         joinedPlaintextByteLength,
@@ -606,9 +675,37 @@ const encodeRecord = (
             byteLengths.selectedPlaintextByteLength,
         );
     }
+    const evidence = record.authenticatedInconsistencyEvidence;
+    if (
+        (record.burnReason === authenticatedDeliveryInconsistencyReason) !==
+            (evidence !== undefined) ||
+        (evidence !== undefined &&
+            (evidence.recipientPosition !== record.context.recipientPosition ||
+                evidence.senderPosition >= record.context.participantCount ||
+                evidence.senderPosition === evidence.recipientPosition))
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidState',
+            'Seed-recipient authentication burn evidence does not match its durable reason and recipient context.',
+        );
+    }
+    const burnParts = [
+        ...selectionParts,
+        Uint8Array.of(record.burnReason),
+        ...(evidence === undefined
+            ? []
+            : [
+                  unsigned16LittleEndian(evidence.senderPosition),
+                  unsigned16LittleEndian(evidence.recipientPosition),
+                  evidence.disclosedAuthenticatedEncryptionKey,
+                  evidence.evidenceIdentity,
+              ]),
+    ];
     return concatenateBytes(
-        [...selectionParts, Uint8Array.of(record.burnReason)],
-        byteLengths.burnedPlaintextByteLength,
+        burnParts,
+        evidence === undefined
+            ? byteLengths.conflictingIntentBurnedPlaintextByteLength
+            : byteLengths.authenticatedInconsistencyBurnedPlaintextByteLength,
     );
 };
 
@@ -768,6 +865,9 @@ const decodeRecord = (
         recipientPosition,
         rootTerminalIdentity,
     });
+    let authenticatedInconsistencyEvidence:
+        | AuthenticatedInconsistencyEvidence
+        | undefined;
     let canonicalOpenRequestBytes: Uint8Array | undefined;
     let receiptTerminalIdentity: Uint8Array | undefined;
     try {
@@ -812,6 +912,36 @@ const decodeRecord = (
                 );
             }
             burnReason = decodedBurnReason;
+            if (burnReason === authenticatedDeliveryInconsistencyReason) {
+                const evidenceSenderPosition = cursor.readUnsigned16(
+                    'inconsistency sender position',
+                );
+                const evidenceRecipientPosition = cursor.readUnsigned16(
+                    'inconsistency recipient position',
+                );
+                if (
+                    evidenceRecipientPosition !== recipientPosition ||
+                    evidenceSenderPosition >= participantCount ||
+                    evidenceSenderPosition === evidenceRecipientPosition
+                ) {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'AuthenticationFailed',
+                        'Seed-recipient authentication inconsistency evidence has invalid roster coordinates.',
+                    );
+                }
+                authenticatedInconsistencyEvidence = Object.freeze({
+                    disclosedAuthenticatedEncryptionKey: cursor.readExact(
+                        32,
+                        'disclosed authenticated-encryption key',
+                    ),
+                    evidenceIdentity: cursor.readExact(
+                        hashByteLength,
+                        'authenticated-inconsistency identity',
+                    ),
+                    recipientPosition: evidenceRecipientPosition,
+                    senderPosition: evidenceSenderPosition,
+                });
+            }
         }
         cursor.requireComplete();
         const record: SeedRecipientAuthenticationRecord =
@@ -822,21 +952,65 @@ const decodeRecord = (
                       kind: 'selected' as const,
                   })
                 : Object.freeze({
+                      ...(authenticatedInconsistencyEvidence === undefined
+                          ? {}
+                          : { authenticatedInconsistencyEvidence }),
                       burnReason: burnReason as SeedRecipientActionBurnReason,
                       canonicalOpenRequestBytes,
                       context,
                       kind: 'burned' as const,
                   });
         canonicalOpenRequestBytes = undefined;
+        authenticatedInconsistencyEvidence = undefined;
         return record;
     } catch (error) {
         destroyContext(context);
         throw error;
     } finally {
+        destroyAuthenticatedInconsistencyEvidence(
+            authenticatedInconsistencyEvidence,
+        );
         canonicalOpenRequestBytes?.fill(0);
         receiptTerminalIdentity?.fill(0);
     }
 };
+
+const destroyAuthenticatedInconsistencyEvidence = (
+    evidence: AuthenticatedInconsistencyEvidence | undefined,
+): void => {
+    evidence?.disclosedAuthenticatedEncryptionKey.fill(0);
+    evidence?.evidenceIdentity.fill(0);
+};
+
+const copyAuthenticatedInconsistencyEvidence = (
+    evidence: AuthenticatedInconsistencyEvidence,
+): AuthenticatedInconsistencyEvidence =>
+    Object.freeze({
+        disclosedAuthenticatedEncryptionKey: copyExactBytes(
+            evidence.disclosedAuthenticatedEncryptionKey,
+            32,
+            'disclosedAuthenticatedEncryptionKey',
+        ),
+        evidenceIdentity: copyExactBytes(
+            evidence.evidenceIdentity,
+            hashByteLength,
+            'evidenceIdentity',
+        ),
+        recipientPosition: requireSafeInteger(
+            evidence.recipientPosition,
+            0,
+            unsigned16Maximum,
+            'recipientPosition',
+            'InvalidInput',
+        ),
+        senderPosition: requireSafeInteger(
+            evidence.senderPosition,
+            0,
+            unsigned16Maximum,
+            'senderPosition',
+            'InvalidInput',
+        ),
+    });
 
 const destroyRecord = (
     record: SeedRecipientAuthenticationRecord | undefined,
@@ -849,6 +1023,11 @@ const destroyRecord = (
         record.receiptTerminalIdentity.fill(0);
     } else {
         record.canonicalOpenRequestBytes.fill(0);
+        if (record.kind === 'burned') {
+            destroyAuthenticatedInconsistencyEvidence(
+                record.authenticatedInconsistencyEvidence,
+            );
+        }
     }
 };
 
@@ -858,6 +1037,21 @@ const recordsHaveSameSelection = (
 ): boolean =>
     contextsEqual(left.context, right.context) &&
     bytesEqual(left.canonicalOpenRequestBytes, right.canonicalOpenRequestBytes);
+
+const authenticatedInconsistencyEvidenceEqual = (
+    left: AuthenticatedInconsistencyEvidence | undefined,
+    right: AuthenticatedInconsistencyEvidence | undefined,
+): boolean =>
+    left === undefined
+        ? right === undefined
+        : right !== undefined &&
+          left.senderPosition === right.senderPosition &&
+          left.recipientPosition === right.recipientPosition &&
+          bytesEqual(
+              left.disclosedAuthenticatedEncryptionKey,
+              right.disclosedAuthenticatedEncryptionKey,
+          ) &&
+          bytesEqual(left.evidenceIdentity, right.evidenceIdentity);
 
 const readRecord = async (
     store: UntrustedStorageTransactionStore,
@@ -1165,6 +1359,16 @@ export class SeedRecipientAuthenticationCustody {
         });
     }
 
+    public authorizePreprocessingSourceState(): PreprocessingSourceStateAuthorization {
+        const authorization = Object.freeze({
+            [preprocessingSourceStateAuthorizationBrand]: true as const,
+        });
+        preprocessingSourceStateAuthorizationReaders.set(authorization, () =>
+            this.#schedule(() => this.#readForPreprocessingSourceState()),
+        );
+        return authorization;
+    }
+
     #schedule<Result>(operation: () => Promise<Result>): Promise<Result> {
         const scheduled = this.#operationTail.then(operation);
         this.#operationTail = scheduled.then(
@@ -1228,6 +1432,50 @@ export class SeedRecipientAuthenticationCustody {
         return this.#recencyCoordinator.runRead((store) =>
             readRecord(store, this.#protection, recordKey, this.#limits),
         );
+    }
+
+    async #readForPreprocessingSourceState(): Promise<ConsumedPreprocessingSourceStateAuthorization> {
+        const opened = await this.#readOpenedRecord();
+        if (opened === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'MissingRecord',
+                'Preprocessing-source state is pending one retained recipient authentication record.',
+            );
+        }
+        let context: SeedRecipientReceiptCustodyContext | undefined;
+        let recordBytes: Uint8Array | undefined;
+        try {
+            this.#requireOwnerContext(opened.record.context);
+            if (
+                opened.record.kind === 'burned' &&
+                opened.record.burnReason !==
+                    authenticatedDeliveryInconsistencyReason
+            ) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidState',
+                    'A conflicting local receipt intent cannot authorize preprocessing-source state.',
+                );
+            }
+            context = copyContext(opened.record.context);
+            recordBytes = encodeRecord(opened.record);
+            const consumed = Object.freeze({
+                actionStateGuard: createSeedRecipientActionStateGuard({
+                    authenticationCustody: this,
+                    context,
+                    recencyCoordinator: this.#recencyCoordinator,
+                }),
+                context,
+                recordBytes,
+            });
+            context = undefined;
+            recordBytes = undefined;
+            return consumed;
+        } finally {
+            destroyContext(context);
+            recordBytes?.fill(0);
+            opened.sealedBytes.fill(0);
+            destroyRecord(opened.record);
+        }
     }
 
     async #assertSelected(): Promise<void> {
@@ -1334,15 +1582,41 @@ export class SeedRecipientAuthenticationCustody {
 
     async #burn(input: {
         readonly canonicalOpenRequestBytes: Uint8Array;
+        readonly disclosedAuthenticatedEncryptionKey: Uint8Array;
+        readonly evidenceIdentity: Uint8Array;
+        readonly recipientPosition: number;
+        readonly senderPosition: number;
         readonly verifiedContext: SeedRecipientReceiptContext;
     }): Promise<void> {
         const selection = this.#snapshotOperationInput(input);
+        let authenticatedInconsistencyEvidence:
+            | AuthenticatedInconsistencyEvidence
+            | undefined;
         try {
+            authenticatedInconsistencyEvidence =
+                copyAuthenticatedInconsistencyEvidence(input);
+            if (
+                authenticatedInconsistencyEvidence.recipientPosition !==
+                    selection.context.recipientPosition ||
+                authenticatedInconsistencyEvidence.senderPosition >=
+                    selection.context.participantCount ||
+                authenticatedInconsistencyEvidence.senderPosition ===
+                    authenticatedInconsistencyEvidence.recipientPosition
+            ) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'AuthenticationFailed',
+                    'The Rust-verified authenticated inconsistency disclosure does not match the selected recipient context.',
+                );
+            }
             await this.#burnSelectedAction(
                 authenticatedDeliveryInconsistencyReason,
                 selection,
+                authenticatedInconsistencyEvidence,
             );
         } finally {
+            destroyAuthenticatedInconsistencyEvidence(
+                authenticatedInconsistencyEvidence,
+            );
             destroyRecord(selection);
         }
     }
@@ -1350,7 +1624,17 @@ export class SeedRecipientAuthenticationCustody {
     async #burnSelectedAction(
         burnReason: SeedRecipientActionBurnReason,
         expectedSelection?: SelectedSeedRecipientAuthenticationRecord,
+        authenticatedInconsistencyEvidence?: AuthenticatedInconsistencyEvidence,
     ): Promise<void> {
+        if (
+            (burnReason === authenticatedDeliveryInconsistencyReason) !==
+            (authenticatedInconsistencyEvidence !== undefined)
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidState',
+                'Seed-recipient authentication burn evidence does not match the requested terminal reason.',
+            );
+        }
         const recordKey = logicalRecordKey(this.#context);
         const opened = await this.#readOpenedRecord();
         if (opened === undefined) {
@@ -1374,10 +1658,30 @@ export class SeedRecipientAuthenticationCustody {
                 );
             }
             if (opened.record.kind === 'burned') {
+                if (
+                    opened.record.burnReason !== burnReason ||
+                    !authenticatedInconsistencyEvidenceEqual(
+                        opened.record.authenticatedInconsistencyEvidence,
+                        authenticatedInconsistencyEvidence,
+                    )
+                ) {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'Conflict',
+                        'The seed-recipient action is durably bound to different terminal burn evidence.',
+                    );
+                }
                 return;
             }
             const burnedRecord: BurnedSeedRecipientAuthenticationRecord =
                 Object.freeze({
+                    ...(authenticatedInconsistencyEvidence === undefined
+                        ? {}
+                        : {
+                              authenticatedInconsistencyEvidence:
+                                  copyAuthenticatedInconsistencyEvidence(
+                                      authenticatedInconsistencyEvidence,
+                                  ),
+                          }),
                     burnReason,
                     canonicalOpenRequestBytes:
                         opened.record.canonicalOpenRequestBytes.slice(),
@@ -1421,6 +1725,19 @@ export class SeedRecipientAuthenticationCustody {
                             throw new AuthenticatedRuntimeRecordError(
                                 'Conflict',
                                 'Concurrent seed-recipient authentication state did not select the same terminal burn.',
+                            );
+                        }
+                        if (
+                            existing.record.burnReason !== burnReason ||
+                            !authenticatedInconsistencyEvidenceEqual(
+                                existing.record
+                                    .authenticatedInconsistencyEvidence,
+                                authenticatedInconsistencyEvidence,
+                            )
+                        ) {
+                            throw new AuthenticatedRuntimeRecordError(
+                                'Conflict',
+                                'Concurrent seed-recipient authentication state retained different terminal burn evidence.',
                             );
                         }
                     } finally {

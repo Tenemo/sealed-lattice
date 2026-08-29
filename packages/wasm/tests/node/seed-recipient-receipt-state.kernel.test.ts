@@ -61,14 +61,24 @@ const openResponse = (): Uint8Array =>
         new Uint8Array(1_088).fill(0x43),
     ]);
 
-const failureResponse = (code: number): Uint8Array =>
-    concatenateBytes([responseHeader(0), unsigned16LittleEndian(code)]);
+const authenticatedInconsistencyResponse = (): Uint8Array =>
+    concatenateBytes([
+        responseHeader(6),
+        unsigned16LittleEndian(0),
+        unsigned16LittleEndian(1),
+        new Uint8Array(32).fill(0x71),
+        new Uint8Array(64).fill(0x72),
+    ]);
 
 const closeResponse = (): Uint8Array => responseHeader(5);
 
 const input = (stateOperations: {
     retainAuthenticatedInconsistency(input: {
         canonicalOpenRequestBytes: Uint8Array;
+        disclosedAuthenticatedEncryptionKey: Uint8Array;
+        evidenceIdentity: Uint8Array;
+        recipientPosition: number;
+        senderPosition: number;
         verifiedContext: typeof verifiedContext;
     }): Promise<void>;
     retainVerifiedPublicSelection(input: {
@@ -131,7 +141,7 @@ it('retains the verified public selection and genuine authenticated refusal in o
             return openResponse();
         }
         if (operation === 2) {
-            return failureResponse(5);
+            return authenticatedInconsistencyResponse();
         }
         if (operation === 5) {
             return closeResponse();
@@ -146,6 +156,10 @@ it('retains the verified public selection and genuine authenticated refusal in o
     const stateOperations = {
         retainAuthenticatedInconsistency: (event: {
             canonicalOpenRequestBytes: Uint8Array;
+            disclosedAuthenticatedEncryptionKey: Uint8Array;
+            evidenceIdentity: Uint8Array;
+            recipientPosition: number;
+            senderPosition: number;
             verifiedContext: typeof verifiedContext;
         }): Promise<void> => {
             retainedEvents.push({
@@ -161,6 +175,14 @@ it('retains the verified public selection and genuine authenticated refusal in o
                 kind: 'burned',
                 requestBytes: event.canonicalOpenRequestBytes.slice(),
             });
+            expect(event.senderPosition).toBe(0);
+            expect(event.recipientPosition).toBe(1);
+            expect(event.disclosedAuthenticatedEncryptionKey).toEqual(
+                new Uint8Array(32).fill(0x71),
+            );
+            expect(event.evidenceIdentity).toEqual(
+                new Uint8Array(64).fill(0x72),
+            );
             return Promise.resolve();
         },
         retainVerifiedPublicSelection: (event: {
@@ -199,6 +221,7 @@ it('retains the verified public selection and genuine authenticated refusal in o
     expect(
         module.isAuthenticatedSeedRecipientReceiptInconsistency(refusal),
     ).toBe(true);
+    expect(refusal).not.toHaveProperty('disclosedAuthenticatedEncryptionKey');
     expect(retainedEvents.map((event) => event.kind)).toEqual([
         'selected',
         'burned',
@@ -227,7 +250,7 @@ it('fails closed when a genuine authenticated refusal cannot be retained', async
             return openResponse();
         }
         if (operation === 2) {
-            return failureResponse(5);
+            return authenticatedInconsistencyResponse();
         }
         if (operation === 5) {
             return closeResponse();
