@@ -19,15 +19,12 @@ type NodeFileSystemPromises = {
 
 const wasmPageByteLength = 65_536;
 const wasm32UsizeByteLength = 4;
-const maximumCopiedBufferByteLength = maximumFoundationCopiedBufferByteLength;
-const maximumFoundationKernelMemoryByteLength =
-    maximumFoundationWasmMemoryByteLength;
 const nodeFileSystemPromisesModuleSpecifier = 'node:fs/promises';
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
-const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
+const sha256Hex = async (bytes: ArrayBuffer): Promise<string> => {
     const subtleCrypto = globalThis.crypto?.subtle;
     /* v8 ignore next 5 */
     if (subtleCrypto === undefined) {
@@ -36,9 +33,8 @@ const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
         );
     }
 
-    const hashInput = Uint8Array.from(bytes);
     return bytesToHex(
-        new Uint8Array(await subtleCrypto.digest('SHA-256', hashInput.buffer)),
+        new Uint8Array(await subtleCrypto.digest('SHA-256', bytes)),
     );
 };
 
@@ -46,13 +42,7 @@ const verifyKernelIntegrity = async (
     bytes: ArrayBuffer,
     expectedSha256Hex: string,
 ): Promise<void> => {
-    if (!sha256HexPattern.test(expectedSha256Hex)) {
-        throw new Error(
-            `The foundation kernel expected integrity hash is invalid: ${expectedSha256Hex}.`,
-        );
-    }
-
-    const actualSha256Hex = await sha256Hex(new Uint8Array(bytes));
+    const actualSha256Hex = await sha256Hex(bytes);
     if (actualSha256Hex !== expectedSha256Hex) {
         throw new Error(
             `The foundation kernel failed integrity verification: expected ${expectedSha256Hex}, received ${actualSha256Hex}.`,
@@ -115,20 +105,8 @@ const resolveKernelBytes = async (
     /* v8 ignore stop */
 };
 
-const assertKernelMemoryWithinProfile = (
-    memory: WebAssembly.Memory,
-    maximumByteLength: number = maximumFoundationKernelMemoryByteLength,
-): void => {
-    if (
-        !Number.isSafeInteger(maximumByteLength) ||
-        maximumByteLength < wasmPageByteLength ||
-        maximumByteLength % wasmPageByteLength !== 0
-    ) {
-        throw new RangeError(
-            'The foundation kernel memory limit must be a positive whole number of WASM pages.',
-        );
-    }
-    if (memory.buffer.byteLength > maximumByteLength) {
+const assertKernelMemoryWithinProfile = (memory: WebAssembly.Memory): void => {
+    if (memory.buffer.byteLength > maximumFoundationWasmMemoryByteLength) {
         throw new RangeError(
             'The foundation kernel exceeded the absolute linear-memory safety bound.',
         );
@@ -163,8 +141,7 @@ const requireKernelMemoryRange = (
     const endOffset = unsignedPointer + length;
     if (
         (length > 0 && unsignedPointer === 0) ||
-        endOffset > memory.buffer.byteLength ||
-        endOffset > maximumFoundationKernelMemoryByteLength
+        endOffset > memory.buffer.byteLength
     ) {
         throw new Error(
             `The foundation kernel returned an out-of-bounds ${operationName} memory range.`,
@@ -196,7 +173,6 @@ const copyIntoKernelMemory = (
     deallocate: (pointer: number, length: number) => void,
     input: Uint8Array,
 ): number => {
-    assertKernelMemoryWithinProfile(memory);
     if (input.length === 0) {
         return 0;
     }
@@ -210,7 +186,7 @@ const copyIntoKernelMemory = (
             );
         }
         const requiredByteLength = pointer + input.length;
-        if (requiredByteLength > maximumFoundationKernelMemoryByteLength) {
+        if (requiredByteLength > maximumFoundationWasmMemoryByteLength) {
             throw new RangeError(
                 'The foundation command allocation exceeds the absolute linear-memory safety bound.',
             );
@@ -280,7 +256,7 @@ const runKernelCommand = (
     ) => number,
     request: Uint8Array,
 ): Uint8Array => {
-    if (request.byteLength > maximumCopiedBufferByteLength) {
+    if (request.byteLength > maximumFoundationCopiedBufferByteLength) {
         throw new RangeError(
             'The foundation command exceeds the copied-buffer limit.',
         );
@@ -310,9 +286,8 @@ const runKernelCommand = (
                 request.byteLength,
                 outputLengthPointer,
             ) >>> 0;
-        assertKernelMemoryWithinProfile(memory);
         outputLength = readKernelOutputLength(memory, outputLengthPointer);
-        if (outputLength > maximumCopiedBufferByteLength) {
+        if (outputLength > maximumFoundationCopiedBufferByteLength) {
             throw new RangeError(
                 'The foundation command response exceeds the copied-buffer limit.',
             );
@@ -327,14 +302,10 @@ const runKernelCommand = (
         if (outputPointer !== 0) {
             deallocate(outputPointer, outputLength);
         }
-        if (inputPointer !== 0 && inputPointer !== outputPointer) {
+        if (inputPointer !== 0) {
             deallocate(inputPointer, request.byteLength);
         }
-        if (
-            outputLengthPointer !== 0 &&
-            outputLengthPointer !== inputPointer &&
-            outputLengthPointer !== outputPointer
-        ) {
+        if (outputLengthPointer !== 0) {
             deallocate(outputLengthPointer, wasm32UsizeByteLength);
         }
     }
@@ -365,27 +336,14 @@ export const instantiateFoundationKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_foundation_command_with_length',
     );
-    let commandInProgress = false;
-
     return {
-        executeCommand: (request): Uint8Array => {
-            if (commandInProgress) {
-                throw new Error(
-                    'The foundation kernel cannot run overlapping commands on one instance.',
-                );
-            }
-            commandInProgress = true;
-            try {
-                return runKernelCommand(
-                    memory,
-                    allocate,
-                    deallocate,
-                    commandWithLength,
-                    request,
-                );
-            } finally {
-                commandInProgress = false;
-            }
-        },
+        executeCommand: (request): Uint8Array =>
+            runKernelCommand(
+                memory,
+                allocate,
+                deallocate,
+                commandWithLength,
+                request,
+            ),
     };
 };
