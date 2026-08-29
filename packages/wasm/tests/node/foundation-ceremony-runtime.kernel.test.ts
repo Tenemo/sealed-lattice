@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { createFoundationCeremonyRuntimeLoader } from '../../src/foundation-kernel/published-sdk-kernel-loader.js';
+import { createFoundationCeremonyRuntimeLoader } from '../../src/foundation-ceremony-runtime.js';
 
 const kernelUrl = new URL(
     '../../dist/sealed-lattice-kernel.wasm',

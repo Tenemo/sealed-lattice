@@ -1,7 +1,7 @@
 import {
     configurableOptionCountRange,
     maximumFoundationCopiedBufferByteLength,
-} from '@sealed-lattice/wasm/published-sdk';
+} from '@sealed-lattice/wasm';
 import { describe, expect, it } from 'vitest';
 
 import {

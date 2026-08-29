@@ -3,17 +3,29 @@ import {
     maximumFoundationWasmMemoryByteLength,
 } from '../foundation-contract.js';
 
-import type { FoundationKernelExports } from './kernel-types.js';
-import {
-    bytesToHex,
-    sha256HexPattern,
-    wasm32UsizeByteLength,
-} from './kernel-wasm-hash.js';
+type FoundationKernelExports = WebAssembly.Exports & {
+    memory?: WebAssembly.Memory;
+    sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_foundation_command_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
+};
+type NodeFileSystemPromises = {
+    readonly readFile: (fileUrl: URL) => Promise<Uint8Array>;
+};
 
 const wasmPageByteLength = 65_536;
+const wasm32UsizeByteLength = 4;
 const maximumCopiedBufferByteLength = maximumFoundationCopiedBufferByteLength;
 const maximumFoundationKernelMemoryByteLength =
     maximumFoundationWasmMemoryByteLength;
+const nodeFileSystemPromisesModuleSpecifier = 'node:fs/promises';
+const sha256HexPattern = /^[a-f0-9]{64}$/u;
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
     const subtleCrypto = globalThis.crypto?.subtle;
@@ -78,9 +90,10 @@ const requireKernelIntegrityExpectation = (
 };
 
 const readWasmFile = async (fileUrl: URL): Promise<ArrayBuffer> => {
-    const { readNodeFileAsArrayBuffer } =
-        await import('./kernel-node-file-loader.js');
-    return readNodeFileAsArrayBuffer(fileUrl);
+    const fileSystem = (await import(
+        /* @vite-ignore */ nodeFileSystemPromisesModuleSpecifier
+    )) as NodeFileSystemPromises;
+    return Uint8Array.from(await fileSystem.readFile(fileUrl)).buffer;
 };
 
 const resolveKernelBytes = async (

@@ -2,7 +2,7 @@ import {
     configurableOptionCountRange,
     maximumFoundationCopiedBufferByteLength,
     type FoundationManifestInput,
-} from '@sealed-lattice/wasm/published-sdk';
+} from '@sealed-lattice/wasm';
 
 export type PollSpec = Readonly<{
     readonly question: string;

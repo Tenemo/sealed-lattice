@@ -8,7 +8,7 @@ import {
     type FoundationCeremonyContextVerification,
     type FoundationManifestVerification,
     type ProtocolHash,
-} from '@sealed-lattice/wasm/published-sdk';
+} from '@sealed-lattice/wasm';
 
 import { loadFoundationCeremonyRuntime } from './kernel.js';
 import {
@@ -28,7 +28,7 @@ export type {
     ProtocolHash,
     RefusalReason,
     VerificationResult,
-} from '@sealed-lattice/wasm/published-sdk';
+} from '@sealed-lattice/wasm';
 export type {
     CanonicalFoundationActionDefinition,
     CanonicalFoundationBoardPolicy,

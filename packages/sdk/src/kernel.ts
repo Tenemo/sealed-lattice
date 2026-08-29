@@ -1,7 +1,7 @@
 import {
     createFoundationCeremonyRuntimeLoader,
     type FoundationCeremonyRuntime,
-} from '@sealed-lattice/wasm/published-sdk';
+} from '@sealed-lattice/wasm';
 
 const foundationKernelUrl = new URL(
     './sealed-lattice-kernel.wasm',

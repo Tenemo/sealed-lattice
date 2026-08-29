@@ -10,19 +10,11 @@ import {
     type RefusalReason,
     type VerificationResult,
 } from './foundation-contract.js';
-import type { FoundationKernelCommandRuntime } from './foundation-kernel/kernel-runtime.js';
-import type {
-    FoundationActionContextVerification,
-    FoundationActionDefinitionVerification,
-    FoundationBoardPolicyVerification,
-    FoundationCeremonyContextVerification,
-    FoundationManifestVerification,
-} from './foundation-kernel/kernel-types.js';
 import {
-    bytesToHex,
-    textDecoder,
-    textEncoder,
-} from './foundation-kernel/kernel-wasm-hash.js';
+    instantiateFoundationKernelCommandRuntime,
+    type FoundationKernelCommandRuntime,
+    type FoundationKernelLoaderOptions,
+} from './foundation-kernel/kernel-runtime.js';
 
 export type FoundationManifestInput = Readonly<{
     readonly displayTitle: string;
@@ -46,6 +38,35 @@ export type CanonicalFoundationActionDefinition = Readonly<{
 export type CanonicalFoundationBoardPolicy = Readonly<{
     readonly boardPolicyHash: ProtocolHash;
     readonly canonicalBytes: Uint8Array;
+}>;
+
+export type FoundationManifestVerification = VerificationResult<{
+    readonly manifestHash: ProtocolHash;
+}>;
+
+export type FoundationActionDefinitionVerification = VerificationResult<{
+    readonly actionDefinitionHash: ProtocolHash;
+}>;
+
+export type FoundationBoardPolicyVerification = VerificationResult<{
+    readonly boardPolicyHash: ProtocolHash;
+}>;
+
+export type FoundationCeremonyContextVerification = VerificationResult<{
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly suiteId: ProtocolHash;
+}>;
+
+export type FoundationActionContextVerification = VerificationResult<{
+    readonly actionContextHash: ProtocolHash;
+    readonly actionDefinitionHash: ProtocolHash;
+    readonly boardPolicyHash: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly submissionCutoffHash: ProtocolHash;
+    readonly suiteId: ProtocolHash;
 }>;
 
 export type FoundationCeremonyRuntime = Readonly<{
@@ -93,10 +114,14 @@ const verifyActionContextCommand = 8;
 const maximumUnsigned64 = (1n << 64n) - 1n;
 const hashByteLength = 64;
 const maximumCopiedBufferByteLength = maximumFoundationCopiedBufferByteLength;
+const textDecoder = new TextDecoder('utf-8', { fatal: true });
+const textEncoder = new TextEncoder();
 const canonicalErrorCodes = new Set<CanonicalErrorCode>(
     canonicalErrorCodeValues,
 );
 const refusalReasons = new Set<RefusalReason>(refusalReasonValues);
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 export class FoundationKernelCommandError extends Error {
     readonly code: CanonicalErrorCode;
@@ -237,18 +262,7 @@ class BinaryReader {
     }
 }
 
-const snapshotDataProperty = (
-    container: unknown,
-    propertyName: string,
-    containerName: string,
-): unknown => {
-    if (container === null || typeof container !== 'object') {
-        throw new TypeError(`${containerName} must be an object.`);
-    }
-    return (container as Readonly<Record<string, unknown>>)[propertyName];
-};
-
-const snapshotSafeInteger = (value: unknown, fieldName: string): number => {
+const requireSafeInteger = (value: unknown, fieldName: string): number => {
     if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
         throw new TypeError(`${fieldName} must be a safe integer.`);
     }
@@ -282,25 +296,20 @@ const requireProtocolHash = (
     return value;
 };
 
-const snapshotManifestInput = (input: unknown): FoundationManifestInput => {
+const validateManifestInput = (
+    input: FoundationManifestInput,
+): FoundationManifestInput => {
     const displayTitle = requireWellFormedString(
-        snapshotDataProperty(input, 'displayTitle', 'input'),
+        input.displayTitle,
         'displayTitle',
     );
-    const optionDefinitionsValue = snapshotDataProperty(
-        input,
-        'optionDefinitions',
-        'input',
-    );
-    if (!Array.isArray(optionDefinitionsValue)) {
+    const rawOptionDefinitions: unknown = input.optionDefinitions;
+    if (!Array.isArray(rawOptionDefinitions)) {
         throw new TypeError('optionDefinitions must be an array.');
     }
-    const optionDefinitionCount = snapshotSafeInteger(
-        snapshotDataProperty(
-            optionDefinitionsValue,
-            'length',
-            'optionDefinitions',
-        ),
+    const optionDefinitionsValue: readonly unknown[] = rawOptionDefinitions;
+    const optionDefinitionCount = requireSafeInteger(
+        optionDefinitionsValue.length,
         'optionDefinitions.length',
     );
     if (
@@ -315,34 +324,27 @@ const snapshotManifestInput = (input: unknown): FoundationManifestInput => {
         { length: optionDefinitionCount },
         (_unused, optionPosition) => {
             const optionName = `optionDefinitions[${String(optionPosition)}]`;
-            const optionDefinition = snapshotDataProperty(
-                optionDefinitionsValue,
-                String(optionPosition),
-                'optionDefinitions',
-            );
+            const optionDefinition = optionDefinitionsValue[optionPosition];
+            if (
+                optionDefinition === null ||
+                typeof optionDefinition !== 'object'
+            ) {
+                throw new TypeError(`${optionName} must be an object.`);
+            }
+            const optionDefinitionRecord = optionDefinition as Readonly<
+                Record<string, unknown>
+            >;
             return {
                 displayLabel: requireWellFormedString(
-                    snapshotDataProperty(
-                        optionDefinition,
-                        'displayLabel',
-                        optionName,
-                    ),
+                    optionDefinitionRecord.displayLabel,
                     `${optionName}.displayLabel`,
                 ),
                 optionIdentifier: requireWellFormedString(
-                    snapshotDataProperty(
-                        optionDefinition,
-                        'optionIdentifier',
-                        optionName,
-                    ),
+                    optionDefinitionRecord.optionIdentifier,
                     `${optionName}.optionIdentifier`,
                 ),
-                optionIndex: snapshotSafeInteger(
-                    snapshotDataProperty(
-                        optionDefinition,
-                        'optionIndex',
-                        optionName,
-                    ),
+                optionIndex: requireSafeInteger(
+                    optionDefinitionRecord.optionIndex,
                     `${optionName}.optionIndex`,
                 ),
             };
@@ -424,15 +426,8 @@ export const openFoundationCeremonyRuntime = (
     kernel: FoundationKernelCommandRuntime,
 ): FoundationCeremonyRuntime => ({
     encodeActionDefinition: (input) => {
-        const submissionCutoffUnixMilliseconds = snapshotDataProperty(
-            input,
-            'submissionCutoffUnixMilliseconds',
-            'input',
-        );
-        const topCount = snapshotSafeInteger(
-            snapshotDataProperty(input, 'topCount', 'input'),
-            'topCount',
-        );
+        const { submissionCutoffUnixMilliseconds } = input;
+        const topCount = requireSafeInteger(input.topCount, 'topCount');
         if (
             typeof submissionCutoffUnixMilliseconds !== 'bigint' ||
             submissionCutoffUnixMilliseconds < 0n ||
@@ -453,7 +448,7 @@ export const openFoundationCeremonyRuntime = (
     },
     encodeBoardPolicy: (input) => {
         const boardOriginIdentifier = requireWellFormedString(
-            snapshotDataProperty(input, 'boardOriginIdentifier', 'input'),
+            input.boardOriginIdentifier,
             'boardOriginIdentifier',
         );
         const request = new BinaryWriter();
@@ -465,18 +460,18 @@ export const openFoundationCeremonyRuntime = (
         }));
     },
     encodeManifest: (input) => {
-        const snapshot = snapshotManifestInput(input);
+        const manifest = validateManifestInput(input);
         const request = new BinaryWriter();
         request.writeU8(encodeManifestCommand);
-        request.writeString(snapshot.displayTitle);
+        request.writeString(manifest.displayTitle);
         request.writeU16(
-            snapshot.optionDefinitions.length,
+            manifest.optionDefinitions.length,
             'optionDefinitions.length',
         );
         for (const [
             optionPosition,
             optionDefinition,
-        ] of snapshot.optionDefinitions.entries()) {
+        ] of manifest.optionDefinitions.entries()) {
             request.writeU16(
                 optionDefinition.optionIndex,
                 `optionDefinitions[${String(optionPosition)}].optionIndex`,
@@ -494,61 +489,43 @@ export const openFoundationCeremonyRuntime = (
         request.writeU8(verifyActionContextCommand);
         request.writeBytes(
             requireCanonicalBytes(
-                snapshotDataProperty(input, 'canonicalManifestBytes', 'input'),
+                input.canonicalManifestBytes,
                 'canonicalManifestBytes',
             ),
         );
         request.writeBytes(
             requireCanonicalBytes(
-                snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
+                input.canonicalRosterBytes,
                 'canonicalRosterBytes',
             ),
         );
         request.writeBytes(
             requireCanonicalBytes(
-                snapshotDataProperty(
-                    input,
-                    'canonicalActionDefinitionBytes',
-                    'input',
-                ),
+                input.canonicalActionDefinitionBytes,
                 'canonicalActionDefinitionBytes',
             ),
         );
         request.writeBytes(
             requireCanonicalBytes(
-                snapshotDataProperty(
-                    input,
-                    'canonicalBoardPolicyBytes',
-                    'input',
-                ),
+                input.canonicalBoardPolicyBytes,
                 'canonicalBoardPolicyBytes',
             ),
         );
         request.writeString(
             requireWellFormedString(
-                snapshotDataProperty(input, 'ceremonyIdentifier', 'input'),
+                input.ceremonyIdentifier,
                 'ceremonyIdentifier',
             ),
         );
         request.writeString(
-            requireWellFormedString(
-                snapshotDataProperty(input, 'actionIdentifier', 'input'),
-                'actionIdentifier',
-            ),
+            requireWellFormedString(input.actionIdentifier, 'actionIdentifier'),
+        );
+        request.writeProtocolHash(
+            requireProtocolHash(input.expectedSuiteId, 'expectedSuiteId'),
         );
         request.writeProtocolHash(
             requireProtocolHash(
-                snapshotDataProperty(input, 'expectedSuiteId', 'input'),
-                'expectedSuiteId',
-            ),
-        );
-        request.writeProtocolHash(
-            requireProtocolHash(
-                snapshotDataProperty(
-                    input,
-                    'expectedCeremonyContextHash',
-                    'input',
-                ),
+                input.expectedCeremonyContextHash,
                 'expectedCeremonyContextHash',
             ),
         );
@@ -590,27 +567,24 @@ export const openFoundationCeremonyRuntime = (
         request.writeU8(verifyCeremonyContextCommand);
         request.writeBytes(
             requireCanonicalBytes(
-                snapshotDataProperty(input, 'canonicalManifestBytes', 'input'),
+                input.canonicalManifestBytes,
                 'canonicalManifestBytes',
             ),
         );
         request.writeBytes(
             requireCanonicalBytes(
-                snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
+                input.canonicalRosterBytes,
                 'canonicalRosterBytes',
             ),
         );
         request.writeString(
             requireWellFormedString(
-                snapshotDataProperty(input, 'ceremonyIdentifier', 'input'),
+                input.ceremonyIdentifier,
                 'ceremonyIdentifier',
             ),
         );
         request.writeProtocolHash(
-            requireProtocolHash(
-                snapshotDataProperty(input, 'expectedSuiteId', 'input'),
-                'expectedSuiteId',
-            ),
+            requireProtocolHash(input.expectedSuiteId, 'expectedSuiteId'),
         );
         return executeCommand(kernel, request, (reader) =>
             readVerification(reader, (response) => ({
@@ -631,3 +605,22 @@ export const openFoundationCeremonyRuntime = (
                 })),
         ),
 });
+
+export const createFoundationCeremonyRuntimeLoader = (
+    foundationKernelUrl: URL,
+    options: FoundationKernelLoaderOptions = {},
+): (() => Promise<FoundationCeremonyRuntime>) => {
+    let runtimePromise: Promise<FoundationCeremonyRuntime> | undefined;
+    return async () => {
+        runtimePromise ??= instantiateFoundationKernelCommandRuntime(
+            foundationKernelUrl,
+            options,
+        )
+            .then(openFoundationCeremonyRuntime)
+            .catch((error: unknown) => {
+                runtimePromise = undefined;
+                throw error;
+            });
+        return runtimePromise;
+    };
+};
