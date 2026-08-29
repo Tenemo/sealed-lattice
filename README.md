@@ -14,14 +14,14 @@ The participant who starts the poll is the organizer and must belong to the froz
 
 1. The host supplies a poll definition and registration workflow, and participants confirm and freeze the public roster and action context.
 2. Every roster participant contributes to malicious tally preparation and verifies the public transcript, private deliveries, and selected preparation terminal in their own browser.
-3. Every participant signs exactly one declaration: submit one threshold-hidden ballot package or abstain. Silence leaves the action pending.
+3. Every participant signs exactly one declaration: submit one private ballot package or abstain. Silence leaves the action pending.
 4. A roster-complete declaration and package-availability inventory deterministically defines one selected ballot set. A roster quorum authorizes exactly that set; it cannot omit a declared available submission.
 5. If no selected ballot is usable, positive verification produces the terminal no-result outcome and no target. Otherwise the preparation, selected-set, and ballot-source roots determine one computation target.
-6. A roster quorum positively verifies and finalizes that exact target before any active ballot input or clear-output-capable evaluation message is released.
-7. Only after finality may source-bound input activation and the admitted online evaluation protocol run. Any participant can positively verify the exact circuit path and obtain the uniquely determined clear result or a terminal abort; withholding leaves the ceremony unresolved.
+6. A roster quorum positively verifies and finalizes that exact target before any selected ballot input or result-dependent evaluation message is released.
+7. Only after finality may verified ballot inputs be released and the admitted online evaluation run. Any participant can verify the circuit execution and obtain the uniquely determined result or a terminal abort; withholding leaves the ceremony unresolved.
 8. Positive result verification exposes only the ordered option identifiers. The same action has no second target, corrected continuation, or retry.
 
-The only poll result is the ordered list of selected option identifiers. Signed declarations, accepted ballot authorship, and whether any selected ballot is usable are public protocol metadata. Individual scores, aggregates, margins, comparisons, ranks, garbling masks, and evaluator intermediates are not public outputs.
+The only poll result is the ordered list of selected option identifiers. Signed declarations, accepted ballot authorship, and whether any selected ballot is usable are public protocol metadata. Individual scores, aggregates, margins, comparisons, ranks, and internal evaluation values are not public outputs.
 
 The protocol provides ballot secrecy, not voter anonymity. No phase requires simultaneous presence. If required participation is missing, the ceremony waits or remains unresolved; it never changes the roster, lowers a threshold, or uses a fallback construction.
 
@@ -34,7 +34,7 @@ Schemas, formulas, validators, and deterministic tally-circuit compilers cover:
 - scores in `1..10`; and
 - `1 <= topCount <= optionCount`.
 
-The sole cryptographic-completion, integration, performance, and supported-phone evidence target is `n = 10`, `optionCount = 10`. Other admitted shapes are structural inputs only and carry no security, runtime, or support claim.
+The sole target for cryptographic completion, integration, performance, and supported-phone evidence is `n = 10`, `optionCount = 10`. Other admitted shapes are structural inputs only and carry no security, runtime, or support claim.
 
 The target is an 80-bit reduced-assurance, post-quantum-oriented mobile research prototype. That target has not been established end to end and is not a production rating or certification.
 
@@ -45,7 +45,7 @@ Every required participant operation must retain a scalar-capable, single-worker
 The complete ceremony is not implemented, cryptographically admitted, suite-activated, or phone-qualified.
 
 - Foundation code exists for canonical validation, deterministic tally semantics, typed refusals, scalar arithmetic, authenticated storage, and reproducible Rust/WebAssembly packaging.
-- An unactivated one-gate verifier enforces target finality before source-bound activation and evaluation release. It is construction-neutral development evidence, not ballot custody or an admitted evaluation protocol.
+- An unactivated one-gate verifier enforces target finality before verified input activation and evaluation release. It is construction-neutral development evidence, not ballot custody or an admitted evaluation protocol.
 - No malicious preparation or evaluation construction is selected, and no end-to-end preparation-to-result capability exists. Retained preparation, mailbox, and state components establish only their local relations.
 - No complete browser ceremony, external-Chrome result, or selected-phone qualification exists.
 - The public SDK exposes foundation operations only. Production dispatch accepts no cryptographic suite. See the [open security issues](SECURITY.md#open-security-issues).

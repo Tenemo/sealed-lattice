@@ -27,7 +27,7 @@ Cryptographic admission and supported-phone qualification are independent result
 - Transcript, mailbox, and storage services are untrusted. Silence never means abstention. Missing required input leaves the action pending.
 - Positive verification of canonical bytes, source correspondence, signatures, authenticated openings, state, and construction-specific relations determines acceptance. Producer status, signatures alone, raw shares, fixtures, and caller-selected targets confer no authority.
 - The selected ballot set is derived from a roster-complete declaration and availability inventory. A quorum cannot choose a different valid subset or authorize an omitted-input opening.
-- Only roster participants using their own clients may witness state, authorize the selected set, establish target finality, or activate source-bound ballot inputs and evaluation messages after finality.
+- Only roster participants using their own clients may witness state, authorize the selected set, establish target finality, or release verified ballot inputs and evaluation messages after finality.
 - Participant action state is bound to one browser profile. There is no backup, export, migration, or replacement-device continuation. Lost or unverifiable state retires that participant from the affected action.
 - Long operations require authenticated checkpoints at deterministic safe boundaries. Correctness cannot depend on wake locks, hidden-page execution, lifecycle callbacks, or final worker notification.
 - Cryptographic randomness comes from browser-local platform randomness and is durably retained before publication. Byte-identical resume reuses the retained value; deterministic action derivation is not a freshness or rollback proof.
@@ -41,7 +41,7 @@ These properties assume honest delivered application code while secrets are hand
 - `SEC-002`: No exact ten-participant, ten-option preparation-to-release ceremony is implemented and positively verified end to end.
 - `SEC-003`: Roster-witnessed one-shot state is specified, but complete durable witness locking, rollback reconciliation, and participant-retirement behavior are not implemented and evidenced for every security-sensitive output.
 - `SEC-004`: No cryptographic suite is activated. The public package exposes foundation operations only, and component tests cannot authorize production dispatch.
-- `SEC-006`: No participant bridge carries verifier-minted preparation, selected-set, computation-target, target-finality, post-finality input-activation, clear-output evaluation, and result capabilities through the complete scalar ceremony with authenticated checkpoint custody.
+- `SEC-006`: No participant bridge carries verifier-created preparation, selected-set, computation-target, target-finality, input-activation, clear-output evaluation, and result capabilities through the complete scalar ceremony with authenticated checkpoints.
 - `SEC-007`: Direct threshold sharing is the retained ballot-custody family, but availability, authenticated inconsistency handling, censorship privacy, first-honest-release simulation, and positive-verifier integration remain incomplete.
 - `SEC-008`: No physical-phone Chrome profile has completed every participant operation for the exact scalar package.
 - `SEC-017`: Browser-local root-key custody and derivation-count continuity are not closed across the complete cold-start, resume, retirement, and cleanup lifecycle.
