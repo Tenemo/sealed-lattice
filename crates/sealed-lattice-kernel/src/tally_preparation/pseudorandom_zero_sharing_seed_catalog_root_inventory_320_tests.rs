@@ -121,20 +121,20 @@ struct OwnedSeedDeliveryEntry320 {
     inclusion_proof_bytes: Vec<u8>,
 }
 
-pub(super) struct SeedMailboxTestFixture320 {
-    pub(super) parameter_identity: Hash512,
-    pub(super) action_context: ActionContext,
-    pub(super) preparation_context: TallyPreparationContext,
-    pub(super) roster: Roster,
-    pub(super) signing_keys: Vec<ml_dsa_65::PrivateKey>,
+pub(crate) struct SeedMailboxTestFixture320 {
+    pub(crate) parameter_identity: Hash512,
+    pub(crate) action_context: ActionContext,
+    pub(crate) preparation_context: TallyPreparationContext,
+    pub(crate) roster: Roster,
+    pub(crate) signing_keys: Vec<ml_dsa_65::PrivateKey>,
     pub(super) mailbox_decapsulation_keys: Vec<ml_kem_768::DecapsKey>,
     pub(super) root_authorization_packages: Vec<OwnedRootAuthorizationPackage320>,
     pub(super) root_terminal_certificate_bytes: Vec<u8>,
-    pub(super) root_terminal: RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
-    pub(super) sender_position: u16,
-    pub(super) recipient_position: u16,
-    pub(super) descriptor_bytes: Vec<u8>,
-    pub(super) payload_bytes: Zeroizing<Vec<u8>>,
+    pub(crate) root_terminal: RosterEndorsedPseudorandomZeroSharingSeedCatalogRootTerminal320,
+    pub(crate) sender_position: u16,
+    pub(crate) recipient_position: u16,
+    pub(crate) descriptor_bytes: Vec<u8>,
+    pub(crate) payload_bytes: Zeroizing<Vec<u8>>,
 }
 
 pub(super) fn seed_mailbox_test_fixture_320(
@@ -156,7 +156,7 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
     )
 }
 
-pub(super) fn seed_mailbox_test_fixture_with_parameter_identity_320(
+pub(crate) fn seed_mailbox_test_fixture_with_parameter_identity_320(
     sender_position: u16,
     recipient_position: u16,
     parameter_identity: Hash512,

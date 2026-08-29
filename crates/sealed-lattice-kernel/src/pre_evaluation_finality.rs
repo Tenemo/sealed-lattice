@@ -61,17 +61,17 @@ const STATE_OUTPUT_INTENT_IDENTITY_DOMAIN: &str =
     "sealed-lattice/v1/pre-evaluation-finality/state-output-intent-identity";
 const STATE_WITNESS_AUTHORIZATION_BODY_DOMAIN: &str =
     "sealed-lattice/v1/pre-evaluation-finality/state-witness-authorization-body";
-const STATE_WITNESS_ENVELOPE_DOMAIN: &str =
+pub(crate) const STATE_WITNESS_ENVELOPE_DOMAIN: &str =
     "sealed-lattice/v1/pre-evaluation-finality/state-witness-envelope";
 const STATE_WITNESS_CERTIFICATE_IDENTITY_DOMAIN: &str =
     "sealed-lattice/v1/pre-evaluation-finality/state-witness-certificate-identity";
 const STATE_SUBJECT_AUTHORIZATION_BODY_DOMAIN: &str =
     "sealed-lattice/v1/pre-evaluation-finality/state-subject-authorization-body";
-const STATE_OUTPUT_CERTIFICATE_DOMAIN: &str =
+pub(crate) const STATE_OUTPUT_CERTIFICATE_DOMAIN: &str =
     "sealed-lattice/v1/pre-evaluation-finality/state-output-certificate";
-const STATE_WITNESS_SIGNATURE_CONTEXT: &[u8] =
+pub(crate) const STATE_WITNESS_SIGNATURE_CONTEXT: &[u8] =
     b"sealed-lattice/v1/pre-evaluation-finality/state-witness";
-const STATE_SUBJECT_SIGNATURE_CONTEXT: &[u8] =
+pub(crate) const STATE_SUBJECT_SIGNATURE_CONTEXT: &[u8] =
     b"sealed-lattice/v1/pre-evaluation-finality/state-subject";
 
 const TARGET_FINALITY_OPERATION_KIND: &str = "target-finality-endorsement";
@@ -285,7 +285,7 @@ impl FragmentVerification {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum FragmentError {
+pub(crate) enum FragmentError {
     Canonical(CanonicalCodecError),
     UnsupportedProfile,
     WrongRoster,
@@ -412,7 +412,7 @@ impl TargetFinalityEndorsementBody {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct StateOutputIntent {
+pub(crate) struct StateOutputIntent {
     participant_count: u16,
     operation_kind: &'static str,
     subject_position: u16,
@@ -442,7 +442,7 @@ impl StateOutputIntent {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn new_with_namespace(
+    pub(crate) fn new_with_namespace(
         suite_identity: Hash512,
         action_context_identity: Hash512,
         state_namespace_identity: Hash512,
@@ -473,7 +473,7 @@ impl StateOutputIntent {
         })
     }
 
-    fn canonical_bytes(self) -> Result<Vec<u8>, FragmentError> {
+    pub(crate) fn canonical_bytes(self) -> Result<Vec<u8>, FragmentError> {
         encode_domain_tuple(
             STATE_OUTPUT_INTENT_DOMAIN,
             vec![
@@ -487,7 +487,15 @@ impl StateOutputIntent {
         )
     }
 
-    fn identity(self) -> Result<Hash512, FragmentError> {
+    pub(crate) const fn state_key_identity(self) -> Hash512 {
+        self.state_key_identity
+    }
+
+    pub(crate) const fn subject_position(self) -> u16 {
+        self.subject_position
+    }
+
+    pub(crate) fn identity(self) -> Result<Hash512, FragmentError> {
         hash_encoded_object(
             STATE_OUTPUT_INTENT_IDENTITY_DOMAIN,
             &self.canonical_bytes()?,
@@ -496,13 +504,16 @@ impl StateOutputIntent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct StateWitnessAuthorizationBody {
+pub(crate) struct StateWitnessAuthorizationBody {
     intent_identity: Hash512,
     witness_position: u16,
 }
 
 impl StateWitnessAuthorizationBody {
-    fn new(intent: StateOutputIntent, witness_position: u16) -> Result<Self, FragmentError> {
+    pub(crate) fn new(
+        intent: StateOutputIntent,
+        witness_position: u16,
+    ) -> Result<Self, FragmentError> {
         validate_witness_position(intent, witness_position)?;
         Ok(Self {
             intent_identity: intent.identity()?,
@@ -510,7 +521,7 @@ impl StateWitnessAuthorizationBody {
         })
     }
 
-    fn canonical_bytes(self) -> Result<Vec<u8>, FragmentError> {
+    pub(crate) fn canonical_bytes(self) -> Result<Vec<u8>, FragmentError> {
         encode_domain_tuple(
             STATE_WITNESS_AUTHORIZATION_BODY_DOMAIN,
             vec![
@@ -522,14 +533,14 @@ impl StateWitnessAuthorizationBody {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct StateSubjectAuthorizationBody {
+pub(crate) struct StateSubjectAuthorizationBody {
     intent_identity: Hash512,
     witness_certificate_identity: Hash512,
     subject_position: u16,
 }
 
 impl StateSubjectAuthorizationBody {
-    fn new(
+    pub(crate) fn new(
         intent: StateOutputIntent,
         witness_certificate_identity: Hash512,
     ) -> Result<Self, FragmentError> {
@@ -540,7 +551,7 @@ impl StateSubjectAuthorizationBody {
         })
     }
 
-    fn canonical_bytes(self) -> Result<Vec<u8>, FragmentError> {
+    pub(crate) fn canonical_bytes(self) -> Result<Vec<u8>, FragmentError> {
         encode_domain_tuple(
             STATE_SUBJECT_AUTHORIZATION_BODY_DOMAIN,
             vec![
@@ -553,11 +564,11 @@ impl StateSubjectAuthorizationBody {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VerifiedStateOutput {
+pub(crate) struct VerifiedStateOutput {
     semantic_body_identity: Hash512,
 }
 
-fn verify_state_output_certificate(
+pub(crate) fn verify_state_output_certificate(
     expected_intent: StateOutputIntent,
     roster: &Roster,
     certificate_bytes: &[u8],
@@ -648,7 +659,7 @@ fn verify_witness_envelopes(
     Ok(())
 }
 
-fn state_witness_certificate_identity(
+pub(crate) fn state_witness_certificate_identity(
     intent: StateOutputIntent,
     witness_envelope_bytes: &[&[u8]],
 ) -> Result<Hash512, FragmentError> {
@@ -1337,6 +1348,7 @@ const fn control_object_decode_limits() -> CanonicalDecodeLimits {
 }
 
 mod direct_mpc_one_and;
+pub(crate) mod direct_mpc_preprocessing_source_terminal;
 
 #[cfg(feature = "direct-mpc-one-and-verifier")]
 pub(crate) use direct_mpc_one_and::run_direct_mpc_one_and_verification_bundle;

@@ -1,6 +1,14 @@
 use std::collections::HashMap;
 
 use super::*;
+use crate::pre_evaluation_finality::direct_mpc_preprocessing_source_terminal::{
+    DirectMpcPreprocessingSourceOutcomeCandidate, DirectMpcPreprocessingSourceTerminalVerification,
+    StateAuthorizedDirectMpcOneAndPreprocessingSource,
+    direct_mpc_preprocessing_source_endorsement_carrier_bytes,
+    direct_mpc_preprocessing_source_terminal_bytes,
+    prepare_direct_mpc_preprocessing_source_terminal,
+    verify_direct_mpc_preprocessing_source_terminal,
+};
 use crate::{
     foundation::FOUNDATION_PROFILE,
     pre_evaluation_finality::tests::{
@@ -73,6 +81,48 @@ struct OneAndFixture {
     events: Vec<Vec<u8>>,
     activation_bodies: Vec<DirectMpcActivationShareBody>,
     output_bodies: Vec<DirectMpcOutputShareBody>,
+}
+
+fn state_authorized_preprocessing_source(
+    environment: &TestEnvironment,
+    source: &VerifiedDirectMpcOneAndPreprocessingSource,
+) -> StateAuthorizedDirectMpcOneAndPreprocessingSource {
+    let candidate = DirectMpcPreprocessingSourceOutcomeCandidate::Success(source);
+    let prepared = prepare_direct_mpc_preprocessing_source_terminal(
+        &environment.action_context,
+        &environment.roster,
+        candidate,
+    )
+    .unwrap();
+    let endorsement_carriers = (0..FOUNDATION_PROFILE.finality_quorum)
+        .map(|subject_position| {
+            let intent = prepared.state_output_intent(subject_position).unwrap();
+            let certificate = signed_state_output_certificate(
+                intent,
+                environment,
+                &canonical_witness_positions(subject_position, false),
+                0x29,
+            );
+            direct_mpc_preprocessing_source_endorsement_carrier_bytes(
+                subject_position,
+                &certificate,
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let terminal_bytes =
+        direct_mpc_preprocessing_source_terminal_bytes(prepared, &endorsement_carriers).unwrap();
+    match verify_direct_mpc_preprocessing_source_terminal(
+        &environment.action_context,
+        &environment.roster,
+        Some(candidate),
+        Some(&terminal_bytes),
+    )
+    .unwrap()
+    {
+        DirectMpcPreprocessingSourceTerminalVerification::Success(source) => source,
+        _ => panic!("valid source terminal did not authorize preprocessing"),
+    }
 }
 
 #[test]
@@ -270,17 +320,19 @@ fn preparation_cursor_requires_verified_source_and_matching_joined_custody() {
             &joined_seed_masters,
         )
         .unwrap();
+    let state_authorized_source =
+        state_authorized_preprocessing_source(&environment, &preprocessing_source);
     let context = DirectMpcOneAndContext::from_verified_seed_custody(
         &environment.action_context,
         &environment.roster,
-        &preprocessing_source,
+        &state_authorized_source,
         &joined_seed_masters,
     )
     .unwrap();
     let checkpoint_key = [0x46; DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH];
     let mut cursor = DirectMpcOneAndPreparationCursor::from_verified_seed_custody(
         context,
-        &preprocessing_source,
+        &state_authorized_source,
         &joined_seed_masters,
         checkpoint_key,
     )
@@ -292,7 +344,7 @@ fn preparation_cursor_requires_verified_source_and_matching_joined_custody() {
     let mut restored =
         DirectMpcOneAndPreparationCursor::restore_from_checkpoint_with_verified_seed_custody(
             context,
-            &preprocessing_source,
+            &state_authorized_source,
             &joined_seed_masters,
             checkpoint_key,
             &checkpoint,
@@ -381,7 +433,6 @@ fn authenticated_opening_inconsistency_burns_and_cannot_be_retried() {
             }
         } if target_identity == fixture.target.identity
     ));
-    events.push(fixture.events[3].clone());
     assert_eq!(
         verify_direct_mpc_one_and_ceremony(
             &fixture.environment.action_context,
@@ -391,6 +442,19 @@ fn authenticated_opening_inconsistency_burns_and_cannot_be_retried() {
             &events,
         ),
         verification
+    );
+    events.push(fixture.events[3].clone());
+    assert_eq!(
+        verify_direct_mpc_one_and_ceremony(
+            &fixture.environment.action_context,
+            &fixture.environment.roster,
+            &fixture.preparation,
+            &fixture.selected_set,
+            &events,
+        ),
+        DirectMpcOneAndVerification::Refused {
+            refusal_reason: RefusalReason::ConsumedState,
+        }
     );
 
     let mut output_bodies = fixture.output_bodies.clone();

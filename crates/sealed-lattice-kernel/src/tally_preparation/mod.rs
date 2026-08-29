@@ -207,9 +207,10 @@ pub(crate) use binary_field::BinaryFieldElement256;
 pub(crate) use binary_field_320::measure_binary_field_320_multiplications;
 pub(crate) use context::TallyPreparationContext;
 #[cfg(test)]
-pub(crate) use direct_mpc_one_and_preprocessing_source::direct_mpc_one_and_preprocessing_source_parameter_identity;
+pub(crate) use direct_mpc_one_and_preprocessing_source::verify_direct_mpc_one_and_preprocessing_source;
 pub(crate) use direct_mpc_one_and_preprocessing_source::{
     DirectMpcOneAndPreprocessingSourceError, VerifiedDirectMpcOneAndPreprocessingSource,
+    direct_mpc_one_and_preprocessing_source_parameter_identity,
 };
 pub(crate) use direct_mpc_participant_cursor::{
     DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH, DirectMpcCursorError,
@@ -219,9 +220,18 @@ pub(crate) use direct_mpc_prime_field::{
     DirectMpcPrimeFieldElement, DirectMpcPrimeFieldError, evaluate_prime_field_polynomial,
     interpolate_consecutive_prime_field_values,
 };
+#[cfg(test)]
+pub(crate) use pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::SeedMailboxTestFixture320;
+pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320::VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320;
+#[cfg(test)]
+pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320::verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320;
+#[cfg(test)]
+pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320_tests::seal_mailbox_stream;
 pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSeedMasters320;
 #[cfg(test)]
 pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::locally_joined_seed_masters_for_direct_mpc_test;
+#[cfg(test)]
+pub(crate) use pseudorandom_zero_sharing_seed_master_join_320_tests::verified_one_and_source_and_joined_custody;
 #[cfg(test)]
 pub(crate) use replicated_random_sharing::ReplicatedRandomSharingSubset;
 

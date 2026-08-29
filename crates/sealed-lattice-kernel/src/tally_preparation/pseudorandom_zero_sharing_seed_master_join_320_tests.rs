@@ -919,7 +919,7 @@ fn completion_join_fixture(
     )
 }
 
-pub(super) fn verified_one_and_source_and_joined_custody(
+pub(crate) fn verified_one_and_source_and_joined_custody(
     parameter_identity: Hash512,
 ) -> (
     SeedMailboxTestFixture320,

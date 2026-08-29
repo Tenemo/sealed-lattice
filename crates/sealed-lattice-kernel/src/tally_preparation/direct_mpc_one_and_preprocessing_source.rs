@@ -125,15 +125,26 @@ impl VerifiedDirectMpcOneAndPreprocessingSource {
         self.preparation_context
     }
 
+    pub(crate) const fn root_terminal_identity(&self) -> Hash512 {
+        self.root_terminal_identity
+    }
+
+    pub(crate) const fn receipt_terminal_identity(&self) -> Hash512 {
+        self.receipt_terminal_identity
+    }
+
+    pub(crate) const fn receipt_terminal_certificate_identity(&self) -> Hash512 {
+        self.receipt_terminal_certificate_identity
+    }
+
     pub(crate) const fn identity(&self) -> Hash512 {
         self.terminal_identity
     }
 
-    pub(crate) fn verify_action_roster_and_local_custody(
+    pub(crate) fn verify_action_and_roster(
         &self,
         action_context: &ActionContext,
         roster: &Roster,
-        joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
     ) -> Result<(), DirectMpcOneAndPreprocessingSourceError> {
         roster
             .validate()
@@ -147,6 +158,16 @@ impl VerifiedDirectMpcOneAndPreprocessingSource {
         {
             return Err(DirectMpcOneAndPreprocessingSourceError::WrongContext);
         }
+        Ok(())
+    }
+
+    pub(crate) fn verify_action_roster_and_local_custody(
+        &self,
+        action_context: &ActionContext,
+        roster: &Roster,
+        joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
+    ) -> Result<(), DirectMpcOneAndPreprocessingSourceError> {
+        self.verify_action_and_roster(action_context, roster)?;
         self.verify_local_custody(joined_seed_masters)
     }
 

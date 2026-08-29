@@ -1588,6 +1588,9 @@ pub(crate) fn verify_pseudorandom_zero_sharing_seed_mailbox_sender_carrier_320(
 /// mutation, or valid delivery never mints this result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320 {
+    parameter_identity: Hash512,
+    preparation_context: super::TallyPreparationContext,
+    root_terminal_identity: Hash512,
     sender_position: u16,
     recipient_position: u16,
     header_identity: Hash512,
@@ -1596,6 +1599,18 @@ pub(crate) struct VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsi
 }
 
 impl VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320 {
+    pub(crate) const fn parameter_identity(self) -> Hash512 {
+        self.parameter_identity
+    }
+
+    pub(crate) const fn preparation_context(self) -> super::TallyPreparationContext {
+        self.preparation_context
+    }
+
+    pub(crate) const fn root_terminal_identity(self) -> Hash512 {
+        self.root_terminal_identity
+    }
+
     pub(crate) const fn sender_position(self) -> u16 {
         self.sender_position
     }
@@ -1714,6 +1729,12 @@ fn verified_authenticated_inconsistency(
     VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320,
     PseudorandomZeroSharingSeedMailboxError320,
 > {
+    let root_inventory = root_terminal.root_inventory();
+    let first_root = root_inventory.root_body(0).ok_or(
+        PseudorandomZeroSharingSeedMailboxError320::ObjectMismatch {
+            field: "root inventory",
+        },
+    )?;
     let header_identity = header.identity()?;
     let manifest_identity = manifest.identity()?;
     let evidence_identity = hash_foundation_tuple_512(
@@ -1729,6 +1750,9 @@ fn verified_authenticated_inconsistency(
     )?;
     Ok(
         VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320 {
+            parameter_identity: root_inventory.body().parameter_identity(),
+            preparation_context: first_root.layout().preparation_context(),
+            root_terminal_identity: root_terminal.identity()?,
             sender_position,
             recipient_position,
             header_identity,

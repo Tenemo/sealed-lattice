@@ -20,11 +20,11 @@ use crate::{
         DirectMpcJoinedSubsetMaster, DirectMpcOneAndPreprocessingSourceError,
         DirectMpcParticipantCursor, DirectMpcPrimeFieldElement, DirectMpcPrimeFieldError,
         DirectMpcPrssContext, LocallyJoinedPseudorandomZeroSharingSeedMasters320,
-        VerifiedDirectMpcOneAndPreprocessingSource, evaluate_prime_field_polynomial,
-        interpolate_consecutive_prime_field_values,
+        evaluate_prime_field_polynomial, interpolate_consecutive_prime_field_values,
     },
 };
 
+use super::direct_mpc_preprocessing_source_terminal::StateAuthorizedDirectMpcOneAndPreprocessingSource;
 use super::{
     ComputationTargetBody, FragmentError, FragmentVerification, PreEvaluationFinalityScope,
     RequiredEvent, SelectionState, StateOutputIntent, VerifiedFragmentTerminal,
@@ -283,7 +283,7 @@ impl DirectMpcOneAndContext {
     fn from_verified_seed_custody(
         action_context: &ActionContext,
         roster: &Roster,
-        preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
+        preprocessing_source: &StateAuthorizedDirectMpcOneAndPreprocessingSource,
         joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
     ) -> Result<Self, DirectMpcOneAndError> {
         roster
@@ -292,12 +292,10 @@ impl DirectMpcOneAndContext {
         let roster_identity = roster
             .roster_hash()
             .map_err(|_| DirectMpcOneAndError::WrongContext)?;
-        preprocessing_source.verify_action_roster_and_local_custody(
-            action_context,
-            roster,
-            joined_seed_masters,
-        )?;
-        let preparation_context = preprocessing_source.preparation_context();
+        preprocessing_source
+            .source()
+            .verify_action_roster_and_local_custody(action_context, roster, joined_seed_masters)?;
+        let preparation_context = preprocessing_source.source().preparation_context();
         if roster_identity != action_context.roster_hash()
             || preparation_context.roster_hash() != roster_identity
             || preparation_context.action_context_hash() != action_context.context_hash()
@@ -1661,6 +1659,12 @@ fn verify_direct_mpc_one_and_verification_bundle(
     let preparation = match preparation_verification {
         DirectMpcPreparationVerification::Pending => return Ok(response),
         DirectMpcPreparationVerification::Burn { terminal_identity } => {
+            if bundle.input_source_terminal.is_some()
+                || bundle.selected_set_terminal.is_some()
+                || !bundle.ceremony_events.is_empty()
+            {
+                return Err(DirectMpcOneAndError::ConsumedState);
+            }
             response.status = VERIFICATION_STATUS_ABORT;
             response.next_event = NEXT_EVENT_NONE;
             response.abort_reason = ABORT_REASON_AUTHENTICATED_PREPARATION_INCONSISTENCY;
@@ -1958,6 +1962,9 @@ fn verify_direct_mpc_one_and_ceremony_inner(
             )? {
                 DirectMpcActivationVerification::Verified(activation) => *activation,
                 DirectMpcActivationVerification::Burn { terminal_identity } => {
+                    if event_bytes.len() > 3 {
+                        return Err(DirectMpcOneAndError::ConsumedState);
+                    }
                     return Ok(DirectMpcOneAndVerification::Complete {
                         terminal: VerifiedDirectMpcOneAndTerminal::Abort {
                             target_identity: target.identity,
@@ -2044,7 +2051,7 @@ struct DirectMpcOneAndPreparationCursor {
 impl DirectMpcOneAndPreparationCursor {
     fn from_verified_seed_custody(
         context: DirectMpcOneAndContext,
-        preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
+        preprocessing_source: &StateAuthorizedDirectMpcOneAndPreprocessingSource,
         joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
         checkpoint_authentication_key: [u8; DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH],
     ) -> Result<Self, DirectMpcOneAndError> {
@@ -2105,7 +2112,7 @@ impl DirectMpcOneAndPreparationCursor {
 
     fn restore_from_checkpoint_with_verified_seed_custody(
         context: DirectMpcOneAndContext,
-        preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
+        preprocessing_source: &StateAuthorizedDirectMpcOneAndPreprocessingSource,
         joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
         checkpoint_authentication_key: [u8; DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH],
         checkpoint_bytes: &[u8],
@@ -2184,11 +2191,17 @@ impl DirectMpcOneAndPreparationCursor {
 
 fn validate_joined_seed_context(
     context: DirectMpcOneAndContext,
-    preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
+    preprocessing_source: &StateAuthorizedDirectMpcOneAndPreprocessingSource,
     joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
 ) -> Result<(), DirectMpcOneAndError> {
-    preprocessing_source.verify_local_custody(joined_seed_masters)?;
-    if preprocessing_source.preparation_context().identity() != context.preparation_context_identity
+    preprocessing_source
+        .source()
+        .verify_local_custody(joined_seed_masters)?;
+    if preprocessing_source
+        .source()
+        .preparation_context()
+        .identity()
+        != context.preparation_context_identity
         || preprocessing_source.identity() != context.seed_terminal_identity
         || joined_seed_masters
             .preparation_context()
