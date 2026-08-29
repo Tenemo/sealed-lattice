@@ -22,7 +22,6 @@
         "release:version": "tsx ./tools/ci/release-version.ts",
         "test:rust:kernel": "tsx ./tools/ci/run-rust-kernel-tests.ts",
         "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",
-        "test:wasm:lpsy15-scalar": "tsx ./tools/ci/run-lpsy15-scalar-wasm-measurement.ts",
         "test:wasm:preparation-field": "tsx ./tools/ci/run-preparation-field-wasm-measurement.ts",
         "test:wasm:zero-sharing": "tsx ./tools/ci/run-zero-sharing-wasm-measurement.ts",
         "test:rust:process-memory-guard": "tsx ./tools/ci/run-process-memory-guard-tests.ts",
