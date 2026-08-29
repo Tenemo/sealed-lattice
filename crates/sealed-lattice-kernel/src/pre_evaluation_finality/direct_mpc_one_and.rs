@@ -17,9 +17,10 @@ use crate::{
     },
     tally_preparation::{
         DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH, DirectMpcCursorError,
-        DirectMpcJoinedSubsetMaster, DirectMpcParticipantCursor, DirectMpcPrimeFieldElement,
-        DirectMpcPrimeFieldError, DirectMpcPrssContext,
-        LocallyJoinedPseudorandomZeroSharingSeedMasters320, evaluate_prime_field_polynomial,
+        DirectMpcJoinedSubsetMaster, DirectMpcOneAndPreprocessingSourceError,
+        DirectMpcParticipantCursor, DirectMpcPrimeFieldElement, DirectMpcPrimeFieldError,
+        DirectMpcPrssContext, LocallyJoinedPseudorandomZeroSharingSeedMasters320,
+        VerifiedDirectMpcOneAndPreprocessingSource, evaluate_prime_field_polynomial,
         interpolate_consecutive_prime_field_values,
     },
 };
@@ -34,8 +35,6 @@ use super::{
 };
 
 const CANDIDATE_IDENTITY_DOMAIN: &str = "sealed-lattice/v1/direct-mpc-one-and/candidate-identity";
-const SEED_TERMINAL_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/v1/direct-mpc-one-and/seed-terminal-identity";
 const PREPARATION_SHARE_BODY_DOMAIN: &str =
     "sealed-lattice/v1/direct-mpc-one-and/preparation-share-body";
 const PREPARATION_SHARE_CARRIER_DOMAIN: &str =
@@ -164,6 +163,7 @@ enum DirectMpcOneAndError {
     Chronology(FragmentError),
     Cursor(DirectMpcCursorError),
     PrimeField(DirectMpcPrimeFieldError),
+    PreprocessingSource(DirectMpcOneAndPreprocessingSourceError),
     WrongContext,
     WrongObject,
     WrongCount,
@@ -187,7 +187,9 @@ impl DirectMpcOneAndError {
             }
             Self::Refusal(refusal_reason) => *refusal_reason,
             Self::Chronology(error) => error.refusal_reason(),
-            Self::Cursor(_) | Self::ArithmeticOverflow => RefusalReason::WrongContext,
+            Self::Cursor(_) | Self::PreprocessingSource(_) | Self::ArithmeticOverflow => {
+                RefusalReason::WrongContext
+            }
             Self::PrimeField(_) => RefusalReason::InvalidArithmeticRelation,
             Self::WrongContext => RefusalReason::WrongContext,
             Self::WrongObject | Self::WrongCount | Self::WrongOrder => {
@@ -234,6 +236,12 @@ impl From<DirectMpcPrimeFieldError> for DirectMpcOneAndError {
     }
 }
 
+impl From<DirectMpcOneAndPreprocessingSourceError> for DirectMpcOneAndError {
+    fn from(error: DirectMpcOneAndPreprocessingSourceError) -> Self {
+        Self::PreprocessingSource(error)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DirectMpcOneAndContext {
     suite_identity: Hash512,
@@ -275,6 +283,7 @@ impl DirectMpcOneAndContext {
     fn from_verified_seed_custody(
         action_context: &ActionContext,
         roster: &Roster,
+        preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
         joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
     ) -> Result<Self, DirectMpcOneAndError> {
         roster
@@ -283,7 +292,12 @@ impl DirectMpcOneAndContext {
         let roster_identity = roster
             .roster_hash()
             .map_err(|_| DirectMpcOneAndError::WrongContext)?;
-        let preparation_context = joined_seed_masters.preparation_context();
+        preprocessing_source.verify_action_roster_and_local_custody(
+            action_context,
+            roster,
+            joined_seed_masters,
+        )?;
+        let preparation_context = preprocessing_source.preparation_context();
         if roster_identity != action_context.roster_hash()
             || preparation_context.roster_hash() != roster_identity
             || preparation_context.action_context_hash() != action_context.context_hash()
@@ -296,7 +310,7 @@ impl DirectMpcOneAndContext {
             return Err(DirectMpcOneAndError::WrongContext);
         }
         let preparation_context_identity = preparation_context.identity();
-        let seed_terminal_identity = derive_seed_terminal_identity(joined_seed_masters)?;
+        let seed_terminal_identity = preprocessing_source.identity();
         Self::new(
             action_context,
             roster_identity,
@@ -402,35 +416,6 @@ impl DirectMpcOneAndContext {
             ZERO_PREPARATION_FIELD_COUNT,
         )
     }
-}
-
-fn derive_seed_terminal_identity(
-    joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
-) -> Result<Hash512, DirectMpcOneAndError> {
-    Ok(hash_foundation_tuple_512(
-        SEED_TERMINAL_IDENTITY_DOMAIN,
-        &[
-            CanonicalItem::hash512(joined_seed_masters.parameter_identity().into_bytes()),
-            CanonicalItem::hash512(
-                joined_seed_masters
-                    .preparation_context()
-                    .identity()
-                    .into_bytes(),
-            ),
-            CanonicalItem::hash512(joined_seed_masters.root_terminal_identity().into_bytes()),
-            CanonicalItem::hash512(
-                joined_seed_masters
-                    .root_terminal_certificate_identity()
-                    .into_bytes(),
-            ),
-            CanonicalItem::hash512(joined_seed_masters.receipt_terminal_identity().into_bytes()),
-            CanonicalItem::hash512(
-                joined_seed_masters
-                    .receipt_terminal_certificate_identity()
-                    .into_bytes(),
-            ),
-        ],
-    )?)
 }
 
 struct DirectMpcOneAndInputSourceMaterial {
@@ -2059,10 +2044,11 @@ struct DirectMpcOneAndPreparationCursor {
 impl DirectMpcOneAndPreparationCursor {
     fn from_verified_seed_custody(
         context: DirectMpcOneAndContext,
+        preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
         joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
         checkpoint_authentication_key: [u8; DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH],
     ) -> Result<Self, DirectMpcOneAndError> {
-        validate_joined_seed_context(context, joined_seed_masters)?;
+        validate_joined_seed_context(context, preprocessing_source, joined_seed_masters)?;
         let participant_position = joined_seed_masters.participant_position();
         let subset_masters = joined_seed_masters
             .subset_masters()
@@ -2119,11 +2105,12 @@ impl DirectMpcOneAndPreparationCursor {
 
     fn restore_from_checkpoint_with_verified_seed_custody(
         context: DirectMpcOneAndContext,
+        preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
         joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
         checkpoint_authentication_key: [u8; DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH],
         checkpoint_bytes: &[u8],
     ) -> Result<Self, DirectMpcOneAndError> {
-        validate_joined_seed_context(context, joined_seed_masters)?;
+        validate_joined_seed_context(context, preprocessing_source, joined_seed_masters)?;
         let participant_position = joined_seed_masters.participant_position();
         let subset_masters = joined_seed_masters
             .subset_masters()
@@ -2197,10 +2184,12 @@ impl DirectMpcOneAndPreparationCursor {
 
 fn validate_joined_seed_context(
     context: DirectMpcOneAndContext,
+    preprocessing_source: &VerifiedDirectMpcOneAndPreprocessingSource,
     joined_seed_masters: &LocallyJoinedPseudorandomZeroSharingSeedMasters320,
 ) -> Result<(), DirectMpcOneAndError> {
-    if joined_seed_masters.preparation_context().identity() != context.preparation_context_identity
-        || derive_seed_terminal_identity(joined_seed_masters)? != context.seed_terminal_identity
+    preprocessing_source.verify_local_custody(joined_seed_masters)?;
+    if preprocessing_source.preparation_context().identity() != context.preparation_context_identity
+        || preprocessing_source.identity() != context.seed_terminal_identity
         || joined_seed_masters
             .preparation_context()
             .participant_count()

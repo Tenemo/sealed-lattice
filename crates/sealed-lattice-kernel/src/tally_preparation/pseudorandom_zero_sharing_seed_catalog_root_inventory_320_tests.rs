@@ -10,8 +10,9 @@ use zeroize::Zeroizing;
 
 use crate::{
     foundation::{
-        FOUNDATION_PROFILE, Hash512, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
-        MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, Roster, RosterEntry,
+        ActionContext, ActionDefinition, BoardPolicy, CeremonyContext, FOUNDATION_PROFILE, Hash512,
+        MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, Manifest,
+        OptionDefinition, Roster, RosterEntry, StabilizedDisplayText,
         derive_foundation_roster_parameters,
     },
     tally_circuit::{CompiledTallyCircuit, TallyCircuitProfile},
@@ -122,6 +123,7 @@ struct OwnedSeedDeliveryEntry320 {
 
 pub(super) struct SeedMailboxTestFixture320 {
     pub(super) parameter_identity: Hash512,
+    pub(super) action_context: ActionContext,
     pub(super) preparation_context: TallyPreparationContext,
     pub(super) roster: Roster,
     pub(super) signing_keys: Vec<ml_dsa_65::PrivateKey>,
@@ -147,14 +149,41 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
     recipient_position: u16,
     parameter_identity_marker: u8,
 ) -> SeedMailboxTestFixture320 {
+    seed_mailbox_test_fixture_with_parameter_identity_320(
+        sender_position,
+        recipient_position,
+        deterministic_hash(parameter_identity_marker, 0),
+    )
+}
+
+pub(super) fn seed_mailbox_test_fixture_with_parameter_identity_320(
+    sender_position: u16,
+    recipient_position: u16,
+    parameter_identity: Hash512,
+) -> SeedMailboxTestFixture320 {
     let participant_count = FOUNDATION_PROFILE.participant_count;
     assert!(sender_position < participant_count);
     assert!(recipient_position < participant_count);
     assert_ne!(sender_position, recipient_position);
     let (roster, signing_keys, mailbox_decapsulation_keys) =
         roster_signing_and_mailbox_keys(participant_count, 0x19);
-    let preparation_context = build_preparation_context(&roster, 0x1b);
-    let parameter_identity = deterministic_hash(parameter_identity_marker, 0);
+    let action_context = build_action_context(&roster, 0x1b);
+    let circuit = CompiledTallyCircuit::compile(
+        TallyCircuitProfile::new(
+            participant_count,
+            FOUNDATION_PROFILE.option_count,
+            FOUNDATION_PROFILE.option_count,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let preparation_context = TallyPreparationContext::new(
+        action_context.context_hash(),
+        roster.roster_hash().unwrap(),
+        [0x1b; 32],
+        &circuit,
+    )
+    .unwrap();
     let catalog_fixtures = (0..participant_count)
         .map(|contributor_position| {
             let layout = PseudorandomZeroSharingSeedCatalogLayout320::derive(
@@ -209,6 +238,7 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
     );
     SeedMailboxTestFixture320 {
         parameter_identity,
+        action_context,
         preparation_context,
         roster,
         signing_keys,
@@ -221,6 +251,40 @@ pub(super) fn seed_mailbox_test_fixture_with_parameter_marker_320(
         descriptor_bytes,
         payload_bytes,
     }
+}
+
+pub(super) fn build_action_context(roster: &Roster, marker: u8) -> ActionContext {
+    let manifest = Manifest::new(
+        StabilizedDisplayText::from_ingress_utf8(b"Seed source fixture").unwrap(),
+        (0..FOUNDATION_PROFILE.option_count)
+            .map(|option_position| {
+                OptionDefinition::new(
+                    option_position,
+                    format!("option-{option_position}"),
+                    StabilizedDisplayText::from_ingress_utf8(
+                        format!("Option {option_position}").as_bytes(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+            })
+            .collect(),
+    )
+    .unwrap();
+    let ceremony_context = CeremonyContext::new(
+        deterministic_hash(marker.wrapping_add(0x50), 0),
+        &manifest,
+        roster,
+        format!("seed-source-fixture-{marker}"),
+    )
+    .unwrap();
+    ActionContext::new(
+        &ceremony_context,
+        format!("seed-source-action-{marker}"),
+        ActionDefinition::new(1, 1_800_000_000_000).unwrap(),
+        &BoardPolicy::new("board.example".to_owned()).unwrap(),
+    )
+    .unwrap()
 }
 
 pub(super) fn seed_delivery_payload_bytes(

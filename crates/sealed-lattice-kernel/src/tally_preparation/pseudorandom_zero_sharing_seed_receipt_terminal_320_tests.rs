@@ -860,6 +860,50 @@ pub(super) fn signed_receipt_envelopes_from_authenticated_deliveries(
     )
 }
 
+pub(super) fn signed_receipt_envelopes_from_authenticated_deliveries_with_parameter_identity(
+    parameter_identity: Hash512,
+    encapsulation_marker: u8,
+    signature_seed_marker: u8,
+) -> Vec<Vec<u8>> {
+    (0..FOUNDATION_PROFILE.participant_count)
+        .map(|recipient_position| {
+            let (fixture, authenticated_deliveries) =
+                super::pseudorandom_zero_sharing_seed_receipt_320_tests::authenticated_delivery_set_with_parameter_identity(
+                    parameter_identity,
+                    recipient_position,
+                    encapsulation_marker
+                        .wrapping_add((recipient_position as u8).wrapping_mul(0x10)),
+                );
+            let authenticated_inventory =
+                verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
+                    &fixture.root_terminal,
+                    recipient_position,
+                    authenticated_deliveries,
+                )
+                .unwrap();
+            let receipt_body =
+                PseudorandomZeroSharingSeedRecipientReceiptBody320::new(&authenticated_inventory)
+                    .unwrap();
+            let receipt_envelope_bytes =
+                super::pseudorandom_zero_sharing_seed_receipt_320_tests::sign_receipt(
+                    &fixture,
+                    receipt_body,
+                    recipient_position,
+                    signature_seed_marker.wrapping_add(recipient_position as u8),
+                    PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_SIGNATURE_CONTEXT,
+                );
+            verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
+                &fixture.root_terminal,
+                &fixture.roster,
+                authenticated_inventory,
+                &receipt_envelope_bytes,
+            )
+            .unwrap();
+            receipt_envelope_bytes
+        })
+        .collect()
+}
+
 fn signed_receipt_envelope(
     fixture: &SeedMailboxTestFixture320,
     recipient_position: u16,

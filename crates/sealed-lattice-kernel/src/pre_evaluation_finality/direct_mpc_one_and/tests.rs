@@ -10,6 +10,8 @@ use crate::{
     tally_circuit::{CompiledTallyCircuit, TallyCircuitProfile},
     tally_preparation::{
         ReplicatedRandomSharingSubset, TallyPreparationContext,
+        VerifiedDirectMpcOneAndPreprocessingSource,
+        direct_mpc_one_and_preprocessing_source_parameter_identity,
         locally_joined_seed_masters_for_direct_mpc_test,
     },
 };
@@ -226,7 +228,7 @@ fn bounded_preparation_checkpoint_restores_identical_share_and_refuses_mutation(
 }
 
 #[test]
-fn preparation_cursor_consumes_only_typed_joined_seed_custody() {
+fn preparation_cursor_requires_verified_source_and_matching_joined_custody() {
     let environment = test_environment(0x27);
     let circuit = CompiledTallyCircuit::compile(
         TallyCircuitProfile::new(
@@ -244,7 +246,7 @@ fn preparation_cursor_consumes_only_typed_joined_seed_custody() {
         &circuit,
     )
     .unwrap();
-    let parameter_identity = hash(0x44);
+    let parameter_identity = direct_mpc_one_and_preprocessing_source_parameter_identity().unwrap();
     let participant_position = 0;
     let subset_masters = ReplicatedRandomSharingSubset::iter(FOUNDATION_PROFILE.participant_count)
         .unwrap()
@@ -261,15 +263,24 @@ fn preparation_cursor_consumes_only_typed_joined_seed_custody() {
         participant_position,
         subset_masters,
     );
+    let preprocessing_source =
+        VerifiedDirectMpcOneAndPreprocessingSource::from_joined_custody_for_test(
+            &environment.action_context,
+            &environment.roster,
+            &joined_seed_masters,
+        )
+        .unwrap();
     let context = DirectMpcOneAndContext::from_verified_seed_custody(
         &environment.action_context,
         &environment.roster,
+        &preprocessing_source,
         &joined_seed_masters,
     )
     .unwrap();
     let checkpoint_key = [0x46; DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH];
     let mut cursor = DirectMpcOneAndPreparationCursor::from_verified_seed_custody(
         context,
+        &preprocessing_source,
         &joined_seed_masters,
         checkpoint_key,
     )
@@ -281,6 +292,7 @@ fn preparation_cursor_consumes_only_typed_joined_seed_custody() {
     let mut restored =
         DirectMpcOneAndPreparationCursor::restore_from_checkpoint_with_verified_seed_custody(
             context,
+            &preprocessing_source,
             &joined_seed_masters,
             checkpoint_key,
             &checkpoint,

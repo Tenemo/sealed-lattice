@@ -23,6 +23,7 @@ mod degree_three_opening_decoder;
 mod direct_mpc_candidate_carrier;
 mod direct_mpc_candidate_compiler;
 mod direct_mpc_field_stream;
+mod direct_mpc_one_and_preprocessing_source;
 mod direct_mpc_participant_cursor;
 mod direct_mpc_prime_field;
 #[cfg(feature = "direct-mpc-scalar-measurement")]
@@ -108,6 +109,8 @@ mod direct_mpc_candidate_carrier_tests;
 mod direct_mpc_candidate_compiler_tests;
 #[cfg(test)]
 mod direct_mpc_field_stream_tests;
+#[cfg(test)]
+mod direct_mpc_one_and_preprocessing_source_tests;
 #[cfg(test)]
 mod direct_mpc_participant_cursor_tests;
 #[cfg(test)]
@@ -203,6 +206,11 @@ pub(crate) use binary_field::BinaryFieldElement256;
 #[cfg(feature = "preparation-field-measurement")]
 pub(crate) use binary_field_320::measure_binary_field_320_multiplications;
 pub(crate) use context::TallyPreparationContext;
+#[cfg(test)]
+pub(crate) use direct_mpc_one_and_preprocessing_source::direct_mpc_one_and_preprocessing_source_parameter_identity;
+pub(crate) use direct_mpc_one_and_preprocessing_source::{
+    DirectMpcOneAndPreprocessingSourceError, VerifiedDirectMpcOneAndPreprocessingSource,
+};
 pub(crate) use direct_mpc_participant_cursor::{
     DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH, DirectMpcCursorError,
     DirectMpcJoinedSubsetMaster, DirectMpcParticipantCursor, DirectMpcPrssContext,

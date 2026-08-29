@@ -1,10 +1,11 @@
 use fips204::traits::Signer;
 
-use crate::foundation::FOUNDATION_PROFILE;
+use crate::foundation::{FOUNDATION_PROFILE, Hash512};
 
 use super::{
     pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::{
         SeedMailboxTestFixture320, seed_mailbox_test_fixture_320,
+        seed_mailbox_test_fixture_with_parameter_identity_320,
     },
     pseudorandom_zero_sharing_seed_delivery_320::PseudorandomZeroSharingSeedDeliveryError320,
     pseudorandom_zero_sharing_seed_mailbox_320::AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320,
@@ -584,6 +585,52 @@ pub(super) fn authenticated_delivery_set(
             } else {
                 let sender_fixture =
                     seed_mailbox_test_fixture_320(sender_position, recipient_position);
+                assert_eq!(
+                    sender_fixture.root_terminal.identity().unwrap(),
+                    owner_fixture.root_terminal.identity().unwrap()
+                );
+                authenticated_mailbox_delivery_320(
+                    &sender_fixture,
+                    [randomness_marker; 32],
+                    randomness_marker.wrapping_add(0x20),
+                )
+            }
+        })
+        .collect();
+    (owner_fixture, authenticated_deliveries)
+}
+
+pub(super) fn authenticated_delivery_set_with_parameter_identity(
+    parameter_identity: Hash512,
+    recipient_position: u16,
+    encapsulation_marker: u8,
+) -> (
+    SeedMailboxTestFixture320,
+    Vec<AuthenticatedPseudorandomZeroSharingSeedMailboxDelivery320>,
+) {
+    let participant_count = FOUNDATION_PROFILE.participant_count;
+    let first_sender_position = if recipient_position == 0 { 1 } else { 0 };
+    let owner_fixture = seed_mailbox_test_fixture_with_parameter_identity_320(
+        first_sender_position,
+        recipient_position,
+        parameter_identity,
+    );
+    let authenticated_deliveries = (0..participant_count)
+        .filter(|sender_position| *sender_position != recipient_position)
+        .map(|sender_position| {
+            let randomness_marker = encapsulation_marker.wrapping_add(sender_position as u8);
+            if sender_position == first_sender_position {
+                authenticated_mailbox_delivery_320(
+                    &owner_fixture,
+                    [randomness_marker; 32],
+                    randomness_marker.wrapping_add(0x20),
+                )
+            } else {
+                let sender_fixture = seed_mailbox_test_fixture_with_parameter_identity_320(
+                    sender_position,
+                    recipient_position,
+                    parameter_identity,
+                );
                 assert_eq!(
                     sender_fixture.root_terminal.identity().unwrap(),
                     owner_fixture.root_terminal.identity().unwrap()

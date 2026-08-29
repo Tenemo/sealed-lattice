@@ -26,7 +26,8 @@ use super::{
     },
     pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::{
         SeedCatalogFixture320, SeedMailboxTestFixture320, seed_catalog_fixture,
-        seed_mailbox_test_fixture_320, seed_mailbox_test_fixture_with_parameter_marker_320,
+        seed_mailbox_test_fixture_320, seed_mailbox_test_fixture_with_parameter_identity_320,
+        seed_mailbox_test_fixture_with_parameter_marker_320,
     },
     pseudorandom_zero_sharing_seed_master_join_320::{
         PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN,
@@ -35,13 +36,19 @@ use super::{
         combine_subset_master_for_test, join_pseudorandom_zero_sharing_seed_masters_320,
         verify_pseudorandom_zero_sharing_local_seed_catalog_320,
     },
-    pseudorandom_zero_sharing_seed_receipt_320::RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+    pseudorandom_zero_sharing_seed_receipt_320::{
+        RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+        verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320,
+        verify_pseudorandom_zero_sharing_seed_recipient_receipt_320,
+    },
+    pseudorandom_zero_sharing_seed_receipt_320_tests::authenticated_delivery_set_with_parameter_identity,
     pseudorandom_zero_sharing_seed_receipt_terminal_320::{
         RosterEndorsedPseudorandomZeroSharingSeedRecipientReceiptTerminal320,
         verify_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_320,
     },
     pseudorandom_zero_sharing_seed_receipt_terminal_320_tests::{
         signed_receipt_envelopes_from_authenticated_deliveries,
+        signed_receipt_envelopes_from_authenticated_deliveries_with_parameter_identity,
         signed_receipt_envelopes_with_inventory_marker_for_test, signed_terminal_certificate,
         verified_receipt_inventory,
     },
@@ -910,6 +917,67 @@ fn completion_join_fixture(
         local_catalog_fixture,
         local_entries,
     )
+}
+
+pub(super) fn verified_one_and_source_and_joined_custody(
+    parameter_identity: Hash512,
+) -> (
+    SeedMailboxTestFixture320,
+    RosterEndorsedPseudorandomZeroSharingSeedRecipientReceiptTerminal320,
+    super::pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSeedMasters320,
+){
+    let participant_position = 0;
+    let fixture = seed_mailbox_test_fixture_with_parameter_identity_320(
+        1,
+        participant_position,
+        parameter_identity,
+    );
+    let receipt_envelopes =
+        signed_receipt_envelopes_from_authenticated_deliveries_with_parameter_identity(
+            parameter_identity,
+            0x31,
+            0x41,
+        );
+    let receipt_terminal = verified_terminal(&fixture, &receipt_envelopes, 0x61);
+    let (local_delivery_fixture, authenticated_deliveries) =
+        authenticated_delivery_set_with_parameter_identity(
+            parameter_identity,
+            participant_position,
+            0x31,
+        );
+    assert_eq!(
+        local_delivery_fixture.root_terminal.identity().unwrap(),
+        fixture.root_terminal.identity().unwrap()
+    );
+    let authenticated_inventory =
+        verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
+            &local_delivery_fixture.root_terminal,
+            participant_position,
+            authenticated_deliveries,
+        )
+        .unwrap();
+    let retained_local_receipt = verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
+        &local_delivery_fixture.root_terminal,
+        &local_delivery_fixture.roster,
+        authenticated_inventory,
+        &receipt_envelopes[usize::from(participant_position)],
+    )
+    .unwrap();
+    let local_catalog_fixture = matching_local_catalog_fixture(&fixture, participant_position);
+    let local_entries = owned_local_entries(&local_catalog_fixture);
+    let local_catalog = verify_pseudorandom_zero_sharing_local_seed_catalog_320(
+        &fixture.root_terminal,
+        participant_position,
+        &borrowed_entries(&local_entries),
+    )
+    .unwrap();
+    let joined_seed_masters = join_pseudorandom_zero_sharing_seed_masters_320(
+        local_catalog,
+        retained_local_receipt,
+        receipt_terminal.clone(),
+    )
+    .unwrap();
+    (fixture, receipt_terminal, joined_seed_masters)
 }
 
 fn verified_terminal(

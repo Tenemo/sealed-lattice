@@ -257,6 +257,41 @@ fn completion_resource_model_matches_the_committed_candidate_geometry() {
     );
 }
 
+#[test]
+fn one_and_source_resource_model_matches_the_emitted_stream_positions() {
+    let context = DirectMpcPrssContext::new(
+        Hash512::from_bytes([0x41; 64]),
+        Hash512::from_bytes([0x42; 64]),
+        Hash512::from_bytes([0x43; 64]),
+        FOUNDATION_PROFILE.participant_count,
+        3,
+        1,
+    );
+    let resource = DirectMpcCursorResourceModel::derive(context, PARTICIPANT_POSITION).unwrap();
+
+    assert_eq!(resource.authorized_subset_count_per_participant, 84);
+    assert_eq!(resource.ordinary_stream_count, 84);
+    assert_eq!(resource.zero_basis_stream_count, 252);
+    assert_eq!(resource.total_stream_count, 336);
+    assert_eq!(resource.ordinary_field_count, 3);
+    assert_eq!(resource.zero_field_count, 1);
+    assert_eq!(resource.field_output_count, 504);
+    assert_eq!(resource.source_byte_length, 16_128);
+    assert_eq!(
+        resource.basis_precomputation_field_multiplication_count,
+        756
+    );
+    assert_eq!(resource.ordinary_basis_modular_inverse_count, 84);
+    assert_eq!(resource.weight_field_multiplication_count, 504);
+    assert_eq!(resource.accumulation_field_addition_count, 500);
+    assert_eq!(resource.maximum_xof_output_allocation_byte_length, 96);
+    assert_eq!(resource.canonical_accumulator_byte_length, 12);
+    assert_eq!(resource.internal_accumulator_byte_length, 16);
+    assert_eq!(resource.checkpoint_byte_length, 465);
+    assert_eq!(resource.cumulative_checkpoint_byte_length, 156_240);
+    assert_eq!(resource.result_byte_length, 351);
+}
+
 fn small_context() -> DirectMpcPrssContext {
     DirectMpcPrssContext::new(
         Hash512::from_bytes([0x11; 64]),
