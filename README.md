@@ -1,29 +1,27 @@
 # sealed-lattice
 
-`sealed-lattice` is a browser-oriented TypeScript and Rust/WebAssembly research prototype for fixed-roster, private-score, top-count polling. It explores how a small group can verify a poll transcript and release one agreed result without revealing individual scores or trusting a tally server.
+`sealed-lattice` is a TypeScript and Rust/WebAssembly research library for fixed-roster, private-score, top-count polling. Participants verify the poll transcript in their browsers instead of trusting a tally server, and the protocol reveals no individual scores.
 
 Use synthetic data only. The project has not been independently audited, certified, or approved for production elections. Do not use it with real ballots, credentials, keys, or secret material. Read the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md) before experimenting with the library.
 
 ## Library boundary
 
-`sealed-lattice` owns cryptographic objects, positive protocol verification, and participant-side workflow. A separate host application owns registration, invitations, organizer workflow, interface copy, notifications, and visit cadence. Participants verify one another before freezing the roster; real-world identity verification and Sybil resistance are outside the library.
+`sealed-lattice` handles cryptographic objects, protocol verification, and participant-side workflow. A separate host application handles registration, invitations, organizer workflow, interface copy, notifications, and visit cadence. Participants verify one another before freezing the roster; real-world identity verification and Sybil resistance are outside the library.
 
-The participant who starts the poll is the organizer and must belong to the frozen roster. That person remains an ordinary participant and eligible voter. The role is not a protocol input and grants no special key, bypass, quorum weight, finality power, or release authority.
+The participant who starts the poll is the organizer and must belong to the frozen roster. The organizer remains an ordinary eligible participant with no special protocol authority.
 
 ## Intended ceremony
 
-1. The host supplies a poll definition and registration workflow, and participants confirm and freeze the public roster and action context.
-2. Every roster participant contributes to malicious tally preparation and verifies the public transcript, private deliveries, and selected preparation terminal in their own browser.
-3. Every participant signs exactly one declaration: submit one private ballot package or abstain. Silence leaves the action pending.
-4. A roster-complete declaration and package-availability inventory deterministically defines one selected ballot set. A roster quorum authorizes exactly that set; it cannot omit a declared available submission.
-5. If no selected ballot is usable, positive verification produces the terminal no-result outcome and no target. Otherwise the preparation, selected-set, and ballot-source roots determine one computation target.
-6. A roster quorum positively verifies and finalizes that exact target before any selected ballot input or result-dependent evaluation message is released.
-7. Only after finality may verified ballot inputs be released and the admitted online evaluation run. Any participant can verify the circuit execution and obtain the uniquely determined result or a terminal abort; withholding leaves the ceremony unresolved.
-8. Positive result verification exposes only the ordered option identifiers. The same action has no second target, corrected continuation, or retry.
+1. The host supplies the poll definition and registration workflow. Participants verify one another and freeze the public roster.
+2. Every roster participant contributes to tally preparation and verifies the public transcript and private deliveries in their own browser.
+3. Every participant signs one declaration: submit one private ballot package or abstain. Silence leaves the poll pending.
+4. The complete declaration and package-availability inventory determines one ballot set. A roster quorum can authorize only that set. If it contains no usable ballot, the poll ends without a result.
+5. Otherwise, the verified preparation and ballot sources determine one computation target. A roster quorum must finalize that target before any selected ballot input or result-dependent evaluation message is released.
+6. After finality, verified ballot inputs may be released and the tally evaluated. Any participant can verify the evaluation and obtain the one permitted result or a terminal abort. Withholding leaves the poll unresolved; it does not create a retry or another target.
 
 The only poll result is the ordered list of selected option identifiers. Signed declarations, accepted ballot authorship, and whether any selected ballot is usable are public protocol metadata. Individual scores, aggregates, margins, comparisons, ranks, and internal evaluation values are not public outputs.
 
-The protocol provides ballot secrecy, not voter anonymity. No phase requires simultaneous presence. If required participation is missing, the ceremony waits or remains unresolved; it never changes the roster, lowers a threshold, or uses a fallback construction.
+The protocol provides ballot secrecy, not voter anonymity. Participants do not need to be online together. Missing participation leaves the poll unresolved; it never changes the roster, lowers a threshold, or activates a fallback.
 
 ## Supported scope
 
@@ -42,13 +40,9 @@ Every required participant operation must retain a scalar-capable, single-worker
 
 ## Current status
 
-The complete ceremony is not implemented, cryptographically admitted, suite-activated, or phone-qualified.
+The complete protocol is not implemented. Foundation code covers validation, deterministic tally semantics, typed refusals, scalar arithmetic, authenticated storage, and reproducible Rust/WebAssembly packaging. A construction-neutral verifier exercises finality before input and evaluation release, but it is not a complete ballot-custody or evaluation protocol.
 
-- Foundation code exists for canonical validation, deterministic tally semantics, typed refusals, scalar arithmetic, authenticated storage, and reproducible Rust/WebAssembly packaging.
-- An unactivated one-gate verifier enforces target finality before verified input activation and evaluation release. It is construction-neutral development evidence, not ballot custody or an admitted evaluation protocol.
-- No malicious preparation or evaluation construction is selected, and no end-to-end preparation-to-result capability exists. Retained preparation, mailbox, and state components establish only their local relations.
-- No complete browser ceremony, external-Chrome result, or selected-phone qualification exists.
-- The public SDK exposes foundation operations only. Production dispatch accepts no cryptographic suite. See the [open security issues](SECURITY.md#open-security-issues).
+No preparation or evaluation construction satisfies the full security model, no end-to-end capability chain exists, and production dispatch activates no cryptographic suite. No complete browser or supported-phone qualification exists. See the [open security issues](SECURITY.md#open-security-issues).
 
 ## Install
 

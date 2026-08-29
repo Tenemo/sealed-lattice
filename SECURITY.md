@@ -10,18 +10,18 @@ Include the affected package version or commit, a minimal reproduction, the expe
 
 ## Supported profile
 
-No released version is supported for production use. The sole completion and qualification target is one exact scalar package with ten roster participants and ten options. It derives an active corruption bound of three, reconstruction threshold of four, and selected-ballot-set, finality, and state-witness quorums of seven.
+No released version is supported for production use. The completion and qualification target is one scalar package with ten roster participants and ten options. This profile has an active corruption bound of three, a reconstruction threshold of four, and ballot-set, finality, and state-witness quorums of seven.
 
 Schemas and tally-circuit compilers admit rosters and option counts from 3 to 20 and 2 to 20 respectively, but other profiles are structural inputs only. They carry no cryptographic, runtime, or support claim.
 
-The target is an 80-bit reduced-assurance, post-quantum-oriented research prototype under the exact stated reductions, assumptions, query bounds, and resource limits. This is not a NIST category, production rating, audit, or certification, and it has not been established end to end.
+The design aims for at least 80 bits of modeled attack work against quantum-capable adversaries under its stated assumptions and limits. That claim has not been established end to end and is not a NIST category, production rating, audit, or certification.
 
 Cryptographic admission and supported-phone qualification are independent results for the same exact bytes. Both are incomplete. Only release Chrome on the selected physical phone can provide supported-phone evidence.
 
 ## Security model
 
 - The protocol protects ballot scores, not voter anonymity. The frozen roster, each signed submit-or-abstain declaration, accepted ballot authorship, and whether any selected ballot is usable are public.
-- The host owns registration, invitations, organizer workflow, interface behavior, notifications, and visit cadence; participants confirm and freeze the roster. Identity vetting and Sybil resistance remain outside the library. The participant who starts the poll is the organizer and remains an ordinary roster participant with no protocol field or special authority.
+- The host handles registration, invitations, organizer workflow, interface behavior, notifications, and visit cadence; participants confirm and freeze the roster. Identity vetting and Sybil resistance remain outside the library. The organizer remains an ordinary roster participant with no special protocol authority.
 - Every roster participant contributes to tally preparation. No smaller group, dealer, server, or organizer can complete it.
 - The adversary statically corrupts at most three participants and may rush, equivocate, withhold, replay, reorder, fork, or replace messages. A separate passive-exposure game covers at most three disclosed shares; the two bounds are not combined.
 - Transcript, mailbox, and storage services are untrusted. Silence never means abstention. Missing required input leaves the action pending.
@@ -37,18 +37,20 @@ These properties assume honest delivered application code while secrets are hand
 
 ## Open security issues
 
+These are layered blockers: construction, integration, browser qualification, and activation must all pass independently.
+
 - `SEC-001`: No independent audit, certification, production hardening, or production approval exists.
 - `SEC-002`: No exact ten-participant, ten-option preparation-to-release ceremony is implemented and positively verified end to end.
 - `SEC-003`: Roster-witnessed one-shot state is specified, but complete durable witness locking, rollback reconciliation, and participant-retirement behavior are not implemented and evidenced for every security-sensitive output.
 - `SEC-004`: No cryptographic suite is activated. The public package exposes foundation operations only, and component tests cannot authorize production dispatch.
-- `SEC-006`: No participant bridge carries verifier-created preparation, selected-set, computation-target, target-finality, input-activation, clear-output evaluation, and result capabilities through the complete scalar ceremony with authenticated checkpoints.
+- `SEC-006`: No participant bridge carries verified state from preparation through ballot selection, target finality, input activation, evaluation, and result decoding with authenticated checkpoints.
 - `SEC-007`: Direct threshold sharing is the retained ballot-custody family, but availability, authenticated inconsistency handling, censorship privacy, first-honest-release simulation, and positive-verifier integration remain incomplete.
 - `SEC-008`: No physical-phone Chrome profile has completed every participant operation for the exact scalar package.
 - `SEC-017`: Browser-local root-key custody and derivation-count continuity are not closed across the complete cold-start, resume, retirement, and cleanup lifecycle.
-- `SEC-019`: No immutable content-addressed evidence bundle binds the selected construction, reductions, production counters, source, dependencies, and exact release package bytes.
+- `SEC-019`: No immutable evidence bundle binds the selected construction, reductions, production counters, source, dependencies, and release package bytes.
 - `SEC-020`: Generic checkpoint and cursor components exist, but the selected long operations do not all have production-authenticated checkpoints, byte-identical cold restore, maximum lost-work bounds, or forced-termination browser evidence.
 - `SEC-021`: Authenticated storage and bounded repair foundations exist, but complete quota admission, transaction overlap, browser amplification, eviction behavior, action-wide mutation enclosure, repair, cleanup, and reclamation evidence remain open.
-- `SEC-023`: No malicious tally-preparation or private-evaluation construction satisfies the stated adversary. Retained construction-neutral verifiers do not compose into an admitted protocol, and no suite is activated.
+- `SEC-023`: No tally-preparation or private-evaluation construction satisfies the stated adversary. The retained construction-neutral verifiers do not compose into an admitted protocol.
 - `SEC-024`: No construction has passed the complete static resource and external-Chrome lifecycle gates. Measurements of isolated native or Node/WebAssembly components do not qualify a browser ceremony.
 
 Identifiers are stable and are not reused. `SEC-005`, `SEC-009` through `SEC-016`, `SEC-018`, `SEC-022`, `SEC-025`, and `SEC-026` are retired.

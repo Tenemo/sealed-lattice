@@ -1,4 +1,4 @@
-# `@sealed-lattice/types`
+# Types package
 
 Internal canonical type definitions for the sealed-lattice library. This package is not published.
 

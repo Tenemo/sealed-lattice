@@ -11,9 +11,9 @@
 
 ## Runtime boundaries
 
-The canonical participant artifact must remain scalar-capable. SIMD may be used for measurement only. It can replace the scalar baseline only behind feature detection and only if it preserves bytes, transcripts, verification, and refusal results exactly.
+The canonical participant artifact must remain scalar-capable. SIMD is optional. It may become a runtime optimization only behind feature detection and after proving that it preserves bytes, transcripts, verification, and refusal results.
 
-The browser bridge transfers ordinary owned binary buffers. It must reacquire WebAssembly memory views after any operation that can grow memory. Long-running work must create authenticated checkpoints before interruption and cannot assume that a hidden page or worker will keep running or receive a termination callback.
+The browser bridge transfers ordinary owned binary buffers. It must reacquire WebAssembly memory views after any operation that can grow memory. Long-running work must save authenticated checkpoints at deterministic safe boundaries so an unexpected interruption loses only bounded work. It cannot assume that a hidden page or worker will keep running or receive a termination callback.
 
 The public SDK exposes only implemented foundation operations. Internal measurement commands cannot authorize protocol state changes. Source and package tests own the exact command inventory.
 

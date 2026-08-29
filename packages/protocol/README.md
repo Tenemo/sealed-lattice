@@ -6,14 +6,14 @@
 
 - Validate pre-protocol poll input.
 - Translate validated poll input into the canonical foundation manifest.
-- Provide authenticated storage, local-record protection, checkpoints, and strict IndexedDB handling without authorizing protocol state changes.
+- Provide authenticated storage, local-record protection, checkpoints, and strict IndexedDB handling without approving protocol transitions.
 - Expose only those implemented helpers through the package entry point.
 
 ## Boundaries
 
 General structural code covers `3 <= n <= 20` participants and `2 <= optionCount <= 20` options. Only the exact `n = 10`, `optionCount = 10` profile is the current cryptographic and runtime evidence target; admitting another size does not qualify it.
 
-The package does not implement the complete ceremony. Storage and checkpoint helpers manage local data only; they cannot authorize protocol state changes. The package entry point and tests own exact exports and verification boundaries. TypeScript must not replace kernel cryptography or treat successful transport or persistence as protocol acceptance.
+The package does not implement the complete ceremony. Storage and checkpoint helpers manage local data only; they cannot approve a protocol transition or create a verified protocol result. The package entry point and tests define the export and verification boundaries. TypeScript must not replace kernel cryptography or treat successful transport or persistence as protocol acceptance.
 
 Implementation status belongs to the repository [README](../../README.md), and security limitations belong to [SECURITY.md](../../SECURITY.md). This package document does not repeat proofs, measurements, or historical design decisions.
 
