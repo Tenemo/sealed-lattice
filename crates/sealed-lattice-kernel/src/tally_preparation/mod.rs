@@ -20,6 +20,7 @@ mod binary_field;
 mod binary_field_320;
 mod context;
 mod degree_three_opening_decoder;
+mod direct_mpc_candidate_carrier;
 mod direct_mpc_candidate_compiler;
 mod direct_mpc_prime_field;
 mod fixed_roster_beaver_mpc_resource_floor;
@@ -97,6 +98,8 @@ mod batched_hidden_bit_check_320_tests;
 mod binary_field_320_tests;
 #[cfg(test)]
 mod degree_three_opening_decoder_tests;
+#[cfg(test)]
+mod direct_mpc_candidate_carrier_tests;
 #[cfg(test)]
 mod direct_mpc_candidate_compiler_tests;
 #[cfg(test)]

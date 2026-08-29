@@ -16,8 +16,9 @@ use super::{
         DirectMpcCandidateError, DirectMpcFaultClass, DirectMpcFaultDisposition,
         DirectMpcInputRole, DirectMpcOperationRole, DirectMpcRoundKind,
         compile_direct_mpc_candidate, derive_validation_coefficients,
+        reduce_little_endian_field_sample,
     },
-    direct_mpc_prime_field::DirectMpcPrimeFieldElement,
+    direct_mpc_prime_field::{DIRECT_MPC_PRIME_FIELD_MODULUS, DirectMpcPrimeFieldElement},
 };
 
 const VALIDATION_CHALLENGE_CONTEXT: [u8; DIRECT_MPC_VALIDATION_CHALLENGE_CONTEXT_BYTE_LENGTH] =
@@ -145,14 +146,20 @@ fn completion_graph_has_exact_validation_evaluation_and_resource_geometry() {
     assert_eq!(resource.participant_count, 10);
     assert_eq!(resource.active_fault_bound, 3);
     assert_eq!(resource.reconstruction_threshold, 4);
+    assert_eq!(resource.selected_set_quorum, 7);
     assert_eq!(resource.finality_quorum, 7);
+    assert_eq!(resource.state_witness_quorum, 7);
     assert_eq!(resource.field_canonical_byte_length, 3);
-    assert_eq!(resource.field_sample_byte_length, 16);
+    assert_eq!(resource.field_sample_byte_length, 32);
     assert_eq!(resource.beaver_triple_count, 9_925);
     assert_eq!(resource.random_degree_three_sharing_count, 30_175);
     assert_eq!(resource.random_degree_six_zero_sharing_count, 9_925);
     assert_eq!(resource.source_consistency_mask_count, 400);
     assert_eq!(resource.validation_challenge_coefficient_count, 3_200);
+    assert_eq!(resource.affine_operation_count, 1_220);
+    assert_eq!(resource.affine_term_count, 11_890);
+    assert_eq!(resource.public_scale_operation_count, 110);
+    assert_eq!(resource.total_wire_count, 11_665);
     assert_eq!(resource.authorized_subset_count, 120);
     assert_eq!(resource.authorized_subset_size, 7);
     assert_eq!(resource.authorized_subset_count_per_participant, 84);
@@ -182,7 +189,7 @@ fn completion_graph_has_exact_validation_evaluation_and_resource_geometry() {
     );
     assert_eq!(
         resource.total_prss_source_byte_length_per_participant,
-        80_572_800
+        161_145_600
     );
     assert_eq!(resource.prss_kmacxof256_query_count_per_participant, 336);
     assert_eq!(resource.prss_work_checkpoint_count_per_participant, 336);
@@ -192,7 +199,7 @@ fn completion_graph_has_exact_validation_evaluation_and_resource_geometry() {
     );
     assert_eq!(
         resource.maximum_prss_xof_output_allocation_byte_length,
-        482_800
+        965_600
     );
     assert_eq!(
         resource.maximum_prss_accumulator_allocation_byte_length,
@@ -530,6 +537,24 @@ fn validation_coefficients_bind_each_predecessor_context_component() {
             baseline,
         );
     }
+}
+
+#[test]
+fn fixed_width_field_reduction_consumes_all_256_sample_bits() {
+    let mut sample = [0_u8; 32];
+    sample[31] = 1;
+    let expected = (0..31).fold(1_u64, |value, _| {
+        value * 256 % u64::from(DIRECT_MPC_PRIME_FIELD_MODULUS)
+    });
+    assert_ne!(expected, 0);
+    assert_eq!(
+        reduce_little_endian_field_sample(&sample).canonical_u32(),
+        u32::try_from(expected).unwrap()
+    );
+
+    sample[..16].fill(0xff);
+    let low_half_only = reduce_little_endian_field_sample(&sample[..16]);
+    assert_ne!(reduce_little_endian_field_sample(&sample), low_half_only);
 }
 
 #[test]

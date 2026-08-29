@@ -23,7 +23,7 @@ use super::direct_mpc_prime_field::{
     interpolate_consecutive_prime_field_values,
 };
 
-pub(crate) const DIRECT_MPC_FIELD_SAMPLE_BYTE_LENGTH: u64 = 16;
+pub(crate) const DIRECT_MPC_FIELD_SAMPLE_BYTE_LENGTH: u64 = 32;
 pub(crate) const DIRECT_MPC_SCORE_BIT_COUNT: usize = 4;
 pub(crate) const DIRECT_MPC_VALIDATION_REPETITION_COUNT: usize = 8;
 pub(crate) const DIRECT_MPC_SUBSET_SEED_BYTE_LENGTH: u64 = 40;
@@ -1111,14 +1111,15 @@ pub(super) fn derive_validation_coefficients(
     xof.finalize_xof().read(&mut bytes);
     Ok(bytes
         .chunks_exact(DIRECT_MPC_FIELD_SAMPLE_BYTE_LENGTH as usize)
-        .map(|chunk| {
-            let mut sample = [0_u8; DIRECT_MPC_FIELD_SAMPLE_BYTE_LENGTH as usize];
-            sample.copy_from_slice(chunk);
-            DirectMpcPrimeFieldElement::from_u64_reduced(
-                (u128::from_le_bytes(sample) % u128::from(DIRECT_MPC_PRIME_FIELD_MODULUS)) as u64,
-            )
-        })
+        .map(reduce_little_endian_field_sample)
         .collect())
+}
+
+pub(super) fn reduce_little_endian_field_sample(sample: &[u8]) -> DirectMpcPrimeFieldElement {
+    let reduced_value = sample.iter().rev().fold(0_u64, |accumulated, byte| {
+        (accumulated * 256 + u64::from(*byte)) % u64::from(DIRECT_MPC_PRIME_FIELD_MODULUS)
+    });
+    DirectMpcPrimeFieldElement::from_u64_reduced(reduced_value)
 }
 
 #[derive(Clone, Copy)]
@@ -1470,7 +1471,9 @@ pub(crate) struct DirectMpcCandidateResourceModel {
     pub(crate) participant_count: u64,
     pub(crate) active_fault_bound: u64,
     pub(crate) reconstruction_threshold: u64,
+    pub(crate) selected_set_quorum: u64,
     pub(crate) finality_quorum: u64,
+    pub(crate) state_witness_quorum: u64,
     pub(crate) field_canonical_byte_length: u64,
     pub(crate) field_sample_byte_length: u64,
     pub(crate) beaver_triple_count: u64,
@@ -1478,6 +1481,10 @@ pub(crate) struct DirectMpcCandidateResourceModel {
     pub(crate) random_degree_six_zero_sharing_count: u64,
     pub(crate) source_consistency_mask_count: u64,
     pub(crate) validation_challenge_coefficient_count: u64,
+    pub(crate) affine_operation_count: u64,
+    pub(crate) affine_term_count: u64,
+    pub(crate) public_scale_operation_count: u64,
+    pub(crate) total_wire_count: u64,
     pub(crate) authorized_subset_count: u64,
     pub(crate) authorized_subset_size: u64,
     pub(crate) authorized_subset_count_per_participant: u64,
@@ -1515,7 +1522,9 @@ impl CompiledDirectMpcCandidate {
         let participant_count = self.profile.participant_count();
         let roster_parameters = derive_foundation_roster_parameters(participant_count)
             .ok_or(DirectMpcCandidateError::InteractionGraphMismatch)?;
-        let quorum = roster_parameters.finality_quorum;
+        let selected_set_quorum = roster_parameters.candidate_view_quorum;
+        let finality_quorum = roster_parameters.finality_quorum;
+        let state_witness_quorum = roster_parameters.state_witness_quorum;
         let participant_count_u64 = u64::from(participant_count);
         let private_mailbox_count = participant_count_u64
             .checked_mul(participant_count_u64.saturating_sub(1))
@@ -1622,16 +1631,16 @@ impl CompiledDirectMpcCandidate {
         append_interaction_round(
             &mut success_rounds,
             DirectMpcRoundKind::SelectedSetAuthorization,
-            quorum,
-            u64::from(quorum),
+            selected_set_quorum,
+            u64::from(selected_set_quorum),
             0,
             0,
         )?;
         append_interaction_round(
             &mut success_rounds,
             DirectMpcRoundKind::TargetFinality,
-            quorum,
-            u64::from(quorum),
+            finality_quorum,
+            u64::from(finality_quorum),
             0,
             0,
         )?;
@@ -1671,8 +1680,8 @@ impl CompiledDirectMpcCandidate {
         append_interaction_round(
             &mut success_rounds,
             DirectMpcRoundKind::ResultWitnesses,
-            quorum,
-            u64::from(quorum),
+            state_witness_quorum,
+            u64::from(state_witness_quorum),
             0,
             0,
         )?;
@@ -1689,8 +1698,8 @@ impl CompiledDirectMpcCandidate {
         append_interaction_round(
             &mut all_abstention_rounds,
             DirectMpcRoundKind::NoResultWitnesses,
-            quorum,
-            u64::from(quorum),
+            state_witness_quorum,
+            u64::from(state_witness_quorum),
             0,
             0,
         )?;
@@ -1721,7 +1730,9 @@ impl CompiledDirectMpcCandidate {
                 .ok_or(DirectMpcCandidateError::InteractionGraphMismatch)?;
         let active_fault_bound = u64::from(roster_parameters.active_fault_bound);
         let reconstruction_threshold = u64::from(roster_parameters.reconstruction_threshold);
+        let selected_set_quorum = u64::from(roster_parameters.candidate_view_quorum);
         let finality_quorum = u64::from(roster_parameters.finality_quorum);
+        let state_witness_quorum = u64::from(roster_parameters.state_witness_quorum);
         let authorized_subset_count =
             checked_binomial_coefficient(participant_count, active_fault_bound)?;
         let authorized_subset_count_per_participant = checked_binomial_coefficient(
@@ -1777,6 +1788,16 @@ impl CompiledDirectMpcCandidate {
         let validation_challenge_coefficient_count = source_consistency_mask_count
             .checked_mul(DIRECT_MPC_VALIDATION_REPETITION_COUNT as u64)
             .ok_or(DirectMpcCandidateError::ArithmeticOverflow)?;
+        let affine_term_count = self.operations.iter().try_fold(0_u64, |sum, record| {
+            let term_count = match &record.operation {
+                DirectMpcArithmeticOperation::Affine { terms, .. } => u64::try_from(terms.len())
+                    .map_err(|_| DirectMpcCandidateError::ArithmeticOverflow)?,
+                DirectMpcArithmeticOperation::Multiply { .. }
+                | DirectMpcArithmeticOperation::MultiplyByPublic { .. } => 0,
+            };
+            sum.checked_add(term_count)
+                .ok_or(DirectMpcCandidateError::ArithmeticOverflow)
+        })?;
         let persistent_ballot_share_field_count_per_participant =
             u64::try_from(self.geometry.private_score_bit_field_count)
                 .map_err(|_| DirectMpcCandidateError::ArithmeticOverflow)?;
@@ -1832,7 +1853,9 @@ impl CompiledDirectMpcCandidate {
             participant_count,
             active_fault_bound,
             reconstruction_threshold,
+            selected_set_quorum,
             finality_quorum,
+            state_witness_quorum,
             field_canonical_byte_length,
             field_sample_byte_length: DIRECT_MPC_FIELD_SAMPLE_BYTE_LENGTH,
             beaver_triple_count: self.geometry.beaver_triple_count,
@@ -1840,6 +1863,13 @@ impl CompiledDirectMpcCandidate {
             random_degree_six_zero_sharing_count,
             source_consistency_mask_count,
             validation_challenge_coefficient_count,
+            affine_operation_count: u64::try_from(self.geometry.affine_operation_count)
+                .map_err(|_| DirectMpcCandidateError::ArithmeticOverflow)?,
+            affine_term_count,
+            public_scale_operation_count: u64::try_from(self.geometry.public_scale_operation_count)
+                .map_err(|_| DirectMpcCandidateError::ArithmeticOverflow)?,
+            total_wire_count: u64::try_from(self.geometry.total_wire_count)
+                .map_err(|_| DirectMpcCandidateError::ArithmeticOverflow)?,
             authorized_subset_count,
             authorized_subset_size,
             authorized_subset_count_per_participant,
