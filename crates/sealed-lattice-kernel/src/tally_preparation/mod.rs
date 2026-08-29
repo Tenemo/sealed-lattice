@@ -22,7 +22,11 @@ mod context;
 mod degree_three_opening_decoder;
 mod direct_mpc_candidate_carrier;
 mod direct_mpc_candidate_compiler;
+mod direct_mpc_field_stream;
+mod direct_mpc_participant_cursor;
 mod direct_mpc_prime_field;
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+pub(crate) mod direct_mpc_scalar_measurement;
 mod fixed_roster_beaver_mpc_resource_floor;
 mod garbled_resource_model;
 mod garbling_alternative_resource_model;
@@ -102,6 +106,10 @@ mod degree_three_opening_decoder_tests;
 mod direct_mpc_candidate_carrier_tests;
 #[cfg(test)]
 mod direct_mpc_candidate_compiler_tests;
+#[cfg(test)]
+mod direct_mpc_field_stream_tests;
+#[cfg(test)]
+mod direct_mpc_participant_cursor_tests;
 #[cfg(test)]
 mod direct_mpc_prime_field_tests;
 #[cfg(test)]

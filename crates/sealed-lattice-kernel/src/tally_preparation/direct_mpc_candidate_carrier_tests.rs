@@ -186,6 +186,10 @@ fn fixed_function_census_closes_sampling_and_chunk_loss_bounds() {
         756
     );
     assert_eq!(
+        fixed.prss_ordinary_basis_modular_inverse_count_per_participant,
+        84
+    );
+    assert_eq!(
         fixed.prss_weight_field_multiplication_count_per_participant,
         5_035_800
     );

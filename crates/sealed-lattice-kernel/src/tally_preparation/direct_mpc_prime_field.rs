@@ -1,5 +1,7 @@
 use core::fmt;
 
+use zeroize::Zeroize;
+
 pub(crate) const DIRECT_MPC_PRIME_FIELD_MODULUS: u32 = 65_537;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +44,12 @@ impl std::error::Error for DirectMpcPrimeFieldError {}
 /// every probabilistic field check carries its own repetition bound.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct DirectMpcPrimeFieldElement(u32);
+
+impl Zeroize for DirectMpcPrimeFieldElement {
+    fn zeroize(&mut self) {
+        self.0 = 0;
+    }
+}
 
 impl DirectMpcPrimeFieldElement {
     pub(crate) const CANONICAL_BYTE_LENGTH: usize = 3;

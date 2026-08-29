@@ -20,6 +20,9 @@ use super::direct_mpc_candidate_compiler::{
     DIRECT_MPC_SUBSET_SEED_BYTE_LENGTH, DIRECT_MPC_VALIDATION_CHALLENGE_CONTEXT_BYTE_LENGTH,
     DIRECT_MPC_VALIDATION_REPETITION_COUNT, DirectMpcCandidateError, DirectMpcRoundKind,
 };
+use super::direct_mpc_field_stream::{
+    DIRECT_MPC_FIELD_STREAM_CUSTOMIZATION, DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH,
+};
 
 const HASH512_BYTE_LENGTH: u64 = Hash512::BYTE_LENGTH as u64;
 const ML_DSA_65_SIGNATURE_BYTE_LENGTH: u64 = ml_dsa_65::SIG_LEN as u64;
@@ -29,7 +32,6 @@ const COMMITMENT_SALT_BYTE_LENGTH: u64 = 64;
 const FIELD_CANONICAL_BYTE_LENGTH: u64 = 3;
 const KECCAK_F1600_RATE_BYTE_LENGTH: u64 = 136;
 const KMACXOF_RIGHT_ENCODE_ZERO_BYTE_LENGTH: u64 = 2;
-const DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH: u64 = 302;
 const RUNTIME_RECORD_ENVELOPE_OVERHEAD_BYTE_LENGTH: u64 = 54;
 const STORAGE_INDEX_VALUE_BYTE_LENGTH: u64 = 256;
 const AUTHENTICATED_REPAIR_RECORD_FIXED_BYTE_LENGTH: u64 = 68;
@@ -53,7 +55,6 @@ const PRIVATE_MESSAGE_ENVELOPE_DOMAIN: &str =
 const PRIVATE_CARRIER_DOMAIN: &str = "sealed-lattice/v1/direct-mpc/private-carrier";
 const PUBLIC_MESSAGE_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/v1/direct-mpc/public-message";
 const PRIVATE_MESSAGE_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/v1/direct-mpc/private-message";
-const FIELD_STREAM_QUERY_DOMAIN: &str = "sealed-lattice/v1/direct-mpc/pseudorandom-field-stream";
 const CHECKPOINT_STATE_DOMAIN: &str = "sealed-lattice/v1/direct-mpc/checkpoint-state";
 const CHECKPOINT_CURSOR_DOMAIN: &str = "sealed-lattice/v1/direct-mpc/checkpoint-cursor";
 
@@ -273,6 +274,7 @@ pub(crate) struct DirectMpcFixedFunctionResourceLedger {
     pub(crate) computation_target_hash_preimage_byte_length: u64,
     pub(crate) checkpoint_hash_call_count_per_participant: u64,
     pub(crate) prss_basis_precomputation_field_multiplication_count_per_participant: u64,
+    pub(crate) prss_ordinary_basis_modular_inverse_count_per_participant: u64,
     pub(crate) prss_weight_field_multiplication_count_per_participant: u64,
     pub(crate) prss_accumulation_field_addition_count_per_participant: u64,
     pub(crate) maximum_field_multiplication_count_per_participant: u64,
@@ -577,7 +579,7 @@ pub(crate) fn compile_direct_mpc_candidate_carrier_ledger(
         checked_multiply(
             ceiling_divide(
                 checked_add(
-                    DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH,
+                    DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH as u64,
                     KMACXOF_RIGHT_ENCODE_ZERO_BYTE_LENGTH,
                 )?,
                 KECCAK_F1600_RATE_BYTE_LENGTH,
@@ -586,11 +588,11 @@ pub(crate) fn compile_direct_mpc_candidate_carrier_ledger(
         )?,
     )?;
     let ordinary_stream_permutation_count = kmac_permutation_count(
-        DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH,
+        DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH as u64,
         ordinary_stream_output_byte_length,
     )?;
     let zero_stream_permutation_count = kmac_permutation_count(
-        DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH,
+        DIRECT_MPC_FIELD_STREAM_QUERY_BYTE_LENGTH as u64,
         zero_stream_output_byte_length,
     )?;
     let zero_stream_count_per_participant = checked_multiply(
@@ -723,7 +725,7 @@ pub(crate) fn compile_direct_mpc_candidate_carrier_ledger(
         field_stream_query_byte_length: direct_mpc_field_stream_query_byte_length(
             candidate.profile().participant_count(),
         )?,
-        field_stream_customization_byte_length: FIELD_STREAM_QUERY_DOMAIN.len() as u64,
+        field_stream_customization_byte_length: DIRECT_MPC_FIELD_STREAM_CUSTOMIZATION.len() as u64,
         kmacxof256_query_count_per_participant: resource
             .prss_kmacxof256_query_count_per_participant,
         kmacxof256_absorbed_byte_length_per_participant: checked_multiply(
@@ -784,6 +786,8 @@ pub(crate) fn compile_direct_mpc_candidate_carrier_ledger(
         )?,
         checkpoint_hash_call_count_per_participant,
         prss_basis_precomputation_field_multiplication_count_per_participant,
+        prss_ordinary_basis_modular_inverse_count_per_participant: resource
+            .authorized_subset_count_per_participant,
         prss_weight_field_multiplication_count_per_participant: resource
             .total_prss_field_output_count_per_participant,
         prss_accumulation_field_addition_count_per_participant,

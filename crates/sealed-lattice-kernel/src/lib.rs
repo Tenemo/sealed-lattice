@@ -611,6 +611,196 @@ pub fn run_completion_zero_sharing_native_measurement_json() -> Result<String, S
     tally_preparation::pseudorandom_zero_sharing_measurement_320::run_completion_zero_sharing_native_measurement_json()
 }
 
+/// Opens the exact completion-profile direct-MPC PRSS scalar diagnostic.
+///
+/// This surface is absent from the production WebAssembly package and cannot
+/// mint a preparation or continuation capability.
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_open_direct_mpc_prss_measurement() -> u32 {
+    tally_preparation::direct_mpc_scalar_measurement::open_completion_direct_mpc_scalar_measurement(
+    )
+}
+
+/// Restores the direct-MPC PRSS diagnostic from one authenticated safe-boundary checkpoint.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory.
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_restore_direct_mpc_prss_measurement(
+    pointer: *const u8,
+    length: usize,
+) -> u32 {
+    let checkpoint = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    tally_preparation::direct_mpc_scalar_measurement::restore_completion_direct_mpc_scalar_measurement(
+        checkpoint,
+    )
+}
+
+/// Performs exactly one canonical direct-MPC subset stream and stops at its safe boundary.
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_step_direct_mpc_prss_measurement() -> u32 {
+    tally_preparation::direct_mpc_scalar_measurement::step_completion_direct_mpc_scalar_measurement(
+    )
+}
+
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_direct_mpc_prss_measurement_state() -> u32 {
+    tally_preparation::direct_mpc_scalar_measurement::completion_direct_mpc_scalar_measurement_state(
+    )
+}
+
+/// Copies the authenticated direct-MPC PRSS checkpoint out of the diagnostic cursor.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or identify one writable `usize` value
+/// in this WebAssembly module's linear memory.
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_direct_mpc_prss_measurement_checkpoint_with_length(
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let Some(output) = tally_preparation::direct_mpc_scalar_measurement::completion_direct_mpc_scalar_measurement_checkpoint() else {
+        if !output_length_pointer.is_null() {
+            unsafe { output_length_pointer.write(0) };
+        }
+        return ptr::null_mut();
+    };
+    if !output_length_pointer.is_null() {
+        unsafe { output_length_pointer.write(output.len()) };
+    }
+    leak_secret_bytes(output)
+}
+
+/// Copies the completed canonical direct-MPC PRSS output out of the diagnostic cursor.
+///
+/// # Safety
+///
+/// `output_length_pointer` must be null or identify one writable `usize` value
+/// in this WebAssembly module's linear memory.
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_direct_mpc_prss_measurement_result_with_length(
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let Some(output) = tally_preparation::direct_mpc_scalar_measurement::completion_direct_mpc_scalar_measurement_result() else {
+        if !output_length_pointer.is_null() {
+            unsafe { output_length_pointer.write(0) };
+        }
+        return ptr::null_mut();
+    };
+    if !output_length_pointer.is_null() {
+        unsafe { output_length_pointer.write(output.len()) };
+    }
+    leak_secret_bytes(output)
+}
+
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_close_direct_mpc_prss_measurement() -> u32 {
+    tally_preparation::direct_mpc_scalar_measurement::close_completion_direct_mpc_scalar_measurement(
+    )
+}
+
+macro_rules! direct_mpc_measurement_resource_export {
+    ($export_name:ident, $resource_function:ident) => {
+        #[cfg(feature = "direct-mpc-scalar-measurement")]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $export_name() -> u64 {
+            tally_preparation::direct_mpc_scalar_measurement::$resource_function()
+        }
+    };
+}
+
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_authorized_subset_count,
+    completion_direct_mpc_authorized_subset_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_ordinary_stream_count,
+    completion_direct_mpc_ordinary_stream_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_zero_basis_stream_count,
+    completion_direct_mpc_zero_basis_stream_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_total_stream_count,
+    completion_direct_mpc_total_stream_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_ordinary_field_count,
+    completion_direct_mpc_ordinary_field_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_zero_field_count,
+    completion_direct_mpc_zero_field_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_field_output_count,
+    completion_direct_mpc_field_output_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_source_byte_length,
+    completion_direct_mpc_source_byte_length
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_basis_multiplication_count,
+    completion_direct_mpc_basis_multiplication_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_basis_inverse_count,
+    completion_direct_mpc_basis_inverse_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_weight_multiplication_count,
+    completion_direct_mpc_weight_multiplication_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_accumulation_addition_count,
+    completion_direct_mpc_accumulation_addition_count
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_maximum_xof_allocation_byte_length,
+    completion_direct_mpc_maximum_xof_allocation_byte_length
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_canonical_accumulator_byte_length,
+    completion_direct_mpc_canonical_accumulator_byte_length
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_internal_accumulator_byte_length,
+    completion_direct_mpc_internal_accumulator_byte_length
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_checkpoint_byte_length,
+    completion_direct_mpc_checkpoint_byte_length
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_cumulative_checkpoint_byte_length,
+    completion_direct_mpc_cumulative_checkpoint_byte_length
+);
+direct_mpc_measurement_resource_export!(
+    sealed_lattice_direct_mpc_prss_result_byte_length,
+    completion_direct_mpc_result_byte_length
+);
+
+/// Runs the exact typed direct-MPC PRSS cursor under the native development target.
+#[cfg(feature = "direct-mpc-scalar-measurement")]
+pub fn run_completion_direct_mpc_native_measurement_json() -> Result<String, String> {
+    tally_preparation::direct_mpc_scalar_measurement::run_completion_direct_mpc_native_measurement_json()
+}
+
 #[cfg(test)]
 mod tests {
     use core::{ptr, slice};
