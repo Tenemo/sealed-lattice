@@ -1,7 +1,6 @@
 import { stripVTControlCharacters } from 'node:util';
 
-import type { CommandOutputEvent, CommandRunObserver } from './run-command.js';
-import { createStreamingLineAccumulator } from './streaming-lines.js';
+import type { CommandRunObserver } from './run-command.js';
 
 export type CheckFailureDetail = {
     readonly commandDescription?: string;
@@ -14,8 +13,8 @@ export type CheckFailureDetail = {
 type CommandState = {
     readonly description: string;
     exitCode?: number;
-    logPath?: string;
-    readonly output: RecentLineBuffer;
+    readonly output: RecentOutput;
+    readonly logPath?: string;
     status: 'failed' | 'passed' | 'running' | 'stopped';
 };
 
@@ -23,38 +22,34 @@ const recentOutputLineLimit = 20;
 const formatDuration = (durationMilliseconds: number): string =>
     `${(durationMilliseconds / 1000).toFixed(1)}s`;
 
-class RecentLineBuffer {
+class RecentOutput {
     readonly #lines: string[] = [];
-    readonly #streamingLines = createStreamingLineAccumulator((line) => {
-        this.#push(stripVTControlCharacters(line));
-    });
+    #pending = '';
 
     append(chunk: string): void {
-        this.#streamingLines.push(chunk);
+        const lines = `${this.#pending}${chunk}`.split(/\r\n|\n|\r/u);
+        this.#pending = lines.pop() ?? '';
+        for (const line of lines) this.#push(line);
     }
 
     finish(): void {
-        this.#streamingLines.flush();
+        this.#push(this.#pending);
+        this.#pending = '';
     }
 
     snapshot(): readonly string[] {
-        const remainder = stripVTControlCharacters(
-            this.#streamingLines.pending(),
-        );
+        const pending = stripVTControlCharacters(this.#pending);
         return [
             ...this.#lines,
-            ...(remainder.length === 0 ? [] : [remainder]),
+            ...(pending.trim().length === 0 ? [] : [pending]),
         ].slice(-recentOutputLineLimit);
     }
 
     #push(line: string): void {
-        if (line.trim().length === 0) {
-            return;
-        }
-        this.#lines.push(line);
-        if (this.#lines.length > recentOutputLineLimit) {
-            this.#lines.splice(0, this.#lines.length - recentOutputLineLimit);
-        }
+        const plainLine = stripVTControlCharacters(line);
+        if (plainLine.trim().length === 0) return;
+        this.#lines.push(plainLine);
+        if (this.#lines.length > recentOutputLineLimit) this.#lines.shift();
     }
 }
 
@@ -66,8 +61,8 @@ export class CheckReporter {
         signal?: AbortSignal,
     ): CommandRunObserver {
         return {
-            onCommandExit: (event): void => {
-                const command = this.#requireCommand(
+            onCommandExit: (event) => {
+                const command = this.#runningCommand(
                     laneName,
                     event.invocation.description,
                 );
@@ -86,75 +81,72 @@ export class CheckReporter {
                           ? 'STOP'
                           : 'FAIL';
                 process.stdout.write(
-                    `${label} ${laneName} (${formatDuration(event.durationMilliseconds)})${this.#commandSuffix(laneName, command.description)}\n`,
+                    `${label} ${laneName} (${formatDuration(
+                        event.durationMilliseconds,
+                    )})${this.#commandSuffix(laneName, command.description)}\n`,
                 );
             },
-            onCommandOutput: (event): void => {
-                this.#recordOutput(laneName, event);
+            onCommandOutput: (event) => {
+                this.#runningCommand(
+                    laneName,
+                    event.invocation.description,
+                ).output.append(event.chunk);
             },
-            onCommandStart: (event): void => {
-                const command: CommandState = {
+            onCommandStart: (event) => {
+                const commands = this.#commandsByLane.get(laneName) ?? [];
+                commands.push({
                     description: event.invocation.description,
                     logPath: event.logFiles?.combinedPath,
-                    output: new RecentLineBuffer(),
+                    output: new RecentOutput(),
                     status: 'running',
-                };
-                const commands = this.#commandsByLane.get(laneName) ?? [];
-                commands.push(command);
+                });
                 this.#commandsByLane.set(laneName, commands);
                 process.stdout.write(
-                    `RUN  ${laneName}${this.#commandSuffix(laneName, command.description)}\n`,
+                    `RUN  ${laneName}${this.#commandSuffix(
+                        laneName,
+                        event.invocation.description,
+                    )}\n`,
                 );
             },
         };
     }
 
     failureDetails(): readonly CheckFailureDetail[] {
-        const details: CheckFailureDetail[] = [];
-        for (const [laneName, commands] of this.#commandsByLane) {
-            const failedCommand = commands.find(
-                (command) => command.status === 'failed',
+        return [...this.#commandsByLane].flatMap(([laneName, commands]) => {
+            const command = commands.find(
+                (candidate) => candidate.status === 'failed',
             );
-            if (failedCommand === undefined) {
-                continue;
-            }
-            details.push({
-                commandDescription: failedCommand.description,
-                exitCode: failedCommand.exitCode,
-                laneName,
-                logPath: failedCommand.logPath,
-                recentOutputLines: failedCommand.output.snapshot(),
-            });
-        }
-
-        return details;
+            return command === undefined
+                ? []
+                : [
+                      {
+                          commandDescription: command.description,
+                          exitCode: command.exitCode,
+                          laneName,
+                          logPath: command.logPath,
+                          recentOutputLines: command.output.snapshot(),
+                      },
+                  ];
+        });
     }
 
     recordStoppedLane(laneName: string, durationMilliseconds: number): void {
         if (
             this.#commandsByLane
                 .get(laneName)
-                ?.some((command) => command.status === 'stopped') === true
+                ?.some((command) => command.status === 'stopped') !== true
         ) {
-            return;
+            process.stdout.write(
+                `STOP ${laneName} (${formatDuration(durationMilliseconds)})\n`,
+            );
         }
-        process.stdout.write(
-            `STOP ${laneName} (${formatDuration(durationMilliseconds)})\n`,
-        );
     }
 
     #commandSuffix(laneName: string, description: string): string {
         return description === laneName ? '' : ` - ${description}`;
     }
 
-    #recordOutput(laneName: string, event: CommandOutputEvent): void {
-        this.#requireCommand(
-            laneName,
-            event.invocation.description,
-        ).output.append(event.chunk);
-    }
-
-    #requireCommand(laneName: string, description: string): CommandState {
+    #runningCommand(laneName: string, description: string): CommandState {
         const command = this.#commandsByLane
             .get(laneName)
             ?.find(
@@ -167,7 +159,6 @@ export class CheckReporter {
                 `No running check command ${description} exists in ${laneName}.`,
             );
         }
-
         return command;
     }
 }

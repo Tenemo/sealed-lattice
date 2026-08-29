@@ -7,7 +7,6 @@ import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
-import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const resolveFromRepoRoot = (...segments: string[]): string =>
@@ -196,7 +195,6 @@ export default defineConfig({
                       ...(process.env.GITHUB_ACTIONS === 'true'
                           ? (['github-actions'] as const)
                           : []),
-                      new VitestDiagnosticReporter(),
                   ],
               }
             : {
@@ -207,7 +205,6 @@ export default defineConfig({
                           ? (['github-actions'] as const)
                           : []),
                       'json' as const,
-                      new VitestDiagnosticReporter(),
                   ],
               }),
         projects: [

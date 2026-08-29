@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export const testDiagnosticEnvironmentVariables = {
+const testDiagnosticEnvironmentVariables = {
     projectLabel: 'SEALED_LATTICE_TEST_PROJECT_LABEL',
     runDirectory: 'SEALED_LATTICE_RUN_DIRECTORY',
 } as const;
@@ -8,7 +8,6 @@ export const testDiagnosticEnvironmentVariables = {
 type ResolvedTestDiagnosticPaths = {
     readonly attachmentDirectoryPath?: string;
     readonly diagnosticReportDirectoryPath?: string;
-    readonly eventFilePath?: string;
     readonly projectLabel: string;
     readonly resultFilePath?: string;
 };
@@ -35,11 +34,6 @@ export const resolveTestDiagnosticPaths = (
             runDirectoryPath,
             'diagnostic-reports',
             projectLabel,
-        ),
-        eventFilePath: path.join(
-            runDirectoryPath,
-            'tests',
-            `${projectLabel}.jsonl`,
         ),
         projectLabel,
         resultFilePath: path.join(
