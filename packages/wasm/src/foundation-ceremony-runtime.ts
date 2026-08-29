@@ -1,14 +1,14 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
-import {
-    configurableOptionCountRange,
-    type ProtocolHash,
-} from '@sealed-lattice/types';
 
 import { isUint8Array } from './byte-array.js';
 import {
+    configurableOptionCountRange,
+    type ProtocolHash,
+} from './foundation-contract.js';
+import {
     bytesToHex,
     textEncoder,
-} from './transcript-core-bridge/kernel-contracts.js';
+} from './foundation-kernel/kernel-contracts.js';
 import type {
     FoundationActionContextVerification,
     FoundationActionDefinitionVerification,
@@ -16,7 +16,7 @@ import type {
     FoundationCeremonyContextVerification,
     FoundationManifestVerification,
     PublishedSdkKernel,
-} from './transcript-core-bridge/kernel-contracts.js';
+} from './foundation-kernel/kernel-contracts.js';
 
 export type FoundationManifestInput = Readonly<{
     readonly displayTitle: string;
@@ -244,7 +244,6 @@ const snapshotManifestInput = (input: unknown): FoundationManifestInput => {
     return Object.freeze({ displayTitle, optionDefinitions });
 };
 
-/** Opens the typed byte boundary backed by one already loaded Rust/WASM kernel. */
 export const openFoundationCeremonyRuntime = (
     kernel: PublishedSdkKernel,
 ): FoundationCeremonyRuntime => ({

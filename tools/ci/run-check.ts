@@ -1,8 +1,6 @@
-import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 import { CheckReporter, type CheckFailureDetail } from './check-reporter.js';
-import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     createLocalRunLog,
     currentProcessExitCode,
@@ -16,9 +14,7 @@ import {
     createPackageManagerCommand,
     runCommandsInSeries,
     type CommandInvocation,
-    type CommandRunObserver,
 } from './run-command.js';
-import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
 
 type LaneStatus = 'failed' | 'passed' | 'stopped';
 
@@ -42,41 +38,6 @@ type ValidationSummaryContext = {
     readonly failureDetails: readonly CheckFailureDetail[];
     readonly runLogDirectoryPath?: string;
 };
-
-const combineCommandRunObservers = (
-    observers: readonly CommandRunObserver[],
-): CommandRunObserver => ({
-    onCommandExit: (event): void => {
-        for (const observer of observers) observer.onCommandExit?.(event);
-    },
-    onCommandOutput: (event): void => {
-        for (const observer of observers) observer.onCommandOutput?.(event);
-    },
-    onCommandStart: (event): void => {
-        for (const observer of observers) observer.onCommandStart?.(event);
-    },
-});
-
-const scopeCommandRunObserver = (
-    commandDescription: string,
-    observer: CommandRunObserver,
-): CommandRunObserver => ({
-    onCommandExit: (event): void => {
-        if (event.invocation.description === commandDescription) {
-            observer.onCommandExit?.(event);
-        }
-    },
-    onCommandOutput: (event): void => {
-        if (event.invocation.description === commandDescription) {
-            observer.onCommandOutput?.(event);
-        }
-    },
-    onCommandStart: (event): void => {
-        if (event.invocation.description === commandDescription) {
-            observer.onCommandStart?.(event);
-        }
-    },
-});
 
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
 const includeDesktopBrowserArgument = '--include-desktop-browser';
@@ -166,9 +127,7 @@ export const buildCheckDesktopBrowserLane = (
         ['run', 'test:browser:built'],
     );
 
-const buildRustKernelLane = (
-    packageManagerRunner: PackageManagerRunner,
-): ValidationLane => ({
+const buildRustKernelLane = (): ValidationLane => ({
     commands: [
         createCargoCommand(
             'cargo fmt --check',
@@ -189,17 +148,18 @@ const buildRustKernelLane = (
             ],
             'cargo-clippy',
         ),
-        createPackageManagerCommand(
-            'Test process memory guard',
-            ['run', 'test:rust:process-memory-guard'],
-            {
-                logFileSlug: 'process-memory-guard',
-                packageManagerRunner,
-            },
-        ),
         createCargoCommand(
             'cargo test (optimized test profile, fast)',
-            cargoTestArgumentsForRustKernelFast(),
+            [
+                'test',
+                '--locked',
+                '-p',
+                'sealed-lattice-kernel',
+                '--',
+                '--test-threads',
+                '1',
+                '--show-output',
+            ],
             'cargo-test',
         ),
     ],
@@ -222,7 +182,7 @@ export const buildCheckParallelLanes = (
         );
     return [
         lane('Lint', 'lint', ['run', 'lint']),
-        buildRustKernelLane(packageManagerRunner),
+        buildRustKernelLane(),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
         lane('Node tests', 'node', [
             'run',
@@ -261,7 +221,6 @@ const runParallelLane = async (
     runLog: ActiveLocalRunLog,
     abortController: AbortController,
     reporter: CheckReporter,
-    additionalObserver?: CommandRunObserver,
 ): Promise<ValidationLaneResult> => {
     const startedAtMilliseconds = performance.now();
     const checkObserver = reporter.createCommandObserver(
@@ -269,13 +228,7 @@ const runParallelLane = async (
         abortController.signal,
     );
     const exitCode = await runCommandsInSeries(lane.commands, {
-        observer:
-            additionalObserver === undefined
-                ? checkObserver
-                : combineCommandRunObservers([
-                      checkObserver,
-                      additionalObserver,
-                  ]),
+        observer: checkObserver,
         outputMode: 'capture',
         runLog,
         signal: abortController.signal,
@@ -420,23 +373,10 @@ const main = async (): Promise<void> => {
     });
     const results: ValidationLaneResult[] = [];
     const reporter = new CheckReporter();
-    let rustTestProgressReporter:
-        | ReturnType<typeof createHeavyTestProgressReporter>
-        | undefined;
     let executionError: unknown;
     let logFinishingError: unknown;
 
     try {
-        rustTestProgressReporter = createHeavyTestProgressReporter({
-            eventFilePath: path.join(
-                runLog.runDirectoryPath,
-                'tests',
-                'rust-kernel-fast.jsonl',
-            ),
-            label: 'rust-kernel-fast',
-            threadCount: 1,
-        });
-
         for (const lane of gatingLanes) {
             const result = await runGatingLane(lane, runLog, reporter);
             results.push(result);
@@ -452,21 +392,9 @@ const main = async (): Promise<void> => {
         }
 
         const abortController = new AbortController();
-        const rustTestObserver = scopeCommandRunObserver(
-            'cargo test (optimized test profile, fast)',
-            rustTestProgressReporter.observer,
-        );
         const parallelResults = await Promise.all(
             parallelLanes.map((lane) =>
-                runParallelLane(
-                    lane,
-                    runLog,
-                    abortController,
-                    reporter,
-                    lane.name === rustKernelLaneName
-                        ? rustTestObserver
-                        : undefined,
-                ),
+                runParallelLane(lane, runLog, abortController, reporter),
             ),
         );
         results.push(
@@ -493,7 +421,6 @@ const main = async (): Promise<void> => {
         executionError = error;
         process.exitCode = currentProcessExitCode() || 1;
     } finally {
-        rustTestProgressReporter?.stop();
         try {
             await runLog.finish({
                 details: { results },

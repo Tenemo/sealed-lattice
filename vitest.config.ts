@@ -26,27 +26,19 @@ const nodeHookTimeoutMs = 240_000;
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelTestTimeoutMs = 15 * 60_000;
 
-const protocolNodeTestGlobs = [
-    'packages/protocol/tests/node/**/*.test.ts',
-] as const;
 const kernelNodeTestGlobs = [
     'packages/wasm/tests/node/**/*.kernel.test.ts',
     'tests/node/**/*.kernel.test.ts',
 ] as const;
 const nodeTestProjectDefinitions = [
     {
-        exclude: [...protocolNodeTestGlobs, ...kernelNodeTestGlobs],
+        exclude: [...kernelNodeTestGlobs],
         include: [
             'packages/*/tests/node/**/*.test.ts',
             'tests/node/**/*.test.ts',
         ],
         projectName: 'node',
         testTimeout: nodeTestTimeoutMs,
-    },
-    {
-        include: protocolNodeTestGlobs,
-        projectName: 'node-protocol',
-        testTimeout: nodeKernelTestTimeoutMs,
     },
     {
         fileParallelism: false,

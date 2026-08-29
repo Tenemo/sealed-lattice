@@ -1,8 +1,5 @@
 [workspace]
-members = [
-    "crates/sealed-lattice-kernel",
-    "tools/process-memory-guard",
-]
+members = ["crates/sealed-lattice-kernel"]
 resolver = "3"
 
 [profile.test]

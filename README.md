@@ -34,13 +34,13 @@ Schemas, formulas, validators, and deterministic tally-circuit compilers cover:
 
 The sole target for cryptographic completion, integration, performance, and supported-phone evidence is `n = 10`, `optionCount = 10`. Other admitted shapes are structural inputs only and carry no security, runtime, or support claim.
 
-The target is an 80-bit reduced-assurance, post-quantum-oriented mobile research prototype. That target has not been established end to end and is not a production rating or certification.
+The research target is at least 80 bits of modeled post-quantum attack work under the stated assumptions and limits. It has not been established end to end and is not a production rating or certification.
 
 Every required participant operation must retain a scalar-capable, single-worker mobile-browser WebAssembly path. Transcript, mailbox, and storage services relay untrusted bytes only. The sole browser qualification target is release Chrome on the selected physical phone for the exact package bytes. Native Rust, Node.js, desktop Chrome, emulation, and other browsers provide development evidence only.
 
 ## Current status
 
-The complete protocol is not implemented. Foundation code covers validation, deterministic tally semantics, typed refusals, scalar arithmetic, authenticated storage, and reproducible Rust/WebAssembly packaging. A construction-neutral verifier exercises finality before input and evaluation release, but it is not a complete ballot-custody or evaluation protocol.
+The complete protocol is not implemented. The public package covers poll validation, canonical foundation objects, positive foundation verifiers, typed refusals, and reproducible Rust/WebAssembly packaging. An independent development-only tally compiler and evaluator remain in Rust tests. Preparation, ballot custody, one-shot state, target finality, input activation, and evaluation are not implemented.
 
 No preparation or evaluation construction satisfies the full security model, no end-to-end capability chain exists, and production dispatch activates no cryptographic suite. No complete browser or supported-phone qualification exists. See the [open security issues](SECURITY.md#open-security-issues).
 
@@ -66,13 +66,11 @@ The validator admits `2..20` options. This example uses the sole ten-option evid
 import { createCanonicalManifest, validatePollSpec } from "sealed-lattice";
 
 const pollValidation = validatePollSpec({
-    pollId: "board-election-2026",
     question: "Which proposals should be adopted?",
     options: Array.from(
         { length: 10 },
         (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
     ),
-    topOptionCount: 5,
 });
 
 if (!pollValidation.isValid) {

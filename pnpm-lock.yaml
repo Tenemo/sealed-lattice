@@ -84,62 +84,15 @@ importers:
         specifier: ^4.1.4
         version: 4.1.4(@types/node@24.13.3)(@vitest/browser-playwright@4.1.4)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
 
-  packages/crypto:
-    dependencies:
-      '@noble/hashes':
-        specifier: 2.2.0
-        version: 2.2.0
-      '@noble/post-quantum':
-        specifier: 0.6.1
-        version: 0.6.1
-      '@sealed-lattice/types':
-        specifier: workspace:*
-        version: link:../types
-    devDependencies:
-      vitest:
-        specifier: ^4.1.4
-        version: 4.1.4(@types/node@24.13.3)(@vitest/browser-playwright@4.1.4)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
-
-  packages/protocol:
-    dependencies:
-      '@noble/hashes':
-        specifier: 2.2.0
-        version: 2.2.0
-      '@sealed-lattice/crypto':
-        specifier: workspace:*
-        version: link:../crypto
-      '@sealed-lattice/types':
-        specifier: workspace:*
-        version: link:../types
-      '@sealed-lattice/wasm':
-        specifier: workspace:*
-        version: link:../wasm
-    devDependencies:
-      vitest:
-        specifier: ^4.1.4
-        version: 4.1.4(@types/node@24.13.3)(@vitest/browser-playwright@4.1.4)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
-
   packages/sdk:
     dependencies:
       '@noble/hashes':
         specifier: 2.2.0
         version: 2.2.0
     devDependencies:
-      '@sealed-lattice/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      '@sealed-lattice/types':
-        specifier: workspace:*
-        version: link:../types
       '@sealed-lattice/wasm':
         specifier: workspace:*
         version: link:../wasm
-      vitest:
-        specifier: ^4.1.4
-        version: 4.1.4(@types/node@24.13.3)(@vitest/browser-playwright@4.1.4)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
-
-  packages/types:
-    devDependencies:
       vitest:
         specifier: ^4.1.4
         version: 4.1.4(@types/node@24.13.3)(@vitest/browser-playwright@4.1.4)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
@@ -149,9 +102,6 @@ importers:
       '@noble/hashes':
         specifier: 2.2.0
         version: 2.2.0
-      '@sealed-lattice/types':
-        specifier: workspace:*
-        version: link:../types
     devDependencies:
       vitest:
         specifier: ^4.1.4
@@ -409,20 +359,8 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@noble/ciphers@2.2.0':
-    resolution: {integrity: sha512-Z6pjIZ/8IJcCGzb2S/0Px5J81yij85xASuk1teLNeg75bfT07MV3a/O2Mtn1I2se43k3lkVEcFaR10N4cgQcZA==}
-    engines: {node: '>= 20.19.0'}
-
-  '@noble/curves@2.2.0':
-    resolution: {integrity: sha512-T/BoHgFXirb0ENSPBquzX0rcjXeM6Lo892a2jlYJkqk83LqZx0l1Of7DzlKJ6jkpvMrkHSnAcgb5JegL8SeIkQ==}
-    engines: {node: '>= 20.19.0'}
-
   '@noble/hashes@2.2.0':
     resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
-    engines: {node: '>= 20.19.0'}
-
-  '@noble/post-quantum@0.6.1':
-    resolution: {integrity: sha512-+pormrDZwjRw05U8ADK4JpHejo87+gBd+muRBB/ozztH5yhDLMDF4jHQWN3NQQAsu1zBNPWTG0ZwVI0CR29H0A==}
     engines: {node: '>= 20.19.0'}
 
   '@nodelib/fs.scandir@2.1.5':
@@ -2433,19 +2371,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.3
     optional: true
 
-  '@noble/ciphers@2.2.0': {}
-
-  '@noble/curves@2.2.0':
-    dependencies:
-      '@noble/hashes': 2.2.0
-
   '@noble/hashes@2.2.0': {}
-
-  '@noble/post-quantum@0.6.1':
-    dependencies:
-      '@noble/ciphers': 2.2.0
-      '@noble/curves': 2.2.0
-      '@noble/hashes': 2.2.0
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
@@ -2580,7 +2506,7 @@ snapshots:
 
   '@oxc-resolver/binding-wasm32-wasi@11.19.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:
-      '@napi-rs/wasm-runtime': 1.1.4(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
+      '@napi-rs/wasm-runtime': 1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -2808,8 +2734,8 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.60.0
       debug: 4.4.3
       minimatch: 10.2.5
-      semver: 7.7.4
-      tinyglobby: 0.2.16
+      semver: 7.8.5
+      tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@6.0.2)
       typescript: 6.0.2
     transitivePeerDependencies:

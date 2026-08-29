@@ -1,25 +1,7 @@
-use crate::hashing::hash_framed_parts_512;
-
 use super::{
-    BooleanOperation, CompiledTallyCircuit, TALLY_CIRCUIT_COMPILER_IDENTITY_DOMAIN,
-    TallyCircuitError, TallyCircuitGeometry, TallyCircuitProfile, WireIndex,
-    bit_width_for_maximum_value, foundation_score_bounds,
+    BooleanOperation, CompiledTallyCircuit, TallyCircuitError, TallyCircuitGeometry,
+    TallyCircuitProfile, WireIndex, bit_width_for_maximum_value, foundation_score_bounds,
 };
-
-const TALLY_CIRCUIT_COMPILER_SOURCE: &[u8] = include_bytes!("compiler.rs");
-
-pub(crate) fn tally_circuit_compiler_identity() -> Result<[u8; 64], TallyCircuitError> {
-    validate_canonical_source_bytes(TALLY_CIRCUIT_COMPILER_SOURCE)?;
-    let (minimum_score, maximum_score) = foundation_score_bounds()?;
-    Ok(hash_framed_parts_512(
-        TALLY_CIRCUIT_COMPILER_IDENTITY_DOMAIN,
-        &[
-            TALLY_CIRCUIT_COMPILER_SOURCE,
-            &minimum_score.to_le_bytes(),
-            &maximum_score.to_le_bytes(),
-        ],
-    ))
-}
 
 pub(crate) fn compile_tally_circuit(
     profile: TallyCircuitProfile,
@@ -350,16 +332,6 @@ fn conditional_swap(
 
 fn wire_index_from_usize(value: usize) -> Result<WireIndex, TallyCircuitError> {
     WireIndex::try_from(value).map_err(|_| TallyCircuitError::WireIndexOverflow)
-}
-
-fn validate_canonical_source_bytes(source_bytes: &[u8]) -> Result<(), TallyCircuitError> {
-    if core::str::from_utf8(source_bytes).is_err()
-        || source_bytes.contains(&b'\r')
-        || !source_bytes.ends_with(b"\n")
-    {
-        return Err(TallyCircuitError::NonCanonicalSourceEncoding);
-    }
-    Ok(())
 }
 
 struct BooleanCircuitBuilder {

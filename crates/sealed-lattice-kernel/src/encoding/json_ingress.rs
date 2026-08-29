@@ -5,7 +5,7 @@ use serde_json::{Map, Number, Value};
 
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-pub(super) const MAXIMUM_TRANSCRIPT_CORE_COMMAND_BYTE_LENGTH: usize = 64 * 1024 * 1024;
+pub(super) const MAXIMUM_FOUNDATION_COMMAND_BYTE_LENGTH: usize = 64 * 1024 * 1024;
 
 const DUPLICATE_FIELD_ERROR_MARKER: &str = "sealed-lattice duplicate JSON field";
 const UNSAFE_INTEGER_ERROR_MARKER: &str = "sealed-lattice unsafe JSON integer";
@@ -20,22 +20,22 @@ const MAXIMUM_COMMAND_JSON_LOGICAL_ALLOCATION_BYTE_LENGTH: usize = 128 * 1024 * 
 const JSON_VALUE_LOGICAL_ALLOCATION_BYTE_LENGTH: usize = 32;
 const JSON_OBJECT_FIELD_LOGICAL_ALLOCATION_BYTE_LENGTH: usize = 32;
 
-pub(super) fn parse_transcript_core_request(input: &[u8]) -> CanonicalResult<Value> {
-    parse_transcript_core_request_with_limit(input, MAXIMUM_TRANSCRIPT_CORE_COMMAND_BYTE_LENGTH)
+pub(super) fn parse_foundation_command_request(input: &[u8]) -> CanonicalResult<Value> {
+    parse_foundation_command_request_with_limit(input, MAXIMUM_FOUNDATION_COMMAND_BYTE_LENGTH)
 }
 
-fn parse_transcript_core_request_with_limit(
+fn parse_foundation_command_request_with_limit(
     input: &[u8],
     maximum_byte_length: usize,
 ) -> CanonicalResult<Value> {
-    parse_transcript_core_request_with_limits(
+    parse_foundation_command_request_with_limits(
         input,
         maximum_byte_length,
         MAXIMUM_COMMAND_JSON_LOGICAL_ALLOCATION_BYTE_LENGTH,
     )
 }
 
-fn parse_transcript_core_request_with_limits(
+fn parse_foundation_command_request_with_limits(
     input: &[u8],
     maximum_byte_length: usize,
     maximum_logical_allocation_byte_length: usize,
@@ -332,10 +332,12 @@ mod tests {
     #[test]
     fn duplicate_fields_refuse_at_every_object_depth() {
         for request in [
-            br#"{"command":"EncodeFoundationManifest","command":"DeriveCanonicalObjectHash"}"#.as_slice(),
-            br#"{"command":"DeriveCanonicalObjectHash","value":{"objectType":"CanonicalJsonTestObject","objectType":"Other"}}"#.as_slice(),
+            br#"{"command":"EncodeFoundationManifest","command":"VerifyFoundationManifest"}"#
+                .as_slice(),
+            br#"{"command":"EncodeFoundationManifest","value":{"field":"first","field":"second"}}"#
+                .as_slice(),
         ] {
-            let error = parse_transcript_core_request(request)
+            let error = parse_foundation_command_request(request)
                 .expect_err("duplicate JSON fields must refuse");
             assert_eq!(error.code, CanonicalErrorCode::DuplicateField);
         }
@@ -346,7 +348,7 @@ mod tests {
         for unsafe_integer in ["9007199254740992", "-9007199254740992", "1e20"] {
             let request =
                 format!("{{\"command\":\"EncodeFoundationManifest\",\"value\":{unsafe_integer}}}");
-            let error = parse_transcript_core_request(request.as_bytes())
+            let error = parse_foundation_command_request(request.as_bytes())
                 .expect_err("unsafe JSON integer must refuse");
             assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
         }
@@ -354,7 +356,7 @@ mod tests {
 
     #[test]
     fn malformed_json_refuses_as_an_invalid_protocol_object() {
-        let error = parse_transcript_core_request(br#"{"#)
+        let error = parse_foundation_command_request(br#"{"#)
             .expect_err("truncated JSON must refuse before command dispatch");
         assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
 
@@ -363,7 +365,7 @@ mod tests {
             br#""EncodeFoundationManifest""#.as_slice(),
             b"[]".as_slice(),
         ] {
-            let error = parse_transcript_core_request(scalar_request)
+            let error = parse_foundation_command_request(scalar_request)
                 .expect_err("a command request must be an object");
             assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
         }
@@ -381,12 +383,12 @@ mod tests {
 
         let exact_boundary =
             request_with_array_depth(usize::from(MAXIMUM_COMMAND_JSON_CONTAINER_DEPTH) - 1);
-        parse_transcript_core_request(exact_boundary.as_bytes())
+        parse_foundation_command_request(exact_boundary.as_bytes())
             .expect("the exact command JSON depth boundary must parse");
 
         let one_container_over =
             request_with_array_depth(usize::from(MAXIMUM_COMMAND_JSON_CONTAINER_DEPTH));
-        let error = parse_transcript_core_request(one_container_over.as_bytes())
+        let error = parse_foundation_command_request(one_container_over.as_bytes())
             .expect_err("one container over the command JSON depth limit must refuse");
         assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     }
@@ -395,10 +397,10 @@ mod tests {
     fn request_limit_accepts_the_exact_boundary_and_refuses_one_byte_over() {
         let request = br#"{"command":"EncodeFoundationManifest"}"#;
         assert!(
-            parse_transcript_core_request_with_limit(request, request.len()).is_ok(),
+            parse_foundation_command_request_with_limit(request, request.len()).is_ok(),
             "the exact request boundary must be accepted"
         );
-        let error = parse_transcript_core_request_with_limit(request, request.len() - 1)
+        let error = parse_foundation_command_request_with_limit(request, request.len() - 1)
             .expect_err("one byte over the request limit must refuse");
         assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     }
@@ -409,7 +411,7 @@ mod tests {
         let request =
             format!("{{\"command\":\"EncodeFoundationManifest\",\"values\":[{compact_values}]}}");
         let error =
-            parse_transcript_core_request_with_limits(request.as_bytes(), request.len(), 256)
+            parse_foundation_command_request_with_limits(request.as_bytes(), request.len(), 256)
                 .expect_err("compact structural amplification must refuse");
 
         assert_eq!(error.code, CanonicalErrorCode::MalformedLength);

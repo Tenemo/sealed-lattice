@@ -1,15 +1,13 @@
 import { readFileSync } from 'node:fs';
 
-import { foundationProfile } from '@sealed-lattice/types';
+import { foundationProfile } from '@sealed-lattice/wasm/published-sdk';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
 
 type CreateCanonicalManifest = (input: {
     readonly options: readonly string[];
-    readonly pollId: string;
     readonly question: string;
-    readonly topOptionCount: number;
 }) => Promise<{
     readonly canonicalBytes: Uint8Array;
     readonly manifestHash: string;
@@ -57,9 +55,7 @@ describe('election foundation public package API in Node', () => {
                 { length: foundationProfile.optionCount },
                 (_value, optionIndex) => `Option ${String(optionIndex)}`,
             ),
-            pollId: 'public-api-ceremony',
             question: 'Choose priorities',
-            topOptionCount: 5,
         });
 
         expect(manifest.canonicalBytes.byteLength).toBeGreaterThan(0);

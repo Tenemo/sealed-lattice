@@ -1,13 +1,10 @@
 use super::*;
 
-use super::json_ingress::parse_transcript_core_request;
-
-use crate::hashing::derive_canonical_object_hash;
+use super::json_ingress::parse_foundation_command_request;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "command")]
-enum TranscriptCoreCommand {
-    DeriveCanonicalObjectHash,
+enum FoundationCommand {
     EncodeFoundationManifest,
     VerifyFoundationManifest,
     EncodeFoundationActionDefinition,
@@ -18,7 +15,7 @@ enum TranscriptCoreCommand {
     VerifyFoundationActionContext,
 }
 
-fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
+fn parse_foundation_command(command_name: &str) -> CanonicalResult<FoundationCommand> {
     serde_json::from_value(json!({ "command": command_name })).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
@@ -27,8 +24,8 @@ fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<Transcri
     })
 }
 
-pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
-    let request = parse_transcript_core_request(input)?;
+pub(super) fn run_foundation_command_inner(input: &[u8]) -> CanonicalResult<Value> {
+    let request = parse_foundation_command_request(input)?;
     let command = request
         .get("command")
         .and_then(Value::as_str)
@@ -38,43 +35,31 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "command must be a string",
             )
         })?;
-    let command = parse_transcript_core_command(command)?;
+    let command = parse_foundation_command(command)?;
 
     match command {
-        TranscriptCoreCommand::DeriveCanonicalObjectHash => {
-            let value = request.get("value").ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidProtocolObject,
-                    "value field is required",
-                )
-            })?;
-
-            Ok(json!({
-                "canonicalObjectHash": derive_canonical_object_hash(value)?,
-            }))
-        }
-        TranscriptCoreCommand::EncodeFoundationManifest => {
+        FoundationCommand::EncodeFoundationManifest => {
             super::foundation_command::encode_foundation_manifest(&request)
         }
-        TranscriptCoreCommand::VerifyFoundationManifest => {
+        FoundationCommand::VerifyFoundationManifest => {
             super::foundation_command::verify_foundation_manifest(&request)
         }
-        TranscriptCoreCommand::EncodeFoundationActionDefinition => {
+        FoundationCommand::EncodeFoundationActionDefinition => {
             super::foundation_command::encode_foundation_action_definition(&request)
         }
-        TranscriptCoreCommand::VerifyFoundationActionDefinition => {
+        FoundationCommand::VerifyFoundationActionDefinition => {
             super::foundation_command::verify_foundation_action_definition(&request)
         }
-        TranscriptCoreCommand::EncodeFoundationBoardPolicy => {
+        FoundationCommand::EncodeFoundationBoardPolicy => {
             super::foundation_command::encode_foundation_board_policy(&request)
         }
-        TranscriptCoreCommand::VerifyFoundationBoardPolicy => {
+        FoundationCommand::VerifyFoundationBoardPolicy => {
             super::foundation_command::verify_foundation_board_policy(&request)
         }
-        TranscriptCoreCommand::VerifyFoundationCeremonyContext => {
+        FoundationCommand::VerifyFoundationCeremonyContext => {
             super::foundation_command::verify_foundation_ceremony_context(&request)
         }
-        TranscriptCoreCommand::VerifyFoundationActionContext => {
+        FoundationCommand::VerifyFoundationActionContext => {
             super::foundation_command::verify_foundation_action_context(&request)
         }
     }

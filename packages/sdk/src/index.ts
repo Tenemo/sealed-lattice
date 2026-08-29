@@ -1,13 +1,4 @@
 import {
-    prepareFoundationManifestIngress,
-    validatePollSpec as validatePollSpecInternal,
-} from '@sealed-lattice/protocol';
-import {
-    type PollSpecInput,
-    type PollSpecValidation,
-    type ProtocolHash,
-} from '@sealed-lattice/types';
-import {
     openFoundationCeremonyRuntime,
     type CanonicalFoundationActionDefinition,
     type CanonicalFoundationBoardPolicy,
@@ -17,20 +8,28 @@ import {
     type FoundationBoardPolicyVerification,
     type FoundationCeremonyContextVerification,
     type FoundationManifestVerification,
+    type ProtocolHash,
 } from '@sealed-lattice/wasm/published-sdk';
 
-import { loadFreshTranscriptCoreKernel } from './kernel.js';
+import { loadFreshFoundationKernel } from './kernel.js';
+import {
+    foundationManifestInputFromPollSpec,
+    type PollSpec,
+    type PollSpecValidation,
+    validatePollSpec as validatePollSpecInternal,
+} from './poll-spec.js';
 
 export type {
     PollSpec,
-    PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     PollSpecValidationErrorCode,
+} from './poll-spec.js';
+export type {
     ProtocolHash,
     RefusalReason,
     VerificationResult,
-} from '@sealed-lattice/types';
+} from '@sealed-lattice/wasm/published-sdk';
 export type {
     CanonicalFoundationActionDefinition,
     CanonicalFoundationBoardPolicy,
@@ -45,10 +44,10 @@ export const validatePollSpec = (input: unknown): PollSpecValidation =>
     validatePollSpecInternal(input);
 
 const loadFoundationCeremonyRuntime = async () =>
-    openFoundationCeremonyRuntime(await loadFreshTranscriptCoreKernel());
+    openFoundationCeremonyRuntime(await loadFreshFoundationKernel());
 
 export const createCanonicalManifest = async (
-    input: PollSpecInput,
+    input: PollSpec,
 ): Promise<CanonicalFoundationManifest> => {
     const validation = validatePollSpecInternal(input);
     if (!validation.isValid) {
@@ -58,7 +57,7 @@ export const createCanonicalManifest = async (
     }
     const runtime = await loadFoundationCeremonyRuntime();
     return runtime.encodeManifest(
-        prepareFoundationManifestIngress(validation.normalized),
+        foundationManifestInputFromPollSpec(validation.normalized),
     );
 };
 

@@ -28,8 +28,7 @@ if (declarationEntryPath === undefined) {
     );
 }
 
-const bundledWorkspacePackagePattern =
-    /^@sealed-lattice\/(?:protocol|types|wasm)$/u;
+const bundledWorkspacePackagePattern = /^@sealed-lattice\/wasm$/u;
 const externalCryptographyPackagePattern = /^@noble\//u;
 const externalNodeBuiltinPattern = /^node:/u;
 const dependencyPolicy = {

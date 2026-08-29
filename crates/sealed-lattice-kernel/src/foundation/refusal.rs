@@ -64,7 +64,6 @@ impl RefusalReason {
         }
     }
 
-    /// The language-neutral name used at JavaScript and evidence boundaries.
     pub const fn name(self) -> &'static str {
         match self {
             Self::MalformedEncoding => "malformedEncoding",

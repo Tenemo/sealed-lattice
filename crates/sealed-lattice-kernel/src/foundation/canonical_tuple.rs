@@ -118,7 +118,6 @@ impl CanonicalDecodeBudget {
 mod decoding;
 mod value;
 
-pub use decoding::IncrementalCanonicalTupleDecoder;
 pub use value::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 #[cfg(test)]

@@ -1,5 +1,3 @@
-//! Canonical ceremony inputs and their immutable context bindings.
-
 use std::collections::BTreeSet;
 
 use super::canonical_tuple::CanonicalDecodeBudget;

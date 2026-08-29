@@ -3,7 +3,7 @@ import {
     type PublishedSdkKernel,
 } from '@sealed-lattice/wasm/published-sdk';
 
-const transcriptCoreKernelUrl = new URL(
+const foundationKernelUrl = new URL(
     './sealed-lattice-kernel.wasm',
     import.meta.url,
 );
@@ -13,21 +13,17 @@ const transcriptCoreKernelUrl = new URL(
 declare const __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__:
     | string
     | undefined;
-const packagedTranscriptCoreKernelNormalizedSha256Hex =
+const packagedFoundationKernelNormalizedSha256Hex =
     typeof __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__ === 'undefined'
         ? undefined
         : __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__;
 
-const transcriptCoreKernelLoaderOptions = {
-    expectedKernelSha256Hex: packagedTranscriptCoreKernelNormalizedSha256Hex,
+const foundationKernelLoaderOptions = {
+    expectedKernelSha256Hex: packagedFoundationKernelNormalizedSha256Hex,
 } as const;
 
-// Portable one-shot operations can own a disposable WASM instance. If source
-// staging or generated-material export fails, discarding that instance also
-// discards authenticated or generated one-shot roots and its linear-memory
-// high-water mark.
-export const loadFreshTranscriptCoreKernel = (): Promise<PublishedSdkKernel> =>
+export const loadFreshFoundationKernel = (): Promise<PublishedSdkKernel> =>
     createPublishedSdkKernelLoader(
-        transcriptCoreKernelUrl,
-        transcriptCoreKernelLoaderOptions,
+        foundationKernelUrl,
+        foundationKernelLoaderOptions,
     )();

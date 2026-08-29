@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { openFoundationCeremonyRuntime } from '../../src/foundation-ceremony-runtime.js';
-import { createPublishedSdkKernelLoader } from '../../src/transcript-core-bridge/published-sdk-kernel-loader.js';
+import { createPublishedSdkKernelLoader } from '../../src/foundation-kernel/published-sdk-kernel-loader.js';
 
 const kernelUrl = new URL(
     '/packages/wasm/dist/sealed-lattice-kernel.wasm',

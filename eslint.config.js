@@ -48,7 +48,6 @@ const packageSourceImportPatterns = [
     {
         group: [
             '@sealed-lattice/*/*',
-            '!@sealed-lattice/crypto/canonical-json',
             '!@sealed-lattice/wasm/published-sdk',
             'sealed-lattice/*',
         ],
@@ -60,8 +59,7 @@ const packageSourceImportPatterns = [
 export default defineConfig(
     globalIgnores([
         '.tmp*/**',
-        'temp*/**',
-        'tmp*/**',
+        'temp/**',
         'node_modules/**',
         'reference-projects/**',
         '**/dist/**',
@@ -167,56 +165,7 @@ export default defineConfig(
         },
     },
     {
-        files: ['packages/types/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/crypto',
-                        '@sealed-lattice/protocol',
-                        '@sealed-lattice/wasm',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
-        files: ['packages/crypto/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/protocol',
-                        '@sealed-lattice/wasm',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
         files: ['packages/wasm/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/crypto',
-                        '@sealed-lattice/protocol',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
-        files: ['packages/protocol/src/**/*.ts'],
         rules: {
             'no-restricted-imports': [
                 'error',

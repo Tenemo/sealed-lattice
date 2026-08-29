@@ -25,7 +25,7 @@ Cryptographic admission and supported-phone qualification are independent result
 - Every roster participant contributes to tally preparation. No smaller group, dealer, server, or organizer can complete it.
 - The adversary statically corrupts at most three participants and may rush, equivocate, withhold, replay, reorder, fork, or replace messages. A separate passive-exposure game covers at most three disclosed shares; the two bounds are not combined.
 - Transcript, mailbox, and storage services are untrusted. Silence never means abstention. Missing required input leaves the action pending.
-- Positive verification of canonical bytes, source correspondence, signatures, authenticated openings, state, and construction-specific relations determines acceptance. Producer status, signatures alone, raw shares, fixtures, and caller-selected targets confer no authority.
+- Positive verification of canonical bytes, source correspondence, signatures, authenticated openings, state, and construction-specific relations determines acceptance. Producer status, signatures alone, raw shares, fixtures, and caller-selected targets cannot authorize it.
 - The selected ballot set is derived from a roster-complete declaration and availability inventory. A quorum cannot choose a different valid subset or authorize an omitted-input opening.
 - Only roster participants using their own clients may witness state, authorize the selected set, establish target finality, or release verified ballot inputs and evaluation messages after finality.
 - Participant action state is bound to one browser profile. There is no backup, export, migration, or replacement-device continuation. Lost or unverifiable state retires that participant from the affected action.
@@ -44,18 +44,18 @@ These are layered blockers: construction, integration, browser qualification, an
 - `SEC-003`: Roster-witnessed one-shot state is specified, but complete durable witness locking, rollback reconciliation, and participant-retirement behavior are not implemented and evidenced for every security-sensitive output.
 - `SEC-004`: No cryptographic suite is activated. The public package exposes foundation operations only, and component tests cannot authorize production dispatch.
 - `SEC-006`: No participant bridge carries verified state from preparation through ballot selection, target finality, input activation, evaluation, and result decoding with authenticated checkpoints.
-- `SEC-007`: Direct threshold sharing is the retained ballot-custody family, but availability, authenticated inconsistency handling, censorship privacy, first-honest-release simulation, and positive-verifier integration remain incomplete.
+- `SEC-007`: No production ballot-custody construction is selected or implemented. Availability, authenticated inconsistency handling, censorship privacy, first-honest-release simulation, and positive-verifier integration remain open.
 - `SEC-008`: No physical-phone Chrome profile has completed every participant operation for the exact scalar package.
 - `SEC-017`: Browser-local root-key custody and derivation-count continuity are not closed across the complete cold-start, resume, retirement, and cleanup lifecycle.
 - `SEC-019`: No immutable evidence bundle binds the selected construction, reductions, production counters, source, dependencies, and release package bytes.
-- `SEC-020`: Generic checkpoint and cursor components exist, but the selected long operations do not all have production-authenticated checkpoints, byte-identical cold restore, maximum lost-work bounds, or forced-termination browser evidence.
-- `SEC-021`: Authenticated storage and bounded repair foundations exist, but complete quota admission, transaction overlap, browser amplification, eviction behavior, action-wide mutation enclosure, repair, cleanup, and reclamation evidence remain open.
-- `SEC-023`: No tally-preparation or private-evaluation construction satisfies the stated adversary. The retained construction-neutral verifiers do not compose into an admitted protocol.
+- `SEC-020`: Long operations do not yet have production-authenticated checkpoints, byte-identical cold restore, maximum lost-work bounds, or forced-termination browser evidence.
+- `SEC-021`: No complete browser-storage implementation and evidence set covers quota admission, transaction overlap, amplification, eviction, action-wide mutation, repair, cleanup, and reclamation.
+- `SEC-023`: No tally-preparation or private-evaluation construction satisfies the stated adversary. Foundation verifiers do not compose into an admitted protocol.
 - `SEC-024`: No construction has passed the complete static resource and external-Chrome lifecycle gates. Measurements of isolated native or Node/WebAssembly components do not qualify a browser ceremony.
 
 Identifiers are stable and are not reused. `SEC-005`, `SEC-009` through `SEC-016`, `SEC-018`, `SEC-022`, `SEC-025`, and `SEC-026` are retired.
 
-## Outside the current model
+## Outside the security model
 
 A compromised participant device holds that participant's keys and authority. It can disclose local secrets and send arbitrary messages. The following remain outside the security boundary:
 

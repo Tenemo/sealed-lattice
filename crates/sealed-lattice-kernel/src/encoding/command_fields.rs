@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
-use crate::transcript_core::decode_hex;
+use crate::encoding::decode_hex;
 
 pub(super) fn required_object<'a>(
     value: &'a Value,

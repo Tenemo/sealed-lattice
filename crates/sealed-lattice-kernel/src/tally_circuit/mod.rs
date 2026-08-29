@@ -1,19 +1,9 @@
-//! Unactivated deterministic Boolean tally circuit.
-//!
-//! This module owns a candidate circuit artifact and independent development
-//! semantics. It does not mint a suite, proof, verification result, workflow
-//! capability, or public result.
+//! Development-only deterministic tally compiler and independent evaluator.
 
 mod codec;
 mod compiler;
 mod direct_evaluator;
 mod interpreter;
-mod output_rekeyed;
-
-pub(crate) use output_rekeyed::OutputRekeyedTallyCircuit;
-
-#[cfg(test)]
-mod output_rekeyed_tests;
 #[cfg(test)]
 mod tests;
 
@@ -29,11 +19,7 @@ use crate::{
 };
 
 pub(crate) const TALLY_CIRCUIT_ARTIFACT_MAGIC: &[u8] = b"sealed-lattice/tally-circuit-artifact";
-pub(crate) const TALLY_CIRCUIT_COMPILER_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/tally-circuit-compiler-identity/v3";
-pub(crate) const TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/tally-direct-evaluator-identity/v2";
-pub(crate) const TALLY_CIRCUIT_IDENTITY_DOMAIN: &str = "sealed-lattice/tally-circuit-identity/v3";
+pub(crate) const TALLY_CIRCUIT_IDENTITY_DOMAIN: &str = "sealed-lattice/tally-circuit-identity/v4";
 
 pub(crate) type WireIndex = u32;
 
@@ -155,14 +141,6 @@ pub(crate) struct CompiledTallyCircuit {
 }
 
 impl CompiledTallyCircuit {
-    pub(crate) fn compile(profile: TallyCircuitProfile) -> Result<Self, TallyCircuitError> {
-        compiler::compile_tally_circuit(profile)
-    }
-
-    pub(crate) fn compiler_identity() -> Result<[u8; 64], TallyCircuitError> {
-        compiler::tally_circuit_compiler_identity()
-    }
-
     pub(crate) const fn profile(&self) -> TallyCircuitProfile {
         self.profile
     }
@@ -329,9 +307,6 @@ pub(crate) enum TallyCircuitError {
         version: u64,
     },
     ArtifactMagicMismatch,
-    CompilerIdentityMismatch,
-    DirectEvaluatorIdentityMismatch,
-    NonCanonicalSourceEncoding,
     CircuitMismatch,
     CanonicalEncoding(CanonicalError),
 }
@@ -424,15 +399,6 @@ impl fmt::Display for TallyCircuitError {
             Self::ArtifactMagicMismatch => {
                 formatter.write_str("tally circuit artifact magic does not match")
             }
-            Self::CompilerIdentityMismatch => {
-                formatter.write_str("tally circuit compiler identity does not match")
-            }
-            Self::DirectEvaluatorIdentityMismatch => {
-                formatter.write_str("tally direct evaluator identity does not match")
-            }
-            Self::NonCanonicalSourceEncoding => formatter.write_str(
-                "tally circuit source identity requires canonical UTF-8 with LF line endings",
-            ),
             Self::CircuitMismatch => formatter.write_str(
                 "tally circuit artifact is not the canonical compiler output for its profile",
             ),

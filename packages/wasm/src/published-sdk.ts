@@ -5,7 +5,21 @@ export type {
     FoundationCeremonyContextVerification,
     FoundationManifestVerification,
     PublishedSdkKernel,
-} from './transcript-core-bridge/kernel-contracts.js';
+} from './foundation-kernel/kernel-contracts.js';
+export {
+    configurableOptionCountRange,
+    configurableParticipantCountRange,
+    deriveFoundationRosterParameters,
+    foundationProfile,
+    isProtocolHash,
+    refusalReasonCodes,
+} from './foundation-contract.js';
+export type {
+    FoundationRosterParameters,
+    ProtocolHash,
+    RefusalReason,
+    VerificationResult,
+} from './foundation-contract.js';
 export { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';
 export type {
     CanonicalFoundationActionDefinition,
@@ -14,4 +28,4 @@ export type {
     FoundationCeremonyRuntime,
     FoundationManifestInput,
 } from './foundation-ceremony-runtime.js';
-export { createPublishedSdkKernelLoader } from './transcript-core-bridge/published-sdk-kernel-loader.js';
+export { createPublishedSdkKernelLoader } from './foundation-kernel/published-sdk-kernel-loader.js';

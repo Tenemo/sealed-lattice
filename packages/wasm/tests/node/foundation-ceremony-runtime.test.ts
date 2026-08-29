@@ -4,7 +4,7 @@ import {
     openFoundationCeremonyRuntime,
     type FoundationManifestInput,
 } from '../../src/foundation-ceremony-runtime.js';
-import type { PublishedSdkKernel } from '../../src/transcript-core-bridge/kernel-contracts.js';
+import type { PublishedSdkKernel } from '../../src/foundation-kernel/kernel-contracts.js';
 
 const hash = (byte: string): string => byte.repeat(128);
 

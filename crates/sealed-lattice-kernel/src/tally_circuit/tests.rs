@@ -4,8 +4,8 @@ use super::{
     BooleanOperation, TALLY_CIRCUIT_ARTIFACT_MAGIC, TallyBallotInput, TallyCircuitError,
     TallyCircuitProfile, TallyEvaluationInput,
     codec::{decode_canonical_tally_circuit, encode_canonical_tally_circuit},
-    compiler::{compile_tally_circuit, tally_circuit_compiler_identity},
-    direct_evaluator::{evaluate_tally_directly, tally_direct_evaluator_identity},
+    compiler::compile_tally_circuit,
+    direct_evaluator::evaluate_tally_directly,
     interpreter::{evaluate_compiled_tally_circuit, interpret_boolean_operations},
 };
 use crate::foundation::{
@@ -178,22 +178,7 @@ fn every_completion_profile_top_count_has_canonical_distinct_bytes_and_semantics
 }
 
 #[test]
-fn source_bound_identities_and_artifact_bytes_are_reproducible() {
-    let compiler_source = include_bytes!("compiler.rs");
-    let direct_evaluator_source = include_bytes!("direct_evaluator.rs");
-    for source in [
-        compiler_source.as_slice(),
-        direct_evaluator_source.as_slice(),
-    ] {
-        assert!(core::str::from_utf8(source).is_ok());
-        assert!(!source.contains(&b'\r'));
-        assert!(source.ends_with(b"\n"));
-    }
-    assert_ne!(
-        tally_circuit_compiler_identity().expect("compiler identity must derive"),
-        tally_direct_evaluator_identity().expect("semantic oracle identity must derive")
-    );
-
+fn artifact_bytes_are_reproducible() {
     let selected_profile = profile(10, 10, 10);
     let first = compile_tally_circuit(selected_profile).expect("first circuit must compile");
     let second = compile_tally_circuit(selected_profile).expect("second circuit must compile");
@@ -380,7 +365,7 @@ fn canonical_verifier_rejects_operation_wiring_input_and_output_mutations() {
 }
 
 #[test]
-fn canonical_decoder_rejects_framing_identity_and_length_mutations() {
+fn canonical_decoder_rejects_framing_and_length_mutations() {
     let canonical_bytes = compile_tally_circuit(profile(3, 2, 2))
         .unwrap()
         .canonical_bytes()
@@ -395,26 +380,10 @@ fn canonical_decoder_rejects_framing_identity_and_length_mutations() {
 
     let version_position = 1 + TALLY_CIRCUIT_ARTIFACT_MAGIC.len();
     let mut version_mutation = canonical_bytes.clone();
-    version_mutation[version_position] = 4;
+    version_mutation[version_position] = 5;
     assert_eq!(
         decode_canonical_tally_circuit(&version_mutation),
-        Err(TallyCircuitError::UnsupportedArtifactVersion { version: 4 })
-    );
-
-    let compiler_identity_position = version_position + 2;
-    let mut compiler_identity_mutation = canonical_bytes.clone();
-    compiler_identity_mutation[compiler_identity_position] ^= 1;
-    assert_eq!(
-        decode_canonical_tally_circuit(&compiler_identity_mutation),
-        Err(TallyCircuitError::CompilerIdentityMismatch)
-    );
-
-    let direct_evaluator_identity_position = compiler_identity_position + 64 + 1;
-    let mut direct_evaluator_identity_mutation = canonical_bytes.clone();
-    direct_evaluator_identity_mutation[direct_evaluator_identity_position] ^= 1;
-    assert_eq!(
-        decode_canonical_tally_circuit(&direct_evaluator_identity_mutation),
-        Err(TallyCircuitError::DirectEvaluatorIdentityMismatch)
+        Err(TallyCircuitError::UnsupportedArtifactVersion { version: 5 })
     );
 
     let mut trailing_mutation = canonical_bytes.clone();

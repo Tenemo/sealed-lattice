@@ -5,14 +5,14 @@ use std::io::{self, Write};
 mod command;
 mod command_fields;
 mod foundation_command;
+mod hex;
 mod json_ingress;
 
-const MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
+pub use hex::{decode_hex, encode_hex};
+
+const MAXIMUM_FOUNDATION_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
 const COMMAND_ERROR_LENGTH_FALLBACK: &[u8] = br#"{"error":{"code":"MalformedLength","message":"command error response exceeds the accepted byte length"},"success":false}"#;
 const COMMAND_ERROR_SERIALIZATION_FALLBACK: &[u8] = br#"{"error":{"code":"InvalidProtocolObject","message":"command error response serialization failed"},"success":false}"#;
-
-#[cfg(test)]
-use command::run_transcript_core_command_inner;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -75,7 +75,7 @@ impl std::error::Error for CanonicalError {}
 
 pub type CanonicalResult<T> = Result<T, CanonicalError>;
 
-// LEB128: 7 payload bits per byte, high bit set marks a continuation byte.
+#[cfg(test)]
 pub fn encode_varuint(mut value: u64) -> Vec<u8> {
     let mut output = Vec::new();
     loop {
@@ -92,20 +92,24 @@ pub fn encode_varuint(mut value: u64) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub fn append_varuint(output: &mut Vec<u8>, value: u64) {
     output.extend(encode_varuint(value));
 }
 
+#[cfg(test)]
 pub fn append_bytes(output: &mut Vec<u8>, value: &[u8]) {
     append_varuint(output, value.len() as u64);
     output.extend(value);
 }
 
+#[cfg(test)]
 pub struct CanonicalReader<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
+#[cfg(test)]
 impl<'a> CanonicalReader<'a> {
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
@@ -262,15 +266,12 @@ pub fn encode_success(value: Value) -> Vec<u8> {
         "success": true,
         "value": value,
     });
-    encode_json_response_with_limit(
-        &response,
-        MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH,
-    )
-    .unwrap_or_else(encode_error)
+    encode_json_response_with_limit(&response, MAXIMUM_FOUNDATION_COMMAND_RESPONSE_BYTE_LENGTH)
+        .unwrap_or_else(encode_error)
 }
 
 pub fn encode_error(error: CanonicalError) -> Vec<u8> {
-    encode_error_with_limit(error, MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH)
+    encode_error_with_limit(error, MAXIMUM_FOUNDATION_COMMAND_RESPONSE_BYTE_LENGTH)
 }
 
 fn encode_error_with_limit(error: CanonicalError, maximum_byte_length: usize) -> Vec<u8> {
@@ -291,8 +292,8 @@ fn encode_error_with_limit(error: CanonicalError, maximum_byte_length: usize) ->
     }
 }
 
-pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
-    let command_result = command::run_transcript_core_command_inner(input);
+pub fn run_foundation_command(input: &[u8]) -> Vec<u8> {
+    let command_result = command::run_foundation_command_inner(input);
 
     match command_result {
         Ok(value) => encode_success(value),
@@ -383,42 +384,6 @@ mod tests {
         assert_eq!(
             response["error"]["message"],
             "command error response exceeds the accepted byte length"
-        );
-    }
-
-    #[test]
-    fn command_derives_canonical_object_hash_with_kernel_canonical_json() {
-        let response = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "DeriveCanonicalObjectHash",
-                "value": {
-                    "objectType": "CanonicalJsonTestObject",
-                    "poll": "main"
-                }
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("canonical object hash command should succeed");
-
-        assert_eq!(
-            response["canonicalObjectHash"]
-                .as_str()
-                .expect("canonical object hash")
-                .len(),
-            128
-        );
-        // A typeless value is rejected by the canonical-object domain.
-        assert!(
-            super::run_transcript_core_command_inner(
-                serde_json::json!({
-                    "command": "DeriveCanonicalObjectHash",
-                    "value": { "poll": "main" }
-                })
-                .to_string()
-                .as_bytes(),
-            )
-            .is_err()
         );
     }
 }

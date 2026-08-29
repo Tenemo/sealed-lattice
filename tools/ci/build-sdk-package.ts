@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import { runPackageManagerAndCaptureOutput } from './run-command.js';
 
-import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
+import { normalizeFoundationKernelBytesForHash } from '#packages/wasm/src/foundation-kernel.js';
 
 const sdkDeclarationEntryEnvironmentVariable =
     'SEALED_LATTICE_SDK_DECLARATION_ENTRY_PATH';
@@ -46,7 +46,7 @@ const tsdownConfigPath = path.resolve(
 );
 export const hashNormalizedWasmKernel = (bytes: Uint8Array): string =>
     createHash('sha256')
-        .update(normalizeTranscriptCoreKernelBytesForHash(bytes))
+        .update(normalizeFoundationKernelBytesForHash(bytes))
         .digest('hex');
 
 export const copyWasmKernelByteIdentically = async (input: {

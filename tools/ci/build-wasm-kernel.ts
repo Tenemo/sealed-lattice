@@ -12,8 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { foundationProfile } from '#packages/types/src/foundation-contract.js';
-import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
+import { foundationProfile } from '#packages/wasm/src/foundation-contract.js';
+import { normalizeFoundationKernelBytesForHash } from '#packages/wasm/src/foundation-kernel.js';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
@@ -202,9 +202,7 @@ const cargoWasmOutputFilePath = (targetDirectoryPath: string): string =>
 
 const hashNormalizedWasmKernel = async (filePath: string): Promise<string> =>
     createHash('sha256')
-        .update(
-            normalizeTranscriptCoreKernelBytesForHash(await readFile(filePath)),
-        )
+        .update(normalizeFoundationKernelBytesForHash(await readFile(filePath)))
         .digest('hex');
 
 const readUnsignedLeb128 = (
@@ -439,7 +437,7 @@ export const buildOptimizedWasmKernelArtifact = async (input: {
 
 export const buildWasmKernel = async (): Promise<void> => {
     await buildOptimizedWasmKernelArtifact({
-        artifactLabel: 'Transcript-core kernel',
+        artifactLabel: 'Foundation kernel',
         outputFilePath: wasmOutputFilePath,
         scratchDirectoryPrefix: 'build-',
         targetDirectoryPath: cargoTargetDirectory,

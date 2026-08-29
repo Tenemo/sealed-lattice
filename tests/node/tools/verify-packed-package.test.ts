@@ -42,14 +42,14 @@ describe('packed package policy checks', () => {
         expect(
             validatePublishedPackageBundle({
                 declarationSourceText:
-                    "export type { VerificationResult } from '@sealed-lattice/types';",
+                    "export type { VerificationResult } from '@sealed-lattice/wasm';",
                 runtimeSourceText:
-                    "import { validatePollSpec } from '@sealed-lattice/protocol';\nconst hash = __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__;",
+                    "import { foundationProfile } from '@sealed-lattice/wasm';\nconst hash = __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__;",
             }),
         ).toEqual(
             expect.arrayContaining([
-                'Published declaration output must bundle internal workspace import "@sealed-lattice/types"',
-                'Published runtime output must bundle internal workspace import "@sealed-lattice/protocol"',
+                'Published declaration output must bundle internal workspace import "@sealed-lattice/wasm"',
+                'Published runtime output must bundle internal workspace import "@sealed-lattice/wasm"',
                 'Published runtime output contains the unresolved WASM integrity token',
             ]),
         );

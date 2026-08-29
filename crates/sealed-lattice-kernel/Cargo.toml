@@ -7,28 +7,13 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "zero-sharing-native-measurement"
-path = "src/bin/zero-sharing-native-measurement.rs"
-required-features = ["preparation-zero-sharing-measurement"]
-
-[features]
-preparation-field-measurement = []
-preparation-zero-sharing-measurement = []
-
 [dependencies]
-aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }
-aes-gcm-siv = { version = "=0.11.1", default-features = false, features = ["aes"] }
 fips203 = { version = "=0.4.3", default-features = false, features = ["ml-kem-768"] }
-fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha3 = { version = "=0.10.9", features = ["zeroize"] }
-subtle = { version = "=2.6.1", default-features = false }
 unicode-normalization = "=0.1.25"
 zeroize = { version = "=1.8.2", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
-num-bigint = "0.4"
-num-traits = "0.2"
-tiny-keccak = { version = "=2.0.2", features = ["kmac", "shake"] }
+fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }

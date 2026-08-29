@@ -5,12 +5,12 @@ use super::command_fields::{
     required_object, required_string, required_u16,
 };
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::encoding::encode_hex;
 use crate::foundation::{
     ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CeremonyContext,
     FoundationSchemaError, Hash512, Manifest, OptionDefinition, RefusalReason, Roster,
     StabilizedDisplayText,
 };
-use crate::transcript_core::encode_hex;
 
 pub(super) fn encode_foundation_manifest(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;

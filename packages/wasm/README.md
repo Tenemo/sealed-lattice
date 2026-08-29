@@ -13,13 +13,11 @@
 
 The canonical participant artifact must remain scalar-capable. SIMD is optional. It may become a runtime optimization only behind feature detection and after proving that it preserves bytes, transcripts, verification, and refusal results.
 
-The browser bridge transfers ordinary owned binary buffers. It must reacquire WebAssembly memory views after any operation that can grow memory. Long-running work must save authenticated checkpoints at deterministic safe boundaries so an unexpected interruption loses only bounded work. It cannot assume that a hidden page or worker will keep running or receive a termination callback.
+The browser bridge transfers owned binary buffers and reacquires WebAssembly memory views after any operation that can grow memory.
 
-The public SDK exposes only implemented foundation operations. Internal measurement commands cannot authorize protocol state changes. Source and package tests own the exact command inventory.
+The public SDK exposes only implemented foundation operations. Source and package tests define the exact command inventory.
 
-Long-running production kernel work must keep authenticated state in the browser, validate every restored cursor against its source, poll at bounded intervals, support cancellation, and dispose of consumed one-use state. Measurement-only cursors do not prove that production checkpointing, rollback protection, browser lifecycle handling, or resumption is safe, and they are not supported-phone evidence.
-
-Native and desktop workbench results are development evidence only; they do not establish participant ceremony or supported-phone behavior. The repository [README](../../README.md) owns implementation status, and [SECURITY.md](../../SECURITY.md) owns security limitations.
+Native and desktop workbench results are development evidence only; they do not establish participant ceremony or supported-phone behavior. See the repository [README](../../README.md) for implementation status and [SECURITY.md](../../SECURITY.md) for security limitations.
 
 ## Development
 

@@ -1,27 +1,8 @@
-use crate::hashing::hash_framed_parts_512;
-
 use super::{
-    TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN, TallyCircuitError, TallyCircuitProfile,
-    TallyEvaluationInput, TallyEvaluationOutcome, bit_width_for_maximum_value,
-    foundation_score_bounds,
+    TallyCircuitError, TallyCircuitProfile, TallyEvaluationInput, TallyEvaluationOutcome,
+    bit_width_for_maximum_value, foundation_score_bounds,
 };
 
-const TALLY_DIRECT_EVALUATOR_SOURCE: &[u8] = include_bytes!("direct_evaluator.rs");
-
-pub(crate) fn tally_direct_evaluator_identity() -> Result<[u8; 64], TallyCircuitError> {
-    validate_canonical_source_bytes(TALLY_DIRECT_EVALUATOR_SOURCE)?;
-    let (minimum_score, maximum_score) = foundation_score_bounds()?;
-    Ok(hash_framed_parts_512(
-        TALLY_DIRECT_EVALUATOR_IDENTITY_DOMAIN,
-        &[
-            TALLY_DIRECT_EVALUATOR_SOURCE,
-            &minimum_score.to_le_bytes(),
-            &maximum_score.to_le_bytes(),
-        ],
-    ))
-}
-
-/// Evaluates tally semantics without compiling or interpreting a circuit.
 pub(crate) fn evaluate_tally_directly(
     profile: TallyCircuitProfile,
     input: &TallyEvaluationInput,
@@ -103,14 +84,4 @@ pub(crate) fn evaluate_tally_directly(
         ordered_option_positions,
         has_selected_ballot,
     })
-}
-
-fn validate_canonical_source_bytes(source_bytes: &[u8]) -> Result<(), TallyCircuitError> {
-    if core::str::from_utf8(source_bytes).is_err()
-        || source_bytes.contains(&b'\r')
-        || !source_bytes.ends_with(b"\n")
-    {
-        return Err(TallyCircuitError::NonCanonicalSourceEncoding);
-    }
-    Ok(())
 }

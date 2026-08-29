@@ -5,12 +5,10 @@ use crate::{
 
 use super::{
     BooleanOperation, CompiledTallyCircuit, TALLY_CIRCUIT_ARTIFACT_MAGIC, TallyCircuitError,
-    TallyCircuitProfile, WireIndex,
-    compiler::{compile_tally_circuit, tally_circuit_compiler_identity},
-    direct_evaluator::tally_direct_evaluator_identity,
+    TallyCircuitProfile, WireIndex, compiler::compile_tally_circuit,
 };
 
-pub(crate) const TALLY_CIRCUIT_ARTIFACT_VERSION: u64 = 3;
+pub(crate) const TALLY_CIRCUIT_ARTIFACT_VERSION: u64 = 4;
 
 const CONSTANT_OPERATION_CODE: u8 = 0;
 const EXCLUSIVE_OR_OPERATION_CODE: u8 = 1;
@@ -24,8 +22,6 @@ pub(crate) fn encode_canonical_tally_circuit(
     let mut bytes = Vec::new();
     append_bytes(&mut bytes, TALLY_CIRCUIT_ARTIFACT_MAGIC);
     append_varuint(&mut bytes, TALLY_CIRCUIT_ARTIFACT_VERSION);
-    append_bytes(&mut bytes, &tally_circuit_compiler_identity()?);
-    append_bytes(&mut bytes, &tally_direct_evaluator_identity()?);
     append_varuint(&mut bytes, u64::from(circuit.profile().participant_count()));
     append_varuint(&mut bytes, u64::from(circuit.profile().option_count()));
     append_varuint(&mut bytes, u64::from(circuit.profile().top_count()));
@@ -89,13 +85,6 @@ pub(crate) fn decode_canonical_tally_circuit(
     if version != TALLY_CIRCUIT_ARTIFACT_VERSION {
         return Err(TallyCircuitError::UnsupportedArtifactVersion { version });
     }
-    if reader.read_bytes()?.as_slice() != tally_circuit_compiler_identity()? {
-        return Err(TallyCircuitError::CompilerIdentityMismatch);
-    }
-    if reader.read_bytes()?.as_slice() != tally_direct_evaluator_identity()? {
-        return Err(TallyCircuitError::DirectEvaluatorIdentityMismatch);
-    }
-
     let profile = TallyCircuitProfile::new(
         read_u16(&mut reader)?,
         read_u16(&mut reader)?,

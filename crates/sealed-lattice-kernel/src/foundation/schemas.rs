@@ -12,12 +12,10 @@ use super::{
 
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
 pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
-pub const STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER: u16 = 0x1800;
 pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 
-/// Roster sizes for which structural protocol parameters can be derived.
 pub const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 3;
 pub const MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 20;
 pub(crate) const PROTOTYPE_PARTICIPANT_COUNT: u16 = 10;
@@ -30,7 +28,7 @@ pub struct FoundationRosterParameters {
     pub participant_count: u16,
     pub active_fault_bound: u16,
     pub reconstruction_threshold: u16,
-    pub candidate_view_quorum: u16,
+    pub selected_set_quorum: u16,
     pub finality_quorum: u16,
     pub state_witness_quorum: u16,
 }
@@ -56,7 +54,7 @@ pub const fn derive_foundation_roster_parameters(
         participant_count,
         active_fault_bound,
         reconstruction_threshold,
-        candidate_view_quorum: quorum,
+        selected_set_quorum: quorum,
         finality_quorum: quorum,
         state_witness_quorum: quorum,
     })
@@ -75,14 +73,13 @@ pub struct FoundationProfile {
     pub participant_count: u16,
     pub active_fault_bound: u16,
     pub reconstruction_threshold: u16,
-    pub candidate_view_quorum: u16,
+    pub selected_set_quorum: u16,
     pub finality_quorum: u16,
     pub state_witness_quorum: u16,
     pub option_count: u16,
     pub minimum_score: u16,
     pub maximum_score: u16,
     pub maximum_identifier_byte_length: usize,
-    pub stream_chunk_byte_length: usize,
     pub maximum_copied_buffer_byte_length: usize,
 }
 
@@ -92,14 +89,13 @@ pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
     participant_count: PROTOTYPE_ROSTER_PARAMETERS.participant_count,
     active_fault_bound: PROTOTYPE_ROSTER_PARAMETERS.active_fault_bound,
     reconstruction_threshold: PROTOTYPE_ROSTER_PARAMETERS.reconstruction_threshold,
-    candidate_view_quorum: PROTOTYPE_ROSTER_PARAMETERS.candidate_view_quorum,
+    selected_set_quorum: PROTOTYPE_ROSTER_PARAMETERS.selected_set_quorum,
     finality_quorum: PROTOTYPE_ROSTER_PARAMETERS.finality_quorum,
     state_witness_quorum: PROTOTYPE_ROSTER_PARAMETERS.state_witness_quorum,
     option_count: PROTOTYPE_OPTION_COUNT,
     minimum_score: 1,
     maximum_score: 10,
     maximum_identifier_byte_length: 128,
-    stream_chunk_byte_length: 1_048_576,
     maximum_copied_buffer_byte_length: 8_388_608,
 };
 
@@ -308,92 +304,6 @@ fn validate_roster_entries(entries: &[RosterEntry]) -> SchemaResult<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StreamDescriptor {
-    pub total_byte_length: u64,
-    pub ordered_chunk_digests: std::sync::Arc<[Hash512]>,
-    pub full_object_digest: Hash512,
-}
-
-impl StreamDescriptor {
-    pub fn new(
-        total_byte_length: u64,
-        ordered_chunk_digests: Vec<Hash512>,
-        full_object_digest: Hash512,
-    ) -> SchemaResult<Self> {
-        let descriptor = Self {
-            total_byte_length,
-            ordered_chunk_digests: ordered_chunk_digests.into(),
-            full_object_digest,
-        };
-        descriptor.validate()?;
-        Ok(descriptor)
-    }
-
-    fn validate(&self) -> SchemaResult<()> {
-        if self.total_byte_length == 0 {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "streamed objects must be nonempty",
-            ));
-        }
-        let chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
-            .map_err(|_| {
-                FoundationSchemaError::new(
-                    RefusalReason::OutsideSupportedProfile,
-                    "stream chunk length does not fit u64",
-                )
-            })?;
-        let expected_chunk_count = 1 + (self.total_byte_length - 1) / chunk_byte_length;
-        let actual_chunk_count = u64::try_from(self.ordered_chunk_digests.len()).map_err(|_| {
-            FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "stream chunk count does not fit u64",
-            )
-        })?;
-        if actual_chunk_count != expected_chunk_count {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "stream chunk count does not match the total byte length",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        Ok(self.canonical_tuple()?.encode()?)
-    }
-
-    fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        self.validate()?;
-        let chunk_digests = self
-            .ordered_chunk_digests
-            .iter()
-            .map(|digest| CanonicalItem::hash512(digest.into_bytes()))
-            .collect::<Vec<_>>();
-        Ok(CanonicalTuple::new(
-            STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned64(self.total_byte_length),
-                CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &chunk_digests)?,
-                CanonicalItem::hash512(self.full_object_digest.into_bytes()),
-            ],
-        ))
-    }
-
-    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
-        preflight_stream_descriptor_chunk_count(bytes, limits)?;
-        let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header(&tuple, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, 3)?;
-        Self::new(
-            read_u64(&tuple.items[0])?,
-            read_hash_list(&tuple.items[1])?,
-            read_hash(&tuple.items[2])?,
-        )
-    }
-}
-
 fn validate_ml_kem_768_encapsulation_key(
     key: &[u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 ) -> SchemaResult<()> {
@@ -458,61 +368,6 @@ fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) ->
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "roster size is outside the configurable range",
-        ));
-    }
-    Ok(())
-}
-
-fn preflight_stream_descriptor_chunk_count(
-    bytes: &[u8],
-    limits: &CanonicalDecodeLimits,
-) -> SchemaResult<()> {
-    const ITEM_TYPES: [CanonicalItemType; 3] = [
-        CanonicalItemType::Unsigned64,
-        CanonicalItemType::HomogeneousList,
-        CanonicalItemType::Hash512,
-    ];
-    let Some(total_byte_length_bytes) = raw_schema_item(
-        bytes,
-        limits,
-        STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER,
-        &ITEM_TYPES,
-        0,
-    ) else {
-        return Ok(());
-    };
-    let Some(total_byte_length) = read_exact_raw_u64(total_byte_length_bytes) else {
-        return Ok(());
-    };
-    if total_byte_length == 0 {
-        return Ok(());
-    }
-    let Some(chunk_digest_list_bytes) = raw_schema_item(
-        bytes,
-        limits,
-        STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER,
-        &ITEM_TYPES,
-        1,
-    ) else {
-        return Ok(());
-    };
-    let Some(declared_chunk_count) =
-        raw_homogeneous_list_count(chunk_digest_list_bytes, CanonicalItemType::Hash512, limits)
-    else {
-        return Ok(());
-    };
-    let chunk_byte_length =
-        u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length).map_err(|_| {
-            FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "stream chunk length does not fit u64",
-            )
-        })?;
-    let expected_chunk_count = 1 + (total_byte_length - 1) / chunk_byte_length;
-    if u64::from(declared_chunk_count) != expected_chunk_count {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::WrongTypeOrLength,
-            "stream chunk count does not match the total byte length",
         ));
     }
     Ok(())
@@ -587,10 +442,6 @@ fn raw_homogeneous_list_count(
     Some(declared_count)
 }
 
-fn read_exact_raw_u64(bytes: &[u8]) -> Option<u64> {
-    Some(u64::from_le_bytes(bytes.try_into().ok()?))
-}
-
 fn read_raw_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     let value_end = offset.checked_add(2)?;
     Some(u16::from_le_bytes(
@@ -662,18 +513,6 @@ fn read_fixed_bytes<const LENGTH: usize>(item: &CanonicalItem) -> SchemaResult<[
         })
 }
 
-fn read_hash(item: &CanonicalItem) -> SchemaResult<Hash512> {
-    let bytes: [u8; 64] = read_item(item, CanonicalItemType::Hash512)?
-        .try_into()
-        .map_err(|_| {
-            FoundationSchemaError::new(
-                RefusalReason::MalformedEncoding,
-                "hash has the wrong length",
-            )
-        })?;
-    Ok(Hash512::from_bytes(bytes))
-}
-
 fn read_list_header(
     item: &CanonicalItem,
     expected_element_type: CanonicalItemType,
@@ -691,32 +530,6 @@ fn read_list_header(
         u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize,
         &bytes[6..],
     ))
-}
-
-fn read_hash_list(item: &CanonicalItem) -> SchemaResult<Vec<Hash512>> {
-    let (count, bytes) = read_list_header(item, CanonicalItemType::Hash512)?;
-    if bytes.len()
-        != count.checked_mul(Hash512::BYTE_LENGTH).ok_or_else(|| {
-            FoundationSchemaError::new(
-                RefusalReason::MalformedEncoding,
-                "hash-list length overflows",
-            )
-        })?
-    {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::MalformedEncoding,
-            "hash-list byte length is malformed",
-        ));
-    }
-    bytes
-        .chunks_exact(Hash512::BYTE_LENGTH)
-        .map(|chunk| {
-            let value: [u8; Hash512::BYTE_LENGTH] = chunk.try_into().map_err(|_| {
-                FoundationSchemaError::new(RefusalReason::MalformedEncoding, "hash length")
-            })?;
-            Ok(Hash512::from_bytes(value))
-        })
-        .collect()
 }
 
 pub(super) fn read_nested_tuple_list_with_budget(
@@ -799,13 +612,13 @@ mod tests {
                 participant_count / 3 + 1
             );
             assert_eq!(
-                parameters.candidate_view_quorum,
+                parameters.selected_set_quorum,
                 (participant_count + parameters.active_fault_bound) / 2 + 1
             );
         }
         assert_eq!(FOUNDATION_PROFILE.active_fault_bound, 3);
         assert_eq!(FOUNDATION_PROFILE.reconstruction_threshold, 4);
-        assert_eq!(FOUNDATION_PROFILE.candidate_view_quorum, 7);
+        assert_eq!(FOUNDATION_PROFILE.selected_set_quorum, 7);
     }
 
     #[test]
@@ -852,30 +665,6 @@ mod tests {
                 .expect_err("oversized declared roster refuses before allocation")
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
-        );
-    }
-
-    #[test]
-    fn stream_descriptor_round_trips_and_binds_exact_chunk_count() {
-        let first = Hash512::from_bytes([1; Hash512::BYTE_LENGTH]);
-        let second = Hash512::from_bytes([2; Hash512::BYTE_LENGTH]);
-        let descriptor = StreamDescriptor::new(
-            u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length).unwrap() + 1,
-            vec![first, second],
-            second,
-        )
-        .expect("two-chunk descriptor is valid");
-        let encoded = descriptor.encode().expect("descriptor encodes");
-        assert_eq!(
-            StreamDescriptor::decode(&encoded, &CanonicalDecodeLimits::default())
-                .expect("descriptor decodes"),
-            descriptor
-        );
-        assert_eq!(
-            StreamDescriptor::new(1, vec![first, second], second)
-                .expect_err("one byte cannot claim two chunks")
-                .refusal_reason,
-            RefusalReason::WrongTypeOrLength
         );
     }
 }

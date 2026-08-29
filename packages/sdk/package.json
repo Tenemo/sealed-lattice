@@ -33,17 +33,15 @@
         "build": "tsx ../../tools/ci/build-sdk-package.ts"
     },
     "devDependencies": {
-        "@sealed-lattice/protocol": "workspace:*",
-        "@sealed-lattice/types": "workspace:*",
         "@sealed-lattice/wasm": "workspace:*",
         "vitest": "^4.1.4"
     },
     "keywords": [
         "cryptography",
+        "privacy",
         "security",
         "post-quantum",
-        "garbled-circuits",
-        "multiparty-computation",
+        "webassembly",
         "voting"
     ],
     "dependencies": {

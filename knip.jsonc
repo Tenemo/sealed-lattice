@@ -9,32 +9,13 @@
             ],
             "project": ["tests/**/*.ts", "tools/**/*.ts", "tools/**/*.mjs"],
             "ignoreDependencies": [
-                // The packed-package smoke script imports the tarball-installed SDK inside a temporary consumer.
                 "sealed-lattice",
-                // The Wasm kernel build resolves binaryen's wasm-opt script by path.
                 "binaryen",
-                // The root browser harness resolves these deep-import optimizer entries from string-valued Vitest configuration.
                 "@noble/hashes",
             ],
         },
         "packages/sdk": {
             "entry": ["src/index.ts", "tests/**/*.test.ts"],
-            "project": ["src/**/*.ts", "tests/**/*.ts"],
-            "ignoreDependencies": [
-                // The public package intentionally declares the hash backend used by the bundled runtime surface.
-                "@noble/hashes",
-            ],
-        },
-        "packages/types": {
-            "entry": ["tests/**/*.test.ts"],
-            "project": ["src/**/*.ts", "tests/**/*.ts"],
-        },
-        "packages/protocol": {
-            "entry": ["tests/**/*.test.ts"],
-            "project": ["src/**/*.ts", "tests/**/*.ts"],
-        },
-        "packages/crypto": {
-            "entry": ["tests/**/*.test.ts"],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/wasm": {
