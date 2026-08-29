@@ -1,12 +1,11 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-export type PackageManager = 'npm' | 'pnpm';
+type PackageManager = 'npm' | 'pnpm';
 
 export type PackageManagerRunner = {
     readonly command: string;
     readonly commandArgumentsPrefix: readonly string[];
-    readonly kind: PackageManager;
 };
 
 const detectPackageManager = (
@@ -105,7 +104,6 @@ export const resolvePackageManagerRunner = (): PackageManagerRunner => {
     return {
         command: process.execPath,
         commandArgumentsPrefix: [resolvedPackageManagerEntryPointPath],
-        kind: detectPackageManager(resolvedPackageManagerEntryPointPath),
     };
 };
 
@@ -117,6 +115,5 @@ export const resolvePackageManagerRunnerForPackageManager = (
     return {
         command: process.execPath,
         commandArgumentsPrefix: [entryPointPath],
-        kind: packageManager,
     };
 };
