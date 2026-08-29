@@ -24,6 +24,7 @@ mod fixed_roster_beaver_mpc_resource_floor;
 mod garbled_resource_model;
 mod garbling_alternative_resource_model;
 mod label_encoding;
+mod lpsy15_candidate_compiler;
 mod output_sharing;
 mod preparation_arithmetic_graph;
 mod preparation_holder_record_catalog;
@@ -103,6 +104,8 @@ mod garbled_resource_model_tests;
 mod garbling_alternative_resource_model_tests;
 #[cfg(test)]
 mod label_encoding_tests;
+#[cfg(test)]
+mod lpsy15_candidate_compiler_tests;
 #[cfg(test)]
 mod preparation_arithmetic_graph_tests;
 #[cfg(test)]
