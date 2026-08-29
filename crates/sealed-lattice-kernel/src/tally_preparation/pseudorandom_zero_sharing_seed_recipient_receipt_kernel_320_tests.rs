@@ -26,8 +26,6 @@ use super::{
     pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320::{
         clear_pseudorandom_zero_sharing_seed_recipient_receipt_contexts_for_test_320,
         run_pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320,
-        verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_320,
-        verify_pseudorandom_zero_sharing_seed_recipient_selection_320,
     },
 };
 
@@ -50,15 +48,6 @@ const RESPONSE_HEADER_BYTE_LENGTH: usize = 7;
 struct RecipientReceiptKernelFixture320 {
     owner: SeedMailboxTestFixture320,
     streams: Vec<SealedMailboxTestStream320>,
-}
-
-pub(crate) struct PreprocessingSourceInconsistencyFixture320 {
-    pub(crate) owner: SeedMailboxTestFixture320,
-    pub(crate) canonical_open_request_bytes: Vec<u8>,
-    pub(crate) sender_position: u16,
-    pub(crate) recipient_position: u16,
-    pub(crate) disclosed_authenticated_encryption_key: [u8; 32],
-    pub(crate) evidence_identity: Hash512,
 }
 
 fn append_unsigned16(bytes: &mut Vec<u8>, value: u16) {
@@ -100,20 +89,6 @@ fn fixture(recipient_position: u16, carrier_marker: u8) -> RecipientReceiptKerne
     fixture_from_owner(owner, recipient_position, carrier_marker)
 }
 
-fn fixture_with_parameter_identity(
-    recipient_position: u16,
-    carrier_marker: u8,
-    parameter_identity: Hash512,
-) -> RecipientReceiptKernelFixture320 {
-    let first_sender_position = if recipient_position == 0 { 1 } else { 0 };
-    let owner = seed_mailbox_test_fixture_with_parameter_identity_320(
-        first_sender_position,
-        recipient_position,
-        parameter_identity,
-    );
-    fixture_from_owner(owner, recipient_position, carrier_marker)
-}
-
 fn fixture_from_owner(
     owner: SeedMailboxTestFixture320,
     recipient_position: u16,
@@ -151,62 +126,6 @@ fn fixture_from_owner(
         })
         .collect();
     RecipientReceiptKernelFixture320 { owner, streams }
-}
-
-pub(crate) fn preprocessing_source_inconsistency_fixture_320(
-    parameter_identity: Hash512,
-    recipient_position: u16,
-) -> PreprocessingSourceInconsistencyFixture320 {
-    let mut fixture = fixture_with_parameter_identity(recipient_position, 0x51, parameter_identity);
-    let mut changed_payload = fixture.owner.payload_bytes.to_vec();
-    changed_payload[0] ^= 0x80;
-    fixture.streams[0] = seal_mailbox_stream(
-        &fixture.owner,
-        fixture.owner.recipient_position,
-        &fixture.owner.descriptor_bytes,
-        &changed_payload,
-        [0x91; 32],
-        0x93,
-    );
-    let canonical_open_request_bytes = encode_open_request(&fixture);
-    let disclosed_authenticated_encryption_key = fixture.streams[0].authenticated_encryption_key;
-    let sender_position = fixture.owner.sender_position;
-    let recipient_position = fixture.owner.recipient_position;
-    let evidence_identity =
-        verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_320(
-            &canonical_open_request_bytes,
-            sender_position,
-            recipient_position,
-            disclosed_authenticated_encryption_key,
-            verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320(
-                &fixture.owner.root_terminal,
-                &fixture.owner.roster,
-                sender_position,
-                recipient_position,
-                &fixture.owner.descriptor_bytes,
-                &fixture.streams[0].header_bytes,
-                &fixture.streams[0].manifest_bytes,
-                &fixture.streams[0].signature_envelope_bytes,
-                &fixture.streams[0]
-                    .encrypted_chunks
-                    .iter()
-                    .map(|chunk| chunk.as_slice())
-                    .collect::<Vec<_>>(),
-                &disclosed_authenticated_encryption_key,
-            )
-            .unwrap()
-            .identity(),
-        )
-        .unwrap()
-        .identity();
-    PreprocessingSourceInconsistencyFixture320 {
-        owner: fixture.owner,
-        canonical_open_request_bytes,
-        sender_position,
-        recipient_position,
-        disclosed_authenticated_encryption_key,
-        evidence_identity,
-    }
 }
 
 fn encode_open_request(fixture: &RecipientReceiptKernelFixture320) -> Vec<u8> {
@@ -541,47 +460,5 @@ fn recipient_receipt_kernel_discloses_only_publicly_verifiable_plaintext_inconsi
     .unwrap();
     assert_eq!(verified.identity(), evidence_identity);
 
-    let canonical_open_request = encode_open_request(&fixture);
-    let selection =
-        verify_pseudorandom_zero_sharing_seed_recipient_selection_320(&canonical_open_request)
-            .unwrap();
-    assert_eq!(
-        selection.parameter_identity(),
-        fixture.owner.parameter_identity
-    );
-    assert_eq!(
-        selection.preparation_context(),
-        fixture.owner.preparation_context
-    );
-    assert_eq!(
-        selection.root_terminal_identity(),
-        fixture.owner.root_terminal.identity().unwrap()
-    );
-    assert_eq!(
-        selection.participant_count(),
-        FOUNDATION_PROFILE.participant_count
-    );
-    assert_eq!(selection.recipient_position(), recipient_position);
-    assert_eq!(
-        verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_320(
-            &canonical_open_request,
-            sender_position,
-            recipient_position,
-            disclosed_key,
-            evidence_identity,
-        )
-        .unwrap(),
-        verified
-    );
-    assert!(
-        verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_320(
-            &canonical_open_request,
-            sender_position,
-            recipient_position,
-            disclosed_key,
-            Hash512::from_bytes([0x7f; Hash512::BYTE_LENGTH]),
-        )
-        .is_err()
-    );
     assert_eq!(failure_code(&complete_authentication(handle, &secrets)), 7);
 }

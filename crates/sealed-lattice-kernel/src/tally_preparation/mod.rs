@@ -20,14 +20,6 @@ mod binary_field;
 mod binary_field_320;
 mod context;
 mod degree_three_opening_decoder;
-mod direct_mpc_candidate_carrier;
-mod direct_mpc_candidate_compiler;
-mod direct_mpc_field_stream;
-mod direct_mpc_one_and_preprocessing_source;
-mod direct_mpc_participant_cursor;
-mod direct_mpc_prime_field;
-#[cfg(feature = "direct-mpc-scalar-measurement")]
-pub(crate) mod direct_mpc_scalar_measurement;
 mod fixed_roster_beaver_mpc_resource_floor;
 mod garbled_resource_model;
 mod garbling_alternative_resource_model;
@@ -103,18 +95,6 @@ mod batched_hidden_bit_check_320_tests;
 mod binary_field_320_tests;
 #[cfg(test)]
 mod degree_three_opening_decoder_tests;
-#[cfg(test)]
-mod direct_mpc_candidate_carrier_tests;
-#[cfg(test)]
-mod direct_mpc_candidate_compiler_tests;
-#[cfg(test)]
-mod direct_mpc_field_stream_tests;
-#[cfg(test)]
-mod direct_mpc_one_and_preprocessing_source_tests;
-#[cfg(test)]
-mod direct_mpc_participant_cursor_tests;
-#[cfg(test)]
-mod direct_mpc_prime_field_tests;
 #[cfg(test)]
 mod fixed_roster_beaver_mpc_resource_floor_tests;
 #[cfg(test)]
@@ -206,48 +186,6 @@ pub(crate) use binary_field::BinaryFieldElement256;
 #[cfg(feature = "preparation-field-measurement")]
 pub(crate) use binary_field_320::measure_binary_field_320_multiplications;
 pub(crate) use context::TallyPreparationContext;
-#[cfg(test)]
-pub(crate) use direct_mpc_one_and_preprocessing_source::verify_direct_mpc_one_and_preprocessing_source;
-pub(crate) use direct_mpc_one_and_preprocessing_source::{
-    DirectMpcOneAndPreprocessingSourceError, VerifiedDirectMpcOneAndPreprocessingSource,
-    direct_mpc_one_and_preprocessing_source_parameter_identity,
-    verify_direct_mpc_one_and_preprocessing_source_from_joined_custody,
-};
-pub(crate) use direct_mpc_participant_cursor::{
-    DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH, DirectMpcCursorError,
-    DirectMpcJoinedSubsetMaster, DirectMpcParticipantCursor, DirectMpcPrssContext,
-};
-pub(crate) use direct_mpc_prime_field::{
-    DirectMpcPrimeFieldElement, DirectMpcPrimeFieldError, evaluate_prime_field_polynomial,
-    interpolate_consecutive_prime_field_values,
-};
-#[cfg(test)]
-pub(crate) use pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::SeedMailboxTestFixture320;
-pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320::VerifiedPseudorandomZeroSharingSeedMailboxAuthenticatedInconsistency320;
-#[cfg(test)]
-pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320::verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320;
-#[cfg(test)]
-pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320_tests::seal_mailbox_stream;
-#[cfg(test)]
-pub(crate) use pseudorandom_zero_sharing_seed_master_custody_320_tests::preprocessing_source_joined_custody_fixture_320;
-pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSeedMasters320;
-#[cfg(test)]
-pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::locally_joined_seed_masters_for_direct_mpc_test;
-#[cfg(test)]
-pub(crate) use pseudorandom_zero_sharing_seed_master_join_320_tests::verified_one_and_source_and_joined_custody;
-pub(crate) use pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320::{
-    VerifiedPseudorandomZeroSharingSeedRecipientSelection320,
-    verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_320,
-    verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_disclosure_320,
-    verify_pseudorandom_zero_sharing_seed_recipient_selection_320,
-};
-#[cfg(test)]
-pub(crate) use pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320_tests::{
-    PreprocessingSourceInconsistencyFixture320, preprocessing_source_inconsistency_fixture_320,
-};
-#[cfg(test)]
-pub(crate) use replicated_random_sharing::ReplicatedRandomSharingSubset;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TallyPreparationError {
     AuthenticatedShareContextEmpty,

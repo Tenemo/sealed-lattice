@@ -137,10 +137,6 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
             },
             {
                 kind: 'function',
-                name: 'sealed_lattice_direct_mpc_preprocessing_source_state_with_length',
-            },
-            {
-                kind: 'function',
                 name: 'sealed_lattice_seed_catalog_source_320_with_length',
             },
             {

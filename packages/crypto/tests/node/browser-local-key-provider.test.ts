@@ -5,7 +5,6 @@ import { replicatedKeyComponentOpeningMailboxPayloadType } from '@sealed-lattice
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-    assertDirectMpcPreprocessingSourceStateSigningCapabilityMatchesRosterKey,
     assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
     assertSeedRecipientReceiptCapabilitiesMatchRosterKeys,
     assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey,
@@ -18,8 +17,6 @@ import {
     encapsulateResetSafeSetupMailbox,
     openBrowserLocalExternalKeyProvider,
     signSeedMailboxManifestBody,
-    signDirectMpcPreprocessingSourceStateSubjectBody,
-    signDirectMpcPreprocessingSourceStateWitnessBody,
     signSeedRecipientReceiptBody,
     signSeedReceiptTerminalEndorsementBody,
     signResetSafeSetupMailboxEnvelope,
@@ -46,14 +43,6 @@ const seedMailboxManifestSignatureContext = textEncoder.encode(
 const seedReceiptTerminalEndorsementSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-recipient-receipt-terminal',
 );
-const directMpcPreprocessingSourceStateWitnessSignatureContext =
-    textEncoder.encode(
-        'sealed-lattice/v1/pre-evaluation-finality/state-witness',
-    );
-const directMpcPreprocessingSourceStateSubjectSignatureContext =
-    textEncoder.encode(
-        'sealed-lattice/v1/pre-evaluation-finality/state-subject',
-    );
 const seedRecipientReceiptSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-recipient-receipt',
 );
@@ -229,107 +218,6 @@ describe('browser-local external key provider', () => {
         endorsementAuthorizationBodyBytes.fill(0);
         signatureRandomness.fill(0);
         signature.fill(0);
-        alternateSigning.publicKey.fill(0);
-        alternateSigning.secretKey.fill(0);
-        provider.close();
-    });
-
-    it('signs only exact preprocessing-source state bodies under their distinct roster-bound contexts', () => {
-        const { signing, mailbox } = createKeyMaterial();
-        const provider = openBrowserLocalExternalKeyProvider({
-            ...createBrowserLocalKeyOperations({ signing, mailbox }),
-        });
-        assertDirectMpcPreprocessingSourceStateSigningCapabilityMatchesRosterKey(
-            {
-                signingCapability: provider.signingCapability,
-                signingVerificationKey: signing.publicKey,
-            },
-        );
-
-        const witnessAuthorizationBodyBytes = new Uint8Array(170).fill(0x19);
-        const subjectAuthorizationBodyBytes = new Uint8Array(240).fill(0x2a);
-        const witnessSignatureRandomness = new Uint8Array(32).fill(0x3b);
-        const subjectSignatureRandomness = new Uint8Array(32).fill(0x4c);
-        const witnessSignature =
-            signDirectMpcPreprocessingSourceStateWitnessBody({
-                signatureRandomness: witnessSignatureRandomness,
-                signingCapability: provider.signingCapability,
-                signingVerificationKey: signing.publicKey,
-                witnessAuthorizationBodyBytes,
-            });
-        const subjectSignature =
-            signDirectMpcPreprocessingSourceStateSubjectBody({
-                signatureRandomness: subjectSignatureRandomness,
-                signingCapability: provider.signingCapability,
-                signingVerificationKey: signing.publicKey,
-                subjectAuthorizationBodyBytes,
-            });
-
-        expect(
-            ml_dsa65.verify(
-                witnessSignature,
-                witnessAuthorizationBodyBytes,
-                signing.publicKey,
-                {
-                    context:
-                        directMpcPreprocessingSourceStateWitnessSignatureContext,
-                },
-            ),
-        ).toBe(true);
-        expect(
-            ml_dsa65.verify(
-                subjectSignature,
-                subjectAuthorizationBodyBytes,
-                signing.publicKey,
-                {
-                    context:
-                        directMpcPreprocessingSourceStateSubjectSignatureContext,
-                },
-            ),
-        ).toBe(true);
-        expect(
-            ml_dsa65.verify(
-                witnessSignature,
-                witnessAuthorizationBodyBytes,
-                signing.publicKey,
-                {
-                    context:
-                        directMpcPreprocessingSourceStateSubjectSignatureContext,
-                },
-            ),
-        ).toBe(false);
-
-        const alternateSigning = ml_dsa65.keygen(
-            new Uint8Array(ml_dsa65.lengths.seed!).fill(0xa4),
-        );
-        expectProviderError(
-            () =>
-                signDirectMpcPreprocessingSourceStateWitnessBody({
-                    signatureRandomness: witnessSignatureRandomness,
-                    signingCapability: provider.signingCapability,
-                    signingVerificationKey: alternateSigning.publicKey,
-                    witnessAuthorizationBodyBytes,
-                }),
-            'KeyMismatch',
-        );
-        expectProviderError(
-            () =>
-                signDirectMpcPreprocessingSourceStateSubjectBody({
-                    signatureRandomness: subjectSignatureRandomness,
-                    signingCapability: provider.signingCapability,
-                    signingVerificationKey: signing.publicKey,
-                    subjectAuthorizationBodyBytes:
-                        subjectAuthorizationBodyBytes.subarray(1),
-                }),
-            'MalformedMessage',
-        );
-
-        witnessAuthorizationBodyBytes.fill(0);
-        subjectAuthorizationBodyBytes.fill(0);
-        witnessSignatureRandomness.fill(0);
-        subjectSignatureRandomness.fill(0);
-        witnessSignature.fill(0);
-        subjectSignature.fill(0);
         alternateSigning.publicKey.fill(0);
         alternateSigning.secretKey.fill(0);
         provider.close();

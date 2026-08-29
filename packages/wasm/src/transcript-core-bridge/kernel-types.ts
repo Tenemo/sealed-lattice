@@ -159,11 +159,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         pointer: number,
         length: number,
     ) => void;
-    sealed_lattice_direct_mpc_preprocessing_source_state_with_length?: (
-        pointer: number,
-        length: number,
-        outputLengthPointer: number,
-    ) => number;
     sealed_lattice_join_seed_masters_320_with_length?: (
         pointer: number,
         length: number,

@@ -27,20 +27,14 @@ use super::{
         run_pseudorandom_zero_sharing_joined_seed_master_validation_320,
         run_pseudorandom_zero_sharing_seed_master_join_custody_320,
     },
-    pseudorandom_zero_sharing_seed_receipt_320::{
-        RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
-        verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320,
-        verify_pseudorandom_zero_sharing_seed_recipient_receipt_320,
-    },
-    pseudorandom_zero_sharing_seed_receipt_320_tests::authenticated_delivery_set_with_parameter_identity,
+    pseudorandom_zero_sharing_seed_receipt_320::RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
     pseudorandom_zero_sharing_seed_receipt_terminal_320::{
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_SIGNATURE_CONTEXT,
         verify_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_320,
     },
     pseudorandom_zero_sharing_seed_receipt_terminal_320_tests::{
-        signed_receipt_envelopes_from_authenticated_deliveries,
-        signed_receipt_envelopes_from_authenticated_deliveries_with_parameter_identity,
-        signed_terminal_certificate, verified_receipt_inventory,
+        signed_receipt_envelopes_from_authenticated_deliveries, signed_terminal_certificate,
+        verified_receipt_inventory,
     },
     pseudorandom_zero_sharing_subset_seed_320::{
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH,
@@ -73,12 +67,6 @@ struct CompletionCustodyFixture320 {
     source_custody_record_bytes: Zeroizing<Vec<u8>>,
     receipt_custody_record_bytes: Zeroizing<Vec<u8>>,
     verification_context_bytes: Vec<u8>,
-}
-
-pub(crate) struct PreprocessingSourceJoinedCustodyFixture320 {
-    pub(crate) owner: SeedMailboxTestFixture320,
-    pub(crate) joined_record_bytes: Zeroizing<Vec<u8>>,
-    pub(crate) receipt_terminal_identity: Hash512,
 }
 
 impl CompletionCustodyFixture320 {
@@ -304,59 +292,6 @@ fn completion_custody_fixture() -> CompletionCustodyFixture320 {
         receipt_envelopes,
         retained_receipt,
     )
-}
-
-pub(crate) fn preprocessing_source_joined_custody_fixture_320(
-    parameter_identity: Hash512,
-) -> PreprocessingSourceJoinedCustodyFixture320 {
-    let owner = seed_mailbox_test_fixture_with_parameter_identity_320(
-        1,
-        PARTICIPANT_POSITION,
-        parameter_identity,
-    );
-    let receipt_envelopes =
-        signed_receipt_envelopes_from_authenticated_deliveries_with_parameter_identity(
-            parameter_identity,
-            0x31,
-            0x41,
-        );
-    let (local_delivery_fixture, authenticated_deliveries) =
-        authenticated_delivery_set_with_parameter_identity(
-            parameter_identity,
-            PARTICIPANT_POSITION,
-            0x31,
-        );
-    assert_eq!(
-        local_delivery_fixture.root_terminal.identity().unwrap(),
-        owner.root_terminal.identity().unwrap()
-    );
-    let authenticated_inventory =
-        verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
-            &local_delivery_fixture.root_terminal,
-            PARTICIPANT_POSITION,
-            authenticated_deliveries,
-        )
-        .unwrap();
-    let retained_receipt = verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
-        &local_delivery_fixture.root_terminal,
-        &local_delivery_fixture.roster,
-        authenticated_inventory,
-        &receipt_envelopes[usize::from(PARTICIPANT_POSITION)],
-    )
-    .unwrap();
-    let fixture = completion_custody_fixture_from_verified_receipts(
-        &owner,
-        receipt_envelopes,
-        retained_receipt,
-    );
-    let response =
-        run_pseudorandom_zero_sharing_seed_master_join_custody_320(&fixture.join_request_bytes());
-    let joined_payload = parse_join_response(&response).unwrap();
-    PreprocessingSourceJoinedCustodyFixture320 {
-        receipt_terminal_identity: fixture.receipt_terminal_identity,
-        joined_record_bytes: fixture.joined_record_bytes(joined_payload),
-        owner,
-    }
 }
 
 fn completion_custody_fixture_from_verified_receipts(

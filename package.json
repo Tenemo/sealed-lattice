@@ -24,8 +24,6 @@
         "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",
         "test:wasm:preparation-field": "tsx ./tools/ci/run-preparation-field-wasm-measurement.ts",
         "test:wasm:zero-sharing": "tsx ./tools/ci/run-zero-sharing-wasm-measurement.ts",
-        "test:wasm:direct-mpc": "tsx ./tools/ci/run-direct-mpc-wasm-measurement.ts",
-        "test:wasm:direct-mpc-one-and": "tsx ./tools/ci/run-direct-mpc-one-and-wasm-verification.ts",
         "test:rust:process-memory-guard": "tsx ./tools/ci/run-process-memory-guard-tests.ts",
         "test:node:kernel": "pnpm run build && pnpm exec vitest --project node-kernel-fast --run",
         "test:node:built": "vitest --project node --project node-protocol --project node-kernel-fast --run",

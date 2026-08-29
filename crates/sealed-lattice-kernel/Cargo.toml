@@ -12,16 +12,9 @@ name = "zero-sharing-native-measurement"
 path = "src/bin/zero-sharing-native-measurement.rs"
 required-features = ["preparation-zero-sharing-measurement"]
 
-[[bin]]
-name = "direct-mpc-native-measurement"
-path = "src/bin/direct-mpc-native-measurement.rs"
-required-features = ["direct-mpc-scalar-measurement"]
-
 [features]
 preparation-field-measurement = []
 preparation-zero-sharing-measurement = []
-direct-mpc-scalar-measurement = []
-direct-mpc-one-and-verifier = []
 
 [dependencies]
 aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }

@@ -43,9 +43,6 @@ use super::{
     },
 };
 
-#[cfg(test)]
-use super::replicated_random_sharing::ReplicatedRandomSharingSubset;
-
 pub(crate) const PSEUDORANDOM_ZERO_SHARING_JOINED_SEED_MASTER_CUSTODY_DOMAIN: &str =
     "sealed-lattice/tally-preparation/pseudorandom-zero-sharing/joined-seed-master-custody/v1";
 const PREPARATION_ATTEMPT_ORDINAL: u16 = 0;
@@ -603,53 +600,6 @@ impl LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
                 error: error.into(),
             }
         })?))
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn locally_joined_seed_masters_for_direct_mpc_test(
-    parameter_identity: Hash512,
-    preparation_context: TallyPreparationContext,
-    participant_position: u16,
-    subset_masters: Vec<(
-        ReplicatedRandomSharingSubset,
-        [u8; PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_CONTRIBUTION_BYTE_LENGTH],
-    )>,
-) -> LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
-    let scoped_subset_masters = subset_masters
-        .into_iter()
-        .map(
-            |(subset, bytes)| LocallyJoinedPseudorandomZeroSharingSubsetMaster320 {
-                scope: PseudorandomZeroSharingSubsetMasterScope320::new(
-                    parameter_identity,
-                    preparation_context,
-                    subset,
-                )
-                .expect("direct-MPC test subset scope must match the preparation context"),
-                bytes,
-            },
-        )
-        .collect::<Vec<_>>()
-        .into_boxed_slice();
-    LocallyJoinedPseudorandomZeroSharingSeedMasters320 {
-        parameter_identity,
-        preparation_context,
-        root_terminal_identity: Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]),
-        root_terminal_certificate_identity: Hash512::from_bytes([0x32; Hash512::BYTE_LENGTH]),
-        receipt_terminal_identity: Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
-        receipt_terminal_certificate_identity: Hash512::from_bytes([0x34; Hash512::BYTE_LENGTH]),
-        authenticated_recipient_inventory_identity: Hash512::from_bytes(
-            [0x35; Hash512::BYTE_LENGTH],
-        ),
-        receipt_body_identity: Hash512::from_bytes([0x36; Hash512::BYTE_LENGTH]),
-        receipt_envelope_identity: Hash512::from_bytes([0x37; Hash512::BYTE_LENGTH]),
-        participant_position,
-        subset_masters: scoped_subset_masters,
-        pair_masters: Box::new([]),
-        collective_coin_source: LocallyJoinedCollectiveCoinSource320 {
-            commitment_salt: [0x38; SEED_CATALOG_SECRET_LEAF_COMMITMENT_SALT_BYTE_LENGTH],
-            source: [0x39; COLLECTIVE_COIN_SOURCE_BYTE_LENGTH],
-        },
     }
 }
 

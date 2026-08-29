@@ -79,15 +79,15 @@ fn mailbox_kmac_derivations_match_an_independent_implementation() {
     assert_eq!(actual_nonce.as_slice(), expected_nonce.as_slice());
 }
 
-pub(crate) struct SealedMailboxTestStream320 {
-    pub(crate) header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
-    pub(crate) header_bytes: Vec<u8>,
-    pub(crate) manifest: PseudorandomZeroSharingSeedMailboxManifestBody320,
-    pub(crate) manifest_bytes: Vec<u8>,
-    pub(crate) signature_body: PseudorandomZeroSharingSeedMailboxSignatureBody320,
-    pub(crate) signature_envelope_bytes: Vec<u8>,
-    pub(crate) encrypted_chunks: Vec<Zeroizing<Vec<u8>>>,
-    pub(crate) authenticated_encryption_key: [u8; 32],
+pub(super) struct SealedMailboxTestStream320 {
+    pub(super) header: PseudorandomZeroSharingSeedMailboxHeaderBody320,
+    pub(super) header_bytes: Vec<u8>,
+    pub(super) manifest: PseudorandomZeroSharingSeedMailboxManifestBody320,
+    pub(super) manifest_bytes: Vec<u8>,
+    pub(super) signature_body: PseudorandomZeroSharingSeedMailboxSignatureBody320,
+    pub(super) signature_envelope_bytes: Vec<u8>,
+    pub(super) encrypted_chunks: Vec<Zeroizing<Vec<u8>>>,
+    pub(super) authenticated_encryption_key: [u8; 32],
 }
 
 #[test]
@@ -717,7 +717,7 @@ fn mailbox_domains_and_kdf_labels_are_exact_and_pairwise_distinct() {
     );
 }
 
-pub(crate) fn seal_mailbox_stream(
+pub(super) fn seal_mailbox_stream(
     fixture: &SeedMailboxTestFixture320,
     recipient_position: u16,
     descriptor_bytes: &[u8],

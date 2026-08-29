@@ -10,8 +10,6 @@ mod direct_evaluator;
 mod interpreter;
 mod output_rekeyed;
 
-#[cfg(test)]
-pub(crate) use direct_evaluator::evaluate_tally_directly;
 pub(crate) use output_rekeyed::OutputRekeyedTallyCircuit;
 
 #[cfg(test)]
