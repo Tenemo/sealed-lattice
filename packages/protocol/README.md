@@ -5,17 +5,17 @@
 ## Responsibilities
 
 - Validate pre-protocol poll input.
-- Translate validated poll input into the canonical foundation-manifest ingress shape.
-- Provide internal authenticated storage, local-record protection, checkpoint, and strict IndexedDB foundations without minting protocol capabilities.
+- Translate validated poll input into the canonical foundation manifest.
+- Provide authenticated storage, local-record protection, checkpoints, and strict IndexedDB handling without authorizing protocol state changes.
 - Expose only those implemented helpers through the package entry point.
 
 ## Boundaries
 
 General structural code covers `3 <= n <= 20` participants and `2 <= optionCount <= 20` options. Only the exact `n = 10`, `optionCount = 10` profile is the current cryptographic and runtime evidence target; admitting another size does not qualify it.
 
-The package does not implement the complete collective-preparation-to-release ceremony. Its storage, checkpoint, and unactivated candidate helpers return only inert bytes, typed refusals, or local custody outcomes; they cannot mint preparation, selected-set, input-activation, evaluation, finality, release, or result capabilities. Exact exports and verifier boundaries are owned by the package entry point and tests. TypeScript must not replace kernel cryptography or turn transport and persistence status into acceptance.
+The package does not implement the complete ceremony. Storage and checkpoint helpers manage local data only; they cannot authorize protocol state changes. The package entry point and tests own exact exports and verification boundaries. TypeScript must not replace kernel cryptography or treat successful transport or persistence as protocol acceptance.
 
-Current implementation status belongs to the repository [README](../../README.md), and current security limitations belong to [SECURITY.md](../../SECURITY.md). Package documentation intentionally does not repeat proof geometry, benchmark snapshots, theorem ledgers, or historical backend decisions.
+Implementation status belongs to the repository [README](../../README.md), and security limitations belong to [SECURITY.md](../../SECURITY.md). This package document does not repeat proofs, measurements, or historical design decisions.
 
 ## Development
 

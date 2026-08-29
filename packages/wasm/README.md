@@ -11,15 +11,15 @@
 
 ## Runtime boundaries
 
-The canonical participant artifact must remain scalar-capable. Optional SIMD measurement cannot replace the scalar baseline without feature detection and byte-for-byte output, transcript, verification, and refusal parity.
+The canonical participant artifact must remain scalar-capable. SIMD may be used for measurement only. It can replace the scalar baseline only behind feature detection and only if it preserves bytes, transcripts, verification, and refusal results exactly.
 
-The browser bridge transfers ordinary owned binary buffers. It must reacquire WebAssembly memory views after any operation that can grow memory. Long-running protocol orchestration must publish proactive authenticated checkpoints and cannot assume that a hidden page or worker will keep running or receive a termination callback.
+The browser bridge transfers ordinary owned binary buffers. It must reacquire WebAssembly memory views after any operation that can grow memory. Long-running work must create authenticated checkpoints before interruption and cannot assume that a hidden page or worker will keep running or receive a termination callback.
 
-The public SDK exposes foundation operations only. Private unactivated candidate commands and feature-gated measurement exports may return bounded inert bytes or typed refusals, but cannot mint preparation, selected-set, input-activation, evaluation, finality, release, or result capabilities. Their exact inventory is owned by source and package tests, not this document.
+The public SDK exposes only implemented foundation operations. Internal measurement commands cannot authorize protocol state changes. Source and package tests own the exact command inventory.
 
-Production long-running kernel work must use canonical source-bound cursors, authenticated browser custody, restore validation, bounded polling, cancellation, and linear-state disposal. Development measurement cursors do not establish production checkpoints, rollback safety, browser lifecycle, continuation authority, or supported-phone evidence.
+Long-running production kernel work must keep authenticated state in the browser, validate every restored cursor against its source, poll at bounded intervals, support cancellation, and dispose of consumed one-use state. Measurement-only cursors do not prove that production checkpointing, rollback protection, browser lifecycle handling, or resumption is safe, and they are not supported-phone evidence.
 
-Test-only workbenches and native or desktop results are not an accepted ceremony or supported-phone evidence. No suite is activated, and rejected protocol bridges have been removed. The repository [README](../../README.md) owns current implementation status, and [SECURITY.md](../../SECURITY.md) owns security limitations.
+Native and desktop workbench results are development evidence only; they do not establish participant ceremony or supported-phone behavior. The repository [README](../../README.md) owns implementation status, and [SECURITY.md](../../SECURITY.md) owns security limitations.
 
 ## Development
 
