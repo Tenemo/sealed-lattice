@@ -10,10 +10,6 @@ pub enum CanonicalErrorCode {
     InvalidProtocolObject,
     InvalidUtf8,
     MalformedLength,
-    #[cfg(test)]
-    MalformedVarUint,
-    #[cfg(test)]
-    NonCanonicalVarUint,
     TrailingBytes,
 }
 
@@ -24,10 +20,6 @@ impl CanonicalErrorCode {
             Self::InvalidProtocolObject => "InvalidProtocolObject",
             Self::InvalidUtf8 => "InvalidUtf8",
             Self::MalformedLength => "MalformedLength",
-            #[cfg(test)]
-            Self::MalformedVarUint => "MalformedVarUint",
-            #[cfg(test)]
-            Self::NonCanonicalVarUint => "NonCanonicalVarUint",
             Self::TrailingBytes => "TrailingBytes",
         }
     }
@@ -232,106 +224,6 @@ pub fn run_foundation_command(input: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-pub fn encode_varuint(mut value: u64) -> Vec<u8> {
-    let mut output = Vec::new();
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        output.push(byte);
-        if value == 0 {
-            return output;
-        }
-    }
-}
-
-#[cfg(test)]
-pub fn append_varuint(output: &mut Vec<u8>, value: u64) {
-    output.extend(encode_varuint(value));
-}
-
-#[cfg(test)]
-pub fn append_bytes(output: &mut Vec<u8>, value: &[u8]) {
-    append_varuint(output, value.len() as u64);
-    output.extend(value);
-}
-
-#[cfg(test)]
-pub struct CanonicalReader<'a> {
-    bytes: &'a [u8],
-    offset: usize,
-}
-
-#[cfg(test)]
-impl<'a> CanonicalReader<'a> {
-    pub fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
-    }
-
-    pub fn is_finished(&self) -> bool {
-        self.offset == self.bytes.len()
-    }
-
-    pub fn read_exact(&mut self, length: usize) -> CanonicalResult<&'a [u8]> {
-        let end = self.offset.checked_add(length).ok_or_else(|| {
-            CanonicalError::new(CanonicalErrorCode::MalformedLength, "length overflow")
-        })?;
-        if end > self.bytes.len() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "length exceeds remaining bytes",
-            ));
-        }
-        let value = &self.bytes[self.offset..end];
-        self.offset = end;
-        Ok(value)
-    }
-
-    pub fn read_varuint(&mut self) -> CanonicalResult<u64> {
-        let start = self.offset;
-        let mut shift = 0_u32;
-        let mut value = 0_u64;
-        for index in 0..10 {
-            let byte = self.read_exact(1)?[0];
-            let payload = u64::from(byte & 0x7f);
-            if index == 9 && payload > 1 {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedVarUint,
-                    "varuint exceeds u64",
-                ));
-            }
-            value |= payload << shift;
-            if byte & 0x80 == 0 {
-                if self.bytes[start..self.offset] != encode_varuint(value) {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::NonCanonicalVarUint,
-                        "varuint is not minimally encoded",
-                    ));
-                }
-                return Ok(value);
-            }
-            shift += 7;
-        }
-        Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedVarUint,
-            "varuint is too long",
-        ))
-    }
-
-    pub fn read_bytes(&mut self) -> CanonicalResult<Vec<u8>> {
-        let length = usize::try_from(self.read_varuint()?).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "length does not fit usize",
-            )
-        })?;
-        Ok(self.read_exact(length)?.to_vec())
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -339,13 +231,5 @@ mod tests {
     fn binary_command_refuses_unknown_and_trailing_input() {
         assert_eq!(run_foundation_command(&[0xff])[0], 1);
         assert_eq!(run_foundation_command(&[2, 0, 0, 0, 0, 1])[0], 1);
-    }
-
-    #[test]
-    fn canonical_varuint_reader_rejects_nonminimal_encoding() {
-        let error = CanonicalReader::new(&[0x80, 0x00])
-            .read_varuint()
-            .expect_err("overlong zero must refuse");
-        assert_eq!(error.code, CanonicalErrorCode::NonCanonicalVarUint);
     }
 }

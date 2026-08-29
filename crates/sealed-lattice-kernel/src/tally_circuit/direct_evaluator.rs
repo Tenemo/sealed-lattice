@@ -7,11 +7,11 @@ pub(crate) fn evaluate_tally_directly(
     profile: TallyCircuitProfile,
     input: &TallyEvaluationInput,
 ) -> Result<TallyEvaluationOutcome, TallyCircuitError> {
-    let (minimum_score, maximum_score) = foundation_score_bounds()?;
-    let participant_count = usize::from(profile.participant_count());
-    let option_count = usize::from(profile.option_count());
-    let top_count = usize::from(profile.top_count());
-    let participant_ballots = input.participant_ballots();
+    let (minimum_score, maximum_score) = foundation_score_bounds();
+    let participant_count = usize::from(profile.participant_count);
+    let option_count = usize::from(profile.option_count);
+    let top_count = usize::from(profile.top_count);
+    let participant_ballots = &input.participant_ballots;
 
     if participant_ballots.len() != participant_count {
         return Err(TallyCircuitError::InputParticipantCountMismatch {
@@ -26,15 +26,14 @@ pub(crate) fn evaluate_tally_directly(
     let mut has_selected_ballot = false;
 
     for (participant_position, ballot) in participant_ballots.iter().enumerate() {
-        if ballot.score_encodings().len() != option_count {
+        if ballot.score_encodings.len() != option_count {
             return Err(TallyCircuitError::InputOptionCountMismatch {
                 participant_position,
                 expected: option_count,
-                actual: ballot.score_encodings().len(),
+                actual: ballot.score_encodings.len(),
             });
         }
-        for (option_position, score_encoding) in
-            ballot.score_encodings().iter().copied().enumerate()
+        for (option_position, score_encoding) in ballot.score_encodings.iter().copied().enumerate()
         {
             if usize::from(score_encoding) > maximum_score_encoding {
                 return Err(TallyCircuitError::ScoreEncodingOutOfRange {
@@ -45,9 +44,9 @@ pub(crate) fn evaluate_tally_directly(
             }
         }
 
-        let is_selected = ballot.is_present()
+        let is_selected = ballot.is_present
             && ballot
-                .score_encodings()
+                .score_encodings
                 .iter()
                 .copied()
                 .all(|score_encoding| {
@@ -57,7 +56,7 @@ pub(crate) fn evaluate_tally_directly(
             has_selected_ballot = true;
             for (aggregate_score, score_encoding) in aggregate_scores
                 .iter_mut()
-                .zip(ballot.score_encodings().iter().copied())
+                .zip(ballot.score_encodings.iter().copied())
             {
                 *aggregate_score = aggregate_score
                     .checked_add(u32::from(score_encoding))

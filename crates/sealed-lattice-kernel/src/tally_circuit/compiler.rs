@@ -1,23 +1,15 @@
 use super::{
-    BooleanOperation, CompiledTallyCircuit, TallyCircuitError, TallyCircuitGeometry,
-    TallyCircuitProfile, WireIndex, bit_width_for_maximum_value, foundation_score_bounds,
+    BooleanOperation, CompiledTallyCircuit, TallyCircuitError, TallyCircuitProfile, WireIndex,
+    bit_width_for_maximum_value, foundation_score_bounds,
 };
 
 pub(crate) fn compile_tally_circuit(
     profile: TallyCircuitProfile,
 ) -> Result<CompiledTallyCircuit, TallyCircuitError> {
-    let (circuit, _accepted_ballot_authorship_source_wires) =
-        compile_tally_circuit_with_authorship_sources(profile)?;
-    Ok(circuit)
-}
-
-pub(super) fn compile_tally_circuit_with_authorship_sources(
-    profile: TallyCircuitProfile,
-) -> Result<(CompiledTallyCircuit, Vec<WireIndex>), TallyCircuitError> {
-    let (_, maximum_score) = foundation_score_bounds()?;
-    let participant_count = usize::from(profile.participant_count());
-    let option_count = usize::from(profile.option_count());
-    let top_count = usize::from(profile.top_count());
+    let (_, maximum_score) = foundation_score_bounds();
+    let participant_count = usize::from(profile.participant_count);
+    let option_count = usize::from(profile.option_count);
+    let top_count = usize::from(profile.top_count);
     let score_bit_width = bit_width_for_maximum_value(usize::from(maximum_score));
     let ballot_presence_input_bit_count = participant_count;
     let private_score_input_bit_count = ballot_presence_input_bit_count
@@ -120,30 +112,14 @@ pub(super) fn compile_tally_circuit_with_authorship_sources(
         .take(top_count)
         .map(|item_wires| item_wires[aggregate_score_bit_width..].to_vec())
         .collect::<Vec<_>>();
-    let private_result_bit_count = top_count
-        .checked_mul(option_position_bit_width)
-        .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-    let geometry = builder.geometry(
-        ballot_presence_input_bit_count,
-        private_score_input_bit_count,
+    Ok(CompiledTallyCircuit {
+        profile,
+        input_bit_count,
         score_bit_width,
-        aggregate_score_bit_width,
-        option_position_bit_width,
-        private_result_bit_count,
-    )?;
-
-    Ok((
-        CompiledTallyCircuit {
-            profile,
-            geometry,
-            operations: builder.operations,
-            ballot_presence_wires,
-            ballot_score_wires,
-            nonempty_output_wire,
-            ordered_option_position_wires,
-        },
-        participant_selected_wires,
-    ))
+        operations: builder.operations,
+        nonempty_output_wire,
+        ordered_option_position_wires,
+    })
 }
 
 type BallotPresenceWires = Vec<WireIndex>;
@@ -183,17 +159,15 @@ fn score_is_valid(
     builder: &mut BooleanCircuitBuilder,
     score_wires: &[WireIndex],
 ) -> Result<WireIndex, TallyCircuitError> {
-    if score_wires.len() != 4 {
-        return Err(TallyCircuitError::UnsupportedFoundationScoreRange {
-            minimum_score: crate::foundation::FOUNDATION_MINIMUM_SCORE,
-            maximum_score: crate::foundation::FOUNDATION_MAXIMUM_SCORE,
-        });
-    }
-
-    let least_significant_bit = score_wires[0];
-    let second_bit = score_wires[1];
-    let third_bit = score_wires[2];
-    let most_significant_bit = score_wires[3];
+    let &[
+        least_significant_bit,
+        second_bit,
+        third_bit,
+        most_significant_bit,
+    ] = score_wires
+    else {
+        return Err(TallyCircuitError::ArithmeticOverflow);
+    };
 
     let low_bits_nonzero = builder.append_disjunction(least_significant_bit, second_bit)?;
     let high_bits_nonzero = builder.append_disjunction(third_bit, most_significant_bit)?;
@@ -340,13 +314,6 @@ struct BooleanCircuitBuilder {
     constant_values: Vec<Option<bool>>,
     false_constant_wire: WireIndex,
     true_constant_wire: WireIndex,
-    conjunction_gate_count: usize,
-    exclusive_or_gate_count: usize,
-    negation_gate_count: usize,
-    folded_conjunction_count: usize,
-    folded_exclusive_or_count: usize,
-    folded_negation_count: usize,
-    duplicate_input_conjunction_count: usize,
 }
 
 impl BooleanCircuitBuilder {
@@ -370,13 +337,6 @@ impl BooleanCircuitBuilder {
             constant_values,
             false_constant_wire,
             true_constant_wire,
-            conjunction_gate_count: 0,
-            exclusive_or_gate_count: 0,
-            negation_gate_count: 0,
-            folded_conjunction_count: 0,
-            folded_exclusive_or_count: 0,
-            folded_negation_count: 0,
-            duplicate_input_conjunction_count: 0,
         })
     }
 
@@ -396,19 +356,11 @@ impl BooleanCircuitBuilder {
         self.validate_input_wire(left_wire)?;
         self.validate_input_wire(right_wire)?;
         if left_wire == right_wire {
-            self.folded_exclusive_or_count = self
-                .folded_exclusive_or_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
             return Ok(self.false_constant_wire);
         }
         let left_constant = self.constant_value(left_wire)?;
         let right_constant = self.constant_value(right_wire)?;
         if let Some(left_constant) = left_constant {
-            self.folded_exclusive_or_count = self
-                .folded_exclusive_or_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
             return if left_constant {
                 self.append_negation(right_wire)
             } else {
@@ -416,27 +368,16 @@ impl BooleanCircuitBuilder {
             };
         }
         if let Some(right_constant) = right_constant {
-            self.folded_exclusive_or_count = self
-                .folded_exclusive_or_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
             return if right_constant {
                 self.append_negation(left_wire)
             } else {
                 Ok(left_wire)
             };
         }
-        self.exclusive_or_gate_count = self
-            .exclusive_or_gate_count
-            .checked_add(1)
-            .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-        self.append_operation(
-            BooleanOperation::ExclusiveOr {
-                left_wire,
-                right_wire,
-            },
-            None,
-        )
+        self.append_operation(BooleanOperation::ExclusiveOr {
+            left_wire,
+            right_wire,
+        })
     }
 
     fn append_conjunction(
@@ -447,23 +388,11 @@ impl BooleanCircuitBuilder {
         self.validate_input_wire(left_wire)?;
         self.validate_input_wire(right_wire)?;
         if left_wire == right_wire {
-            self.folded_conjunction_count = self
-                .folded_conjunction_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-            self.duplicate_input_conjunction_count = self
-                .duplicate_input_conjunction_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
             return Ok(left_wire);
         }
         let left_constant = self.constant_value(left_wire)?;
         let right_constant = self.constant_value(right_wire)?;
         if let Some(left_constant) = left_constant {
-            self.folded_conjunction_count = self
-                .folded_conjunction_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
             return Ok(if left_constant {
                 right_wire
             } else {
@@ -471,47 +400,28 @@ impl BooleanCircuitBuilder {
             });
         }
         if let Some(right_constant) = right_constant {
-            self.folded_conjunction_count = self
-                .folded_conjunction_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
             return Ok(if right_constant {
                 left_wire
             } else {
                 self.false_constant_wire
             });
         }
-        self.conjunction_gate_count = self
-            .conjunction_gate_count
-            .checked_add(1)
-            .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-        self.append_operation(
-            BooleanOperation::Conjunction {
-                left_wire,
-                right_wire,
-            },
-            None,
-        )
+        self.append_operation(BooleanOperation::Conjunction {
+            left_wire,
+            right_wire,
+        })
     }
 
     fn append_negation(&mut self, input_wire: WireIndex) -> Result<WireIndex, TallyCircuitError> {
         self.validate_input_wire(input_wire)?;
         if let Some(input_constant) = self.constant_value(input_wire)? {
-            self.folded_negation_count = self
-                .folded_negation_count
-                .checked_add(1)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?;
             return Ok(if input_constant {
                 self.false_constant_wire
             } else {
                 self.true_constant_wire
             });
         }
-        self.negation_gate_count = self
-            .negation_gate_count
-            .checked_add(1)
-            .ok_or(TallyCircuitError::ArithmeticOverflow)?;
-        self.append_operation(BooleanOperation::Negation { input_wire }, None)
+        self.append_operation(BooleanOperation::Negation { input_wire })
     }
 
     fn append_disjunction(
@@ -527,11 +437,10 @@ impl BooleanCircuitBuilder {
     fn append_operation(
         &mut self,
         operation: BooleanOperation,
-        constant_value: Option<bool>,
     ) -> Result<WireIndex, TallyCircuitError> {
         let output_wire = wire_index_from_usize(self.available_wire_count()?)?;
         self.operations.push(operation);
-        self.constant_values.push(constant_value);
+        self.constant_values.push(None);
         Ok(output_wire)
     }
 
@@ -564,39 +473,5 @@ impl BooleanCircuitBuilder {
         self.input_bit_count
             .checked_add(self.operations.len())
             .ok_or(TallyCircuitError::ArithmeticOverflow)
-    }
-
-    fn geometry(
-        &self,
-        ballot_presence_input_bit_count: usize,
-        private_score_input_bit_count: usize,
-        score_bit_width: usize,
-        aggregate_score_bit_width: usize,
-        option_position_bit_width: usize,
-        private_result_bit_count: usize,
-    ) -> Result<TallyCircuitGeometry, TallyCircuitError> {
-        Ok(TallyCircuitGeometry {
-            input_bit_count: self.input_bit_count,
-            ballot_presence_input_bit_count,
-            private_score_input_bit_count,
-            score_bit_width,
-            aggregate_score_bit_width,
-            option_position_bit_width,
-            constant_operation_count: 2,
-            conjunction_gate_count: self.conjunction_gate_count,
-            exclusive_or_gate_count: self.exclusive_or_gate_count,
-            negation_gate_count: self.negation_gate_count,
-            total_wire_count: self.available_wire_count()?,
-            fresh_input_and_conjunction_output_wire_count: self
-                .input_bit_count
-                .checked_add(self.conjunction_gate_count)
-                .ok_or(TallyCircuitError::ArithmeticOverflow)?,
-            folded_conjunction_count: self.folded_conjunction_count,
-            folded_exclusive_or_count: self.folded_exclusive_or_count,
-            folded_negation_count: self.folded_negation_count,
-            duplicate_input_conjunction_count: self.duplicate_input_conjunction_count,
-            public_output_bit_count: 1,
-            private_result_bit_count,
-        })
     }
 }
