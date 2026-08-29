@@ -13,12 +13,9 @@ import { fileURLToPath } from 'node:url';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import { runPackageManagerAndCaptureOutput } from './run-command.js';
 
-import { normalizeFoundationKernelBytesForHash } from '#packages/wasm/src/foundation-kernel.js';
-
 const sdkDeclarationEntryEnvironmentVariable =
     'SEALED_LATTICE_SDK_DECLARATION_ENTRY_PATH';
-const sdkKernelHashEnvironmentVariable =
-    'SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX';
+const sdkKernelHashEnvironmentVariable = 'SEALED_LATTICE_KERNEL_SHA256_HEX';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const wasmKernelSourcePath = path.resolve(
     repoRoot,
@@ -44,10 +41,8 @@ const tsdownConfigPath = path.resolve(
     'ci',
     'sdk-package-tsdown.config.ts',
 );
-export const hashNormalizedWasmKernel = (bytes: Uint8Array): string =>
-    createHash('sha256')
-        .update(normalizeFoundationKernelBytesForHash(bytes))
-        .digest('hex');
+export const hashWasmKernel = (bytes: Uint8Array): string =>
+    createHash('sha256').update(bytes).digest('hex');
 
 export const copyWasmKernelByteIdentically = async (input: {
     readonly destinationPath: string;
@@ -169,7 +164,7 @@ export const buildSdkPackage = async (): Promise<void> => {
         throw buildError;
     }
 
-    const kernelHash = hashNormalizedWasmKernel(kernelBytes);
+    const kernelHash = hashWasmKernel(kernelBytes);
     await mkdir(sdkDeclarationScratchRoot, { recursive: true });
     const sdkDeclarationScratchDirectoryPath = await mkdtemp(
         path.join(sdkDeclarationScratchRoot, 'build-'),

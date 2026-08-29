@@ -15,6 +15,8 @@ The canonical participant artifact must remain scalar-capable. SIMD is optional.
 
 The browser bridge transfers owned binary buffers and reacquires WebAssembly memory views after any operation that can grow memory.
 
+Kernel integrity is the SHA-256 hash of the exact shipped WebAssembly bytes, including custom sections. Build reproducibility is enforced during generation rather than by normalizing bytes in the loader.
+
 The public SDK exposes only implemented foundation operations. Source and package tests define the exact command inventory.
 
 Package tests establish only their named byte, refusal, and runtime properties. See the repository [README](../../README.md) for implementation status and [SECURITY.md](../../SECURITY.md) for security limitations.

@@ -4,8 +4,7 @@ import { defineConfig } from 'tsdown';
 
 const sdkDeclarationEntryEnvironmentVariable =
     'SEALED_LATTICE_SDK_DECLARATION_ENTRY_PATH';
-const sdkKernelHashEnvironmentVariable =
-    'SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX';
+const sdkKernelHashEnvironmentVariable = 'SEALED_LATTICE_KERNEL_SHA256_HEX';
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
 const kernelHash = process.env[sdkKernelHashEnvironmentVariable];
 const declarationEntryPath =
@@ -19,7 +18,7 @@ const sdkTsconfigPath = fileURLToPath(
 
 if (kernelHash === undefined || !sha256HexPattern.test(kernelHash)) {
     throw new Error(
-        `${sdkKernelHashEnvironmentVariable} must contain the normalized SHA-256 hash of the packaged WASM kernel. Run the SDK package build through its package script.`,
+        `${sdkKernelHashEnvironmentVariable} must contain the SHA-256 hash of the packaged WASM kernel. Run the SDK package build through its package script.`,
     );
 }
 if (declarationEntryPath === undefined) {
@@ -51,8 +50,7 @@ export default defineConfig([
         clean: true,
         cwd: sdkPackageDirectoryPath,
         define: {
-            __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__:
-                JSON.stringify(kernelHash),
+            __SEALED_LATTICE_KERNEL_SHA256_HEX__: JSON.stringify(kernelHash),
         },
         deps: dependencyPolicy,
         dts: false,

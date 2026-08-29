@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    hashNormalizedWasmKernel,
+    hashWasmKernel,
     normalizeSdkDeclarationSourceMarkers,
 } from '#tools/ci/build-sdk-package';
 
 const wasmHeader = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00] as const;
 
 describe('SDK package build', () => {
-    it('binds the package hash to executable WASM while ignoring custom metadata sections', () => {
+    it('binds the package hash to every shipped WASM byte', () => {
         const firstCustomSection = Uint8Array.from([
             ...wasmHeader,
             0x00,
@@ -30,11 +30,11 @@ describe('SDK package build', () => {
             0x00,
         ]);
 
-        expect(hashNormalizedWasmKernel(firstCustomSection)).toBe(
-            hashNormalizedWasmKernel(secondCustomSection),
+        expect(hashWasmKernel(firstCustomSection)).not.toBe(
+            hashWasmKernel(secondCustomSection),
         );
-        expect(hashNormalizedWasmKernel(firstCustomSection)).not.toBe(
-            hashNormalizedWasmKernel(executableSection),
+        expect(hashWasmKernel(firstCustomSection)).not.toBe(
+            hashWasmKernel(executableSection),
         );
     });
 

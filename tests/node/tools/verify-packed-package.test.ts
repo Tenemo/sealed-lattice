@@ -44,7 +44,7 @@ describe('packed package policy checks', () => {
                 declarationSourceText:
                     "export type { VerificationResult } from '@sealed-lattice/wasm';",
                 runtimeSourceText:
-                    "import { foundationProfile } from '@sealed-lattice/wasm';\nconst hash = __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__;",
+                    "import { foundationProfile } from '@sealed-lattice/wasm';\nconst hash = __SEALED_LATTICE_KERNEL_SHA256_HEX__;",
             }),
         ).toEqual(
             expect.arrayContaining([

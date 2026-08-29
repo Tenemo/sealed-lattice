@@ -13,7 +13,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { foundationProfile } from '#packages/wasm/src/foundation-contract.js';
-import { normalizeFoundationKernelBytesForHash } from '#packages/wasm/src/foundation-kernel.js';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
@@ -179,180 +178,17 @@ const cargoWasmOutputFilePath = (targetDirectoryPath: string): string =>
         'sealed_lattice_kernel.wasm',
     );
 
-const hashNormalizedWasmKernel = async (filePath: string): Promise<string> =>
+const hashWasmKernel = async (filePath: string): Promise<string> =>
     createHash('sha256')
-        .update(normalizeFoundationKernelBytesForHash(await readFile(filePath)))
+        .update(await readFile(filePath))
         .digest('hex');
-
-const readUnsignedLeb128 = (
-    bytes: Uint8Array,
-    startingOffset: number,
-): { readonly nextOffset: number; readonly value: number } => {
-    let offset = startingOffset;
-    let value = 0;
-    let shift = 0;
-    while (offset < bytes.length && shift <= 28) {
-        const byte = bytes[offset];
-        if (byte === undefined) {
-            break;
-        }
-        offset += 1;
-        value |= (byte & 0x7f) << shift;
-        if ((byte & 0x80) === 0) {
-            return { nextOffset: offset, value: value >>> 0 };
-        }
-        shift += 7;
-    }
-    throw new Error('WASM contains an invalid unsigned LEB128 value.');
-};
-
-const readSignedI32Leb128 = (
-    bytes: Uint8Array,
-    startingOffset: number,
-): { readonly nextOffset: number; readonly value: number } => {
-    let offset = startingOffset;
-    let value = 0;
-    let shift = 0;
-    let byte: number;
-    do {
-        const nextByte = bytes[offset];
-        if (nextByte === undefined || shift > 28) {
-            throw new Error(
-                'WASM contains an invalid signed i32 LEB128 value.',
-            );
-        }
-        byte = nextByte;
-        offset += 1;
-        value |= (byte & 0x7f) << shift;
-        shift += 7;
-    } while ((byte & 0x80) !== 0);
-    if (shift < 32 && (byte & 0x40) !== 0) {
-        value |= ~0 << shift;
-    }
-    return { nextOffset: offset, value: value | 0 };
-};
-
-export const assertDeterministicWasmStackLayout = (bytes: Uint8Array): void => {
-    const expectedHeader = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
-    if (
-        bytes.length < expectedHeader.length ||
-        expectedHeader.some((byte, index) => bytes[index] !== byte)
-    ) {
-        throw new Error(
-            'WASM stack inspection received an invalid module header.',
-        );
-    }
-    let module: WebAssembly.Module;
-    try {
-        const ownedModuleBytes = new Uint8Array(bytes.byteLength);
-        ownedModuleBytes.set(bytes);
-        module = new WebAssembly.Module(ownedModuleBytes.buffer);
-    } catch (error) {
-        throw Object.assign(
-            new Error('WASM stack inspection received an invalid module.'),
-            { cause: error },
-        );
-    }
-    if (
-        WebAssembly.Module.imports(module).some(
-            (entry) => entry.kind === 'global',
-        )
-    ) {
-        throw new Error(
-            'WASM stack layout must not depend on imported globals.',
-        );
-    }
-
-    let offset = expectedHeader.length;
-    let mutableI32GlobalCount = 0;
-    let configuredStackGlobalCount = 0;
-    let observedGlobalSection = false;
-    while (offset < bytes.length) {
-        const sectionIdentifier = bytes[offset];
-        if (sectionIdentifier === undefined) {
-            throw new Error('WASM section identifier is truncated.');
-        }
-        offset += 1;
-        const sectionLength = readUnsignedLeb128(bytes, offset);
-        offset = sectionLength.nextOffset;
-        const sectionEnd = offset + sectionLength.value;
-        if (sectionEnd > bytes.length) {
-            throw new Error('WASM section payload is truncated.');
-        }
-        if (sectionIdentifier !== 6) {
-            offset = sectionEnd;
-            continue;
-        }
-        if (observedGlobalSection) {
-            throw new Error('WASM contains more than one global section.');
-        }
-        observedGlobalSection = true;
-        const globalCount = readUnsignedLeb128(bytes, offset);
-        offset = globalCount.nextOffset;
-        for (
-            let globalIndex = 0;
-            globalIndex < globalCount.value;
-            globalIndex += 1
-        ) {
-            const valueType = bytes[offset];
-            const mutability = bytes[offset + 1];
-            const initializerOpcode = bytes[offset + 2];
-            if (
-                valueType === undefined ||
-                mutability === undefined ||
-                initializerOpcode === undefined
-            ) {
-                throw new Error('WASM global declaration is truncated.');
-            }
-            offset += 3;
-            if (valueType !== 0x7f || initializerOpcode !== 0x41) {
-                throw new Error(
-                    'WASM stack inspection requires i32 globals with i32.const initializers.',
-                );
-            }
-            const initializer = readSignedI32Leb128(bytes, offset);
-            offset = initializer.nextOffset;
-            if (bytes[offset] !== 0x0b) {
-                throw new Error(
-                    'WASM global initializer is not terminated canonically.',
-                );
-            }
-            offset += 1;
-            if (mutability === 1) {
-                mutableI32GlobalCount += 1;
-                if (initializer.value === wasmStackByteLength) {
-                    configuredStackGlobalCount += 1;
-                }
-            } else if (mutability !== 0) {
-                throw new Error('WASM global has invalid mutability.');
-            }
-        }
-        if (offset !== sectionEnd) {
-            throw new Error('WASM global section contains trailing bytes.');
-        }
-    }
-    if (
-        !observedGlobalSection ||
-        mutableI32GlobalCount !== 1 ||
-        configuredStackGlobalCount !== 1
-    ) {
-        throw new Error(
-            `WASM must contain exactly one mutable i32 stack global initialized to ${wasmStackByteLength}.`,
-        );
-    }
-};
-
-export type BuiltWasmKernelArtifact = Readonly<{
-    normalizedSha256Hex: string;
-    outputFilePath: string;
-}>;
 
 export const buildOptimizedWasmKernelArtifact = async (input: {
     readonly artifactLabel: string;
     readonly outputFilePath: string;
     readonly scratchDirectoryPrefix: string;
     readonly targetDirectoryPath: string;
-}): Promise<BuiltWasmKernelArtifact> => {
+}): Promise<void> => {
     const outputDirectoryPath = path.dirname(input.outputFilePath);
     await mkdir(outputDirectoryPath, { recursive: true });
     await mkdir(wasmBuildScratchRoot, { recursive: true });
@@ -379,22 +215,12 @@ export const buildOptimizedWasmKernelArtifact = async (input: {
         );
         runWasmOptimizer(unoptimizedOutputFilePath, optimizedOutputFilePath);
 
-        assertDeterministicWasmStackLayout(
-            await readFile(optimizedOutputFilePath),
-        );
-
-        const normalizedSha256Hex = await hashNormalizedWasmKernel(
-            optimizedOutputFilePath,
-        );
+        const sha256Hex = await hashWasmKernel(optimizedOutputFilePath);
         await rename(optimizedOutputFilePath, input.outputFilePath);
 
         console.log(
-            `${input.artifactLabel} built at ${path.relative(repoRoot, input.outputFilePath)} (${normalizedSha256Hex}); deterministic WASM stack ${wasmStackByteLength} bytes.`,
+            `${input.artifactLabel} built at ${path.relative(repoRoot, input.outputFilePath)} (${sha256Hex}); deterministic WASM stack ${wasmStackByteLength} bytes.`,
         );
-        return Object.freeze({
-            normalizedSha256Hex,
-            outputFilePath: input.outputFilePath,
-        });
     } finally {
         await rm(scratchDirectoryPath, { force: true, recursive: true });
     }

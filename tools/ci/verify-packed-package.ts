@@ -53,8 +53,7 @@ const expectedPublishedPackageFilePaths = [
     'dist/sealed-lattice-kernel.wasm',
     'package.json',
 ] as const;
-const unresolvedKernelHashToken =
-    '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
+const unresolvedKernelHashToken = '__SEALED_LATTICE_KERNEL_SHA256_HEX__';
 
 const createPackArguments = (packDirectory: string): readonly string[] => [
     'pack',

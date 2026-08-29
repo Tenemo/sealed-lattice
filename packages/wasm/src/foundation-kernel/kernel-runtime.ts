@@ -12,16 +12,10 @@ import type {
 } from './kernel-contracts.js';
 import {
     bytesToHex,
-    concatenateByteChunks,
-    hasWasmHeader,
-    normalizeRustSourcePathsForHash,
-    readWasmVarUint32,
     sha256HexPattern,
     textDecoder,
     textEncoder,
     wasm32UsizeByteLength,
-    wasmCustomSectionId,
-    wasmHeaderByteLength,
 } from './kernel-contracts.js';
 import { canonicalErrorCodes } from './kernel-errors.js';
 
@@ -313,49 +307,6 @@ const serializeBoundedKernelCommandRequest = (
     return requestBytes;
 };
 
-// Excludes WASM custom sections (debug / producers / name) from the integrity hash:
-// they vary by toolchain but do not affect execution, so dropping them keeps the
-// hash reproducible across build environments.
-const stripWasmCustomSectionsForHash = (bytes: Uint8Array): Uint8Array => {
-    if (!hasWasmHeader(bytes)) {
-        return bytes;
-    }
-
-    const chunks: Uint8Array[] = [bytes.subarray(0, wasmHeaderByteLength)];
-    let totalByteLength = wasmHeaderByteLength;
-    let sectionOffset = wasmHeaderByteLength;
-
-    while (sectionOffset < bytes.length) {
-        const sectionId = bytes[sectionOffset];
-        const sectionSize = readWasmVarUint32(bytes, sectionOffset + 1);
-        const sectionPayloadOffset = sectionSize.nextOffset;
-        const nextSectionOffset = sectionPayloadOffset + sectionSize.value;
-        if (nextSectionOffset > bytes.length) {
-            throw new Error(
-                'The foundation kernel contains a truncated WASM section.',
-            );
-        }
-
-        if (sectionId !== wasmCustomSectionId) {
-            const sectionBytes = bytes.subarray(
-                sectionOffset,
-                nextSectionOffset,
-            );
-            chunks.push(sectionBytes);
-            totalByteLength += sectionBytes.length;
-        }
-
-        sectionOffset = nextSectionOffset;
-    }
-
-    return concatenateByteChunks(chunks, totalByteLength);
-};
-
-export const normalizeFoundationKernelBytesForHash = (
-    bytes: Uint8Array,
-): Uint8Array =>
-    stripWasmCustomSectionsForHash(normalizeRustSourcePathsForHash(bytes));
-
 const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
     const subtleCrypto = globalThis.crypto?.subtle;
     /* v8 ignore next 5 */
@@ -382,9 +333,7 @@ const verifyKernelIntegrity = async (
         );
     }
 
-    const actualSha256Hex = await sha256Hex(
-        normalizeFoundationKernelBytesForHash(new Uint8Array(bytes)),
-    );
+    const actualSha256Hex = await sha256Hex(new Uint8Array(bytes));
     if (actualSha256Hex !== expectedSha256Hex) {
         throw new Error(
             `The foundation kernel failed integrity verification: expected ${expectedSha256Hex}, received ${actualSha256Hex}.`,
