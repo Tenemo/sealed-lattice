@@ -25,7 +25,7 @@ const kernelOutputPath = path.join(
     'sealed-lattice-kernel.wasm',
 );
 
-export const hashWasmKernel = (bytes: Uint8Array): string =>
+const hashWasmKernel = (bytes: Uint8Array): string =>
     createHash('sha256').update(bytes).digest('hex');
 
 export const buildSdkPackage = async (): Promise<void> => {
