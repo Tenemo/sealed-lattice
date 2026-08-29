@@ -21,6 +21,7 @@ required-features = ["direct-mpc-scalar-measurement"]
 preparation-field-measurement = []
 preparation-zero-sharing-measurement = []
 direct-mpc-scalar-measurement = []
+direct-mpc-one-and-verifier = []
 
 [dependencies]
 aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }

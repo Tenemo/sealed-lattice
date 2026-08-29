@@ -203,6 +203,19 @@ pub(crate) use binary_field::BinaryFieldElement256;
 #[cfg(feature = "preparation-field-measurement")]
 pub(crate) use binary_field_320::measure_binary_field_320_multiplications;
 pub(crate) use context::TallyPreparationContext;
+pub(crate) use direct_mpc_participant_cursor::{
+    DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH, DirectMpcCursorError,
+    DirectMpcJoinedSubsetMaster, DirectMpcParticipantCursor, DirectMpcPrssContext,
+};
+pub(crate) use direct_mpc_prime_field::{
+    DirectMpcPrimeFieldElement, DirectMpcPrimeFieldError, evaluate_prime_field_polynomial,
+    interpolate_consecutive_prime_field_values,
+};
+pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSeedMasters320;
+#[cfg(test)]
+pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::locally_joined_seed_masters_for_direct_mpc_test;
+#[cfg(test)]
+pub(crate) use replicated_random_sharing::ReplicatedRandomSharingSubset;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TallyPreparationError {

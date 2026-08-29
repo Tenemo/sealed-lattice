@@ -5,7 +5,7 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 use subtle::ConstantTimeEq;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
@@ -23,6 +23,7 @@ use super::{
     direct_mpc_prime_field::{
         DIRECT_MPC_PRIME_FIELD_MODULUS, DirectMpcPrimeFieldElement, DirectMpcPrimeFieldError,
     },
+    pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSubsetMaster320,
     replicated_random_sharing::{ReplicatedRandomSharingGeometry, ReplicatedRandomSharingSubset},
 };
 
@@ -260,15 +261,26 @@ impl DirectMpcPrssContext {
     }
 }
 
-/// One source-verified joined subset master expected from the future seed
-/// terminal verifier. Constructing this record does not verify that terminal
-/// and therefore cannot authorize protocol continuation.
+/// One source-verified joined subset master.
 pub(crate) struct DirectMpcJoinedSubsetMaster {
     subset: ReplicatedRandomSharingSubset,
     bytes: Zeroizing<[u8; DIRECT_MPC_SUBSET_MASTER_BYTE_LENGTH]>,
 }
 
 impl DirectMpcJoinedSubsetMaster {
+    pub(crate) fn from_verified_joined_seed_master(
+        master: &LocallyJoinedPseudorandomZeroSharingSubsetMaster320,
+    ) -> Self {
+        Self {
+            subset: master.scope().subset(),
+            bytes: Zeroizing::new(*master.as_bytes()),
+        }
+    }
+
+    /// Constructs diagnostic source material only in tests and in the bounded
+    /// scalar measurement build. Production continuation must use the adapter
+    /// from positively verified joined seed custody.
+    #[cfg(any(test, feature = "preparation-zero-sharing-measurement"))]
     pub(crate) fn new(
         subset: ReplicatedRandomSharingSubset,
         bytes: [u8; DIRECT_MPC_SUBSET_MASTER_BYTE_LENGTH],
@@ -285,6 +297,31 @@ impl DirectMpcJoinedSubsetMaster {
 
     pub(crate) fn as_bytes(&self) -> &[u8; DIRECT_MPC_SUBSET_MASTER_BYTE_LENGTH] {
         &self.bytes
+    }
+}
+
+/// Typed PRSS output available only after the bounded cursor has consumed its
+/// complete source geometry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirectMpcPrssParticipantOutput {
+    ordinary_values: Box<[DirectMpcPrimeFieldElement]>,
+    zero_values: Box<[DirectMpcPrimeFieldElement]>,
+}
+
+impl DirectMpcPrssParticipantOutput {
+    pub(crate) fn ordinary_values(&self) -> &[DirectMpcPrimeFieldElement] {
+        &self.ordinary_values
+    }
+
+    pub(crate) fn zero_values(&self) -> &[DirectMpcPrimeFieldElement] {
+        &self.zero_values
+    }
+}
+
+impl Drop for DirectMpcPrssParticipantOutput {
+    fn drop(&mut self) {
+        self.ordinary_values.zeroize();
+        self.zero_values.zeroize();
     }
 }
 
@@ -585,6 +622,22 @@ impl DirectMpcParticipantCursor {
             &self.ordinary_accumulator,
             &self.zero_accumulator,
         )
+    }
+
+    pub(crate) fn verified_output(
+        &self,
+    ) -> Result<DirectMpcPrssParticipantOutput, DirectMpcCursorError> {
+        if !self.is_finished()? {
+            return Err(DirectMpcCursorError::ResultUnavailable);
+        }
+        Ok(DirectMpcPrssParticipantOutput {
+            ordinary_values: self
+                .ordinary_accumulator
+                .as_slice()
+                .to_vec()
+                .into_boxed_slice(),
+            zero_values: self.zero_accumulator.as_slice().to_vec().into_boxed_slice(),
+        })
     }
 
     fn apply_checkpoint(&mut self, checkpoint_bytes: &[u8]) -> Result<(), DirectMpcCursorError> {

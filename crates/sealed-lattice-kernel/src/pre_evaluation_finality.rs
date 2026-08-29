@@ -155,11 +155,31 @@ impl PreEvaluationFinalityScope {
         selected_set_root: Hash512,
         selection_state: SelectionState,
     ) -> Result<Self, FragmentError> {
+        Self::new_from_identities(
+            action_context.suite_id(),
+            action_context.context_hash(),
+            action_context.roster_hash(),
+            roster,
+            preparation_terminal_identity,
+            selected_set_root,
+            selection_state,
+        )
+    }
+
+    fn new_from_identities(
+        suite_identity: Hash512,
+        action_context_identity: Hash512,
+        expected_roster_identity: Hash512,
+        roster: &Roster,
+        preparation_terminal_identity: Hash512,
+        selected_set_root: Hash512,
+        selection_state: SelectionState,
+    ) -> Result<Self, FragmentError> {
         roster.validate().map_err(|_| FragmentError::WrongRoster)?;
         let roster_identity = roster
             .roster_hash()
             .map_err(|_| FragmentError::WrongRoster)?;
-        if roster_identity != action_context.roster_hash() {
+        if roster_identity != expected_roster_identity {
             return Err(FragmentError::WrongRoster);
         }
         let participant_count =
@@ -184,8 +204,8 @@ impl PreEvaluationFinalityScope {
             validate_roster_position(garbling_contributor_position, participant_count)?;
         }
         Ok(Self {
-            suite_identity: action_context.suite_id(),
-            action_context_identity: action_context.context_hash(),
+            suite_identity,
+            action_context_identity,
             roster_identity,
             participant_count,
             circuit_identity: one_and_circuit_identity()?,
@@ -409,19 +429,42 @@ impl StateOutputIntent {
         predecessor_identity: Hash512,
         semantic_body_identity: Hash512,
     ) -> Result<Self, FragmentError> {
-        validate_roster_position(subject_position, scope.participant_count)?;
+        Self::new_with_namespace(
+            scope.suite_identity,
+            scope.action_context_identity,
+            scope.preparation_terminal_identity,
+            scope.participant_count,
+            operation_kind,
+            subject_position,
+            predecessor_identity,
+            semantic_body_identity,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_namespace(
+        suite_identity: Hash512,
+        action_context_identity: Hash512,
+        state_namespace_identity: Hash512,
+        participant_count: u16,
+        operation_kind: &'static str,
+        subject_position: u16,
+        predecessor_identity: Hash512,
+        semantic_body_identity: Hash512,
+    ) -> Result<Self, FragmentError> {
+        validate_roster_position(subject_position, participant_count)?;
         let state_key_identity = hash_foundation_tuple_512(
             STATE_KEY_IDENTITY_DOMAIN,
             &[
-                CanonicalItem::hash512(scope.suite_identity.into_bytes()),
-                CanonicalItem::hash512(scope.action_context_identity.into_bytes()),
-                CanonicalItem::hash512(scope.preparation_terminal_identity.into_bytes()),
+                CanonicalItem::hash512(suite_identity.into_bytes()),
+                CanonicalItem::hash512(action_context_identity.into_bytes()),
+                CanonicalItem::hash512(state_namespace_identity.into_bytes()),
                 CanonicalItem::nonempty_ascii(operation_kind)?,
                 CanonicalItem::unsigned16(subject_position),
             ],
         )?;
         Ok(Self {
-            participant_count: scope.participant_count,
+            participant_count,
             operation_kind,
             subject_position,
             state_key_identity,
@@ -1292,6 +1335,11 @@ const fn control_object_decode_limits() -> CanonicalDecodeLimits {
         maximum_cumulative_allocation_byte_length: MAXIMUM_CONTROL_OBJECT_CUMULATIVE_BYTE_LENGTH,
     }
 }
+
+mod direct_mpc_one_and;
+
+#[cfg(feature = "direct-mpc-one-and-verifier")]
+pub(crate) use direct_mpc_one_and::run_direct_mpc_one_and_verification_bundle;
 
 #[cfg(test)]
 mod tests;

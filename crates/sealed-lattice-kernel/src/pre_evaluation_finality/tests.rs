@@ -22,10 +22,10 @@ const TEST_SIGNATURE_RANDOMNESS_DOMAIN: &str =
     "sealed-lattice/test/pre-evaluation-finality/signature-randomness";
 const TEST_CORRUPT_VIEW_DOMAIN: &str = "sealed-lattice/test/pre-evaluation-finality/corrupt-view";
 
-struct TestEnvironment {
-    roster: Roster,
-    action_context: ActionContext,
-    signing_keys: Vec<ml_dsa_65::PrivateKey>,
+pub(super) struct TestEnvironment {
+    pub(super) roster: Roster,
+    pub(super) action_context: ActionContext,
+    pub(super) signing_keys: Vec<ml_dsa_65::PrivateKey>,
 }
 
 struct NonemptyFixture {
@@ -654,7 +654,7 @@ fn nonempty_fixture(
     }
 }
 
-fn target_finality_terminal(
+pub(super) fn target_finality_terminal(
     scope: PreEvaluationFinalityScope,
     target: ComputationTargetBody,
     environment: &TestEnvironment,
@@ -789,7 +789,7 @@ fn garbling_release_carrier(
     .unwrap()
 }
 
-fn signed_state_output_certificate(
+pub(super) fn signed_state_output_certificate(
     intent: StateOutputIntent,
     environment: &TestEnvironment,
     witness_positions: &[u16],
@@ -844,7 +844,7 @@ fn signed_state_output_certificate(
     encode_domain_tuple(STATE_OUTPUT_CERTIFICATE_DOMAIN, items).unwrap()
 }
 
-fn sign_test_message(
+pub(super) fn sign_test_message(
     signing_key: &ml_dsa_65::PrivateKey,
     signer_position: u16,
     message: &[u8],
@@ -867,7 +867,7 @@ fn sign_test_message(
         .unwrap()
 }
 
-fn canonical_witness_positions(subject_position: u16, from_end: bool) -> Vec<u16> {
+pub(super) fn canonical_witness_positions(subject_position: u16, from_end: bool) -> Vec<u16> {
     let positions = (0..FOUNDATION_PROFILE.participant_count)
         .filter(|position| *position != subject_position)
         .collect::<Vec<_>>();
@@ -879,7 +879,7 @@ fn canonical_witness_positions(subject_position: u16, from_end: bool) -> Vec<u16
     }
 }
 
-fn no_result_terminal_bytes(scope: PreEvaluationFinalityScope) -> Vec<u8> {
+pub(super) fn no_result_terminal_bytes(scope: PreEvaluationFinalityScope) -> Vec<u8> {
     encode_domain_tuple(
         NO_RESULT_TERMINAL_DOMAIN,
         vec![
@@ -891,7 +891,7 @@ fn no_result_terminal_bytes(scope: PreEvaluationFinalityScope) -> Vec<u8> {
     .unwrap()
 }
 
-fn test_environment(marker: u8) -> TestEnvironment {
+pub(super) fn test_environment(marker: u8) -> TestEnvironment {
     let mut signing_keys = Vec::with_capacity(usize::from(FOUNDATION_PROFILE.participant_count));
     let roster_entries = (0..FOUNDATION_PROFILE.participant_count)
         .map(|roster_position| {

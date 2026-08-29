@@ -119,6 +119,37 @@ pub unsafe extern "C" fn sealed_lattice_transcript_core_command_with_length(
     leak_bytes(output)
 }
 
+/// Positively verifies one complete or partial direct-MPC one-AND transcript.
+///
+/// This feature-gated evidence boundary emits only a canonical verifier
+/// response. It does not activate a suite or authorize production dispatch.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory. `output_length_pointer`
+/// must be null or identify one writable `usize` value in the same memory.
+#[cfg(feature = "direct-mpc-one-and-verifier")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_verify_direct_mpc_one_and_with_length(
+    pointer: *const u8,
+    length: usize,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let input = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    let output = pre_evaluation_finality::run_direct_mpc_one_and_verification_bundle(input);
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    leak_bytes(output)
+}
+
 /// Positively verifies exact retained source, receipt, and public-terminal
 /// bytes before encoding inert joined seed-master custody.
 ///
