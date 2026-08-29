@@ -158,8 +158,13 @@ class BinaryWriter {
         this.#writeFixed(Uint8Array.of(value));
     }
 
-    writeU16(value: number, fieldName: string): void {
-        if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff) {
+    writeU16(value: unknown, fieldName: string): void {
+        if (
+            typeof value !== 'number' ||
+            !Number.isSafeInteger(value) ||
+            value < 0 ||
+            value > 0xffff
+        ) {
             throw new RangeError(
                 `${fieldName} must fit an unsigned 16-bit integer.`,
             );
@@ -169,24 +174,44 @@ class BinaryWriter {
         this.#writeFixed(bytes);
     }
 
-    writeU64(value: bigint): void {
+    writeU64(value: unknown, fieldName: string): void {
+        if (
+            typeof value !== 'bigint' ||
+            value < 0n ||
+            value > maximumUnsigned64
+        ) {
+            throw new RangeError(
+                `${fieldName} must fit an unsigned 64-bit integer.`,
+            );
+        }
         const bytes = new Uint8Array(8);
         new DataView(bytes.buffer).setBigUint64(0, value, true);
         this.#writeFixed(bytes);
     }
 
-    writeBytes(bytes: Uint8Array): void {
+    writeBytes(value: unknown, fieldName: string): void {
+        if (!(value instanceof Uint8Array)) {
+            throw new TypeError(`${fieldName} must be a Uint8Array.`);
+        }
         const length = new Uint8Array(4);
-        new DataView(length.buffer).setUint32(0, bytes.byteLength, true);
+        new DataView(length.buffer).setUint32(0, value.byteLength, true);
         this.#writeFixed(length);
-        this.#writeFixed(bytes);
+        this.#writeFixed(value);
     }
 
-    writeString(value: string): void {
-        this.writeBytes(textEncoder.encode(value));
+    writeString(value: unknown, fieldName: string): void {
+        if (typeof value !== 'string' || !value.isWellFormed()) {
+            throw new TypeError(`${fieldName} must be a well-formed string.`);
+        }
+        this.writeBytes(textEncoder.encode(value), fieldName);
     }
 
-    writeProtocolHash(value: ProtocolHash): void {
+    writeProtocolHash(value: unknown, fieldName: string): void {
+        if (!isProtocolHash(value)) {
+            throw new TypeError(
+                `${fieldName} must be a lowercase 512-bit hash.`,
+            );
+        }
         const bytes = new Uint8Array(hashByteLength);
         for (let index = 0; index < hashByteLength; index += 1) {
             bytes[index] = Number.parseInt(
@@ -262,97 +287,6 @@ class BinaryReader {
     }
 }
 
-const requireSafeInteger = (value: unknown, fieldName: string): number => {
-    if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
-        throw new TypeError(`${fieldName} must be a safe integer.`);
-    }
-    return value;
-};
-
-const requireCanonicalBytes = (
-    value: unknown,
-    fieldName: string,
-): Uint8Array => {
-    if (!(value instanceof Uint8Array)) {
-        throw new TypeError(`${fieldName} must be a Uint8Array.`);
-    }
-    return value;
-};
-
-const requireWellFormedString = (value: unknown, fieldName: string): string => {
-    if (typeof value !== 'string' || !value.isWellFormed()) {
-        throw new TypeError(`${fieldName} must be a well-formed string.`);
-    }
-    return value;
-};
-
-const requireProtocolHash = (
-    value: unknown,
-    fieldName: string,
-): ProtocolHash => {
-    if (!isProtocolHash(value)) {
-        throw new TypeError(`${fieldName} must be a lowercase 512-bit hash.`);
-    }
-    return value;
-};
-
-const validateManifestInput = (
-    input: FoundationManifestInput,
-): FoundationManifestInput => {
-    const displayTitle = requireWellFormedString(
-        input.displayTitle,
-        'displayTitle',
-    );
-    const rawOptionDefinitions: unknown = input.optionDefinitions;
-    if (!Array.isArray(rawOptionDefinitions)) {
-        throw new TypeError('optionDefinitions must be an array.');
-    }
-    const optionDefinitionsValue: readonly unknown[] = rawOptionDefinitions;
-    const optionDefinitionCount = requireSafeInteger(
-        optionDefinitionsValue.length,
-        'optionDefinitions.length',
-    );
-    if (
-        optionDefinitionCount < configurableOptionCountRange.minimum ||
-        optionDefinitionCount > configurableOptionCountRange.maximum
-    ) {
-        throw new RangeError(
-            `optionDefinitions must contain from ${String(configurableOptionCountRange.minimum)} through ${String(configurableOptionCountRange.maximum)} entries.`,
-        );
-    }
-    const optionDefinitions = Array.from(
-        { length: optionDefinitionCount },
-        (_unused, optionPosition) => {
-            const optionName = `optionDefinitions[${String(optionPosition)}]`;
-            const optionDefinition = optionDefinitionsValue[optionPosition];
-            if (
-                optionDefinition === null ||
-                typeof optionDefinition !== 'object'
-            ) {
-                throw new TypeError(`${optionName} must be an object.`);
-            }
-            const optionDefinitionRecord = optionDefinition as Readonly<
-                Record<string, unknown>
-            >;
-            return {
-                displayLabel: requireWellFormedString(
-                    optionDefinitionRecord.displayLabel,
-                    `${optionName}.displayLabel`,
-                ),
-                optionIdentifier: requireWellFormedString(
-                    optionDefinitionRecord.optionIdentifier,
-                    `${optionName}.optionIdentifier`,
-                ),
-                optionIndex: requireSafeInteger(
-                    optionDefinitionRecord.optionIndex,
-                    `${optionName}.optionIndex`,
-                ),
-            };
-        },
-    );
-    return { displayTitle, optionDefinitions };
-};
-
 const readHash = (reader: BinaryReader): ProtocolHash =>
     bytesToHex(reader.readFixed(hashByteLength));
 
@@ -418,7 +352,7 @@ const canonicalInputCommand = (
 ): BinaryWriter => {
     const request = new BinaryWriter();
     request.writeU8(command);
-    request.writeBytes(requireCanonicalBytes(canonicalBytes, 'canonicalBytes'));
+    request.writeBytes(canonicalBytes, 'canonicalBytes');
     return request;
 };
 
@@ -426,58 +360,71 @@ export const openFoundationCeremonyRuntime = (
     kernel: FoundationKernelCommandRuntime,
 ): FoundationCeremonyRuntime => ({
     encodeActionDefinition: (input) => {
-        const { submissionCutoffUnixMilliseconds } = input;
-        const topCount = requireSafeInteger(input.topCount, 'topCount');
-        if (
-            typeof submissionCutoffUnixMilliseconds !== 'bigint' ||
-            submissionCutoffUnixMilliseconds < 0n ||
-            submissionCutoffUnixMilliseconds > maximumUnsigned64
-        ) {
-            throw new RangeError(
-                'submissionCutoffUnixMilliseconds must fit an unsigned 64-bit integer.',
-            );
-        }
         const request = new BinaryWriter();
         request.writeU8(encodeActionDefinitionCommand);
-        request.writeU16(topCount, 'topCount');
-        request.writeU64(submissionCutoffUnixMilliseconds);
+        request.writeU16(input.topCount, 'topCount');
+        request.writeU64(
+            input.submissionCutoffUnixMilliseconds,
+            'submissionCutoffUnixMilliseconds',
+        );
         return executeCommand(kernel, request, (reader) => ({
             canonicalBytes: Uint8Array.from(reader.readBytes()),
             actionDefinitionHash: readHash(reader),
         }));
     },
     encodeBoardPolicy: (input) => {
-        const boardOriginIdentifier = requireWellFormedString(
+        const request = new BinaryWriter();
+        request.writeU8(encodeBoardPolicyCommand);
+        request.writeString(
             input.boardOriginIdentifier,
             'boardOriginIdentifier',
         );
-        const request = new BinaryWriter();
-        request.writeU8(encodeBoardPolicyCommand);
-        request.writeString(boardOriginIdentifier);
         return executeCommand(kernel, request, (reader) => ({
             canonicalBytes: Uint8Array.from(reader.readBytes()),
             boardPolicyHash: readHash(reader),
         }));
     },
     encodeManifest: (input) => {
-        const manifest = validateManifestInput(input);
+        const rawOptionDefinitions: unknown = input.optionDefinitions;
+        if (!Array.isArray(rawOptionDefinitions)) {
+            throw new TypeError('optionDefinitions must be an array.');
+        }
+        const optionDefinitions: readonly unknown[] = rawOptionDefinitions;
+        if (
+            optionDefinitions.length < configurableOptionCountRange.minimum ||
+            optionDefinitions.length > configurableOptionCountRange.maximum
+        ) {
+            throw new RangeError(
+                `optionDefinitions must contain from ${String(configurableOptionCountRange.minimum)} through ${String(configurableOptionCountRange.maximum)} entries.`,
+            );
+        }
         const request = new BinaryWriter();
         request.writeU8(encodeManifestCommand);
-        request.writeString(manifest.displayTitle);
-        request.writeU16(
-            manifest.optionDefinitions.length,
-            'optionDefinitions.length',
-        );
+        request.writeString(input.displayTitle, 'displayTitle');
+        request.writeU16(optionDefinitions.length, 'optionDefinitions.length');
         for (const [
             optionPosition,
             optionDefinition,
-        ] of manifest.optionDefinitions.entries()) {
-            request.writeU16(
-                optionDefinition.optionIndex,
-                `optionDefinitions[${String(optionPosition)}].optionIndex`,
+        ] of optionDefinitions.entries()) {
+            const optionName = `optionDefinitions[${String(optionPosition)}]`;
+            if (
+                optionDefinition === null ||
+                typeof optionDefinition !== 'object'
+            ) {
+                throw new TypeError(`${optionName} must be an object.`);
+            }
+            const option = optionDefinition as Readonly<
+                Record<string, unknown>
+            >;
+            request.writeU16(option.optionIndex, `${optionName}.optionIndex`);
+            request.writeString(
+                option.optionIdentifier,
+                `${optionName}.optionIdentifier`,
             );
-            request.writeString(optionDefinition.optionIdentifier);
-            request.writeString(optionDefinition.displayLabel);
+            request.writeString(
+                option.displayLabel,
+                `${optionName}.displayLabel`,
+            );
         }
         return executeCommand(kernel, request, (reader) => ({
             canonicalBytes: Uint8Array.from(reader.readBytes()),
@@ -488,46 +435,24 @@ export const openFoundationCeremonyRuntime = (
         const request = new BinaryWriter();
         request.writeU8(verifyActionContextCommand);
         request.writeBytes(
-            requireCanonicalBytes(
-                input.canonicalManifestBytes,
-                'canonicalManifestBytes',
-            ),
+            input.canonicalManifestBytes,
+            'canonicalManifestBytes',
+        );
+        request.writeBytes(input.canonicalRosterBytes, 'canonicalRosterBytes');
+        request.writeBytes(
+            input.canonicalActionDefinitionBytes,
+            'canonicalActionDefinitionBytes',
         );
         request.writeBytes(
-            requireCanonicalBytes(
-                input.canonicalRosterBytes,
-                'canonicalRosterBytes',
-            ),
+            input.canonicalBoardPolicyBytes,
+            'canonicalBoardPolicyBytes',
         );
-        request.writeBytes(
-            requireCanonicalBytes(
-                input.canonicalActionDefinitionBytes,
-                'canonicalActionDefinitionBytes',
-            ),
-        );
-        request.writeBytes(
-            requireCanonicalBytes(
-                input.canonicalBoardPolicyBytes,
-                'canonicalBoardPolicyBytes',
-            ),
-        );
-        request.writeString(
-            requireWellFormedString(
-                input.ceremonyIdentifier,
-                'ceremonyIdentifier',
-            ),
-        );
-        request.writeString(
-            requireWellFormedString(input.actionIdentifier, 'actionIdentifier'),
-        );
+        request.writeString(input.ceremonyIdentifier, 'ceremonyIdentifier');
+        request.writeString(input.actionIdentifier, 'actionIdentifier');
+        request.writeProtocolHash(input.expectedSuiteId, 'expectedSuiteId');
         request.writeProtocolHash(
-            requireProtocolHash(input.expectedSuiteId, 'expectedSuiteId'),
-        );
-        request.writeProtocolHash(
-            requireProtocolHash(
-                input.expectedCeremonyContextHash,
-                'expectedCeremonyContextHash',
-            ),
+            input.expectedCeremonyContextHash,
+            'expectedCeremonyContextHash',
         );
         return executeCommand(kernel, request, (reader) =>
             readVerification(reader, (response) => ({
@@ -566,26 +491,12 @@ export const openFoundationCeremonyRuntime = (
         const request = new BinaryWriter();
         request.writeU8(verifyCeremonyContextCommand);
         request.writeBytes(
-            requireCanonicalBytes(
-                input.canonicalManifestBytes,
-                'canonicalManifestBytes',
-            ),
+            input.canonicalManifestBytes,
+            'canonicalManifestBytes',
         );
-        request.writeBytes(
-            requireCanonicalBytes(
-                input.canonicalRosterBytes,
-                'canonicalRosterBytes',
-            ),
-        );
-        request.writeString(
-            requireWellFormedString(
-                input.ceremonyIdentifier,
-                'ceremonyIdentifier',
-            ),
-        );
-        request.writeProtocolHash(
-            requireProtocolHash(input.expectedSuiteId, 'expectedSuiteId'),
-        );
+        request.writeBytes(input.canonicalRosterBytes, 'canonicalRosterBytes');
+        request.writeString(input.ceremonyIdentifier, 'ceremonyIdentifier');
+        request.writeProtocolHash(input.expectedSuiteId, 'expectedSuiteId');
         return executeCommand(kernel, request, (reader) =>
             readVerification(reader, (response) => ({
                 suiteId: readHash(response),
