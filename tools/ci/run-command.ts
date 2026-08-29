@@ -26,7 +26,7 @@ export type CommandInvocation = {
     readonly workingDirectoryPath?: string;
 };
 
-export type CapturedCommandResult = {
+type CapturedCommandResult = {
     readonly exitCode: number;
     readonly stderr: string;
     readonly stdout: string;

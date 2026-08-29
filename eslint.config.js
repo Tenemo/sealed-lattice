@@ -14,7 +14,7 @@ import {
 const sourceFiles = ['**/*.{js,mjs,ts}'];
 const javaScriptFiles = ['**/*.{js,mjs}'];
 const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
-const toolFiles = ['tools/**/*.{ts,mjs}', '*.config.{ts,js}'];
+const toolFiles = ['tools/**/*.ts', '*.config.{ts,js}'];
 
 const projectPaths = ['./tsconfig.tools.json', './packages/*/tsconfig.json'];
 
@@ -224,25 +224,6 @@ export default defineConfig(
             'vitest/valid-expect': ['error', { minArgs: 1, maxArgs: 2 }],
             'vitest/no-focused-tests': 'error',
             'vitest/no-disabled-tests': 'error',
-        },
-    },
-    {
-        files: ['tools/ci/*.mjs'],
-        languageOptions: {
-            parserOptions: {
-                project: './tsconfig.tools.json',
-            },
-        },
-        rules: {
-            '@typescript-eslint/no-unsafe-argument': 'off',
-        },
-    },
-    {
-        files: ['tools/ci/packed-package-smoke.mjs'],
-        rules: {
-            // This script is copied into a temporary consumer and runs only
-            // after the packed SDK has been installed there.
-            'import-x/no-unresolved': 'off',
         },
     },
 );

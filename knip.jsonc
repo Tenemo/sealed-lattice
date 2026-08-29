@@ -4,14 +4,10 @@
         ".": {
             "entry": [
                 "tests/**/*.test.ts",
-                "tools/ci/packed-package-smoke.mjs",
                 "tools/ci/sdk-package-tsdown.config.ts",
             ],
-            "project": ["tests/**/*.ts", "tools/**/*.ts", "tools/**/*.mjs"],
-            "ignoreDependencies": [
-                "sealed-lattice",
-                "binaryen",
-            ],
+            "project": ["tests/**/*.ts", "tools/**/*.ts"],
+            "ignoreDependencies": ["binaryen"],
         },
         "packages/sdk": {
             "entry": ["src/index.ts", "tests/**/*.test.ts"],
