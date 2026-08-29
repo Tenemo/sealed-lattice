@@ -1,4 +1,5 @@
 import {
+    createFoundationCeremonyRuntimeLoader,
     type CanonicalFoundationActionDefinition,
     type CanonicalFoundationBoardPolicy,
     type CanonicalFoundationManifest,
@@ -7,16 +8,29 @@ import {
     type FoundationBoardPolicyVerification,
     type FoundationCeremonyContextVerification,
     type FoundationManifestVerification,
+    type FoundationCeremonyRuntime,
     type ProtocolHash,
 } from '@sealed-lattice/wasm';
 
-import { loadFoundationCeremonyRuntime } from './kernel.js';
 import {
     foundationManifestInputFromPollSpec,
     type PollSpec,
     type PollSpecValidation,
     validatePollSpec as validatePollSpecInternal,
 } from './poll-spec.js';
+
+const foundationKernelUrl = new URL(
+    './sealed-lattice-kernel.wasm',
+    import.meta.url,
+);
+declare const __SEALED_LATTICE_KERNEL_SHA256_HEX__: string | undefined;
+const loadFoundationCeremonyRuntime: () => Promise<FoundationCeremonyRuntime> =
+    createFoundationCeremonyRuntimeLoader(foundationKernelUrl, {
+        expectedKernelSha256Hex:
+            typeof __SEALED_LATTICE_KERNEL_SHA256_HEX__ === 'undefined'
+                ? undefined
+                : __SEALED_LATTICE_KERNEL_SHA256_HEX__,
+    });
 
 export type {
     PollSpec,
