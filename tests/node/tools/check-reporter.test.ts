@@ -21,8 +21,6 @@ describe('plain check reporter', () => {
                 logFiles: {
                     combinedPath: 'logs/type-check/output.log',
                     commandId: 'type-check-1',
-                    stderrPath: 'logs/type-check/stderr.log',
-                    stdoutPath: 'logs/type-check/stdout.log',
                 },
                 startedAtMilliseconds: 10,
             });

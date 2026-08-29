@@ -140,23 +140,15 @@ const makeNodeProject = ({
 });
 
 type BrowserProjectInput = {
-    readonly exclude?: readonly string[];
-    readonly hookTimeout?: number;
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
-    readonly retainFailureTrace?: boolean;
-    readonly testTimeout?: number;
 };
 
 const makeBrowserProject = ({
-    exclude,
-    hookTimeout,
     include,
     instances,
     projectName,
-    retainFailureTrace = false,
-    testTimeout,
 }: BrowserProjectInput): UserWorkspaceConfig => {
     const projectAttachmentDirectoryPath =
         testAttachmentDirectoryPath === undefined
@@ -170,13 +162,10 @@ const makeBrowserProject = ({
         test: {
             name: projectName,
             include: [...include],
-            ...(exclude === undefined ? {} : { exclude: [...exclude] }),
             // Each real-WASM browser file can instantiate a large kernel and
             // create workers. Keep the canonical Chromium lane serialized so
             // concurrent files cannot inflate the measured working set.
             fileParallelism: false,
-            ...(hookTimeout === undefined ? {} : { hookTimeout }),
-            ...(testTimeout === undefined ? {} : { testTimeout }),
             ...(nodeDiagnosticReportArguments.length === 0
                 ? {}
                 : { execArgv: nodeDiagnosticReportArguments }),
@@ -194,17 +183,7 @@ const makeBrowserProject = ({
                 // directory before Vitest can add worker identity. Routine
                 // coverage therefore keeps tracing off. Each manual evidence
                 // command selects one isolated instance.
-                trace:
-                    retainFailureTrace &&
-                    projectAttachmentDirectoryPath !== undefined
-                        ? {
-                              mode: 'retain-on-failure' as const,
-                              tracesDir: path.join(
-                                  projectAttachmentDirectoryPath,
-                                  'traces',
-                              ),
-                          }
-                        : ('off' as const),
+                trace: 'off' as const,
                 ...(projectAttachmentDirectoryPath === undefined
                     ? {}
                     : {

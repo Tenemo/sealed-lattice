@@ -15,7 +15,6 @@ import {
     selectDiagnosticEnvironment,
     serializeErrorDiagnostic,
 } from './run-log-diagnostics.js';
-import { createTerminalLineFilter } from './terminal-line-filter.js';
 
 export type CommandInvocation = {
     readonly args: readonly string[];
@@ -519,7 +518,6 @@ const runCommandWithOptionalLog = async (
         readonly outputMode?: CommandOutputMode;
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
-        readonly terminalOutputFilter?: (line: string) => boolean;
     } = {},
 ): Promise<number> => {
     const outputMode = input.outputMode ?? 'inherit';
@@ -736,34 +734,6 @@ const runCommandWithOptionalLog = async (
         if (input.signal?.aborted === true) {
             onAbort();
         }
-        // When a terminal output filter is supplied, the child's terminal echo
-        // is reassembled into whole lines per stream so the filter can drop
-        // specific noise lines (for example libtest's slow-test notices). Log
-        // files and observers still receive the raw, unfiltered chunks.
-        const terminalLineFilters =
-            outputMode === 'inherit' && input.terminalOutputFilter !== undefined
-                ? {
-                      stderr: createTerminalLineFilter(
-                          input.terminalOutputFilter,
-                      ),
-                      stdout: createTerminalLineFilter(
-                          input.terminalOutputFilter,
-                      ),
-                  }
-                : undefined;
-        const flushTerminalLineFilters = (): void => {
-            if (terminalLineFilters === undefined) {
-                return;
-            }
-            const stdoutRemainder = terminalLineFilters.stdout.flush();
-            if (stdoutRemainder.length > 0) {
-                process.stdout.write(stdoutRemainder);
-            }
-            const stderrRemainder = terminalLineFilters.stderr.flush();
-            if (stderrRemainder.length > 0) {
-                process.stderr.write(stderrRemainder);
-            }
-        };
         const writeChunk = (
             streamName: CommandOutputStreamName,
             chunk: string,
@@ -771,11 +741,7 @@ const runCommandWithOptionalLog = async (
             const terminalStream =
                 streamName === 'stdout' ? process.stdout : process.stderr;
             if (outputMode === 'inherit') {
-                terminalStream.write(
-                    terminalLineFilters === undefined
-                        ? chunk
-                        : terminalLineFilters[streamName].push(chunk),
-                );
+                terminalStream.write(chunk);
             }
             if (commandId !== undefined) {
                 input.runLog?.writeCommandOutput({
@@ -809,7 +775,6 @@ const runCommandWithOptionalLog = async (
             }
             untrackChildProcess();
             input.signal?.removeEventListener('abort', onAbort);
-            flushTerminalLineFilters();
             const durationMilliseconds = Math.round(
                 performance.now() - startedAtMilliseconds,
             );
@@ -843,7 +808,6 @@ const runCommandWithOptionalLog = async (
             }
             untrackChildProcess();
             input.signal?.removeEventListener('abort', onAbort);
-            flushTerminalLineFilters();
             const resolvedExitCode =
                 terminationSignal === null ? (exitCode ?? 1) : 1;
             if (terminationSignal !== null) {
@@ -959,7 +923,6 @@ export const runCommandsInSeries = async (
         readonly outputMode?: CommandOutputMode;
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
-        readonly terminalOutputFilter?: (line: string) => boolean;
     } = {},
 ): Promise<number> => {
     for (const invocation of invocations) {

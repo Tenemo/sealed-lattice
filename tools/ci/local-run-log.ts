@@ -23,8 +23,6 @@ import {
 export type CommandLogFiles = {
     readonly combinedPath: string;
     readonly commandId: string;
-    readonly stderrPath?: string;
-    readonly stdoutPath?: string;
 };
 
 export type CommandLogRequest = {
@@ -46,7 +44,6 @@ export type ActiveLocalRunLog = {
         readonly error?: unknown;
         readonly exitCode: number;
     }): Promise<void>;
-    writeCombinedOutput(chunk: string | Uint8Array): void;
     writeCommandOutput(input: {
         readonly chunk: string | Uint8Array;
         readonly commandId: string;
@@ -516,14 +513,6 @@ class LocalRunLog implements ActiveLocalRunLog {
             this.#closeFileDescriptors();
             this.#closed = true;
         }
-    }
-
-    writeCombinedOutput(chunk: string | Uint8Array): void {
-        this.writeCommandOutput({
-            chunk,
-            commandId: 'runner',
-            streamName: 'runner',
-        });
     }
 
     writeCommandOutput(input: {

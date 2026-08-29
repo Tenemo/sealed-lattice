@@ -1,10 +1,6 @@
 {
     "compilerOptions": {
         "paths": {
-            "@sealed-lattice/types": ["./packages/types/src/index.ts"],
-            "@sealed-lattice/protocol": ["./packages/protocol/src/index.ts"],
-            "@sealed-lattice/crypto": ["./packages/crypto/src/index.ts"],
-            "@sealed-lattice/wasm": ["./packages/wasm/src/index.ts"],
             "#packages/*": ["./packages/*"],
             "#test-vectors/*": ["./test-vectors/*"],
             "#tests/*": ["./tests/*"],

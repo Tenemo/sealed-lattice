@@ -5,54 +5,12 @@ import { describe, expect, it } from 'vitest';
 import {
     assertDeterministicWasmStackLayout,
     createDeterministicCargoEnvironment,
-    createWasmCargoBuildArguments,
-    resolveWasmCargoExecutable,
     wasmStackByteLength,
 } from '#tools/ci/build-wasm-kernel';
 
 const encodedRustflagSeparator = '\x1f';
 
 describe('WASM kernel build environment', () => {
-    it('uses an explicit Cargo executable without changing the deterministic environment', () => {
-        expect(resolveWasmCargoExecutable({})).toBe('cargo');
-        expect(
-            resolveWasmCargoExecutable({
-                SEALED_LATTICE_CARGO_EXECUTABLE:
-                    'C:\\toolchains\\cargo\\cargo.exe',
-            }),
-        ).toBe('C:\\toolchains\\cargo\\cargo.exe');
-        expect(() =>
-            resolveWasmCargoExecutable({
-                SEALED_LATTICE_CARGO_EXECUTABLE: '   ',
-            }),
-        ).toThrow(/nonempty Cargo executable/u);
-    });
-
-    it('keeps the ordinary cargo build arguments feature-free', () => {
-        expect(createWasmCargoBuildArguments()).toEqual([
-            'build',
-            '--locked',
-            '--package',
-            'sealed-lattice-kernel',
-            '--lib',
-            '--target',
-            'wasm32-unknown-unknown',
-            '--release',
-        ]);
-        expect(createWasmCargoBuildArguments(['example-feature'])).toEqual([
-            'build',
-            '--locked',
-            '--package',
-            'sealed-lattice-kernel',
-            '--lib',
-            '--target',
-            'wasm32-unknown-unknown',
-            '--release',
-            '--features',
-            'example-feature',
-        ]);
-    });
-
     it('sets the complete deterministic Rust flag list and target directory', () => {
         const projectRoot = path.resolve('C:\\repo\\sealed-lattice');
         const cargoHome = path.resolve('C:\\cargo-home');

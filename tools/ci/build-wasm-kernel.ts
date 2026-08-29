@@ -129,9 +129,7 @@ export const createDeterministicCargoEnvironment = (
     };
 };
 
-export const createWasmCargoBuildArguments = (
-    cargoFeatures: readonly string[] = [],
-): readonly string[] => [
+const wasmCargoBuildArguments = [
     'build',
     '--locked',
     '--package',
@@ -140,34 +138,15 @@ export const createWasmCargoBuildArguments = (
     '--target',
     'wasm32-unknown-unknown',
     '--release',
-    ...(cargoFeatures.length === 0
-        ? []
-        : ['--features', cargoFeatures.join(',')]),
-];
-
-export const resolveWasmCargoExecutable = (
-    environment: NodeJS.ProcessEnv = process.env,
-): string => {
-    const configuredExecutable = environment.SEALED_LATTICE_CARGO_EXECUTABLE;
-    if (configuredExecutable === undefined) {
-        return 'cargo';
-    }
-    if (configuredExecutable.trim().length === 0) {
-        throw new Error(
-            'SEALED_LATTICE_CARGO_EXECUTABLE must name a nonempty Cargo executable.',
-        );
-    }
-    return configuredExecutable;
-};
+] as const;
 
 const runCargoBuild = (input: {
-    readonly cargoFeatures: readonly string[];
     readonly environment: NodeJS.ProcessEnv;
     readonly targetDirectoryPath: string;
 }): void => {
     runCheckedCommand({
-        command: resolveWasmCargoExecutable(input.environment),
-        args: createWasmCargoBuildArguments(input.cargoFeatures),
+        command: 'cargo',
+        args: wasmCargoBuildArguments,
         description: 'cargo build',
         env: createDeterministicCargoEnvironment(input.environment, {
             targetDirectory: input.targetDirectoryPath,
@@ -370,23 +349,10 @@ export type BuiltWasmKernelArtifact = Readonly<{
 
 export const buildOptimizedWasmKernelArtifact = async (input: {
     readonly artifactLabel: string;
-    readonly cargoFeatures?: readonly string[];
     readonly outputFilePath: string;
     readonly scratchDirectoryPrefix: string;
     readonly targetDirectoryPath: string;
 }): Promise<BuiltWasmKernelArtifact> => {
-    const cargoFeatures = input.cargoFeatures ?? [];
-    if (
-        cargoFeatures.some(
-            (feature, featureIndex) =>
-                !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(feature) ||
-                cargoFeatures.indexOf(feature) !== featureIndex,
-        )
-    ) {
-        throw new Error(
-            'The deterministic WASM build requires unique kebab-case Cargo features.',
-        );
-    }
     const outputDirectoryPath = path.dirname(input.outputFilePath);
     await mkdir(outputDirectoryPath, { recursive: true });
     await mkdir(wasmBuildScratchRoot, { recursive: true });
@@ -404,7 +370,6 @@ export const buildOptimizedWasmKernelArtifact = async (input: {
 
     try {
         runCargoBuild({
-            cargoFeatures,
             environment: process.env,
             targetDirectoryPath: input.targetDirectoryPath,
         });

@@ -25,17 +25,6 @@ describe('CI workflow policy', () => {
         expect(ciWorkflow).toContain('run: pnpm run test:browser:built');
     });
 
-    it('keeps one properly named disabled heavy Rust placeholder', async () => {
-        const ciWorkflow = await readFile(ciWorkflowPath, 'utf8');
-
-        expect(ciWorkflow).toMatch(
-            /^ {8}name: rust heavy \(disabled placeholder\)\r?$/mu,
-        );
-        expect(ciWorkflow).toContain('        if: ${{ false }}');
-        expect(ciWorkflow).not.toContain('matrix.testFilter');
-        expect(ciWorkflow).not.toContain('test:rust:kernel:heavy');
-    });
-
     it('waits for exact-source CI before releasing without repeating the CI graph', async () => {
         const releaseWorkflow = await readFile(releaseWorkflowPath, 'utf8');
 

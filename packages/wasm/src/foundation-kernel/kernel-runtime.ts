@@ -746,11 +746,7 @@ export const instantiateFoundationKernelCommandRuntime = async (
     if (expectedKernelSha256Hex !== undefined) {
         await verifyKernelIntegrity(bytes, expectedKernelSha256Hex);
     }
-    const instantiatedSource = await WebAssembly.instantiate(bytes, {
-        sealed_lattice_diagnostics: {
-            monotonic_time_milliseconds: (): number => performance.now(),
-        },
-    });
+    const instantiatedSource = await WebAssembly.instantiate(bytes);
     const wasmExports = instantiatedSource.instance
         .exports as FoundationKernelExports;
     const memory = resolveMemory(wasmExports);

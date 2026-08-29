@@ -68,11 +68,5 @@
     "engines": {
         "node": ">=24.14.1"
     },
-    "pnpm": {
-        "onlyBuiltDependencies": [
-            "esbuild",
-            "unrs-resolver"
-        ]
-    },
     "type": "module"
 }

@@ -75,13 +75,6 @@ jobs:
                   name: rust-fast-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
-    rust-heavy-placeholder:
-        name: rust heavy (disabled placeholder)
-        if: ${{ false }}
-        runs-on: ubuntu-24.04
-        steps:
-            - run: echo "No heavy Rust test is active."
-
     verify:
         name: verify
         runs-on: ubuntu-24.04
@@ -89,10 +82,9 @@ jobs:
         needs:
             - routine
             - rust-fast
-            - rust-heavy-placeholder
         if: ${{ always() }}
         steps:
             - name: Refuse failed or unexpected job states
-              if: ${{ needs.routine.result != 'success' || needs.rust-fast.result != 'success' || needs.rust-heavy-placeholder.result != 'skipped' }}
+              if: ${{ needs.routine.result != 'success' || needs.rust-fast.result != 'success' }}
               run: exit 1
             - run: echo "Verify jobs passed."
