@@ -13,7 +13,7 @@
 
 The canonical participant artifact must remain scalar-capable. SIMD is optional. It may become a runtime optimization only behind feature detection and after proving that it preserves bytes, transcripts, verification, and refusal results.
 
-The browser bridge transfers owned binary buffers and reacquires WebAssembly memory views after any operation that can grow memory.
+The browser bridge transfers owned binary buffers and reacquires WebAssembly memory views after any operation that can grow memory. Its internal command envelope uses one operation tag, bounded length-prefixed byte fields, raw hashes, and complete-input consumption; it does not duplicate bytes as JSON or hexadecimal text.
 
 Kernel integrity is the SHA-256 hash of the exact shipped WebAssembly bytes, including custom sections. Build reproducibility is enforced during generation rather than by normalizing bytes in the loader.
 

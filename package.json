@@ -40,7 +40,6 @@
     "homepage": "https://github.com/Tenemo/sealed-lattice",
     "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@noble/hashes": "2.2.0",
         "@types/node": "^24.0.0",
         "@vitest/browser-playwright": "^4.1.4",
         "@vitest/eslint-plugin": "^1.6.18",

@@ -92,18 +92,11 @@ export const foundationProfile = Object.freeze({
 } as const);
 
 export const canonicalErrorCodeValues = [
-    'ComponentMismatch',
-    'DuplicateField',
     'InvalidEnum',
     'InvalidProtocolObject',
-    'InvalidHex',
     'InvalidUtf8',
     'MalformedLength',
-    'MalformedMagic',
-    'MalformedVarUint',
-    'NonCanonicalVarUint',
     'TrailingBytes',
-    'UnsupportedObjectVersion',
 ] as const;
 
 export type CanonicalErrorCode = (typeof canonicalErrorCodeValues)[number];

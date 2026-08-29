@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { openFoundationCeremonyRuntime } from '../../src/foundation-ceremony-runtime.js';
-import { createPublishedSdkKernelLoader } from '../../src/foundation-kernel/published-sdk-kernel-loader.js';
+import { createFoundationCeremonyRuntimeLoader } from '../../src/foundation-kernel/published-sdk-kernel-loader.js';
 
 const kernelUrl = new URL(
     '/packages/wasm/dist/sealed-lattice-kernel.wasm',
@@ -10,10 +9,9 @@ const kernelUrl = new URL(
 
 describe('foundation ceremony runtime in Chromium', () => {
     it('executes the same scalar WASM bytes at both structural option-count boundaries', async () => {
-        const kernel = await createPublishedSdkKernelLoader(kernelUrl, {
+        const runtime = await createFoundationCeremonyRuntimeLoader(kernelUrl, {
             allowUnpinnedKernel: true,
         })();
-        const runtime = openFoundationCeremonyRuntime(kernel);
 
         for (const optionCount of [2, 20]) {
             const encoded = runtime.encodeManifest({

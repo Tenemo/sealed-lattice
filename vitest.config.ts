@@ -77,11 +77,6 @@ for (const diagnosticDirectoryPath of [
     }
 }
 
-const browserOptimizedDependencies = [
-    '@noble/hashes/sha3.js',
-    '@noble/hashes/utils.js',
-] as const;
-
 const rootPrivateAliases = [
     {
         find: '#packages',
@@ -155,9 +150,6 @@ const makeBrowserProject = ({
             ? undefined
             : path.join(testAttachmentDirectoryPath, projectName);
     return {
-        optimizeDeps: {
-            include: [...browserOptimizedDependencies],
-        },
         resolve: testResolve,
         test: {
             name: projectName,

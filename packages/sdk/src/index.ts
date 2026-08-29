@@ -1,5 +1,4 @@
 import {
-    openFoundationCeremonyRuntime,
     type CanonicalFoundationActionDefinition,
     type CanonicalFoundationBoardPolicy,
     type CanonicalFoundationManifest,
@@ -11,7 +10,7 @@ import {
     type ProtocolHash,
 } from '@sealed-lattice/wasm/published-sdk';
 
-import { loadFreshFoundationKernel } from './kernel.js';
+import { loadFoundationCeremonyRuntime } from './kernel.js';
 import {
     foundationManifestInputFromPollSpec,
     type PollSpec,
@@ -42,9 +41,6 @@ export type {
 };
 export const validatePollSpec = (input: unknown): PollSpecValidation =>
     validatePollSpecInternal(input);
-
-const loadFoundationCeremonyRuntime = async () =>
-    openFoundationCeremonyRuntime(await loadFreshFoundationKernel());
 
 export const createCanonicalManifest = async (
     input: PollSpec,

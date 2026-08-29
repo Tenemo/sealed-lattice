@@ -1,120 +1,33 @@
-import type { PublishedSdkKernel } from './kernel-contracts.js';
-import type {
-    FoundationKernelCommandRuntime,
-    FoundationKernelLoaderOptions,
-} from './kernel-runtime.js';
+import {
+    openFoundationCeremonyRuntime,
+    type FoundationCeremonyRuntime,
+} from '../foundation-ceremony-runtime.js';
+
+import type { FoundationKernelLoaderOptions } from './kernel-runtime.js';
 import { instantiateFoundationKernelCommandRuntime } from './kernel-runtime.js';
 
-const createCachedKernelLoader = <Kernel>(
-    loadKernel: () => Promise<Kernel>,
-): (() => Promise<Kernel>) => {
-    let kernelPromise: Promise<Kernel> | undefined;
-
-    return async (): Promise<Kernel> => {
-        kernelPromise ??= loadKernel().catch((error: unknown) => {
-            kernelPromise = undefined;
+const createCachedLoader = <Value>(
+    load: () => Promise<Value>,
+): (() => Promise<Value>) => {
+    let valuePromise: Promise<Value> | undefined;
+    return async (): Promise<Value> => {
+        valuePromise ??= load().catch((error: unknown) => {
+            valuePromise = undefined;
             throw error;
         });
-
-        return kernelPromise;
+        return valuePromise;
     };
 };
 
-const createPublishedSdkKernelBindings = (
-    runtime: FoundationKernelCommandRuntime,
-): PublishedSdkKernel => {
-    return {
-        encodeFoundationManifest: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['encodeFoundationManifest']>
-            >({
-                command: 'EncodeFoundationManifest',
-                displayTitleUtf8Hex: input.displayTitleUtf8Hex,
-                optionDefinitions: input.optionDefinitions,
-            }),
-        verifyFoundationManifest: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['verifyFoundationManifest']>
-            >({
-                command: 'VerifyFoundationManifest',
-                canonicalBytesHex: input.canonicalBytesHex,
-            }),
-        encodeFoundationActionDefinition: (input) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['encodeFoundationActionDefinition']
-                >
-            >({
-                command: 'EncodeFoundationActionDefinition',
-                submissionCutoffUnixMilliseconds:
-                    input.submissionCutoffUnixMilliseconds,
-                topCount: input.topCount,
-            }),
-        verifyFoundationActionDefinition: (input) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['verifyFoundationActionDefinition']
-                >
-            >({
-                command: 'VerifyFoundationActionDefinition',
-                canonicalBytesHex: input.canonicalBytesHex,
-            }),
-        encodeFoundationBoardPolicy: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['encodeFoundationBoardPolicy']>
-            >({
-                command: 'EncodeFoundationBoardPolicy',
-                boardOriginIdentifier: input.boardOriginIdentifier,
-            }),
-        verifyFoundationBoardPolicy: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['verifyFoundationBoardPolicy']>
-            >({
-                command: 'VerifyFoundationBoardPolicy',
-                canonicalBytesHex: input.canonicalBytesHex,
-            }),
-        verifyFoundationCeremonyContext: (input) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['verifyFoundationCeremonyContext']
-                >
-            >({
-                command: 'VerifyFoundationCeremonyContext',
-                canonicalManifestBytesHex: input.canonicalManifestBytesHex,
-                canonicalRosterBytesHex: input.canonicalRosterBytesHex,
-                ceremonyIdentifier: input.ceremonyIdentifier,
-                expectedSuiteId: input.expectedSuiteId,
-            }),
-        verifyFoundationActionContext: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['verifyFoundationActionContext']>
-            >({
-                command: 'VerifyFoundationActionContext',
-                actionIdentifier: input.actionIdentifier,
-                canonicalActionDefinitionBytesHex:
-                    input.canonicalActionDefinitionBytesHex,
-                canonicalBoardPolicyBytesHex:
-                    input.canonicalBoardPolicyBytesHex,
-                canonicalManifestBytesHex: input.canonicalManifestBytesHex,
-                canonicalRosterBytesHex: input.canonicalRosterBytesHex,
-                ceremonyIdentifier: input.ceremonyIdentifier,
-                expectedCeremonyContextHash: input.expectedCeremonyContextHash,
-                expectedSuiteId: input.expectedSuiteId,
-            }),
-    };
-};
-
-export const createPublishedSdkKernelLoader = (
+export const createFoundationCeremonyRuntimeLoader = (
     foundationKernelUrl: URL,
     options: FoundationKernelLoaderOptions = {},
-): (() => Promise<PublishedSdkKernel>) => {
-    return createCachedKernelLoader(async () => {
-        const runtime = await instantiateFoundationKernelCommandRuntime(
-            foundationKernelUrl,
-            options,
-        );
-        const kernel = createPublishedSdkKernelBindings(runtime);
-
-        return kernel;
-    });
-};
+): (() => Promise<FoundationCeremonyRuntime>) =>
+    createCachedLoader(async () =>
+        openFoundationCeremonyRuntime(
+            await instantiateFoundationKernelCommandRuntime(
+                foundationKernelUrl,
+                options,
+            ),
+        ),
+    );

@@ -18,7 +18,7 @@ fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
 
 unsafe fn command_output(pointer: *const u8, length: usize) -> Vec<u8> {
     if length == 0 || pointer.is_null() {
-        return run_foundation_command(b"{}");
+        return run_foundation_command(&[]);
     }
 
     let input = unsafe { slice::from_raw_parts(pointer, length) };
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn command_abi_returns_owned_output() {
-        let input = b"{}";
+        let input = [0xff];
         let mut output_length = 0_usize;
         let output_pointer = unsafe {
             sealed_lattice_foundation_command_with_length(

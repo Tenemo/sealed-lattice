@@ -4,8 +4,7 @@ export type {
     FoundationBoardPolicyVerification,
     FoundationCeremonyContextVerification,
     FoundationManifestVerification,
-    PublishedSdkKernel,
-} from './foundation-kernel/kernel-contracts.js';
+} from './foundation-kernel/kernel-types.js';
 export {
     configurableOptionCountRange,
     configurableParticipantCountRange,
@@ -20,7 +19,6 @@ export type {
     RefusalReason,
     VerificationResult,
 } from './foundation-contract.js';
-export { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';
 export type {
     CanonicalFoundationActionDefinition,
     CanonicalFoundationBoardPolicy,
@@ -28,4 +26,4 @@ export type {
     FoundationCeremonyRuntime,
     FoundationManifestInput,
 } from './foundation-ceremony-runtime.js';
-export { createPublishedSdkKernelLoader } from './foundation-kernel/published-sdk-kernel-loader.js';
+export { createFoundationCeremonyRuntimeLoader } from './foundation-kernel/published-sdk-kernel-loader.js';

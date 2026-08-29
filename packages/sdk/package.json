@@ -43,8 +43,5 @@
         "post-quantum",
         "webassembly",
         "voting"
-    ],
-    "dependencies": {
-        "@noble/hashes": "2.2.0"
-    }
+    ]
 }

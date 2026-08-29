@@ -16,9 +16,6 @@
             "import": "./dist/published-sdk.js"
         }
     },
-    "dependencies": {
-        "@noble/hashes": "2.2.0"
-    },
     "scripts": {
         "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts",
         "build": "del-cli dist && tsc --project tsconfig.json && pnpm run build:wasm"

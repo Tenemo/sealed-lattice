@@ -1,36 +1,14 @@
 import type {
-    CanonicalError,
     ProtocolHash,
     VerificationResult,
 } from '../foundation-contract.js';
-
-export type FoundationOptionDefinitionIngress = Readonly<{
-    readonly displayLabelUtf8Hex: string;
-    readonly optionIdentifier: string;
-    readonly optionIndex: number;
-}>;
-
-export type EncodedFoundationManifest = Readonly<{
-    readonly canonicalBytesHex: string;
-    readonly manifestHash: ProtocolHash;
-}>;
 
 export type FoundationManifestVerification = VerificationResult<{
     readonly manifestHash: ProtocolHash;
 }>;
 
-export type EncodedFoundationActionDefinition = Readonly<{
-    readonly actionDefinitionHash: ProtocolHash;
-    readonly canonicalBytesHex: string;
-}>;
-
 export type FoundationActionDefinitionVerification = VerificationResult<{
     readonly actionDefinitionHash: ProtocolHash;
-}>;
-
-export type EncodedFoundationBoardPolicy = Readonly<{
-    readonly boardPolicyHash: ProtocolHash;
-    readonly canonicalBytesHex: string;
 }>;
 
 export type FoundationBoardPolicyVerification = VerificationResult<{
@@ -54,96 +32,7 @@ export type FoundationActionContextVerification = VerificationResult<{
     readonly suiteId: ProtocolHash;
 }>;
 
-export type FoundationKernel = {
-    encodeFoundationManifest(input: {
-        readonly displayTitleUtf8Hex: string;
-        readonly optionDefinitions: readonly FoundationOptionDefinitionIngress[];
-    }): EncodedFoundationManifest;
-    verifyFoundationManifest(input: {
-        readonly canonicalBytesHex: string;
-    }): FoundationManifestVerification;
-    encodeFoundationActionDefinition(input: {
-        readonly submissionCutoffUnixMilliseconds: string;
-        readonly topCount: number;
-    }): EncodedFoundationActionDefinition;
-    verifyFoundationActionDefinition(input: {
-        readonly canonicalBytesHex: string;
-    }): FoundationActionDefinitionVerification;
-    encodeFoundationBoardPolicy(input: {
-        readonly boardOriginIdentifier: string;
-    }): EncodedFoundationBoardPolicy;
-    verifyFoundationBoardPolicy(input: {
-        readonly canonicalBytesHex: string;
-    }): FoundationBoardPolicyVerification;
-    verifyFoundationCeremonyContext(input: {
-        readonly canonicalManifestBytesHex: string;
-        readonly canonicalRosterBytesHex: string;
-        readonly ceremonyIdentifier: string;
-        readonly expectedSuiteId: ProtocolHash;
-    }): FoundationCeremonyContextVerification;
-    verifyFoundationActionContext(input: {
-        readonly actionIdentifier: string;
-        readonly canonicalActionDefinitionBytesHex: string;
-        readonly canonicalBoardPolicyBytesHex: string;
-        readonly canonicalManifestBytesHex: string;
-        readonly canonicalRosterBytesHex: string;
-        readonly ceremonyIdentifier: string;
-        readonly expectedCeremonyContextHash: ProtocolHash;
-        readonly expectedSuiteId: ProtocolHash;
-    }): FoundationActionContextVerification;
-};
-
-export type PublishedSdkKernel = FoundationKernel;
-
-type KernelMethodInput<MethodName extends keyof FoundationKernel> =
-    FoundationKernel[MethodName] extends (input: infer Input) => unknown
-        ? NonNullable<Input>
-        : never;
-
-type KernelCommandFromMethod<
-    CommandName extends string,
-    MethodName extends keyof FoundationKernel,
-> = Readonly<
-    {
-        readonly command: CommandName;
-    } & KernelMethodInput<MethodName>
->;
-
-type FoundationKernelCommand =
-    | KernelCommandFromMethod<
-          'EncodeFoundationManifest',
-          'encodeFoundationManifest'
-      >
-    | KernelCommandFromMethod<
-          'VerifyFoundationManifest',
-          'verifyFoundationManifest'
-      >
-    | KernelCommandFromMethod<
-          'EncodeFoundationActionDefinition',
-          'encodeFoundationActionDefinition'
-      >
-    | KernelCommandFromMethod<
-          'VerifyFoundationActionDefinition',
-          'verifyFoundationActionDefinition'
-      >
-    | KernelCommandFromMethod<
-          'EncodeFoundationBoardPolicy',
-          'encodeFoundationBoardPolicy'
-      >
-    | KernelCommandFromMethod<
-          'VerifyFoundationBoardPolicy',
-          'verifyFoundationBoardPolicy'
-      >
-    | KernelCommandFromMethod<
-          'VerifyFoundationCeremonyContext',
-          'verifyFoundationCeremonyContext'
-      >
-    | KernelCommandFromMethod<
-          'VerifyFoundationActionContext',
-          'verifyFoundationActionContext'
-      >;
-
-type FoundationKernelExports = WebAssembly.Exports & {
+export type FoundationKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
@@ -152,21 +41,4 @@ type FoundationKernelExports = WebAssembly.Exports & {
         length: number,
         outputLengthPointer: number,
     ) => number;
-};
-
-type KernelSuccessResponse<Result> = {
-    readonly success: true;
-    readonly value: Result;
-};
-
-type KernelFailureResponse = {
-    readonly success: false;
-    readonly error: CanonicalError;
-};
-
-export type {
-    KernelFailureResponse,
-    KernelSuccessResponse,
-    FoundationKernelCommand,
-    FoundationKernelExports,
 };

@@ -4,7 +4,7 @@ import {
     openFoundationCeremonyRuntime,
     type FoundationManifestInput,
 } from '../../src/foundation-ceremony-runtime.js';
-import type { PublishedSdkKernel } from '../../src/foundation-kernel/kernel-contracts.js';
+import type { FoundationKernelCommandRuntime } from '../../src/foundation-kernel/kernel-runtime.js';
 
 const hash = (byte: string): string => byte.repeat(128);
 
@@ -21,38 +21,36 @@ const manifestInput = (optionCount: number): FoundationManifestInput => ({
 });
 
 const makeKernel = () => {
-    const encodeFoundationManifest = vi.fn(
-        (
-            input: Parameters<
-                PublishedSdkKernel['encodeFoundationManifest']
-            >[0],
-        ) => ({
-            canonicalBytesHex: '0001',
-            manifestHash: hash('1'),
-            input,
-        }),
+    const response = Uint8Array.from([
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+        1,
+        ...new Uint8Array(64).fill(0x11),
+    ]);
+    const executeCommand = vi.fn((_request: Uint8Array) => response);
+    const kernel: FoundationKernelCommandRuntime = { executeCommand };
+    return { executeCommand, kernel };
+};
+
+const encodedOptionCount = (request: Uint8Array): number => {
+    const view = new DataView(
+        request.buffer,
+        request.byteOffset,
+        request.byteLength,
     );
-    const unsupported = (): never => {
-        throw new Error('unexpected kernel call');
-    };
-    const kernel = {
-        encodeFoundationActionDefinition: unsupported,
-        encodeFoundationBoardPolicy: unsupported,
-        encodeFoundationManifest,
-        verifyFoundationActionContext: unsupported,
-        verifyFoundationActionDefinition: unsupported,
-        verifyFoundationBoardPolicy: unsupported,
-        verifyFoundationCeremonyContext: unsupported,
-        verifyFoundationManifest: unsupported,
-    } as unknown as PublishedSdkKernel;
-    return { encodeFoundationManifest, kernel };
+    const displayTitleByteLength = view.getUint32(1, true);
+    return view.getUint16(5 + displayTitleByteLength, true);
 };
 
 describe('foundation ceremony runtime input boundary', () => {
     it.each([2, 20])(
         'accepts the admitted structural option-count boundary %i',
         (optionCount) => {
-            const { encodeFoundationManifest, kernel } = makeKernel();
+            const { executeCommand, kernel } = makeKernel();
             const encoded = openFoundationCeremonyRuntime(
                 kernel,
             ).encodeManifest(manifestInput(optionCount));
@@ -62,26 +60,28 @@ describe('foundation ceremony runtime input boundary', () => {
                 manifestHash: hash('1'),
             });
             expect(
-                encodeFoundationManifest.mock.calls[0]?.[0].optionDefinitions,
-            ).toHaveLength(optionCount);
+                encodedOptionCount(
+                    executeCommand.mock.calls[0]?.[0] ?? new Uint8Array(),
+                ),
+            ).toBe(optionCount);
         },
     );
 
     it.each([1, 21])(
         'refuses the non-admitted structural option count %i before the kernel call',
         (optionCount) => {
-            const { encodeFoundationManifest, kernel } = makeKernel();
+            const { executeCommand, kernel } = makeKernel();
             expect(() =>
                 openFoundationCeremonyRuntime(kernel).encodeManifest(
                     manifestInput(optionCount),
                 ),
             ).toThrow(RangeError);
-            expect(encodeFoundationManifest).not.toHaveBeenCalled();
+            expect(executeCommand).not.toHaveBeenCalled();
         },
     );
 
     it('refuses accessors and malformed Unicode before crossing the trusted byte boundary', () => {
-        const { encodeFoundationManifest, kernel } = makeKernel();
+        const { executeCommand, kernel } = makeKernel();
         const runtime = openFoundationCeremonyRuntime(kernel);
         const accessorInput = manifestInput(2) as Record<string, unknown>;
         Object.defineProperty(accessorInput, 'displayTitle', {
@@ -99,6 +99,6 @@ describe('foundation ceremony runtime input boundary', () => {
         expect(() => runtime.encodeManifest(malformedUnicodeInput)).toThrow(
             'well-formed string',
         );
-        expect(encodeFoundationManifest).not.toHaveBeenCalled();
+        expect(executeCommand).not.toHaveBeenCalled();
     });
 });

@@ -2,8 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { openFoundationCeremonyRuntime } from '../../src/foundation-ceremony-runtime.js';
-import { createPublishedSdkKernelLoader } from '../../src/foundation-kernel/published-sdk-kernel-loader.js';
+import { createFoundationCeremonyRuntimeLoader } from '../../src/foundation-kernel/published-sdk-kernel-loader.js';
 
 const kernelUrl = new URL(
     '../../dist/sealed-lattice-kernel.wasm',
@@ -11,11 +10,9 @@ const kernelUrl = new URL(
 );
 
 const loadRuntime = async () =>
-    openFoundationCeremonyRuntime(
-        await createPublishedSdkKernelLoader(kernelUrl, {
-            allowUnpinnedKernel: true,
-        })(),
-    );
+    createFoundationCeremonyRuntimeLoader(kernelUrl, {
+        allowUnpinnedKernel: true,
+    })();
 
 const manifestInput = (optionCount: number) => ({
     displayTitle: 'Choose priorities',
@@ -77,6 +74,71 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
         const trailing = new Uint8Array(encoded.canonicalBytes.length + 1);
         trailing.set(encoded.canonicalBytes);
         expect(runtime.verifyManifest(trailing)).toEqual({
+            isValid: false,
+            refusalReason: 'malformedEncoding',
+        });
+    });
+
+    it('roundtrips action and board values through the binary command boundary', async () => {
+        const runtime = await loadRuntime();
+        const actionDefinition = runtime.encodeActionDefinition({
+            submissionCutoffUnixMilliseconds: 1_800_000_000_000n,
+            topCount: 2,
+        });
+        expect(
+            runtime.verifyActionDefinition(actionDefinition.canonicalBytes),
+        ).toEqual({
+            isValid: true,
+            value: {
+                actionDefinitionHash: actionDefinition.actionDefinitionHash,
+            },
+        });
+
+        const boardPolicy = runtime.encodeBoardPolicy({
+            boardOriginIdentifier: 'https://board.example',
+        });
+        expect(runtime.verifyBoardPolicy(boardPolicy.canonicalBytes)).toEqual({
+            isValid: true,
+            value: { boardPolicyHash: boardPolicy.boardPolicyHash },
+        });
+    });
+
+    it('routes context verification and preserves malformed-roster refusals', async () => {
+        const runtime = await loadRuntime();
+        const manifest = runtime.encodeManifest(manifestInput(2));
+        const actionDefinition = runtime.encodeActionDefinition({
+            submissionCutoffUnixMilliseconds: 1_800_000_000_000n,
+            topCount: 2,
+        });
+        const boardPolicy = runtime.encodeBoardPolicy({
+            boardOriginIdentifier: 'https://board.example',
+        });
+        const emptyRoster = new Uint8Array();
+        const placeholderHash = '00'.repeat(64);
+
+        expect(
+            runtime.verifyCeremonyContext({
+                canonicalManifestBytes: manifest.canonicalBytes,
+                canonicalRosterBytes: emptyRoster,
+                ceremonyIdentifier: 'ceremony-2026',
+                expectedSuiteId: placeholderHash,
+            }),
+        ).toEqual({
+            isValid: false,
+            refusalReason: 'malformedEncoding',
+        });
+        expect(
+            runtime.verifyActionContext({
+                actionIdentifier: 'submission',
+                canonicalActionDefinitionBytes: actionDefinition.canonicalBytes,
+                canonicalBoardPolicyBytes: boardPolicy.canonicalBytes,
+                canonicalManifestBytes: manifest.canonicalBytes,
+                canonicalRosterBytes: emptyRoster,
+                ceremonyIdentifier: 'ceremony-2026',
+                expectedCeremonyContextHash: placeholderHash,
+                expectedSuiteId: placeholderHash,
+            }),
+        ).toEqual({
             isValid: false,
             refusalReason: 'malformedEncoding',
         });

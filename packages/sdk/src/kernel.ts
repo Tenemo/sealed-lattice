@@ -1,6 +1,6 @@
 import {
-    createPublishedSdkKernelLoader,
-    type PublishedSdkKernel,
+    createFoundationCeremonyRuntimeLoader,
+    type FoundationCeremonyRuntime,
 } from '@sealed-lattice/wasm/published-sdk';
 
 const foundationKernelUrl = new URL(
@@ -20,8 +20,9 @@ const foundationKernelLoaderOptions = {
     expectedKernelSha256Hex: packagedFoundationKernelSha256Hex,
 } as const;
 
-export const loadFreshFoundationKernel = (): Promise<PublishedSdkKernel> =>
-    createPublishedSdkKernelLoader(
-        foundationKernelUrl,
-        foundationKernelLoaderOptions,
-    )();
+export const loadFoundationCeremonyRuntime =
+    (): Promise<FoundationCeremonyRuntime> =>
+        createFoundationCeremonyRuntimeLoader(
+            foundationKernelUrl,
+            foundationKernelLoaderOptions,
+        )();
