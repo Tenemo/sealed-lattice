@@ -84,7 +84,7 @@ const repositoryRootDirectoryPath = path.resolve(
 );
 const defaultResourceSampleIntervalMilliseconds = 15_000;
 
-export const currentProcessExitCode = (): number =>
+const currentProcessExitCode = (): number =>
     typeof process.exitCode === 'number' ? process.exitCode : 0;
 
 const readRepositorySnapshot = (): RepositorySnapshot => ({
