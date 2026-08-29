@@ -25,9 +25,10 @@ describe('CI workflow policy', () => {
         expect(ciWorkflow).toContain('run: pnpm run test:browser:built');
     });
 
-    it('runs every active heavy Rust test through an exact registry matrix entry', async () => {
+    it('keeps the heavy Rust placeholder stable and runs every future registry entry', async () => {
         const ciWorkflow = await readFile(ciWorkflowPath, 'utf8');
 
+        expect(ciWorkflow).toMatch(/^ {8}name: rust heavy\r?$/mu);
         expect(ciWorkflow).toContain(
             'heavy_matrix: ${{ steps.classify.outputs.heavy_matrix }}',
         );

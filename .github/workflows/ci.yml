@@ -108,7 +108,7 @@ jobs:
                   path: logs
 
     rust-heavy:
-        name: rust heavy (${{ matrix.testFilter }})
+        name: rust heavy
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
