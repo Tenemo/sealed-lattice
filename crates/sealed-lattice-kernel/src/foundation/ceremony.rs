@@ -48,18 +48,6 @@ impl OptionDefinition {
         Ok(definition)
     }
 
-    pub const fn option_index(&self) -> u16 {
-        self.option_index
-    }
-
-    pub fn option_identifier(&self) -> &str {
-        &self.option_identifier
-    }
-
-    pub const fn display_label(&self) -> &StabilizedDisplayText {
-        &self.display_label
-    }
-
     fn validate(&self) -> SchemaResult<()> {
         if self.option_index >= MAXIMUM_CONFIGURABLE_OPTION_COUNT {
             return Err(FoundationSchemaError::new(
@@ -118,14 +106,6 @@ impl Manifest {
         };
         manifest.validate()?;
         Ok(manifest)
-    }
-
-    pub const fn display_title(&self) -> &StabilizedDisplayText {
-        &self.display_title
-    }
-
-    pub fn options(&self) -> &[OptionDefinition] {
-        &self.options
     }
 
     fn validate_components(&self) -> SchemaResult<()> {
@@ -232,14 +212,6 @@ impl ActionDefinition {
         })
     }
 
-    pub const fn top_count(self) -> u16 {
-        self.top_count
-    }
-
-    pub const fn submission_cutoff_unix_milliseconds(self) -> u64 {
-        self.submission_cutoff_unix_milliseconds
-    }
-
     fn canonical_tuple(self) -> CanonicalTuple {
         CanonicalTuple::new(
             ACTION_DEFINITION_SCHEMA_IDENTIFIER,
@@ -287,10 +259,6 @@ impl BoardPolicy {
         Ok(policy)
     }
 
-    pub fn board_origin_identifier(&self) -> &str {
-        &self.board_origin_identifier
-    }
-
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
         Ok(CanonicalTuple::new(
             BOARD_POLICY_SCHEMA_IDENTIFIER,
@@ -323,7 +291,6 @@ pub struct CeremonyContext {
     manifest_hash: Hash512,
     roster_hash: Hash512,
     option_count: u16,
-    ceremony_identifier: String,
     context_hash: Hash512,
 }
 
@@ -335,7 +302,7 @@ impl CeremonyContext {
         ceremony_identifier: String,
     ) -> SchemaResult<Self> {
         validate_external_identifier(&ceremony_identifier)?;
-        let manifest_option_count = u16::try_from(manifest.options().len()).map_err(|_| {
+        let manifest_option_count = u16::try_from(manifest.options.len()).map_err(|_| {
             FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "manifest option count does not fit the context field",
@@ -359,7 +326,6 @@ impl CeremonyContext {
             manifest_hash,
             roster_hash,
             option_count: manifest_option_count,
-            ceremony_identifier,
             context_hash,
         })
     }
@@ -376,14 +342,6 @@ impl CeremonyContext {
         self.roster_hash
     }
 
-    pub const fn option_count(&self) -> u16 {
-        self.option_count
-    }
-
-    pub fn ceremony_identifier(&self) -> &str {
-        &self.ceremony_identifier
-    }
-
     pub const fn context_hash(&self) -> Hash512 {
         self.context_hash
     }
@@ -394,7 +352,6 @@ pub struct ActionContext {
     suite_id: Hash512,
     roster_hash: Hash512,
     ceremony_context_hash: Hash512,
-    action_identifier: String,
     action_definition_hash: Hash512,
     board_policy_hash: Hash512,
     context_hash: Hash512,
@@ -409,7 +366,7 @@ impl ActionContext {
         board_policy: &BoardPolicy,
     ) -> SchemaResult<Self> {
         validate_external_identifier(&action_identifier)?;
-        if action_definition.top_count() > ceremony_context.option_count {
+        if action_definition.top_count > ceremony_context.option_count {
             return Err(FoundationSchemaError::new(
                 RefusalReason::WrongContext,
                 "action top count exceeds the ceremony option count",
@@ -437,7 +394,6 @@ impl ActionContext {
             suite_id: ceremony_context.suite_id,
             roster_hash: ceremony_context.roster_hash,
             ceremony_context_hash: ceremony_context.context_hash,
-            action_identifier,
             action_definition_hash,
             board_policy_hash,
             context_hash,
@@ -455,10 +411,6 @@ impl ActionContext {
 
     pub const fn ceremony_context_hash(&self) -> Hash512 {
         self.ceremony_context_hash
-    }
-
-    pub fn action_identifier(&self) -> &str {
-        &self.action_identifier
     }
 
     pub const fn action_definition_hash(&self) -> Hash512 {
@@ -603,7 +555,7 @@ mod tests {
             let encoded = manifest.encode().expect("bounded manifest encodes");
             let decoded = Manifest::decode(&encoded, &CanonicalDecodeLimits::default())
                 .expect("bounded manifest decodes");
-            assert_eq!(decoded.options().len(), usize::from(option_count));
+            assert_eq!(decoded.options.len(), usize::from(option_count));
             assert_eq!(
                 decoded.encode().expect("bounded manifest re-encodes"),
                 encoded

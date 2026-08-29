@@ -1,14 +1,12 @@
 #![recursion_limit = "256"]
 
 mod encoding;
-pub mod foundation;
+mod foundation;
 #[cfg(test)]
 pub(crate) mod tally_circuit;
 
 use core::{ptr, slice};
 use std::vec::Vec;
-
-pub use encoding::run_foundation_command;
 
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
     Box::into_raw(bytes.into_boxed_slice()) as *mut u8
@@ -16,11 +14,11 @@ fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
 
 unsafe fn command_output(pointer: *const u8, length: usize) -> Vec<u8> {
     if length == 0 || pointer.is_null() {
-        return run_foundation_command(&[]);
+        return encoding::run_foundation_command(&[]);
     }
 
     let input = unsafe { slice::from_raw_parts(pointer, length) };
-    run_foundation_command(input)
+    encoding::run_foundation_command(input)
 }
 
 #[unsafe(no_mangle)]

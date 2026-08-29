@@ -209,7 +209,7 @@ fn encode_success(payload: Vec<u8>) -> Vec<u8> {
     encoded.unwrap_or_else(encode_error)
 }
 
-pub fn run_foundation_command(input: &[u8]) -> Vec<u8> {
+pub(super) fn run_foundation_command(input: &[u8]) -> Vec<u8> {
     if input.len() > MAXIMUM_COPIED_BUFFER_BYTE_LENGTH {
         return encode_error(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,

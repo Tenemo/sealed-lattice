@@ -6,35 +6,32 @@ mod refusal;
 mod schemas;
 mod text;
 
-pub use canonical_tuple::{
+pub(crate) use canonical_tuple::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple,
 };
-pub use ceremony::{
-    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ActionContext, ActionDefinition,
-    BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy, CeremonyContext, MANIFEST_SCHEMA_IDENTIFIER,
-    Manifest, OPTION_DEFINITION_SCHEMA_IDENTIFIER, OptionDefinition,
+pub(crate) use ceremony::{
+    ActionContext, ActionDefinition, BoardPolicy, CeremonyContext, Manifest, OptionDefinition,
 };
 pub(crate) use hash::StreamingFoundationTupleHash512;
-pub use hash::{Hash512, hash_foundation_tuple_512};
-pub use participant_identity::{
-    ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, derive_participant_identity,
+pub(crate) use hash::{Hash512, hash_foundation_tuple_512};
+pub(crate) use participant_identity::{
+    ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
 };
-pub use refusal::RefusalReason;
+pub(crate) use refusal::RefusalReason;
 #[cfg(test)]
 pub(crate) use schemas::{
-    FOUNDATION_MAXIMUM_SCORE, FOUNDATION_MINIMUM_SCORE, PROTOTYPE_OPTION_COUNT,
-    PROTOTYPE_PARTICIPANT_COUNT,
+    FOUNDATION_MAXIMUM_SCORE, FOUNDATION_MINIMUM_SCORE, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT,
+    RosterEntry,
 };
 pub(crate) use schemas::{
     FOUNDATION_PROTOCOL_NAME, FOUNDATION_PROTOCOL_VERSION,
     MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH, MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH,
 };
-pub use schemas::{
-    FoundationSchemaError, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
-    MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_OPTION_COUNT,
-    MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH,
-    ROSTER_ENTRY_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_IDENTIFIER, Roster, RosterEntry,
+pub(crate) use schemas::{
+    FoundationSchemaError, MAXIMUM_CONFIGURABLE_OPTION_COUNT, MINIMUM_CONFIGURABLE_OPTION_COUNT,
+    Roster,
 };
-pub use text::{DisplayTextError, StabilizedDisplayText};
+pub(crate) use text::StabilizedDisplayText;

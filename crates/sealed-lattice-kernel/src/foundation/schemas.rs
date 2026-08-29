@@ -6,8 +6,8 @@ use fips203::{ml_kem_768, traits::SerDes as KemSerDes};
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    Hash512, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, RefusalReason,
-    derive_participant_identity, hash_foundation_tuple_512,
+    Hash512, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, RefusalReason, derive_participant_identity,
+    hash_foundation_tuple_512,
 };
 
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
@@ -107,10 +107,6 @@ impl RosterEntry {
         validate_ml_kem_768_encapsulation_key(&self.mailbox_encapsulation_key)
     }
 
-    pub fn participant_identity(&self) -> SchemaResult<ParticipantIdentity> {
-        Ok(derive_participant_identity(&self.signing_verification_key)?)
-    }
-
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
         self.validate()?;
         Ok(CanonicalTuple::new(
@@ -131,14 +127,6 @@ impl RosterEntry {
             read_fixed_bytes(&tuple.items[1])?,
             read_fixed_bytes(&tuple.items[2])?,
         )
-    }
-
-    pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        Ok(self.canonical_tuple()?.encode()?)
-    }
-
-    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
-        Self::from_tuple(&CanonicalTuple::decode(bytes, limits)?)
     }
 }
 
