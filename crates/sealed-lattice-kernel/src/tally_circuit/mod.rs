@@ -12,7 +12,7 @@ use core::fmt;
 use crate::{
     encoding::CanonicalError,
     foundation::{
-        FOUNDATION_PROFILE, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+        FOUNDATION_MAXIMUM_SCORE, FOUNDATION_MINIMUM_SCORE, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
         MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_OPTION_COUNT,
         MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
     },
@@ -416,16 +416,13 @@ impl From<CanonicalError> for TallyCircuitError {
 }
 
 pub(crate) fn foundation_score_bounds() -> Result<(u16, u16), TallyCircuitError> {
-    if FOUNDATION_PROFILE.minimum_score != 1 || FOUNDATION_PROFILE.maximum_score != 10 {
+    if FOUNDATION_MINIMUM_SCORE != 1 || FOUNDATION_MAXIMUM_SCORE != 10 {
         return Err(TallyCircuitError::UnsupportedFoundationScoreRange {
-            minimum_score: FOUNDATION_PROFILE.minimum_score,
-            maximum_score: FOUNDATION_PROFILE.maximum_score,
+            minimum_score: FOUNDATION_MINIMUM_SCORE,
+            maximum_score: FOUNDATION_MAXIMUM_SCORE,
         });
     }
-    Ok((
-        FOUNDATION_PROFILE.minimum_score,
-        FOUNDATION_PROFILE.maximum_score,
-    ))
+    Ok((FOUNDATION_MINIMUM_SCORE, FOUNDATION_MAXIMUM_SCORE))
 }
 
 pub(crate) fn bit_width_for_maximum_value(maximum_value: usize) -> usize {

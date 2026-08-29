@@ -6,10 +6,11 @@ use super::schemas::{
     read_variable_item, require_header,
 };
 use super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
-    FoundationSchemaError, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
-    MINIMUM_CONFIGURABLE_OPTION_COUNT, RefusalReason, Roster, StabilizedDisplayText,
-    StreamingFoundationTupleHash512, hash_foundation_tuple_512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    FOUNDATION_PROTOCOL_NAME, FOUNDATION_PROTOCOL_VERSION, FoundationSchemaError, Hash512,
+    MAXIMUM_CONFIGURABLE_OPTION_COUNT, MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
+    MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH, MINIMUM_CONFIGURABLE_OPTION_COUNT, RefusalReason,
+    Roster, StabilizedDisplayText, StreamingFoundationTupleHash512, hash_foundation_tuple_512,
 };
 
 pub const MANIFEST_SCHEMA_IDENTIFIER: u16 = 0x0110;
@@ -345,8 +346,8 @@ impl CeremonyContext {
         let context_hash = hash_foundation_tuple_512(
             CEREMONY_CONTEXT_HASH_DOMAIN,
             &[
-                CanonicalItem::nonempty_ascii(FOUNDATION_PROFILE.protocol_name)?,
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.protocol_version),
+                CanonicalItem::nonempty_ascii(FOUNDATION_PROTOCOL_NAME)?,
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
                 CanonicalItem::hash512(suite_id.into_bytes()),
                 CanonicalItem::hash512(manifest_hash.into_bytes()),
                 CanonicalItem::hash512(roster_hash.into_bytes()),
@@ -485,7 +486,7 @@ fn read_display_text(item: &CanonicalItem) -> SchemaResult<StabilizedDisplayText
 }
 
 fn require_copied_buffer_bound(tuple: &CanonicalTuple, message: &'static str) -> SchemaResult<()> {
-    if tuple.encode()?.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
+    if tuple.encode()?.len() > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             message,
@@ -502,7 +503,7 @@ fn manifest_hash_error() -> FoundationSchemaError {
 }
 
 fn validate_external_identifier(identifier: &str) -> SchemaResult<()> {
-    if identifier.len() > FOUNDATION_PROFILE.maximum_identifier_byte_length {
+    if identifier.len() > MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "external identifier exceeds the supported byte bound",
@@ -524,7 +525,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::foundation::RosterEntry;
+    use crate::foundation::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT, RosterEntry};
 
     fn display_text(value: &str) -> StabilizedDisplayText {
         StabilizedDisplayText::from_ingress_utf8(value.as_bytes())
@@ -546,11 +547,11 @@ mod tests {
     }
 
     fn sample_manifest() -> Manifest {
-        manifest_for_option_count(FOUNDATION_PROFILE.option_count)
+        manifest_for_option_count(PROTOTYPE_OPTION_COUNT)
     }
 
     fn sample_roster() -> Roster {
-        let entries = (0..FOUNDATION_PROFILE.participant_count)
+        let entries = (0..PROTOTYPE_PARTICIPANT_COUNT)
             .map(|roster_position| {
                 let mut signing_seed = [0x23_u8; 32];
                 signing_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
@@ -559,7 +560,7 @@ mod tests {
                 mailbox_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
                 let mut mailbox_fallback_seed = [0x97_u8; 32];
                 mailbox_fallback_seed[31] =
-                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                    u8::try_from(PROTOTYPE_PARTICIPANT_COUNT - roster_position)
                         .expect("reverse test position fits u8");
                 let (mailbox_key, _) =
                     ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
@@ -620,8 +621,7 @@ mod tests {
             .expect("one-byte-title manifest encodes")
             .len()
             - 1;
-        let maximum_title_byte_length = FOUNDATION_PROFILE
-            .maximum_copied_buffer_byte_length
+        let maximum_title_byte_length = MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH
             .checked_sub(title_independent_byte_length)
             .expect("manifest framing fits the copied-buffer profile");
 
@@ -635,7 +635,7 @@ mod tests {
                 .encode()
                 .expect("exact-boundary manifest encodes")
                 .len(),
-            FOUNDATION_PROFILE.maximum_copied_buffer_byte_length,
+            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
         );
         exact_boundary_manifest
             .manifest_hash()
@@ -741,7 +741,7 @@ mod tests {
         let roster = sample_roster();
         let ceremony = CeremonyContext::new(
             suite_identity,
-            &manifest_for_option_count(FOUNDATION_PROFILE.option_count - 1),
+            &manifest_for_option_count(PROTOTYPE_OPTION_COUNT - 1),
             &roster,
             "manifest-owned-option-count".to_owned(),
         )
@@ -752,7 +752,7 @@ mod tests {
             ActionContext::new(
                 &ceremony,
                 "too-wide-action".to_owned(),
-                ActionDefinition::new(FOUNDATION_PROFILE.option_count, 0)
+                ActionDefinition::new(PROTOTYPE_OPTION_COUNT, 0)
                     .expect("top count remains structurally bounded"),
                 &board_policy,
             )
@@ -785,9 +785,9 @@ mod tests {
         let expected_ceremony_hash = hash_foundation_tuple_512(
             CEREMONY_CONTEXT_HASH_DOMAIN,
             &[
-                CanonicalItem::nonempty_ascii(FOUNDATION_PROFILE.protocol_name)
+                CanonicalItem::nonempty_ascii(FOUNDATION_PROTOCOL_NAME)
                     .expect("protocol name is canonical"),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.protocol_version),
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
                 CanonicalItem::hash512(suite_id.into_bytes()),
                 CanonicalItem::hash512(
                     manifest
@@ -820,7 +820,7 @@ mod tests {
         for invalid_identifier in [
             String::new(),
             "bad\nidentifier".to_owned(),
-            "a".repeat(FOUNDATION_PROFILE.maximum_identifier_byte_length + 1),
+            "a".repeat(MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH + 1),
         ] {
             assert!(
                 CeremonyContext::new(suite_id, &manifest, &roster, invalid_identifier).is_err()

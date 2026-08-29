@@ -185,8 +185,8 @@ fn score_is_valid(
 ) -> Result<WireIndex, TallyCircuitError> {
     if score_wires.len() != 4 {
         return Err(TallyCircuitError::UnsupportedFoundationScoreRange {
-            minimum_score: crate::foundation::FOUNDATION_PROFILE.minimum_score,
-            maximum_score: crate::foundation::FOUNDATION_PROFILE.maximum_score,
+            minimum_score: crate::foundation::FOUNDATION_MINIMUM_SCORE,
+            maximum_score: crate::foundation::FOUNDATION_MAXIMUM_SCORE,
         });
     }
 

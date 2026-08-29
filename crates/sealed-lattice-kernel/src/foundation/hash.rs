@@ -1,14 +1,12 @@
 use core::fmt;
 
-use sha3::{
-    Shake256,
-    digest::{ExtendableOutput, Update, XofReader},
-};
-use zeroize::Zeroizing;
-
 use super::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError, CanonicalItem,
     CanonicalItemType, CanonicalTuple,
+};
+use sha3::{
+    Shake256,
+    digest::{ExtendableOutput, Update, XofReader},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -81,18 +79,16 @@ fn foundation_tuple_hasher(
 fn canonical_foundation_tuple_hash_preimage(
     domain: &str,
     items: &[CanonicalItem],
-) -> Result<Zeroizing<Vec<u8>>, CanonicalCodecError> {
+) -> Result<Vec<u8>, CanonicalCodecError> {
     let mut framed_items = Vec::with_capacity(items.len().saturating_add(1));
     framed_items.push(CanonicalItem::nonempty_ascii(domain)?);
     framed_items.extend_from_slice(items);
-    Ok(Zeroizing::new(
-        CanonicalTuple::new(
-            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
-            CANONICAL_TUPLE_VERSION,
-            framed_items,
-        )
-        .encode()?,
-    ))
+    CanonicalTuple::new(
+        CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+        CANONICAL_TUPLE_VERSION,
+        framed_items,
+    )
+    .encode()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -29,7 +29,7 @@ const parserOptions = {
 };
 
 const importResolverSettings = {
-    'import-x/internal-regex': '^#(?:packages|test-vectors|tests|tools)(?:/|$)',
+    'import-x/internal-regex': '^#(?:packages|tests|tools)(?:/|$)',
     'import-x/resolver-next': [
         createTypeScriptImportResolver({
             alwaysTryTypes: true,
@@ -41,7 +41,7 @@ const importResolverSettings = {
 
 const packageSourceImportPatterns = [
     {
-        group: ['#packages/*', '#test-vectors/*', '#tests/*', '#tools/*'],
+        group: ['#packages/*', '#tests/*', '#tools/*'],
         message:
             'Published package source must not depend on repository-private aliases.',
     },

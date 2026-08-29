@@ -1,5 +1,3 @@
-use zeroize::Zeroize;
-
 use super::super::StabilizedDisplayText;
 use super::decoding::{decode_tuple_at, validate_item_bytes};
 use super::{
@@ -43,12 +41,6 @@ impl CanonicalItemType {
 pub struct CanonicalItem {
     pub(super) item_type: CanonicalItemType,
     pub(super) canonical_bytes: Vec<u8>,
-}
-
-impl Zeroize for CanonicalItem {
-    fn zeroize(&mut self) {
-        self.canonical_bytes.zeroize();
-    }
 }
 
 impl CanonicalItem {
@@ -316,14 +308,6 @@ pub struct CanonicalTuple {
     pub schema_identifier: u16,
     pub schema_version: u16,
     pub items: Vec<CanonicalItem>,
-}
-
-impl Zeroize for CanonicalTuple {
-    fn zeroize(&mut self) {
-        self.schema_identifier.zeroize();
-        self.schema_version.zeroize();
-        self.items.zeroize();
-    }
 }
 
 impl CanonicalTuple {

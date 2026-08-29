@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { foundationProfile } from '#packages/wasm/src/foundation-contract.js';
+import { maximumFoundationWasmMemoryByteLength } from '#packages/wasm/src/foundation-contract.js';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
@@ -108,7 +108,7 @@ export const createDeterministicCargoEnvironment = (
         '--remap-path-prefix',
         `${cargoHome}=/cargo`,
         '-C',
-        `link-arg=--max-memory=${foundationProfile.maximumWasmMemoryByteLength}`,
+        `link-arg=--max-memory=${maximumFoundationWasmMemoryByteLength}`,
         '-C',
         'link-arg=-z',
         '-C',

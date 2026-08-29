@@ -7,7 +7,6 @@
     "packageManager": "pnpm@10.33.0",
     "imports": {
         "#packages/*": "./packages/*",
-        "#test-vectors/*": "./test-vectors/*",
         "#tests/*": "./tests/*",
         "#tools/*": "./tools/*"
     },

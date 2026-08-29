@@ -86,10 +86,6 @@ const rootPrivateAliases = [
         find: '#tests',
         replacement: resolveFromRepoRoot('tests'),
     },
-    {
-        find: '#test-vectors',
-        replacement: resolveFromRepoRoot('test-vectors'),
-    },
 ] as const;
 
 const testResolve = {

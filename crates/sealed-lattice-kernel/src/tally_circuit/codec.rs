@@ -1,6 +1,6 @@
 use crate::{
     encoding::{CanonicalReader, append_bytes, append_varuint},
-    foundation::FOUNDATION_PROFILE,
+    foundation::MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH,
 };
 
 use super::{
@@ -371,7 +371,7 @@ fn validate_circuit_structure(circuit: &CompiledTallyCircuit) -> Result<(), Tall
 }
 
 fn enforce_artifact_byte_length(byte_length: usize) -> Result<(), TallyCircuitError> {
-    let maximum_byte_length = FOUNDATION_PROFILE.maximum_copied_buffer_byte_length;
+    let maximum_byte_length = MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH;
     if byte_length == 0 || byte_length > maximum_byte_length {
         return Err(TallyCircuitError::ArtifactTooLarge {
             byte_length,

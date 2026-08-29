@@ -80,18 +80,9 @@ describe('foundation ceremony runtime input boundary', () => {
         },
     );
 
-    it('refuses accessors and malformed Unicode before crossing the trusted byte boundary', () => {
+    it('refuses malformed Unicode before crossing the kernel boundary', () => {
         const { executeCommand, kernel } = makeKernel();
         const runtime = openFoundationCeremonyRuntime(kernel);
-        const accessorInput = manifestInput(2) as Record<string, unknown>;
-        Object.defineProperty(accessorInput, 'displayTitle', {
-            enumerable: true,
-            get: () => 'accessor value',
-        });
-        expect(() => runtime.encodeManifest(accessorInput as never)).toThrow(
-            'ordinary data property',
-        );
-
         const malformedUnicodeInput = {
             ...manifestInput(2),
             displayTitle: '\ud800',

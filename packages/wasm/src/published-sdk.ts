@@ -7,14 +7,11 @@ export type {
 } from './foundation-kernel/kernel-types.js';
 export {
     configurableOptionCountRange,
-    configurableParticipantCountRange,
-    deriveFoundationRosterParameters,
-    foundationProfile,
     isProtocolHash,
-    refusalReasonCodes,
+    maximumFoundationCopiedBufferByteLength,
+    maximumFoundationWasmMemoryByteLength,
 } from './foundation-contract.js';
 export type {
-    FoundationRosterParameters,
     ProtocolHash,
     RefusalReason,
     VerificationResult,

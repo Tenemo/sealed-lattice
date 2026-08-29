@@ -1,10 +1,9 @@
-import { isUint8Array } from './byte-array.js';
 import {
     canonicalErrorCodeValues,
     configurableOptionCountRange,
-    foundationProfile,
     isProtocolHash,
-    refusalReasonCodes,
+    maximumFoundationCopiedBufferByteLength,
+    refusalReasonValues,
     type CanonicalError,
     type CanonicalErrorCode,
     type ProtocolHash,
@@ -93,11 +92,11 @@ const verifyCeremonyContextCommand = 7;
 const verifyActionContextCommand = 8;
 const maximumUnsigned64 = (1n << 64n) - 1n;
 const hashByteLength = 64;
-const maximumCopiedBufferByteLength =
-    foundationProfile.maximumCopiedBufferByteLength;
+const maximumCopiedBufferByteLength = maximumFoundationCopiedBufferByteLength;
 const canonicalErrorCodes = new Set<CanonicalErrorCode>(
     canonicalErrorCodeValues,
 );
+const refusalReasons = new Set<RefusalReason>(refusalReasonValues);
 
 export class FoundationKernelCommandError extends Error {
     readonly code: CanonicalErrorCode;
@@ -243,26 +242,10 @@ const snapshotDataProperty = (
     propertyName: string,
     containerName: string,
 ): unknown => {
-    if (
-        container === null ||
-        (typeof container !== 'object' && typeof container !== 'function')
-    ) {
+    if (container === null || typeof container !== 'object') {
         throw new TypeError(`${containerName} must be an object.`);
     }
-    let descriptor: PropertyDescriptor | undefined;
-    try {
-        descriptor = Object.getOwnPropertyDescriptor(container, propertyName);
-    } catch {
-        throw new TypeError(
-            `${containerName}.${propertyName} must be an ordinary data property.`,
-        );
-    }
-    if (descriptor === undefined || !('value' in descriptor)) {
-        throw new TypeError(
-            `${containerName}.${propertyName} must be an ordinary data property.`,
-        );
-    }
-    return descriptor.value;
+    return (container as Readonly<Record<string, unknown>>)[propertyName];
 };
 
 const snapshotSafeInteger = (value: unknown, fieldName: string): number => {
@@ -272,45 +255,18 @@ const snapshotSafeInteger = (value: unknown, fieldName: string): number => {
     return value;
 };
 
-const copyCanonicalBytes = (value: unknown, fieldName: string): Uint8Array => {
-    if (!isUint8Array(value)) {
+const requireCanonicalBytes = (
+    value: unknown,
+    fieldName: string,
+): Uint8Array => {
+    if (!(value instanceof Uint8Array)) {
         throw new TypeError(`${fieldName} must be a Uint8Array.`);
     }
-    try {
-        return Uint8Array.from(value);
-    } catch {
-        throw new TypeError(
-            `${fieldName} must reference an attached Uint8Array.`,
-        );
-    }
-};
-
-const isWellFormedString = (value: string): boolean => {
-    for (
-        let codeUnitIndex = 0;
-        codeUnitIndex < value.length;
-        codeUnitIndex += 1
-    ) {
-        const codeUnit = value.charCodeAt(codeUnitIndex);
-        if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
-            const followingCodeUnit = value.charCodeAt(codeUnitIndex + 1);
-            if (
-                codeUnitIndex + 1 >= value.length ||
-                followingCodeUnit < 0xdc00 ||
-                followingCodeUnit > 0xdfff
-            ) {
-                return false;
-            }
-            codeUnitIndex += 1;
-        } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
-            return false;
-        }
-    }
-    return true;
+    return value;
 };
 
 const requireWellFormedString = (value: unknown, fieldName: string): string => {
-    if (typeof value !== 'string' || !isWellFormedString(value)) {
+    if (typeof value !== 'string' || !value.isWellFormed()) {
         throw new TypeError(`${fieldName} must be a well-formed string.`);
     }
     return value;
@@ -364,7 +320,7 @@ const snapshotManifestInput = (input: unknown): FoundationManifestInput => {
                 String(optionPosition),
                 'optionDefinitions',
             );
-            return Object.freeze({
+            return {
                 displayLabel: requireWellFormedString(
                     snapshotDataProperty(
                         optionDefinition,
@@ -389,10 +345,10 @@ const snapshotManifestInput = (input: unknown): FoundationManifestInput => {
                     ),
                     `${optionName}.optionIndex`,
                 ),
-            });
+            };
         },
     );
-    return Object.freeze({ displayTitle, optionDefinitions });
+    return { displayTitle, optionDefinitions };
 };
 
 const readHash = (reader: BinaryReader): ProtocolHash =>
@@ -402,7 +358,7 @@ const isCanonicalErrorCode = (value: string): value is CanonicalErrorCode =>
     canonicalErrorCodes.has(value as CanonicalErrorCode);
 
 const isRefusalReason = (value: string): value is RefusalReason =>
-    Object.prototype.hasOwnProperty.call(refusalReasonCodes, value);
+    refusalReasons.has(value as RefusalReason);
 
 const executeCommand = <Result>(
     runtime: FoundationKernelCommandRuntime,
@@ -460,7 +416,7 @@ const canonicalInputCommand = (
 ): BinaryWriter => {
     const request = new BinaryWriter();
     request.writeU8(command);
-    request.writeBytes(copyCanonicalBytes(canonicalBytes, 'canonicalBytes'));
+    request.writeBytes(requireCanonicalBytes(canonicalBytes, 'canonicalBytes'));
     return request;
 };
 
@@ -490,12 +446,10 @@ export const openFoundationCeremonyRuntime = (
         request.writeU8(encodeActionDefinitionCommand);
         request.writeU16(topCount, 'topCount');
         request.writeU64(submissionCutoffUnixMilliseconds);
-        return executeCommand(kernel, request, (reader) =>
-            Object.freeze({
-                canonicalBytes: Uint8Array.from(reader.readBytes()),
-                actionDefinitionHash: readHash(reader),
-            }),
-        );
+        return executeCommand(kernel, request, (reader) => ({
+            canonicalBytes: Uint8Array.from(reader.readBytes()),
+            actionDefinitionHash: readHash(reader),
+        }));
     },
     encodeBoardPolicy: (input) => {
         const boardOriginIdentifier = requireWellFormedString(
@@ -505,12 +459,10 @@ export const openFoundationCeremonyRuntime = (
         const request = new BinaryWriter();
         request.writeU8(encodeBoardPolicyCommand);
         request.writeString(boardOriginIdentifier);
-        return executeCommand(kernel, request, (reader) =>
-            Object.freeze({
-                canonicalBytes: Uint8Array.from(reader.readBytes()),
-                boardPolicyHash: readHash(reader),
-            }),
-        );
+        return executeCommand(kernel, request, (reader) => ({
+            canonicalBytes: Uint8Array.from(reader.readBytes()),
+            boardPolicyHash: readHash(reader),
+        }));
     },
     encodeManifest: (input) => {
         const snapshot = snapshotManifestInput(input);
@@ -532,30 +484,28 @@ export const openFoundationCeremonyRuntime = (
             request.writeString(optionDefinition.optionIdentifier);
             request.writeString(optionDefinition.displayLabel);
         }
-        return executeCommand(kernel, request, (reader) =>
-            Object.freeze({
-                canonicalBytes: Uint8Array.from(reader.readBytes()),
-                manifestHash: readHash(reader),
-            }),
-        );
+        return executeCommand(kernel, request, (reader) => ({
+            canonicalBytes: Uint8Array.from(reader.readBytes()),
+            manifestHash: readHash(reader),
+        }));
     },
     verifyActionContext: (input) => {
         const request = new BinaryWriter();
         request.writeU8(verifyActionContextCommand);
         request.writeBytes(
-            copyCanonicalBytes(
+            requireCanonicalBytes(
                 snapshotDataProperty(input, 'canonicalManifestBytes', 'input'),
                 'canonicalManifestBytes',
             ),
         );
         request.writeBytes(
-            copyCanonicalBytes(
+            requireCanonicalBytes(
                 snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
                 'canonicalRosterBytes',
             ),
         );
         request.writeBytes(
-            copyCanonicalBytes(
+            requireCanonicalBytes(
                 snapshotDataProperty(
                     input,
                     'canonicalActionDefinitionBytes',
@@ -565,7 +515,7 @@ export const openFoundationCeremonyRuntime = (
             ),
         );
         request.writeBytes(
-            copyCanonicalBytes(
+            requireCanonicalBytes(
                 snapshotDataProperty(
                     input,
                     'canonicalBoardPolicyBytes',
@@ -639,13 +589,13 @@ export const openFoundationCeremonyRuntime = (
         const request = new BinaryWriter();
         request.writeU8(verifyCeremonyContextCommand);
         request.writeBytes(
-            copyCanonicalBytes(
+            requireCanonicalBytes(
                 snapshotDataProperty(input, 'canonicalManifestBytes', 'input'),
                 'canonicalManifestBytes',
             ),
         );
         request.writeBytes(
-            copyCanonicalBytes(
+            requireCanonicalBytes(
                 snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
                 'canonicalRosterBytes',
             ),

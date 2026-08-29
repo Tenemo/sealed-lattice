@@ -18,86 +18,26 @@ const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 
 pub const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 3;
 pub const MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 20;
+#[cfg(test)]
 pub(crate) const PROTOTYPE_PARTICIPANT_COUNT: u16 = 10;
 pub const MINIMUM_CONFIGURABLE_OPTION_COUNT: u16 = 2;
 pub const MAXIMUM_CONFIGURABLE_OPTION_COUNT: u16 = 20;
+#[cfg(test)]
 pub(crate) const PROTOTYPE_OPTION_COUNT: u16 = 10;
+pub(crate) const FOUNDATION_PROTOCOL_NAME: &str = "sealed-lattice";
+pub(crate) const FOUNDATION_PROTOCOL_VERSION: u16 = 1;
+#[cfg(test)]
+pub(crate) const FOUNDATION_MINIMUM_SCORE: u16 = 1;
+#[cfg(test)]
+pub(crate) const FOUNDATION_MAXIMUM_SCORE: u16 = 10;
+pub(crate) const MAXIMUM_FOUNDATION_IDENTIFIER_BYTE_LENGTH: usize = 128;
+pub(crate) const MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH: usize = 8_388_608;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FoundationRosterParameters {
-    pub participant_count: u16,
-    pub active_fault_bound: u16,
-    pub reconstruction_threshold: u16,
-    pub selected_set_quorum: u16,
-    pub finality_quorum: u16,
-    pub state_witness_quorum: u16,
+fn participant_count_is_configurable(participant_count: usize) -> bool {
+    (usize::from(MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT)
+        ..=usize::from(MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT))
+        .contains(&participant_count)
 }
-
-/// Derives structural roster parameters without selecting or qualifying the
-/// resulting profile. The reconstruction threshold is independent of the
-/// strict asynchronous active-fault bound when the roster size is divisible
-/// by three.
-pub const fn derive_foundation_roster_parameters(
-    participant_count: u16,
-) -> Option<FoundationRosterParameters> {
-    if participant_count < MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT
-        || participant_count > MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
-    {
-        return None;
-    }
-
-    let active_fault_bound = (participant_count - 1) / 3;
-    let reconstruction_threshold = participant_count / 3 + 1;
-    let quorum = (participant_count + active_fault_bound) / 2 + 1;
-
-    Some(FoundationRosterParameters {
-        participant_count,
-        active_fault_bound,
-        reconstruction_threshold,
-        selected_set_quorum: quorum,
-        finality_quorum: quorum,
-        state_witness_quorum: quorum,
-    })
-}
-
-const PROTOTYPE_ROSTER_PARAMETERS: FoundationRosterParameters =
-    match derive_foundation_roster_parameters(PROTOTYPE_PARTICIPANT_COUNT) {
-        Some(parameters) => parameters,
-        None => panic!("the prototype participant count must be configurable"),
-    };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FoundationProfile {
-    pub protocol_name: &'static str,
-    pub protocol_version: u16,
-    pub participant_count: u16,
-    pub active_fault_bound: u16,
-    pub reconstruction_threshold: u16,
-    pub selected_set_quorum: u16,
-    pub finality_quorum: u16,
-    pub state_witness_quorum: u16,
-    pub option_count: u16,
-    pub minimum_score: u16,
-    pub maximum_score: u16,
-    pub maximum_identifier_byte_length: usize,
-    pub maximum_copied_buffer_byte_length: usize,
-}
-
-pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
-    protocol_name: "sealed-lattice",
-    protocol_version: 1,
-    participant_count: PROTOTYPE_ROSTER_PARAMETERS.participant_count,
-    active_fault_bound: PROTOTYPE_ROSTER_PARAMETERS.active_fault_bound,
-    reconstruction_threshold: PROTOTYPE_ROSTER_PARAMETERS.reconstruction_threshold,
-    selected_set_quorum: PROTOTYPE_ROSTER_PARAMETERS.selected_set_quorum,
-    finality_quorum: PROTOTYPE_ROSTER_PARAMETERS.finality_quorum,
-    state_witness_quorum: PROTOTYPE_ROSTER_PARAMETERS.state_witness_quorum,
-    option_count: PROTOTYPE_OPTION_COUNT,
-    minimum_score: 1,
-    maximum_score: 10,
-    maximum_identifier_byte_length: 128,
-    maximum_copied_buffer_byte_length: 8_388_608,
-};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundationSchemaError {
@@ -261,11 +201,7 @@ impl Roster {
 }
 
 fn validate_roster_entries(entries: &[RosterEntry]) -> SchemaResult<()> {
-    let participant_count = u16::try_from(entries.len()).ok();
-    if participant_count
-        .and_then(derive_foundation_roster_parameters)
-        .is_none()
-    {
+    if !participant_count_is_configurable(entries.len()) {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "roster size is outside the configurable range",
@@ -351,11 +287,7 @@ fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) ->
     let Some(declared_entry_count) = raw_nested_tuple_list_count(entry_list_bytes, limits) else {
         return Ok(());
     };
-    if u16::try_from(declared_entry_count)
-        .ok()
-        .and_then(derive_foundation_roster_parameters)
-        .is_none()
-    {
+    if !participant_count_is_configurable(declared_entry_count as usize) {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
             "roster size is outside the configurable range",
@@ -583,32 +515,8 @@ mod tests {
     }
 
     #[test]
-    fn roster_parameter_formulas_cover_only_the_configurable_range() {
-        assert_eq!(derive_foundation_roster_parameters(2), None);
-        assert_eq!(derive_foundation_roster_parameters(21), None);
-        for participant_count in
-            MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
-        {
-            let parameters = derive_foundation_roster_parameters(participant_count)
-                .expect("admitted roster derives");
-            assert_eq!(parameters.active_fault_bound, (participant_count - 1) / 3);
-            assert_eq!(
-                parameters.reconstruction_threshold,
-                participant_count / 3 + 1
-            );
-            assert_eq!(
-                parameters.selected_set_quorum,
-                (participant_count + parameters.active_fault_bound) / 2 + 1
-            );
-        }
-        assert_eq!(FOUNDATION_PROFILE.active_fault_bound, 3);
-        assert_eq!(FOUNDATION_PROFILE.reconstruction_threshold, 4);
-        assert_eq!(FOUNDATION_PROFILE.selected_set_quorum, 7);
-    }
-
-    #[test]
     fn every_configurable_roster_size_round_trips_canonically() {
-        for participant_count in [3, FOUNDATION_PROFILE.participant_count, 20] {
+        for participant_count in [3, PROTOTYPE_PARTICIPANT_COUNT, 20] {
             let roster = Roster::new(roster_entries(participant_count)).expect("roster is valid");
             let encoded = roster.encode().expect("roster encodes");
             let decoded = Roster::decode(&encoded, &CanonicalDecodeLimits::default())

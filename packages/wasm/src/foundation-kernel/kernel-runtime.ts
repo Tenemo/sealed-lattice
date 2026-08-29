@@ -1,4 +1,7 @@
-import { foundationProfile } from '../foundation-contract.js';
+import {
+    maximumFoundationCopiedBufferByteLength,
+    maximumFoundationWasmMemoryByteLength,
+} from '../foundation-contract.js';
 
 import type { FoundationKernelExports } from './kernel-types.js';
 import {
@@ -8,10 +11,9 @@ import {
 } from './kernel-wasm-hash.js';
 
 const wasmPageByteLength = 65_536;
-const maximumCopiedBufferByteLength =
-    foundationProfile.maximumCopiedBufferByteLength;
+const maximumCopiedBufferByteLength = maximumFoundationCopiedBufferByteLength;
 const maximumFoundationKernelMemoryByteLength =
-    foundationProfile.maximumWasmMemoryByteLength;
+    maximumFoundationWasmMemoryByteLength;
 
 const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
     const subtleCrypto = globalThis.crypto?.subtle;

@@ -9,8 +9,9 @@ use super::{
     interpreter::{evaluate_compiled_tally_circuit, interpret_boolean_operations},
 };
 use crate::foundation::{
-    FOUNDATION_PROFILE, MAXIMUM_CONFIGURABLE_OPTION_COUNT, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    MAXIMUM_CONFIGURABLE_OPTION_COUNT, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
     MINIMUM_CONFIGURABLE_OPTION_COUNT, MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT,
 };
 
 fn profile(participant_count: u16, option_count: u16, top_count: u16) -> TallyCircuitProfile {
@@ -56,9 +57,9 @@ fn compare_compiled_circuit_and_direct_evaluator(
 #[test]
 fn completion_profile_full_ranking_has_one_slot_geometry() {
     let compiled_circuit = compile_tally_circuit(profile(
-        FOUNDATION_PROFILE.participant_count,
-        FOUNDATION_PROFILE.option_count,
-        FOUNDATION_PROFILE.option_count,
+        PROTOTYPE_PARTICIPANT_COUNT,
+        PROTOTYPE_OPTION_COUNT,
+        PROTOTYPE_OPTION_COUNT,
     ))
     .expect("completion-profile circuit must compile");
     let geometry = compiled_circuit.geometry();
@@ -142,10 +143,10 @@ fn randomized_elections_match_for_every_admitted_structural_profile() {
 fn every_completion_profile_top_count_has_canonical_distinct_bytes_and_semantics() {
     let mut circuit_identities = BTreeSet::new();
     let scores = vec![10, 1, 9, 2, 8, 3, 7, 4, 6, 5];
-    for top_count in 1..=FOUNDATION_PROFILE.option_count {
+    for top_count in 1..=PROTOTYPE_OPTION_COUNT {
         let selected_profile = profile(
-            FOUNDATION_PROFILE.participant_count,
-            FOUNDATION_PROFILE.option_count,
+            PROTOTYPE_PARTICIPANT_COUNT,
+            PROTOTYPE_OPTION_COUNT,
             top_count,
         );
         let compiled_circuit = compile_tally_circuit(selected_profile)

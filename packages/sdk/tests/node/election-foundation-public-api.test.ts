@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 
-import { foundationProfile } from '@sealed-lattice/wasm/published-sdk';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
@@ -52,7 +51,7 @@ describe('election foundation public package API in Node', () => {
     it('creates and verifies canonical manifest bytes through the packaged kernel', async () => {
         const manifest = await createCanonicalManifest({
             options: Array.from(
-                { length: foundationProfile.optionCount },
+                { length: 10 },
                 (_value, optionIndex) => `Option ${String(optionIndex)}`,
             ),
             question: 'Choose priorities',
