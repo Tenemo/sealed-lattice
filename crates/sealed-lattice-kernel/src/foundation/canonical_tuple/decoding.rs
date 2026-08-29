@@ -174,11 +174,9 @@ pub(in crate::foundation) fn validate_item_bytes(
     }
     budget.charge_work(bytes.len(), base_offset)?;
     let expected_length = match item_type {
-        CanonicalItemType::Unsigned8 | CanonicalItemType::Boolean => Some(1),
         CanonicalItemType::Unsigned16 => Some(2),
-        CanonicalItemType::Unsigned32 => Some(4),
         CanonicalItemType::Unsigned64 => Some(8),
-        CanonicalItemType::Hash512 | CanonicalItemType::ParticipantIdentity => Some(64),
+        CanonicalItemType::Hash512 => Some(64),
         _ => None,
     };
     if let Some(expected_length) = expected_length
@@ -200,13 +198,6 @@ pub(in crate::foundation) fn validate_item_bytes(
                     "ASCII item contains a non-printable byte",
                 ));
             }
-        }
-        CanonicalItemType::Boolean if !matches!(bytes, [0] | [1]) => {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                base_offset,
-                "boolean item is not zero or one",
-            ));
         }
         CanonicalItemType::DisplayText => {
             let value = decode_variable_value(bytes, base_offset)?;
@@ -239,58 +230,6 @@ pub(in crate::foundation) fn validate_item_bytes(
                     base_offset + consumed,
                     "nested tuple contains trailing bytes",
                 ));
-            }
-        }
-        CanonicalItemType::Optional => {
-            if bytes.len() < 3 {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::Truncated,
-                    base_offset + bytes.len(),
-                    "optional item is truncated",
-                ));
-            }
-            let contained_type_code = u16::from_le_bytes([bytes[0], bytes[1]]);
-            let contained_type = CanonicalItemType::from_canonical_code(contained_type_code)
-                .ok_or_else(|| {
-                    CanonicalCodecError::new(
-                        CanonicalCodecErrorKind::UnknownItemType,
-                        base_offset,
-                        "optional contained item type is unassigned",
-                    )
-                })?;
-            match bytes[2] {
-                0 if bytes.len() == 3 => {}
-                0 => {
-                    return Err(CanonicalCodecError::new(
-                        CanonicalCodecErrorKind::TrailingBytes,
-                        base_offset + 3,
-                        "absent optional item contains trailing bytes",
-                    ));
-                }
-                1 => {
-                    let next_depth = nesting_depth.checked_add(1).ok_or_else(|| {
-                        CanonicalCodecError::new(
-                            CanonicalCodecErrorKind::LengthOverflow,
-                            base_offset + 3,
-                            "optional nesting depth overflows",
-                        )
-                    })?;
-                    validate_item_bytes(
-                        contained_type,
-                        &bytes[3..],
-                        limits,
-                        budget,
-                        next_depth,
-                        base_offset + 3,
-                    )?
-                }
-                _ => {
-                    return Err(CanonicalCodecError::new(
-                        CanonicalCodecErrorKind::InvalidItem,
-                        base_offset + 2,
-                        "optional tag is not zero or one",
-                    ));
-                }
             }
         }
         CanonicalItemType::HomogeneousList => {
@@ -328,15 +267,6 @@ pub(in crate::foundation) fn validate_item_bytes(
                 base_offset + 6,
             )?;
         }
-        CanonicalItemType::FieldElement | CanonicalItemType::ChallengeExtensionElement
-            if bytes.is_empty() =>
-        {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                base_offset,
-                "field item cannot be empty",
-            ));
-        }
         _ => {}
     }
     Ok(())
@@ -351,122 +281,11 @@ pub(super) fn validate_list_payload(
     nesting_depth: u16,
     base_offset: usize,
 ) -> Result<(), CanonicalCodecError> {
-    let fixed_length = match element_type {
-        CanonicalItemType::Unsigned8 | CanonicalItemType::Boolean => Some(1usize),
-        CanonicalItemType::Unsigned16 => Some(2),
-        CanonicalItemType::Unsigned32 => Some(4),
-        CanonicalItemType::Unsigned64 => Some(8),
-        CanonicalItemType::Hash512 | CanonicalItemType::ParticipantIdentity => Some(64),
-        _ => None,
-    };
-    if let Some(element_length) = fixed_length {
-        let expected_length = count.checked_mul(element_length).ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                base_offset,
-                "homogeneous-list byte length overflows",
-            )
-        })?;
-        if bytes.len() != expected_length {
-            return Err(CanonicalCodecError::new(
-                if bytes.len() < expected_length {
-                    CanonicalCodecErrorKind::Truncated
-                } else {
-                    CanonicalCodecErrorKind::TrailingBytes
-                },
-                base_offset + bytes.len().min(expected_length),
-                "homogeneous-list payload length is not canonical",
-            ));
-        }
-        for index in 0..count {
-            let start = index * element_length;
-            validate_item_bytes(
-                element_type,
-                &bytes[start..start + element_length],
-                limits,
-                budget,
-                nesting_depth,
-                base_offset + start,
-            )?;
-        }
-        return Ok(());
-    }
-    if matches!(
-        element_type,
-        CanonicalItemType::Ascii | CanonicalItemType::DisplayText
-    ) {
-        let mut offset = 0usize;
-        for _ in 0..count {
-            if bytes.len().saturating_sub(offset) < 4 {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::Truncated,
-                    base_offset + bytes.len(),
-                    "variable-width homogeneous-list element is truncated",
-                ));
-            }
-            let declared_length = u32::from_le_bytes([
-                bytes[offset],
-                bytes[offset + 1],
-                bytes[offset + 2],
-                bytes[offset + 3],
-            ]) as usize;
-            let element_length = declared_length.checked_add(4).ok_or_else(|| {
-                CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::LengthOverflow,
-                    base_offset + offset,
-                    "homogeneous-list element length overflows",
-                )
-            })?;
-            let element_end = offset.checked_add(element_length).ok_or_else(|| {
-                CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::LengthOverflow,
-                    base_offset + offset,
-                    "homogeneous-list element end overflows",
-                )
-            })?;
-            if element_end > bytes.len() {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::Truncated,
-                    base_offset + offset,
-                    "variable-width homogeneous-list element is truncated",
-                ));
-            }
-            validate_item_bytes(
-                element_type,
-                &bytes[offset..element_end],
-                limits,
-                budget,
-                nesting_depth,
-                base_offset + offset,
-            )?;
-            offset = element_end;
-        }
-        if offset != bytes.len() {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::TrailingBytes,
-                base_offset + offset,
-                "homogeneous-list contains trailing bytes",
-            ));
-        }
-        return Ok(());
-    }
-    if matches!(
-        element_type,
-        CanonicalItemType::RawBytes
-            | CanonicalItemType::FieldElement
-            | CanonicalItemType::ChallengeExtensionElement
-    ) {
-        // Their element widths and, for raw bytes, fixed-versus-variable
-        // framing are selected by the enclosing schema and suite. Preserve
-        // the bounded payload here so the profile-aware decoder can enforce
-        // exact element boundaries before accepting it.
-        return Ok(());
-    }
     if element_type != CanonicalItemType::NestedTuple {
         return Err(CanonicalCodecError::new(
             CanonicalCodecErrorKind::InvalidItem,
             base_offset,
-            "homogeneous-list element type has no canonical framing rule",
+            "foundation homogeneous lists contain only nested tuples",
         ));
     }
     let next_depth = nesting_depth.checked_add(1).ok_or_else(|| {

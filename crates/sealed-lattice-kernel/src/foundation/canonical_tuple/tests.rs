@@ -49,7 +49,6 @@ fn recursively_nested_single_item_tuple(
 fn representative_tuple() -> CanonicalTuple {
     let display = StabilizedDisplayText::from_ingress_utf8("Cafe\u{301}".as_bytes())
         .expect("display text normalizes");
-    let nested = CanonicalTuple::new(0x0111, 1, vec![CanonicalItem::unsigned16(3)]);
     CanonicalTuple::new(
         0x0110,
         1,
@@ -58,8 +57,6 @@ fn representative_tuple() -> CanonicalTuple {
             CanonicalItem::ascii("sealed-lattice").expect("printable ASCII"),
             CanonicalItem::display_text(&display).expect("display text fits u32"),
             CanonicalItem::hash512([0x5a; 64]),
-            CanonicalItem::nested_tuple(&nested).expect("nested tuple encodes"),
-            CanonicalItem::optional(CanonicalItemType::Hash512, None).expect("optional encodes"),
         ],
     )
 }
@@ -73,33 +70,14 @@ fn representative_tuples_and_homogeneous_lists_round_trip_byte_identically() {
     assert_eq!(decoded, tuple);
     assert_eq!(decoded.encode().expect("decoded tuple re-encodes"), encoded);
 
-    let hash_values = [
-        CanonicalItem::hash512([1; 64]),
-        CanonicalItem::hash512([2; 64]),
-    ];
     let nested_values = [
-        CanonicalItem::nested_tuple(&CanonicalTuple::new(
-            0x0111,
-            1,
-            vec![CanonicalItem::unsigned16(0)],
-        ))
-        .expect("nested tuple"),
-        CanonicalItem::nested_tuple(&CanonicalTuple::new(
-            0x0111,
-            1,
-            vec![CanonicalItem::unsigned16(1)],
-        ))
-        .expect("nested tuple"),
+        CanonicalTuple::new(0x0111, 1, vec![CanonicalItem::unsigned16(0)]),
+        CanonicalTuple::new(0x0111, 1, vec![CanonicalItem::unsigned16(1)]),
     ];
     let list_tuple = CanonicalTuple::new(
         0x0110,
         1,
-        vec![
-            CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &hash_values)
-                .expect("hash list"),
-            CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &nested_values)
-                .expect("tuple list"),
-        ],
+        vec![CanonicalItem::nested_tuple_list(&nested_values).expect("tuple list")],
     );
     let encoded = list_tuple.encode().expect("encode");
     assert_eq!(
@@ -225,7 +203,7 @@ fn hostile_counts_lengths_types_and_termination_refuse_before_allocation() {
         CanonicalCodecErrorKind::LimitExceeded
     );
 
-    let mut unknown_type = CanonicalTuple::new(1, 1, vec![CanonicalItem::unsigned8(1)])
+    let mut unknown_type = CanonicalTuple::new(1, 1, vec![CanonicalItem::unsigned16(1)])
         .encode()
         .expect("encode");
     unknown_type[8..10].copy_from_slice(&0xffff_u16.to_le_bytes());
@@ -258,7 +236,7 @@ fn hostile_counts_lengths_types_and_termination_refuse_before_allocation() {
 }
 
 #[test]
-fn noncanonical_boolean_optional_and_unicode_items_refuse() {
+fn noncanonical_display_text_refuses() {
     let decomposed = "Cafe\u{301}".as_bytes();
     let mut noncanonical_display_text = Vec::new();
     noncanonical_display_text.extend_from_slice(
@@ -267,58 +245,9 @@ fn noncanonical_boolean_optional_and_unicode_items_refuse() {
             .to_le_bytes(),
     );
     noncanonical_display_text.extend_from_slice(decomposed);
-    for (item_type, bytes) in [
-        (CanonicalItemType::Boolean, vec![2]),
-        (CanonicalItemType::Optional, vec![0x06, 0x00, 0, 1]),
-        (CanonicalItemType::DisplayText, noncanonical_display_text),
-    ] {
-        let encoded = unchecked_single_item_tuple(item_type, &bytes);
-        assert!(CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default()).is_err());
-    }
-}
-
-#[test]
-fn deeply_nested_optionals_refuse_at_the_configured_depth() {
-    let mut contained_type = CanonicalItemType::Unsigned8;
-    let mut nested_value = vec![1];
-    for _ in 0..40 {
-        let mut optional = Vec::with_capacity(nested_value.len() + 3);
-        optional.extend_from_slice(&contained_type.canonical_code().to_le_bytes());
-        optional.push(1);
-        optional.extend_from_slice(&nested_value);
-        nested_value = optional;
-        contained_type = CanonicalItemType::Optional;
-    }
-    let error = CanonicalTuple::decode(
-        &unchecked_single_item_tuple(CanonicalItemType::Optional, &nested_value),
-        &CanonicalDecodeLimits::default(),
-    )
-    .expect_err("optional nesting must be bounded");
-    assert_eq!(error.kind, CanonicalCodecErrorKind::LimitExceeded);
-
-    let mut contained_type = CanonicalItemType::Unsigned8;
-    let mut nested_value = vec![1];
-    for _ in 0..=ABSOLUTE_MAXIMUM_NESTING_DEPTH {
-        let mut optional = Vec::with_capacity(nested_value.len() + 3);
-        optional.extend_from_slice(&contained_type.canonical_code().to_le_bytes());
-        optional.push(1);
-        optional.extend_from_slice(&nested_value);
-        nested_value = optional;
-        contained_type = CanonicalItemType::Optional;
-    }
-    let permissive_limits = CanonicalDecodeLimits {
-        maximum_nesting_depth: u16::MAX,
-        ..CanonicalDecodeLimits::default()
-    };
-    assert_eq!(
-        CanonicalTuple::decode(
-            &unchecked_single_item_tuple(CanonicalItemType::Optional, &nested_value),
-            &permissive_limits,
-        )
-        .expect_err("the absolute nesting ceiling cannot be disabled")
-        .kind,
-        CanonicalCodecErrorKind::LimitExceeded
-    );
+    let encoded =
+        unchecked_single_item_tuple(CanonicalItemType::DisplayText, &noncanonical_display_text);
+    assert!(CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default()).is_err());
 }
 
 #[test]
@@ -362,7 +291,7 @@ fn cumulative_budgets_refuse_recursive_scanning_and_copy_amplification() {
 
 #[test]
 fn cumulative_budgets_enforce_exact_flat_decode_boundaries() {
-    let encoded = unchecked_single_item_tuple(CanonicalItemType::Unsigned8, &[7]);
+    let encoded = unchecked_single_item_tuple(CanonicalItemType::Unsigned16, &[7, 0]);
     let before_item_validation_limit = CanonicalDecodeLimits {
         maximum_cumulative_work_byte_length: encoded.len() - 1,
         ..CanonicalDecodeLimits::default()
@@ -400,7 +329,7 @@ fn cumulative_budgets_enforce_exact_flat_decode_boundaries() {
 
     let exact_limit = CanonicalDecodeLimits {
         maximum_cumulative_allocation_byte_length: CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH
-            + 1,
+            + 2,
         ..CanonicalDecodeLimits::default()
     };
     CanonicalTuple::decode(&encoded, &exact_limit)
@@ -409,7 +338,7 @@ fn cumulative_budgets_enforce_exact_flat_decode_boundaries() {
 
 #[test]
 fn prefix_decodes_share_one_cumulative_budget() {
-    let encoded = unchecked_single_item_tuple(CanonicalItemType::Unsigned8, &[7]);
+    let encoded = unchecked_single_item_tuple(CanonicalItemType::Unsigned16, &[7, 0]);
     let limits = CanonicalDecodeLimits {
         maximum_cumulative_work_byte_length: encoded.len(),
         ..CanonicalDecodeLimits::default()
@@ -431,10 +360,12 @@ fn prefix_decodes_share_one_cumulative_budget() {
 
 #[test]
 fn constructors_do_not_emit_values_the_default_decoder_refuses() {
-    let too_many_values =
-        vec![CanonicalItem::unsigned8(0); CanonicalDecodeLimits::default().maximum_item_count + 1];
+    let too_many_values = vec![
+        CanonicalTuple::new(1, 1, vec![]);
+        CanonicalDecodeLimits::default().maximum_item_count + 1
+    ];
     assert_eq!(
-        CanonicalItem::homogeneous_list(CanonicalItemType::Unsigned8, &too_many_values)
+        CanonicalItem::nested_tuple_list(&too_many_values)
             .expect_err("oversized list must refuse")
             .kind,
         CanonicalCodecErrorKind::LimitExceeded
@@ -443,7 +374,7 @@ fn constructors_do_not_emit_values_the_default_decoder_refuses() {
     let too_many_items = CanonicalTuple::new(
         1,
         1,
-        vec![CanonicalItem::unsigned8(0); CanonicalDecodeLimits::default().maximum_item_count + 1],
+        vec![CanonicalItem::unsigned16(0); CanonicalDecodeLimits::default().maximum_item_count + 1],
     );
     assert_eq!(
         too_many_items
@@ -461,24 +392,18 @@ fn constructors_do_not_emit_values_the_default_decoder_refuses() {
         CanonicalCodecErrorKind::LimitExceeded
     );
 
-    let maximum_fixed_item = CanonicalItem::fixed_bytes(vec![0; maximum_item_byte_length])
-        .expect("the fixed value itself is exactly at the limit");
-    assert_eq!(
-        CanonicalItem::optional(CanonicalItemType::RawBytes, Some(&maximum_fixed_item))
-            .expect_err("optional framing must be charged before allocation")
-            .kind,
-        CanonicalCodecErrorKind::LimitExceeded
+    let half_limit_tuple = CanonicalTuple::new(
+        1,
+        1,
+        vec![
+            CanonicalItem::fixed_bytes(vec![0; maximum_item_byte_length / 2])
+                .expect("half-limit item"),
+        ],
     );
-
-    let half_limit_item =
-        CanonicalItem::fixed_bytes(vec![0; maximum_item_byte_length / 2]).expect("half-limit item");
     assert_eq!(
-        CanonicalItem::homogeneous_list(
-            CanonicalItemType::RawBytes,
-            &[half_limit_item.clone(), half_limit_item],
-        )
-        .expect_err("list framing must be charged before allocation")
-        .kind,
+        CanonicalItem::nested_tuple_list(&[half_limit_tuple.clone(), half_limit_tuple])
+            .expect_err("list framing must be charged before allocation")
+            .kind,
         CanonicalCodecErrorKind::LimitExceeded
     );
 }

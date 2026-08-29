@@ -222,19 +222,12 @@ impl Roster {
         let entries = self
             .entries
             .iter()
-            .map(|entry| {
-                entry
-                    .canonical_tuple()
-                    .and_then(|tuple| CanonicalItem::nested_tuple(&tuple).map_err(Into::into))
-            })
+            .map(RosterEntry::canonical_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
         Ok(CanonicalTuple::new(
             ROSTER_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![CanonicalItem::homogeneous_list(
-                CanonicalItemType::NestedTuple,
-                &entries,
-            )?],
+            vec![CanonicalItem::nested_tuple_list(&entries)?],
         )
         .encode()?)
     }
@@ -355,9 +348,7 @@ fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) ->
     else {
         return Ok(());
     };
-    let Some(declared_entry_count) =
-        raw_homogeneous_list_count(entry_list_bytes, CanonicalItemType::NestedTuple, limits)
-    else {
+    let Some(declared_entry_count) = raw_nested_tuple_list_count(entry_list_bytes, limits) else {
         return Ok(());
     };
     if u16::try_from(declared_entry_count)
@@ -427,12 +418,8 @@ fn raw_schema_item<'a>(
     requested_item
 }
 
-fn raw_homogeneous_list_count(
-    bytes: &[u8],
-    expected_element_type: CanonicalItemType,
-    limits: &CanonicalDecodeLimits,
-) -> Option<u32> {
-    if read_raw_u16(bytes, 0)? != expected_element_type.canonical_code() {
+fn raw_nested_tuple_list_count(bytes: &[u8], limits: &CanonicalDecodeLimits) -> Option<u32> {
+    if read_raw_u16(bytes, 0)? != CanonicalItemType::NestedTuple.canonical_code() {
         return None;
     }
     let declared_count = read_raw_u32(bytes, 2)?;
@@ -513,13 +500,11 @@ fn read_fixed_bytes<const LENGTH: usize>(item: &CanonicalItem) -> SchemaResult<[
         })
 }
 
-fn read_list_header(
-    item: &CanonicalItem,
-    expected_element_type: CanonicalItemType,
-) -> SchemaResult<(usize, &[u8])> {
+fn read_nested_tuple_list_header(item: &CanonicalItem) -> SchemaResult<(usize, &[u8])> {
     let bytes = read_item(item, CanonicalItemType::HomogeneousList)?;
     if bytes.len() < 6
-        || u16::from_le_bytes([bytes[0], bytes[1]]) != expected_element_type.canonical_code()
+        || u16::from_le_bytes([bytes[0], bytes[1]])
+            != CanonicalItemType::NestedTuple.canonical_code()
     {
         return Err(FoundationSchemaError::new(
             RefusalReason::WrongTypeOrLength,
@@ -537,7 +522,7 @@ pub(super) fn read_nested_tuple_list_with_budget(
     limits: &CanonicalDecodeLimits,
     budget: &mut CanonicalDecodeBudget,
 ) -> SchemaResult<Vec<CanonicalTuple>> {
-    let (count, bytes) = read_list_header(item, CanonicalItemType::NestedTuple)?;
+    let (count, bytes) = read_nested_tuple_list_header(item)?;
     if count > limits.maximum_item_count {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,

@@ -1,7 +1,7 @@
 use zeroize::Zeroize;
 
 use super::super::StabilizedDisplayText;
-use super::decoding::{decode_tuple_at, validate_item_bytes, validate_list_payload};
+use super::decoding::{decode_tuple_at, validate_item_bytes};
 use super::{
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeBudget, CanonicalDecodeLimits,
 };
@@ -12,18 +12,11 @@ pub enum CanonicalItemType {
     RawBytes = 0x01,
     Ascii = 0x02,
     Unsigned16 = 0x03,
-    Unsigned32 = 0x04,
     Unsigned64 = 0x05,
     Hash512 = 0x06,
-    ParticipantIdentity = 0x07,
-    FieldElement = 0x08,
     NestedTuple = 0x09,
-    Unsigned8 = 0x0a,
-    Boolean = 0x0b,
     DisplayText = 0x0c,
-    Optional = 0x0d,
     HomogeneousList = 0x0e,
-    ChallengeExtensionElement = 0x0f,
 }
 
 impl CanonicalItemType {
@@ -36,18 +29,11 @@ impl CanonicalItemType {
             0x01 => Some(Self::RawBytes),
             0x02 => Some(Self::Ascii),
             0x03 => Some(Self::Unsigned16),
-            0x04 => Some(Self::Unsigned32),
             0x05 => Some(Self::Unsigned64),
             0x06 => Some(Self::Hash512),
-            0x07 => Some(Self::ParticipantIdentity),
-            0x08 => Some(Self::FieldElement),
             0x09 => Some(Self::NestedTuple),
-            0x0a => Some(Self::Unsigned8),
-            0x0b => Some(Self::Boolean),
             0x0c => Some(Self::DisplayText),
-            0x0d => Some(Self::Optional),
             0x0e => Some(Self::HomogeneousList),
-            0x0f => Some(Self::ChallengeExtensionElement),
             _ => None,
         }
     }
@@ -66,26 +52,6 @@ impl Zeroize for CanonicalItem {
 }
 
 impl CanonicalItem {
-    pub fn from_canonical_bytes(
-        item_type: CanonicalItemType,
-        canonical_bytes: Vec<u8>,
-        limits: &CanonicalDecodeLimits,
-    ) -> Result<Self, CanonicalCodecError> {
-        if canonical_bytes.len() > limits.maximum_item_byte_length {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "item byte length exceeds the configured limit",
-            ));
-        }
-        let mut budget = CanonicalDecodeBudget::new(limits);
-        validate_item_bytes(item_type, &canonical_bytes, limits, &mut budget, 0, 0)?;
-        Ok(Self {
-            item_type,
-            canonical_bytes,
-        })
-    }
-
     pub fn fixed_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, CanonicalCodecError> {
         let source_bytes = bytes.as_ref();
         ensure_default_fixed_byte_value_limit(source_bytes.len())?;
@@ -142,23 +108,9 @@ impl CanonicalItem {
         Self::ascii(value)
     }
 
-    pub fn unsigned8(value: u8) -> Self {
-        Self {
-            item_type: CanonicalItemType::Unsigned8,
-            canonical_bytes: vec![value],
-        }
-    }
-
     pub fn unsigned16(value: u16) -> Self {
         Self {
             item_type: CanonicalItemType::Unsigned16,
-            canonical_bytes: value.to_le_bytes().to_vec(),
-        }
-    }
-
-    pub fn unsigned32(value: u32) -> Self {
-        Self {
-            item_type: CanonicalItemType::Unsigned32,
             canonical_bytes: value.to_le_bytes().to_vec(),
         }
     }
@@ -170,23 +122,9 @@ impl CanonicalItem {
         }
     }
 
-    pub fn boolean(value: bool) -> Self {
-        Self {
-            item_type: CanonicalItemType::Boolean,
-            canonical_bytes: vec![u8::from(value)],
-        }
-    }
-
     pub fn hash512(value: [u8; 64]) -> Self {
         Self {
             item_type: CanonicalItemType::Hash512,
-            canonical_bytes: value.to_vec(),
-        }
-    }
-
-    pub fn participant_identity(value: [u8; 64]) -> Self {
-        Self {
-            item_type: CanonicalItemType::ParticipantIdentity,
             canonical_bytes: value.to_vec(),
         }
     }
@@ -203,81 +141,13 @@ impl CanonicalItem {
         })
     }
 
-    pub fn nested_tuple(value: &CanonicalTuple) -> Result<Self, CanonicalCodecError> {
-        Ok(Self {
-            item_type: CanonicalItemType::NestedTuple,
-            canonical_bytes: value.encode()?,
-        })
-    }
-
-    pub fn optional(
-        contained_type: CanonicalItemType,
-        value: Option<&CanonicalItem>,
-    ) -> Result<Self, CanonicalCodecError> {
-        if let Some(item) = value
-            && item.item_type != contained_type
-        {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                0,
-                "optional item type does not match its declared contained type",
-            ));
-        }
-        let value_length = value.map_or(0, |item| item.canonical_bytes.len());
-        let capacity = 3usize.checked_add(value_length).ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                0,
-                "optional item length overflows",
-            )
-        })?;
-        if capacity > CanonicalDecodeLimits::default().maximum_item_byte_length {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "optional item exceeds the default item limit",
-            ));
-        }
-        let mut canonical_bytes = Vec::with_capacity(capacity);
-        canonical_bytes.extend_from_slice(&contained_type.canonical_code().to_le_bytes());
-        canonical_bytes.push(u8::from(value.is_some()));
-        if let Some(item) = value {
-            canonical_bytes.extend_from_slice(&item.canonical_bytes);
-        }
-        ensure_default_item_limit(&canonical_bytes)?;
-        let limits = CanonicalDecodeLimits::default();
-        let mut budget = CanonicalDecodeBudget::new(&limits);
-        validate_item_bytes(
-            CanonicalItemType::Optional,
-            &canonical_bytes,
-            &limits,
-            &mut budget,
-            0,
-            0,
-        )?;
-        Ok(Self {
-            item_type: CanonicalItemType::Optional,
-            canonical_bytes,
-        })
-    }
-
-    pub fn homogeneous_list(
-        element_type: CanonicalItemType,
-        values: &[CanonicalItem],
-    ) -> Result<Self, CanonicalCodecError> {
+    pub fn nested_tuple_list(values: &[CanonicalTuple]) -> Result<Self, CanonicalCodecError> {
         let limits = CanonicalDecodeLimits::default();
         if values.len() > limits.maximum_item_count {
             return Err(CanonicalCodecError::new(
                 CanonicalCodecErrorKind::LimitExceeded,
                 0,
                 "homogeneous-list count exceeds the default item limit",
-            ));
-        }
-        if values.iter().any(|item| item.item_type != element_type) {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                0,
-                "homogeneous-list element type mismatch",
             ));
         }
         let count = u32::try_from(values.len()).map_err(|_| {
@@ -287,16 +157,18 @@ impl CanonicalItem {
                 "homogeneous-list count does not fit u32",
             )
         })?;
-        let payload_length = values.iter().try_fold(0usize, |length, item| {
-            length
-                .checked_add(item.canonical_bytes.len())
-                .ok_or_else(|| {
-                    CanonicalCodecError::new(
-                        CanonicalCodecErrorKind::LengthOverflow,
-                        0,
-                        "homogeneous-list byte length overflows",
-                    )
-                })
+        let encoded_values = values
+            .iter()
+            .map(CanonicalTuple::encode)
+            .collect::<Result<Vec<_>, _>>()?;
+        let payload_length = encoded_values.iter().try_fold(0usize, |length, bytes| {
+            length.checked_add(bytes.len()).ok_or_else(|| {
+                CanonicalCodecError::new(
+                    CanonicalCodecErrorKind::LengthOverflow,
+                    0,
+                    "homogeneous-list byte length overflows",
+                )
+            })
         })?;
         let canonical_length = 6usize.checked_add(payload_length).ok_or_else(|| {
             CanonicalCodecError::new(
@@ -315,22 +187,15 @@ impl CanonicalItem {
             ));
         }
         let mut canonical_bytes = Vec::with_capacity(canonical_length);
-        canonical_bytes.extend_from_slice(&element_type.canonical_code().to_le_bytes());
+        canonical_bytes.extend_from_slice(
+            &CanonicalItemType::NestedTuple
+                .canonical_code()
+                .to_le_bytes(),
+        );
         canonical_bytes.extend_from_slice(&count.to_le_bytes());
-        for item in values {
-            canonical_bytes.extend_from_slice(&item.canonical_bytes);
+        for encoded_value in encoded_values {
+            canonical_bytes.extend_from_slice(&encoded_value);
         }
-        ensure_default_item_limit(&canonical_bytes)?;
-        let mut budget = CanonicalDecodeBudget::new(&limits);
-        validate_list_payload(
-            element_type,
-            values.len(),
-            &canonical_bytes[6..],
-            &limits,
-            &mut budget,
-            0,
-            6,
-        )?;
         Ok(Self {
             item_type: CanonicalItemType::HomogeneousList,
             canonical_bytes,

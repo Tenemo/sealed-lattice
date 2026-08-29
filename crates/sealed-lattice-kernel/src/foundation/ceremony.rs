@@ -162,18 +162,14 @@ impl Manifest {
         let options = self
             .options
             .iter()
-            .map(|option| {
-                option
-                    .canonical_tuple()
-                    .and_then(|tuple| CanonicalItem::nested_tuple(&tuple).map_err(Into::into))
-            })
+            .map(OptionDefinition::canonical_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
         let tuple = CanonicalTuple::new(
             MANIFEST_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::display_text(&self.display_title)?,
-                CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &options)?,
+                CanonicalItem::nested_tuple_list(&options)?,
             ],
         );
         require_copied_buffer_bound(&tuple, "manifest exceeds the supported copied-buffer bound")?;
