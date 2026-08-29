@@ -2,7 +2,7 @@
 
 This directory contains deterministic fixtures consumed by the repository's tests. Each consumer must rederive the vector's named application property from an independent implementation path where one exists.
 
-A passing vector proves only its named test property. Fixtures cannot authorize protocol state or establish production or supported-phone results.
+A passing vector proves only its named test property. Fixtures cannot authorize protocol state or establish production readiness or supported-phone qualification.
 
 ## Maintenance
 

@@ -6,11 +6,18 @@
 
 Use GitHub private vulnerability reporting when available. If it is unavailable, open a minimal public issue requesting a private contact path without including exploit details.
 
-Include the affected package version or commit, a minimal reproduction, the expected property, the observed behavior, and whether private material may have been exposed. Do not attach real election data, private keys, ballots, shares, witnesses, or unpublished exploit material.
+Include:
+
+- the affected package version or commit;
+- a minimal reproduction;
+- the expected and observed behavior; and
+- whether private material may have been exposed.
+
+Do not attach real election data or unpublished exploit material. Do not attach private keys, ballots, shares, or witnesses.
 
 ## Supported profile
 
-No released version is supported for production use. The completion and qualification target is one scalar package with ten roster participants and ten options. This profile has an active corruption bound of three, a reconstruction threshold of four, and ballot-set, finality, and state-witness quorums of seven.
+No released version is supported for production use. The completion and qualification target is one scalar package with ten roster participants and ten options. For that profile, the protocol formulas derive an active corruption bound of three, a reconstruction threshold of four, and ballot-set, finality, and state-witness quorums of seven.
 
 Schemas and tally-circuit compilers admit rosters and option counts from 3 to 20 and 2 to 20 respectively, but other profiles are structural inputs only. They carry no cryptographic, runtime, or support claim.
 
@@ -18,14 +25,16 @@ The design aims for at least 80 bits of modeled attack work against quantum-capa
 
 Cryptographic admission and supported-phone qualification are independent results for the same exact bytes. Both are incomplete. Only release Chrome on the selected physical phone can provide supported-phone evidence.
 
+Here, a poll is the user-facing workflow. An action is one canonical protocol execution for that poll.
+
 ## Security model
 
 - The protocol protects ballot scores, not voter anonymity. The frozen roster, each signed submit-or-abstain declaration, accepted ballot authorship, and whether any selected ballot is usable are public.
-- The host handles registration, invitations, organizer workflow, interface behavior, notifications, and visit cadence; participants confirm and freeze the roster. Identity vetting and Sybil resistance remain outside the library. The organizer remains an ordinary roster participant with no special protocol authority.
+- The host-application duties described in the [README](README.md#library-boundary) grant no protocol authority. Participants confirm and freeze the roster. Identity vetting and Sybil resistance remain outside the library, and the organizer remains an ordinary roster participant.
 - Every roster participant contributes to tally preparation. No smaller group, dealer, server, or organizer can complete it.
 - The adversary statically corrupts at most three participants and may rush, equivocate, withhold, replay, reorder, fork, or replace messages. A separate passive-exposure game covers at most three disclosed shares; the two bounds are not combined.
 - Transcript, mailbox, and storage services are untrusted. Silence never means abstention. Missing required input leaves the action pending.
-- Positive verification of canonical bytes, source correspondence, signatures, authenticated openings, state, and construction-specific relations determines acceptance. Producer status, signatures alone, raw shares, fixtures, and caller-selected targets cannot authorize it.
+- Acceptance comes only from positive verification. The responsible verifier recomputes context and source bindings, then checks the canonical bytes and every required authentication, opening, state, and construction relation. Producer status and caller-selected targets cannot authorize acceptance; neither can signatures, raw shares, or fixtures on their own.
 - The selected ballot set is derived from a roster-complete declaration and availability inventory. A quorum cannot choose a different valid subset or authorize an omitted-input opening.
 - Only roster participants using their own clients may witness state, authorize the selected set, establish target finality, or release verified ballot inputs and evaluation messages after finality.
 - Participant action state is bound to one browser profile. There is no backup, export, migration, or replacement-device continuation. Lost or unverifiable state retires that participant from the affected action.
@@ -37,7 +46,7 @@ These properties assume honest delivered application code while secrets are hand
 
 ## Open security issues
 
-These are layered blockers: construction, integration, browser qualification, and activation must all pass independently.
+These are layered blockers: construction, integration, supported-phone qualification, and activation must all pass independently.
 
 - `SEC-001`: No independent audit, certification, production hardening, or production approval exists.
 - `SEC-002`: No exact ten-participant, ten-option preparation-to-release ceremony is implemented and positively verified end to end.
@@ -45,7 +54,7 @@ These are layered blockers: construction, integration, browser qualification, an
 - `SEC-004`: No cryptographic suite is activated. The public package exposes foundation operations only, and component tests cannot authorize production dispatch.
 - `SEC-006`: No participant bridge carries verified state from preparation through ballot selection, target finality, input activation, evaluation, and result decoding with authenticated checkpoints.
 - `SEC-007`: No production ballot-custody construction is selected or implemented. Availability, authenticated inconsistency handling, censorship privacy, first-honest-release simulation, and positive-verifier integration remain open.
-- `SEC-008`: No physical-phone Chrome profile has completed every participant operation for the exact scalar package.
+- `SEC-008`: No supported-phone qualification has completed every participant operation in release Chrome on the selected physical phone for the exact scalar package.
 - `SEC-017`: Browser-local root-key custody and derivation-count continuity are not closed across the complete cold-start, resume, retirement, and cleanup lifecycle.
 - `SEC-019`: No immutable evidence bundle binds the selected construction, reductions, production counters, source, dependencies, and release package bytes.
 - `SEC-020`: Long operations do not yet have production-authenticated checkpoints, byte-identical cold restore, maximum lost-work bounds, or forced-termination browser evidence.
@@ -62,10 +71,10 @@ A compromised participant device holds that participant's keys and authority. It
 - compromise beyond the active fault bound;
 - data already present on a compromised device;
 - malicious same-origin application code or platform key storage;
-- adaptive corruption and post-action device compromise;
+- adaptive-corruption security and post-action compromise security;
 - everlasting secrecy, receipt freeness, coercion resistance, and endpoint security;
-- denial of service and guaranteed availability; and
-- timing, traffic-analysis, power, cache, speculative-execution, and other side channels.
+- denial-of-service resistance, guaranteed availability, or guaranteed output; and
+- side-channel resistance, including timing, traffic-analysis, power, cache, and speculative-execution attacks.
 
 Logical deletion and secret-buffer zeroization are required hygiene, but browser storage cannot attest physical erasure. Physical reclamation is measured for storage feasibility, not claimed as post-compromise secrecy.
 

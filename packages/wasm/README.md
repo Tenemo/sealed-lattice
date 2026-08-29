@@ -17,14 +17,18 @@ The browser bridge transfers owned binary buffers and reacquires WebAssembly mem
 
 The public SDK exposes only implemented foundation operations. Source and package tests define the exact command inventory.
 
-Native and desktop workbench results are development evidence only; they do not establish participant ceremony or supported-phone behavior. See the repository [README](../../README.md) for implementation status and [SECURITY.md](../../SECURITY.md) for security limitations.
+Package tests establish only their named byte, refusal, and runtime properties. See the repository [README](../../README.md) for implementation status and [SECURITY.md](../../SECURITY.md) for security limitations.
 
 ## Development
 
-Do not edit generated WebAssembly output directly. Build it from the Rust kernel through the package-owned command:
+Do not edit generated WebAssembly output directly. The package-owned build uses a dedicated Cargo target and per-invocation optimizer staging, then atomically replaces the generated artifact. Run:
 
 ```bash
 pnpm --filter @sealed-lattice/wasm run build:wasm
 ```
 
-Use the workspace build when package declarations and copied SDK bytes must be regenerated together.
+Use the workspace build when package declarations and copied SDK bytes must be regenerated together. After that build, the reproducibility gate repeats only WebAssembly generation and the SDK copy, then requires every package byte to match:
+
+```bash
+pnpm run build:verify-reproducible
+```
