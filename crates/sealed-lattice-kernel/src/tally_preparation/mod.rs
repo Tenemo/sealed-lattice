@@ -211,6 +211,7 @@ pub(crate) use direct_mpc_one_and_preprocessing_source::verify_direct_mpc_one_an
 pub(crate) use direct_mpc_one_and_preprocessing_source::{
     DirectMpcOneAndPreprocessingSourceError, VerifiedDirectMpcOneAndPreprocessingSource,
     direct_mpc_one_and_preprocessing_source_parameter_identity,
+    verify_direct_mpc_one_and_preprocessing_source_from_joined_custody,
 };
 pub(crate) use direct_mpc_participant_cursor::{
     DIRECT_MPC_CURSOR_CHECKPOINT_KEY_BYTE_LENGTH, DirectMpcCursorError,
@@ -227,11 +228,23 @@ pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320::VerifiedPseudorandomZ
 pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320::verify_pseudorandom_zero_sharing_seed_mailbox_authenticated_inconsistency_320;
 #[cfg(test)]
 pub(crate) use pseudorandom_zero_sharing_seed_mailbox_320_tests::seal_mailbox_stream;
+#[cfg(test)]
+pub(crate) use pseudorandom_zero_sharing_seed_master_custody_320_tests::preprocessing_source_joined_custody_fixture_320;
 pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::LocallyJoinedPseudorandomZeroSharingSeedMasters320;
 #[cfg(test)]
 pub(crate) use pseudorandom_zero_sharing_seed_master_join_320::locally_joined_seed_masters_for_direct_mpc_test;
 #[cfg(test)]
 pub(crate) use pseudorandom_zero_sharing_seed_master_join_320_tests::verified_one_and_source_and_joined_custody;
+pub(crate) use pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320::{
+    VerifiedPseudorandomZeroSharingSeedRecipientSelection320,
+    verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_320,
+    verify_pseudorandom_zero_sharing_seed_recipient_authenticated_inconsistency_disclosure_320,
+    verify_pseudorandom_zero_sharing_seed_recipient_selection_320,
+};
+#[cfg(test)]
+pub(crate) use pseudorandom_zero_sharing_seed_recipient_receipt_kernel_320_tests::{
+    PreprocessingSourceInconsistencyFixture320, preprocessing_source_inconsistency_fixture_320,
+};
 #[cfg(test)]
 pub(crate) use replicated_random_sharing::ReplicatedRandomSharingSubset;
 

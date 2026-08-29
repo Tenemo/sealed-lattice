@@ -264,6 +264,12 @@ pub(crate) struct PreparedDirectMpcPreprocessingSourceTerminal {
 }
 
 impl PreparedDirectMpcPreprocessingSourceTerminal {
+    pub(crate) fn source_outcome_body_bytes(
+        self,
+    ) -> Result<Vec<u8>, DirectMpcPreprocessingSourceTerminalError> {
+        self.body.canonical_bytes()
+    }
+
     pub(crate) fn endorsement_body(
         self,
         subject_position: u16,

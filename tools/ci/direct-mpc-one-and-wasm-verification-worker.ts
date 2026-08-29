@@ -38,6 +38,9 @@ const nativeCargoTargetDirectory = path.resolve(
 );
 const exactFixtureTest =
     'pre_evaluation_finality::direct_mpc_one_and::tests::canonical_bundle_matches_the_positive_verifier_and_typed_refusal';
+const exactSourceStateFixtureTest =
+    'pre_evaluation_finality::direct_mpc_preprocessing_source_state_kernel::tests::actual_predecessors_drive_state_messages_public_burn_and_exact_terminal_replay';
+const sourceStateFixtureStepCount = 15;
 
 type ParsedArguments = Readonly<{
     outputFilePath: string;
@@ -110,14 +113,19 @@ const parseArguments = (
     return { outputFilePath, verificationId };
 };
 
-const generateNativeFixture = (fixtureDirectoryPath: string): void => {
+type WorkerOperation = 'one-and' | 'source-state';
+
+const runNativeFixtureTest = (input: {
+    environmentVariableName: string;
+    fixtureDirectoryPath: string;
+    testName: string;
+}): void => {
     const environment = { ...process.env };
     delete environment.CARGO_ENCODED_RUSTFLAGS;
     environment.CARGO_BUILD_JOBS = '1';
     environment.CARGO_INCREMENTAL = '0';
     environment.CARGO_TARGET_DIR = nativeCargoTargetDirectory;
-    environment.SEALED_LATTICE_DIRECT_MPC_ONE_AND_FIXTURE_DIRECTORY =
-        fixtureDirectoryPath;
+    environment[input.environmentVariableName] = input.fixtureDirectoryPath;
     const result = spawnSync(
         resolveWasmCargoExecutable(environment),
         [
@@ -129,7 +137,7 @@ const generateNativeFixture = (fixtureDirectoryPath: string): void => {
             '--features',
             'direct-mpc-one-and-verifier',
             '--lib',
-            exactFixtureTest,
+            input.testName,
             '--',
             '--exact',
         ],
@@ -150,6 +158,24 @@ const generateNativeFixture = (fixtureDirectoryPath: string): void => {
             `Native direct-MPC one-AND fixture verification failed with status ${result.status ?? 'null'}: ${result.stderr.trim()}`,
         );
     }
+};
+
+const generateNativeFixtures = (input: {
+    oneAndFixtureDirectoryPath: string;
+    sourceStateFixtureDirectoryPath: string;
+}): void => {
+    runNativeFixtureTest({
+        environmentVariableName:
+            'SEALED_LATTICE_DIRECT_MPC_ONE_AND_FIXTURE_DIRECTORY',
+        fixtureDirectoryPath: input.oneAndFixtureDirectoryPath,
+        testName: exactFixtureTest,
+    });
+    runNativeFixtureTest({
+        environmentVariableName:
+            'SEALED_LATTICE_DIRECT_MPC_SOURCE_STATE_FIXTURE_DIRECTORY',
+        fixtureDirectoryPath: input.sourceStateFixtureDirectoryPath,
+        testName: exactSourceStateFixtureTest,
+    });
 };
 
 const awaitWorkerMessage = <Message extends WorkerMessage>(
@@ -188,6 +214,7 @@ const verifyInWorker = async (
     worker: Worker,
     requestId: number,
     requestBytes: Uint8Array,
+    operation: WorkerOperation,
 ): Promise<ResponseMessage> => {
     const transferredRequest = Uint8Array.from(requestBytes);
     const responsePromise = awaitWorkerMessage(
@@ -198,6 +225,7 @@ const verifyInWorker = async (
     );
     worker.postMessage(
         {
+            operation,
             requestBytes: transferredRequest,
             requestId,
             type: 'verify',
@@ -219,6 +247,16 @@ const verifyInWorker = async (
 const sha3_512Hex = (bytes: Uint8Array): string =>
     createHash('sha3-512').update(bytes).digest('hex');
 
+const responseCorpusSha3_512Hex = (
+    responses: readonly ResponseMessage[],
+): string => {
+    const hash = createHash('sha3-512');
+    for (const response of responses) {
+        hash.update(response.responseBytes);
+    }
+    return hash.digest('hex');
+};
+
 export const runDirectMpcOneAndWasmVerificationWorker = async (
     rawArguments: readonly string[] = process.argv.slice(2),
 ): Promise<void> => {
@@ -231,11 +269,18 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
         path.join(temporaryRoot, 'run-'),
     );
     try {
-        const fixtureDirectoryPath = path.join(
+        const oneAndFixtureDirectoryPath = path.join(
             temporaryDirectoryPath,
-            'fixture',
+            'one-and-fixture',
         );
-        generateNativeFixture(fixtureDirectoryPath);
+        const sourceStateFixtureDirectoryPath = path.join(
+            temporaryDirectoryPath,
+            'source-state-fixture',
+        );
+        generateNativeFixtures({
+            oneAndFixtureDirectoryPath,
+            sourceStateFixtureDirectoryPath,
+        });
         const [request, nativeResponse, hostileRequest, nativeHostileResponse] =
             await Promise.all(
                 [
@@ -244,12 +289,49 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
                     'hostile-request.bin',
                     'hostile-response.bin',
                 ].map((fileName) =>
-                    readFile(path.join(fixtureDirectoryPath, fileName)),
+                    readFile(path.join(oneAndFixtureDirectoryPath, fileName)),
                 ),
             );
+        const sourceStateFixtures = await Promise.all(
+            Array.from(
+                { length: sourceStateFixtureStepCount },
+                async (_unused, stepIndex) => {
+                    const sequence = (stepIndex + 1)
+                        .toString(10)
+                        .padStart(2, '0');
+                    const [stepRequest, stepResponse] = await Promise.all([
+                        readFile(
+                            path.join(
+                                sourceStateFixtureDirectoryPath,
+                                `${sequence}-request.bin`,
+                            ),
+                        ),
+                        readFile(
+                            path.join(
+                                sourceStateFixtureDirectoryPath,
+                                `${sequence}-response.bin`,
+                            ),
+                        ),
+                    ]);
+                    return Object.freeze({
+                        request: stepRequest,
+                        response: stepResponse,
+                        sequence: stepIndex + 1,
+                    });
+                },
+            ),
+        );
         if (
-            request.byteLength > verification.maximumRequestByteLength ||
-            hostileRequest.byteLength > verification.maximumRequestByteLength
+            request.byteLength > verification.maximumDirectRequestByteLength ||
+            hostileRequest.byteLength >
+                verification.maximumDirectRequestByteLength ||
+            sourceStateFixtures.some(
+                (fixture) =>
+                    fixture.request.byteLength >
+                        verification.maximumSourceStateRequestByteLength ||
+                    fixture.response.byteLength >
+                        verification.maximumSourceStateResponseByteLength,
+            )
         ) {
             throw new Error(
                 'The direct-MPC one-AND fixture exceeds the absolute copied-buffer bound.',
@@ -268,9 +350,14 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
         const worker = new Worker(workerThreadFilePath, {
             execArgv: ['--import', 'tsx'],
             workerData: {
-                maximumRequestByteLength: verification.maximumRequestByteLength,
-                maximumResponseByteLength:
-                    verification.maximumResponseByteLength,
+                maximumDirectRequestByteLength:
+                    verification.maximumDirectRequestByteLength,
+                maximumDirectResponseByteLength:
+                    verification.maximumDirectResponseByteLength,
+                maximumSourceStateRequestByteLength:
+                    verification.maximumSourceStateRequestByteLength,
+                maximumSourceStateResponseByteLength:
+                    verification.maximumSourceStateResponseByteLength,
                 maximumWasmMemoryByteLength:
                     verification.maximumWasmMemoryByteLength,
                 wasmFilePath,
@@ -284,15 +371,33 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
             if (
                 !ready.exportNames.includes(
                     'sealed_lattice_verify_direct_mpc_one_and_with_length',
+                ) ||
+                !ready.exportNames.includes(
+                    'sealed_lattice_direct_mpc_preprocessing_source_state_with_length',
                 )
             ) {
                 throw new Error(
-                    'The scalar worker did not expose the direct-MPC one-AND positive verifier.',
+                    'The scalar worker did not expose both direct-MPC positive-verification operations.',
                 );
             }
-            const positive = await verifyInWorker(worker, 1, request);
-            const repeatedPositive = await verifyInWorker(worker, 2, request);
-            const hostile = await verifyInWorker(worker, 3, hostileRequest);
+            const positive = await verifyInWorker(
+                worker,
+                1,
+                request,
+                'one-and',
+            );
+            const repeatedPositive = await verifyInWorker(
+                worker,
+                2,
+                request,
+                'one-and',
+            );
+            const hostile = await verifyInWorker(
+                worker,
+                3,
+                hostileRequest,
+                'one-and',
+            );
             if (
                 !Buffer.from(positive.responseBytes).equals(nativeResponse) ||
                 !Buffer.from(repeatedPositive.responseBytes).equals(
@@ -306,10 +411,32 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
                     'Rust and scalar WebAssembly direct-MPC one-AND verifier bytes differ.',
                 );
             }
+            const sourceStateResponses: ResponseMessage[] = [];
+            for (const fixture of sourceStateFixtures) {
+                const response = await verifyInWorker(
+                    worker,
+                    100 + fixture.sequence,
+                    fixture.request,
+                    'source-state',
+                );
+                if (
+                    !Buffer.from(response.responseBytes).equals(
+                        fixture.response,
+                    )
+                ) {
+                    throw new Error(
+                        `Rust and scalar WebAssembly preprocessing-source state bytes differ at sequence ${fixture.sequence}.`,
+                    );
+                }
+                sourceStateResponses.push(response);
+            }
             const maximumVerificationDurationMilliseconds = Math.max(
                 positive.durationMilliseconds,
                 repeatedPositive.durationMilliseconds,
                 hostile.durationMilliseconds,
+                ...sourceStateResponses.map(
+                    (response) => response.durationMilliseconds,
+                ),
             );
             if (
                 maximumVerificationDurationMilliseconds >
@@ -324,6 +451,9 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
                 positive.linearMemoryAfterByteLength,
                 repeatedPositive.linearMemoryAfterByteLength,
                 hostile.linearMemoryAfterByteLength,
+                ...sourceStateResponses.map(
+                    (response) => response.linearMemoryAfterByteLength,
+                ),
             );
             const result = Object.freeze({
                 evidenceClassification: verification.evidenceClassification,
@@ -334,8 +464,10 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
                     responseSha3_512Hex: sha3_512Hex(hostile.responseBytes),
                     rustAndWasmByteIdentical: true,
                 }),
-                maximumCopiedInputByteLength:
-                    verification.maximumRequestByteLength,
+                maximumCopiedInputByteLength: Math.max(
+                    verification.maximumDirectRequestByteLength,
+                    verification.maximumSourceStateRequestByteLength,
+                ),
                 maximumLinearMemoryByteLength,
                 maximumVerificationDurationMilliseconds,
                 positive: Object.freeze({
@@ -347,6 +479,27 @@ export const runDirectMpcOneAndWasmVerificationWorker = async (
                     responseSha3_512Hex: sha3_512Hex(positive.responseBytes),
                     repeatedResponseByteIdentical: true,
                     rustAndWasmByteIdentical: true,
+                }),
+                preprocessingSourceState: Object.freeze({
+                    maximumDurationMilliseconds: Math.max(
+                        ...sourceStateResponses.map(
+                            (response) => response.durationMilliseconds,
+                        ),
+                    ),
+                    maximumRequestByteLength: Math.max(
+                        ...sourceStateFixtures.map(
+                            (fixture) => fixture.request.byteLength,
+                        ),
+                    ),
+                    maximumResponseByteLength: Math.max(
+                        ...sourceStateResponses.map(
+                            (response) => response.responseBytes.byteLength,
+                        ),
+                    ),
+                    responseCorpusSha3_512Hex:
+                        responseCorpusSha3_512Hex(sourceStateResponses),
+                    rustAndWasmByteIdentical: true,
+                    stepCount: sourceStateFixtures.length,
                 }),
                 scalarOnly: true,
                 schemaVersion: 1,

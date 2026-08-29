@@ -405,6 +405,9 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
     readonly executeCommand: <Result>(
         request: TranscriptCoreKernelCommand,
     ) => Result;
+    readonly executeDirectMpcPreprocessingSourceState: (
+        requestBytes: Uint8Array,
+    ) => Uint8Array;
     readonly executeJoinedSeedMasterJoin: (
         requestBytes: Uint8Array,
     ) => Uint8Array;
@@ -569,6 +572,7 @@ type NumberExportName =
     | 'sealed_lattice_allocate'
     | 'sealed_lattice_deallocate'
     | 'sealed_lattice_deallocate_secret'
+    | 'sealed_lattice_direct_mpc_preprocessing_source_state_with_length'
     | 'sealed_lattice_join_seed_masters_320_with_length'
     | 'sealed_lattice_seed_catalog_source_320_with_length'
     | 'sealed_lattice_seed_mailbox_sender_320_with_length'
@@ -879,6 +883,10 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_deallocate_secret',
     );
+    const directMpcPreprocessingSourceStateWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_direct_mpc_preprocessing_source_state_with_length',
+    );
     const joinSeedMastersWithLength = resolveNumberExport(
         wasmExports,
         'sealed_lattice_join_seed_masters_320_with_length',
@@ -938,6 +946,20 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
                 deallocate,
                 commandWithLength,
                 request,
+            ),
+        );
+    const executeDirectMpcPreprocessingSourceState = (
+        requestBytes: Uint8Array,
+    ): Uint8Array =>
+        runExclusive('direct-MPC preprocessing-source state', () =>
+            runSecretKernelOperation(
+                memory,
+                allocate,
+                deallocate,
+                deallocateSecret,
+                directMpcPreprocessingSourceStateWithLength,
+                requestBytes,
+                'direct-MPC preprocessing-source state',
             ),
         );
     const executeJoinedSeedMasterJoin = (
@@ -1039,6 +1061,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         allocate,
         deallocate,
         executeCommand,
+        executeDirectMpcPreprocessingSourceState,
         executeJoinedSeedMasterJoin,
         executeJoinedSeedMasterRestorationValidation,
         executeJoinedSeedMasterValidation,

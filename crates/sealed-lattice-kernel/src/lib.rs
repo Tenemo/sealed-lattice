@@ -235,6 +235,35 @@ pub unsafe extern "C" fn sealed_lattice_validate_joined_seed_master_restoration_
     leak_secret_bytes(output)
 }
 
+/// Re-verifies one exact preprocessing-source predecessor and constructs or
+/// validates its state-witnessed success-or-burn terminal. The command surface
+/// remains internal and does not activate a suite or public SDK capability.
+///
+/// # Safety
+///
+/// `pointer` must be null when `length` is zero or identify `length` readable
+/// bytes in this WebAssembly module's linear memory. `output_length_pointer`
+/// must be null or identify one writable `usize` value in the same memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_direct_mpc_preprocessing_source_state_with_length(
+    pointer: *const u8,
+    length: usize,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let input = if length == 0 || pointer.is_null() {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(pointer, length) }
+    };
+    let output = pre_evaluation_finality::direct_mpc_preprocessing_source_state_kernel::run_direct_mpc_preprocessing_source_state_kernel(input);
+    if !output_length_pointer.is_null() {
+        unsafe {
+            output_length_pointer.write(output.len());
+        }
+    }
+    leak_secret_bytes(output)
+}
+
 /// Generates or positively revalidates one exact retained seed-catalog source
 /// object through the scalar kernel. Returned bytes are inert local custody and
 /// create no publication, receipt, burn, coin-opening, or continuation power.

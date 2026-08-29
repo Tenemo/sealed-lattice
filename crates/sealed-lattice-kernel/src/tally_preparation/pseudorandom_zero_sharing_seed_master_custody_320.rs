@@ -1566,9 +1566,18 @@ pub(super) fn join_and_encode_for_test(
     join_and_encode(request_bytes)
 }
 
+struct VerifiedJoinedSeedMasterSourceContext320 {
+    custody: VerifiedJoinedSeedMasterCustody320,
+    receipt_terminal: RosterEndorsedPseudorandomZeroSharingSeedRecipientReceiptTerminal320,
+    roster: Roster,
+}
+
 fn parse_joined_record_and_validate(
     record_bytes: &[u8],
-) -> Result<VerifiedJoinedSeedMasterCustody320, PseudorandomZeroSharingSeedMasterCustodyError320> {
+) -> Result<
+    VerifiedJoinedSeedMasterSourceContext320,
+    PseudorandomZeroSharingSeedMasterCustodyError320,
+> {
     let mut cursor = BoundedCursor::new(record_bytes)?;
     cursor.require_magic(JOINED_CUSTODY_RECORD_MAGIC, "joined-record magic")?;
     cursor.require_version("joined-record version")?;
@@ -1615,9 +1624,14 @@ fn parse_joined_record_and_validate(
         receipt_terminal_certificate_bytes,
     };
     let verification = parse_verification_context(verification_context_bytes)?;
-    let (_receipt_terminal, _roster, preparation_context) =
+    let (receipt_terminal, roster, preparation_context) =
         verify_public_context(&synthetic_request, verification)?;
-    verify_joined_payload(joined_payload_bytes, context, preparation_context)
+    let custody = verify_joined_payload(joined_payload_bytes, context, preparation_context)?;
+    Ok(VerifiedJoinedSeedMasterSourceContext320 {
+        custody,
+        receipt_terminal,
+        roster,
+    })
 }
 
 fn verify_joined_payload(
@@ -1784,11 +1798,38 @@ pub(super) fn restore_pseudorandom_zero_sharing_joined_seed_masters_320(
     LocallyJoinedPseudorandomZeroSharingSeedMasters320,
     PseudorandomZeroSharingSeedMasterCustodyError320,
 > {
-    let verified_custody = parse_joined_record_and_validate(record_bytes)?;
-    restore_pseudorandom_zero_sharing_seed_masters_from_verified_custody_320(verified_custody)
+    let verified = parse_joined_record_and_validate(record_bytes)?;
+    restore_pseudorandom_zero_sharing_seed_masters_from_verified_custody_320(verified.custody)
         .map_err(|_| {
             PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload("typed restoration")
         })
+}
+
+/// Restores the exact local seed masters together with the positively
+/// reverified public receipt terminal and roster needed by a later source
+/// verifier. The caller must still bind those values to the exact action and
+/// must not expose the returned local masters.
+pub(super) fn restore_pseudorandom_zero_sharing_joined_seed_masters_and_public_source_320(
+    record_bytes: &[u8],
+) -> Result<
+    (
+        LocallyJoinedPseudorandomZeroSharingSeedMasters320,
+        RosterEndorsedPseudorandomZeroSharingSeedRecipientReceiptTerminal320,
+        Roster,
+    ),
+    PseudorandomZeroSharingSeedMasterCustodyError320,
+> {
+    let verified = parse_joined_record_and_validate(record_bytes)?;
+    let joined_seed_masters =
+        restore_pseudorandom_zero_sharing_seed_masters_from_verified_custody_320(verified.custody)
+            .map_err(|_| {
+                PseudorandomZeroSharingSeedMasterCustodyError320::JoinedPayload("typed restoration")
+            })?;
+    Ok((
+        joined_seed_masters,
+        verified.receipt_terminal,
+        verified.roster,
+    ))
 }
 
 /// Executes the source-authorized local/global join and returns a stable binary
@@ -1810,8 +1851,8 @@ pub(crate) fn run_pseudorandom_zero_sharing_joined_seed_master_validation_320(
     record_bytes: &[u8],
 ) -> Zeroizing<Vec<u8>> {
     match parse_joined_record_and_validate(record_bytes) {
-        Ok(verified_custody) => {
-            drop(verified_custody);
+        Ok(verified) => {
+            drop(verified);
             encode_validation_response()
         }
         Err(error) => encode_failure_response(error),

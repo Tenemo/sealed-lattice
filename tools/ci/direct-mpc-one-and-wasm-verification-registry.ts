@@ -2,9 +2,14 @@ import { foundationProfile } from '#packages/types/src/foundation-contract.js';
 
 const directMpcOneAndVerification = Object.freeze({
     evidenceClassification:
-        'one-AND scalar WebAssembly positive-verifier development evidence',
-    maximumRequestByteLength: foundationProfile.maximumCopiedBufferByteLength,
-    maximumResponseByteLength: 4_096,
+        'bounded one-AND and preprocessing-source state scalar WebAssembly positive-verifier development evidence',
+    maximumDirectRequestByteLength:
+        foundationProfile.maximumCopiedBufferByteLength,
+    maximumDirectResponseByteLength: 4_096,
+    maximumSourceStateRequestByteLength:
+        foundationProfile.maximumCopiedBufferByteLength,
+    maximumSourceStateResponseByteLength:
+        foundationProfile.maximumCopiedBufferByteLength,
     maximumVerificationMilliseconds: 2 * 60 * 1_000,
     maximumWasmMemoryByteLength: foundationProfile.maximumWasmMemoryByteLength,
     verificationId: 'direct-mpc-one-and-positive-verifier',

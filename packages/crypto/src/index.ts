@@ -9,6 +9,7 @@ export type {
 } from './canonical-json.js';
 export { deriveCanonicalObjectHash } from './hashes.js';
 export {
+    assertDirectMpcPreprocessingSourceStateSigningCapabilityMatchesRosterKey,
     assertSeedMailboxSenderSigningCapabilityMatchesRosterKey,
     assertSeedRecipientReceiptCapabilitiesMatchRosterKeys,
     assertSeedReceiptTerminalEndorsementSigningCapabilityMatchesRosterKey,
@@ -16,6 +17,8 @@ export {
     decapsulateSeedRecipientMailboxCiphertext,
     openBrowserLocalExternalKeyProvider,
     signSeedMailboxManifestBody,
+    signDirectMpcPreprocessingSourceStateSubjectBody,
+    signDirectMpcPreprocessingSourceStateWitnessBody,
     signSeedRecipientReceiptBody,
     signSeedReceiptTerminalEndorsementBody,
     signResetSafeSetupObject,

@@ -17,7 +17,8 @@ use super::{
     pseudorandom_zero_sharing_seed_catalog_root_inventory_320_tests::{
         OwnedRootAuthorizationPackage320, SeedCatalogFixture320, SeedMailboxTestFixture320,
         authorize_root_body, seed_catalog_fixture, seed_delivery_payload_bytes,
-        seed_mailbox_test_fixture_320, signed_root_terminal_certificate,
+        seed_mailbox_test_fixture_320, seed_mailbox_test_fixture_with_parameter_identity_320,
+        signed_root_terminal_certificate,
     },
     pseudorandom_zero_sharing_seed_delivery_320::PseudorandomZeroSharingSeedDeliveryLayout320,
     pseudorandom_zero_sharing_seed_master_custody_320::{
@@ -26,13 +27,20 @@ use super::{
         run_pseudorandom_zero_sharing_joined_seed_master_validation_320,
         run_pseudorandom_zero_sharing_seed_master_join_custody_320,
     },
+    pseudorandom_zero_sharing_seed_receipt_320::{
+        RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+        verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320,
+        verify_pseudorandom_zero_sharing_seed_recipient_receipt_320,
+    },
+    pseudorandom_zero_sharing_seed_receipt_320_tests::authenticated_delivery_set_with_parameter_identity,
     pseudorandom_zero_sharing_seed_receipt_terminal_320::{
         PSEUDORANDOM_ZERO_SHARING_SEED_RECIPIENT_RECEIPT_TERMINAL_SIGNATURE_CONTEXT,
         verify_pseudorandom_zero_sharing_seed_recipient_receipt_terminal_320,
     },
     pseudorandom_zero_sharing_seed_receipt_terminal_320_tests::{
-        signed_receipt_envelopes_from_authenticated_deliveries, signed_terminal_certificate,
-        verified_receipt_inventory,
+        signed_receipt_envelopes_from_authenticated_deliveries,
+        signed_receipt_envelopes_from_authenticated_deliveries_with_parameter_identity,
+        signed_terminal_certificate, verified_receipt_inventory,
     },
     pseudorandom_zero_sharing_subset_seed_320::{
         PSEUDORANDOM_ZERO_SHARING_SUBSET_SEED_COMMITMENT_SALT_BYTE_LENGTH,
@@ -65,6 +73,12 @@ struct CompletionCustodyFixture320 {
     source_custody_record_bytes: Zeroizing<Vec<u8>>,
     receipt_custody_record_bytes: Zeroizing<Vec<u8>>,
     verification_context_bytes: Vec<u8>,
+}
+
+pub(crate) struct PreprocessingSourceJoinedCustodyFixture320 {
+    pub(crate) owner: SeedMailboxTestFixture320,
+    pub(crate) joined_record_bytes: Zeroizing<Vec<u8>>,
+    pub(crate) receipt_terminal_identity: Hash512,
 }
 
 impl CompletionCustodyFixture320 {
@@ -283,6 +297,73 @@ fn custody_boundary_refuses_context_source_receipt_and_inventory_mutations() {
 
 fn completion_custody_fixture() -> CompletionCustodyFixture320 {
     let owner_fixture = seed_mailbox_test_fixture_320(1, PARTICIPANT_POSITION);
+    let (receipt_envelopes, _alternate_receipt_envelopes, retained_receipt) =
+        signed_receipt_envelopes_from_authenticated_deliveries(0x31, 0x41, 0x51);
+    completion_custody_fixture_from_verified_receipts(
+        &owner_fixture,
+        receipt_envelopes,
+        retained_receipt,
+    )
+}
+
+pub(crate) fn preprocessing_source_joined_custody_fixture_320(
+    parameter_identity: Hash512,
+) -> PreprocessingSourceJoinedCustodyFixture320 {
+    let owner = seed_mailbox_test_fixture_with_parameter_identity_320(
+        1,
+        PARTICIPANT_POSITION,
+        parameter_identity,
+    );
+    let receipt_envelopes =
+        signed_receipt_envelopes_from_authenticated_deliveries_with_parameter_identity(
+            parameter_identity,
+            0x31,
+            0x41,
+        );
+    let (local_delivery_fixture, authenticated_deliveries) =
+        authenticated_delivery_set_with_parameter_identity(
+            parameter_identity,
+            PARTICIPANT_POSITION,
+            0x31,
+        );
+    assert_eq!(
+        local_delivery_fixture.root_terminal.identity().unwrap(),
+        owner.root_terminal.identity().unwrap()
+    );
+    let authenticated_inventory =
+        verify_pseudorandom_zero_sharing_authenticated_seed_recipient_inventory_320(
+            &local_delivery_fixture.root_terminal,
+            PARTICIPANT_POSITION,
+            authenticated_deliveries,
+        )
+        .unwrap();
+    let retained_receipt = verify_pseudorandom_zero_sharing_seed_recipient_receipt_320(
+        &local_delivery_fixture.root_terminal,
+        &local_delivery_fixture.roster,
+        authenticated_inventory,
+        &receipt_envelopes[usize::from(PARTICIPANT_POSITION)],
+    )
+    .unwrap();
+    let fixture = completion_custody_fixture_from_verified_receipts(
+        &owner,
+        receipt_envelopes,
+        retained_receipt,
+    );
+    let response =
+        run_pseudorandom_zero_sharing_seed_master_join_custody_320(&fixture.join_request_bytes());
+    let joined_payload = parse_join_response(&response).unwrap();
+    PreprocessingSourceJoinedCustodyFixture320 {
+        receipt_terminal_identity: fixture.receipt_terminal_identity,
+        joined_record_bytes: fixture.joined_record_bytes(joined_payload),
+        owner,
+    }
+}
+
+fn completion_custody_fixture_from_verified_receipts(
+    owner_fixture: &SeedMailboxTestFixture320,
+    receipt_envelopes: Vec<Vec<u8>>,
+    retained_receipt: RosterAuthenticatedPseudorandomZeroSharingSeedRecipientReceipt320,
+) -> CompletionCustodyFixture320 {
     let parameter_identity = owner_fixture
         .root_terminal
         .root_inventory()
@@ -342,9 +423,7 @@ fn completion_custody_fixture() -> CompletionCustodyFixture320 {
         owner_fixture.root_terminal.certificate_identity()
     );
 
-    let (receipt_envelopes, _alternate_receipt_envelopes, retained_receipt) =
-        signed_receipt_envelopes_from_authenticated_deliveries(0x31, 0x41, 0x51);
-    let receipt_inventory = verified_receipt_inventory(&owner_fixture, &receipt_envelopes);
+    let receipt_inventory = verified_receipt_inventory(owner_fixture, &receipt_envelopes);
     let receipt_terminal_certificate = signed_terminal_certificate(
         &receipt_inventory,
         &owner_fixture.signing_keys,
@@ -363,13 +442,13 @@ fn completion_custody_fixture() -> CompletionCustodyFixture320 {
     let state_predecessor_identity = Hash512::from_bytes([0xa7; Hash512::BYTE_LENGTH]);
     let local_catalog_fixture = &catalog_fixtures[usize::from(PARTICIPANT_POSITION)];
     let source_custody_record_bytes = encode_source_custody_record(
-        &owner_fixture,
+        owner_fixture,
         local_catalog_fixture,
         state_predecessor_identity,
         PARTICIPANT_POSITION,
     );
     let receipt_custody_record_bytes =
-        encode_receipt_custody_record(&owner_fixture, &retained_receipt, &receipt_envelopes[0]);
+        encode_receipt_custody_record(owner_fixture, &retained_receipt, &receipt_envelopes[0]);
     let verification_context_bytes = encode_verification_context(
         parameter_identity,
         preparation_context.canonical_bytes(),
@@ -575,7 +654,11 @@ pub(super) fn encode_receipt_custody_record(
     let segments = sender_positions
         .iter()
         .map(|sender_position| {
-            let fixture = seed_mailbox_test_fixture_320(*sender_position, PARTICIPANT_POSITION);
+            let fixture = seed_mailbox_test_fixture_with_parameter_identity_320(
+                *sender_position,
+                PARTICIPANT_POSITION,
+                owner_fixture.parameter_identity,
+            );
             assert_eq!(
                 fixture.root_terminal.identity().unwrap(),
                 owner_fixture.root_terminal.identity().unwrap()

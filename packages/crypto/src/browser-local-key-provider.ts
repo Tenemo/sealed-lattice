@@ -29,6 +29,14 @@ const seedMailboxManifestSignatureContext = textEncoder.encode(
 const seedReceiptTerminalEndorsementSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-recipient-receipt-terminal',
 );
+const directMpcPreprocessingSourceStateWitnessSignatureContext =
+    textEncoder.encode(
+        'sealed-lattice/v1/pre-evaluation-finality/state-witness',
+    );
+const directMpcPreprocessingSourceStateSubjectSignatureContext =
+    textEncoder.encode(
+        'sealed-lattice/v1/pre-evaluation-finality/state-subject',
+    );
 const seedRecipientReceiptSignatureContext = textEncoder.encode(
     'sealed-lattice/v1/preparation/seed-recipient-receipt',
 );
@@ -36,6 +44,8 @@ const signingHedgeByteLength = 32;
 const mailboxAttemptIdentifierByteLength = 32;
 const seedMailboxManifestSignatureBodyByteLength = 309;
 const seedReceiptTerminalEndorsementAuthorizationBodyByteLength = 174;
+const directMpcPreprocessingSourceStateWitnessAuthorizationBodyByteLength = 170;
+const directMpcPreprocessingSourceStateSubjectAuthorizationBodyByteLength = 240;
 const seedRecipientReceiptBodyByteLength = 374;
 
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
@@ -1535,6 +1545,183 @@ export const signSeedReceiptTerminalEndorsementBody = (input: {
         endorsementAuthorizationBodyBytes?.fill(0);
         signatureRandomness?.fill(0);
         endorserSigningVerificationKey?.fill(0);
+        signature?.fill(0);
+    }
+};
+
+/**
+ * Checks that one opaque browser-local signing capability owns the exact
+ * roster key selected by a positively verified preprocessing-source state
+ * context.
+ */
+export const assertDirectMpcPreprocessingSourceStateSigningCapabilityMatchesRosterKey =
+    (input: {
+        readonly signingCapability: BrowserLocalSigningCapability;
+        readonly signingVerificationKey: Uint8Array;
+    }): void => {
+        const provider = requireSigningProvider(input.signingCapability);
+        const signingVerificationKey = copyExactBytes(
+            input.signingVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'signingVerificationKey',
+        );
+        try {
+            if (
+                !bytesEqual(
+                    signingVerificationKey,
+                    provider.signingVerificationKey!,
+                )
+            ) {
+                throw new BrowserLocalKeyProviderError(
+                    'KeyMismatch',
+                    'The preprocessing-source state key does not match the frozen browser-local signing capability.',
+                );
+            }
+        } finally {
+            signingVerificationKey.fill(0);
+        }
+    };
+
+/** Signs one exact preprocessing-source witness authorization body. */
+export const signDirectMpcPreprocessingSourceStateWitnessBody = (input: {
+    readonly signatureRandomness: Uint8Array;
+    readonly signingCapability: BrowserLocalSigningCapability;
+    readonly signingVerificationKey: Uint8Array;
+    readonly witnessAuthorizationBodyBytes: Uint8Array;
+}): Uint8Array => {
+    const provider = requireSigningProvider(input.signingCapability);
+    let witnessAuthorizationBodyBytes: Uint8Array | undefined;
+    let signatureRandomness: Uint8Array | undefined;
+    let signingVerificationKey: Uint8Array | undefined;
+    let signature: Uint8Array | undefined;
+    try {
+        witnessAuthorizationBodyBytes = copyExactBytes(
+            input.witnessAuthorizationBodyBytes,
+            directMpcPreprocessingSourceStateWitnessAuthorizationBodyByteLength,
+            'witnessAuthorizationBodyBytes',
+            'MalformedMessage',
+        );
+        signatureRandomness = copyExactBytes(
+            input.signatureRandomness,
+            signingHedgeByteLength,
+            'signatureRandomness',
+            'MalformedRandomness',
+        );
+        signingVerificationKey = copyExactBytes(
+            input.signingVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'signingVerificationKey',
+        );
+        if (
+            !bytesEqual(
+                signingVerificationKey,
+                provider.signingVerificationKey!,
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The preprocessing-source witness key does not match the frozen browser-local signing capability.',
+            );
+        }
+        signature = invokeSigningOperation(
+            provider,
+            witnessAuthorizationBodyBytes,
+            directMpcPreprocessingSourceStateWitnessSignatureContext,
+            signatureRandomness,
+        );
+        if (
+            !ml_dsa65.verify(
+                signature,
+                witnessAuthorizationBodyBytes,
+                signingVerificationKey,
+                {
+                    context:
+                        directMpcPreprocessingSourceStateWitnessSignatureContext,
+                },
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The preprocessing-source witness signature does not match the frozen roster key.',
+            );
+        }
+        return signature.slice();
+    } finally {
+        witnessAuthorizationBodyBytes?.fill(0);
+        signatureRandomness?.fill(0);
+        signingVerificationKey?.fill(0);
+        signature?.fill(0);
+    }
+};
+
+/** Signs one exact preprocessing-source subject authorization body. */
+export const signDirectMpcPreprocessingSourceStateSubjectBody = (input: {
+    readonly signatureRandomness: Uint8Array;
+    readonly signingCapability: BrowserLocalSigningCapability;
+    readonly signingVerificationKey: Uint8Array;
+    readonly subjectAuthorizationBodyBytes: Uint8Array;
+}): Uint8Array => {
+    const provider = requireSigningProvider(input.signingCapability);
+    let subjectAuthorizationBodyBytes: Uint8Array | undefined;
+    let signatureRandomness: Uint8Array | undefined;
+    let signingVerificationKey: Uint8Array | undefined;
+    let signature: Uint8Array | undefined;
+    try {
+        subjectAuthorizationBodyBytes = copyExactBytes(
+            input.subjectAuthorizationBodyBytes,
+            directMpcPreprocessingSourceStateSubjectAuthorizationBodyByteLength,
+            'subjectAuthorizationBodyBytes',
+            'MalformedMessage',
+        );
+        signatureRandomness = copyExactBytes(
+            input.signatureRandomness,
+            signingHedgeByteLength,
+            'signatureRandomness',
+            'MalformedRandomness',
+        );
+        signingVerificationKey = copyExactBytes(
+            input.signingVerificationKey,
+            mlDsa65PublicKeyByteLength,
+            'signingVerificationKey',
+        );
+        if (
+            !bytesEqual(
+                signingVerificationKey,
+                provider.signingVerificationKey!,
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The preprocessing-source subject key does not match the frozen browser-local signing capability.',
+            );
+        }
+        signature = invokeSigningOperation(
+            provider,
+            subjectAuthorizationBodyBytes,
+            directMpcPreprocessingSourceStateSubjectSignatureContext,
+            signatureRandomness,
+        );
+        if (
+            !ml_dsa65.verify(
+                signature,
+                subjectAuthorizationBodyBytes,
+                signingVerificationKey,
+                {
+                    context:
+                        directMpcPreprocessingSourceStateSubjectSignatureContext,
+                },
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The preprocessing-source subject signature does not match the frozen roster key.',
+            );
+        }
+        return signature.slice();
+    } finally {
+        subjectAuthorizationBodyBytes?.fill(0);
+        signatureRandomness?.fill(0);
+        signingVerificationKey?.fill(0);
         signature?.fill(0);
     }
 };

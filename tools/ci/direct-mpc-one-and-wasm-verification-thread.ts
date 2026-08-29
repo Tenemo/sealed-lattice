@@ -3,13 +3,16 @@ import { performance } from 'node:perf_hooks';
 import { parentPort, workerData } from 'node:worker_threads';
 
 type WorkerConfiguration = Readonly<{
-    maximumRequestByteLength: number;
-    maximumResponseByteLength: number;
+    maximumDirectRequestByteLength: number;
+    maximumDirectResponseByteLength: number;
+    maximumSourceStateRequestByteLength: number;
+    maximumSourceStateResponseByteLength: number;
     maximumWasmMemoryByteLength: number;
     wasmFilePath: string;
 }>;
 
 type VerificationRequest = Readonly<{
+    operation: 'one-and' | 'source-state';
     requestBytes: Uint8Array;
     requestId: number;
     type: 'verify';
@@ -20,8 +23,14 @@ type CloseRequest = Readonly<{ type: 'close' }>;
 type DirectMpcOneAndExports = Readonly<{
     allocate: (byteLength: number) => number;
     deallocate: (pointer: number, byteLength: number) => void;
+    deallocateSecret: (pointer: number, byteLength: number) => void;
     memory: WebAssembly.Memory;
     verify: (
+        pointer: number,
+        byteLength: number,
+        outputLengthPointer: number,
+    ) => number;
+    verifySourceState: (
         pointer: number,
         byteLength: number,
         outputLengthPointer: number,
@@ -68,6 +77,9 @@ const exports: DirectMpcOneAndExports = Object.freeze({
         instance.exports,
         'sealed_lattice_deallocate',
     ),
+    deallocateSecret: resolveFunction<
+        (pointer: number, byteLength: number) => void
+    >(instance.exports, 'sealed_lattice_deallocate_secret'),
     memory,
     verify: resolveFunction<
         (
@@ -76,6 +88,16 @@ const exports: DirectMpcOneAndExports = Object.freeze({
             outputLengthPointer: number,
         ) => number
     >(instance.exports, 'sealed_lattice_verify_direct_mpc_one_and_with_length'),
+    verifySourceState: resolveFunction<
+        (
+            pointer: number,
+            byteLength: number,
+            outputLengthPointer: number,
+        ) => number
+    >(
+        instance.exports,
+        'sealed_lattice_direct_mpc_preprocessing_source_state_with_length',
+    ),
 });
 
 let verificationInProgress = false;
@@ -86,11 +108,19 @@ const verify = (request: VerificationRequest) => {
             'The direct-MPC one-AND worker refuses overlapping verifier operations.',
         );
     }
+    const maximumRequestByteLength =
+        request.operation === 'one-and'
+            ? configuration.maximumDirectRequestByteLength
+            : configuration.maximumSourceStateRequestByteLength;
+    const maximumResponseByteLength =
+        request.operation === 'one-and'
+            ? configuration.maximumDirectResponseByteLength
+            : configuration.maximumSourceStateResponseByteLength;
     if (
         !Number.isSafeInteger(request.requestId) ||
         request.requestId < 0 ||
         request.requestBytes.byteLength === 0 ||
-        request.requestBytes.byteLength > configuration.maximumRequestByteLength
+        request.requestBytes.byteLength > maximumRequestByteLength
     ) {
         throw new Error(
             'The direct-MPC one-AND worker received an invalid request boundary.',
@@ -123,12 +153,13 @@ const verify = (request: VerificationRequest) => {
         );
         const linearMemoryBeforeByteLength = exports.memory.buffer.byteLength;
         const startedAt = performance.now();
+        const operation =
+            request.operation === 'one-and'
+                ? exports.verify
+                : exports.verifySourceState;
         outputPointer =
-            exports.verify(
-                inputPointer,
-                requestByteLength,
-                outputLengthPointer,
-            ) >>> 0;
+            operation(inputPointer, requestByteLength, outputLengthPointer) >>>
+            0;
         const durationMilliseconds = performance.now() - startedAt;
         outputByteLength = new DataView(exports.memory.buffer).getUint32(
             outputLengthPointer,
@@ -139,7 +170,7 @@ const verify = (request: VerificationRequest) => {
             linearMemoryAfterByteLength >
                 configuration.maximumWasmMemoryByteLength ||
             outputByteLength === 0 ||
-            outputByteLength > configuration.maximumResponseByteLength ||
+            outputByteLength > maximumResponseByteLength ||
             outputPointer === 0 ||
             outputPointer + outputByteLength > linearMemoryAfterByteLength
         ) {
@@ -165,11 +196,15 @@ const verify = (request: VerificationRequest) => {
             [responseBytes.buffer],
         );
     } finally {
+        const deallocateOperationBytes =
+            request.operation === 'source-state'
+                ? exports.deallocateSecret
+                : exports.deallocate;
         if (outputPointer !== 0) {
-            exports.deallocate(outputPointer, outputByteLength);
+            deallocateOperationBytes(outputPointer, outputByteLength);
         }
         if (inputPointer !== 0) {
-            exports.deallocate(inputPointer, requestByteLength);
+            deallocateOperationBytes(inputPointer, requestByteLength);
         }
         if (outputLengthPointer !== 0) {
             exports.deallocate(outputLengthPointer, 4);

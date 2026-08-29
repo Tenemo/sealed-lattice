@@ -38,6 +38,9 @@ pub(crate) enum DirectMpcOneAndPreprocessingSourceError {
     RootTerminal(PseudorandomZeroSharingSeedCatalogRootTerminalError320),
     Receipt(PseudorandomZeroSharingSeedReceiptError320),
     ReceiptTerminal(PseudorandomZeroSharingSeedReceiptTerminalError320),
+    MasterCustody(
+        super::pseudorandom_zero_sharing_seed_master_custody_320::PseudorandomZeroSharingSeedMasterCustodyError320,
+    ),
     WrongContext,
     WrongSourceParameter,
     WrongLocalCustody,
@@ -83,6 +86,17 @@ impl From<PseudorandomZeroSharingSeedReceiptTerminalError320>
 {
     fn from(error: PseudorandomZeroSharingSeedReceiptTerminalError320) -> Self {
         Self::ReceiptTerminal(error)
+    }
+}
+
+impl From<
+    super::pseudorandom_zero_sharing_seed_master_custody_320::PseudorandomZeroSharingSeedMasterCustodyError320,
+> for DirectMpcOneAndPreprocessingSourceError
+{
+    fn from(
+        error: super::pseudorandom_zero_sharing_seed_master_custody_320::PseudorandomZeroSharingSeedMasterCustodyError320,
+    ) -> Self {
+        Self::MasterCustody(error)
     }
 }
 
@@ -369,6 +383,30 @@ pub(crate) fn verify_direct_mpc_one_and_preprocessing_source(
         terminal_identity,
         receipt_bindings,
     })
+}
+
+/// Positively reconstructs the exact public source and verifies its local
+/// participant custody from one authenticated joined record. The local masters
+/// are dropped before this function returns; only the public source result and
+/// the verified participant coordinate survive.
+pub(crate) fn verify_direct_mpc_one_and_preprocessing_source_from_joined_custody(
+    action_context: &ActionContext,
+    expected_roster: &Roster,
+    joined_custody_record_bytes: &[u8],
+) -> Result<
+    (VerifiedDirectMpcOneAndPreprocessingSource, u16),
+    DirectMpcOneAndPreprocessingSourceError,
+> {
+    let (joined_seed_masters, receipt_terminal, roster) =
+        super::pseudorandom_zero_sharing_seed_master_custody_320::restore_pseudorandom_zero_sharing_joined_seed_masters_and_public_source_320(
+            joined_custody_record_bytes,
+        )?;
+    if roster != *expected_roster {
+        return Err(DirectMpcOneAndPreprocessingSourceError::WrongContext);
+    }
+    let source = verify_direct_mpc_one_and_preprocessing_source(&roster, &receipt_terminal)?;
+    source.verify_action_roster_and_local_custody(action_context, &roster, &joined_seed_masters)?;
+    Ok((source, joined_seed_masters.participant_position()))
 }
 
 fn source_terminal_identity(

@@ -1348,6 +1348,7 @@ const fn control_object_decode_limits() -> CanonicalDecodeLimits {
 }
 
 mod direct_mpc_one_and;
+pub(crate) mod direct_mpc_preprocessing_source_state_kernel;
 pub(crate) mod direct_mpc_preprocessing_source_terminal;
 
 #[cfg(feature = "direct-mpc-one-and-verifier")]
