@@ -33,83 +33,83 @@ fn completion_profile_reconciles_paper_counts_without_collapsing_per_participant
     assert_eq!(ledger.mask_random_bit_count_per_participant, 7_176);
     assert_eq!(
         ledger.independent_field_sample_count_per_participant,
-        2_454_748
+        2_455_796
     );
-    assert_eq!(ledger.complete_independent_field_sample_count, 24_547_480);
-    assert_eq!(ledger.field_sampling_statistical_numerator, 662_781_960);
+    assert_eq!(ledger.complete_independent_field_sample_count, 24_557_960);
+    assert_eq!(ledger.field_sampling_statistical_numerator, 663_064_920);
     assert_eq!(ledger.randomness_xof_message_byte_length, 500);
     assert_eq!(
         ledger.randomness_xof_output_byte_length_per_participant,
-        98_190_817
+        98_232_737
     );
     assert_eq!(
         ledger.randomness_xof_rate_block_count_per_participant,
-        721_992
+        722_300
     );
     assert_eq!(
         ledger.randomness_xof_permutation_count_per_participant,
-        721_995
+        722_303
     );
     assert_eq!(
         ledger.degree_three_polynomial_count_per_participant,
-        688_096
+        688_271
     );
-    assert_eq!(ledger.degree_six_polynomial_count_per_participant, 41_790);
+    assert_eq!(ledger.degree_six_polynomial_count_per_participant, 41_848);
     assert_eq!(
         ledger.polynomial_evaluation_multiplication_count_per_participant,
-        23_150_280
+        23_159_010
     );
     assert_eq!(
         ledger.polynomial_evaluation_addition_count_per_participant,
-        23_150_280
+        23_159_010
     );
     assert_eq!(
         ledger.source_extraction_multiplication_count_per_participant,
-        11_700_760
+        11_717_160
     );
     assert_eq!(
         ledger.source_extraction_addition_count_per_participant,
-        10_530_684
+        10_545_444
     );
     assert_eq!(
         ledger.sharing_check_multiplication_count_per_participant,
-        7_945_104
+        7_947_551
     );
     assert_eq!(
         ledger.sharing_check_addition_count_per_participant,
-        7_298_830
+        7_301_160
     );
     assert_eq!(
         ledger.degree_three_codeword_check_count_per_participant,
-        867_396
+        868_216
     );
     assert_eq!(
         ledger.degree_six_codeword_check_count_per_participant,
-        292_529
+        292_939
     );
     assert_eq!(
         ledger.codeword_check_multiplication_count_per_participant,
-        32_477_900
+        32_512_340
     );
     assert_eq!(
         ledger.codeword_check_addition_count_per_participant,
-        25_236_012
+        25_263_072
     );
     assert_eq!(
         ledger.triple_generation_multiplication_count_per_participant,
-        292_519
+        292_929
     );
     assert_eq!(
         ledger.triple_generation_addition_count_per_participant,
-        585_038
+        585_858
     );
     assert_eq!(
         ledger.beaver_evaluation_multiplication_count_per_participant,
-        877_557
+        878_787
     );
     assert_eq!(
         ledger.beaver_evaluation_addition_count_per_participant,
-        1_462_595
+        1_464_645
     );
     assert_eq!(
         ledger.garbling_affine_addition_count_per_participant,
@@ -125,19 +125,28 @@ fn completion_profile_reconciles_paper_counts_without_collapsing_per_participant
     );
     assert_eq!(
         ledger.complete_field_multiplication_count_per_participant,
-        76_451_296
+        76_515_363
     );
     assert_eq!(
         ledger.complete_field_addition_count_per_participant,
-        75_493_932
+        75_550_092
     );
     assert_eq!(ledger.paper_gate_multiplication_count, 220_759);
     assert_eq!(ledger.mask_generation_multiplication_count, 71_760);
-    assert_eq!(ledger.source_bound_activation_addition_count, 410);
-    assert_eq!(ledger.total_multiplication_count, 292_519);
+    assert_eq!(ledger.preparation_multiplication_count, 292_519);
+    assert_eq!(ledger.source_bound_activation_multiplication_count, 410);
+    assert_eq!(
+        ledger.source_bound_activation_constant_multiplication_count_per_participant,
+        410
+    );
+    assert_eq!(
+        ledger.source_bound_activation_addition_count_per_participant,
+        820
+    );
+    assert_eq!(ledger.total_multiplication_count, 292_929);
     assert_eq!(
         ledger.multiplication_count_by_layer,
-        [35_880, 14_352, 7_176, 7_176, 13_941, 19_454, 194_540]
+        [35_880, 14_352, 7_176, 7_176, 13_941, 19_454, 194_540, 410]
     );
     assert_eq!(ledger.prf_output_input_count_per_participant, 541_200);
     assert_eq!(ledger.complete_prf_output_input_count, 5_412_000);
@@ -156,69 +165,69 @@ fn completion_profile_reconciles_paper_counts_without_collapsing_per_participant
     assert_eq!(ledger.private_mpc_input_count, 5_627_280);
     assert_eq!(
         ledger.random_source_polynomial_count_per_participant,
-        83_577
+        83_694
     );
-    assert_eq!(ledger.double_source_pair_count_per_participant, 41_789);
+    assert_eq!(ledger.double_source_pair_count_per_participant, 41_847);
     assert_eq!(ledger.sharing_check_mask_polynomial_count, 30);
-    assert_eq!(ledger.source_polynomial_count, 1_671_580);
-    assert_eq!(ledger.total_polynomial_count, 7_298_860);
-    assert_eq!(ledger.remote_private_share_field_element_count, 65_689_740);
+    assert_eq!(ledger.source_polynomial_count, 1_673_910);
+    assert_eq!(ledger.total_polynomial_count, 7_301_190);
+    assert_eq!(ledger.remote_private_share_field_element_count, 65_710_710);
     assert_eq!(
         ledger.remote_private_share_payload_byte_length,
-        2_693_279_340
+        2_694_139_110
     );
-    assert_eq!(ledger.public_opening_field_element_count, 11_599_250);
-    assert_eq!(ledger.public_opening_payload_byte_length, 475_569_250);
+    assert_eq!(ledger.public_opening_field_element_count, 11_611_550);
+    assert_eq!(ledger.public_opening_payload_byte_length, 476_073_550);
     assert_eq!(ledger.active_key_opening_field_element_count, 41_100);
-    assert_eq!(ledger.raw_upload_payload_byte_length, 3_168_848_590);
+    assert_eq!(ledger.raw_upload_payload_byte_length, 3_170_212_660);
     assert_eq!(ledger.private_stream_count, 90);
-    assert_eq!(ledger.public_stream_count, 181);
-    assert_eq!(ledger.network_signature_count, 271);
+    assert_eq!(ledger.public_stream_count, 191);
+    assert_eq!(ledger.network_signature_count, 281);
     assert_eq!(ledger.encapsulation_count, 90);
     assert_eq!(ledger.authenticated_encryption_count, 2_610);
-    assert_eq!(ledger.stream_identity_hash_count, 3_722);
-    assert_eq!(ledger.private_stream_carrier_byte_length, 2_694_004_650);
-    assert_eq!(ledger.public_stream_carrier_byte_length, 476_447_855);
-    assert_eq!(ledger.complete_upload_carrier_byte_length, 3_170_452_505);
-    assert_eq!(ledger.maximum_canonical_stream_byte_length, 29_933_385);
+    assert_eq!(ledger.stream_identity_hash_count, 3_752);
+    assert_eq!(ledger.private_stream_carrier_byte_length, 2_694_864_420);
+    assert_eq!(ledger.public_stream_carrier_byte_length, 476_998_345);
+    assert_eq!(ledger.complete_upload_carrier_byte_length, 3_171_862_765);
+    assert_eq!(ledger.maximum_canonical_stream_byte_length, 29_942_938);
     assert_eq!(
         ledger.maximum_participant_upload_carrier_byte_length,
-        317_049_350
+        317_190_376
     );
     assert_eq!(
         ledger.clean_state_participant_download_carrier_byte_length,
-        745_848_320
+        746_484_787
     );
     assert_eq!(ledger.evaluation_success_claim_byte_length, 169);
     assert_eq!(ledger.authenticated_failure_claim_byte_length, 170);
-    assert_eq!(ledger.round_root_derivation_count, 19);
+    assert_eq!(ledger.round_root_derivation_count, 20);
     assert_eq!(ledger.burn_terminal_stream_count, 8);
     assert_eq!(ledger.paper_round_reconciliation_count, 12);
     assert_eq!(ledger.preparation_complete_roster_round_count, 13);
-    assert_eq!(ledger.online_complete_roster_round_count, 3);
-    assert_eq!(ledger.minimum_dependency_separated_visit_count, 164);
-    assert_eq!(ledger.maximum_dependency_separated_visit_count, 181);
+    assert_eq!(ledger.online_complete_roster_round_count, 4);
+    assert_eq!(ledger.minimum_dependency_separated_visit_count, 173);
+    assert_eq!(ledger.maximum_dependency_separated_visit_count, 191);
     assert_eq!(ledger.maximum_live_active_wire_count, 416);
     assert_eq!(ledger.maximum_live_active_key_byte_length, 199_680);
     assert_eq!(ledger.field_work_batch_element_count, 4_096);
     assert_eq!(ledger.maximum_field_work_batch_byte_length, 1_376_256);
-    assert_eq!(ledger.participant_share_state_byte_length, 299_253_260);
-    assert_eq!(ledger.participant_source_staging_byte_length, 122_834_765);
+    assert_eq!(ledger.participant_share_state_byte_length, 299_348_790);
+    assert_eq!(ledger.participant_source_staging_byte_length, 122_877_733);
     assert_eq!(
         ledger.participant_share_checkpoint_storage_byte_length,
-        600_041_952
+        600_233_012
     );
     assert_eq!(
         ledger.participant_source_checkpoint_storage_byte_length,
-        246_306_498
+        246_392_434
     );
     assert_eq!(
         ledger.retained_transcript_with_cleanup_lag_byte_length,
-        1_015_248_785
+        1_015_971_229
     );
     assert_eq!(
         ledger.persistent_storage_with_repair_and_cleanup_lag_byte_length,
-        1_863_340_747
+        1_864_381_467
     );
     assert_eq!(ledger.maximum_contiguous_allocation_byte_length, 1_376_256);
     assert_eq!(ledger.maximum_wasm_data_live_set_byte_length, 3_673_088);
@@ -236,29 +245,29 @@ fn completion_profile_reconciles_paper_counts_without_collapsing_per_participant
         &[
             super::lpsy15_candidate_compiler::Lpsy15CheckpointStorageIntent {
                 kind: Lpsy15CheckpointStateKind::SourceStaging,
-                state_byte_length: 122_834_765,
+                state_byte_length: 122_877_733,
                 state_chunk_count: 118,
                 cursor_byte_length: 226,
                 stream_descriptor_byte_length: 7_656,
                 canonical_manifest_byte_length: 8_774,
                 maximum_journal_byte_length: 67_574,
                 configured_manifest_limit_byte_length: 67_574,
-                copy_on_write_stored_value_byte_length: 246_016_626,
+                copy_on_write_stored_value_byte_length: 246_102_562,
                 repair_head_overlap_byte_length: 289_872,
-                complete_storage_byte_length: 246_306_498,
+                complete_storage_byte_length: 246_392_434,
             },
             super::lpsy15_candidate_compiler::Lpsy15CheckpointStorageIntent {
                 kind: Lpsy15CheckpointStateKind::ParticipantShareState,
-                state_byte_length: 299_253_260,
+                state_byte_length: 299_348_790,
                 state_chunk_count: 286,
                 cursor_byte_length: 226,
                 stream_descriptor_byte_length: 18_408,
                 canonical_manifest_byte_length: 19_526,
                 maximum_journal_byte_length: 163_670,
                 configured_manifest_limit_byte_length: 163_670,
-                copy_on_write_stored_value_byte_length: 599_343_504,
+                copy_on_write_stored_value_byte_length: 599_534_564,
                 repair_head_overlap_byte_length: 698_448,
-                complete_storage_byte_length: 600_041_952,
+                complete_storage_byte_length: 600_233_012,
             },
         ]
     );
@@ -267,14 +276,14 @@ fn completion_profile_reconciles_paper_counts_without_collapsing_per_participant
     assert_eq!(compilation.physical_wire_roles().len(), 7_176);
     assert_eq!(compilation.gate_roles().len(), 6_765);
     assert_eq!(compilation.output_roles().len(), 41);
-    assert_eq!(compilation.rounds().len(), 19);
-    assert_eq!(compilation.streams().len(), 271);
+    assert_eq!(compilation.rounds().len(), 20);
+    assert_eq!(compilation.streams().len(), 281);
     assert!(matches!(
         compilation.rounds()[4].kind,
         Lpsy15RoundKind::TripleProductOpening
     ));
     assert!(matches!(
-        compilation.rounds()[18].kind,
+        compilation.rounds()[19].kind,
         Lpsy15RoundKind::ResultTerminalWitness
     ));
 }
@@ -287,7 +296,7 @@ fn state_intents_and_terminal_paths_bind_finality_before_clear_output_material()
     let candidate_paths = compilation.candidate_paths();
 
     assert_eq!(state_intents.len(), compilation.rounds().len());
-    assert_eq!(state_intents.len(), 19);
+    assert_eq!(state_intents.len(), 20);
     for (round, state_intent) in compilation.rounds().iter().zip(state_intents) {
         assert_eq!(state_intent.round_index, round.round_index);
         assert_eq!(state_intent.round_kind, round.kind);
@@ -317,7 +326,7 @@ fn state_intents_and_terminal_paths_bind_finality_before_clear_output_material()
     );
     assert!(matches!(
         state_intents[target_finality_position + 1].round_kind,
-        Lpsy15RoundKind::ActivationAndTableOpening
+        Lpsy15RoundKind::SourceBoundInputActivation
     ));
     assert!(
         state_intents[target_finality_position + 1..]
@@ -325,13 +334,13 @@ fn state_intents_and_terminal_paths_bind_finality_before_clear_output_material()
             .all(|state_intent| state_intent.permits_clear_output_material)
     );
 
-    assert_eq!(candidate_paths.len(), 59);
+    assert_eq!(candidate_paths.len(), 62);
     assert_eq!(candidate_paths[0].kind, Lpsy15CandidatePathKind::Success);
     assert_eq!(
         candidate_paths[0].terminal,
         Lpsy15CandidatePathTerminal::Result
     );
-    assert_eq!(candidate_paths[0].verified_prefix_stream_count, 271);
+    assert_eq!(candidate_paths[0].verified_prefix_stream_count, 281);
     assert_eq!(
         candidate_paths[0].downloaded_carrier_byte_length,
         ledger.complete_upload_carrier_byte_length
@@ -347,7 +356,7 @@ fn state_intents_and_terminal_paths_bind_finality_before_clear_output_material()
     assert_eq!(candidate_paths[1].verified_prefix_stream_count, 227);
     assert_eq!(
         candidate_paths[1].downloaded_carrier_byte_length,
-        3_057_442_465
+        3_058_470_335
     );
 
     for path in &candidate_paths[2..] {
@@ -378,7 +387,7 @@ fn state_intents_and_terminal_paths_bind_finality_before_clear_output_material()
     assert_eq!(ledger.burn_terminal_carrier_byte_length, 36_674);
     assert_eq!(
         ledger.maximum_authenticated_failure_path_carrier_byte_length,
-        3_170_489_179
+        3_171_899_439
     );
 }
 
@@ -419,15 +428,15 @@ fn canonical_stream_graph_covers_every_sender_recipient_and_round_slot() {
         }
     }
     assert!(private_streams.iter().all(|stream| {
-        stream.field_element_count == 729_886
-            && stream.payload_byte_length == 29_925_326
+        stream.field_element_count == 730_119
+            && stream.payload_byte_length == 29_934_879
             && stream.maximum_payload_chunk_byte_length == 1_048_534
             && stream.chunk_count == 29
             && stream.header_byte_length == 1_620
             && stream.manifest_byte_length == 2_022
             && stream.signature_envelope_byte_length == 3_953
             && stream.authentication_tag_byte_length == 464
-            && stream.carrier_byte_length == 29_933_385
+            && stream.carrier_byte_length == 29_942_938
     }));
 
     for round in compilation.rounds() {
@@ -575,11 +584,11 @@ fn deterministic_role_cursors_cover_every_random_key_prf_polynomial_and_multipli
     let last_multiplication = compilation
         .multiplication_role(ledger.total_multiplication_count - 1)
         .unwrap();
-    assert_eq!(last_multiplication.layer_index, 7);
-    assert_eq!(last_multiplication.ordinal_within_layer, 194_539);
+    assert_eq!(last_multiplication.layer_index, 8);
+    assert_eq!(last_multiplication.ordinal_within_layer, 409);
     assert_eq!(
         last_multiplication.kind,
-        Lpsy15MultiplicationKind::TableSelector
+        Lpsy15MultiplicationKind::SourceBoundInputActivation
     );
     assert!(
         compilation

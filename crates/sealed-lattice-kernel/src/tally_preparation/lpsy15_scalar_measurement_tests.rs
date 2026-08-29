@@ -6,8 +6,8 @@ use super::lpsy15_scalar_measurement::{
 #[test]
 fn completion_counts_come_from_the_candidate_compiler() {
     let counts = Lpsy15ScalarMeasurementCounts::derive().unwrap();
-    assert_eq!(counts.field_multiplication_count, 76_451_296);
-    assert_eq!(counts.field_addition_count, 75_493_932);
+    assert_eq!(counts.field_multiplication_count, 76_515_363);
+    assert_eq!(counts.field_addition_count, 75_550_092);
     assert_eq!(counts.prf_call_count, 1_894_200);
     assert_eq!(counts.prf_message_byte_length, 452);
     assert_eq!(counts.prf_permutation_count_per_call, 6);

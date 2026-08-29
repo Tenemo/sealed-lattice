@@ -247,6 +247,7 @@ pub(crate) enum Lpsy15MultiplicationKind {
     MaskCheckOrGateInput,
     Indicator,
     TableSelector,
+    SourceBoundInputActivation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -285,6 +286,7 @@ pub(crate) enum Lpsy15RoundKind {
     PreparationOutputOpening,
     PreparationTerminalWitness,
     TargetFinality,
+    SourceBoundInputActivation,
     ActivationAndTableOpening,
     ActiveKeyOpening,
     EvaluationClaim,
@@ -463,7 +465,10 @@ pub(crate) struct Lpsy15CandidateResourceLedger {
     pub(crate) complete_field_addition_count_per_participant: u64,
     pub(crate) paper_gate_multiplication_count: u64,
     pub(crate) mask_generation_multiplication_count: u64,
-    pub(crate) source_bound_activation_addition_count: u64,
+    pub(crate) preparation_multiplication_count: u64,
+    pub(crate) source_bound_activation_multiplication_count: u64,
+    pub(crate) source_bound_activation_constant_multiplication_count_per_participant: u64,
+    pub(crate) source_bound_activation_addition_count_per_participant: u64,
     pub(crate) total_multiplication_count: u64,
     pub(crate) multiplication_count_by_layer: Vec<u64>,
     pub(crate) prf_output_input_count_per_participant: u64,
@@ -742,24 +747,35 @@ impl Lpsy15CandidateCompilation {
         )?;
         let mask_generation_multiplication_count =
             checked_multiply(physical_wire_count, participant_count)?;
-        // Source-authenticated ballot shares are added to the corresponding
-        // wire-mask sharings and opened only after target finality. This is an
-        // affine activation, not one multiplication per ballot bit.
-        let source_bound_activation_addition_count = ballot_input_wire_count;
-        let total_multiplication_count = checked_add(
+        let preparation_multiplication_count = checked_add(
             paper_gate_multiplication_count,
             mask_generation_multiplication_count,
         )?;
-        let mut multiplication_count_by_layer = Vec::new();
+        // LPSY15 works over an odd-characteristic prime field. For a hidden
+        // source bit x and hidden wire mask lambda, the external signal is
+        // x + lambda - 2*x*lambda, not their field sum. Each protected input
+        // therefore consumes one preprocessed triple and one post-finality
+        // Beaver multiplication. The multiplication by the public constant
+        // two and the two additions are local work after that opening.
+        let source_bound_activation_multiplication_count = ballot_input_wire_count;
+        let source_bound_activation_constant_multiplication_count_per_participant =
+            ballot_input_wire_count;
+        let source_bound_activation_addition_count_per_participant =
+            checked_multiply(2, ballot_input_wire_count)?;
+        let total_multiplication_count = checked_add(
+            preparation_multiplication_count,
+            source_bound_activation_multiplication_count,
+        )?;
+        let mut preparation_multiplication_count_by_layer = Vec::new();
         let mut remaining_mask_factors = participant_count;
         while remaining_mask_factors > 1 {
-            multiplication_count_by_layer.push(checked_multiply(
+            preparation_multiplication_count_by_layer.push(checked_multiply(
                 physical_wire_count,
                 remaining_mask_factors / 2,
             )?);
             remaining_mask_factors = checked_ceiling_divide(remaining_mask_factors, 2)?;
         }
-        multiplication_count_by_layer.extend([
+        preparation_multiplication_count_by_layer.extend([
             checked_add(physical_wire_count, binary_gate_count)?,
             checked_add(
                 checked_multiply(conjunction_gate_count, 4)?,
@@ -776,12 +792,14 @@ impl Lpsy15CandidateCompilation {
                 )?,
             )?,
         ]);
-        if checked_sum(&multiplication_count_by_layer)?
-            != checked_add(
-                paper_gate_multiplication_count,
-                mask_generation_multiplication_count,
-            )?
+        if checked_sum(&preparation_multiplication_count_by_layer)?
+            != preparation_multiplication_count
         {
+            return Err(Lpsy15CandidateCompilerError::ArithmeticOverflow);
+        }
+        let mut multiplication_count_by_layer = preparation_multiplication_count_by_layer.clone();
+        multiplication_count_by_layer.push(source_bound_activation_multiplication_count);
+        if checked_sum(&multiplication_count_by_layer)? != total_multiplication_count {
             return Err(Lpsy15CandidateCompilerError::ArithmeticOverflow);
         }
 
@@ -1093,6 +1111,7 @@ impl Lpsy15CandidateCompilation {
             beaver_evaluation_multiplication_count_per_participant,
             codeword_check_multiplication_count_per_participant,
             mask_conversion_constant_multiplication_count_per_participant,
+            source_bound_activation_constant_multiplication_count_per_participant,
         ])?;
         let complete_field_addition_count_per_participant = checked_sum(&[
             polynomial_evaluation_addition_count_per_participant,
@@ -1103,7 +1122,7 @@ impl Lpsy15CandidateCompilation {
             codeword_check_addition_count_per_participant,
             mask_conversion_addition_count_per_participant,
             garbling_affine_addition_count_per_participant,
-            source_bound_activation_addition_count,
+            source_bound_activation_addition_count_per_participant,
             online_evaluation_addition_count_per_participant,
         ])?;
         let public_opening_field_element_count = checked_sum(&[
@@ -1133,7 +1152,8 @@ impl Lpsy15CandidateCompilation {
             table_field_element_count,
             total_polynomial_count,
             total_multiplication_count,
-            multiplication_count_by_layer: &multiplication_count_by_layer,
+            preparation_multiplication_count_by_layer: &preparation_multiplication_count_by_layer,
+            source_bound_activation_multiplication_count,
         })?;
         let preparation_complete_roster_round_count = u64_from_usize(
             rounds
@@ -1158,7 +1178,8 @@ impl Lpsy15CandidateCompilation {
                 .filter(|round| {
                     matches!(
                         round.kind,
-                        Lpsy15RoundKind::ActivationAndTableOpening
+                        Lpsy15RoundKind::SourceBoundInputActivation
+                            | Lpsy15RoundKind::ActivationAndTableOpening
                             | Lpsy15RoundKind::ActiveKeyOpening
                             | Lpsy15RoundKind::EvaluationClaim
                     ) && round.participation == Lpsy15RoundParticipation::CompleteRoster
@@ -1439,12 +1460,15 @@ impl Lpsy15CandidateCompilation {
             beaver_evaluation_addition_count_per_participant,
             garbling_affine_addition_count_per_participant,
             mask_conversion_constant_multiplication_count_per_participant,
+            source_bound_activation_constant_multiplication_count_per_participant,
+            source_bound_activation_addition_count_per_participant,
             online_evaluation_addition_count_per_participant,
             complete_field_multiplication_count_per_participant,
             complete_field_addition_count_per_participant,
             paper_gate_multiplication_count,
             mask_generation_multiplication_count,
-            source_bound_activation_addition_count,
+            preparation_multiplication_count,
+            source_bound_activation_multiplication_count,
             total_multiplication_count,
             multiplication_count_by_layer,
             prf_output_input_count_per_participant,
@@ -1743,6 +1767,7 @@ impl Lpsy15CandidateCompilation {
                     5 => Lpsy15MultiplicationKind::MaskCheckOrGateInput,
                     6 => Lpsy15MultiplicationKind::Indicator,
                     7 => Lpsy15MultiplicationKind::TableSelector,
+                    8 => Lpsy15MultiplicationKind::SourceBoundInputActivation,
                     _ => return None,
                 };
                 return Some(Lpsy15MultiplicationRole {
@@ -2225,7 +2250,8 @@ struct Lpsy15RoundCompilerInputs<'a> {
     table_field_element_count: u64,
     total_polynomial_count: u64,
     total_multiplication_count: u64,
-    multiplication_count_by_layer: &'a [u64],
+    preparation_multiplication_count_by_layer: &'a [u64],
+    source_bound_activation_multiplication_count: u64,
 }
 
 fn compile_rounds(
@@ -2280,7 +2306,7 @@ fn compile_rounds(
         },
     ];
     for (layer_position, multiplication_count) in inputs
-        .multiplication_count_by_layer
+        .preparation_multiplication_count_by_layer
         .iter()
         .copied()
         .enumerate()
@@ -2299,7 +2325,7 @@ fn compile_rounds(
     }
     let preparation_output_round_index = u16::try_from(
         5_usize
-            .checked_add(inputs.multiplication_count_by_layer.len())
+            .checked_add(inputs.preparation_multiplication_count_by_layer.len())
             .ok_or(Lpsy15CandidateCompilerError::ArithmeticOverflow)?,
     )
     .map_err(|_| Lpsy15CandidateCompilerError::IntegerConversion)?;
@@ -2309,7 +2335,10 @@ fn compile_rounds(
     let finality_round_index = preparation_witness_round_index
         .checked_add(1)
         .ok_or(Lpsy15CandidateCompilerError::ArithmeticOverflow)?;
-    let activation_round_index = finality_round_index
+    let source_bound_activation_round_index = finality_round_index
+        .checked_add(1)
+        .ok_or(Lpsy15CandidateCompilerError::ArithmeticOverflow)?;
+    let activation_round_index = source_bound_activation_round_index
         .checked_add(1)
         .ok_or(Lpsy15CandidateCompilerError::ArithmeticOverflow)?;
     rounds.extend([
@@ -2336,6 +2365,16 @@ fn compile_rounds(
             participation: Lpsy15RoundParticipation::FinalityQuorum,
             private_field_elements_per_participant: 0,
             public_field_elements_per_participant: 0,
+        },
+        Lpsy15Round {
+            round_index: source_bound_activation_round_index,
+            kind: Lpsy15RoundKind::SourceBoundInputActivation,
+            participation: Lpsy15RoundParticipation::CompleteRoster,
+            private_field_elements_per_participant: 0,
+            public_field_elements_per_participant: checked_multiply(
+                2,
+                inputs.source_bound_activation_multiplication_count,
+            )?,
         },
         Lpsy15Round {
             round_index: activation_round_index,
@@ -2450,7 +2489,8 @@ fn compile_state_intents(
                     Lpsy15StateIntentKind::PreparationTerminal
                 }
                 Lpsy15RoundKind::TargetFinality => Lpsy15StateIntentKind::TargetFinality,
-                Lpsy15RoundKind::ActivationAndTableOpening
+                Lpsy15RoundKind::SourceBoundInputActivation
+                | Lpsy15RoundKind::ActivationAndTableOpening
                 | Lpsy15RoundKind::ActiveKeyOpening
                 | Lpsy15RoundKind::EvaluationClaim => Lpsy15StateIntentKind::EvaluationRound,
                 Lpsy15RoundKind::ResultTerminalWitness => Lpsy15StateIntentKind::ResultTerminal,
@@ -2487,7 +2527,8 @@ fn compile_state_intents(
                 )?,
                 permits_clear_output_material: matches!(
                     round.kind,
-                    Lpsy15RoundKind::ActivationAndTableOpening
+                    Lpsy15RoundKind::SourceBoundInputActivation
+                        | Lpsy15RoundKind::ActivationAndTableOpening
                         | Lpsy15RoundKind::ActiveKeyOpening
                         | Lpsy15RoundKind::EvaluationClaim
                         | Lpsy15RoundKind::ResultTerminalWitness

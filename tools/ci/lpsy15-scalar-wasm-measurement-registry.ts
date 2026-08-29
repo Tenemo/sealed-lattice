@@ -5,8 +5,8 @@ const completionLpsy15ScalarKernels = Object.freeze({
         'completion-profile scalar WebAssembly LPSY15 kernel development measurement',
     measurementId: 'lpsy15-completion-scalar-kernels',
     expected: Object.freeze({
-        fieldAdditionCount: 75_493_932,
-        fieldMultiplicationCount: 76_451_296,
+        fieldAdditionCount: 75_550_092,
+        fieldMultiplicationCount: 76_515_363,
         fieldScratchByteLength: 1_376_256,
         prfCallCount: 1_894_200,
         prfMessageByteLength: 452,
