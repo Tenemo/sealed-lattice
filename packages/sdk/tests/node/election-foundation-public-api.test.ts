@@ -1,8 +1,12 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
+import {
+    createMaximumAcceptedPollSpec,
+    maximumCanonicalManifestFixtureByteLength,
+} from '../maximum-manifest-fixture.js';
 
 type CreateCanonicalManifest = (input: {
     readonly options: readonly string[];
@@ -48,16 +52,38 @@ describe('election foundation public package API in Node', () => {
         }
     });
 
-    it('creates and verifies canonical manifest bytes through the packaged kernel', async () => {
-        const manifest = await createCanonicalManifest({
-            options: Array.from(
-                { length: 10 },
-                (_value, optionIndex) => `Option ${String(optionIndex)}`,
-            ),
-            question: 'Choose priorities',
-        });
+    it('creates and verifies canonical manifest bytes through one packaged kernel instance', async () => {
+        const instantiate = vi.spyOn(WebAssembly, 'instantiate');
+        try {
+            const manifest = await createCanonicalManifest({
+                options: Array.from(
+                    { length: 10 },
+                    (_value, optionIndex) => `Option ${String(optionIndex)}`,
+                ),
+                question: 'Choose priorities',
+            });
 
-        expect(manifest.canonicalBytes.byteLength).toBeGreaterThan(0);
+            expect(manifest.canonicalBytes.byteLength).toBeGreaterThan(0);
+            expect(
+                await verifyCanonicalManifest(manifest.canonicalBytes),
+            ).toEqual({
+                isValid: true,
+                value: { manifestHash: manifest.manifestHash },
+            });
+            expect(instantiate).toHaveBeenCalledTimes(1);
+        } finally {
+            instantiate.mockRestore();
+        }
+    });
+
+    it('creates and verifies the largest manifest admitted by poll validation', async () => {
+        const manifest = await createCanonicalManifest(
+            createMaximumAcceptedPollSpec(),
+        );
+
+        expect(manifest.canonicalBytes).toHaveLength(
+            maximumCanonicalManifestFixtureByteLength,
+        );
         expect(await verifyCanonicalManifest(manifest.canonicalBytes)).toEqual({
             isValid: true,
             value: { manifestHash: manifest.manifestHash },

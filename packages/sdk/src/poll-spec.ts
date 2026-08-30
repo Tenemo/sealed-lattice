@@ -34,6 +34,13 @@ export type PollSpecValidation =
 
 const textEncoder = new TextEncoder();
 
+// A successful encode response contains one status byte, one four-byte
+// canonical-value length, and one 64-byte manifest hash.
+const canonicalManifestCommandResponseOverheadByteLength = 1 + 4 + 64;
+const maximumCanonicalFoundationManifestByteLength =
+    maximumFoundationCopiedBufferByteLength -
+    canonicalManifestCommandResponseOverheadByteLength;
+
 const canonicalManifestNonDisplayByteLength = (optionCount: number): number =>
     30 +
     36 * optionCount +
@@ -65,7 +72,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         ? optionCount
         : configurableOptionCountRange.maximum;
     let remainingDisplayTextByteLength =
-        maximumFoundationCopiedBufferByteLength -
+        maximumCanonicalFoundationManifestByteLength -
         canonicalManifestNonDisplayByteLength(framedOptionCount);
     const consumeDisplayTextBytes = (value: string): boolean => {
         const byteLength = textEncoder.encode(value).byteLength;

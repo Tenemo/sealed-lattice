@@ -1,8 +1,7 @@
-import {
-    configurableOptionCountRange,
-    maximumFoundationCopiedBufferByteLength,
-} from '@sealed-lattice/wasm';
+import { configurableOptionCountRange } from '@sealed-lattice/wasm';
 import { describe, expect, it } from 'vitest';
+
+import { createMaximumAcceptedPollSpec } from '../maximum-manifest-fixture.js';
 
 import {
     foundationManifestInputFromPollSpec,
@@ -78,38 +77,15 @@ describe('poll input validation', () => {
         ).toEqual(['EmptyOptionLabel']);
     });
 
-    it('enforces the exact aggregate display-text byte ceiling', () => {
-        const options = Array.from(
-            { length: prototypeOptionCount },
-            (_value, optionIndex) => `O${String(optionIndex)}`,
-        );
-        const encoder = new TextEncoder();
-        const optionBytes = options.reduce(
-            (total, label) => total + encoder.encode(label).byteLength,
-            0,
-        );
-        const framingBytes =
-            30 +
-            36 * prototypeOptionCount +
-            Array.from(
-                { length: prototypeOptionCount },
-                (_value, optionIndex) => `option-${String(optionIndex)}`,
-            ).reduce(
-                (total, identifier) =>
-                    total + encoder.encode(identifier).byteLength,
-                0,
-            );
-        const exactQuestion = 'Q'.repeat(
-            maximumFoundationCopiedBufferByteLength -
-                framingBytes -
-                optionBytes,
-        );
+    it('reserves the command response framing at the exact display-text ceiling', () => {
+        const exactPollSpec = createMaximumAcceptedPollSpec();
 
+        expect(validatePollSpec(exactPollSpec).isValid).toBe(true);
         expect(
-            validatePollSpec({ question: exactQuestion, options }).isValid,
-        ).toBe(true);
-        expect(errorCodes({ question: `${exactQuestion}Q`, options })).toEqual([
-            'UnsupportedHashCriticalText',
-        ]);
+            errorCodes({
+                ...exactPollSpec,
+                question: `${exactPollSpec.question}Q`,
+            }),
+        ).toEqual(['UnsupportedHashCriticalText']);
     });
 });
