@@ -707,7 +707,7 @@ describe('generated direct-finality visit schedule', () => {
         ).toBe(false);
     });
 
-    it('rejects a separate repair action because it forces a sixth visit', () => {
+    it('shows that a separate repair action misses the five-visit target', () => {
         const schedule = runGeneratedVisitSchedule({
             participantCount: 10,
             requireRepair: true,
