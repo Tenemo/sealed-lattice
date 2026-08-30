@@ -1,8 +1,8 @@
 use core::str;
 
-mod foundation_command;
+use crate::foundation::MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH;
 
-const MAXIMUM_COPIED_BUFFER_BYTE_LENGTH: usize = 8_388_608;
+mod foundation_command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanonicalErrorCode {
@@ -144,7 +144,7 @@ impl BinaryWriter {
                 "response length overflow",
             )
         })?;
-        if required_length > MAXIMUM_COPIED_BUFFER_BYTE_LENGTH {
+        if required_length > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 "foundation command response exceeds the copied-buffer limit",
@@ -210,7 +210,7 @@ fn encode_success(payload: Vec<u8>) -> Vec<u8> {
 }
 
 pub(super) fn run_foundation_command(input: &[u8]) -> Vec<u8> {
-    if input.len() > MAXIMUM_COPIED_BUFFER_BYTE_LENGTH {
+    if input.len() > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
         return encode_error(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "foundation command exceeds the copied-buffer limit",
@@ -227,9 +227,78 @@ pub(super) fn run_foundation_command(input: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    fn decode_command_error(response: &[u8]) -> (&str, &str) {
+        let mut reader = BinaryReader::new(response);
+        assert_eq!(reader.read_u8().expect("command status is present"), 1);
+        let code = reader.read_string().expect("error code is present");
+        let message = reader.read_string().expect("error message is present");
+        reader.finish().expect("error response is fully consumed");
+        (code, message)
+    }
+
     #[test]
     fn binary_command_refuses_unknown_and_trailing_input() {
-        assert_eq!(run_foundation_command(&[0xff])[0], 1);
-        assert_eq!(run_foundation_command(&[2, 0, 0, 0, 0, 1])[0], 1);
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&[0xff])).0,
+            CanonicalErrorCode::InvalidEnum.as_str()
+        );
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&[2, 0, 0, 0, 0, 1])).0,
+            CanonicalErrorCode::TrailingBytes.as_str()
+        );
+    }
+
+    #[test]
+    fn binary_command_enforces_the_exact_input_limit() {
+        let mut command = vec![0_u8; MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH];
+        command[0] = 0xff;
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&command)).0,
+            CanonicalErrorCode::InvalidEnum.as_str(),
+            "an exact-limit command must reach command decoding"
+        );
+
+        command.push(0);
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&command)),
+            (
+                CanonicalErrorCode::MalformedLength.as_str(),
+                "foundation command exceeds the copied-buffer limit"
+            )
+        );
+    }
+
+    #[test]
+    fn binary_response_writer_enforces_the_exact_output_limit() {
+        let exact_limit = vec![0_u8; MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH];
+        let mut writer = BinaryWriter::new();
+        writer
+            .write_fixed(&exact_limit)
+            .expect("the exact copied-buffer limit is accepted");
+        let error = writer
+            .write_u8(0)
+            .expect_err("one byte beyond the copied-buffer limit must refuse");
+
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+        assert_eq!(
+            error.message,
+            "foundation command response exceeds the copied-buffer limit"
+        );
+        assert_eq!(
+            writer.into_bytes().len(),
+            MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH
+        );
+    }
+
+    #[test]
+    fn binary_command_refuses_truncated_lengths_and_invalid_utf8() {
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&[2, 0, 0, 0])).0,
+            CanonicalErrorCode::MalformedLength.as_str()
+        );
+        assert_eq!(
+            decode_command_error(&run_foundation_command(&[5, 1, 0, 0, 0, 0xff])).0,
+            CanonicalErrorCode::InvalidUtf8.as_str()
+        );
     }
 }

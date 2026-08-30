@@ -1,7 +1,8 @@
 use super::{BinaryReader, BinaryWriter, CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::{
     ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CeremonyContext,
-    FoundationSchemaError, Hash512, Manifest, OptionDefinition, RefusalReason, Roster,
+    FoundationSchemaError, Hash512, MAXIMUM_CONFIGURABLE_OPTION_COUNT,
+    MINIMUM_CONFIGURABLE_OPTION_COUNT, Manifest, OptionDefinition, RefusalReason, Roster,
     StabilizedDisplayText,
 };
 
@@ -37,7 +38,15 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
 fn encode_manifest(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
     let display_title = ingress_display_text(reader.read_bytes()?, "display title")?;
     let option_count = reader.read_u16()?;
-    let mut option_definitions = Vec::with_capacity(usize::from(option_count.min(20)));
+    if !(MINIMUM_CONFIGURABLE_OPTION_COUNT..=MAXIMUM_CONFIGURABLE_OPTION_COUNT)
+        .contains(&option_count)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "manifest option count is outside the configurable range",
+        ));
+    }
+    let mut option_definitions = Vec::with_capacity(usize::from(option_count));
     for _ in 0..option_count {
         let option_index = reader.read_u16()?;
         let option_identifier = reader.read_string()?.to_owned();
@@ -280,4 +289,28 @@ fn schema_refusal<Value>(
 
 fn schema_error(error: FoundationSchemaError) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_manifest_refuses_out_of_range_counts_before_reading_entries() {
+        for option_count in [
+            MINIMUM_CONFIGURABLE_OPTION_COUNT - 1,
+            MAXIMUM_CONFIGURABLE_OPTION_COUNT + 1,
+            u16::MAX,
+        ] {
+            let mut command = vec![ENCODE_MANIFEST, 1, 0, 0, 0, b'Q'];
+            command.extend_from_slice(&option_count.to_le_bytes());
+
+            let error = run(&command).expect_err("invalid option count must refuse");
+            assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+            assert_eq!(
+                error.message,
+                "manifest option count is outside the configurable range"
+            );
+        }
+    }
 }
