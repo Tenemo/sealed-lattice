@@ -279,7 +279,10 @@ const runLane = async (
         status = 'stopped';
         reporter.recordStoppedLane(lane.name, durationMilliseconds);
     } else if (exitCode !== 0 && abortController !== undefined) {
-        abortController.abort({ initiator: lane.name });
+        abortController.abort({
+            classification: 'sibling-abort',
+            initiator: lane.name,
+        });
     }
 
     return { durationMilliseconds, exitCode, name: lane.name, status };

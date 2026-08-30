@@ -13,6 +13,7 @@ import {
 } from './package-manager-runner.js';
 import {
     redactCommandLineArguments,
+    redactDiagnosticText,
     selectDiagnosticEnvironment,
     serializeErrorDiagnostic,
 } from './run-log-diagnostics.js';
@@ -89,6 +90,31 @@ type WindowsTaskKiller = (
     | undefined;
 
 const forceKillDelayMilliseconds = 5_000;
+
+type CommandTerminationReasonDiagnostic =
+    | Readonly<{
+          classification: 'sibling-abort';
+          initiator: string;
+      }>
+    | ReturnType<typeof serializeErrorDiagnostic>;
+
+const serializeCommandTerminationReason = (
+    reason: unknown,
+): CommandTerminationReasonDiagnostic => {
+    if (reason !== null && typeof reason === 'object') {
+        const reasonRecord = reason as Readonly<Record<string, unknown>>;
+        if (
+            reasonRecord.classification === 'sibling-abort' &&
+            typeof reasonRecord.initiator === 'string'
+        ) {
+            return {
+                classification: 'sibling-abort',
+                initiator: redactDiagnosticText(reasonRecord.initiator),
+            };
+        }
+    }
+    return serializeErrorDiagnostic(reason);
+};
 
 export const createPackageManagerCommand = (
     description: string,
@@ -374,6 +400,7 @@ const runCommand = async (
         const stopTracking = trackChildProcess(childProcess);
         let forceKillTimer: NodeJS.Timeout | undefined;
         let settled = false;
+        let terminationReason: CommandTerminationReasonDiagnostic | undefined;
 
         if (commandId !== undefined) {
             input.runLog?.writeEvent({
@@ -396,13 +423,14 @@ const runCommand = async (
         };
         const abortCommand = (): void => {
             if (settled) return;
+            terminationReason ??= serializeCommandTerminationReason(
+                input.signal?.reason ?? 'abort',
+            );
             if (commandId !== undefined) {
                 input.runLog?.writeEvent({
                     commandId,
                     details: {
-                        reason: serializeErrorDiagnostic(
-                            input.signal?.reason ?? 'abort',
-                        ),
+                        reason: terminationReason,
                     },
                     eventType: 'command-termination-requested',
                 });
@@ -498,6 +526,12 @@ const runCommand = async (
                         durationMilliseconds,
                         exitCode,
                         rawExitCode,
+                        ...(terminationReason === undefined
+                            ? {}
+                            : {
+                                  terminationReason,
+                                  terminationRequested: true,
+                              }),
                         terminationSignal,
                     },
                     eventType: 'command-finished',

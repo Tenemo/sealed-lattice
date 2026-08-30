@@ -404,9 +404,10 @@ class LocalRunLog implements ActiveLocalRunLog {
             if (
                 event.eventType === 'command-spawn-failed' ||
                 (typeof event.details?.exitCode === 'number' &&
-                    event.details.exitCode !== 0)
+                    event.details.exitCode !== 0 &&
+                    event.details.terminationRequested !== true)
             ) {
-                this.#failedCommandId = event.commandId;
+                this.#failedCommandId ??= event.commandId;
             }
         }
 
