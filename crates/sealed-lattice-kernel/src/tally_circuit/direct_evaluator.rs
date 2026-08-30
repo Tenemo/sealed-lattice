@@ -23,6 +23,7 @@ pub(crate) fn evaluate_tally_directly(
     let score_bit_width = bit_width_for_maximum_value(usize::from(maximum_score));
     let maximum_score_encoding = (1_usize << score_bit_width) - 1;
     let mut aggregate_scores = vec![0_u32; option_count];
+    let mut accepted_ballot_authorship = Vec::with_capacity(participant_count);
     let mut has_selected_ballot = false;
 
     for (participant_position, ballot) in participant_ballots.iter().enumerate() {
@@ -52,6 +53,7 @@ pub(crate) fn evaluate_tally_directly(
                 .all(|score_encoding| {
                     (minimum_score..=maximum_score).contains(&u16::from(score_encoding))
                 });
+        accepted_ballot_authorship.push(is_selected);
         if is_selected {
             has_selected_ballot = true;
             for (aggregate_score, score_encoding) in aggregate_scores
@@ -80,6 +82,7 @@ pub(crate) fn evaluate_tally_directly(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(TallyEvaluationOutcome {
+        accepted_ballot_authorship,
         ordered_option_positions,
         has_selected_ballot,
     })

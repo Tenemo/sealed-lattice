@@ -117,6 +117,7 @@ pub(crate) fn compile_tally_circuit(
         input_bit_count,
         score_bit_width,
         operations: builder.operations,
+        participant_selected_wires,
         nonempty_output_wire,
         ordered_option_position_wires,
     })

@@ -24,8 +24,15 @@ pub(crate) fn evaluate_compiled_tally_circuit(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let accepted_ballot_authorship = circuit
+        .participant_selected_wires
+        .iter()
+        .copied()
+        .map(|wire| read_wire(&wire_values, wire))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(TallyEvaluationOutcome {
+        accepted_ballot_authorship,
         ordered_option_positions,
         has_selected_ballot: read_wire(&wire_values, circuit.nonempty_output_wire)?,
     })

@@ -76,6 +76,7 @@ pub(crate) struct CompiledTallyCircuit {
     input_bit_count: usize,
     score_bit_width: usize,
     operations: Vec<BooleanOperation>,
+    participant_selected_wires: Vec<WireIndex>,
     nonempty_output_wire: WireIndex,
     ordered_option_position_wires: Vec<Vec<WireIndex>>,
 }
@@ -93,6 +94,7 @@ pub(crate) struct TallyBallotInput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TallyEvaluationOutcome {
+    accepted_ballot_authorship: Vec<bool>,
     ordered_option_positions: Vec<u16>,
     has_selected_ballot: bool,
 }

@@ -103,6 +103,29 @@ fn every_prototype_top_count_matches_the_direct_tally() {
 }
 
 #[test]
+fn completion_profile_circuit_geometry_is_derived_for_every_top_count() {
+    for top_count in 1..=PROTOTYPE_OPTION_COUNT {
+        let circuit = compile_tally_circuit(profile(
+            PROTOTYPE_PARTICIPANT_COUNT,
+            PROTOTYPE_OPTION_COUNT,
+            top_count,
+        ))
+        .unwrap();
+
+        assert_eq!(circuit.input_bit_count, 410);
+        assert_eq!(circuit.participant_selected_wires.len(), 10);
+        assert_eq!(
+            circuit
+                .ordered_option_position_wires
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>(),
+            usize::from(top_count) * 4
+        );
+    }
+}
+
+#[test]
 fn every_four_bit_score_encoding_is_checked_in_every_option_position() {
     let selected_profile = profile(3, 3, 3);
     for is_present in [false, true] {
@@ -114,11 +137,11 @@ fn every_four_bit_score_encoding_is_checked_in_every_option_position() {
                 compare_interpreter_and_direct_evaluator(selected_profile, &input);
 
                 let expected_selection = is_present && (1..=10).contains(&score_encoding);
+                let outcome = evaluate_tally_directly(selected_profile, &input).unwrap();
+                assert_eq!(outcome.has_selected_ballot, expected_selection);
                 assert_eq!(
-                    evaluate_tally_directly(selected_profile, &input)
-                        .unwrap()
-                        .has_selected_ballot,
-                    expected_selection
+                    outcome.accepted_ballot_authorship,
+                    [expected_selection, false, false]
                 );
             }
         }
@@ -132,6 +155,7 @@ fn all_abstentions_and_invalid_ballots_produce_no_result() {
     compare_interpreter_and_direct_evaluator(selected_profile, &all_abstentions);
     let abstention_outcome = evaluate_tally_directly(selected_profile, &all_abstentions).unwrap();
     assert!(!abstention_outcome.has_selected_ballot);
+    assert_eq!(abstention_outcome.accepted_ballot_authorship, [false; 3]);
     assert_eq!(abstention_outcome.ordered_option_positions, [0, 1, 2]);
     assert_eq!(abstention_outcome.accepted_ordered_option_positions(), None);
 
@@ -143,12 +167,9 @@ fn all_abstentions_and_invalid_ballots_produce_no_result() {
         ],
     };
     compare_interpreter_and_direct_evaluator(selected_profile, &invalid_ballots);
-    assert_eq!(
-        evaluate_tally_directly(selected_profile, &invalid_ballots)
-            .unwrap()
-            .accepted_ordered_option_positions(),
-        None
-    );
+    let invalid_outcome = evaluate_tally_directly(selected_profile, &invalid_ballots).unwrap();
+    assert_eq!(invalid_outcome.accepted_ballot_authorship, [false; 3]);
+    assert_eq!(invalid_outcome.accepted_ordered_option_positions(), None);
 }
 
 #[test]
