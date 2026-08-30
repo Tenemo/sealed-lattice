@@ -15,9 +15,9 @@ The participant who starts the poll is the organizer and must belong to the froz
 1. The host supplies the poll definition and registration workflow. Participants verify one another and freeze the public roster.
 2. Every roster participant contributes to tally preparation and verifies the public transcript and private deliveries in their own browser.
 3. Every participant signs one declaration: submit one private ballot package or abstain. Silence leaves the poll pending.
-4. Once everyone has declared and every submission has been verified as available, the protocol derives one ballot set automatically. A roster quorum can authorize only that set. If it contains no usable ballot, the poll ends without a result.
-5. Otherwise, the verified preparation and ballot sources determine exactly what will be computed. A roster quorum locks in that target before any selected ballot data or result-dependent evaluation material can be released.
-6. After that lock-in, verified ballot inputs may be released and the tally evaluated. Any participant can verify the one permitted result or a terminal abort. Withholding leaves the poll unresolved; it does not create a retry or another target.
+4. Once everyone has declared and every submission has been verified as available, the protocol derives one ballot set automatically from the complete signed inventory. There is no separate ballot-set vote.
+5. The verified preparation and ballot sources determine one semantic target: either the exact computation or no result when the usable set is empty. A direct roster quorum locks in that target before any selected ballot data or result-dependent evaluation material can be released.
+6. After that lock-in, verified ballot inputs or equivalent online contributions may be released and the tally evaluated. Any participant can verify the one permitted result. Invalid or missing contributions leave the poll unresolved; they cannot create a conflicting global abort, retry, or another target.
 
 The only poll result is the ordered list of selected option identifiers. Signed declarations, accepted ballot authorship, and whether any selected ballot is usable are also public. Individual scores and every other tally or evaluation value remain private.
 

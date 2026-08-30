@@ -17,7 +17,7 @@ Do not attach real election data or unpublished exploit material. Do not attach 
 
 ## Supported profile
 
-No released version is supported for production use. The completion and qualification target is one scalar package with ten roster participants and ten options. For that profile, the protocol formulas derive an active corruption bound of three, a reconstruction threshold of four, and ballot-set, finality, and state-witness quorums of seven.
+No released version is supported for production use. The completion and qualification target is one scalar package with ten roster participants and ten options. For that profile, the protocol formulas derive an active corruption bound of three, a reconstruction threshold of four, and a direct finality quorum of eight. The finality intersection additionally tolerates one independently rolled-back or lost honest finality lock. There is no separate ballot-set or network state-witness quorum.
 
 Schemas and tally-circuit compilers admit rosters and option counts from 3 to 20 and 2 to 20 respectively, but other profiles are structural inputs only. They carry no cryptographic, runtime, or support claim.
 
@@ -35,8 +35,8 @@ Here, a poll is the user-facing workflow. An action is one canonical protocol ex
 - The adversary statically corrupts at most three participants and may rush, equivocate, withhold, replay, reorder, fork, or replace messages. A separate passive-exposure game covers at most three disclosed shares; the two bounds are not combined.
 - Transcript, mailbox, and storage services are untrusted. Silence never means abstention. Missing required input leaves the action pending.
 - Acceptance comes only from positive verification. The responsible verifier recomputes context and source bindings, then checks the canonical bytes and every required authentication, opening, state, and construction relation. Producer status and caller-selected targets cannot authorize acceptance; neither can signatures, raw shares, or fixtures on their own.
-- The selected ballot set is derived from a roster-complete declaration and availability inventory. A quorum cannot choose a different valid subset or authorize an omitted-input opening.
-- Only roster participants using their own clients may witness state, authorize the selected set, establish target finality, or release verified ballot inputs and evaluation messages after finality.
+- The selected ballot set is derived from a roster-complete declaration and availability inventory. Every finality signer recomputes it; no separate quorum can choose another subset or authorize an omitted-input opening.
+- Only roster participants using their own clients may establish direct target finality or release verified ballot inputs and evaluation messages after finality.
 - Participant action state is bound to one browser profile. There is no backup, export, migration, or replacement-device continuation. Lost or unverifiable state retires that participant from the affected action.
 - Long operations require authenticated checkpoints at deterministic safe boundaries. Correctness cannot depend on wake locks, hidden-page execution, lifecycle callbacks, or final worker notification.
 - Cryptographic randomness comes from browser-local platform randomness and is durably retained before publication. Byte-identical resume reuses the retained value; deterministic action derivation is not a freshness or rollback proof.
@@ -50,7 +50,7 @@ These are layered blockers: construction, integration, supported-phone qualifica
 
 - `SEC-001`: No independent audit, certification, production hardening, or production approval exists.
 - `SEC-002`: No exact ten-participant, ten-option preparation-to-release ceremony is implemented and positively verified end to end.
-- `SEC-003`: Roster-witnessed one-shot state is specified, but complete durable witness locking, rollback reconciliation, and participant-retirement behavior are not implemented and evidenced for every security-sensitive output.
+- `SEC-003`: Direct finality and participant-local one-shot state are specified, but persist-before-publish locking, rollback reconciliation, byte-identical replay, and participant-retirement behavior are not implemented and evidenced for every security-sensitive output.
 - `SEC-004`: No cryptographic suite is activated. The public package exposes foundation operations only, and component tests cannot authorize production dispatch.
 - `SEC-006`: No participant bridge carries verified state from preparation through ballot selection, target finality, input activation, evaluation, and result decoding with authenticated checkpoints.
 - `SEC-007`: No production ballot-custody construction is selected or implemented. Availability, authenticated inconsistency handling, censorship privacy, first-honest-release simulation, and positive-verifier integration remain open.
