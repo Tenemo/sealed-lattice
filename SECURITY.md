@@ -61,6 +61,7 @@ These are layered blockers: construction, integration, supported-phone qualifica
 - `SEC-021`: No complete browser-storage implementation and evidence set covers quota admission, transaction overlap, amplification, eviction, action-wide mutation, repair, cleanup, and reclamation.
 - `SEC-023`: No tally-preparation or private-evaluation construction satisfies the stated adversary. Foundation verifiers do not compose into an admitted protocol.
 - `SEC-024`: No construction has passed the complete static resource and external-Chrome lifecycle gates. Measurements of isolated native or Node/WebAssembly components do not qualify a browser ceremony.
+- `SEC-027`: The latest reference-flow candidate was rejected after a cross-fork complementary-response attack exposed its protected source. Its executable surface has been removed. The replacement finality-before-activation direction still lacks an independently reviewed static-QPT theorem, exact emitted protocol, atomic browser state, real scalar-WebAssembly vertical, and mobile qualification.
 
 Identifiers are stable and are not reused. `SEC-005`, `SEC-009` through `SEC-016`, `SEC-018`, `SEC-022`, `SEC-025`, and `SEC-026` are retired.
 

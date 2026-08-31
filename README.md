@@ -16,8 +16,8 @@ The participant who starts the poll is the organizer and must belong to the froz
 2. Every roster participant contributes to tally preparation and verifies the public transcript and private deliveries in their own browser.
 3. Every participant signs one declaration: submit one private ballot package or abstain. Silence leaves the poll pending.
 4. Once everyone has declared and every submission has been verified as available, the protocol derives one ballot set automatically from the complete signed inventory. There is no separate ballot-set vote.
-5. The verified preparation and ballot sources determine one semantic target: either the exact computation or no result when the usable set is empty. A direct roster quorum locks in that target before any selected ballot data or result-dependent evaluation material can be released.
-6. After that lock-in, verified ballot inputs or equivalent online contributions may be released and the tally evaluated. Any participant can verify the one permitted result. Invalid or missing contributions leave the poll unresolved; they cannot create a conflicting global abort, retry, or another target.
+5. The verified preparation and ballot sources determine one semantic target: public all-abstention may target no result directly; any inventory containing a submission targets the exact computation without revealing whether a submitted score vector is usable. A direct roster quorum locks in that target before any selected ballot data or result-dependent evaluation material can be released.
+6. After that lock-in, verified ballot inputs or equivalent online contributions may be released and the tally evaluated. The sole evaluation returns the ordered result or no result when no submitted ballot is usable. Any participant can verify that one permitted terminal. Invalid or missing contributions leave the poll unresolved; they cannot create a conflicting global abort, retry, or another target.
 
 The only poll result is the ordered list of selected option identifiers. Signed declarations, accepted ballot authorship, and whether any selected ballot is usable are also public. Individual scores and every other tally or evaluation value remain private.
 
@@ -43,6 +43,8 @@ Every required participant operation must retain a scalar-capable, single-worker
 The complete protocol is not implemented. The public package covers poll validation, canonical foundation objects and verifiers, typed refusals, and reproducible Rust/WebAssembly packaging. A standalone development-only tally compiler and evaluator remain in Rust tests.
 
 No preparation or evaluation construction satisfies the full security model. There is no end-to-end capability chain, active cryptographic suite, complete browser ceremony, or supported-phone qualification. See the [open security issues](SECURITY.md#open-security-issues).
+
+A test-only randomized direct-check reference flow was removed after a cross-fork attack showed that complementary honest responses could reveal a protected source. The next finality-before-activation direction remains theorem research only: no candidate protocol, visit count, resource estimate, or experimental primitive is part of the public package or evidence of security.
 
 ## Install
 
