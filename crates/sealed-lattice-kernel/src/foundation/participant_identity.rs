@@ -2,11 +2,10 @@ use core::fmt;
 
 use super::{CanonicalCodecError, CanonicalItem, hash_foundation_tuple_512 as hash512};
 
-pub const ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH: usize =
-    sealed_lattice_sphincs_plus::PUBLIC_KEY_BYTE_LENGTH;
+pub const ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH: usize = 1_952;
 const PARTICIPANT_IDENTITY_BYTE_LENGTH: usize = 64;
 
-/// A participant identity derived from exactly one frozen-roster signature key.
+/// A participant identity derived from exactly one ML-DSA-65 verification key.
 ///
 /// This type is intentionally distinct from [`super::Hash512`]. Equal-width
 /// protocol hashes cannot be used where a roster-derived identity is required.
@@ -52,7 +51,7 @@ impl fmt::Display for ParticipantIdentity {
 }
 
 pub fn derive_participant_identity(
-    signing_verification_key: &[u8; ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH],
+    signing_verification_key: &[u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
 ) -> Result<ParticipantIdentity, CanonicalCodecError> {
     let participant_identity_hash = hash512(
         "sealed-lattice/foundation/participant-id/v1",
@@ -70,7 +69,7 @@ mod tests {
 
     #[test]
     fn signing_key_derivation_returns_the_identity_type() {
-        let signing_verification_key = [0x5a; ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH];
+        let signing_verification_key = [0x5a; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH];
         let identity = derive_participant_identity(&signing_verification_key)
             .expect("fixed signing key derives an identity");
         let expected_hash = hash512(

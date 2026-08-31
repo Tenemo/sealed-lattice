@@ -17,7 +17,7 @@ pub(crate) use ceremony::{
 pub(crate) use hash::StreamingFoundationTupleHash512;
 pub(crate) use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use participant_identity::{
-    ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
+    ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
 };
 pub(crate) use refusal::RefusalReason;
 #[cfg(test)]

@@ -3,8 +3,6 @@
 mod encoding;
 mod foundation;
 #[cfg(test)]
-mod reference_flow;
-#[cfg(test)]
 pub(crate) mod tally_circuit;
 
 use core::{ptr, slice};
