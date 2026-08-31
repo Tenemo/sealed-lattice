@@ -6,8 +6,8 @@ use fips203::{ml_kem_768, traits::SerDes as KemSerDes};
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    Hash512, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, RefusalReason, derive_participant_identity,
-    hash_foundation_tuple_512,
+    Hash512, ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH, RefusalReason,
+    derive_participant_identity, hash_foundation_tuple_512,
 };
 
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
@@ -15,6 +15,7 @@ pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
 pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+const ROSTER_SCHEMA_VERSION: u16 = 2;
 
 pub const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 3;
 pub const MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 20;
@@ -78,14 +79,14 @@ pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RosterEntry {
     pub roster_position: u16,
-    pub signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+    pub signing_verification_key: [u8; ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH],
     pub mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 }
 
 impl RosterEntry {
     pub fn new(
         roster_position: u16,
-        signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+        signing_verification_key: [u8; ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH],
         mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
     ) -> SchemaResult<Self> {
         let entry = Self {
@@ -111,7 +112,7 @@ impl RosterEntry {
         self.validate()?;
         Ok(CanonicalTuple::new(
             ROSTER_ENTRY_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
+            ROSTER_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.roster_position),
                 CanonicalItem::fixed_bytes(self.signing_verification_key)?,
@@ -121,7 +122,12 @@ impl RosterEntry {
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 3)?;
+        require_header_version(
+            tuple,
+            ROSTER_ENTRY_SCHEMA_IDENTIFIER,
+            ROSTER_SCHEMA_VERSION,
+            3,
+        )?;
         Self::new(
             read_u16(&tuple.items[0])?,
             read_fixed_bytes(&tuple.items[1])?,
@@ -154,7 +160,7 @@ impl Roster {
             .collect::<SchemaResult<Vec<_>>>()?;
         Ok(CanonicalTuple::new(
             ROSTER_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
+            ROSTER_SCHEMA_VERSION,
             vec![CanonicalItem::nested_tuple_list(&entries)?],
         )
         .encode()?)
@@ -172,7 +178,7 @@ impl Roster {
     ) -> SchemaResult<Self> {
         preflight_roster_entry_count(bytes, limits)?;
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, ROSTER_SCHEMA_IDENTIFIER, 1)?;
+        require_header_version(&tuple, ROSTER_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_VERSION, 1)?;
         let entries = read_nested_tuple_list_with_budget(&tuple.items[0], limits, budget)?
             .iter()
             .map(RosterEntry::from_tuple)
@@ -244,13 +250,27 @@ pub(super) fn require_header(
     schema_identifier: u16,
     item_count: usize,
 ) -> SchemaResult<()> {
+    require_header_version(
+        tuple,
+        schema_identifier,
+        FOUNDATION_SCHEMA_VERSION,
+        item_count,
+    )
+}
+
+fn require_header_version(
+    tuple: &CanonicalTuple,
+    schema_identifier: u16,
+    schema_version: u16,
+    item_count: usize,
+) -> SchemaResult<()> {
     if tuple.schema_identifier != schema_identifier {
         return Err(FoundationSchemaError::new(
             RefusalReason::WrongTypeOrLength,
             "foundation tuple has the wrong schema",
         ));
     }
-    if tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
+    if tuple.schema_version != schema_version {
         return Err(FoundationSchemaError::new(
             RefusalReason::UnsupportedVersionOrSuite,
             "foundation tuple schema version is unsupported",
@@ -267,9 +287,14 @@ pub(super) fn require_header(
 
 fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<()> {
     const ITEM_TYPES: [CanonicalItemType; 1] = [CanonicalItemType::HomogeneousList];
-    let Some(entry_list_bytes) =
-        raw_schema_item(bytes, limits, ROSTER_SCHEMA_IDENTIFIER, &ITEM_TYPES, 0)
-    else {
+    let Some(entry_list_bytes) = raw_schema_item(
+        bytes,
+        limits,
+        ROSTER_SCHEMA_IDENTIFIER,
+        ROSTER_SCHEMA_VERSION,
+        &ITEM_TYPES,
+        0,
+    ) else {
         return Ok(());
     };
     let Some(declared_entry_count) = raw_nested_tuple_list_count(entry_list_bytes, limits) else {
@@ -288,6 +313,7 @@ fn raw_schema_item<'a>(
     bytes: &'a [u8],
     limits: &CanonicalDecodeLimits,
     expected_schema_identifier: u16,
+    expected_schema_version: u16,
     expected_item_types: &[CanonicalItemType],
     requested_item_index: usize,
 ) -> Option<&'a [u8]> {
@@ -303,7 +329,7 @@ fn raw_schema_item<'a>(
     }
     let tuple_header = bytes.get(..TUPLE_HEADER_BYTE_LENGTH)?;
     if read_raw_u16(tuple_header, 0)? != expected_schema_identifier
-        || read_raw_u16(tuple_header, 2)? != FOUNDATION_SCHEMA_VERSION
+        || read_raw_u16(tuple_header, 2)? != expected_schema_version
         || usize::try_from(read_raw_u32(tuple_header, 4)?).ok()? != expected_item_types.len()
     {
         return None;
@@ -483,7 +509,7 @@ mod tests {
         (0..participant_count)
             .map(|roster_position| {
                 let mut signing_verification_key =
-                    [0x23_u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH];
+                    [0x23_u8; ROSTER_SIGNATURE_VERIFICATION_KEY_BYTE_LENGTH];
                 signing_verification_key[0..2].copy_from_slice(&roster_position.to_le_bytes());
                 let mut mailbox_seed = [0x61_u8; 32];
                 mailbox_seed[0] = u8::try_from(roster_position + 1).expect("position fits u8");

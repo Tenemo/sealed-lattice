@@ -3,6 +3,8 @@ use super::decoding::{decode_tuple_at, validate_item_bytes};
 use super::{
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeBudget, CanonicalDecodeLimits,
 };
+#[cfg(test)]
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -214,6 +216,11 @@ impl CanonicalItem {
             ));
         }
         decode_variable_value(&self.canonical_bytes, 0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn zeroize(&mut self) {
+        self.canonical_bytes.zeroize();
     }
 }
 
@@ -429,5 +436,12 @@ impl CanonicalTuple {
         nesting_depth: u16,
     ) -> Result<(Self, usize), CanonicalCodecError> {
         decode_tuple_at(bytes, limits, budget, nesting_depth, 0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn zeroize(&mut self) {
+        for item in &mut self.items {
+            item.zeroize();
+        }
     }
 }

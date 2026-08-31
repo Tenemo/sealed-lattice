@@ -471,10 +471,7 @@ mod tests {
         ml_kem_768,
         traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
     };
-    use fips204::{
-        ml_dsa_65,
-        traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes},
-    };
+    use sealed_lattice_sphincs_plus::{KEY_GENERATION_SEED_BYTE_LENGTH, keypair_from_seed};
 
     use super::*;
     use crate::foundation::{PROTOTYPE_OPTION_COUNT, PROTOTYPE_PARTICIPANT_COUNT, RosterEntry};
@@ -505,9 +502,9 @@ mod tests {
     fn sample_roster() -> Roster {
         let entries = (0..PROTOTYPE_PARTICIPANT_COUNT)
             .map(|roster_position| {
-                let mut signing_seed = [0x23_u8; 32];
+                let mut signing_seed = [0x23_u8; KEY_GENERATION_SEED_BYTE_LENGTH];
                 signing_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
-                let (signing_key, _) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+                let (signing_verification_key, _) = keypair_from_seed(&signing_seed);
                 let mut mailbox_seed = [0x61_u8; 32];
                 mailbox_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
                 let mut mailbox_fallback_seed = [0x97_u8; 32];
@@ -518,7 +515,7 @@ mod tests {
                     ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
                 RosterEntry {
                     roster_position,
-                    signing_verification_key: signing_key.into_bytes(),
+                    signing_verification_key,
                     mailbox_encapsulation_key: mailbox_key.into_bytes(),
                 }
             })

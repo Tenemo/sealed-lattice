@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/sealed-lattice-kernel"]
+members = [
+    "crates/sealed-lattice-kernel",
+    "crates/sealed-lattice-sphincs-plus",
+]
 resolver = "3"
 
 [profile.test]

@@ -1,0 +1,10 @@
+[package]
+name = "sealed-lattice-sphincs-plus"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+sha256 = { package = "sha2", version = "=0.10.9", default-features = false, features = ["compress"] }
+zeroize = { version = "=1.8.2", default-features = false }
