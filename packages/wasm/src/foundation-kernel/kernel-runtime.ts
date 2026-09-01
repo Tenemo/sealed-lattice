@@ -3,9 +3,14 @@ import {
     maximumFoundationWasmMemoryByteLength,
 } from '../foundation-contract.js';
 
-type FoundationKernelExports = WebAssembly.Exports & {
+type KernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_construction_command_with_length?: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
     sealed_lattice_foundation_command_with_length?: (
         pointer: number,
@@ -58,6 +63,8 @@ export type FoundationKernelLoaderOptions = {
 export type FoundationKernelCommandRuntime = Readonly<{
     readonly executeCommand: (request: Uint8Array) => Uint8Array;
 }>;
+
+export type ConstructionKernelCommandRuntime = FoundationKernelCommandRuntime;
 
 const requireKernelIntegrityExpectation = (
     options: FoundationKernelLoaderOptions,
@@ -113,9 +120,7 @@ const assertKernelMemoryWithinProfile = (memory: WebAssembly.Memory): void => {
     }
 };
 
-const resolveMemory = (
-    exports: FoundationKernelExports,
-): WebAssembly.Memory => {
+const resolveMemory = (exports: KernelExports): WebAssembly.Memory => {
     const { memory } = exports;
     /* v8 ignore next 3 */
     if (!(memory instanceof WebAssembly.Memory)) {
@@ -152,13 +157,14 @@ const requireKernelMemoryRange = (
 
 type NumberExportName =
     | 'sealed_lattice_allocate'
+    | 'sealed_lattice_construction_command_with_length'
     | 'sealed_lattice_deallocate'
     | 'sealed_lattice_foundation_command_with_length';
 
 const resolveNumberExport = <ExportName extends NumberExportName>(
-    exports: FoundationKernelExports,
+    exports: KernelExports,
     exportName: ExportName,
-): NonNullable<FoundationKernelExports[ExportName]> => {
+): NonNullable<KernelExports[ExportName]> => {
     const exportValue = exports[exportName];
     /* v8 ignore next 3 */
     if (typeof exportValue !== 'function') {
@@ -311,9 +317,12 @@ const runKernelCommand = (
     }
 };
 
-export const instantiateFoundationKernelCommandRuntime = async (
+const instantiateKernelCommandRuntime = async (
     foundationKernelUrl: URL,
-    options: FoundationKernelLoaderOptions = {},
+    options: FoundationKernelLoaderOptions,
+    commandExportName:
+        | 'sealed_lattice_construction_command_with_length'
+        | 'sealed_lattice_foundation_command_with_length',
 ): Promise<FoundationKernelCommandRuntime> => {
     const expectedKernelSha256Hex = requireKernelIntegrityExpectation(options);
     const bytes = await resolveKernelBytes(foundationKernelUrl);
@@ -321,8 +330,7 @@ export const instantiateFoundationKernelCommandRuntime = async (
         await verifyKernelIntegrity(bytes, expectedKernelSha256Hex);
     }
     const instantiatedSource = await WebAssembly.instantiate(bytes);
-    const wasmExports = instantiatedSource.instance
-        .exports as FoundationKernelExports;
+    const wasmExports = instantiatedSource.instance.exports as KernelExports;
     const memory = resolveMemory(wasmExports);
     const allocate = resolveNumberExport(
         wasmExports,
@@ -334,7 +342,7 @@ export const instantiateFoundationKernelCommandRuntime = async (
     );
     const commandWithLength = resolveNumberExport(
         wasmExports,
-        'sealed_lattice_foundation_command_with_length',
+        commandExportName,
     );
     return {
         executeCommand: (request): Uint8Array =>
@@ -347,3 +355,23 @@ export const instantiateFoundationKernelCommandRuntime = async (
             ),
     };
 };
+
+export const instantiateFoundationKernelCommandRuntime = (
+    foundationKernelUrl: URL,
+    options: FoundationKernelLoaderOptions = {},
+): Promise<FoundationKernelCommandRuntime> =>
+    instantiateKernelCommandRuntime(
+        foundationKernelUrl,
+        options,
+        'sealed_lattice_foundation_command_with_length',
+    );
+
+export const instantiateConstructionKernelCommandRuntime = (
+    foundationKernelUrl: URL,
+    options: FoundationKernelLoaderOptions = {},
+): Promise<ConstructionKernelCommandRuntime> =>
+    instantiateKernelCommandRuntime(
+        foundationKernelUrl,
+        options,
+        'sealed_lattice_construction_command_with_length',
+    );

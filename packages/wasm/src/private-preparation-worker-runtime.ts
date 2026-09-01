@@ -1,0 +1,2535 @@
+/// <reference lib="webworker" />
+
+import {
+    actionKeySetBodyByteLength,
+    openActionKeySetRuntime,
+    type ActionKeySetRuntime,
+} from './action-key-set-runtime.js';
+import {
+    actionSignatureKeyByteLength,
+    openActionSignatureRuntime,
+    type ActionSignatureRuntime,
+} from './action-signature-runtime.js';
+import {
+    instantiateConstructionKernelCommandRuntime,
+    type FoundationKernelLoaderOptions,
+} from './foundation-kernel/kernel-runtime.js';
+import {
+    openPairEncryptionRuntime,
+    pairDecryptionKeyByteLength,
+    pairEncryptionKeyGenerationRandomnessByteLength,
+    pairEncryptionRandomnessByteLength,
+    type PairEncryptionRuntime,
+} from './pair-encryption-runtime.js';
+import {
+    openPreparationMaterialRuntime,
+    preparationAffineCoefficientByteLength,
+    preparationAffineModuleValueByteLength,
+    preparationContributionOpeningVectorByteLength,
+    preparationLowAffineCoefficientCount,
+    preparationPlaintextByteLength,
+    type PreparationMaterialRuntime,
+} from './preparation-material-runtime.js';
+import {
+    actionSignatureCarrierByteLength,
+    openPreparationParentRuntime,
+    preparationParentBodyByteLength,
+    type PreparationParentRuntime,
+} from './preparation-parent-runtime.js';
+import {
+    openPrivatePreparationBodyRuntime,
+    privatePreparationBodyByteLength,
+    privatePreparationRecordKeyByteLength,
+    type PrivatePreparationBodyRuntime,
+    type PrivatePreparationContextInput,
+} from './private-preparation-body-runtime.js';
+import {
+    createProtectedRecord,
+    DurableStateError,
+    generateBrowserLocalRootKey,
+    openProtectedRecord,
+    PrivatePreparationDurableState,
+    type ProtectedRecord,
+} from './private-preparation-durable-state.js';
+import type {
+    ConfirmedActionKeyRoster,
+    PrivatePreparationActionContext,
+    PrivatePreparationWorkerFailure,
+    PrivatePreparationWorkerInitialization,
+    PrivatePreparationWorkerRequest,
+    PrivatePreparationWorkerResponse,
+    PrivatePreparationConsumption,
+    PublishedPreparationPackage,
+    RegisteredActionKeys,
+} from './private-preparation-worker-protocol.js';
+
+const completionProfileParticipantCount = 10;
+const signaturePurposeCount = 4;
+const pairKeyCount = completionProfileParticipantCount - 1;
+const identityByteLength = 64;
+const localContextDomainByteLength = 32;
+const localContextDomain = 'sealed-lattice/local-record/v1';
+const localContextByteLength =
+    localContextDomainByteLength + 5 * identityByteLength + 2 + 2 + 8 + 2 + 8;
+const noPeerPosition = 0xffff;
+const actionStateKind = 1;
+const preparationStateKind = 2;
+const privatePreparationSlotStateKind = 3;
+const registeredActionPhase = 1;
+const confirmedRosterPhase = 2;
+const unsignedPreparationPhase = 1;
+const publishedPreparationPhase = 2;
+const consumedPrivatePreparationPhase = 1;
+const resolvedPrivatePreparationPhase = 2;
+const burnedPrivatePreparationPhase = 3;
+const privatePreparationOperationOrdinal = 1n;
+
+type WorkerConfiguration = Readonly<{
+    runtimeIdentity: Uint8Array;
+    candidateBuildIdentity: Uint8Array;
+    afterDurableConsume?: () => Promise<void> | void;
+}>;
+
+type LocalRecordContext = Readonly<{
+    runtimeIdentity: Uint8Array;
+    candidateBuildIdentity: Uint8Array;
+    actionProposalIdentity: Uint8Array;
+    actionKeySetRosterIdentity: Uint8Array;
+    predecessorIdentity: Uint8Array;
+    participantPosition: number;
+    objectKind: number;
+    generation: bigint;
+    peerPosition: number;
+    operationOrdinal: bigint;
+}>;
+
+type ActionState = {
+    phase: typeof confirmedRosterPhase | typeof registeredActionPhase;
+    generation: bigint;
+    runtimeIdentity: Uint8Array;
+    candidateBuildIdentity: Uint8Array;
+    actionProposalIdentity: Uint8Array;
+    actionKeySetRosterIdentity: Uint8Array;
+    predecessorIdentity: Uint8Array;
+    participantPosition: number;
+    actionKeySetBody: Uint8Array;
+    actionKeySetIdentity: Uint8Array;
+    signatureBodyIdentities: Uint8Array[];
+    signatureSecretKeys: Uint8Array[];
+    pairDecryptionKeys: Uint8Array[];
+};
+
+type LoadedActionState = Readonly<{
+    record: ProtectedRecord;
+    rootKey: CryptoKey;
+    state: ActionState;
+}>;
+
+type PreparationState = {
+    phase: typeof publishedPreparationPhase | typeof unsignedPreparationPhase;
+    generation: bigint;
+    preparationAttempt: number;
+    parentIdentity: Uint8Array;
+    parentBody: Uint8Array;
+    parentSignature: Uint8Array;
+    privateBodyIdentities: Uint8Array[];
+    privateBodies: Uint8Array[];
+    contributionOpenings: Uint8Array;
+    affineCoefficients: Uint8Array;
+};
+
+type LoadedPreparationState = Readonly<{
+    record: ProtectedRecord;
+    state: PreparationState;
+}>;
+
+type PrivatePreparationSlotState = {
+    phase:
+        | typeof burnedPrivatePreparationPhase
+        | typeof consumedPrivatePreparationPhase
+        | typeof resolvedPrivatePreparationPhase;
+    generation: bigint;
+    preparationAttempt: number;
+    senderPosition: number;
+    parentIdentity: Uint8Array;
+    bodyIdentity: Uint8Array;
+    verifiedPlaintextIdentity: Uint8Array;
+    plaintext: Uint8Array;
+};
+
+type LoadedPrivatePreparationSlotState = Readonly<{
+    record: ProtectedRecord;
+    state: PrivatePreparationSlotState;
+}>;
+
+class FixedWriter {
+    readonly #bytes: Uint8Array;
+    #offset = 0;
+
+    constructor(length: number) {
+        this.#bytes = new Uint8Array(length);
+    }
+
+    writeU8(value: number): void {
+        this.#bytes[this.#offset] = value;
+        this.#offset += 1;
+    }
+
+    writeU16(value: number): void {
+        new DataView(this.#bytes.buffer).setUint16(this.#offset, value, true);
+        this.#offset += 2;
+    }
+
+    writeU64(value: bigint): void {
+        new DataView(this.#bytes.buffer).setBigUint64(
+            this.#offset,
+            value,
+            true,
+        );
+        this.#offset += 8;
+    }
+
+    writeFixed(bytes: Uint8Array): void {
+        this.#bytes.set(bytes, this.#offset);
+        this.#offset += bytes.byteLength;
+    }
+
+    finish(): Uint8Array {
+        if (this.#offset !== this.#bytes.byteLength) {
+            this.#bytes.fill(0);
+            throw new Error('The fixed worker record length is inconsistent.');
+        }
+        return this.#bytes;
+    }
+}
+
+class FixedReader {
+    #offset = 0;
+
+    constructor(private readonly bytes: Uint8Array) {}
+
+    readU8(): number {
+        return this.readFixed(1)[0] ?? 0;
+    }
+
+    readU16(): number {
+        const bytes = this.readFixed(2);
+        return new DataView(
+            bytes.buffer,
+            bytes.byteOffset,
+            bytes.byteLength,
+        ).getUint16(0, true);
+    }
+
+    readU64(): bigint {
+        const bytes = this.readFixed(8);
+        return new DataView(
+            bytes.buffer,
+            bytes.byteOffset,
+            bytes.byteLength,
+        ).getBigUint64(0, true);
+    }
+
+    readFixed(length: number): Uint8Array {
+        const end = this.#offset + length;
+        if (length < 0 || end > this.bytes.byteLength) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The worker state record is truncated.',
+            );
+        }
+        const result = Uint8Array.from(this.bytes.subarray(this.#offset, end));
+        this.#offset = end;
+        return result;
+    }
+
+    finish(): void {
+        if (this.#offset !== this.bytes.byteLength) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The worker state record has trailing bytes.',
+            );
+        }
+    }
+}
+
+const requireBytes = (
+    value: unknown,
+    length: number,
+    name: string,
+): Uint8Array => {
+    if (!(value instanceof Uint8Array) || value.byteLength !== length) {
+        throw new TypeError(
+            `${name} must be a ${String(length)}-byte Uint8Array.`,
+        );
+    }
+    return value;
+};
+
+const requirePosition = (value: unknown, name: string): number => {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0 ||
+        value >= completionProfileParticipantCount
+    ) {
+        throw new TypeError(`${name} is not a completion-profile position.`);
+    }
+    return value;
+};
+
+const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+    if (left.byteLength !== right.byteLength) {
+        return false;
+    }
+    let difference = 0;
+    for (let index = 0; index < left.byteLength; index += 1) {
+        difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
+    }
+    return difference === 0;
+};
+
+const isZero = (bytes: Uint8Array): boolean => {
+    let aggregate = 0;
+    for (const byte of bytes) {
+        aggregate |= byte;
+    }
+    return aggregate === 0;
+};
+
+const copyActionContext = (
+    value: PrivatePreparationActionContext,
+): PrivatePreparationActionContext => ({
+    actionProposalIdentity: Uint8Array.from(
+        requireBytes(
+            value.actionProposalIdentity,
+            identityByteLength,
+            'actionProposalIdentity',
+        ),
+    ),
+    predecessorIdentity: Uint8Array.from(
+        requireBytes(
+            value.predecessorIdentity,
+            identityByteLength,
+            'predecessorIdentity',
+        ),
+    ),
+    participantPosition: requirePosition(
+        value.participantPosition,
+        'participantPosition',
+    ),
+});
+
+const requireUnsigned16 = (value: unknown, name: string): number => {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0 ||
+        value > 0xffff
+    ) {
+        throw new TypeError(`${name} must be an unsigned 16-bit integer.`);
+    }
+    return value;
+};
+
+const copyActionKeySetBodies = (
+    bodies: readonly Uint8Array[],
+): Uint8Array[] => {
+    if (bodies.length !== completionProfileParticipantCount) {
+        throw new TypeError(
+            'actionKeySetBodies must contain the complete roster.',
+        );
+    }
+    const expectedByteLength = actionKeySetBodyByteLength(
+        completionProfileParticipantCount,
+    );
+    return bodies.map((body, position) =>
+        Uint8Array.from(
+            requireBytes(
+                body,
+                expectedByteLength,
+                `actionKeySetBodies[${String(position)}]`,
+            ),
+        ),
+    );
+};
+
+const randomBytes = (length: number): Uint8Array => {
+    const output = new Uint8Array(length);
+    for (let offset = 0; offset < output.byteLength; offset += 65_536) {
+        crypto.getRandomValues(
+            output.subarray(offset, Math.min(offset + 65_536, output.length)),
+        );
+    }
+    return output;
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const actionIdentifier = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+): string =>
+    `action.${bytesToHex(configuration.runtimeIdentity)}.${bytesToHex(
+        action.actionProposalIdentity,
+    )}.${String(action.participantPosition)}`;
+
+const preparationIdentifier = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+): string =>
+    `preparation.${bytesToHex(configuration.runtimeIdentity)}.${bytesToHex(
+        action.actionProposalIdentity,
+    )}.${String(action.participantPosition)}`;
+
+const privatePreparationSlotIdentifier = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+    senderPosition: number,
+): string =>
+    `private-preparation-slot.${bytesToHex(
+        configuration.runtimeIdentity,
+    )}.${bytesToHex(action.actionProposalIdentity)}.${String(
+        action.participantPosition,
+    )}.${String(senderPosition)}`;
+
+const remotePositions = (localPosition: number): number[] =>
+    Array.from(
+        { length: completionProfileParticipantCount },
+        (_, position) => position,
+    ).filter((position) => position !== localPosition);
+
+const pairDecryptionKeyIndex = (
+    localPosition: number,
+    senderPosition: number,
+): number =>
+    senderPosition < localPosition ? senderPosition : senderPosition - 1;
+
+const copyPublishedPreparationPackage = (
+    state: PreparationState,
+): PublishedPreparationPackage => ({
+    parentBody: Uint8Array.from(state.parentBody),
+    parentSignature: Uint8Array.from(state.parentSignature),
+    privateBodies: state.privateBodies.map((body) => Uint8Array.from(body)),
+});
+
+const encodeLocalRecordContext = (context: LocalRecordContext): Uint8Array => {
+    const writer = new FixedWriter(localContextByteLength);
+    const domain = new TextEncoder().encode(localContextDomain);
+    if (domain.byteLength > localContextDomainByteLength) {
+        throw new Error('The local record domain is too long.');
+    }
+    const paddedDomain = new Uint8Array(localContextDomainByteLength);
+    paddedDomain.set(domain);
+    writer.writeFixed(paddedDomain);
+    paddedDomain.fill(0);
+    writer.writeFixed(context.runtimeIdentity);
+    writer.writeFixed(context.candidateBuildIdentity);
+    writer.writeFixed(context.actionProposalIdentity);
+    writer.writeFixed(context.actionKeySetRosterIdentity);
+    writer.writeFixed(context.predecessorIdentity);
+    writer.writeU16(context.participantPosition);
+    writer.writeU16(context.objectKind);
+    writer.writeU64(context.generation);
+    writer.writeU16(context.peerPosition);
+    writer.writeU64(context.operationOrdinal);
+    return writer.finish();
+};
+
+const decodeLocalRecordContext = (bytes: ArrayBuffer): LocalRecordContext => {
+    const reader = new FixedReader(new Uint8Array(bytes));
+    const actualDomain = reader.readFixed(localContextDomainByteLength);
+    const expectedDomain = new Uint8Array(localContextDomainByteLength);
+    expectedDomain.set(new TextEncoder().encode(localContextDomain));
+    if (!bytesEqual(actualDomain, expectedDomain)) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The local record has the wrong domain.',
+        );
+    }
+    const context = {
+        runtimeIdentity: reader.readFixed(identityByteLength),
+        candidateBuildIdentity: reader.readFixed(identityByteLength),
+        actionProposalIdentity: reader.readFixed(identityByteLength),
+        actionKeySetRosterIdentity: reader.readFixed(identityByteLength),
+        predecessorIdentity: reader.readFixed(identityByteLength),
+        participantPosition: reader.readU16(),
+        objectKind: reader.readU16(),
+        generation: reader.readU64(),
+        peerPosition: reader.readU16(),
+        operationOrdinal: reader.readU64(),
+    };
+    reader.finish();
+    return context;
+};
+
+const actionStateByteLength =
+    1 +
+    1 +
+    2 +
+    8 +
+    5 * identityByteLength +
+    actionKeySetBodyByteLength(completionProfileParticipantCount) +
+    identityByteLength +
+    signaturePurposeCount * identityByteLength +
+    signaturePurposeCount * actionSignatureKeyByteLength +
+    pairKeyCount * pairDecryptionKeyByteLength;
+
+const encodeActionState = (state: ActionState): Uint8Array => {
+    const writer = new FixedWriter(actionStateByteLength);
+    writer.writeU8(1);
+    writer.writeU8(state.phase);
+    writer.writeU16(state.participantPosition);
+    writer.writeU64(state.generation);
+    writer.writeFixed(state.runtimeIdentity);
+    writer.writeFixed(state.candidateBuildIdentity);
+    writer.writeFixed(state.actionProposalIdentity);
+    writer.writeFixed(state.actionKeySetRosterIdentity);
+    writer.writeFixed(state.predecessorIdentity);
+    writer.writeFixed(state.actionKeySetBody);
+    writer.writeFixed(state.actionKeySetIdentity);
+    for (const bodyIdentity of state.signatureBodyIdentities) {
+        writer.writeFixed(bodyIdentity);
+    }
+    for (const secretKey of state.signatureSecretKeys) {
+        writer.writeFixed(secretKey);
+    }
+    for (const decryptionKey of state.pairDecryptionKeys) {
+        writer.writeFixed(decryptionKey);
+    }
+    return writer.finish();
+};
+
+const decodeActionState = (bytes: Uint8Array): ActionState => {
+    if (bytes.byteLength !== actionStateByteLength) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The action state has the wrong byte length.',
+        );
+    }
+    const reader = new FixedReader(bytes);
+    if (reader.readU8() !== 1) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The action state has the wrong version.',
+        );
+    }
+    const phase = reader.readU8();
+    if (phase !== registeredActionPhase && phase !== confirmedRosterPhase) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The action state has an invalid phase.',
+        );
+    }
+    const state: ActionState = {
+        phase,
+        participantPosition: reader.readU16(),
+        generation: reader.readU64(),
+        runtimeIdentity: reader.readFixed(identityByteLength),
+        candidateBuildIdentity: reader.readFixed(identityByteLength),
+        actionProposalIdentity: reader.readFixed(identityByteLength),
+        actionKeySetRosterIdentity: reader.readFixed(identityByteLength),
+        predecessorIdentity: reader.readFixed(identityByteLength),
+        actionKeySetBody: reader.readFixed(
+            actionKeySetBodyByteLength(completionProfileParticipantCount),
+        ),
+        actionKeySetIdentity: reader.readFixed(identityByteLength),
+        signatureBodyIdentities: Array.from(
+            { length: signaturePurposeCount },
+            () => reader.readFixed(identityByteLength),
+        ),
+        signatureSecretKeys: Array.from({ length: signaturePurposeCount }, () =>
+            reader.readFixed(actionSignatureKeyByteLength),
+        ),
+        pairDecryptionKeys: Array.from({ length: pairKeyCount }, () =>
+            reader.readFixed(pairDecryptionKeyByteLength),
+        ),
+    };
+    reader.finish();
+    return state;
+};
+
+const zeroActionState = (state: ActionState): void => {
+    for (const key of state.signatureSecretKeys) {
+        key.fill(0);
+    }
+    for (const key of state.pairDecryptionKeys) {
+        key.fill(0);
+    }
+};
+
+const remoteParticipantCount = completionProfileParticipantCount - 1;
+const completionPreparationParentBodyByteLength =
+    preparationParentBodyByteLength(completionProfileParticipantCount);
+const preparationStateByteLength =
+    1 +
+    1 +
+    8 +
+    2 +
+    identityByteLength +
+    completionPreparationParentBodyByteLength +
+    actionSignatureCarrierByteLength +
+    remoteParticipantCount * identityByteLength +
+    remoteParticipantCount * privatePreparationBodyByteLength +
+    preparationContributionOpeningVectorByteLength +
+    preparationAffineCoefficientByteLength;
+
+const encodePreparationState = (state: PreparationState): Uint8Array => {
+    const writer = new FixedWriter(preparationStateByteLength);
+    writer.writeU8(1);
+    writer.writeU8(state.phase);
+    writer.writeU64(state.generation);
+    writer.writeU16(state.preparationAttempt);
+    writer.writeFixed(state.parentIdentity);
+    writer.writeFixed(state.parentBody);
+    writer.writeFixed(state.parentSignature);
+    for (const identity of state.privateBodyIdentities) {
+        writer.writeFixed(identity);
+    }
+    for (const body of state.privateBodies) {
+        writer.writeFixed(body);
+    }
+    writer.writeFixed(state.contributionOpenings);
+    writer.writeFixed(state.affineCoefficients);
+    return writer.finish();
+};
+
+const decodePreparationState = (bytes: Uint8Array): PreparationState => {
+    if (bytes.byteLength !== preparationStateByteLength) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained preparation has the wrong byte length.',
+        );
+    }
+    const reader = new FixedReader(bytes);
+    if (reader.readU8() !== 1) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained preparation has the wrong version.',
+        );
+    }
+    const phase = reader.readU8();
+    if (
+        phase !== unsignedPreparationPhase &&
+        phase !== publishedPreparationPhase
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained preparation has an invalid phase.',
+        );
+    }
+    const state: PreparationState = {
+        phase,
+        generation: reader.readU64(),
+        preparationAttempt: reader.readU16(),
+        parentIdentity: reader.readFixed(identityByteLength),
+        parentBody: reader.readFixed(completionPreparationParentBodyByteLength),
+        parentSignature: reader.readFixed(actionSignatureCarrierByteLength),
+        privateBodyIdentities: Array.from(
+            { length: remoteParticipantCount },
+            () => reader.readFixed(identityByteLength),
+        ),
+        privateBodies: Array.from({ length: remoteParticipantCount }, () =>
+            reader.readFixed(privatePreparationBodyByteLength),
+        ),
+        contributionOpenings: reader.readFixed(
+            preparationContributionOpeningVectorByteLength,
+        ),
+        affineCoefficients: reader.readFixed(
+            preparationAffineCoefficientByteLength,
+        ),
+    };
+    reader.finish();
+    if (
+        state.phase === unsignedPreparationPhase &&
+        !isZero(state.parentSignature)
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The retained preparation signature state is inconsistent.',
+        );
+    }
+    return state;
+};
+
+const zeroPreparationState = (state: PreparationState): void => {
+    state.contributionOpenings.fill(0);
+    state.affineCoefficients.fill(0);
+};
+
+const privatePreparationSlotStateByteLength =
+    1 + 1 + 8 + 2 + 2 + 3 * identityByteLength + preparationPlaintextByteLength;
+
+const encodePrivatePreparationSlotState = (
+    state: PrivatePreparationSlotState,
+): Uint8Array => {
+    const writer = new FixedWriter(privatePreparationSlotStateByteLength);
+    writer.writeU8(1);
+    writer.writeU8(state.phase);
+    writer.writeU64(state.generation);
+    writer.writeU16(state.preparationAttempt);
+    writer.writeU16(state.senderPosition);
+    writer.writeFixed(state.parentIdentity);
+    writer.writeFixed(state.bodyIdentity);
+    writer.writeFixed(state.verifiedPlaintextIdentity);
+    writer.writeFixed(state.plaintext);
+    return writer.finish();
+};
+
+const decodePrivatePreparationSlotState = (
+    bytes: Uint8Array,
+): PrivatePreparationSlotState => {
+    if (bytes.byteLength !== privatePreparationSlotStateByteLength) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The private-preparation slot has the wrong byte length.',
+        );
+    }
+    const reader = new FixedReader(bytes);
+    if (reader.readU8() !== 1) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The private-preparation slot has the wrong version.',
+        );
+    }
+    const phase = reader.readU8();
+    if (
+        phase !== consumedPrivatePreparationPhase &&
+        phase !== resolvedPrivatePreparationPhase &&
+        phase !== burnedPrivatePreparationPhase
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The private-preparation slot has an invalid phase.',
+        );
+    }
+    const state: PrivatePreparationSlotState = {
+        phase,
+        generation: reader.readU64(),
+        preparationAttempt: reader.readU16(),
+        senderPosition: reader.readU16(),
+        parentIdentity: reader.readFixed(identityByteLength),
+        bodyIdentity: reader.readFixed(identityByteLength),
+        verifiedPlaintextIdentity: reader.readFixed(identityByteLength),
+        plaintext: reader.readFixed(preparationPlaintextByteLength),
+    };
+    reader.finish();
+    if (
+        state.phase !== resolvedPrivatePreparationPhase &&
+        (!isZero(state.verifiedPlaintextIdentity) || !isZero(state.plaintext))
+    ) {
+        throw new DurableStateError(
+            'CorruptState',
+            'The unopened private-preparation slot contains resolved material.',
+        );
+    }
+    return state;
+};
+
+const zeroPrivatePreparationSlotState = (
+    state: PrivatePreparationSlotState,
+): void => {
+    state.plaintext.fill(0);
+};
+
+const actionLocalContext = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+    rosterIdentity: Uint8Array,
+    generation: bigint,
+): LocalRecordContext => ({
+    runtimeIdentity: configuration.runtimeIdentity,
+    candidateBuildIdentity: configuration.candidateBuildIdentity,
+    actionProposalIdentity: action.actionProposalIdentity,
+    actionKeySetRosterIdentity: rosterIdentity,
+    predecessorIdentity: action.predecessorIdentity,
+    participantPosition: action.participantPosition,
+    objectKind: actionStateKind,
+    generation,
+    peerPosition: noPeerPosition,
+    operationOrdinal: 0n,
+});
+
+const preparationLocalContext = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+    rosterIdentity: Uint8Array,
+    generation: bigint,
+    preparationAttempt: number,
+): LocalRecordContext => ({
+    runtimeIdentity: configuration.runtimeIdentity,
+    candidateBuildIdentity: configuration.candidateBuildIdentity,
+    actionProposalIdentity: action.actionProposalIdentity,
+    actionKeySetRosterIdentity: rosterIdentity,
+    predecessorIdentity: action.predecessorIdentity,
+    participantPosition: action.participantPosition,
+    objectKind: preparationStateKind,
+    generation,
+    peerPosition: noPeerPosition,
+    operationOrdinal: BigInt(preparationAttempt),
+});
+
+const privatePreparationSlotLocalContext = (
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+    rosterIdentity: Uint8Array,
+    generation: bigint,
+    senderPosition: number,
+): LocalRecordContext => ({
+    runtimeIdentity: configuration.runtimeIdentity,
+    candidateBuildIdentity: configuration.candidateBuildIdentity,
+    actionProposalIdentity: action.actionProposalIdentity,
+    actionKeySetRosterIdentity: rosterIdentity,
+    predecessorIdentity: action.predecessorIdentity,
+    participantPosition: action.participantPosition,
+    objectKind: privatePreparationSlotStateKind,
+    generation,
+    peerPosition: senderPosition,
+    operationOrdinal: privatePreparationOperationOrdinal,
+});
+
+const assertActionStateContext = (
+    state: ActionState,
+    localContext: LocalRecordContext,
+    configuration: WorkerConfiguration,
+    action: PrivatePreparationActionContext,
+): void => {
+    const expectedRosterIsZero = state.phase === registeredActionPhase;
+    if (
+        state.generation !== localContext.generation ||
+        state.participantPosition !== action.participantPosition ||
+        localContext.participantPosition !== action.participantPosition ||
+        localContext.objectKind !== actionStateKind ||
+        localContext.peerPosition !== noPeerPosition ||
+        localContext.operationOrdinal !== 0n ||
+        !bytesEqual(state.runtimeIdentity, configuration.runtimeIdentity) ||
+        !bytesEqual(
+            localContext.runtimeIdentity,
+            configuration.runtimeIdentity,
+        ) ||
+        !bytesEqual(
+            state.candidateBuildIdentity,
+            configuration.candidateBuildIdentity,
+        ) ||
+        !bytesEqual(
+            localContext.candidateBuildIdentity,
+            configuration.candidateBuildIdentity,
+        ) ||
+        !bytesEqual(
+            state.actionProposalIdentity,
+            action.actionProposalIdentity,
+        ) ||
+        !bytesEqual(
+            localContext.actionProposalIdentity,
+            action.actionProposalIdentity,
+        ) ||
+        !bytesEqual(state.predecessorIdentity, action.predecessorIdentity) ||
+        !bytesEqual(
+            localContext.predecessorIdentity,
+            action.predecessorIdentity,
+        ) ||
+        !bytesEqual(
+            state.actionKeySetRosterIdentity,
+            localContext.actionKeySetRosterIdentity,
+        ) ||
+        (expectedRosterIsZero && !isZero(state.actionKeySetRosterIdentity)) ||
+        (!expectedRosterIsZero && isZero(state.actionKeySetRosterIdentity))
+    ) {
+        throw new DurableStateError(
+            'StateLost',
+            'The retained action state does not match its authenticated context.',
+        );
+    }
+};
+
+class PrivatePreparationWorkerRuntime {
+    private constructor(
+        private readonly configuration: WorkerConfiguration,
+        private readonly durableState: PrivatePreparationDurableState,
+        private readonly actionKeySetRuntime: ActionKeySetRuntime,
+        private readonly actionSignatureRuntime: ActionSignatureRuntime,
+        private readonly pairEncryptionRuntime: PairEncryptionRuntime,
+        private readonly preparationMaterialRuntime: PreparationMaterialRuntime,
+        private readonly preparationParentRuntime: PreparationParentRuntime,
+        private readonly privatePreparationBodyRuntime: PrivatePreparationBodyRuntime,
+    ) {}
+
+    static async create(
+        initialization: PrivatePreparationWorkerInitialization,
+        persistentStorageRequired: boolean,
+        unpinnedKernelAllowed: boolean,
+        afterDurableConsume?: () => Promise<void> | void,
+    ): Promise<PrivatePreparationWorkerRuntime> {
+        const runtimeIdentity = Uint8Array.from(
+            requireBytes(
+                initialization.runtimeIdentity,
+                identityByteLength,
+                'runtimeIdentity',
+            ),
+        );
+        const candidateBuildIdentity = Uint8Array.from(
+            requireBytes(
+                initialization.candidateBuildIdentity,
+                identityByteLength,
+                'candidateBuildIdentity',
+            ),
+        );
+        let kernelUrl: URL;
+        try {
+            kernelUrl = new URL(initialization.kernelUrl);
+        } catch {
+            throw new TypeError('kernelUrl is invalid.');
+        }
+        const kernelOptions: FoundationKernelLoaderOptions =
+            initialization.kernelOptions;
+        if (
+            !unpinnedKernelAllowed &&
+            (kernelOptions.allowUnpinnedKernel === true ||
+                kernelOptions.expectedKernelSha256Hex === undefined)
+        ) {
+            throw new TypeError(
+                'The production worker requires a pinned kernel identity.',
+            );
+        }
+        const [durableState, kernel] = await Promise.all([
+            PrivatePreparationDurableState.open(
+                initialization.databaseName,
+                persistentStorageRequired,
+            ),
+            instantiateConstructionKernelCommandRuntime(
+                kernelUrl,
+                kernelOptions,
+            ),
+        ]);
+        return new PrivatePreparationWorkerRuntime(
+            { runtimeIdentity, candidateBuildIdentity, afterDurableConsume },
+            durableState,
+            openActionKeySetRuntime(kernel),
+            openActionSignatureRuntime(kernel),
+            openPairEncryptionRuntime(kernel),
+            openPreparationMaterialRuntime(kernel),
+            openPreparationParentRuntime(kernel),
+            openPrivatePreparationBodyRuntime(kernel),
+        );
+    }
+
+    async registerActionKeys(
+        input: PrivatePreparationActionContext,
+    ): Promise<RegisteredActionKeys> {
+        const action = copyActionContext(input);
+        return this.durableState.exclusive(async () => {
+            const identifier = actionIdentifier(this.configuration, action);
+            const existing = await this.durableState.readProtected(
+                'actions',
+                identifier,
+            );
+            if (existing !== undefined) {
+                const loaded = await this.loadActionState(action, existing);
+                try {
+                    return {
+                        actionKeySetBody: Uint8Array.from(
+                            loaded.state.actionKeySetBody,
+                        ),
+                        actionKeySetIdentity: Uint8Array.from(
+                            loaded.state.actionKeySetIdentity,
+                        ),
+                    };
+                } finally {
+                    zeroActionState(loaded.state);
+                }
+            }
+
+            let rootKey = await this.durableState.readRoot();
+            const protectedRecordCount =
+                await this.durableState.countProtectedRecords();
+            if (rootKey === undefined && protectedRecordCount !== 0) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The browser-local root is absent while protected state remains.',
+                );
+            }
+            rootKey ??= await generateBrowserLocalRootKey();
+
+            const signatureSecretKeys = Array.from(
+                { length: signaturePurposeCount },
+                () => randomBytes(actionSignatureKeyByteLength),
+            );
+            const signatureVerificationKeys = signatureSecretKeys.map((key) =>
+                this.actionSignatureRuntime.deriveVerificationKey(key),
+            );
+            const pairEncryptionKeys: Uint8Array[] = [];
+            const pairDecryptionKeys: Uint8Array[] = [];
+            try {
+                for (let index = 0; index < pairKeyCount; index += 1) {
+                    const randomness = randomBytes(
+                        pairEncryptionKeyGenerationRandomnessByteLength,
+                    );
+                    try {
+                        const pair =
+                            this.pairEncryptionRuntime.generateKeyPair(
+                                randomness,
+                            );
+                        pairEncryptionKeys.push(pair.encryptionKey);
+                        pairDecryptionKeys.push(pair.decryptionKey);
+                    } finally {
+                        randomness.fill(0);
+                    }
+                }
+                const actionKeySet = this.actionKeySetRuntime.encode({
+                    participantCount: completionProfileParticipantCount,
+                    proposalIdentity: action.actionProposalIdentity,
+                    rosterPosition: action.participantPosition,
+                    nonce: randomBytes(32),
+                    actionSignatureVerificationKeys: signatureVerificationKeys,
+                    pairEncryptionKeys,
+                });
+                const state: ActionState = {
+                    phase: registeredActionPhase,
+                    generation: 1n,
+                    runtimeIdentity: this.configuration.runtimeIdentity,
+                    candidateBuildIdentity:
+                        this.configuration.candidateBuildIdentity,
+                    actionProposalIdentity: action.actionProposalIdentity,
+                    actionKeySetRosterIdentity: new Uint8Array(
+                        identityByteLength,
+                    ),
+                    predecessorIdentity: action.predecessorIdentity,
+                    participantPosition: action.participantPosition,
+                    actionKeySetBody: actionKeySet.body,
+                    actionKeySetIdentity: actionKeySet.identity,
+                    signatureBodyIdentities: Array.from(
+                        { length: signaturePurposeCount },
+                        () => new Uint8Array(identityByteLength),
+                    ),
+                    signatureSecretKeys,
+                    pairDecryptionKeys,
+                };
+                const plaintext = encodeActionState(state);
+                const context = encodeLocalRecordContext(
+                    actionLocalContext(
+                        this.configuration,
+                        action,
+                        state.actionKeySetRosterIdentity,
+                        state.generation,
+                    ),
+                );
+                let record: ProtectedRecord;
+                try {
+                    record = await createProtectedRecord(
+                        identifier,
+                        context,
+                        plaintext,
+                        rootKey,
+                    );
+                } finally {
+                    plaintext.fill(0);
+                    context.fill(0);
+                }
+                if ((await this.durableState.readRoot()) === undefined) {
+                    await this.durableState.initializeRootAndAction(
+                        rootKey,
+                        record,
+                    );
+                } else {
+                    await this.durableState.putIfAbsent('actions', record);
+                }
+                const retained = await this.durableState.readProtected(
+                    'actions',
+                    identifier,
+                );
+                if (retained === undefined) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The retained action state disappeared after persistence.',
+                    );
+                }
+                const reloaded = await this.loadActionState(action, retained);
+                zeroActionState(reloaded.state);
+                return {
+                    actionKeySetBody: Uint8Array.from(actionKeySet.body),
+                    actionKeySetIdentity: Uint8Array.from(
+                        actionKeySet.identity,
+                    ),
+                };
+            } finally {
+                for (const key of signatureSecretKeys) {
+                    key.fill(0);
+                }
+                for (const key of pairDecryptionKeys) {
+                    key.fill(0);
+                }
+            }
+        });
+    }
+
+    async confirmActionKeyRoster(
+        input: PrivatePreparationActionContext & {
+            actionKeySetBodies: readonly Uint8Array[];
+        },
+    ): Promise<ConfirmedActionKeyRoster> {
+        const action = copyActionContext(input);
+        const bodies = copyActionKeySetBodies(input.actionKeySetBodies);
+        return this.durableState.exclusive(async () => {
+            const identifier = actionIdentifier(this.configuration, action);
+            const record = await this.durableState.readProtected(
+                'actions',
+                identifier,
+            );
+            if (record === undefined) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'Action keys are absent for roster confirmation.',
+                );
+            }
+            const loaded = await this.loadActionState(action, record);
+            try {
+                const rosterIdentity =
+                    this.actionKeySetRuntime.verifyCompleteRoster(
+                        completionProfileParticipantCount,
+                        bodies,
+                    );
+                const ownBody = bodies[action.participantPosition];
+                if (
+                    ownBody === undefined ||
+                    !bytesEqual(ownBody, loaded.state.actionKeySetBody)
+                ) {
+                    throw new DurableStateError(
+                        'Conflict',
+                        'The complete roster does not contain the retained local key set.',
+                    );
+                }
+                if (loaded.state.phase === confirmedRosterPhase) {
+                    if (
+                        !bytesEqual(
+                            loaded.state.actionKeySetRosterIdentity,
+                            rosterIdentity,
+                        )
+                    ) {
+                        throw new DurableStateError(
+                            'Conflict',
+                            'The action is already bound to another key roster.',
+                        );
+                    }
+                    return {
+                        actionKeySetRosterIdentity:
+                            Uint8Array.from(rosterIdentity),
+                    };
+                }
+                const replacementState: ActionState = {
+                    ...loaded.state,
+                    phase: confirmedRosterPhase,
+                    generation: loaded.state.generation + 1n,
+                    actionKeySetRosterIdentity: Uint8Array.from(rosterIdentity),
+                };
+                const plaintext = encodeActionState(replacementState);
+                const context = encodeLocalRecordContext(
+                    actionLocalContext(
+                        this.configuration,
+                        action,
+                        rosterIdentity,
+                        replacementState.generation,
+                    ),
+                );
+                let replacement: ProtectedRecord;
+                try {
+                    replacement = await createProtectedRecord(
+                        identifier,
+                        context,
+                        plaintext,
+                        loaded.rootKey,
+                    );
+                } finally {
+                    plaintext.fill(0);
+                    context.fill(0);
+                }
+                await this.durableState.replaceExact(
+                    'actions',
+                    loaded.record,
+                    replacement,
+                );
+                const retained = await this.durableState.readProtected(
+                    'actions',
+                    identifier,
+                );
+                if (retained === undefined) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'Confirmed roster state disappeared after persistence.',
+                    );
+                }
+                const reloaded = await this.loadActionState(action, retained);
+                zeroActionState(reloaded.state);
+                return {
+                    actionKeySetRosterIdentity: Uint8Array.from(rosterIdentity),
+                };
+            } finally {
+                zeroActionState(loaded.state);
+            }
+        });
+    }
+
+    async createPreparationPackage(
+        input: PrivatePreparationActionContext & {
+            actionKeySetBodies: readonly Uint8Array[];
+            preparationAttempt: number;
+        },
+    ): Promise<PublishedPreparationPackage> {
+        const action = copyActionContext(input);
+        const actionKeySetBodies = copyActionKeySetBodies(
+            input.actionKeySetBodies,
+        );
+        const preparationAttempt = requireUnsigned16(
+            input.preparationAttempt,
+            'preparationAttempt',
+        );
+        return this.durableState.exclusive(async () => {
+            const actionRecord = await this.durableState.readProtected(
+                'actions',
+                actionIdentifier(this.configuration, action),
+            );
+            if (actionRecord === undefined) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'Action keys are absent for preparation publication.',
+                );
+            }
+            const loadedAction = await this.loadActionState(
+                action,
+                actionRecord,
+            );
+            try {
+                this.verifyConfirmedActionRoster(
+                    action,
+                    loadedAction.state,
+                    actionKeySetBodies,
+                );
+                const identifier = preparationIdentifier(
+                    this.configuration,
+                    action,
+                );
+                const existing = await this.durableState.readProtected(
+                    'preparations',
+                    identifier,
+                );
+                const boundParentIdentity =
+                    loadedAction.state.signatureBodyIdentities[0];
+                if (boundParentIdentity === undefined) {
+                    throw new DurableStateError(
+                        'CorruptState',
+                        'The preparation-signature slot is absent.',
+                    );
+                }
+                if (existing !== undefined) {
+                    if (isZero(boundParentIdentity)) {
+                        throw new DurableStateError(
+                            'StateLost',
+                            'Retained preparation exists without its action-level signature binding.',
+                        );
+                    }
+                    const loadedPreparation = await this.loadPreparationState(
+                        action,
+                        loadedAction.state.actionKeySetRosterIdentity,
+                        existing,
+                    );
+                    try {
+                        if (
+                            loadedPreparation.state.preparationAttempt !==
+                                preparationAttempt ||
+                            !bytesEqual(
+                                loadedPreparation.state.parentIdentity,
+                                boundParentIdentity,
+                            )
+                        ) {
+                            throw new DurableStateError(
+                                'Conflict',
+                                'The action is already bound to another preparation.',
+                            );
+                        }
+                        this.validatePreparationState(
+                            action,
+                            actionKeySetBodies,
+                            loadedAction.state,
+                            loadedPreparation.state,
+                        );
+                        if (
+                            loadedPreparation.state.phase ===
+                            publishedPreparationPhase
+                        ) {
+                            return copyPublishedPreparationPackage(
+                                loadedPreparation.state,
+                            );
+                        }
+                        return await this.publishRetainedPreparation(
+                            action,
+                            actionKeySetBodies,
+                            loadedAction,
+                            loadedPreparation,
+                        );
+                    } finally {
+                        zeroPreparationState(loadedPreparation.state);
+                    }
+                }
+                if (!isZero(boundParentIdentity)) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The preparation-signature slot is consumed but its retained package is absent.',
+                    );
+                }
+                return await this.createAndPublishPreparation(
+                    action,
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    loadedAction,
+                );
+            } finally {
+                zeroActionState(loadedAction.state);
+            }
+        });
+    }
+
+    async consumePrivatePreparation(
+        input: PrivatePreparationActionContext & {
+            actionKeySetBodies: readonly Uint8Array[];
+            preparationAttempt: number;
+            parentBody: Uint8Array;
+            parentSignature: Uint8Array;
+            privateBody: Uint8Array;
+        },
+    ): Promise<PrivatePreparationConsumption> {
+        const action = copyActionContext(input);
+        const actionKeySetBodies = copyActionKeySetBodies(
+            input.actionKeySetBodies,
+        );
+        const preparationAttempt = requireUnsigned16(
+            input.preparationAttempt,
+            'preparationAttempt',
+        );
+        const parentBody = Uint8Array.from(
+            requireBytes(
+                input.parentBody,
+                completionPreparationParentBodyByteLength,
+                'parentBody',
+            ),
+        );
+        const parentSignature = Uint8Array.from(
+            requireBytes(
+                input.parentSignature,
+                actionSignatureCarrierByteLength,
+                'parentSignature',
+            ),
+        );
+        const privateBody = Uint8Array.from(
+            requireBytes(
+                input.privateBody,
+                privatePreparationBodyByteLength,
+                'privateBody',
+            ),
+        );
+        return this.durableState.exclusive(async () => {
+            const actionRecord = await this.durableState.readProtected(
+                'actions',
+                actionIdentifier(this.configuration, action),
+            );
+            if (actionRecord === undefined) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'Action keys are absent for private preparation consumption.',
+                );
+            }
+            const loadedAction = await this.loadActionState(
+                action,
+                actionRecord,
+            );
+            try {
+                this.verifyConfirmedActionRoster(
+                    action,
+                    loadedAction.state,
+                    actionKeySetBodies,
+                );
+                const carrier =
+                    this.preparationParentRuntime.verifyPrivateCarrier(
+                        {
+                            participantCount: completionProfileParticipantCount,
+                            actionProposalIdentity:
+                                action.actionProposalIdentity,
+                            actionKeySetRosterIdentity:
+                                loadedAction.state.actionKeySetRosterIdentity,
+                            preparationAttempt,
+                            predecessorIdentity: action.predecessorIdentity,
+                            recipientPosition: action.participantPosition,
+                        },
+                        actionKeySetBodies,
+                        parentBody,
+                        parentSignature,
+                        privateBody,
+                    );
+                const senderPosition = carrier.senderPosition;
+                const slotIdentifier = privatePreparationSlotIdentifier(
+                    this.configuration,
+                    action,
+                    senderPosition,
+                );
+                const existing = await this.durableState.readProtected(
+                    'slots',
+                    slotIdentifier,
+                );
+                if (existing !== undefined) {
+                    const loadedSlot = await this.loadPrivatePreparationSlot(
+                        action,
+                        loadedAction.state.actionKeySetRosterIdentity,
+                        senderPosition,
+                        existing,
+                    );
+                    try {
+                        this.assertSlotMatchesCarrier(
+                            loadedSlot.state,
+                            preparationAttempt,
+                            carrier.parentIdentity,
+                            carrier.bodyIdentity,
+                        );
+                        if (
+                            loadedSlot.state.phase ===
+                            resolvedPrivatePreparationPhase
+                        ) {
+                            return {
+                                senderPosition,
+                                status: 'already-resolved',
+                            };
+                        }
+                        if (
+                            loadedSlot.state.phase ===
+                            burnedPrivatePreparationPhase
+                        ) {
+                            return { senderPosition, status: 'burned' };
+                        }
+                        await this.burnPrivatePreparationSlot(
+                            action,
+                            loadedAction.rootKey,
+                            loadedAction.state.actionKeySetRosterIdentity,
+                            loadedSlot,
+                        );
+                        return { senderPosition, status: 'burned' };
+                    } finally {
+                        zeroPrivatePreparationSlotState(loadedSlot.state);
+                    }
+                }
+
+                const consumedState: PrivatePreparationSlotState = {
+                    phase: consumedPrivatePreparationPhase,
+                    generation: 1n,
+                    preparationAttempt,
+                    senderPosition,
+                    parentIdentity: Uint8Array.from(carrier.parentIdentity),
+                    bodyIdentity: Uint8Array.from(carrier.bodyIdentity),
+                    verifiedPlaintextIdentity: new Uint8Array(
+                        identityByteLength,
+                    ),
+                    plaintext: new Uint8Array(preparationPlaintextByteLength),
+                };
+                const consumedPlaintext =
+                    encodePrivatePreparationSlotState(consumedState);
+                const consumedContext = encodeLocalRecordContext(
+                    privatePreparationSlotLocalContext(
+                        this.configuration,
+                        action,
+                        loadedAction.state.actionKeySetRosterIdentity,
+                        consumedState.generation,
+                        senderPosition,
+                    ),
+                );
+                let consumedRecord: ProtectedRecord;
+                try {
+                    consumedRecord = await createProtectedRecord(
+                        slotIdentifier,
+                        consumedContext,
+                        consumedPlaintext,
+                        loadedAction.rootKey,
+                    );
+                } finally {
+                    consumedPlaintext.fill(0);
+                    consumedContext.fill(0);
+                }
+                await this.durableState.putIfAbsent('slots', consumedRecord);
+                const retainedRecord = await this.durableState.readProtected(
+                    'slots',
+                    slotIdentifier,
+                );
+                if (retainedRecord === undefined) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The consumed private-preparation slot disappeared after persistence.',
+                    );
+                }
+                const retainedSlot = await this.loadPrivatePreparationSlot(
+                    action,
+                    loadedAction.state.actionKeySetRosterIdentity,
+                    senderPosition,
+                    retainedRecord,
+                );
+                try {
+                    this.assertSlotMatchesCarrier(
+                        retainedSlot.state,
+                        preparationAttempt,
+                        carrier.parentIdentity,
+                        carrier.bodyIdentity,
+                    );
+                    await this.configuration.afterDurableConsume?.();
+                    return await this.openConsumedPrivatePreparation(
+                        action,
+                        actionKeySetBodies,
+                        parentBody,
+                        privateBody,
+                        loadedAction,
+                        retainedSlot,
+                    );
+                } finally {
+                    zeroPrivatePreparationSlotState(retainedSlot.state);
+                }
+            } finally {
+                zeroActionState(loadedAction.state);
+                parentBody.fill(0);
+                parentSignature.fill(0);
+                privateBody.fill(0);
+            }
+        });
+    }
+
+    private verifyConfirmedActionRoster(
+        action: PrivatePreparationActionContext,
+        state: ActionState,
+        actionKeySetBodies: readonly Uint8Array[],
+    ): void {
+        if (state.phase !== confirmedRosterPhase) {
+            throw new DurableStateError(
+                'Conflict',
+                'The action-key roster has not been confirmed.',
+            );
+        }
+        const rosterIdentity = this.actionKeySetRuntime.verifyCompleteRoster(
+            completionProfileParticipantCount,
+            actionKeySetBodies,
+        );
+        const ownBody = actionKeySetBodies[action.participantPosition];
+        if (
+            ownBody === undefined ||
+            !bytesEqual(ownBody, state.actionKeySetBody) ||
+            !bytesEqual(rosterIdentity, state.actionKeySetRosterIdentity)
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The retained action is bound to another complete key roster.',
+            );
+        }
+    }
+
+    private async createAndPublishPreparation(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        preparationAttempt: number,
+        loadedAction: LoadedActionState,
+    ): Promise<PublishedPreparationPackage> {
+        const contributionOpenings = randomBytes(
+            preparationContributionOpeningVectorByteLength,
+        );
+        const affineCoefficients = randomBytes(
+            preparationAffineCoefficientByteLength,
+        );
+        const affineConstantOffset =
+            preparationLowAffineCoefficientCount *
+            preparationAffineModuleValueByteLength;
+        while (
+            isZero(
+                affineCoefficients.subarray(
+                    affineConstantOffset,
+                    affineConstantOffset +
+                        preparationAffineModuleValueByteLength,
+                ),
+            )
+        ) {
+            const replacementConstant = randomBytes(
+                preparationAffineModuleValueByteLength,
+            );
+            affineCoefficients.set(replacementConstant, affineConstantOffset);
+            replacementConstant.fill(0);
+        }
+        const materialContext = {
+            participantCount: completionProfileParticipantCount,
+            actionProposalIdentity: action.actionProposalIdentity,
+            actionKeySetRosterIdentity:
+                loadedAction.state.actionKeySetRosterIdentity,
+            preparationAttempt,
+            predecessorIdentity: action.predecessorIdentity,
+            senderPosition: action.participantPosition,
+        } as const;
+        const material = this.preparationMaterialRuntime.generate(
+            materialContext,
+            contributionOpenings,
+            affineCoefficients,
+        );
+        const privateBodies: Uint8Array[] = [];
+        const privateBodyIdentities: Uint8Array[] = [];
+        const recipients = remotePositions(action.participantPosition);
+        try {
+            for (const [
+                recipientIndex,
+                recipientPosition,
+            ] of recipients.entries()) {
+                const plaintext = material.recipientPlaintexts[recipientIndex];
+                if (plaintext === undefined) {
+                    throw new Error(
+                        'Generated preparation material omitted a recipient.',
+                    );
+                }
+                const pairEncryptionKey =
+                    this.actionKeySetRuntime.resolvePairEncryptionKey(
+                        completionProfileParticipantCount,
+                        action.actionProposalIdentity,
+                        loadedAction.state.actionKeySetRosterIdentity,
+                        action.participantPosition,
+                        recipientPosition,
+                        actionKeySetBodies,
+                    );
+                const recordKey = randomBytes(
+                    privatePreparationRecordKeyByteLength,
+                );
+                const pairEncryptionRandomness = randomBytes(
+                    pairEncryptionRandomnessByteLength,
+                );
+                try {
+                    const sealed = this.privatePreparationBodyRuntime.seal(
+                        {
+                            ...materialContext,
+                            recipientPosition,
+                        },
+                        pairEncryptionKey,
+                        recordKey,
+                        pairEncryptionRandomness,
+                        plaintext,
+                    );
+                    privateBodies.push(sealed.body);
+                    privateBodyIdentities.push(sealed.identity);
+                } finally {
+                    pairEncryptionKey.fill(0);
+                    recordKey.fill(0);
+                    pairEncryptionRandomness.fill(0);
+                }
+            }
+            const parent = this.preparationParentRuntime.encode({
+                ...materialContext,
+                subsetCommitments: material.subsetCommitments,
+                privateBodyIdentities,
+            });
+            const state: PreparationState = {
+                phase: unsignedPreparationPhase,
+                generation: 1n,
+                preparationAttempt,
+                parentIdentity: parent.identity,
+                parentBody: parent.body,
+                parentSignature: new Uint8Array(
+                    actionSignatureCarrierByteLength,
+                ),
+                privateBodyIdentities,
+                privateBodies,
+                contributionOpenings,
+                affineCoefficients,
+            };
+            this.validatePreparationState(
+                action,
+                actionKeySetBodies,
+                loadedAction.state,
+                state,
+            );
+            const preparationPlaintext = encodePreparationState(state);
+            const preparationContext = encodeLocalRecordContext(
+                preparationLocalContext(
+                    this.configuration,
+                    action,
+                    loadedAction.state.actionKeySetRosterIdentity,
+                    state.generation,
+                    preparationAttempt,
+                ),
+            );
+            let preparationRecord: ProtectedRecord;
+            try {
+                preparationRecord = await createProtectedRecord(
+                    preparationIdentifier(this.configuration, action),
+                    preparationContext,
+                    preparationPlaintext,
+                    loadedAction.rootKey,
+                );
+            } finally {
+                preparationPlaintext.fill(0);
+                preparationContext.fill(0);
+            }
+            const replacementActionState: ActionState = {
+                ...loadedAction.state,
+                generation: loadedAction.state.generation + 1n,
+                signatureBodyIdentities:
+                    loadedAction.state.signatureBodyIdentities.map(
+                        (identity, index) =>
+                            index === 0
+                                ? Uint8Array.from(parent.identity)
+                                : Uint8Array.from(identity),
+                    ),
+            };
+            const actionPlaintext = encodeActionState(replacementActionState);
+            const actionContext = encodeLocalRecordContext(
+                actionLocalContext(
+                    this.configuration,
+                    action,
+                    replacementActionState.actionKeySetRosterIdentity,
+                    replacementActionState.generation,
+                ),
+            );
+            let actionRecord: ProtectedRecord;
+            try {
+                actionRecord = await createProtectedRecord(
+                    actionIdentifier(this.configuration, action),
+                    actionContext,
+                    actionPlaintext,
+                    loadedAction.rootKey,
+                );
+            } finally {
+                actionPlaintext.fill(0);
+                actionContext.fill(0);
+            }
+            await this.durableState.replaceExactAndPutIfAbsent(
+                'actions',
+                loadedAction.record,
+                actionRecord,
+                'preparations',
+                preparationRecord,
+            );
+            const [retainedActionRecord, retainedPreparationRecord] =
+                await Promise.all([
+                    this.durableState.readProtected(
+                        'actions',
+                        actionIdentifier(this.configuration, action),
+                    ),
+                    this.durableState.readProtected(
+                        'preparations',
+                        preparationIdentifier(this.configuration, action),
+                    ),
+                ]);
+            if (
+                retainedActionRecord === undefined ||
+                retainedPreparationRecord === undefined
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The atomic preparation binding disappeared after persistence.',
+                );
+            }
+            const reboundAction = await this.loadActionState(
+                action,
+                retainedActionRecord,
+            );
+            const retainedPreparation = await this.loadPreparationState(
+                action,
+                reboundAction.state.actionKeySetRosterIdentity,
+                retainedPreparationRecord,
+            );
+            try {
+                if (
+                    !bytesEqual(
+                        reboundAction.state.signatureBodyIdentities[0] ??
+                            new Uint8Array(),
+                        retainedPreparation.state.parentIdentity,
+                    )
+                ) {
+                    throw new DurableStateError(
+                        'StateLost',
+                        'The durable preparation binding is inconsistent.',
+                    );
+                }
+                return await this.publishRetainedPreparation(
+                    action,
+                    actionKeySetBodies,
+                    reboundAction,
+                    retainedPreparation,
+                );
+            } finally {
+                zeroActionState(reboundAction.state);
+                zeroPreparationState(retainedPreparation.state);
+            }
+        } finally {
+            for (const plaintext of material.recipientPlaintexts) {
+                plaintext.fill(0);
+            }
+            contributionOpenings.fill(0);
+            affineCoefficients.fill(0);
+        }
+    }
+
+    private async publishRetainedPreparation(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        loadedAction: LoadedActionState,
+        loadedPreparation: LoadedPreparationState,
+    ): Promise<PublishedPreparationPackage> {
+        if (loadedPreparation.state.phase !== unsignedPreparationPhase) {
+            throw new DurableStateError(
+                'Conflict',
+                'The retained preparation is already published.',
+            );
+        }
+        this.validatePreparationState(
+            action,
+            actionKeySetBodies,
+            loadedAction.state,
+            loadedPreparation.state,
+        );
+        const secretKey = loadedAction.state.signatureSecretKeys[0];
+        if (secretKey === undefined) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The preparation signing key is absent.',
+            );
+        }
+        const signature = this.actionSignatureRuntime.signBodyIdentity(
+            secretKey,
+            loadedPreparation.state.parentIdentity,
+        );
+        let signatureCarrier: Uint8Array;
+        try {
+            signatureCarrier = this.preparationParentRuntime.encodeSignature(
+                completionProfileParticipantCount,
+                action.participantPosition,
+                loadedPreparation.state.parentIdentity,
+                signature,
+            );
+        } finally {
+            signature.fill(0);
+        }
+        const replacementState: PreparationState = {
+            ...loadedPreparation.state,
+            phase: publishedPreparationPhase,
+            generation: loadedPreparation.state.generation + 1n,
+            parentSignature: signatureCarrier,
+        };
+        const plaintext = encodePreparationState(replacementState);
+        const context = encodeLocalRecordContext(
+            preparationLocalContext(
+                this.configuration,
+                action,
+                loadedAction.state.actionKeySetRosterIdentity,
+                replacementState.generation,
+                replacementState.preparationAttempt,
+            ),
+        );
+        let replacement: ProtectedRecord;
+        try {
+            replacement = await createProtectedRecord(
+                loadedPreparation.record.id,
+                context,
+                plaintext,
+                loadedAction.rootKey,
+            );
+        } finally {
+            plaintext.fill(0);
+            context.fill(0);
+        }
+        await this.durableState.replaceExact(
+            'preparations',
+            loadedPreparation.record,
+            replacement,
+        );
+        const retained = await this.durableState.readProtected(
+            'preparations',
+            loadedPreparation.record.id,
+        );
+        if (retained === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The published preparation disappeared after persistence.',
+            );
+        }
+        const reloaded = await this.loadPreparationState(
+            action,
+            loadedAction.state.actionKeySetRosterIdentity,
+            retained,
+        );
+        try {
+            this.validatePreparationState(
+                action,
+                actionKeySetBodies,
+                loadedAction.state,
+                reloaded.state,
+            );
+            return copyPublishedPreparationPackage(reloaded.state);
+        } finally {
+            zeroPreparationState(reloaded.state);
+        }
+    }
+
+    private validatePreparationState(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        actionState: ActionState,
+        state: PreparationState,
+    ): void {
+        const materialContext = {
+            participantCount: completionProfileParticipantCount,
+            actionProposalIdentity: action.actionProposalIdentity,
+            actionKeySetRosterIdentity: actionState.actionKeySetRosterIdentity,
+            preparationAttempt: state.preparationAttempt,
+            predecessorIdentity: action.predecessorIdentity,
+            senderPosition: action.participantPosition,
+        } as const;
+        const material = this.preparationMaterialRuntime.generate(
+            materialContext,
+            state.contributionOpenings,
+            state.affineCoefficients,
+        );
+        try {
+            const parent = this.preparationParentRuntime.encode({
+                ...materialContext,
+                subsetCommitments: material.subsetCommitments,
+                privateBodyIdentities: state.privateBodyIdentities,
+            });
+            if (
+                !bytesEqual(parent.body, state.parentBody) ||
+                !bytesEqual(parent.identity, state.parentIdentity)
+            ) {
+                throw new DurableStateError(
+                    'CorruptState',
+                    'The retained preparation parent does not match its source material.',
+                );
+            }
+            const recipients = remotePositions(action.participantPosition);
+            for (const [
+                recipientIndex,
+                recipientPosition,
+            ] of recipients.entries()) {
+                const plaintext = material.recipientPlaintexts[recipientIndex];
+                const privateBody = state.privateBodies[recipientIndex];
+                const expectedBodyIdentity =
+                    state.privateBodyIdentities[recipientIndex];
+                if (
+                    plaintext === undefined ||
+                    privateBody === undefined ||
+                    expectedBodyIdentity === undefined
+                ) {
+                    throw new DurableStateError(
+                        'CorruptState',
+                        'The retained preparation omitted a recipient.',
+                    );
+                }
+                this.preparationMaterialRuntime.verifyPlaintext(
+                    materialContext,
+                    recipientPosition,
+                    state.parentBody,
+                    plaintext,
+                );
+                if (state.phase === publishedPreparationPhase) {
+                    const carrier =
+                        this.preparationParentRuntime.verifyPrivateCarrier(
+                            {
+                                participantCount:
+                                    completionProfileParticipantCount,
+                                actionProposalIdentity:
+                                    action.actionProposalIdentity,
+                                actionKeySetRosterIdentity:
+                                    actionState.actionKeySetRosterIdentity,
+                                preparationAttempt: state.preparationAttempt,
+                                predecessorIdentity: action.predecessorIdentity,
+                                recipientPosition,
+                            },
+                            actionKeySetBodies,
+                            state.parentBody,
+                            state.parentSignature,
+                            privateBody,
+                        );
+                    if (
+                        carrier.senderPosition !== action.participantPosition ||
+                        carrier.recipientPosition !== recipientPosition ||
+                        !bytesEqual(
+                            carrier.parentIdentity,
+                            state.parentIdentity,
+                        ) ||
+                        !bytesEqual(carrier.bodyIdentity, expectedBodyIdentity)
+                    ) {
+                        throw new DurableStateError(
+                            'CorruptState',
+                            'A retained private preparation carrier has the wrong identity.',
+                        );
+                    }
+                }
+            }
+        } finally {
+            for (const plaintext of material.recipientPlaintexts) {
+                plaintext.fill(0);
+            }
+        }
+    }
+
+    private async openConsumedPrivatePreparation(
+        action: PrivatePreparationActionContext,
+        actionKeySetBodies: readonly Uint8Array[],
+        parentBody: Uint8Array,
+        privateBody: Uint8Array,
+        loadedAction: LoadedActionState,
+        loadedSlot: LoadedPrivatePreparationSlotState,
+    ): Promise<PrivatePreparationConsumption> {
+        const senderPosition = loadedSlot.state.senderPosition;
+        const decryptionKeyIndex = pairDecryptionKeyIndex(
+            action.participantPosition,
+            senderPosition,
+        );
+        const pairDecryptionKey =
+            loadedAction.state.pairDecryptionKeys[decryptionKeyIndex];
+        if (pairDecryptionKey === undefined) {
+            throw new DurableStateError(
+                'CorruptState',
+                'The retained private-delivery key is absent.',
+            );
+        }
+        const pairEncryptionKey =
+            this.actionKeySetRuntime.resolvePairEncryptionKey(
+                completionProfileParticipantCount,
+                action.actionProposalIdentity,
+                loadedAction.state.actionKeySetRosterIdentity,
+                senderPosition,
+                action.participantPosition,
+                actionKeySetBodies,
+            );
+        const privateContext: PrivatePreparationContextInput = {
+            participantCount: completionProfileParticipantCount,
+            actionProposalIdentity: action.actionProposalIdentity,
+            actionKeySetRosterIdentity:
+                loadedAction.state.actionKeySetRosterIdentity,
+            preparationAttempt: loadedSlot.state.preparationAttempt,
+            predecessorIdentity: action.predecessorIdentity,
+            senderPosition,
+            recipientPosition: action.participantPosition,
+        };
+        let capabilityIsLive = true;
+        const openOnce = (): Uint8Array => {
+            if (!capabilityIsLive) {
+                throw new DurableStateError(
+                    'Conflict',
+                    'The private-opening capability is already consumed.',
+                );
+            }
+            capabilityIsLive = false;
+            return this.privatePreparationBodyRuntime.open(
+                privateContext,
+                pairEncryptionKey,
+                pairDecryptionKey,
+                privateBody,
+            );
+        };
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = openOnce();
+            const verifiedPlaintextIdentity =
+                this.preparationMaterialRuntime.verifyPlaintext(
+                    {
+                        participantCount: completionProfileParticipantCount,
+                        actionProposalIdentity: action.actionProposalIdentity,
+                        actionKeySetRosterIdentity:
+                            loadedAction.state.actionKeySetRosterIdentity,
+                        preparationAttempt: loadedSlot.state.preparationAttempt,
+                        predecessorIdentity: action.predecessorIdentity,
+                        senderPosition,
+                    },
+                    action.participantPosition,
+                    parentBody,
+                    plaintext,
+                );
+            const resolvedState: PrivatePreparationSlotState = {
+                ...loadedSlot.state,
+                phase: resolvedPrivatePreparationPhase,
+                generation: loadedSlot.state.generation + 1n,
+                verifiedPlaintextIdentity,
+                plaintext: Uint8Array.from(plaintext),
+            };
+            await this.replacePrivatePreparationSlot(
+                action,
+                loadedAction.rootKey,
+                loadedAction.state.actionKeySetRosterIdentity,
+                loadedSlot,
+                resolvedState,
+            );
+            return { senderPosition, status: 'resolved' };
+        } catch (error: unknown) {
+            await this.burnPrivatePreparationSlot(
+                action,
+                loadedAction.rootKey,
+                loadedAction.state.actionKeySetRosterIdentity,
+                loadedSlot,
+            );
+            throw error;
+        } finally {
+            capabilityIsLive = false;
+            pairEncryptionKey.fill(0);
+            plaintext?.fill(0);
+        }
+    }
+
+    private async burnPrivatePreparationSlot(
+        action: PrivatePreparationActionContext,
+        rootKey: CryptoKey,
+        rosterIdentity: Uint8Array,
+        loadedSlot: LoadedPrivatePreparationSlotState,
+    ): Promise<void> {
+        const burnedState: PrivatePreparationSlotState = {
+            ...loadedSlot.state,
+            phase: burnedPrivatePreparationPhase,
+            generation: loadedSlot.state.generation + 1n,
+            verifiedPlaintextIdentity: new Uint8Array(identityByteLength),
+            plaintext: new Uint8Array(preparationPlaintextByteLength),
+        };
+        await this.replacePrivatePreparationSlot(
+            action,
+            rootKey,
+            rosterIdentity,
+            loadedSlot,
+            burnedState,
+        );
+    }
+
+    private async replacePrivatePreparationSlot(
+        action: PrivatePreparationActionContext,
+        rootKey: CryptoKey,
+        rosterIdentity: Uint8Array,
+        loadedSlot: LoadedPrivatePreparationSlotState,
+        replacementState: PrivatePreparationSlotState,
+    ): Promise<void> {
+        const plaintext = encodePrivatePreparationSlotState(replacementState);
+        const context = encodeLocalRecordContext(
+            privatePreparationSlotLocalContext(
+                this.configuration,
+                action,
+                rosterIdentity,
+                replacementState.generation,
+                replacementState.senderPosition,
+            ),
+        );
+        let replacement: ProtectedRecord;
+        try {
+            replacement = await createProtectedRecord(
+                loadedSlot.record.id,
+                context,
+                plaintext,
+                rootKey,
+            );
+        } finally {
+            plaintext.fill(0);
+            context.fill(0);
+        }
+        await this.durableState.replaceExact(
+            'slots',
+            loadedSlot.record,
+            replacement,
+        );
+        const retained = await this.durableState.readProtected(
+            'slots',
+            loadedSlot.record.id,
+        );
+        if (retained === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The private-preparation slot disappeared after replacement.',
+            );
+        }
+        const reloaded = await this.loadPrivatePreparationSlot(
+            action,
+            rosterIdentity,
+            replacementState.senderPosition,
+            retained,
+        );
+        try {
+            if (
+                reloaded.state.phase !== replacementState.phase ||
+                reloaded.state.generation !== replacementState.generation ||
+                !bytesEqual(
+                    reloaded.state.parentIdentity,
+                    replacementState.parentIdentity,
+                ) ||
+                !bytesEqual(
+                    reloaded.state.bodyIdentity,
+                    replacementState.bodyIdentity,
+                ) ||
+                !bytesEqual(
+                    reloaded.state.verifiedPlaintextIdentity,
+                    replacementState.verifiedPlaintextIdentity,
+                ) ||
+                !bytesEqual(
+                    reloaded.state.plaintext,
+                    replacementState.plaintext,
+                )
+            ) {
+                throw new DurableStateError(
+                    'StateLost',
+                    'The replaced private-preparation slot is inconsistent.',
+                );
+            }
+        } finally {
+            zeroPrivatePreparationSlotState(reloaded.state);
+        }
+    }
+
+    private assertSlotMatchesCarrier(
+        state: PrivatePreparationSlotState,
+        preparationAttempt: number,
+        parentIdentity: Uint8Array,
+        bodyIdentity: Uint8Array,
+    ): void {
+        if (
+            state.preparationAttempt !== preparationAttempt ||
+            !bytesEqual(state.parentIdentity, parentIdentity) ||
+            !bytesEqual(state.bodyIdentity, bodyIdentity)
+        ) {
+            throw new DurableStateError(
+                'Conflict',
+                'The private-preparation slot is already bound to another carrier.',
+            );
+        }
+    }
+
+    private async loadPreparationState(
+        action: PrivatePreparationActionContext,
+        rosterIdentity: Uint8Array,
+        record: ProtectedRecord,
+    ): Promise<LoadedPreparationState> {
+        const rootKey = await this.durableState.readRoot();
+        if (rootKey === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for retained preparation state.',
+            );
+        }
+        const localContext = decodeLocalRecordContext(record.context);
+        const expectedContext = encodeLocalRecordContext(localContext);
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = await openProtectedRecord(
+                record,
+                expectedContext,
+                rootKey,
+            );
+            const state = decodePreparationState(plaintext);
+            if (
+                state.generation !== localContext.generation ||
+                BigInt(state.preparationAttempt) !==
+                    localContext.operationOrdinal ||
+                localContext.objectKind !== preparationStateKind ||
+                localContext.peerPosition !== noPeerPosition ||
+                localContext.participantPosition !==
+                    action.participantPosition ||
+                !bytesEqual(
+                    localContext.runtimeIdentity,
+                    this.configuration.runtimeIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.candidateBuildIdentity,
+                    this.configuration.candidateBuildIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.actionProposalIdentity,
+                    action.actionProposalIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.actionKeySetRosterIdentity,
+                    rosterIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.predecessorIdentity,
+                    action.predecessorIdentity,
+                )
+            ) {
+                zeroPreparationState(state);
+                throw new DurableStateError(
+                    'StateLost',
+                    'The retained preparation does not match its authenticated context.',
+                );
+            }
+            return { record, state };
+        } finally {
+            expectedContext.fill(0);
+            plaintext?.fill(0);
+        }
+    }
+
+    private async loadPrivatePreparationSlot(
+        action: PrivatePreparationActionContext,
+        rosterIdentity: Uint8Array,
+        senderPosition: number,
+        record: ProtectedRecord,
+    ): Promise<LoadedPrivatePreparationSlotState> {
+        const rootKey = await this.durableState.readRoot();
+        if (rootKey === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for a private-preparation slot.',
+            );
+        }
+        const localContext = decodeLocalRecordContext(record.context);
+        const expectedContext = encodeLocalRecordContext(localContext);
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = await openProtectedRecord(
+                record,
+                expectedContext,
+                rootKey,
+            );
+            const state = decodePrivatePreparationSlotState(plaintext);
+            if (
+                state.generation !== localContext.generation ||
+                state.senderPosition !== senderPosition ||
+                localContext.operationOrdinal !==
+                    privatePreparationOperationOrdinal ||
+                localContext.objectKind !== privatePreparationSlotStateKind ||
+                localContext.peerPosition !== senderPosition ||
+                localContext.participantPosition !==
+                    action.participantPosition ||
+                !bytesEqual(
+                    localContext.runtimeIdentity,
+                    this.configuration.runtimeIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.candidateBuildIdentity,
+                    this.configuration.candidateBuildIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.actionProposalIdentity,
+                    action.actionProposalIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.actionKeySetRosterIdentity,
+                    rosterIdentity,
+                ) ||
+                !bytesEqual(
+                    localContext.predecessorIdentity,
+                    action.predecessorIdentity,
+                )
+            ) {
+                zeroPrivatePreparationSlotState(state);
+                throw new DurableStateError(
+                    'StateLost',
+                    'The private-preparation slot does not match its authenticated context.',
+                );
+            }
+            return { record, state };
+        } finally {
+            expectedContext.fill(0);
+            plaintext?.fill(0);
+        }
+    }
+
+    private async loadActionState(
+        action: PrivatePreparationActionContext,
+        record: ProtectedRecord,
+    ): Promise<LoadedActionState> {
+        const rootKey = await this.durableState.readRoot();
+        if (rootKey === undefined) {
+            throw new DurableStateError(
+                'StateLost',
+                'The browser-local root is absent for retained action state.',
+            );
+        }
+        const localContext = decodeLocalRecordContext(record.context);
+        const expectedContext = encodeLocalRecordContext(localContext);
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = await openProtectedRecord(
+                record,
+                expectedContext,
+                rootKey,
+            );
+            const state = decodeActionState(plaintext);
+            assertActionStateContext(
+                state,
+                localContext,
+                this.configuration,
+                action,
+            );
+            const actionKeySetIdentity = this.actionKeySetRuntime.verify(
+                completionProfileParticipantCount,
+                action.actionProposalIdentity,
+                action.participantPosition,
+                state.actionKeySetBody,
+            );
+            if (!bytesEqual(actionKeySetIdentity, state.actionKeySetIdentity)) {
+                zeroActionState(state);
+                throw new DurableStateError(
+                    'CorruptState',
+                    'The retained action key-set identity is inconsistent.',
+                );
+            }
+            return { record, rootKey, state };
+        } finally {
+            expectedContext.fill(0);
+            plaintext?.fill(0);
+        }
+    }
+}
+
+type WorkerInstallationOptions = Readonly<{
+    persistentStorageRequired: boolean;
+    unpinnedKernelAllowed: boolean;
+    afterDurableConsume?: () => Promise<void> | void;
+}>;
+
+const failureResponse = (
+    requestId: number,
+    error: unknown,
+): PrivatePreparationWorkerFailure => {
+    if (error instanceof DurableStateError) {
+        return {
+            requestId,
+            ok: false,
+            error: { code: error.code, message: error.message },
+        };
+    }
+    if (error instanceof TypeError || error instanceof RangeError) {
+        return {
+            requestId,
+            ok: false,
+            error: { code: 'InvalidRequest', message: error.message },
+        };
+    }
+    return {
+        requestId,
+        ok: false,
+        error: {
+            code: 'ProtocolRefusal',
+            message:
+                error instanceof Error
+                    ? error.message
+                    : 'The construction verifier refused the operation.',
+        },
+    };
+};
+
+const responseTransferables = (
+    response: PrivatePreparationWorkerResponse,
+): Transferable[] => {
+    if (!response.ok) {
+        return [];
+    }
+    const { result } = response;
+    if ('actionKeySetBody' in result) {
+        return [
+            result.actionKeySetBody.buffer,
+            result.actionKeySetIdentity.buffer,
+        ];
+    }
+    if ('actionKeySetRosterIdentity' in result) {
+        return [result.actionKeySetRosterIdentity.buffer];
+    }
+    if ('parentBody' in result) {
+        return [
+            result.parentBody.buffer,
+            result.parentSignature.buffer,
+            ...result.privateBodies.map((body) => body.buffer),
+        ];
+    }
+    return [];
+};
+
+export const installPrivatePreparationWorker = (
+    scope: DedicatedWorkerGlobalScope,
+    options: WorkerInstallationOptions,
+): void => {
+    let runtimePromise: Promise<PrivatePreparationWorkerRuntime> | undefined;
+    scope.addEventListener(
+        'message',
+        (event: MessageEvent<PrivatePreparationWorkerRequest>) => {
+            const request = event.data;
+            void (async () => {
+                let response: PrivatePreparationWorkerResponse;
+                try {
+                    if (
+                        typeof request !== 'object' ||
+                        request === null ||
+                        !Number.isSafeInteger(request.requestId) ||
+                        request.requestId < 0
+                    ) {
+                        throw new TypeError('The worker request is malformed.');
+                    }
+                    if (request.operation === 'initialize') {
+                        if (runtimePromise !== undefined) {
+                            throw new TypeError(
+                                'The worker is already initialized.',
+                            );
+                        }
+                        runtimePromise = PrivatePreparationWorkerRuntime.create(
+                            request.input,
+                            options.persistentStorageRequired,
+                            options.unpinnedKernelAllowed,
+                            options.afterDurableConsume,
+                        );
+                        await runtimePromise;
+                        response = {
+                            requestId: request.requestId,
+                            ok: true,
+                            result: { initialized: true },
+                        };
+                    } else {
+                        if (runtimePromise === undefined) {
+                            throw new TypeError(
+                                'The worker has not been initialized.',
+                            );
+                        }
+                        const runtime = await runtimePromise;
+                        if (request.operation === 'register-action-keys') {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.registerActionKeys(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation === 'confirm-action-key-roster'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.confirmActionKeyRoster(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation === 'create-preparation-package'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.createPreparationPackage(
+                                    request.input,
+                                ),
+                            };
+                        } else if (
+                            request.operation === 'consume-private-preparation'
+                        ) {
+                            response = {
+                                requestId: request.requestId,
+                                ok: true,
+                                result: await runtime.consumePrivatePreparation(
+                                    request.input,
+                                ),
+                            };
+                        } else {
+                            throw new TypeError(
+                                'The requested worker operation is not implemented.',
+                            );
+                        }
+                    }
+                } catch (error: unknown) {
+                    const requestId =
+                        typeof request === 'object' &&
+                        request !== null &&
+                        Number.isSafeInteger(request.requestId)
+                            ? request.requestId
+                            : 0;
+                    response = failureResponse(requestId, error);
+                }
+                scope.postMessage(response, responseTransferables(response));
+            })();
+        },
+    );
+};

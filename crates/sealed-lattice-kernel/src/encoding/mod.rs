@@ -2,6 +2,7 @@ use core::str;
 
 use crate::foundation::MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH;
 
+mod construction_command;
 mod foundation_command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +165,10 @@ impl BinaryWriter {
         self.extend(&[value])
     }
 
+    pub fn write_u16(&mut self, value: u16) -> CanonicalResult<()> {
+        self.extend(&value.to_le_bytes())
+    }
+
     pub fn write_bytes(&mut self, value: &[u8]) -> CanonicalResult<()> {
         let length = u32::try_from(value.len()).map_err(|_| {
             CanonicalError::new(
@@ -218,6 +223,20 @@ pub(super) fn run_foundation_command(input: &[u8]) -> Vec<u8> {
     }
 
     match foundation_command::run(input) {
+        Ok(payload) => encode_success(payload),
+        Err(error) => encode_error(error),
+    }
+}
+
+pub(super) fn run_construction_command(input: &[u8]) -> Vec<u8> {
+    if input.len() > MAXIMUM_FOUNDATION_COPIED_BUFFER_BYTE_LENGTH {
+        return encode_error(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "construction command exceeds the copied-buffer limit",
+        ));
+    }
+
+    match construction_command::run(input) {
         Ok(payload) => encode_success(payload),
         Err(error) => encode_error(error),
     }

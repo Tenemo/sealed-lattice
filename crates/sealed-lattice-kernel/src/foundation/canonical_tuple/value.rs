@@ -133,6 +133,15 @@ impl CanonicalItem {
         })
     }
 
+    pub fn nested_tuple(value: &CanonicalTuple) -> Result<Self, CanonicalCodecError> {
+        let canonical_bytes = value.encode()?;
+        ensure_default_item_limit(&canonical_bytes)?;
+        Ok(Self {
+            item_type: CanonicalItemType::NestedTuple,
+            canonical_bytes,
+        })
+    }
+
     pub fn nested_tuple_list(values: &[CanonicalTuple]) -> Result<Self, CanonicalCodecError> {
         let limits = CanonicalDecodeLimits::default();
         if values.len() > limits.maximum_item_count {

@@ -27,7 +27,7 @@ const manifestInput = (optionCount: number) => ({
 });
 
 describe('foundation ceremony runtime with the scalar WASM kernel', () => {
-    it('exports only the foundation command ABI and standard WASM globals', async () => {
+    it('exports only the owned command ABIs and standard WASM globals', async () => {
         const module = await WebAssembly.compile(await readFile(kernelUrl));
         expect(WebAssembly.Module.exports(module)).toEqual([
             { kind: 'memory', name: 'memory' },
@@ -36,6 +36,10 @@ describe('foundation ceremony runtime with the scalar WASM kernel', () => {
             {
                 kind: 'function',
                 name: 'sealed_lattice_foundation_command_with_length',
+            },
+            {
+                kind: 'function',
+                name: 'sealed_lattice_construction_command_with_length',
             },
             { kind: 'global', name: '__data_end' },
             { kind: 'global', name: '__heap_base' },
