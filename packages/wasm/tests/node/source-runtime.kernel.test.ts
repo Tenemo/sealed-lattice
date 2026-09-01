@@ -30,6 +30,12 @@ import {
     type JointContinuationPlan,
 } from '../../src/joint-continuation-runtime.js';
 import {
+    openPaddedContinuationRuntime,
+    paddedContinuationChunkByteLength,
+    paddedContinuationGateMaterialByteLength,
+    paddedContinuationLabelEntropyByteLength,
+} from '../../src/padded-continuation-runtime.js';
+import {
     openPairEncryptionRuntime,
     pairEncryptionKeyGenerationRandomnessByteLength,
 } from '../../src/pair-encryption-runtime.js';
@@ -142,6 +148,152 @@ const concatenateBytes = (chunks: readonly Uint8Array[]): Uint8Array => {
     return output;
 };
 
+const deterministicPaddedLabelEntropy = (
+    length: number,
+    seed: bigint,
+): Uint8Array => {
+    const entropy = deterministicBytes(length, seed);
+    for (let offset = 0; offset < entropy.byteLength; offset += 81) {
+        entropy[offset + 80] = (entropy[offset + 80] ?? 0) & 1;
+        let labelsEqual = true;
+        for (let byte = 0; byte < 40; byte += 1) {
+            if (entropy[offset + byte] !== entropy[offset + 40 + byte]) {
+                labelsEqual = false;
+                break;
+            }
+        }
+        if (labelsEqual) {
+            entropy[offset + 40] = (entropy[offset + 40] ?? 0) ^ 1;
+        }
+    }
+    return entropy;
+};
+
+const xorPaddedModule = (output: Uint8Array, input: Uint8Array): void => {
+    for (let byte = 0; byte < output.byteLength; byte += 1) {
+        output[byte] = (output[byte] ?? 0) ^ (input[byte] ?? 0);
+    }
+};
+
+const addScaledPaddedModule = (
+    output: Uint8Array,
+    input: Uint8Array,
+    scalar: number,
+): void => {
+    for (let byte = 0; byte < output.byteLength; byte += 1) {
+        const inputByte = input[byte] ?? 0;
+        const low = multiplyFieldValues(inputByte & 0x0f, scalar);
+        const high = multiplyFieldValues(inputByte >> 4, scalar);
+        output[byte] = (output[byte] ?? 0) ^ low ^ (high << 4);
+    }
+};
+
+const deterministicPaddedModule = (identity: bigint): Uint8Array => {
+    const encodedIdentity = new Uint8Array(8);
+    new DataView(encodedIdentity.buffer).setBigUint64(0, identity, true);
+    return Uint8Array.from(
+        createHash('shake256', { outputLength: 40 })
+            .update(encodedIdentity)
+            .digest(),
+    );
+};
+
+const paddedModulePolynomial = (
+    gateIndex: number,
+    receiverPosition: number,
+    family: number,
+    degree: number,
+): Uint8Array[] =>
+    Array.from({ length: degree + 1 }, (_unused, coefficient) =>
+        deterministicPaddedModule(
+            1n +
+                BigInt(
+                    ((gateIndex * participantCount + receiverPosition) * 3 +
+                        family) *
+                        16 +
+                        coefficient,
+                ),
+        ),
+    );
+
+const evaluatePaddedModulePolynomial = (
+    coefficients: readonly Uint8Array[],
+    point: number,
+): Uint8Array => {
+    let value = new Uint8Array(40);
+    for (const coefficient of [...coefficients].reverse()) {
+        const next = Uint8Array.from(coefficient);
+        addScaledPaddedModule(next, value, point);
+        value = next;
+    }
+    return value;
+};
+
+const explicitPaddedGateMaterial = (
+    participantPosition: number,
+    gateIndex: number,
+): Uint8Array => {
+    const ownAffineA = paddedModulePolynomial(
+        gateIndex,
+        participantPosition,
+        0,
+        9,
+    );
+    const ownAffineB = paddedModulePolynomial(
+        gateIndex,
+        participantPosition,
+        1,
+        3,
+    );
+    const chunks: Uint8Array[] = [
+        ownAffineA[0] ?? new Uint8Array(),
+        ownAffineB[0] ?? new Uint8Array(),
+    ];
+    for (
+        let receiverPosition = 0;
+        receiverPosition < participantCount;
+        receiverPosition += 1
+    ) {
+        const affineA = paddedModulePolynomial(
+            gateIndex,
+            receiverPosition,
+            0,
+            9,
+        );
+        const affineB = paddedModulePolynomial(
+            gateIndex,
+            receiverPosition,
+            1,
+            3,
+        );
+        const affineAEvaluation = evaluatePaddedModulePolynomial(
+            affineA,
+            participantPosition + 1,
+        );
+        chunks.push(
+            evaluatePaddedModulePolynomial(affineB, participantPosition + 1),
+        );
+        const finalPad = Uint8Array.from(affineAEvaluation);
+        for (let basis = 0; basis < 3; basis += 1) {
+            const pad = deterministicPaddedModule(
+                1n +
+                    (1n << 40n) +
+                    BigInt(
+                        ((gateIndex * participantCount + receiverPosition) *
+                            participantCount +
+                            participantPosition) *
+                            4 +
+                            basis,
+                    ),
+            );
+            chunks.push(pad);
+            xorPaddedModule(finalPad, pad);
+        }
+        chunks.push(finalPad);
+    }
+    return concatenateBytes(chunks);
+};
+
 const encodeJointContinuationPlanForRawCommand = (
     plan: JointContinuationPlan,
 ): Uint8Array => {
@@ -171,12 +323,23 @@ const encodeJointContinuationPlanForRawCommand = (
     return bytes;
 };
 
-const hashJointContinuationBody = (body: Uint8Array): Uint8Array => {
-    const domain = new TextEncoder().encode(
-        'sealed-lattice/joint-continuation/body/v1',
-    );
+const hashFoundationVariableBytes = (
+    domainText: string,
+    bytes: Uint8Array,
+): Uint8Array => {
+    const domain = new TextEncoder().encode(domainText);
     const frame = new Uint8Array(
-        2 + 2 + 4 + 2 + 4 + 4 + domain.byteLength + 2 + 4 + 4 + body.byteLength,
+        2 +
+            2 +
+            4 +
+            2 +
+            4 +
+            4 +
+            domain.byteLength +
+            2 +
+            4 +
+            4 +
+            bytes.byteLength,
     );
     const view = new DataView(frame.buffer);
     let offset = 0;
@@ -196,15 +359,21 @@ const hashJointContinuationBody = (body: Uint8Array): Uint8Array => {
     offset += domain.byteLength;
     view.setUint16(offset, 1, true);
     offset += 2;
-    view.setUint32(offset, body.byteLength + 4, true);
+    view.setUint32(offset, bytes.byteLength + 4, true);
     offset += 4;
-    view.setUint32(offset, body.byteLength, true);
+    view.setUint32(offset, bytes.byteLength, true);
     offset += 4;
-    frame.set(body, offset);
+    frame.set(bytes, offset);
     return Uint8Array.from(
         createHash('shake256', { outputLength: 64 }).update(frame).digest(),
     );
 };
+
+const hashJointContinuationBody = (body: Uint8Array): Uint8Array =>
+    hashFoundationVariableBytes(
+        'sealed-lattice/joint-continuation/body/v1',
+        body,
+    );
 
 describe('source fixation scalar WASM runtime', () => {
     it('derives the exact retained preparation, source correction, and signed variants', async () => {
@@ -1734,6 +1903,978 @@ describe('source fixation scalar WASM runtime', () => {
             ),
         ).toThrow(ConstructionKernelCommandError);
 
+        const paddedContinuationRuntime = openPaddedContinuationRuntime(kernel);
+        expect(
+            paddedContinuationLabelEntropyByteLength(jointContinuationPlan),
+        ).toBe(27_621);
+        expect(
+            paddedContinuationGateMaterialByteLength(jointContinuationPlan),
+        ).toBe(14_560);
+        expect(paddedContinuationChunkByteLength(jointContinuationPlan)).toBe(
+            69_099,
+        );
+
+        const paddedInputs = Array.from(
+            { length: participantCount },
+            (_unused, participantPosition) => ({
+                participantPosition,
+                initialWireValues:
+                    initialWireValues[participantPosition] ?? new Uint8Array(),
+                gateMaskShares: Uint8Array.from(
+                    gateMaskShares[participantPosition] ?? [],
+                ),
+                terminalMaskShares: Uint8Array.from(
+                    terminalMaskShares[participantPosition] ?? [],
+                ),
+                allocationNonce: deterministicBytes(
+                    32,
+                    0x710_000n + BigInt(participantPosition),
+                ),
+                labelEntropy: deterministicPaddedLabelEntropy(
+                    paddedContinuationLabelEntropyByteLength(
+                        jointContinuationPlan,
+                    ),
+                    0x720_000n + BigInt(participantPosition),
+                ),
+                gateMaterial: concatenateBytes(
+                    jointContinuationPlan.gates.map((_gate, gateIndex) =>
+                        explicitPaddedGateMaterial(
+                            participantPosition,
+                            gateIndex,
+                        ),
+                    ),
+                ),
+            }),
+        );
+        const paddedChunks: Uint8Array[] = [];
+        const paddedChunkIdentities: Uint8Array[] = [];
+        const paddedManifests: Uint8Array[] = [];
+        const paddedManifestIdentities: Uint8Array[] = [];
+        const paddedActivationSignatures: Uint8Array[] = [];
+        for (
+            let participantPosition = 0;
+            participantPosition < participantCount;
+            participantPosition += 1
+        ) {
+            const input = paddedInputs[participantPosition];
+            if (input === undefined) {
+                throw new Error('test padded input is absent');
+            }
+            const generated = paddedContinuationRuntime.generateParticipant(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                input,
+            );
+            expect(generated.chunk).toHaveLength(69_099);
+            expect(generated.manifest).toHaveLength(254);
+            expect(generated.chunk.subarray(0, 4)).toEqual(
+                new TextEncoder().encode('SLPC'),
+            );
+            expect(generated.manifest.subarray(0, 4)).toEqual(
+                new TextEncoder().encode('SLPM'),
+            );
+            expect(generated.chunkIdentity).toEqual(
+                hashFoundationVariableBytes(
+                    'sealed-lattice/padded-continuation/chunk/v1',
+                    generated.chunk,
+                ),
+            );
+            expect(generated.manifestIdentity).toEqual(
+                hashFoundationVariableBytes(
+                    'sealed-lattice/padded-continuation/manifest/v1',
+                    generated.manifest,
+                ),
+            );
+            const activationSecretKey =
+                signatureSecretKeys[participantPosition]?.[3];
+            if (activationSecretKey === undefined) {
+                throw new Error('test padded activation key is absent');
+            }
+            paddedChunks.push(generated.chunk);
+            paddedChunkIdentities.push(generated.chunkIdentity);
+            paddedManifests.push(generated.manifest);
+            paddedManifestIdentities.push(generated.manifestIdentity);
+            paddedActivationSignatures.push(
+                paddedContinuationRuntime.encodeActivationSignature(
+                    participantPosition,
+                    generated.manifestIdentity,
+                    signatureRuntime.signBodyIdentity(
+                        activationSecretKey,
+                        generated.manifestIdentity,
+                    ),
+                ),
+            );
+        }
+
+        const observedPaddedEvaluationRequestByteLengths: number[] = [];
+        const recordingPaddedContinuationRuntime =
+            openPaddedContinuationRuntime({
+                executeCommand: (request) => {
+                    if (request[0] === 40) {
+                        observedPaddedEvaluationRequestByteLengths.push(
+                            request.byteLength,
+                        );
+                    }
+                    return kernel.executeCommand(request);
+                },
+                measureResources: () => kernel.measureResources(),
+            });
+        const evaluatedPadded =
+            recordingPaddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                paddedManifests,
+                paddedActivationSignatures,
+                paddedChunks,
+            );
+        expect(
+            Buffer.from(paddedChunkIdentities[0] ?? new Uint8Array()).toString(
+                'hex',
+            ),
+        ).toBe(
+            'ecdb906e707e8a55c381ab1b1b81b5e14e21eba0d84ab4353f2e5b8d0e85d133c49fca3f13e14a29c3fb19bbe3d6f66bd9203b48448440bb482d8589c7b337d6',
+        );
+        expect(paddedManifests[0]).toEqual(
+            Uint8Array.from(
+                Buffer.from(
+                    '534c504d01009f67e3d94c776f2ba59d87ea059d545dd43f166054f0ee716aa1d532986da34a9d3c68100bb5f9be9c36d9a06e954ba283ca7d0a570f4f8d0aafbbfcdeb9cd766fb96c7ddb8fd1d847b8608460675c03ac902440d103fc97a23c5df76d08418514029b16ed4443549d75ff335aaeba2d4e0c28efd2b0fe28a2b4f1b870b7e1410a000000010000c4c722b87319a38e0bf5a0c7908b52a0572f230fd576ec7d71e96c624008f60100000000000000070000000101eb0d0100ecdb906e707e8a55c381ab1b1b81b5e14e21eba0d84ab4353f2e5b8d0e85d133c49fca3f13e14a29c3fb19bbe3d6f66bd9203b48448440bb482d8589c7b337d6',
+                    'hex',
+                ),
+            ),
+        );
+        const firstPaddedChunk = paddedChunks[0];
+        const firstPaddedManifest = paddedManifests[0];
+        if (
+            firstPaddedChunk === undefined ||
+            firstPaddedManifest === undefined
+        ) {
+            throw new Error('test padded carrier is absent');
+        }
+        const firstChunkView = new DataView(
+            firstPaddedChunk.buffer,
+            firstPaddedChunk.byteOffset,
+            firstPaddedChunk.byteLength,
+        );
+        const firstManifestView = new DataView(
+            firstPaddedManifest.buffer,
+            firstPaddedManifest.byteOffset,
+            firstPaddedManifest.byteLength,
+        );
+        expect(firstPaddedChunk.subarray(0, 4)).toEqual(
+            new TextEncoder().encode('SLPC'),
+        );
+        expect(firstChunkView.getUint16(4, true)).toBe(1);
+        expect(firstPaddedChunk.subarray(6, 70)).toEqual(target.targetIdentity);
+        expect(firstPaddedChunk.subarray(70, 134)).toEqual(
+            Uint8Array.from(
+                Buffer.from(
+                    '6fb96c7ddb8fd1d847b8608460675c03ac902440d103fc97a23c5df76d08418514029b16ed4443549d75ff335aaeba2d4e0c28efd2b0fe28a2b4f1b870b7e141',
+                    'hex',
+                ),
+            ),
+        );
+        expect(firstChunkView.getUint16(134, true)).toBe(10);
+        expect(firstChunkView.getUint16(136, true)).toBe(0);
+        expect(firstChunkView.getUint16(138, true)).toBe(1);
+        expect(firstPaddedChunk.subarray(140, 172)).toEqual(
+            paddedInputs[0]?.allocationNonce,
+        );
+        expect(firstChunkView.getUint32(172, true)).toBe(0);
+        expect(firstChunkView.getUint32(176, true)).toBe(0);
+        expect(firstChunkView.getUint32(180, true)).toBe(7);
+        expect(firstPaddedChunk.subarray(184, 186)).toEqual(
+            Uint8Array.of(1, 1),
+        );
+        expect(firstPaddedChunk.subarray(186, 250)).toEqual(new Uint8Array(64));
+        expect(firstPaddedManifest.subarray(0, 4)).toEqual(
+            new TextEncoder().encode('SLPM'),
+        );
+        expect(firstManifestView.getUint16(4, true)).toBe(1);
+        expect(firstPaddedManifest.subarray(6, 172)).toEqual(
+            firstPaddedChunk.subarray(6, 172),
+        );
+        expect(firstManifestView.getUint32(172, true)).toBe(1);
+        expect(firstManifestView.getUint32(176, true)).toBe(0);
+        expect(firstManifestView.getUint32(180, true)).toBe(7);
+        expect(firstPaddedManifest.subarray(184, 186)).toEqual(
+            Uint8Array.of(1, 1),
+        );
+        expect(firstManifestView.getUint32(186, true)).toBe(69_099);
+        expect(firstPaddedManifest.subarray(190, 254)).toEqual(
+            paddedChunkIdentities[0],
+        );
+        expect(
+            Buffer.from(
+                paddedManifestIdentities[0] ?? new Uint8Array(),
+            ).toString('hex'),
+        ).toBe(
+            'c599a7052a543529ed053f77c7a146dfabe374d9feada206c5fbfa5c3d35b098a6ee0af12658ad3bf15878e6899884675de0fef4cb4cf5932db625bdeea6e821',
+        );
+        expect(Buffer.from(evaluatedPadded.batchIdentity).toString('hex')).toBe(
+            '33f51b3fbf0e9587c51d196e8ecf068ad9ef45b5c90fd8c1e8c3c20449255ed9892cc7a18d52b1155698a4cd4524686edcb18fb2e7b8e5139ed865226dcff630',
+        );
+        expect(evaluatedPadded.terminalBits).toEqual(
+            evaluatedJointContinuation.terminalBits,
+        );
+        expect(evaluatedPadded.batchIdentity).toHaveLength(64);
+        expect(observedPaddedEvaluationRequestByteLengths).toEqual([1_479_379]);
+        expect(
+            observedPaddedEvaluationRequestByteLengths[0],
+        ).toBeLessThanOrEqual(1_572_864);
+        const nineSignatureEvaluation =
+            recordingPaddedContinuationRuntime.evaluateBatch(
+                {
+                    ...jointContinuationCertificate,
+                    signatures: finalitySignatures.slice(0, 9),
+                },
+                jointContinuationPlan,
+                paddedManifests,
+                paddedActivationSignatures,
+                paddedChunks,
+            );
+        const tenSignatureEvaluation =
+            recordingPaddedContinuationRuntime.evaluateBatch(
+                {
+                    ...jointContinuationCertificate,
+                    signatures: finalitySignatures,
+                },
+                jointContinuationPlan,
+                paddedManifests,
+                paddedActivationSignatures,
+                paddedChunks,
+            );
+        expect(nineSignatureEvaluation).toEqual(evaluatedPadded);
+        expect(tenSignatureEvaluation).toEqual(evaluatedPadded);
+        expect(observedPaddedEvaluationRequestByteLengths).toEqual([
+            1_479_379, 1_485_773, 1_492_167,
+        ]);
+        expect(
+            Math.max(...observedPaddedEvaluationRequestByteLengths),
+        ).toBeLessThanOrEqual(1_572_864);
+        expect(
+            paddedContinuationRuntime.evaluateBatch(
+                {
+                    ...jointContinuationCertificate,
+                    signatures: [
+                        ...jointContinuationCertificate.signatures,
+                    ].reverse(),
+                },
+                jointContinuationPlan,
+                paddedManifests,
+                paddedActivationSignatures,
+                paddedChunks,
+            ),
+        ).toEqual(evaluatedPadded);
+
+        const invalidPaddedGenerationOrderingRequest =
+            new ConstructionCommandWriter();
+        invalidPaddedGenerationOrderingRequest.writeU8(38);
+        writeRawCertificate(
+            invalidPaddedGenerationOrderingRequest,
+            invalidCertificate,
+        );
+        invalidPaddedGenerationOrderingRequest.writeBytes(nonReviewedPlanBytes);
+        expect(() =>
+            executeConstructionCommand(
+                kernel,
+                invalidPaddedGenerationOrderingRequest,
+                () => undefined,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: finality signature is invalid$/,
+        );
+
+        const paddedParticipantZero = paddedInputs[0];
+        if (paddedParticipantZero === undefined) {
+            throw new Error('test padded input is absent');
+        }
+        for (const field of [
+            'initialWireValues',
+            'gateMaskShares',
+            'terminalMaskShares',
+        ] as const) {
+            const noncanonical = Uint8Array.from(paddedParticipantZero[field]);
+            noncanonical[0] = 0x10;
+            expect(() =>
+                paddedContinuationRuntime.generateParticipant(
+                    jointContinuationCertificate,
+                    jointContinuationPlan,
+                    { ...paddedParticipantZero, [field]: noncanonical },
+                ),
+            ).toThrowError(
+                /^InvalidProtocolObject: padded continuation body is invalid$/,
+            );
+        }
+        const validPaddedGenerationOrderingRequest =
+            new ConstructionCommandWriter();
+        validPaddedGenerationOrderingRequest.writeU8(38);
+        writeRawCertificate(
+            validPaddedGenerationOrderingRequest,
+            jointContinuationCertificate,
+        );
+        validPaddedGenerationOrderingRequest.writeBytes(nonReviewedPlanBytes);
+        validPaddedGenerationOrderingRequest.writeU16(
+            paddedParticipantZero.participantPosition,
+        );
+        validPaddedGenerationOrderingRequest.writeBytes(
+            paddedParticipantZero.initialWireValues,
+        );
+        validPaddedGenerationOrderingRequest.writeBytes(
+            paddedParticipantZero.gateMaskShares,
+        );
+        validPaddedGenerationOrderingRequest.writeBytes(
+            paddedParticipantZero.terminalMaskShares,
+        );
+        validPaddedGenerationOrderingRequest.writeBytes(
+            paddedParticipantZero.allocationNonce,
+        );
+        validPaddedGenerationOrderingRequest.writeBytes(
+            paddedParticipantZero.labelEntropy,
+        );
+        validPaddedGenerationOrderingRequest.writeBytes(
+            paddedParticipantZero.gateMaterial,
+        );
+        expect(() =>
+            executeConstructionCommand(
+                kernel,
+                validPaddedGenerationOrderingRequest,
+                () => undefined,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation plan is invalid$/,
+        );
+
+        const invalidPaddedEvaluationOrderingRequest =
+            new ConstructionCommandWriter();
+        invalidPaddedEvaluationOrderingRequest.writeU8(40);
+        writeRawCertificate(
+            invalidPaddedEvaluationOrderingRequest,
+            invalidCertificate,
+        );
+        invalidPaddedEvaluationOrderingRequest.writeBytes(nonReviewedPlanBytes);
+        expect(() =>
+            executeConstructionCommand(
+                kernel,
+                invalidPaddedEvaluationOrderingRequest,
+                () => undefined,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: finality signature is invalid$/,
+        );
+
+        const validPaddedEvaluationOrderingRequest =
+            new ConstructionCommandWriter();
+        validPaddedEvaluationOrderingRequest.writeU8(40);
+        writeRawCertificate(
+            validPaddedEvaluationOrderingRequest,
+            jointContinuationCertificate,
+        );
+        validPaddedEvaluationOrderingRequest.writeBytes(nonReviewedPlanBytes);
+        expect(() =>
+            executeConstructionCommand(
+                kernel,
+                validPaddedEvaluationOrderingRequest,
+                () => undefined,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation plan is invalid$/,
+        );
+
+        const stalePaddedSignatures = paddedActivationSignatures.map(
+            (signature) => Uint8Array.from(signature),
+        );
+        const staleLastSignature =
+            stalePaddedSignatures[stalePaddedSignatures.length - 1];
+        if (staleLastSignature === undefined) {
+            throw new Error('test padded signature is absent');
+        }
+        staleLastSignature[staleLastSignature.byteLength - 1] =
+            (staleLastSignature[staleLastSignature.byteLength - 1] ?? 0) ^ 1;
+        expect(() =>
+            paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                paddedManifests,
+                stalePaddedSignatures,
+                paddedChunks,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation signature is invalid$/,
+        );
+
+        const malformedEarlyChunks = paddedChunks.map((chunk) =>
+            Uint8Array.from(chunk),
+        );
+        const malformedEarlyChunk = malformedEarlyChunks[0];
+        if (malformedEarlyChunk === undefined) {
+            throw new Error('test padded chunk is absent');
+        }
+        malformedEarlyChunk[0] = (malformedEarlyChunk[0] ?? 0) ^ 1;
+        expect(() =>
+            paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                paddedManifests,
+                stalePaddedSignatures,
+                malformedEarlyChunks,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation signature is invalid$/,
+        );
+
+        const evaluateSignedPaddedInventory = (
+            chunks: readonly Uint8Array[],
+            manifests: readonly Uint8Array[],
+        ): void => {
+            const signatures = manifests.map(
+                (manifest, participantPosition) => {
+                    const manifestIdentity = hashFoundationVariableBytes(
+                        'sealed-lattice/padded-continuation/manifest/v1',
+                        manifest,
+                    );
+                    return paddedContinuationRuntime.encodeActivationSignature(
+                        participantPosition,
+                        manifestIdentity,
+                        signatureRuntime.signBodyIdentity(
+                            signatureSecretKeys[participantPosition]?.[3] ??
+                                new Uint8Array(),
+                            manifestIdentity,
+                        ),
+                    );
+                },
+            );
+            paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                manifests,
+                signatures,
+                chunks,
+            );
+        };
+        const evaluateSignedPaddedVariant = (
+            chunk: Uint8Array,
+            manifest: Uint8Array,
+        ): void =>
+            evaluateSignedPaddedInventory(
+                [chunk, ...paddedChunks.slice(1)],
+                [manifest, ...paddedManifests.slice(1)],
+            );
+        const manifestForChunk = (chunk: Uint8Array): Uint8Array => {
+            const manifest = Uint8Array.from(firstPaddedManifest);
+            manifest.set(
+                hashFoundationVariableBytes(
+                    'sealed-lattice/padded-continuation/chunk/v1',
+                    chunk,
+                ),
+                190,
+            );
+            return manifest;
+        };
+        const firstMaskedMapOffset = 250 + 4 * 4 * 41 + 35 * 4 * 41 + 4 * 41;
+        const noncanonicalMaskedMapChunk = Uint8Array.from(firstPaddedChunk);
+        noncanonicalMaskedMapChunk[firstMaskedMapOffset] =
+            (noncanonicalMaskedMapChunk[firstMaskedMapOffset] ?? 0) | 0x10;
+        expect(() =>
+            evaluateSignedPaddedVariant(
+                noncanonicalMaskedMapChunk,
+                manifestForChunk(noncanonicalMaskedMapChunk),
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation body is invalid$/,
+        );
+
+        const nonbinaryMaskedChunks = paddedChunks.map((chunk) => {
+            const changed = Uint8Array.from(chunk);
+            changed[firstMaskedMapOffset] =
+                (changed[firstMaskedMapOffset] ?? 0) ^ 2;
+            return changed;
+        });
+        const nonbinaryMaskedManifests = nonbinaryMaskedChunks.map(
+            (chunk, participantPosition) => {
+                const manifest = Uint8Array.from(
+                    paddedManifests[participantPosition] ?? new Uint8Array(),
+                );
+                manifest.set(
+                    hashFoundationVariableBytes(
+                        'sealed-lattice/padded-continuation/chunk/v1',
+                        chunk,
+                    ),
+                    190,
+                );
+                return manifest;
+            },
+        );
+        expect(() =>
+            evaluateSignedPaddedInventory(
+                nonbinaryMaskedChunks,
+                nonbinaryMaskedManifests,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation codeword is invalid$/,
+        );
+
+        const firstJointRowsOffset = firstMaskedMapOffset + 1;
+        const firstContinuationRowsOffset =
+            firstJointRowsOffset + 10 * 4 * 2 * 40;
+        const paddedGatePayloadByteLength =
+            35 * 4 * 41 + 4 * 41 + 1 + 10 * 4 * 2 * 40 + 2 * 81 + 3 * 41;
+        for (const { gateIndex, selectedRow } of [
+            { gateIndex: 0, selectedRow: 0 },
+            { gateIndex: 1, selectedRow: 1 },
+        ] as const) {
+            const selectedRowOffset =
+                firstContinuationRowsOffset +
+                gateIndex * paddedGatePayloadByteLength +
+                selectedRow * 81;
+            for (
+                let authenticatorByte = 0;
+                authenticatorByte < 40;
+                authenticatorByte += 1
+            ) {
+                const chunk = Uint8Array.from(firstPaddedChunk);
+                const offset = selectedRowOffset + 41 + authenticatorByte;
+                chunk[offset] = (chunk[offset] ?? 0) ^ 1;
+                expect(() =>
+                    evaluateSignedPaddedVariant(chunk, manifestForChunk(chunk)),
+                ).toThrowError(
+                    /^InvalidProtocolObject: padded continuation authentication failed$/,
+                );
+            }
+
+            const malformedTokenChunk = Uint8Array.from(firstPaddedChunk);
+            malformedTokenChunk[selectedRowOffset + 40] =
+                (malformedTokenChunk[selectedRowOffset + 40] ?? 0) ^ 2;
+            expect(() =>
+                evaluateSignedPaddedVariant(
+                    malformedTokenChunk,
+                    manifestForChunk(malformedTokenChunk),
+                ),
+            ).toThrowError(
+                /^InvalidProtocolObject: padded continuation body is invalid$/,
+            );
+        }
+        const chunkMutationCases: readonly Readonly<{
+            offset: number;
+            expected: RegExp;
+            replacement?: number;
+        }>[] = [
+            {
+                offset: 0,
+                expected:
+                    /^InvalidProtocolObject: padded continuation context is invalid$/,
+            },
+            {
+                offset: 6,
+                expected:
+                    /^InvalidProtocolObject: padded continuation context is invalid$/,
+            },
+            {
+                offset: 136,
+                replacement: 10,
+                expected:
+                    /^InvalidProtocolObject: padded continuation participant position is invalid$/,
+            },
+            {
+                offset: 172,
+                expected:
+                    /^InvalidProtocolObject: padded continuation chunk is invalid$/,
+            },
+            {
+                offset: 184,
+                expected:
+                    /^InvalidProtocolObject: padded continuation chunk is invalid$/,
+            },
+            {
+                offset: 186,
+                expected:
+                    /^InvalidProtocolObject: padded continuation chunk is invalid$/,
+            },
+        ];
+        for (const { offset, replacement, expected } of chunkMutationCases) {
+            const chunk = Uint8Array.from(firstPaddedChunk);
+            if (replacement === undefined) {
+                chunk[offset] = (chunk[offset] ?? 0) ^ 1;
+            } else {
+                new DataView(
+                    chunk.buffer,
+                    chunk.byteOffset,
+                    chunk.byteLength,
+                ).setUint16(offset, replacement, true);
+            }
+            const manifest = manifestForChunk(chunk);
+            expect(() =>
+                evaluateSignedPaddedVariant(chunk, manifest),
+            ).toThrowError(expected);
+        }
+
+        const manifestMutationCases: readonly Readonly<{
+            offset: number;
+            expected: RegExp;
+        }>[] = [
+            {
+                offset: 0,
+                expected:
+                    /^InvalidProtocolObject: padded continuation context is invalid$/,
+            },
+            {
+                offset: 140,
+                expected:
+                    /^InvalidProtocolObject: padded continuation context is invalid$/,
+            },
+            {
+                offset: 172,
+                expected:
+                    /^InvalidProtocolObject: padded continuation manifest is invalid$/,
+            },
+            {
+                offset: 180,
+                expected:
+                    /^InvalidProtocolObject: padded continuation manifest is invalid$/,
+            },
+            {
+                offset: 184,
+                expected:
+                    /^InvalidProtocolObject: padded continuation manifest is invalid$/,
+            },
+            {
+                offset: 186,
+                expected:
+                    /^InvalidProtocolObject: padded continuation manifest is invalid$/,
+            },
+            {
+                offset: 190,
+                expected:
+                    /^InvalidProtocolObject: padded continuation chunk is invalid$/,
+            },
+        ];
+        for (const { offset, expected } of manifestMutationCases) {
+            const manifest = Uint8Array.from(firstPaddedManifest);
+            manifest[offset] = (manifest[offset] ?? 0) ^ 1;
+            expect(() =>
+                evaluateSignedPaddedVariant(firstPaddedChunk, manifest),
+            ).toThrowError(expected);
+        }
+
+        const losingForkBatchIdentities: Uint8Array[] = [];
+        const losingForkParticipants: {
+            chunk: Uint8Array;
+            manifest: Uint8Array;
+        }[] = [];
+        for (let variant = 0; variant < 2; variant += 1) {
+            const baseInput = paddedInputs[0];
+            if (baseInput === undefined) {
+                throw new Error('test padded fork input is absent');
+            }
+            const forkGateMaterial = Uint8Array.from(baseInput.gateMaterial);
+            const gateDelta = deterministicPaddedModule(
+                0x8800n + BigInt(variant),
+            );
+            const constantDelta = new Uint8Array(40);
+            addScaledPaddedModule(constantDelta, gateDelta, 4);
+            for (let byte = 0; byte < 40; byte += 1) {
+                forkGateMaterial[byte] =
+                    (forkGateMaterial[byte] ?? 0) ^ (constantDelta[byte] ?? 0);
+                const firstReceiverFirstPad = 3 * 40 + byte;
+                forkGateMaterial[firstReceiverFirstPad] =
+                    (forkGateMaterial[firstReceiverFirstPad] ?? 0) ^
+                    (gateDelta[byte] ?? 0);
+            }
+            const fork = paddedContinuationRuntime.generateParticipant(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                {
+                    ...baseInput,
+                    allocationNonce: deterministicBytes(
+                        32,
+                        0x730_000n + BigInt(variant),
+                    ),
+                    labelEntropy: deterministicPaddedLabelEntropy(
+                        paddedContinuationLabelEntropyByteLength(
+                            jointContinuationPlan,
+                        ),
+                        0x740_000n + BigInt(variant),
+                    ),
+                    gateMaterial: forkGateMaterial,
+                },
+            );
+            const forkSignature =
+                paddedContinuationRuntime.encodeActivationSignature(
+                    0,
+                    fork.manifestIdentity,
+                    signatureRuntime.signBodyIdentity(
+                        signatureSecretKeys[0]?.[3] ?? new Uint8Array(),
+                        fork.manifestIdentity,
+                    ),
+                );
+            const forkEvaluation = paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                [fork.manifest, ...paddedManifests.slice(1)],
+                [forkSignature, ...paddedActivationSignatures.slice(1)],
+                [fork.chunk, ...paddedChunks.slice(1)],
+            );
+            expect(forkEvaluation.terminalBits).toEqual(
+                evaluatedPadded.terminalBits,
+            );
+            expect(forkEvaluation.batchIdentity).not.toEqual(
+                evaluatedPadded.batchIdentity,
+            );
+            losingForkBatchIdentities.push(forkEvaluation.batchIdentity);
+            losingForkParticipants.push(fork);
+        }
+        expect(losingForkBatchIdentities[0]).not.toEqual(
+            losingForkBatchIdentities[1],
+        );
+        for (const [recipientIndex, donorIndex] of [
+            [0, 1],
+            [1, 0],
+        ] as const) {
+            const recipient = losingForkParticipants[recipientIndex];
+            const donor = losingForkParticipants[donorIndex];
+            if (recipient === undefined || donor === undefined) {
+                throw new Error('test padded fork participant is absent');
+            }
+            const transplantedChunk = Uint8Array.from(recipient.chunk);
+            transplantedChunk.set(
+                donor.chunk.subarray(
+                    firstContinuationRowsOffset,
+                    firstContinuationRowsOffset + 2 * 81,
+                ),
+                firstContinuationRowsOffset,
+            );
+            const transplantedManifest = Uint8Array.from(recipient.manifest);
+            transplantedManifest.set(
+                hashFoundationVariableBytes(
+                    'sealed-lattice/padded-continuation/chunk/v1',
+                    transplantedChunk,
+                ),
+                190,
+            );
+            expect(() =>
+                evaluateSignedPaddedVariant(
+                    transplantedChunk,
+                    transplantedManifest,
+                ),
+            ).toThrowError(
+                /^InvalidProtocolObject: padded continuation authentication failed$/,
+            );
+        }
+
+        const oneGateMaterialByteLength =
+            paddedContinuationGateMaterialByteLength(jointContinuationPlan) /
+            jointContinuationPlan.gates.length;
+        const invalidPaddedMaterial = Uint8Array.from(
+            paddedInputs[0]?.gateMaterial ?? new Uint8Array(),
+        );
+        invalidPaddedMaterial.fill(0, 40, 80);
+        expect(() =>
+            paddedContinuationRuntime.generateParticipant(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                {
+                    ...(paddedInputs[0] ??
+                        (() => {
+                            throw new Error('test padded input is absent');
+                        })()),
+                    gateMaterial: invalidPaddedMaterial,
+                },
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation gate material is invalid$/,
+        );
+
+        const equalPairEntropy = Uint8Array.from(
+            paddedInputs[0]?.labelEntropy ?? new Uint8Array(),
+        );
+        equalPairEntropy.copyWithin(40, 0, 40);
+        expect(() =>
+            paddedContinuationRuntime.generateParticipant(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                {
+                    ...(paddedInputs[0] ??
+                        (() => {
+                            throw new Error('test padded input is absent');
+                        })()),
+                    labelEntropy: equalPairEntropy,
+                },
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation label entropy is invalid$/,
+        );
+
+        const crossAlternativeMaterial = Uint8Array.from(
+            paddedInputs[0]?.gateMaterial ?? new Uint8Array(),
+        );
+        const crossAlternative = crossAlternativeMaterial.slice(
+            oneGateMaterialByteLength,
+            oneGateMaterialByteLength + 40,
+        );
+        xorPaddedModule(
+            crossAlternative,
+            crossAlternativeMaterial.subarray(
+                oneGateMaterialByteLength + 40,
+                oneGateMaterialByteLength + 80,
+            ),
+        );
+        crossAlternativeMaterial.set(crossAlternative, 0);
+        expect(() =>
+            paddedContinuationRuntime.generateParticipant(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                {
+                    ...(paddedInputs[0] ??
+                        (() => {
+                            throw new Error('test padded input is absent');
+                        })()),
+                    gateMaterial: crossAlternativeMaterial,
+                },
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation gate material is invalid$/,
+        );
+
+        const replayedPaddedMaterial = Uint8Array.from(
+            paddedInputs[0]?.gateMaterial ?? new Uint8Array(),
+        );
+        replayedPaddedMaterial.copyWithin(
+            oneGateMaterialByteLength,
+            0,
+            oneGateMaterialByteLength,
+        );
+        expect(() =>
+            paddedContinuationRuntime.generateParticipant(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                {
+                    ...(paddedInputs[0] ??
+                        (() => {
+                            throw new Error('test padded input is absent');
+                        })()),
+                    gateMaterial: replayedPaddedMaterial,
+                },
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation gate material is invalid$/,
+        );
+
+        const duplicatedNonceInput = paddedInputs[1];
+        const firstPaddedInput = paddedInputs[0];
+        if (
+            duplicatedNonceInput === undefined ||
+            firstPaddedInput === undefined
+        ) {
+            throw new Error('test padded duplicate-nonce input is absent');
+        }
+        const duplicatedNonceParticipant =
+            paddedContinuationRuntime.generateParticipant(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                {
+                    ...duplicatedNonceInput,
+                    allocationNonce: firstPaddedInput.allocationNonce,
+                },
+            );
+        const duplicateNonceSignature =
+            paddedContinuationRuntime.encodeActivationSignature(
+                1,
+                duplicatedNonceParticipant.manifestIdentity,
+                signatureRuntime.signBodyIdentity(
+                    signatureSecretKeys[1]?.[3] ?? new Uint8Array(),
+                    duplicatedNonceParticipant.manifestIdentity,
+                ),
+            );
+        expect(() =>
+            paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                [
+                    paddedManifests[0] ?? new Uint8Array(),
+                    duplicatedNonceParticipant.manifest,
+                    ...paddedManifests.slice(2),
+                ],
+                [
+                    paddedActivationSignatures[0] ?? new Uint8Array(),
+                    duplicateNonceSignature,
+                    ...paddedActivationSignatures.slice(2),
+                ],
+                [
+                    paddedChunks[0] ?? new Uint8Array(),
+                    duplicatedNonceParticipant.chunk,
+                    ...paddedChunks.slice(2),
+                ],
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation reuses a label-allocation nonce$/,
+        );
+
+        const corruptPaddedChunks = paddedChunks.map((chunk) =>
+            Uint8Array.from(chunk),
+        );
+        const corruptFirstChunk = corruptPaddedChunks[0];
+        if (corruptFirstChunk === undefined) {
+            throw new Error('test padded chunk is absent');
+        }
+        const firstPaddedRowsOffset =
+            250 + 4 * 4 * 41 + 35 * 4 * 41 + 4 * 41 + 1;
+        corruptFirstChunk[firstPaddedRowsOffset] =
+            (corruptFirstChunk[firstPaddedRowsOffset] ?? 0) ^ 1;
+        corruptFirstChunk[firstPaddedRowsOffset + 40] =
+            (corruptFirstChunk[firstPaddedRowsOffset + 40] ?? 0) ^ 1;
+        const corruptChunkIdentity = hashFoundationVariableBytes(
+            'sealed-lattice/padded-continuation/chunk/v1',
+            corruptFirstChunk,
+        );
+        const corruptPaddedManifests = paddedManifests.map((manifest) =>
+            Uint8Array.from(manifest),
+        );
+        const corruptFirstManifest = corruptPaddedManifests[0];
+        if (corruptFirstManifest === undefined) {
+            throw new Error('test padded manifest is absent');
+        }
+        corruptFirstManifest.set(
+            corruptChunkIdentity,
+            corruptFirstManifest.byteLength - 64,
+        );
+        const corruptManifestIdentity = hashFoundationVariableBytes(
+            'sealed-lattice/padded-continuation/manifest/v1',
+            corruptFirstManifest,
+        );
+        const corruptPaddedSignatures = [...paddedActivationSignatures];
+        corruptPaddedSignatures[0] =
+            paddedContinuationRuntime.encodeActivationSignature(
+                0,
+                corruptManifestIdentity,
+                signatureRuntime.signBodyIdentity(
+                    signatureSecretKeys[0]?.[3] ?? new Uint8Array(),
+                    corruptManifestIdentity,
+                ),
+            );
+        expect(() =>
+            paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                jointContinuationPlan,
+                corruptPaddedManifests,
+                corruptPaddedSignatures,
+                corruptPaddedChunks,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation authentication failed$/,
+        );
+
+        expect(() =>
+            paddedContinuationRuntime.evaluateBatch(
+                jointContinuationCertificate,
+                {
+                    ...jointContinuationPlan,
+                    outputWires: [4, 7],
+                },
+                paddedManifests,
+                paddedActivationSignatures,
+                paddedChunks,
+            ),
+        ).toThrow(RangeError);
+
         expect(
             finalityRuntime.verifyCertificate(
                 target.targetBody,
@@ -1927,6 +3068,26 @@ describe('source fixation scalar WASM runtime', () => {
             ),
         ).toThrowError(
             /^InvalidProtocolObject: joint continuation requires a finalized computation target$/,
+        );
+        expect(() =>
+            paddedContinuationRuntime.generateParticipant(
+                noResultCertificate,
+                jointContinuationPlan,
+                paddedParticipantZero,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation requires a finalized computation target$/,
+        );
+        expect(() =>
+            paddedContinuationRuntime.evaluateBatch(
+                noResultCertificate,
+                jointContinuationPlan,
+                paddedManifests,
+                paddedActivationSignatures,
+                paddedChunks,
+            ),
+        ).toThrowError(
+            /^InvalidProtocolObject: padded continuation requires a finalized computation target$/,
         );
 
         const secondSubmissionCorrection = sourceRuntime.deriveHonestCorrection(

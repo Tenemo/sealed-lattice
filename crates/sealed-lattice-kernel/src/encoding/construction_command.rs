@@ -17,6 +17,11 @@ use crate::protocol::joint_continuation::{
     derive_affine_material, encode_activation_signature, evaluate_signed_batch,
     generate_participant_body,
 };
+use crate::protocol::padded_continuation::{
+    PaddedParticipantGenerationInput, encode_padded_activation_signature,
+    evaluate_signed_padded_batch, generate_padded_participant,
+    padded_participant_payload_byte_length,
+};
 use crate::protocol::pair_encryption::{
     ENCRYPTION_KEY_BYTE_LENGTH as PAIR_ENCRYPTION_KEY_BYTE_LENGTH, decrypt, encrypt,
     generate_key_pair,
@@ -72,6 +77,9 @@ const DERIVE_JOINT_CONTINUATION_AFFINE_MATERIAL: u8 = 34;
 const GENERATE_JOINT_CONTINUATION_PARTICIPANT_BODY: u8 = 35;
 const ENCODE_JOINT_CONTINUATION_ACTIVATION_SIGNATURE: u8 = 36;
 const EVALUATE_JOINT_CONTINUATION_BATCH: u8 = 37;
+const GENERATE_PADDED_CONTINUATION_PARTICIPANT: u8 = 38;
+const ENCODE_PADDED_CONTINUATION_ACTIVATION_SIGNATURE: u8 = 39;
+const EVALUATE_PADDED_CONTINUATION_BATCH: u8 = 40;
 
 pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
     let mut reader = BinaryReader::new(input);
@@ -118,6 +126,13 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
             encode_joint_continuation_activation_signature(&mut reader)
         }
         EVALUATE_JOINT_CONTINUATION_BATCH => evaluate_joint_continuation_batch(&mut reader),
+        GENERATE_PADDED_CONTINUATION_PARTICIPANT => {
+            generate_padded_continuation_participant(&mut reader)
+        }
+        ENCODE_PADDED_CONTINUATION_ACTIVATION_SIGNATURE => {
+            encode_padded_continuation_activation_signature(&mut reader)
+        }
+        EVALUATE_PADDED_CONTINUATION_BATCH => evaluate_padded_continuation_batch(&mut reader),
         command => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidEnum,
             format!("unsupported construction command: {command}"),
@@ -207,6 +222,87 @@ fn evaluate_joint_continuation_batch(reader: &mut BinaryReader<'_>) -> Canonical
     let evaluated =
         evaluate_signed_batch(&capability, &action_key_sets, &plan, &bodies, &signatures)
             .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_fixed(evaluated.batch_identity.as_bytes())?;
+    response.write_u16(
+        u16::try_from(evaluated.terminal_bits.len())
+            .map_err(|_| malformed_construction_length())?,
+    )?;
+    for bit in evaluated.terminal_bits {
+        response.write_u8(u8::from(bit))?;
+    }
+    Ok(response.into_bytes())
+}
+
+fn generate_padded_continuation_participant(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    let (capability, _) = read_verified_finality_capability(reader)?;
+    let plan = JointContinuationPlan::decode(reader.read_bytes()?).map_err(construction_error)?;
+    let participant_position = reader.read_u16()?;
+    let initial_wire_values = reader.read_bytes()?;
+    let gate_mask_shares = reader.read_bytes()?;
+    let terminal_mask_shares = reader.read_bytes()?;
+    let allocation_nonce = reader.read_bytes()?;
+    let label_entropy = reader.read_bytes()?;
+    let gate_material = reader.read_bytes()?;
+    let generated = generate_padded_participant(
+        &capability,
+        &plan,
+        PaddedParticipantGenerationInput {
+            participant_position,
+            initial_wire_values,
+            gate_mask_shares,
+            terminal_mask_shares,
+            allocation_nonce,
+            label_entropy,
+            gate_material,
+        },
+    )
+    .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_bytes(&generated.chunk)?;
+    response.write_fixed(generated.chunk_identity.as_bytes())?;
+    response.write_bytes(&generated.manifest)?;
+    response.write_fixed(generated.manifest_identity.as_bytes())?;
+    Ok(response.into_bytes())
+}
+
+fn encode_padded_continuation_activation_signature(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    bytes_response(
+        &encode_padded_activation_signature(
+            reader.read_u16()?,
+            read_hash512(reader)?,
+            reader.read_bytes()?,
+        )
+        .map_err(construction_error)?,
+    )
+}
+
+fn evaluate_padded_continuation_batch(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let (capability, action_key_sets) = read_verified_finality_capability(reader)?;
+    let plan = JointContinuationPlan::decode(reader.read_bytes()?).map_err(construction_error)?;
+    padded_participant_payload_byte_length(&plan).map_err(construction_error)?;
+    let participant_count = capability.target.context().participant_count;
+    let manifests = (0..participant_count)
+        .map(|_| Ok(reader.read_bytes()?.to_vec()))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let signatures = (0..participant_count)
+        .map(|_| Ok(reader.read_bytes()?.to_vec()))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let chunks = (0..participant_count)
+        .map(|_| Ok(reader.read_bytes()?.to_vec()))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let evaluated = evaluate_signed_padded_batch(
+        &capability,
+        &action_key_sets,
+        &manifests,
+        &signatures,
+        &chunks,
+    )
+    .map_err(construction_error)?;
     let mut response = BinaryWriter::new();
     response.write_fixed(evaluated.batch_identity.as_bytes())?;
     response.write_u16(
