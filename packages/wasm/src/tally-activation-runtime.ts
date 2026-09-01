@@ -33,7 +33,10 @@ export type ActivationChunkRange = Readonly<{
 
 type TallyActivationPlan = Readonly<{
     operationCount: number;
+    constantOperationCount: number;
+    exclusiveOrOperationCount: number;
     conjunctionCount: number;
+    negationOperationCount: number;
     outputBitCount: number;
     ranges: readonly ActivationChunkRange[];
 }>;
@@ -250,7 +253,10 @@ export const openTallyActivationRuntime = (
         request.writeU16(topCount);
         return executeConstructionCommand(kernel, request, (reader) => {
             const operationCount = reader.readU32();
+            const constantOperationCount = reader.readU32();
+            const exclusiveOrOperationCount = reader.readU32();
             const conjunctionCount = reader.readU32();
+            const negationOperationCount = reader.readU32();
             const outputBitCount = reader.readU16();
             const rangeCount = reader.readU16();
             const ranges = Array.from({ length: rangeCount }, () => ({
@@ -264,6 +270,11 @@ export const openTallyActivationRuntime = (
                 ranges[0]?.firstOperation !== 0 ||
                 lastRange?.operationEnd !== operationCount ||
                 !lastRange.includesTerminalRekey ||
+                operationCount !==
+                    constantOperationCount +
+                        exclusiveOrOperationCount +
+                        conjunctionCount +
+                        negationOperationCount ||
                 ranges.some(
                     (range, index) =>
                         range.firstOperation > range.operationEnd ||
@@ -279,7 +290,10 @@ export const openTallyActivationRuntime = (
             }
             return {
                 operationCount,
+                constantOperationCount,
+                exclusiveOrOperationCount,
                 conjunctionCount,
+                negationOperationCount,
                 outputBitCount,
                 ranges,
             };

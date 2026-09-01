@@ -250,18 +250,40 @@ fn plan_tally_activation(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u
     let top_count = reader.read_u16()?;
     let circuit = compile_completion_tally(top_count).map_err(construction_error)?;
     let ranges = activation_chunk_ranges(&circuit).map_err(construction_error)?;
+    let constant_count = circuit
+        .operations()
+        .iter()
+        .filter(|operation| matches!(operation, BooleanOperation::Constant(_)))
+        .count();
+    let exclusive_or_count = circuit
+        .operations()
+        .iter()
+        .filter(|operation| matches!(operation, BooleanOperation::ExclusiveOr { .. }))
+        .count();
     let conjunction_count = circuit
         .operations()
         .iter()
         .filter(|operation| matches!(operation, BooleanOperation::Conjunction { .. }))
         .count();
+    let negation_count = circuit
+        .operations()
+        .iter()
+        .filter(|operation| matches!(operation, BooleanOperation::Negation { .. }))
+        .count();
     let mut response = BinaryWriter::new();
     response.write_u32(
         u32::try_from(circuit.operations().len()).map_err(|_| malformed_construction_length())?,
     )?;
+    response
+        .write_u32(u32::try_from(constant_count).map_err(|_| malformed_construction_length())?)?;
+    response.write_u32(
+        u32::try_from(exclusive_or_count).map_err(|_| malformed_construction_length())?,
+    )?;
     response.write_u32(
         u32::try_from(conjunction_count).map_err(|_| malformed_construction_length())?,
     )?;
+    response
+        .write_u32(u32::try_from(negation_count).map_err(|_| malformed_construction_length())?)?;
     response.write_u16(
         u16::try_from(circuit.output_wires().len()).map_err(|_| malformed_construction_length())?,
     )?;
@@ -416,6 +438,7 @@ fn derive_finality_target_command(reader: &mut BinaryReader<'_>) -> CanonicalRes
         preparation_attempt: reader.read_u16()?,
         predecessor_identity: read_hash512(reader)?,
         verified_preparation_root: read_hash512(reader)?,
+        top_count: reader.read_u16()?,
     };
     let action_key_sets = (0..participant_count)
         .map(|_| {
@@ -457,6 +480,7 @@ fn derive_finality_target_command(reader: &mut BinaryReader<'_>) -> CanonicalRes
         response.write_fixed(source_identity.as_bytes())?;
     }
     response.write_u16(target_context.source_submission_bitmap)?;
+    response.write_u16(target_context.top_count)?;
     response.write_u16(verified.target.target_kind() as u16)?;
     response.write_u16(verified.target.quorum())?;
     Ok(response.into_bytes())
@@ -512,6 +536,7 @@ fn verify_finality_certificate_command(reader: &mut BinaryReader<'_>) -> Canonic
     response.write_u16(target.quorum())?;
     response.write_u16(target.target_kind() as u16)?;
     response.write_u16(target.context().source_submission_bitmap)?;
+    response.write_u16(target.context().top_count)?;
     response.write_fixed(target_identity.as_bytes())?;
     Ok(response.into_bytes())
 }

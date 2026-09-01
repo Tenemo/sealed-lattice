@@ -10,12 +10,12 @@ use super::preparation_parent::{ActionSignatureCarrier, ActionSignaturePurpose};
 use super::source::{SOURCE_ORDINAL, SourceContext, SourceDeclaration, verify_source_carrier};
 
 pub const COMPLETION_PROFILE_PARTICIPANT_COUNT: u16 = 10;
-pub const FINALITY_TARGET_BODY_BYTE_LENGTH: usize = 552;
+pub const FINALITY_TARGET_BODY_BYTE_LENGTH: usize = 560;
 pub const OUTPUT_ORDINAL: u64 = 0;
 pub const INDEPENDENT_HONEST_LOCK_LOSS_COUNT: u16 = 1;
 
 const FINALITY_TARGET_SCHEMA_IDENTIFIER: u16 = 0x0209;
-const FINALITY_TARGET_SCHEMA_VERSION: u16 = 1;
+const FINALITY_TARGET_SCHEMA_VERSION: u16 = 2;
 const FINALITY_TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/construction/finality-target/v1";
 const SOURCE_INVENTORY_ROOT_DOMAIN: &str = "sealed-lattice/construction/source-inventory-root/v1";
 const MINIMUM_PARTICIPANT_COUNT: u16 = 3;
@@ -93,6 +93,7 @@ pub struct FinalityDerivationContext {
     pub preparation_attempt: u16,
     pub predecessor_identity: Hash512,
     pub verified_preparation_root: Hash512,
+    pub top_count: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +108,7 @@ pub struct FinalityTargetContext {
     pub verified_preparation_root: Hash512,
     pub source_inventory_root: Hash512,
     pub source_submission_bitmap: u16,
+    pub top_count: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +125,9 @@ impl FinalityTarget {
         let admitted_bitmap = (1_u16 << context.participant_count) - 1;
         if context.source_submission_bitmap & !admitted_bitmap != 0 {
             return Err(FinalityError::UnsupportedSourceInventory);
+        }
+        if context.top_count == 0 || context.top_count > COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            return Err(FinalityError::WrongContext);
         }
         let target_kind = if context.source_submission_bitmap == 0 {
             FinalityTargetKind::NoResult
@@ -152,6 +157,7 @@ impl FinalityTarget {
                 CanonicalItem::hash512(self.context.verified_preparation_root.into_bytes()),
                 CanonicalItem::hash512(self.context.source_inventory_root.into_bytes()),
                 CanonicalItem::unsigned16(self.context.source_submission_bitmap),
+                CanonicalItem::unsigned16(self.context.top_count),
                 CanonicalItem::unsigned16(self.target_kind as u16),
                 CanonicalItem::unsigned64(self.output_ordinal),
                 CanonicalItem::unsigned16(self.quorum),
@@ -173,7 +179,7 @@ impl FinalityTarget {
             .map_err(|_| FinalityError::InvalidCanonicalEncoding)?;
         if tuple.schema_identifier != FINALITY_TARGET_SCHEMA_IDENTIFIER
             || tuple.schema_version != FINALITY_TARGET_SCHEMA_VERSION
-            || tuple.items.len() != 13
+            || tuple.items.len() != 14
         {
             return Err(FinalityError::WrongSchema);
         }
@@ -188,10 +194,11 @@ impl FinalityTarget {
             verified_preparation_root: read_hash512(&tuple.items[7])?,
             source_inventory_root: read_hash512(&tuple.items[8])?,
             source_submission_bitmap: read_unsigned16(&tuple.items[9])?,
+            top_count: read_unsigned16(&tuple.items[10])?,
         };
-        let target_kind = FinalityTargetKind::from_u16(read_unsigned16(&tuple.items[10])?)?;
-        let output_ordinal = read_unsigned64(&tuple.items[11])?;
-        let quorum = read_unsigned16(&tuple.items[12])?;
+        let target_kind = FinalityTargetKind::from_u16(read_unsigned16(&tuple.items[11])?)?;
+        let output_ordinal = read_unsigned64(&tuple.items[12])?;
+        let quorum = read_unsigned16(&tuple.items[13])?;
         let target = Self::new(context)?;
         if target.target_kind != target_kind
             || output_ordinal != OUTPUT_ORDINAL
@@ -316,6 +323,7 @@ pub fn derive_finality_target(
         verified_preparation_root: context.verified_preparation_root,
         source_inventory_root,
         source_submission_bitmap,
+        top_count: context.top_count,
     })?;
     let target_body = target.encode()?;
     let target_identity = target.body_identity()?;
@@ -501,6 +509,7 @@ mod tests {
             verified_preparation_root: hash(6),
             source_inventory_root: hash(7),
             source_submission_bitmap: submission_bitmap,
+            top_count: 1,
         })
         .expect("valid finality target")
     }
@@ -538,6 +547,32 @@ mod tests {
     }
 
     #[test]
+    fn three_malicious_participants_and_one_lock_loss_cannot_finalize_two_targets() {
+        let roster_mask = (1_u16 << COMPLETION_PROFILE_PARTICIPANT_COUNT) - 1;
+        let quorum_masks = (0_u16..=roster_mask)
+            .filter(|mask| mask.count_ones() == 8)
+            .collect::<Vec<_>>();
+        let corrupt_masks = (0_u16..=roster_mask)
+            .filter(|mask| mask.count_ones() == 3)
+            .collect::<Vec<_>>();
+        for left in &quorum_masks {
+            for right in &quorum_masks {
+                let intersection = left & right;
+                for corrupt in &corrupt_masks {
+                    let stable_honest = intersection & !corrupt & roster_mask;
+                    for lost_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT {
+                        let after_independent_loss = stable_honest & !(1_u16 << lost_position);
+                        assert!(
+                            after_independent_loss.count_ones() >= 2,
+                            "two completion quorums lost their stable honest intersection"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn target_round_trips_exact_computation_and_no_result_branches() {
         for (submission_bitmap, expected_kind) in [
             (0_u16, FinalityTargetKind::NoResult),
@@ -549,6 +584,38 @@ mod tests {
             assert_eq!(FinalityTarget::decode(&encoded).expect("decodes"), target);
             assert_eq!(target.target_kind(), expected_kind);
             assert_eq!(target.quorum(), 8);
+        }
+    }
+
+    #[test]
+    fn target_binds_every_admitted_top_count() {
+        let mut identities = Vec::new();
+        for top_count in 1..=COMPLETION_PROFILE_PARTICIPANT_COUNT {
+            let candidate = FinalityTarget::new(FinalityTargetContext {
+                top_count,
+                ..target(1).context()
+            })
+            .expect("admitted top count");
+            let encoded = candidate.encode().expect("encodes");
+            assert_eq!(FinalityTarget::decode(&encoded), Ok(candidate.clone()));
+            assert_eq!(candidate.context().top_count, top_count);
+            identities.push(candidate.body_identity().expect("identity"));
+        }
+        identities.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        identities.dedup();
+        assert_eq!(
+            identities.len(),
+            usize::from(COMPLETION_PROFILE_PARTICIPANT_COUNT)
+        );
+
+        for top_count in [0, COMPLETION_PROFILE_PARTICIPANT_COUNT + 1] {
+            assert_eq!(
+                FinalityTarget::new(FinalityTargetContext {
+                    top_count,
+                    ..target(1).context()
+                }),
+                Err(FinalityError::WrongContext)
+            );
         }
     }
 
@@ -577,5 +644,14 @@ mod tests {
         let mut encoded = target(1).encode().expect("encodes");
         *encoded.last_mut().expect("last byte") ^= 1;
         assert!(FinalityTarget::decode(&encoded).is_err());
+
+        let context = FinalityTargetContext {
+            top_count: 0,
+            ..target(0).context()
+        };
+        assert_eq!(
+            FinalityTarget::new(context),
+            Err(FinalityError::WrongContext)
+        );
     }
 }

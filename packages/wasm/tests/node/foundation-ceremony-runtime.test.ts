@@ -32,7 +32,14 @@ const makeKernel = () => {
         ...new Uint8Array(64).fill(0x11),
     ]);
     const executeCommand = vi.fn((_request: Uint8Array) => response);
-    const kernel: FoundationKernelCommandRuntime = { executeCommand };
+    const kernel: FoundationKernelCommandRuntime = {
+        executeCommand,
+        measureResources: () => ({
+            wasmMemoryByteLength: 0,
+            maximumRequestByteLength: 0,
+            maximumResponseByteLength: 0,
+        }),
+    };
     return { executeCommand, kernel };
 };
 

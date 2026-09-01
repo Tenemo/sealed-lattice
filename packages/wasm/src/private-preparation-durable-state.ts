@@ -1,10 +1,12 @@
-const databaseVersion = 3;
+const databaseVersion = 4;
 const rootStoreName = 'root';
 const actionStoreName = 'actions';
 const preparationStoreName = 'preparations';
 const slotStoreName = 'slots';
 const sourceStoreName = 'sources';
 const finalityStoreName = 'finalities';
+const activationStoreName = 'activations';
+const evaluationStoreName = 'evaluations';
 const rootRecordIdentifier = 'browser-local-hmac-root-v1';
 
 type ProtectedStoreName =
@@ -12,13 +14,34 @@ type ProtectedStoreName =
     | typeof preparationStoreName
     | typeof slotStoreName
     | typeof sourceStoreName
-    | typeof finalityStoreName;
+    | typeof finalityStoreName
+    | typeof activationStoreName
+    | typeof evaluationStoreName;
+
+const protectedStoreNames: readonly ProtectedStoreName[] = [
+    actionStoreName,
+    preparationStoreName,
+    slotStoreName,
+    sourceStoreName,
+    finalityStoreName,
+    activationStoreName,
+    evaluationStoreName,
+];
 
 export type ProtectedRecord = Readonly<{
     id: string;
     context: ArrayBuffer;
     nonce: ArrayBuffer;
     ciphertext: ArrayBuffer;
+}>;
+
+type ProtectedRecordStorageMeasurement = Readonly<{
+    storeName: ProtectedStoreName;
+    recordCount: number;
+    identifierUtf8ByteLength: number;
+    authenticatedContextByteLength: number;
+    nonceByteLength: number;
+    ciphertextByteLength: number;
 }>;
 
 type RootRecord = Readonly<{
@@ -100,14 +123,7 @@ const openDatabase = (name: string): Promise<IDBDatabase> =>
         const request = indexedDB.open(name, databaseVersion);
         request.addEventListener('upgradeneeded', () => {
             const database = request.result;
-            for (const storeName of [
-                rootStoreName,
-                actionStoreName,
-                preparationStoreName,
-                slotStoreName,
-                sourceStoreName,
-                finalityStoreName,
-            ]) {
+            for (const storeName of [rootStoreName, ...protectedStoreNames]) {
                 if (!database.objectStoreNames.contains(storeName)) {
                     database.createObjectStore(storeName, { keyPath: 'id' });
                 }
@@ -330,23 +346,11 @@ export class PrivatePreparationDurableState {
 
     async countProtectedRecords(): Promise<number> {
         const transaction = this.#database.transaction(
-            [
-                actionStoreName,
-                preparationStoreName,
-                slotStoreName,
-                sourceStoreName,
-                finalityStoreName,
-            ],
+            protectedStoreNames,
             'readonly',
         );
         const counts = await Promise.all(
-            [
-                actionStoreName,
-                preparationStoreName,
-                slotStoreName,
-                sourceStoreName,
-                finalityStoreName,
-            ].map((storeName) =>
+            protectedStoreNames.map((storeName) =>
                 requestResult<number>(
                     transaction.objectStore(storeName).count(),
                 ),
@@ -356,20 +360,70 @@ export class PrivatePreparationDurableState {
         return counts.reduce((sum, count) => sum + count, 0);
     }
 
+    async measureProtectedRecords(): Promise<
+        readonly ProtectedRecordStorageMeasurement[]
+    > {
+        const transaction = this.#database.transaction(
+            protectedStoreNames,
+            'readonly',
+        );
+        const values = await Promise.all(
+            protectedStoreNames.map((storeName) =>
+                unknownRequestResult(
+                    transaction.objectStore(storeName).getAll(),
+                ),
+            ),
+        );
+        await transactionCompletion(transaction);
+        const textEncoder = new TextEncoder();
+        return values.map((unknownRecords, storeIndex) => {
+            const storeName = protectedStoreNames[storeIndex];
+            if (storeName === undefined || !Array.isArray(unknownRecords)) {
+                throw new DurableStateError(
+                    'CorruptState',
+                    'A protected browser-local store is malformed.',
+                );
+            }
+            const records = unknownRecords.map((value) => {
+                if (!isProtectedRecord(value)) {
+                    throw new DurableStateError(
+                        'CorruptState',
+                        'A protected browser-local record is malformed.',
+                    );
+                }
+                return value;
+            });
+            return {
+                storeName,
+                recordCount: records.length,
+                identifierUtf8ByteLength: records.reduce(
+                    (sum, record) =>
+                        sum + textEncoder.encode(record.id).byteLength,
+                    0,
+                ),
+                authenticatedContextByteLength: records.reduce(
+                    (sum, record) => sum + record.context.byteLength,
+                    0,
+                ),
+                nonceByteLength: records.reduce(
+                    (sum, record) => sum + record.nonce.byteLength,
+                    0,
+                ),
+                ciphertextByteLength: records.reduce(
+                    (sum, record) => sum + record.ciphertext.byteLength,
+                    0,
+                ),
+            };
+        });
+    }
+
     async initializeRootAndAction(
         rootKey: CryptoKey,
         action: ProtectedRecord,
     ): Promise<void> {
         validateRootKey(rootKey);
         const transaction = this.#database.transaction(
-            [
-                rootStoreName,
-                actionStoreName,
-                preparationStoreName,
-                slotStoreName,
-                sourceStoreName,
-                finalityStoreName,
-            ],
+            [rootStoreName, ...protectedStoreNames],
             'readwrite',
             { durability: 'strict' },
         );
@@ -383,13 +437,7 @@ export class PrivatePreparationDurableState {
             actionStore.get(action.id),
         );
         const stateCounts = await Promise.all(
-            [
-                actionStoreName,
-                preparationStoreName,
-                slotStoreName,
-                sourceStoreName,
-                finalityStoreName,
-            ].map((storeName) =>
+            protectedStoreNames.map((storeName) =>
                 requestResult<number>(
                     transaction.objectStore(storeName).count(),
                 ),

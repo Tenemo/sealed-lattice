@@ -1,16 +1,25 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { PrivatePreparationDurableState } from '../../src/private-preparation-durable-state.js';
 import { PrivatePreparationWorkerClient } from '../../src/private-preparation-worker-client.js';
 import type {
     PrivatePreparationActionContext,
     PrivatePreparationWorkerRequest,
     PrivatePreparationWorkerResponse,
+    PublishedFinalityPackage,
     PublishedPreparationPackage,
+    PublishedSourcePackage,
+    PublishedTallyActivation,
+    TallyEvaluationProgress,
 } from '../../src/private-preparation-worker-protocol.js';
 import {
     abstentionSourceBodyByteLength,
     submittedSourceBodyByteLength,
 } from '../../src/source-runtime.js';
+import {
+    modelParticipantActivationByteLength,
+    modelTallyScalarWork,
+} from '../../src/tally-resource-model.js';
 
 const participantCount = 10;
 const preparationAttempt = 7;
@@ -64,6 +73,45 @@ const deleteDatabase = (name: string): Promise<void> =>
         );
     });
 
+const sumByteLengths = (values: readonly Uint8Array[]): number =>
+    values.reduce((sum, value) => sum + value.byteLength, 0);
+
+const measureProtectedDatabase = async (
+    name: string,
+): Promise<
+    Readonly<{
+        recordCount: number;
+        protectedRecordByteLength: number;
+        ciphertextByteLength: number;
+    }>
+> => {
+    const durableState = await PrivatePreparationDurableState.open(name, false);
+    try {
+        const measurements = await durableState.measureProtectedRecords();
+        return {
+            recordCount: measurements.reduce(
+                (sum, measurement) => sum + measurement.recordCount,
+                0,
+            ),
+            protectedRecordByteLength: measurements.reduce(
+                (sum, measurement) =>
+                    sum +
+                    measurement.identifierUtf8ByteLength +
+                    measurement.authenticatedContextByteLength +
+                    measurement.nonceByteLength +
+                    measurement.ciphertextByteLength,
+                0,
+            ),
+            ciphertextByteLength: measurements.reduce(
+                (sum, measurement) => sum + measurement.ciphertextByteLength,
+                0,
+            ),
+        };
+    } finally {
+        durableState.close();
+    }
+};
+
 const openClient = async (
     runIdentity: string,
     participantPosition: number,
@@ -96,6 +144,106 @@ const remoteBodyIndex = (
     recipientPosition < senderPosition
         ? recipientPosition
         : recipientPosition - 1;
+
+const createCompletePreparation = async (
+    runIdentity: string,
+): Promise<
+    Readonly<{
+        actionKeySetBodies: readonly Uint8Array[];
+        preparationPackages: readonly PublishedPreparationPackage[];
+        preparationParents: readonly Readonly<{
+            body: Uint8Array;
+            signature: Uint8Array;
+        }>[];
+    }>
+> => {
+    const actionKeySetBodies: Uint8Array[] = [];
+    for (
+        let participantPosition = 0;
+        participantPosition < participantCount;
+        participantPosition += 1
+    ) {
+        const client = await openClient(runIdentity, participantPosition);
+        const registration = await client.registerActionKeys(
+            actionContext(participantPosition),
+        );
+        actionKeySetBodies.push(registration.actionKeySetBody);
+        closeClient(client);
+    }
+    for (
+        let participantPosition = 0;
+        participantPosition < participantCount;
+        participantPosition += 1
+    ) {
+        const client = await openClient(runIdentity, participantPosition);
+        await client.confirmActionKeyRoster(
+            actionContext(participantPosition),
+            actionKeySetBodies,
+        );
+        closeClient(client);
+    }
+    const preparationPackages: PublishedPreparationPackage[] = [];
+    for (
+        let participantPosition = 0;
+        participantPosition < participantCount;
+        participantPosition += 1
+    ) {
+        const client = await openClient(runIdentity, participantPosition);
+        preparationPackages.push(
+            await client.createPreparationPackage(
+                actionContext(participantPosition),
+                actionKeySetBodies,
+                preparationAttempt,
+            ),
+        );
+        closeClient(client);
+    }
+    const preparationParents = preparationPackages.map((entry) => ({
+        body: entry.parentBody,
+        signature: entry.parentSignature,
+    }));
+    for (
+        let recipientPosition = 0;
+        recipientPosition < participantCount;
+        recipientPosition += 1
+    ) {
+        const client = await openClient(runIdentity, recipientPosition);
+        for (
+            let senderPosition = 0;
+            senderPosition < participantCount;
+            senderPosition += 1
+        ) {
+            if (senderPosition === recipientPosition) {
+                continue;
+            }
+            const privateBody =
+                preparationPackages[senderPosition]?.privateBodies[
+                    remoteBodyIndex(senderPosition, recipientPosition)
+                ];
+            const parent = preparationPackages[senderPosition];
+            if (privateBody === undefined || parent === undefined) {
+                throw new Error('The preparation fixture is incomplete.');
+            }
+            const consumption = await client.consumePrivatePreparation(
+                actionContext(recipientPosition),
+                actionKeySetBodies,
+                preparationAttempt,
+                parent.parentBody,
+                parent.parentSignature,
+                privateBody,
+            );
+            if (consumption.status !== 'resolved') {
+                throw new Error('A preparation delivery did not resolve.');
+            }
+        }
+        closeClient(client);
+    }
+    return {
+        actionKeySetBodies,
+        preparationPackages,
+        preparationParents,
+    };
+};
 
 const rawRequest = <Result>(
     worker: Worker,
@@ -359,9 +507,24 @@ describe('private preparation worker in Chromium', () => {
     );
 
     it(
-        'binds one source only after the complete preparation and resumes the same source after a crash',
-        { timeout: 300_000 },
+        'executes and restores the complete full-tally ceremony through the scalar worker',
+        { timeout: 600_000 },
         async () => {
+            const ceremonyStartedAt = performance.now();
+            let longestForegroundIntervalMilliseconds = 0;
+            const measureForeground = async <Result>(
+                operation: () => Promise<Result>,
+            ): Promise<Result> => {
+                const startedAt = performance.now();
+                try {
+                    return await operation();
+                } finally {
+                    longestForegroundIntervalMilliseconds = Math.max(
+                        longestForegroundIntervalMilliseconds,
+                        performance.now() - startedAt,
+                    );
+                }
+            };
             const runIdentity = crypto.randomUUID();
             const submittedScores = Uint8Array.of(
                 1,
@@ -385,8 +548,10 @@ describe('private preparation worker in Chromium', () => {
                     runIdentity,
                     participantPosition,
                 );
-                const registration = await client.registerActionKeys(
-                    actionContext(participantPosition),
+                const registration = await measureForeground(() =>
+                    client.registerActionKeys(
+                        actionContext(participantPosition),
+                    ),
                 );
                 actionKeySetBodies.push(registration.actionKeySetBody);
                 closeClient(client);
@@ -400,9 +565,11 @@ describe('private preparation worker in Chromium', () => {
                     runIdentity,
                     participantPosition,
                 );
-                await client.confirmActionKeyRoster(
-                    actionContext(participantPosition),
-                    actionKeySetBodies,
+                await measureForeground(() =>
+                    client.confirmActionKeyRoster(
+                        actionContext(participantPosition),
+                        actionKeySetBodies,
+                    ),
                 );
                 closeClient(client);
             }
@@ -418,10 +585,12 @@ describe('private preparation worker in Chromium', () => {
                     participantPosition,
                 );
                 preparationPackages.push(
-                    await client.createPreparationPackage(
-                        actionContext(participantPosition),
-                        actionKeySetBodies,
-                        preparationAttempt,
+                    await measureForeground(() =>
+                        client.createPreparationPackage(
+                            actionContext(participantPosition),
+                            actionKeySetBodies,
+                            preparationAttempt,
+                        ),
                     ),
                 );
                 closeClient(client);
@@ -459,13 +628,15 @@ describe('private preparation worker in Chromium', () => {
                         );
                     }
                     await expect(
-                        client.consumePrivatePreparation(
-                            actionContext(recipientPosition),
-                            actionKeySetBodies,
-                            preparationAttempt,
-                            senderPackage.parentBody,
-                            senderPackage.parentSignature,
-                            privateBody,
+                        measureForeground(() =>
+                            client.consumePrivatePreparation(
+                                actionContext(recipientPosition),
+                                actionKeySetBodies,
+                                preparationAttempt,
+                                senderPackage.parentBody,
+                                senderPackage.parentSignature,
+                                privateBody,
+                            ),
                         ),
                     ).resolves.toEqual({
                         senderPosition,
@@ -646,6 +817,809 @@ describe('private preparation worker in Chromium', () => {
             );
             expect(recoveredAbstention.sourceSignature).toHaveLength(6_388);
             closeClient(malformedSource);
+
+            const sourcePackages: (PublishedSourcePackage | undefined)[] =
+                Array.from({ length: participantCount });
+            const sourceDeclarations = Array.from(
+                { length: participantCount },
+                () => 'abstain' as const,
+            ) as ('abstain' | 'submit')[];
+            sourcePackages[0] = submitted;
+            sourceDeclarations[0] = 'submit';
+            sourcePackages[1] = abstention;
+            sourcePackages[2] = recoveredAbstention;
+            const unusableScores = [
+                new Uint8Array(10),
+                new Uint8Array(10).fill(15),
+            ];
+            for (
+                let participantPosition = 3;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                const unusable = unusableScores[participantPosition - 3];
+                const choice =
+                    unusable === undefined
+                        ? ({ declaration: 'abstain' } as const)
+                        : ({
+                              declaration: 'submit',
+                              scoreEncodings: unusable,
+                          } as const);
+                sourceDeclarations[participantPosition] = choice.declaration;
+                sourcePackages[participantPosition] =
+                    await client.createSourcePackage(
+                        actionContext(participantPosition),
+                        actionKeySetBodies,
+                        preparationAttempt,
+                        preparationParents,
+                        choice,
+                    );
+                closeClient(client);
+            }
+            const sourceCarriers = sourcePackages.map((source, position) => {
+                if (source === undefined) {
+                    throw new Error(
+                        'The finalized source roster is incomplete.',
+                    );
+                }
+                return {
+                    declaration: sourceDeclarations[position] ?? 'abstain',
+                    body: source.sourceBody,
+                    signature: source.sourceSignature,
+                };
+            });
+
+            const topCount = 1;
+            const finalityPackages: PublishedFinalityPackage[] = [];
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                const finality = await measureForeground(() =>
+                    client.createFinalitySignature(
+                        actionContext(participantPosition),
+                        actionKeySetBodies,
+                        preparationAttempt,
+                        sourceCarriers,
+                        topCount,
+                    ),
+                );
+                finalityPackages.push(finality);
+                closeClient(client);
+            }
+            const finalityTargetIdentity = finalityPackages[0]?.targetIdentity;
+            if (finalityTargetIdentity === undefined) {
+                throw new Error('The finality roster is empty.');
+            }
+            expect(
+                finalityPackages.every(
+                    (entry) =>
+                        entry.targetKind === 'computation' &&
+                        entry.topCount === topCount &&
+                        entry.sourceSubmissionBitmap === 0b0000_0001_1001 &&
+                        entry.targetIdentity.every(
+                            (byte, index) =>
+                                byte === finalityTargetIdentity[index],
+                        ),
+                ),
+            ).toBe(true);
+            const finalitySignatures = finalityPackages
+                .slice(0, 8)
+                .map((entry, signerPosition) => ({
+                    signerPosition,
+                    signature: entry.finalitySignature,
+                }));
+
+            const conflictingFinality = await openClient(runIdentity, 9);
+            await expect(
+                conflictingFinality.createFinalitySignature(
+                    actionContext(9),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    [...sourceCarriers].reverse(),
+                    topCount,
+                ),
+            ).rejects.toThrow();
+            await expect(
+                conflictingFinality.createFinalitySignature(
+                    actionContext(9),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    topCount + 1,
+                ),
+            ).rejects.toThrow();
+            closeClient(conflictingFinality);
+
+            const incompleteFinalityClient = await openClient(runIdentity, 0);
+            await expect(
+                incompleteFinalityClient.createTallyActivation(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures.slice(0, 7),
+                    topCount,
+                ),
+            ).rejects.toThrow();
+            closeClient(incompleteFinalityClient);
+            const activations: PublishedTallyActivation[] = [];
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                activations.push(
+                    await measureForeground(() =>
+                        client.createTallyActivation(
+                            actionContext(participantPosition),
+                            actionKeySetBodies,
+                            preparationAttempt,
+                            sourceCarriers,
+                            finalitySignatures,
+                            topCount,
+                        ),
+                    ),
+                );
+                closeClient(client);
+            }
+            const activationPlan = activations[0];
+            if (activationPlan === undefined) {
+                throw new Error('The activation roster is empty.');
+            }
+            expect(activationPlan.outputBitCount).toBe(15);
+            expect(activationPlan.chunks.length).toBeGreaterThan(2);
+            const emittedPlanCounts = {
+                operationCount: activationPlan.operationCount,
+                constantOperationCount: activationPlan.constantOperationCount,
+                exclusiveOrOperationCount:
+                    activationPlan.exclusiveOrOperationCount,
+                conjunctionCount: activationPlan.conjunctionCount,
+                negationOperationCount: activationPlan.negationOperationCount,
+                outputBitCount: activationPlan.outputBitCount,
+                rangeCount: activationPlan.chunks.length,
+            };
+            const modeledParticipantActivationByteLength =
+                modelParticipantActivationByteLength(emittedPlanCounts);
+            expect(
+                activations.every(
+                    (activation, participantPosition) =>
+                        activation.topCount === topCount &&
+                        activation.targetIdentity.every(
+                            (byte, index) =>
+                                byte === finalityTargetIdentity[index],
+                        ) &&
+                        activation.chunks.length ===
+                            activationPlan.chunks.length &&
+                        activation.manifestBody.byteLength > 0 &&
+                        activation.manifestSignature.byteLength === 6_388 &&
+                        activation.chunks.reduce(
+                            (sum, chunk) => sum + chunk.byteLength,
+                            0,
+                        ) === modeledParticipantActivationByteLength &&
+                        participantPosition < participantCount,
+                ),
+            ).toBe(true);
+            const activationManifests = activations.map((activation) => ({
+                body: activation.manifestBody,
+                signature: activation.manifestSignature,
+            }));
+            const activationClients = await Promise.all(
+                Array.from({ length: participantCount }, (_, position) =>
+                    openClient(runIdentity, position),
+                ),
+            );
+            const readChunks = (rangeIndex: number): Promise<Uint8Array[]> =>
+                Promise.all(
+                    activationClients.map(async (client, position) => {
+                        const published = await measureForeground(() =>
+                            client.readTallyActivationChunk(
+                                actionContext(position),
+                                rangeIndex,
+                            ),
+                        );
+                        expect(published.chunkIndex).toBe(rangeIndex);
+                        return published.chunk;
+                    }),
+                );
+
+            const firstChunks = await readChunks(0);
+            const evaluator = activationClients[0];
+            if (evaluator === undefined) {
+                throw new Error('The evaluator worker is absent.');
+            }
+            await expect(
+                evaluator.advanceTally(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    activationManifests.slice(0, 9),
+                    0,
+                    firstChunks,
+                ),
+            ).rejects.toThrow();
+            let maximumCheckpointByteLength = 0;
+            let maximumProtectedRecordByteLength = 0;
+            let maximumProtectedRecordCount = 0;
+            let maximumWasmMemoryByteLength = 0;
+            let maximumKernelRequestByteLength = 0;
+            let maximumKernelResponseByteLength = 0;
+            const recordEvaluationProgress = async (
+                currentProgress: TallyEvaluationProgress,
+            ): Promise<void> => {
+                maximumWasmMemoryByteLength = Math.max(
+                    maximumWasmMemoryByteLength,
+                    currentProgress.resources.wasmMemoryByteLength,
+                );
+                maximumKernelRequestByteLength = Math.max(
+                    maximumKernelRequestByteLength,
+                    currentProgress.resources.maximumRequestByteLength,
+                );
+                maximumKernelResponseByteLength = Math.max(
+                    maximumKernelResponseByteLength,
+                    currentProgress.resources.maximumResponseByteLength,
+                );
+                if (
+                    currentProgress.kind !== 'pending' ||
+                    currentProgress.checkpointByteLength <=
+                        maximumCheckpointByteLength
+                ) {
+                    return;
+                }
+                maximumCheckpointByteLength =
+                    currentProgress.checkpointByteLength;
+                const storage = await measureProtectedDatabase(
+                    databaseName(runIdentity, 0),
+                );
+                maximumProtectedRecordByteLength = Math.max(
+                    maximumProtectedRecordByteLength,
+                    storage.protectedRecordByteLength,
+                );
+                maximumProtectedRecordCount = Math.max(
+                    maximumProtectedRecordCount,
+                    storage.recordCount,
+                );
+            };
+            await expect(
+                evaluator.advanceTally(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    activationManifests,
+                    0,
+                    firstChunks.slice(0, 9),
+                ),
+            ).rejects.toThrow();
+            const corruptedChunks = firstChunks.map((chunk) =>
+                Uint8Array.from(chunk),
+            );
+            const corruptedChunk = corruptedChunks[3];
+            if (corruptedChunk === undefined) {
+                throw new Error('The corruption fixture omitted a chunk.');
+            }
+            corruptedChunk[corruptedChunk.byteLength - 1] ^= 1;
+            await expect(
+                evaluator.advanceTally(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    activationManifests,
+                    0,
+                    corruptedChunks,
+                ),
+            ).rejects.toThrow();
+            await expect(
+                evaluator.advanceTally(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    activationManifests,
+                    1,
+                    firstChunks,
+                ),
+            ).rejects.toThrow();
+            const firstProgress = await measureForeground(() =>
+                evaluator.advanceTally(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    activationManifests,
+                    0,
+                    firstChunks,
+                ),
+            );
+            expect(firstProgress).toMatchObject({
+                kind: 'pending',
+                nextRangeIndex: 1,
+            });
+            await recordEvaluationProgress(firstProgress);
+            const replayProgress = await evaluator.advanceTally(
+                actionContext(0),
+                actionKeySetBodies,
+                preparationAttempt,
+                sourceCarriers,
+                finalitySignatures,
+                topCount,
+                activationManifests,
+                0,
+                firstChunks,
+            );
+            expect(replayProgress).toMatchObject({
+                kind: 'pending',
+                nextRangeIndex: 1,
+            });
+            await recordEvaluationProgress(replayProgress);
+
+            closeClient(evaluator);
+            const restoredEvaluator = await openClient(runIdentity, 0);
+            activationClients[0] = restoredEvaluator;
+            const restoredPending = await restoredEvaluator.readTallyResult(
+                actionContext(0),
+            );
+            expect(restoredPending).toMatchObject({
+                kind: 'pending',
+                nextRangeIndex: 1,
+            });
+            await recordEvaluationProgress(restoredPending);
+            const secondChunks = await readChunks(1);
+            await expect(
+                restoredEvaluator.advanceTally(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    activationManifests,
+                    2,
+                    secondChunks,
+                ),
+            ).rejects.toThrow();
+
+            let progress = await measureForeground(() =>
+                restoredEvaluator.advanceTally(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    finalitySignatures,
+                    topCount,
+                    activationManifests,
+                    1,
+                    secondChunks,
+                ),
+            );
+            await recordEvaluationProgress(progress);
+            for (
+                let rangeIndex = 2;
+                rangeIndex < activationPlan.chunks.length;
+                rangeIndex += 1
+            ) {
+                const rangeChunks = await readChunks(rangeIndex);
+                progress = await measureForeground(() =>
+                    restoredEvaluator.advanceTally(
+                        actionContext(0),
+                        actionKeySetBodies,
+                        preparationAttempt,
+                        sourceCarriers,
+                        finalitySignatures,
+                        topCount,
+                        activationManifests,
+                        rangeIndex,
+                        rangeChunks,
+                    ),
+                );
+                await recordEvaluationProgress(progress);
+            }
+            expect(progress).toMatchObject({
+                kind: 'result',
+                acceptedBallotAuthorshipBitmap: 1,
+                orderedOptionPositions: [1],
+            });
+            closeClient(restoredEvaluator);
+            const resultRetriever = await openClient(runIdentity, 0);
+            const restoredResult = await measureForeground(() =>
+                resultRetriever.readTallyResult(actionContext(0)),
+            );
+            expect(restoredResult).toMatchObject({
+                kind: 'result',
+                acceptedBallotAuthorshipBitmap: 1,
+                orderedOptionPositions: [1],
+            });
+            await recordEvaluationProgress(restoredResult);
+            closeClient(resultRetriever);
+            for (const client of activationClients.slice(1)) {
+                closeClient(client);
+            }
+
+            const finalStorageMeasurements = await Promise.all(
+                Array.from({ length: participantCount }, (_, position) =>
+                    measureProtectedDatabase(
+                        databaseName(runIdentity, position),
+                    ),
+                ),
+            );
+            maximumProtectedRecordByteLength = Math.max(
+                maximumProtectedRecordByteLength,
+                ...finalStorageMeasurements.map(
+                    (measurement) => measurement.protectedRecordByteLength,
+                ),
+            );
+            maximumProtectedRecordCount = Math.max(
+                maximumProtectedRecordCount,
+                ...finalStorageMeasurements.map(
+                    (measurement) => measurement.recordCount,
+                ),
+            );
+
+            const actionKeyCorpusByteLength =
+                sumByteLengths(actionKeySetBodies);
+            const preparationParentCorpusByteLength =
+                preparationPackages.reduce(
+                    (sum, entry) =>
+                        sum +
+                        entry.parentBody.byteLength +
+                        entry.parentSignature.byteLength,
+                    0,
+                );
+            const preparationPrivateCorpusByteLength =
+                preparationPackages.reduce(
+                    (sum, entry) => sum + sumByteLengths(entry.privateBodies),
+                    0,
+                );
+            const sourceCorpusByteLength = sourceCarriers.reduce(
+                (sum, source) =>
+                    sum + source.body.byteLength + source.signature.byteLength,
+                0,
+            );
+            const finalitySignatureCorpusByteLength = finalityPackages.reduce(
+                (sum, entry) => sum + entry.finalitySignature.byteLength,
+                0,
+            );
+            const finalityCertificateSignatureByteLength =
+                finalitySignatures.reduce(
+                    (sum, entry) => sum + entry.signature.byteLength,
+                    0,
+                );
+            const activationManifestCorpusByteLength = activations.reduce(
+                (sum, activation) =>
+                    sum +
+                    activation.manifestBody.byteLength +
+                    activation.manifestSignature.byteLength,
+                0,
+            );
+            const activationChunkCorpusByteLength = activations.reduce(
+                (sum, activation) =>
+                    sum +
+                    activation.chunks.reduce(
+                        (participantSum, chunk) =>
+                            participantSum + chunk.byteLength,
+                        0,
+                    ),
+                0,
+            );
+            const maximumTransportChunkByteLength = Math.max(
+                ...activations.flatMap((activation) =>
+                    activation.chunks.map((chunk) => chunk.byteLength),
+                ),
+            );
+            const rangeCorpusByteLengths = activationPlan.chunks.map(
+                (_, rangeIndex) =>
+                    activations.reduce(
+                        (sum, activation) =>
+                            sum +
+                            (activation.chunks[rangeIndex]?.byteLength ?? 0),
+                        0,
+                    ),
+            );
+            const maximumRangeCorpusByteLength = Math.max(
+                ...rangeCorpusByteLengths,
+            );
+            const finalityTargetBody = finalityPackages[0]?.targetBody;
+            if (finalityTargetBody === undefined) {
+                throw new Error('The finality target body is absent.');
+            }
+            const completePublicProtocolCorpusByteLength =
+                actionKeyCorpusByteLength +
+                preparationParentCorpusByteLength +
+                preparationPrivateCorpusByteLength +
+                sourceCorpusByteLength +
+                finalityTargetBody.byteLength +
+                finalitySignatureCorpusByteLength +
+                activationManifestCorpusByteLength +
+                activationChunkCorpusByteLength;
+            const recipientPrivatePreparationByteLength =
+                preparationPackages.reduce((sum, entry, senderPosition) => {
+                    if (senderPosition === 0) {
+                        return sum;
+                    }
+                    const privateBody =
+                        entry.privateBodies[remoteBodyIndex(senderPosition, 0)];
+                    if (privateBody === undefined) {
+                        throw new Error(
+                            'A recipient preparation body is absent.',
+                        );
+                    }
+                    return sum + privateBody.byteLength;
+                }, 0);
+            const cleanParticipantDownloadByteLength =
+                actionKeyCorpusByteLength +
+                preparationParentCorpusByteLength +
+                recipientPrivatePreparationByteLength +
+                sourceCorpusByteLength +
+                finalityTargetBody.byteLength +
+                finalityCertificateSignatureByteLength +
+                activationManifestCorpusByteLength +
+                activationChunkCorpusByteLength;
+            const participantUploadByteLengths = activations.map(
+                (activation, position) => {
+                    const preparation = preparationPackages[position];
+                    const source = sourceCarriers[position];
+                    const finality = finalityPackages[position];
+                    const actionKey = actionKeySetBodies[position];
+                    if (
+                        preparation === undefined ||
+                        source === undefined ||
+                        finality === undefined ||
+                        actionKey === undefined
+                    ) {
+                        throw new Error(
+                            'A participant upload fixture is incomplete.',
+                        );
+                    }
+                    return (
+                        actionKey.byteLength +
+                        preparation.parentBody.byteLength +
+                        preparation.parentSignature.byteLength +
+                        sumByteLengths(preparation.privateBodies) +
+                        source.body.byteLength +
+                        source.signature.byteLength +
+                        finality.finalitySignature.byteLength +
+                        activation.manifestBody.byteLength +
+                        activation.manifestSignature.byteLength +
+                        activation.chunks.reduce(
+                            (sum, chunk) => sum + chunk.byteLength,
+                            0,
+                        )
+                    );
+                },
+            );
+            const maximumParticipantUploadByteLength = Math.max(
+                ...participantUploadByteLengths,
+            );
+            const allParticipantUploadByteLength =
+                participantUploadByteLengths.reduce(
+                    (sum, byteLength) => sum + byteLength,
+                    0,
+                );
+            const maximumAdvanceTransferByteLength =
+                2 * 64 +
+                actionKeyCorpusByteLength +
+                sourceCorpusByteLength +
+                finalityCertificateSignatureByteLength +
+                activationManifestCorpusByteLength +
+                maximumRangeCorpusByteLength;
+            const accountedWorkerCopyByteLength =
+                2 * maximumAdvanceTransferByteLength;
+            const accountedJavaScriptWasmOverlapUpperBound =
+                accountedWorkerCopyByteLength +
+                2 * maximumKernelRequestByteLength +
+                2 * maximumKernelResponseByteLength;
+            const scalarWork = modelTallyScalarWork(emittedPlanCounts);
+            const resourceEvidence = {
+                topCount,
+                operationCounts: emittedPlanCounts,
+                scalarWork,
+                activationRangeCount: activationPlan.chunks.length,
+                modeledParticipantActivationByteLength,
+                activationChunkCorpusByteLength,
+                activationManifestCorpusByteLength,
+                completePublicProtocolCorpusByteLength,
+                cleanParticipantDownloadByteLength,
+                participantDownloadWithOneCompleteRefetchByteLength:
+                    2 * cleanParticipantDownloadByteLength,
+                maximumParticipantUploadByteLength,
+                allParticipantUploadByteLength,
+                maximumTransportChunkByteLength,
+                maximumRangeCorpusByteLength,
+                maximumAdvanceTransferByteLength,
+                accountedWorkerCopyByteLength,
+                accountedJavaScriptWasmOverlapUpperBound,
+                maximumCheckpointByteLength,
+                maximumProtectedRecordCount,
+                maximumProtectedRecordByteLength,
+                maximumWasmMemoryByteLength,
+                maximumKernelRequestByteLength,
+                maximumKernelResponseByteLength,
+                exactOrdinaryVisitCountIncludingResultRetrieval: 6,
+                exactAllAbstainVisitCountIncludingResultRetrieval: 5,
+                longestForegroundIntervalMilliseconds: Math.ceil(
+                    longestForegroundIntervalMilliseconds,
+                ),
+                completeCeremonyMilliseconds: Math.ceil(
+                    performance.now() - ceremonyStartedAt,
+                ),
+            };
+            expect(resourceEvidence).toMatchObject({
+                exactOrdinaryVisitCountIncludingResultRetrieval: 6,
+                exactAllAbstainVisitCountIncludingResultRetrieval: 5,
+            });
+            expect(completePublicProtocolCorpusByteLength).toBeLessThanOrEqual(
+                2_147_483_648,
+            );
+            expect(cleanParticipantDownloadByteLength).toBeLessThanOrEqual(
+                2_147_483_648,
+            );
+            expect(maximumParticipantUploadByteLength).toBeLessThanOrEqual(
+                2_147_483_648,
+            );
+            expect(allParticipantUploadByteLength).toBeLessThanOrEqual(
+                2_147_483_648,
+            );
+            expect(maximumTransportChunkByteLength).toBeLessThanOrEqual(
+                1_048_576,
+            );
+            expect(maximumKernelRequestByteLength).toBeLessThanOrEqual(
+                8_388_608,
+            );
+            expect(maximumWasmMemoryByteLength).toBeLessThanOrEqual(
+                671_088_640,
+            );
+            expect(
+                accountedJavaScriptWasmOverlapUpperBound,
+            ).toBeLessThanOrEqual(134_217_728);
+            expect(maximumProtectedRecordByteLength).toBeLessThanOrEqual(
+                2_147_483_648,
+            );
+            console.info(
+                `Full-tally resource evidence ${JSON.stringify(resourceEvidence)}`,
+            );
+        },
+    );
+
+    it(
+        'finalizes an all-abstain roster without an activation wave',
+        { timeout: 300_000 },
+        async () => {
+            const runIdentity = crypto.randomUUID();
+            const { actionKeySetBodies, preparationParents } =
+                await createCompletePreparation(runIdentity);
+            const sources: PublishedSourcePackage[] = [];
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                sources.push(
+                    await client.createSourcePackage(
+                        actionContext(participantPosition),
+                        actionKeySetBodies,
+                        preparationAttempt,
+                        preparationParents,
+                        { declaration: 'abstain' },
+                    ),
+                );
+                closeClient(client);
+            }
+            const sourceCarriers = sources.map((source) => ({
+                declaration: 'abstain' as const,
+                body: source.sourceBody,
+                signature: source.sourceSignature,
+            }));
+            const topCount = 10;
+            const finalities: PublishedFinalityPackage[] = [];
+            for (
+                let participantPosition = 0;
+                participantPosition < participantCount;
+                participantPosition += 1
+            ) {
+                const client = await openClient(
+                    runIdentity,
+                    participantPosition,
+                );
+                finalities.push(
+                    await client.createFinalitySignature(
+                        actionContext(participantPosition),
+                        actionKeySetBodies,
+                        preparationAttempt,
+                        sourceCarriers,
+                        topCount,
+                    ),
+                );
+                closeClient(client);
+            }
+            expect(
+                finalities.every(
+                    (finality) =>
+                        finality.targetKind === 'no-result' &&
+                        finality.topCount === topCount &&
+                        finality.sourceSubmissionBitmap === 0,
+                ),
+            ).toBe(true);
+            const certificate = finalities
+                .slice(0, 8)
+                .map((finality, signerPosition) => ({
+                    signerPosition,
+                    signature: finality.finalitySignature,
+                }));
+            const resultClient = await openClient(runIdentity, 0);
+            await expect(
+                resultClient.readTallyResult(actionContext(0)),
+            ).rejects.toThrow();
+            await expect(
+                resultClient.createTallyActivation(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    certificate,
+                    topCount,
+                ),
+            ).rejects.toThrow();
+            await expect(
+                resultClient.finalizeNoResult(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    certificate.slice(0, 7),
+                    topCount,
+                ),
+            ).rejects.toThrow();
+            await expect(
+                resultClient.finalizeNoResult(
+                    actionContext(0),
+                    actionKeySetBodies,
+                    preparationAttempt,
+                    sourceCarriers,
+                    certificate,
+                    topCount,
+                ),
+            ).resolves.toMatchObject({
+                kind: 'no-result',
+                acceptedBallotAuthorshipBitmap: 0,
+            });
+            closeClient(resultClient);
+            const restoredResultClient = await openClient(runIdentity, 0);
+            await expect(
+                restoredResultClient.readTallyResult(actionContext(0)),
+            ).resolves.toMatchObject({
+                kind: 'no-result',
+                acceptedBallotAuthorshipBitmap: 0,
+            });
+            closeClient(restoredResultClient);
         },
     );
 });

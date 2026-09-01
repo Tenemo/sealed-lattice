@@ -1971,6 +1971,133 @@ mod tests {
     }
 
     #[test]
+    fn three_malicious_continuation_rows_and_selective_withholding_refuse() {
+        let context = context(1);
+        let circuit = compile_completion_tally(1).expect("circuit");
+        let ranges = activation_chunk_ranges(&circuit).expect("ranges");
+        let conjunction_index = circuit
+            .operations()
+            .iter()
+            .position(|operation| matches!(operation, BooleanOperation::Conjunction { .. }))
+            .expect("full tally contains conjunctions");
+        let range_index = ranges
+            .iter()
+            .position(|range| {
+                range.first_operation as usize <= conjunction_index
+                    && conjunction_index < range.operation_end as usize
+            })
+            .expect("conjunction range");
+        let materials = materials();
+        let generators = materials
+            .iter()
+            .map(|material| {
+                LocalActivationGenerator::new(&context, &circuit, material)
+                    .expect("local generator")
+            })
+            .collect::<Vec<_>>();
+        let mut evaluator = ActivationEvaluator::new(context.clone()).expect("evaluator");
+        for range in &ranges[..range_index] {
+            let chunks = generators
+                .iter()
+                .map(|generator| generator.generate(*range).expect("activation chunk"))
+                .collect::<Vec<_>>();
+            evaluator.absorb(*range, &chunks).expect("prefix accepts");
+        }
+        let range = ranges[range_index];
+        let honest_chunks = generators
+            .iter()
+            .map(|generator| generator.generate(range).expect("activation chunk"))
+            .collect::<Vec<_>>();
+        let mut withheld_chunks = honest_chunks.clone();
+        withheld_chunks.pop();
+        let checkpoint = evaluator.encode_checkpoint().expect("checkpoint");
+        let mut withheld_evaluator =
+            ActivationEvaluator::decode_checkpoint(&checkpoint).expect("checkpoint restores");
+        assert!(withheld_evaluator.absorb(range, &withheld_chunks).is_err());
+
+        let operation_start = CHUNK_HEADER_BYTE_LENGTH
+            + if range.first_operation == 0 {
+                INITIAL_LABEL_BYTE_LENGTH
+            } else {
+                0
+            }
+            + circuit.operations()[range.first_operation as usize..conjunction_index]
+                .iter()
+                .map(operation_byte_length)
+                .sum::<usize>();
+        let continuation_start = operation_start
+            + 35 * 4 * LABEL_BYTE_LENGTH
+            + FIELD_BIT_WIDTH * LABEL_BYTE_LENGTH
+            + 1
+            + COMPLETION_PROFILE_PARTICIPANT_COUNT * FIELD_BIT_WIDTH * 2 * LABEL_BYTE_LENGTH;
+        let continuation_end = continuation_start + 2 * 2 * LABEL_BYTE_LENGTH;
+        let mut malicious_chunks = honest_chunks;
+        for (participant_position, chunk) in malicious_chunks.iter_mut().take(3).enumerate() {
+            for byte in &mut chunk[continuation_start..continuation_end] {
+                *byte ^= 0x31_u8.wrapping_add(participant_position as u8);
+            }
+        }
+        assert!(evaluator.absorb(range, &malicious_chunks).is_err());
+    }
+
+    #[test]
+    fn full_compiler_exercises_serial_multiplication_fan_out_and_live_wire_restore() {
+        let circuit = compile_completion_tally(10).expect("circuit");
+        let mut depends_on_conjunction = vec![false; circuit.wire_count()];
+        let mut operation_use_counts = vec![0_usize; circuit.wire_count()];
+        let mut has_serial_multiplication = false;
+        for (operation_index, operation) in circuit.operations().iter().enumerate() {
+            let inputs: &[WireIndex] = match operation {
+                BooleanOperation::Constant(_) => &[],
+                BooleanOperation::ExclusiveOr {
+                    left_wire,
+                    right_wire,
+                }
+                | BooleanOperation::Conjunction {
+                    left_wire,
+                    right_wire,
+                } => &[*left_wire, *right_wire],
+                BooleanOperation::Negation { input_wire } => &[*input_wire],
+            };
+            let input_depends_on_conjunction = inputs
+                .iter()
+                .any(|wire| depends_on_conjunction[usize::try_from(*wire).expect("wire index")]);
+            for wire in inputs {
+                operation_use_counts[usize::try_from(*wire).expect("wire index")] += 1;
+            }
+            if matches!(operation, BooleanOperation::Conjunction { .. })
+                && input_depends_on_conjunction
+            {
+                has_serial_multiplication = true;
+            }
+            let output_wire = usize::try_from(
+                operation_output_wire(&circuit, operation_index).expect("output wire"),
+            )
+            .expect("wire index");
+            depends_on_conjunction[output_wire] = input_depends_on_conjunction
+                || matches!(operation, BooleanOperation::Conjunction { .. });
+        }
+        assert!(has_serial_multiplication);
+        assert!(operation_use_counts.into_iter().any(|count| count > 1));
+
+        let last_uses = last_wire_uses(&circuit).expect("last uses");
+        for range in activation_chunk_ranges(&circuit)
+            .expect("ranges")
+            .into_iter()
+            .filter(|range| range.operation_end < circuit.operations().len() as u32)
+        {
+            let boundary = usize::try_from(range.operation_end).expect("boundary");
+            let produced_end = circuit.input_bit_count() + boundary;
+            assert!(
+                last_uses[..produced_end]
+                    .iter()
+                    .any(|last_use| *last_use >= boundary),
+                "range ending at operation {boundary} lost every required live wire"
+            );
+        }
+    }
+
+    #[test]
     fn complete_top_one_ceremony_matches_the_independent_direct_evaluator() {
         let context = context(1);
         let circuit = compile_completion_tally(1).expect("circuit");
@@ -2017,6 +2144,7 @@ mod tests {
         let source_submission_bitmap = 0x03ff & !(1 << 1) & !(1 << 7);
         let context = context_for(10, source_submission_bitmap, &scores);
         let circuit = compile_completion_tally(10).expect("circuit");
+        assert_eq!(circuit.output_wires().len(), 11 + 4 * 10);
         let materials = materials();
         let (terminal, emitted_bytes, peak_checkpoint_bytes) =
             execute_complete_ceremony(&context, &materials);
@@ -2052,6 +2180,15 @@ mod tests {
                     expected
                         .accepted_ordered_option_positions()
                         .expect("nonempty direct result"),
+                );
+                assert_eq!(ordered_option_positions.len(), 10);
+                assert_eq!(
+                    ordered_option_positions
+                        .iter()
+                        .copied()
+                        .collect::<BTreeSet<_>>()
+                        .len(),
+                    10,
                 );
                 assert!(!accepted_ballot_authorship[1]);
                 assert!(!accepted_ballot_authorship[2]);

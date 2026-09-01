@@ -20,7 +20,7 @@ const verifyFinalitySignatureCommand = 26;
 const completionProfileParticipantCount = 10;
 const identityByteLength = 64;
 
-export const finalityTargetBodyByteLength = 552;
+export const finalityTargetBodyByteLength = 560;
 export const sourceBodyIdentityVectorByteLength = 640;
 export const completionProfileFinalityQuorum = 8;
 
@@ -35,6 +35,7 @@ type FinalityDerivationContext = Readonly<{
     preparationAttempt: number;
     predecessorIdentity: Uint8Array;
     verifiedPreparationRoot: Uint8Array;
+    topCount: number;
 }>;
 
 export type SourceCarrier = Readonly<{
@@ -49,6 +50,7 @@ type DerivedFinalityTarget = Readonly<{
     sourceInventoryRoot: Uint8Array;
     sourceBodyIdentities: Uint8Array;
     sourceSubmissionBitmap: number;
+    topCount: number;
     targetKind: FinalityTargetKind;
     quorum: number;
 }>;
@@ -63,6 +65,7 @@ type VerifiedFinalityCertificate = Readonly<{
     quorum: number;
     targetKind: FinalityTargetKind;
     sourceSubmissionBitmap: number;
+    topCount: number;
     targetIdentity: Uint8Array;
 }>;
 
@@ -191,6 +194,15 @@ const validateDerivationContext = (
         identityByteLength,
         'verifiedPreparationRoot',
     );
+    requireUnsigned16(context.topCount, 'topCount');
+    if (
+        context.topCount === 0 ||
+        context.topCount > completionProfileParticipantCount
+    ) {
+        throw new RangeError(
+            'topCount must be admitted by the completion profile.',
+        );
+    }
 };
 
 export const openFinalityRuntime = (
@@ -214,6 +226,7 @@ export const openFinalityRuntime = (
         request.writeU16(context.preparationAttempt);
         request.writeFixed(context.predecessorIdentity);
         request.writeFixed(context.verifiedPreparationRoot);
+        request.writeU16(context.topCount);
         for (const body of actionKeySetBodies) {
             request.writeBytes(body);
         }
@@ -253,10 +266,12 @@ export const openFinalityRuntime = (
                 reader.readFixed(sourceBodyIdentityVectorByteLength),
             );
             const sourceSubmissionBitmap = reader.readU16();
+            const topCount = reader.readU16();
             const targetKind = targetKindFromCode(reader.readU16());
             const quorum = reader.readU16();
             if (
                 quorum !== completionProfileFinalityQuorum ||
+                topCount !== context.topCount ||
                 (targetKind === 'no-result' && sourceSubmissionBitmap !== 0) ||
                 (targetKind === 'computation' &&
                     sourceSubmissionBitmap === 0) ||
@@ -272,6 +287,7 @@ export const openFinalityRuntime = (
                 sourceInventoryRoot,
                 sourceBodyIdentities,
                 sourceSubmissionBitmap,
+                topCount,
                 targetKind,
                 quorum,
             };
@@ -343,6 +359,7 @@ export const openFinalityRuntime = (
             const quorum = reader.readU16();
             const targetKind = targetKindFromCode(reader.readU16());
             const sourceSubmissionBitmap = reader.readU16();
+            const topCount = reader.readU16();
             const targetIdentity = Uint8Array.from(
                 reader.readFixed(identityByteLength),
             );
@@ -351,6 +368,8 @@ export const openFinalityRuntime = (
                 countSetBits(signerBitmap) < quorum ||
                 sourceSubmissionBitmap >=
                     1 << completionProfileParticipantCount ||
+                topCount === 0 ||
+                topCount > completionProfileParticipantCount ||
                 (targetKind === 'no-result' && sourceSubmissionBitmap !== 0) ||
                 (targetKind === 'computation' && sourceSubmissionBitmap === 0)
             ) {
@@ -363,6 +382,7 @@ export const openFinalityRuntime = (
                 quorum,
                 targetKind,
                 sourceSubmissionBitmap,
+                topCount,
                 targetIdentity,
             };
         });

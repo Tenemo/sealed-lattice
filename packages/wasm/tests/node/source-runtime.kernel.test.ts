@@ -407,6 +407,7 @@ describe('source fixation scalar WASM runtime', () => {
             preparationAttempt: sourcePreparationContext.preparationAttempt,
             predecessorIdentity,
             verifiedPreparationRoot: sourcePreparation.root,
+            topCount: 1,
         } as const;
         const target = finalityRuntime.deriveTarget(
             finalityContext,
@@ -418,6 +419,7 @@ describe('source fixation scalar WASM runtime', () => {
             sourceBodyIdentityVectorByteLength,
         );
         expect(target.sourceSubmissionBitmap).toBe(1);
+        expect(target.topCount).toBe(1);
         expect(target.targetKind).toBe('computation');
         expect(target.quorum).toBe(completionProfileFinalityQuorum);
         expect(
@@ -427,6 +429,37 @@ describe('source fixation scalar WASM runtime', () => {
                 sources,
             ),
         ).toEqual(target);
+        const admittedTargets = Array.from(
+            { length: participantCount },
+            (_, index) =>
+                finalityRuntime.deriveTarget(
+                    { ...finalityContext, topCount: index + 1 },
+                    actionKeySetBodies,
+                    sources,
+                ),
+        );
+        expect(admittedTargets.map((entry) => entry.topCount)).toEqual(
+            Array.from({ length: participantCount }, (_, index) => index + 1),
+        );
+        expect(
+            new Set(
+                admittedTargets.map((entry) => entry.targetIdentity.join(',')),
+            ).size,
+        ).toBe(participantCount);
+        expect(() =>
+            finalityRuntime.deriveTarget(
+                { ...finalityContext, topCount: 0 },
+                actionKeySetBodies,
+                sources,
+            ),
+        ).toThrow(RangeError);
+        expect(() =>
+            finalityRuntime.deriveTarget(
+                { ...finalityContext, topCount: participantCount + 1 },
+                actionKeySetBodies,
+                sources,
+            ),
+        ).toThrow(RangeError);
 
         const finalitySignatures: FinalitySignatureCarrier[] = [];
         for (
@@ -461,6 +494,7 @@ describe('source fixation scalar WASM runtime', () => {
             quorum: completionProfileFinalityQuorum,
             targetKind: 'computation',
             sourceSubmissionBitmap: 1,
+            topCount: 1,
             targetIdentity: target.targetIdentity,
         });
         finalityRuntime.verifySignature(

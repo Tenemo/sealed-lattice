@@ -268,6 +268,7 @@ const applyOutcomeEvent = (
 
 type VisitParticipantState = {
     finalitySigned: boolean;
+    keyPublished: boolean;
     outputPublished: boolean;
     preparationPublished: boolean;
     recipientPassPublished: boolean;
@@ -279,6 +280,7 @@ type VisitParticipantState = {
 type VisitRelayState = {
     finalityCertificateAvailable: boolean;
     finalitySigners: Set<number>;
+    keyPublishers: Set<number>;
     outputPublishers: Set<number>;
     preparationPublishers: Set<number>;
     recipientPassPublishers: Set<number>;
@@ -287,6 +289,7 @@ type VisitRelayState = {
 };
 
 const runGeneratedVisitSchedule = (input: {
+    allAbstain?: boolean;
     participantCount: number;
     requireRepair?: boolean;
     withholdOutputFrom?: number;
@@ -299,6 +302,7 @@ const runGeneratedVisitSchedule = (input: {
         { length: input.participantCount },
         (): VisitParticipantState => ({
             finalitySigned: false,
+            keyPublished: false,
             outputPublished: false,
             preparationPublished: false,
             recipientPassPublished: false,
@@ -310,6 +314,7 @@ const runGeneratedVisitSchedule = (input: {
     const relayState: VisitRelayState = {
         finalityCertificateAvailable: false,
         finalitySigners: new Set(),
+        keyPublishers: new Set(),
         outputPublishers: new Set(),
         preparationPublishers: new Set(),
         recipientPassPublishers: new Set(),
@@ -321,7 +326,14 @@ const runGeneratedVisitSchedule = (input: {
         const participantState = participantStates[participantPosition];
         let productive = false;
 
-        if (!participantState.preparationPublished) {
+        if (!participantState.keyPublished) {
+            participantState.keyPublished = true;
+            relayState.keyPublishers.add(participantPosition);
+            productive = true;
+        } else if (
+            relayState.keyPublishers.size === input.participantCount &&
+            !participantState.preparationPublished
+        ) {
             participantState.preparationPublished = true;
             relayState.preparationPublishers.add(participantPosition);
             productive = true;
@@ -357,6 +369,7 @@ const runGeneratedVisitSchedule = (input: {
             productive = true;
             if (
                 relayState.finalityCertificateAvailable &&
+                input.allAbstain !== true &&
                 input.withholdOutputFrom !== participantPosition
             ) {
                 participantState.outputPublished = true;
@@ -373,6 +386,8 @@ const runGeneratedVisitSchedule = (input: {
         }
 
         relayState.resultAvailable =
+            (input.allAbstain === true &&
+                relayState.finalityCertificateAvailable) ||
             relayState.outputPublishers.size === input.participantCount;
         if (relayState.resultAvailable && !participantState.resultRetrieved) {
             participantState.resultRetrieved = true;
@@ -660,28 +675,36 @@ describe('post-finality outcome model', () => {
 });
 
 describe('generated direct-finality visit schedule', () => {
-    it('includes result retrieval and stays within five productive visits', () => {
-        for (
-            let participantCount = 3;
-            participantCount <= 20;
-            participantCount += 1
-        ) {
-            const schedule = runGeneratedVisitSchedule({ participantCount });
-            expect(schedule.relayState.resultAvailable).toBe(true);
-            expect(
-                schedule.participantStates.every(
-                    (participantState) => participantState.resultRetrieved,
+    it('counts result retrieval in the exact six-visit completion graph', () => {
+        const schedule = runGeneratedVisitSchedule({ participantCount: 10 });
+        expect(schedule.relayState.resultAvailable).toBe(true);
+        expect(
+            schedule.participantStates.every(
+                (participantState) => participantState.resultRetrieved,
+            ),
+        ).toBe(true);
+        expect(
+            Math.max(
+                ...schedule.participantStates.map(
+                    (participantState) => participantState.productiveVisitCount,
                 ),
-            ).toBe(true);
-            expect(
-                Math.max(
-                    ...schedule.participantStates.map(
-                        (participantState) =>
-                            participantState.productiveVisitCount,
-                    ),
+            ),
+        ).toBe(6);
+    });
+
+    it('retrieves an all-abstain terminal in five productive visits', () => {
+        const schedule = runGeneratedVisitSchedule({
+            allAbstain: true,
+            participantCount: 10,
+        });
+        expect(schedule.relayState.resultAvailable).toBe(true);
+        expect(
+            Math.max(
+                ...schedule.participantStates.map(
+                    (participantState) => participantState.productiveVisitCount,
                 ),
-            ).toBeLessThanOrEqual(5);
-        }
+            ),
+        ).toBe(5);
     });
 
     it('leaves missing passes and post-finality withholding pending', () => {
@@ -707,7 +730,7 @@ describe('generated direct-finality visit schedule', () => {
         ).toBe(false);
     });
 
-    it('shows that a separate repair action misses the five-visit target', () => {
+    it('shows that a separate repair action adds a seventh visit', () => {
         const schedule = runGeneratedVisitSchedule({
             participantCount: 10,
             requireRepair: true,
@@ -719,6 +742,6 @@ describe('generated direct-finality visit schedule', () => {
         );
 
         expect(schedule.relayState.resultAvailable).toBe(true);
-        expect(maximumProductiveVisitCount).toBe(6);
+        expect(maximumProductiveVisitCount).toBe(7);
     });
 });

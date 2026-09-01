@@ -62,9 +62,16 @@ export type FoundationKernelLoaderOptions = {
 
 export type FoundationKernelCommandRuntime = Readonly<{
     readonly executeCommand: (request: Uint8Array) => Uint8Array;
+    readonly measureResources: () => KernelResourceMeasurement;
 }>;
 
 export type ConstructionKernelCommandRuntime = FoundationKernelCommandRuntime;
+
+export type KernelResourceMeasurement = Readonly<{
+    wasmMemoryByteLength: number;
+    maximumRequestByteLength: number;
+    maximumResponseByteLength: number;
+}>;
 
 const requireKernelIntegrityExpectation = (
     options: FoundationKernelLoaderOptions,
@@ -344,15 +351,32 @@ const instantiateKernelCommandRuntime = async (
         wasmExports,
         commandExportName,
     );
+    let maximumRequestByteLength = 0;
+    let maximumResponseByteLength = 0;
     return {
-        executeCommand: (request): Uint8Array =>
-            runKernelCommand(
+        executeCommand: (request): Uint8Array => {
+            maximumRequestByteLength = Math.max(
+                maximumRequestByteLength,
+                request.byteLength,
+            );
+            const response = runKernelCommand(
                 memory,
                 allocate,
                 deallocate,
                 commandWithLength,
                 request,
-            ),
+            );
+            maximumResponseByteLength = Math.max(
+                maximumResponseByteLength,
+                response.byteLength,
+            );
+            return response;
+        },
+        measureResources: () => ({
+            wasmMemoryByteLength: memory.buffer.byteLength,
+            maximumRequestByteLength,
+            maximumResponseByteLength,
+        }),
     };
 };
 

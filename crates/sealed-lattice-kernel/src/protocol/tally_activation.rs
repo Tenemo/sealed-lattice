@@ -572,6 +572,75 @@ mod tests {
     }
 
     #[test]
+    fn every_honest_source_vector_has_a_corrupt_invisible_subset_pad() {
+        for corrupt_bitmap in 0_u16..=COMPLETION_PROFILE_BITMAP {
+            if corrupt_bitmap.count_ones() != 3 {
+                continue;
+            }
+            let hidden_subset = COMPLETION_PROFILE_BITMAP ^ corrupt_bitmap;
+            assert_eq!(hidden_subset.count_ones(), 7);
+            assert_eq!(
+                normalized_low_subset_polynomial(hidden_subset, Gf16::ZERO),
+                Gf16::ONE,
+            );
+            for corrupt_position in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT as u16 {
+                if subset_contains(corrupt_bitmap, corrupt_position) {
+                    assert!(!subset_contains(hidden_subset, corrupt_position));
+                    assert_eq!(
+                        normalized_low_subset_polynomial(
+                            hidden_subset,
+                            participant_point(corrupt_position).expect("corrupt point"),
+                        ),
+                        Gf16::ZERO,
+                    );
+                }
+            }
+            for honest_source in 0..COMPLETION_PROFILE_PARTICIPANT_COUNT as u16 {
+                if !subset_contains(corrupt_bitmap, honest_source) {
+                    assert!(subset_contains(hidden_subset, honest_source));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn subset_stream_coordinates_are_disjoint_across_the_full_tally() {
+        let mut coordinates = std::collections::BTreeSet::new();
+        for source_rank in 0..LOW_SUBSET_SIZE as usize {
+            for source_bit_ordinal in 0..SOURCE_BIT_COUNT {
+                assert!(coordinates.insert((
+                    SOURCE_STREAM_FAMILY,
+                    source_rank * SOURCE_BIT_COUNT + source_bit_ordinal,
+                )));
+            }
+        }
+        let maximum_conjunction_count = 2_962;
+        for conjunction_ordinal in 0..maximum_conjunction_count {
+            for offset in 0..MATCHED_MASK_BITS_PER_CONJUNCTION {
+                assert!(coordinates.insert((
+                    MATCHED_MASK_STREAM_FAMILY,
+                    conjunction_ordinal * MATCHED_MASK_BITS_PER_CONJUNCTION + offset,
+                )));
+            }
+        }
+        let maximum_output_bit_count = 11 + 4 * 10;
+        for output_bit_ordinal in 0..maximum_output_bit_count {
+            for offset in 0..FIELD_BIT_WIDTH {
+                assert!(coordinates.insert((
+                    OUTPUT_MASK_STREAM_FAMILY,
+                    output_bit_ordinal * FIELD_BIT_WIDTH + offset,
+                )));
+            }
+        }
+        assert_eq!(
+            coordinates.len(),
+            LOW_SUBSET_SIZE as usize * SOURCE_BIT_COUNT
+                + maximum_conjunction_count * MATCHED_MASK_BITS_PER_CONJUNCTION
+                + maximum_output_bit_count * FIELD_BIT_WIDTH,
+        );
+    }
+
+    #[test]
     fn abstaining_sources_have_public_zero_inputs() {
         let all_keys = (0..COMPLETION_PROFILE_PARTICIPANT_COUNT)
             .map(|position| held_keys(position as u16))
