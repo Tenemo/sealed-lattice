@@ -9,8 +9,13 @@ use crate::protocol::action_signature::{
     derive_verification_key_fragment, sign_fragment, verify_fragment,
 };
 use crate::protocol::finality::{
-    FinalityDerivationContext, FinalityTarget, derive_finality_target,
+    FinalityDerivationContext, FinalityTarget, VerifiedFinalityCapability, derive_finality_target,
     encode_finality_signature_carrier, verify_finality_certificate, verify_finality_signature,
+};
+use crate::protocol::joint_continuation::{
+    AFFINE_MATERIAL_BYTE_LENGTH, JointContinuationPlan, ParticipantGenerationInput,
+    derive_affine_material, encode_activation_signature, evaluate_signed_batch,
+    generate_participant_body,
 };
 use crate::protocol::pair_encryption::{
     ENCRYPTION_KEY_BYTE_LENGTH as PAIR_ENCRYPTION_KEY_BYTE_LENGTH, decrypt, encrypt,
@@ -63,6 +68,10 @@ const VERIFY_FINALITY_CERTIFICATE: u8 = 25;
 const VERIFY_FINALITY_SIGNATURE: u8 = 26;
 const REJECTED_TALLY_ACTIVATION_COMMAND_START: u8 = 27;
 const REJECTED_TALLY_ACTIVATION_COMMAND_END: u8 = 33;
+const DERIVE_JOINT_CONTINUATION_AFFINE_MATERIAL: u8 = 34;
+const GENERATE_JOINT_CONTINUATION_PARTICIPANT_BODY: u8 = 35;
+const ENCODE_JOINT_CONTINUATION_ACTIVATION_SIGNATURE: u8 = 36;
+const EVALUATE_JOINT_CONTINUATION_BATCH: u8 = 37;
 
 pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
     let mut reader = BinaryReader::new(input);
@@ -99,6 +108,16 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
                 "rejected tally activation command is tombstoned",
             ))
         }
+        DERIVE_JOINT_CONTINUATION_AFFINE_MATERIAL => {
+            derive_joint_continuation_affine_material(&mut reader)
+        }
+        GENERATE_JOINT_CONTINUATION_PARTICIPANT_BODY => {
+            generate_joint_continuation_participant_body(&mut reader)
+        }
+        ENCODE_JOINT_CONTINUATION_ACTIVATION_SIGNATURE => {
+            encode_joint_continuation_activation_signature(&mut reader)
+        }
+        EVALUATE_JOINT_CONTINUATION_BATCH => evaluate_joint_continuation_batch(&mut reader),
         command => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidEnum,
             format!("unsupported construction command: {command}"),
@@ -106,6 +125,124 @@ pub(super) fn run(input: &[u8]) -> CanonicalResult<Vec<u8>> {
     }?;
     reader.finish()?;
     Ok(payload)
+}
+
+fn derive_joint_continuation_affine_material(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    let material = derive_affine_material(reader.read_bytes()?).map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_fixed(material.commitment.as_bytes())?;
+    for constant in &material.constants {
+        response.write_fixed(constant)?;
+    }
+    for evaluation in &material.evaluations {
+        response.write_fixed(&evaluation.affine_a)?;
+        response.write_fixed(&evaluation.affine_b)?;
+    }
+    let response = response.into_bytes();
+    if response.len() != AFFINE_MATERIAL_BYTE_LENGTH {
+        return Err(malformed_construction_length());
+    }
+    Ok(response)
+}
+
+fn generate_joint_continuation_participant_body(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    let (capability, _) = read_verified_finality_capability(reader)?;
+    let plan = JointContinuationPlan::decode(reader.read_bytes()?).map_err(construction_error)?;
+    let participant_position = reader.read_u16()?;
+    let initial_wire_values = reader.read_bytes()?;
+    let gate_mask_shares = reader.read_bytes()?;
+    let terminal_mask_shares = reader.read_bytes()?;
+    let label_entropy = reader.read_bytes()?;
+    let own_affine_entropy = reader.read_bytes()?;
+    let affine_commitments = reader.read_bytes()?;
+    let affine_evaluations = reader.read_bytes()?;
+    let generated = generate_participant_body(
+        &capability,
+        &plan,
+        ParticipantGenerationInput {
+            participant_position,
+            initial_wire_values,
+            gate_mask_shares,
+            terminal_mask_shares,
+            label_entropy,
+            own_affine_entropy,
+            affine_commitments,
+            affine_evaluations,
+        },
+    )
+    .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_bytes(&generated.body)?;
+    response.write_fixed(generated.body_identity.as_bytes())?;
+    Ok(response.into_bytes())
+}
+
+fn encode_joint_continuation_activation_signature(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<Vec<u8>> {
+    bytes_response(
+        &encode_activation_signature(
+            reader.read_u16()?,
+            read_hash512(reader)?,
+            reader.read_bytes()?,
+        )
+        .map_err(construction_error)?,
+    )
+}
+
+fn evaluate_joint_continuation_batch(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
+    let (capability, action_key_sets) = read_verified_finality_capability(reader)?;
+    let plan = JointContinuationPlan::decode(reader.read_bytes()?).map_err(construction_error)?;
+    let participant_count = capability.target.context().participant_count;
+    let bodies = (0..participant_count)
+        .map(|_| Ok(reader.read_bytes()?.to_vec()))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let signatures = (0..participant_count)
+        .map(|_| Ok(reader.read_bytes()?.to_vec()))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let evaluated =
+        evaluate_signed_batch(&capability, &action_key_sets, &plan, &bodies, &signatures)
+            .map_err(construction_error)?;
+    let mut response = BinaryWriter::new();
+    response.write_fixed(evaluated.batch_identity.as_bytes())?;
+    response.write_u16(
+        u16::try_from(evaluated.terminal_bits.len())
+            .map_err(|_| malformed_construction_length())?,
+    )?;
+    for bit in evaluated.terminal_bits {
+        response.write_u8(u8::from(bit))?;
+    }
+    Ok(response.into_bytes())
+}
+
+fn read_verified_finality_capability(
+    reader: &mut BinaryReader<'_>,
+) -> CanonicalResult<(VerifiedFinalityCapability, Vec<ActionKeySet>)> {
+    let participant_count = reader.read_u16()?;
+    let target = FinalityTarget::decode(reader.read_bytes()?).map_err(construction_error)?;
+    if target.context().participant_count != participant_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "finality target has the wrong participant count",
+        ));
+    }
+    let action_key_sets = (0..participant_count)
+        .map(|_| {
+            ActionKeySet::decode(participant_count, reader.read_bytes()?)
+                .map_err(construction_error)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let signature_count = reader.read_u16()?;
+    let signatures = (0..signature_count)
+        .map(|_| Ok((reader.read_u16()?, reader.read_bytes()?.to_vec())))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let capability = verify_finality_certificate(&target, &action_key_sets, &signatures)
+        .map_err(construction_error)?;
+    Ok((capability, action_key_sets))
 }
 
 fn derive_finality_target_command(reader: &mut BinaryReader<'_>) -> CanonicalResult<Vec<u8>> {
